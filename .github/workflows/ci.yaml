@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Test and static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pytest --strict-markers
+
+  container:
+    name: Container smoke test
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - run: docker build --tag litwatch:ci --build-arg VERSION=ci --build-arg REVISION="${GITHUB_SHA}" .
+      - name: Verify fixed non-root user
+        shell: bash
+        run: '[[ "$(docker image inspect litwatch:ci --format ''{{.Config.User}}'')" == "1000:1000" ]]'
+      - name: Smoke-test CLI on a read-only root filesystem
+        run: >-
+          docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges
+          --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m
+          litwatch:ci --help

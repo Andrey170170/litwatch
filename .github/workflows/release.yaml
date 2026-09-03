@@ -1,0 +1,164 @@
+name: Release container
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable SemVer tag to publish (for example v1.2.3)
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/andrey170170/litwatch
+
+jobs:
+  verify:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      git_ref: ${{ steps.version.outputs.git_ref }}
+    steps:
+      - name: Resolve and validate version
+        id: version
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "${REQUESTED_TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tag must be stable SemVer in the form v1.2.3" >&2
+            exit 1
+          fi
+          echo "version=${REQUESTED_TAG#v}" >> "${GITHUB_OUTPUT}"
+          echo "git_ref=${REQUESTED_TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out exact tag
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ steps.version.outputs.git_ref }}
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev
+
+
+      - name: Run release checks
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+          uv run pytest --strict-markers
+
+      - name: Build smoke-test image
+        run: >-
+          docker build
+          --tag litwatch:release-test
+          --build-arg VERSION=${{ steps.version.outputs.version }}
+          --build-arg REVISION=${GITHUB_SHA}
+          .
+
+      - name: Smoke-test release image
+        run: >-
+          docker run --rm
+          --read-only
+          --cap-drop=ALL
+          --security-opt=no-new-privileges
+          --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m
+          litwatch:release-test --help
+
+  publish:
+    name: Publish multi-platform image
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out exact tag
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ needs.verify.outputs.git_ref }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create immutable image metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: type=raw,value=${{ needs.verify.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.verify.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push image, SBOM, and provenance
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.verify.outputs.version }}
+            REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          sbom: true
+          provenance: mode=max
+
+      - name: Attest published image digest
+        if: github.event.repository.private == false
+        uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Record private-repository attestation limitation
+        if: github.event.repository.private == true
+        shell: bash
+        run: >-
+          echo "This workflow skips GitHub artifact attestation for private repositories;
+          the image still includes the BuildKit SBOM and provenance generated above."
+          >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Write release summary
+        shell: bash
+        run: |
+          echo "### Published litwatch ${{ needs.verify.outputs.version }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo '```text' >> "${GITHUB_STEP_SUMMARY}"
+          echo "${IMAGE_NAME}:${{ needs.verify.outputs.version }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "${{ steps.push.outputs.digest }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"

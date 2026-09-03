@@ -13,7 +13,9 @@ class Paper(BaseModel):
     abstract: str
     authors: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
+    primary_category: str | None = None
     published: str | None = None
+    updated: str | None = None
     url: str | None = None
 
 

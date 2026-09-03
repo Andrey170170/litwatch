@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -10,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from litwatch import arxiv_source, evalset, evaluation
+from litwatch import arxiv_source, db, evalset, evaluation, ingest
 from litwatch.config import Settings
 from litwatch.models import Tier
 from litwatch.screen import Cascade, ModelScreener, openrouter_client
@@ -169,3 +170,48 @@ def candidates(
     existing.papers.extend(new_items)
     evalset.save(out, existing)
     console.print(f"{len(existing.papers)} papers in {out}")
+
+
+@app.command()
+def run(
+    days: Annotated[int, typer.Option(help="Fetch window in days ending now")] = 3,
+    kind: Annotated[str, typer.Option(help="daily, backfill, or manual")] = "manual",
+    fetch: Annotated[bool, typer.Option(help="Fetch before screening pending papers")] = True,
+) -> None:
+    """Fetch the arXiv window into the database and screen everything pending."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    settings = Settings.from_env()
+
+    async def go():
+        async with await db.connect(settings.require_database()) as conn:
+            await db.apply_schema(conn)
+            return await ingest.run(conn, settings, build_cascade(settings), kind, days, fetch)
+
+    s = asyncio.run(go())
+    console.print(
+        f"run {s.run_id}: fetched {s.fetched} ({s.inserted} new), screened {s.screened}, "
+        f"{s.rescreened} re-screened, {s.failed} failed, cost ${s.cost:.4f}, tiers {s.tiers}"
+    )
+
+
+@app.command()
+def stats() -> None:
+    """Row counts per tier."""
+    settings = Settings.from_env()
+
+    async def go():
+        async with await db.connect(settings.require_database()) as conn:
+            return await db.stats(conn)
+
+    console.print_json(json.dumps(asyncio.run(go()), default=str))
+
+
+@app.command()
+def serve(host: str = "0.0.0.0", port: int = 8080) -> None:  # noqa: S104 - stack-internal
+    """Serve the internal HTTP API used by n8n."""
+    import uvicorn
+
+    from litwatch.api import create_app
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    uvicorn.run(create_app(Settings.from_env()), host=host, port=port, log_level="info")

@@ -1,6 +1,8 @@
-"""arXiv access through the `arxiv` library. Phase 1 needs lookups and searches only."""
+"""arXiv access through the `arxiv` library: lookups, searches, and the windowed daily fetch."""
 
 import re
+from collections.abc import Iterator
+from datetime import datetime
 
 import arxiv
 
@@ -29,7 +31,9 @@ def to_paper(result: arxiv.Result) -> Paper:
         abstract=" ".join(result.summary.split()),
         authors=[a.name for a in result.authors],
         categories=list(result.categories),
-        published=result.published.date().isoformat(),
+        primary_category=result.primary_category,
+        published=result.published.isoformat(),
+        updated=result.updated.isoformat(),
         url=result.entry_id,
     )
 
@@ -43,3 +47,27 @@ def search(query: str, max_results: int, client: arxiv.Client | None = None) -> 
     client = client or arxiv.Client()
     s = arxiv.Search(query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance)
     return [to_paper(r) for r in client.results(s)]
+
+
+def window_query(categories: list[str], since: datetime, until: datetime) -> str:
+    """arXiv query for papers in any of `categories` submitted within [since, until]."""
+    cats = " OR ".join(f"cat:{c}" for c in categories)
+    fmt = "%Y%m%d%H%M"
+    return f"({cats}) AND submittedDate:[{since.strftime(fmt)} TO {until.strftime(fmt)}]"
+
+
+def fetch_window(
+    categories: list[str],
+    since: datetime,
+    until: datetime,
+    client: arxiv.Client | None = None,
+) -> Iterator[Paper]:
+    """Every paper submitted in the window, newest first. The client paces requests."""
+    client = client or arxiv.Client(page_size=500, delay_seconds=3, num_retries=5)
+    s = arxiv.Search(
+        query=window_query(categories, since, until),
+        max_results=None,
+        sort_by=arxiv.SortCriterion.SubmittedDate,
+    )
+    for r in client.results(s):
+        yield to_paper(r)
