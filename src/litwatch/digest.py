@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from openai import AsyncOpenAI
 
 from litwatch.models import Paper, ScreenResult, Usage
@@ -49,10 +51,16 @@ async def write_digest(
         ],
         extra_body={"reasoning": {"effort": effort}, "usage": {"include": True}},
     )
-    text = (completion.choices[0].message.content or "").strip()
+    text = normalize(completion.choices[0].message.content or "")
     if not text:
         raise RuntimeError(f"{model} returned an empty digest")
     return text, usage_of(completion, model)
+
+
+def normalize(text: str) -> str:
+    """One line per paragraph, paragraphs separated by a blank line."""
+    paragraphs = re.split(r"\n\s*\n", text.strip())
+    return "\n\n".join(" ".join(p.split()) for p in paragraphs if p.strip())
 
 
 class Digester:

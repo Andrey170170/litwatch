@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from litwatch.digest import EMPTY_DIGEST, Digester, render_papers
+from litwatch.digest import EMPTY_DIGEST, Digester, normalize, render_papers
 from litwatch.models import (
     Confidence,
     Paper,
@@ -64,3 +64,8 @@ async def test_digest_call_carries_papers_and_cost():
     assert user == render_papers(papers)
     assert "Title: First Paper" in user and "Tier: must read" in user
     assert call["extra_body"]["usage"] == {"include": True}
+
+
+def test_normalize_joins_wrapped_lines_and_keeps_paragraphs():
+    wrapped = "First line\ncontinues here.  \n\n\nSecond paragraph\nalso wrapped.\n"
+    assert normalize(wrapped) == "First line continues here.\n\nSecond paragraph also wrapped."

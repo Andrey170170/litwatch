@@ -314,7 +314,7 @@ def digest(
             return positives, text, usage
 
     positives, text, usage = asyncio.run(go())
-    console.print(text)
+    print(text)  # raw, unwrapped: the console printer would insert line breaks
     cost = f"${usage.cost:.4f}" if usage and usage.cost is not None else "n/a"
     console.print(f"\n[dim]{len(positives)} papers, {digester.model}, cost {cost}[/dim]")
 
