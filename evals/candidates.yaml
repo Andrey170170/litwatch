@@ -1,5 +1,37 @@
 schema_version: 1
 papers:
+- id: '2502.05242'
+  title: 'Beyond External Monitors: Enhancing Transparency of Large Language Models for Easier Monitoring'
+  abstract: Large language models (LLMs) are becoming increasingly capable, but the mechanisms of their
+    thinking and decision-making processes remain unclear. Chain-of-thoughts (CoTs) have been commonly
+    utilized to externalize LLMs' thinking, but this strategy fails to accurately reflect LLMs' thinking
+    process. Techniques based on LLMs' hidden representations provide an inner perspective to improve
+    the monitorability of their latent thinking. However, previous methods only try to develop external
+    modules instead of making LLMs themselves easier to monitor. In this paper, we propose a novel method,
+    TELLME, improving the transparency of LLMs and helping monitors identify unsuitable and sensitive
+    behaviors. Furthermore, we showcase the effectiveness of TELLME on detoxification tasks, where LLMs
+    achieve consistent improvement among multimodal test sets, distinct architectures, and varying parameter
+    scales. We further analyze TELLME's improvement on LLMs' generalization ability from both optimal
+    transport theory and empirical perspectives.
+  authors:
+  - Guanxu Chen
+  - Jing Shao
+  - Tao Luo
+  - Lijie Hu
+  - Qihao Lin
+  - Dongrui Liu
+  categories:
+  - cs.CL
+  - cs.AI
+  - cs.CV
+  - cs.LG
+  published: '2025-02-07'
+  url: http://arxiv.org/abs/2502.05242v3
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+  note: 'PI''s example (OpenReview 8yrdEj23Hj, ICML 2026): hand label, confirm on review'
 - id: '2402.18312'
   title: 'How to think step-by-step: A mechanistic understanding of chain-of-thought reasoning'
   abstract: 'Despite superior reasoning prowess demonstrated by Large Language Models (LLMs) with Chain-of-Thought
