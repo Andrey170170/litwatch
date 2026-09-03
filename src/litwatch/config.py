@@ -34,7 +34,8 @@ class Settings:
     rescreen_model: str = "openai/gpt-5.6-sol"
     rescreen_effort: str = "low"
     # A different model family on purpose: its errors are less correlated with Luna's.
-    confirm_model: str = "meta/muse-spark-1.3-contributor"
+    # The `-contributor` endpoint is far cheaper but needs OpenRouter's training opt-in.
+    confirm_model: str = "meta/muse-spark-1.3"
     confirm_effort: str = "high"
     database_url: str | None = None
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")

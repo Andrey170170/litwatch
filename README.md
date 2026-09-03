@@ -50,7 +50,9 @@ Three stages, each later verdict replacing the earlier one:
    are less correlated with the first two. About 1% of the feed.
 
 `litwatch eval` reports precision and recall after each stage. `litwatch
-reconfirm` applies stage 3 to rows screened before it existed.
+reconfirm` applies stage 3 to rows screened before it existed. Set
+`LITWATCH_CONFIRM_MODEL=meta/muse-spark-1.3-contributor` once the OpenRouter
+account has training opt-in enabled; the inputs are public abstracts.
 
 ## Labeled set
 

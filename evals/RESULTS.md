@@ -47,3 +47,17 @@ the real feed is therefore well below the eval-set number; the eval set was
 built from topical searches and had few of these near-negatives. The 25
 agreed papers joined `labeled.yaml` as silver, the 20 disagreements joined
 `contested.yaml`. Recall on the real feed is unmeasured.
+
+## 2026-09-03 · confirm stage on the backfill positives
+
+Judges compared on the 45 tier 1 and 2 papers (same prompt, high effort):
+Terra kept 20 of 35 must_reads, GLM 5.3 kept 24, DeepSeek V4 Pro 15, Muse
+Spark 1.3 kept 13. Pairwise agreement between judges was 27 to 33 of 45, so
+none of this is ground truth. Muse's four lone rejections read as correct
+applications of the definition (reasoning-correctness verifiers, a
+text-to-image plan paper), so Muse became the confirm stage.
+
+Applied to the live database with `litwatch reconfirm`: 45 confirmed, 26
+changed tier. Routed set after all three stages: 10 must_read, 9 aware, out
+of 3,695 papers. Cost of the confirm pass: about $0.60 on the regular Muse
+endpoint.
