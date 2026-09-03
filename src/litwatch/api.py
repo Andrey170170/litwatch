@@ -42,6 +42,7 @@ def create_app(settings: Settings) -> FastAPI:
         yield
 
     app = FastAPI(title="litwatch", lifespan=lifespan)
+    app.state.runs = state  # exposes the in-flight task, for tests and diagnostics
 
     async def execute(req: RunRequest) -> None:
         try:

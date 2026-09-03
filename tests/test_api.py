@@ -39,7 +39,7 @@ async def test_second_run_is_rejected_while_first_is_active(app):
         assert first.status_code == 202 and first.json()["days"] == 2
         second = await c.post("/runs", json={"days": 2})
         assert second.status_code == 409
-        await asyncio.sleep(0.1)
+        await app.state.runs["task"]
         third = await c.post("/runs", json={"days": 1, "kind": "backfill"})
         assert third.status_code == 202
 
