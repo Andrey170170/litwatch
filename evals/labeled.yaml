@@ -33,37 +33,6 @@ papers:
     mech_interp: true
     foundational: false
   note: 'gold: Andrei.'
-- id: '2402.18312'
-  title: 'How to think step-by-step: A mechanistic understanding of chain-of-thought reasoning'
-  abstract: 'Despite superior reasoning prowess demonstrated by Large Language Models (LLMs) with Chain-of-Thought
-    (CoT) prompting, a lack of understanding prevails around the internal mechanisms of the models that
-    facilitate CoT generation. This work investigates the neural sub-structures within LLMs that manifest
-    CoT reasoning from a mechanistic point of view. From an analysis of Llama-2 7B applied to multistep
-    reasoning over fictional ontologies, we demonstrate that LLMs deploy multiple parallel pathways of
-    answer generation for step-by-step reasoning. These parallel pathways provide sequential answers from
-    the input question context as well as the generated CoT. We observe a functional rift in the middle
-    layers of the LLM. Token representations in the initial half remain strongly biased towards the pretraining
-    prior, with the in-context prior taking over in the later half. This internal phase shift manifests
-    in different functional components: attention heads that write the answer token appear in the later
-    half, attention heads that move information along ontological relationships appear in the initial
-    half, and so on. To the best of our knowledge, this is the first attempt towards mechanistic investigation
-    of CoT reasoning in LLMs.'
-  authors:
-  - Subhabrata Dutta
-  - Joykirat Singh
-  - Soumen Chakrabarti
-  - Tanmoy Chakraborty
-  categories:
-  - cs.CL
-  - cs.LG
-  published: '2024-02-28'
-  url: http://arxiv.org/abs/2402.18312v2
-  expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
 - id: '2412.01113'
   title: 'LLMs Faithfully and Iteratively Compute Answers During CoT: A Systematic Analysis With Multi-step
     Arithmetics'
@@ -153,37 +122,6 @@ papers:
     mech_interp: true
     foundational: false
   note: 'gold: Andrei. why not mech interp? wouldn''t mech interp as a field be the widest?'
-- id: '2504.04072'
-  title: 'Among Us: A Sandbox for Measuring and Detecting Agentic Deception'
-  abstract: 'Prior studies on deception in language-based AI agents typically assess whether the agent
-    produces a false statement about a topic, or makes a binary choice prompted by a goal, rather than
-    allowing open-ended deceptive behavior to emerge in pursuit of a longer-term goal. To fix this, we
-    introduce Among Us, a sandbox social deception game where LLM-agents exhibit long-term, open-ended
-    deception as a consequence of the game objectives. While most benchmarks saturate quickly, Among Us
-    can be expected to last much longer, because it is a multi-player game far from equilibrium. Using
-    the sandbox, we evaluate 18 proprietary and open-weight LLMs and uncover a general trend: models trained
-    with RL are comparatively much better at producing deception than detecting it. We evaluate the effectiveness
-    of methods to detect lying and deception: logistic regression on the activations and sparse autoencoders
-    (SAEs). We find that probes trained on a dataset of "pretend you''re a dishonest model:.." generalize
-    extremely well out-of-distribution, consistently obtaining AUROCs over 95% even when evaluated just
-    on the deceptive statement, without the chain of thought. We also find two SAE features that work
-    well at deception detection but are unable to steer the model to lie less. We hope our open-sourced
-    sandbox, game logs, and probes serve to anticipate and mitigate deceptive behavior and capabilities
-    in language-based agents.'
-  authors:
-  - Satvik Golechha
-  - Adrià Garriga-Alonso
-  categories:
-  - cs.AI
-  - cs.LG
-  published: '2025-04-05'
-  url: http://arxiv.org/abs/2504.04072v3
-  expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
 - id: '2507.12379'
   title: Probing for Arithmetic Errors in Language Models
   abstract: We investigate whether internal activations in language models can be used to detect arithmetic
@@ -281,39 +219,6 @@ papers:
     mech_interp: true
     foundational: false
   note: 'gold: Andrei.'
-- id: '2510.11529'
-  title: Hallucination Detection via Internal States and Structured Reasoning Consistency in Large Language
-    Models
-  abstract: 'The detection of sophisticated hallucinations in Large Language Models (LLMs) is hampered
-    by a ``Detection Dilemma'''': methods probing internal states (Internal State Probing) excel at identifying
-    factual inconsistencies but fail on logical fallacies, while those verifying externalized reasoning
-    (Chain-of-Thought Verification) show the opposite behavior. This schism creates a task-dependent blind
-    spot: Chain-of-Thought Verification fails on fact-intensive tasks like open-domain QA where reasoning
-    is ungrounded, while Internal State Probing is ineffective on logic-intensive tasks like mathematical
-    reasoning where models are confidently wrong. We resolve this with a unified framework that bridges
-    this critical gap. However, unification is hindered by two fundamental challenges: the Signal Scarcity
-    Barrier, as coarse symbolic reasoning chains lack signals directly comparable to fine-grained internal
-    states, and the Representational Alignment Barrier, a deep-seated mismatch between their underlying
-    semantic spaces. To overcome these, we introduce a multi-path reasoning mechanism to obtain more comparable,
-    fine-grained signals, and a segment-aware temporalized cross-attention module to adaptively fuse these
-    now-aligned representations, pinpointing subtle dissonances. Extensive experiments on three diverse
-    benchmarks and two leading LLMs demonstrate that our framework consistently and significantly outperforms
-    strong baselines. Our code is available: https://github.com/peach918/HalluDet.'
-  authors:
-  - Yusheng Song
-  - Lirong Qiu
-  - Xi Zhang
-  - Zhihao Tang
-  categories:
-  - cs.CL
-  published: '2025-10-13'
-  url: http://arxiv.org/abs/2510.11529v2
-  expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
 - id: '2512.01222'
   title: Unsupervised decoding of encoded reasoning using language model interpretability
   abstract: As large language models become increasingly capable, there is growing concern that they may
@@ -337,38 +242,6 @@ papers:
   - cs.AI
   published: '2025-12-01'
   url: http://arxiv.org/abs/2512.01222v2
-  expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
-- id: '2601.03052'
-  title: Detecting Hallucinations in Retrieval-Augmented Generation via Semantic-level Internal Reasoning
-    Graph
-  abstract: The Retrieval-augmented generation (RAG) system based on Large language model (LLM) has made
-    significant progress. It can effectively reduce factuality hallucinations, but faithfulness hallucinations
-    still exist. Previous methods for detecting faithfulness hallucinations either neglect to capture
-    the models' internal reasoning processes or handle those features coarsely, making it difficult for
-    discriminators to learn. This paper proposes a semantic-level internal reasoning graph-based method
-    for detecting faithfulness hallucination. Specifically, we first extend the layer-wise relevance propagation
-    algorithm from the token level to the semantic level, constructing an internal reasoning graph based
-    on attribution vectors. This provides a more faithful semantic-level representation of dependency.
-    Furthermore, we design a general framework based on a small pre-trained language model to utilize
-    the dependencies in LLM's reasoning for training and hallucination detection, which can dynamically
-    adjust the pass rate of correct samples through a threshold. Experimental results demonstrate that
-    our method achieves better overall performance compared to state-of-the-art baselines on RAGTruth
-    and Dolly-15k.
-  authors:
-  - Jianpeng Hu
-  - Yanzeng Li
-  - Jialun Zhong
-  - Wenfa Qi
-  - Lei Zou
-  categories:
-  - cs.CL
-  published: '2026-01-06'
-  url: http://arxiv.org/abs/2601.03052v1
   expected:
     cot: true
     internals: true
