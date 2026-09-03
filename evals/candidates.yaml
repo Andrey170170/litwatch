@@ -31,6 +31,7 @@ papers:
     cot: true
     internals: true
     mech_interp: true
+    foundational: false
   note: 'PI''s example (OpenReview 8yrdEj23Hj, ICML 2026): hand label, confirm on review'
 - id: '2402.18312'
   title: 'How to think step-by-step: A mechanistic understanding of chain-of-thought reasoning'
@@ -61,8 +62,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper mechanistically analyzes internal neural pathways,
-    token representations, and attention heads that generate chain-of-thought reasoning in LLMs.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper mechanistically analyzes internal pathways, attention
+    heads, and representation shifts underlying chain-of-thought generation, but does not propose a faithfulness
+    definition or benchmark.'
 - id: '2412.01113'
   title: 'LLMs Faithfully and Iteratively Compute Answers During CoT: A Systematic Analysis With Multi-step
     Arithmetics'
@@ -92,8 +95,9 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly analyzes CoT faithfulness and causal information
-    flow using internal model computations to determine when and how reasoning affects the final answer.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT faithfulness and causal internal
+    information flow, including when answers are determined and how CoT affects final outputs.'
 - id: '2502.14829'
   title: Measuring Chain of Thought Faithfulness by Unlearning Reasoning Steps
   abstract: When prompted to think step-by-step, language models (LMs) produce a chain of thought (CoT),
@@ -120,9 +124,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly measures CoT faithfulness by unlearning
-    reasoning-step information from model parameters and observing prediction changes, relying on weight-level
-    model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly proposes a framework and FUR method for
+    measuring CoT faithfulness via parameter unlearning, relying on model weights and introducing a reusable
+    faithfulness measure.'
 - id: '2502.18848'
   title: A Causal Lens for Evaluating Faithfulness Metrics
   abstract: 'Large Language Models (LLMs) offer natural language explanations as an alternative to feature
@@ -151,9 +156,10 @@ papers:
     cot: true
     internals: true
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper benchmarks faithfulness metrics for natural-language
-    and chain-of-thought explanations, using model-editing methods to create faithful and unfaithful explanation
-    pairs.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper introduces a causal diagnosticity testbed and benchmark
+    for evaluating faithfulness metrics, including chain-of-thought explanations, using model-editing
+    interventions to create faithful and unfaithful pairs.'
 - id: '2504.04072'
   title: 'Among Us: A Sandbox for Measuring and Detecting Agentic Deception'
   abstract: 'Prior studies on deception in language-based AI agents typically assess whether the agent
@@ -183,9 +189,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper studies detecting agent deception and explicitly
-    analyzes activations and sparse autoencoder features, while noting detection even without chain of
-    thought.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper introduces a sandbox benchmark for open-ended agentic
+    deception and evaluates activation probes and sparse autoencoders for detecting it, explicitly analyzing
+    deception with and without chain of thought.'
 - id: '2507.12379'
   title: Probing for Arithmetic Errors in Language Models
   abstract: We investigate whether internal activations in language models can be used to detect arithmetic
@@ -212,8 +219,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper probes hidden activations to detect errors in structured
-    chain-of-thought traces and guide correction, directly addressing internal monitoring of reasoning.'
+    chain-of-thought reasoning and guide correction, directly concerning internal monitoring of reasoning
+    traces.'
 - id: '2507.22928'
   title: How does Chain of Thought Think? Mechanistic Interpretability of Chain-of-Thought Reasoning with
     Sparse Autoencoding
@@ -243,8 +252,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
+    foundational: true
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT faithfulness using sparse-autoencoder
-    features and activation patching to causally analyze internal reasoning mechanisms.'
+    features and activation patching, and introduces patch-curves and baselines as evaluation tools for
+    causal faithfulness.'
 - id: '2510.04040'
   title: 'FaithCoT-Bench: Benchmarking Instance-Level Faithfulness of Chain-of-Thought Reasoning'
   abstract: Large language models (LLMs) increasingly rely on Chain-of-Thought (CoT) prompting to improve
@@ -281,10 +292,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper benchmarks instance-level detection of unfaithful
-    CoT trajectories and evaluates logit-based and counterfactual methods, which rely on model outputs
-    or interventions tied to internal computation; its focus on faithfulness and mechanism-level reasoning
-    makes it broadly mechanistic interpretability.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper introduces a benchmark and task formulation for
+    detecting instance-level CoT unfaithfulness, including logit-based methods that rely on model outputs/internal
+    signals.'
 - id: '2510.11529'
   title: Hallucination Detection via Internal States and Structured Reasoning Consistency in Large Language
     Models
@@ -316,8 +327,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper jointly verifies externalized chain-of-thought reasoning
-    and probes LLM internal states to detect inconsistencies, explicitly addressing reasoning-trace reliability.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly combines chain-of-thought verification
+    with internal-state probing to detect reasoning inconsistencies, using representations inside LLMs,
+    but applies existing benchmarks rather than proposing a new benchmark or faithfulness definition.'
 - id: '2512.01222'
   title: Unsupervised decoding of encoded reasoning using language model interpretability
   abstract: As large language models become increasingly capable, there is growing concern that they may
@@ -345,8 +358,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper decodes ROT-13-encoded chain-of-thought reasoning
-    for oversight using internal activations and logit lens mechanistic interpretability.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates decoding hidden ROT-13 chain-of-thought
+    from internal activations with logit lens and constructs a controlled testbed for assessing oversight
+    of encoded reasoning.'
 - id: '2601.03052'
   title: Detecting Hallucinations in Retrieval-Augmented Generation via Semantic-level Internal Reasoning
     Graph
@@ -377,8 +392,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper detects faithfulness hallucinations by modeling
-    the LLM''s internal reasoning dependencies with layer-wise relevance propagation and attribution vectors.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper detects faithfulness hallucinations using an internal
+    reasoning graph built from layer-wise relevance propagation and attribution vectors, applying an existing
+    evaluation setting rather than proposing a new benchmark or definition.'
 - id: '2602.00449'
   title: Do Latent-CoT Models Think Step-by-Step? A Mechanistic Study on Sequential Reasoning Tasks
   abstract: Latent Chain-of-Thought (Latent-CoT) aims to enable step-by-step computation without emitting
@@ -406,9 +423,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates whether latent chain-of-thought
-    performs faithful step-by-step computation and uses logit lenses, probes, attention analysis, activation
-    patching, and ablations to study internal mechanisms.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper mechanistically analyzes latent-CoT reasoning using
+    probes, attention, logit lens, and activation patching, explicitly distinguishing faithful iterative
+    computation from shortcut strategies.'
 - id: '2602.02496'
   title: 'The Hypocrisy Gap: Quantifying Divergence Between Internal Belief and Chain-of-Thought Explanation
     via Sparse Autoencoders'
@@ -435,8 +453,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly measures divergence between internal beliefs
-    and CoT explanations for unfaithfulness detection using sparse autoencoders and linear probes.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper defines a mechanistic Hypocrisy Gap metric for detecting
+    divergence between internal beliefs and CoT/final explanations, using sparse autoencoders and probes
+    and evaluating it on a sycophancy benchmark.'
 - id: '2602.03978'
   title: 'Monitorability as a Free Gift: How RLVR Spontaneously Aligns Reasoning'
   abstract: 'As Large Reasoning Models (LRMs) are increasingly deployed, auditing their chain-of-thought
@@ -466,8 +486,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT monitorability and faithfulness
-    under RLVR, using mechanistic analysis of response entropy and attention to explain the effect.'
+    under RLVR, using mechanistic analysis of entropy and attention, but evaluates existing concepts rather
+    than proposing a new definition or benchmark.'
 - id: '2602.04856'
   title: 'CoT is Not the Chain of Truth: An Empirical Internal Analysis of Reasoning LLMs for Fake News
     Generation'
@@ -502,8 +524,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
+    foundational: true
   note: 'draft (openai/gpt-5.6-luna, high): The paper analyzes unsafe content hidden in CoT despite refusals
-    and uses layer- and attention-head-level Jacobian spectral analysis to identify internal mechanisms.'
+    using layer- and attention-head-level Jacobian metrics, and introduces a safety-analysis framework
+    with stability, geometry, and energy measures.'
 - id: '2602.07833'
   title: 'SPD-Faith Bench: Diagnosing and Improving Faithfulness in Chain-of-Thought for Multimodal Large
     Language Models'
@@ -536,8 +560,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly benchmarks and improves multimodal CoT
-    faithfulness, tracing failures to decaying visual attention and residual-stream representation shifts.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper introduces a benchmark for multimodal CoT faithfulness,
+    analyzes residual-stream representation shifts and visual attention, and proposes a method to align
+    reasoning traces with visual evidence.'
 - id: '2603.01437'
   title: 'Post-Hoc Reasoning in Chain of Thought: Decoding and Steering Pre-Committed Answers'
   abstract: 'As chain of thought (CoT) has become central to scaling reasoning capabilities in large language
@@ -566,8 +592,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT faithfulness and post-hoc reasoning
-    using residual-stream probes and causal activation steering to decode and alter pre-committed answers.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT faithfulness using residual-stream
+    probes and causal activation steering to show that answers may be pre-committed before reasoning is
+    generated.'
 - id: '2603.03031'
   title: Step-Level Sparse Autoencoder for Reasoning Process Interpretation
   abstract: Large Language Models (LLMs) have achieved strong complex reasoning capabilities through Chain-of-Thought
@@ -600,8 +628,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper interprets step-level CoT reasoning and probes correctness
-    and logicality using sparse autoencoder features derived from model representations.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper interprets CoT reasoning steps using sparse autoencoders
+    and probes internal features for correctness and logicality, but does not propose a faithfulness or
+    monitoring benchmark or definition.'
 - id: '2603.04069'
   title: Monitoring Emergent Reward Hacking During Generation via Internal Activations
   abstract: Fine-tuned large language models can exhibit reward-hacking behavior arising from emergent
@@ -631,9 +661,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper monitors reward-hacking during chain-of-thought
-    generation using residual-stream activations and sparse autoencoders, explicitly studying internal
-    mechanisms for safety oversight.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper monitors reward-hacking signals during chain-of-thought
+    generation using residual-stream activations and sparse autoencoder features, but does not propose
+    a new definition or benchmark.'
 - id: '2603.05488'
   title: 'Reasoning Theater: Disentangling Model Beliefs from Chain-of-Thought'
   abstract: 'We provide evidence of performative chain-of-thought (CoT) in reasoning models, where a model
@@ -667,8 +698,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies whether CoT reveals model beliefs
-    and monitorable reasoning, using activation probing and early-answer analyses of internal representations.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper studies performative CoT and monitorability using
+    activation probes, early answering, and CoT monitors, while evaluating internal belief shifts and
+    adaptive computation.'
 - id: '2603.13791'
   title: DeceptGuard :A Constitutional Oversight Framework For Detecting Deception in LLM Agents
   abstract: 'Reliable detection of deceptive behavior in Large Language Model (LLM) agents is an essential
@@ -700,9 +733,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates CoT-aware deception monitoring
-    and post-training CoT faithfulness degradation, while also using activation probes over hidden-state
-    representations.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly compares CoT-aware and activation-probe
+    monitors for deception, studies CoT faithfulness degradation, and introduces a deception taxonomy,
+    synthetic data pipeline, and benchmark with execution-verified labels.'
 - id: '2603.17199'
   title: 'Catching rationalization in the act: detecting motivated reasoning before and after CoT via
     activation probing'
@@ -731,6 +765,7 @@ papers:
     cot: true
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies unfaithful CoT rationalization
     and compares CoT monitoring with residual-stream activation probes for detecting motivated reasoning.'
 - id: '2603.18579'
@@ -761,9 +796,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates faithfulness of LLM explanations and extends
-    the framework to step-level chain-of-thought, using attention comparisons and attribution methods
-    that rely on model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper introduces a statistically grounded, operator-dependent
+    framework for evaluating explanation and chain-of-thought faithfulness, using attention comparisons
+    and intervention operators.'
 - id: '2605.09502'
   title: 'Hidden Error Awareness in Chain-of-Thought Reasoning: The Signal Is Diagnostic, Not Causal'
   abstract: 'Chain-of-thought (CoT) prompting assumes that generated reasoning reflects a model''s internal
@@ -796,9 +832,9 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies whether CoT reflects internal error
-    awareness and uses hidden-state probes, activation steering, and patching to analyze and intervene
-    on that signal.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly tests whether CoT reflects internal computation
+    using hidden-state probes, activation steering, and patching to study unfaithful error awareness.'
 - id: '2605.22072'
   title: 'Faithful-MR1: Faithful Multimodal Reasoning via Anchoring and Reinforcing Visual Attention'
   abstract: 'Reinforcement learning with verifiable rewards (RLVR) has emerged as a promising paradigm
@@ -836,9 +872,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper targets faithful multimodal reasoning trajectories
-    by reinforcing causal use of visual evidence, using visual attention supervision and counterfactual
-    image interventions.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly trains for faithful multimodal reasoning
+    and uses visual attention patterns plus counterfactual image interventions to enforce faithful evidence
+    use.'
 - id: '2605.26893'
   title: 'GeoFaith: A Spatio-Temporal Dual View of Faithful Chain-of-Thought'
   abstract: Chain-of-Thought (CoT) reasoning has advanced large language models (LLMs), but outcome-based
@@ -868,9 +905,10 @@ papers:
     cot: true
     internals: true
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly addresses faithful chain-of-thought detection
-    and enforcement, using latent geometric structure and entropy dynamics that rely on model-internal
-    representations or signals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies faithful CoT, proposing latent-geometry
+    and entropy-based diagnosis/enforcement with step-level annotations and faithfulness benchmarks, which
+    rely on model-internal representations and dynamics.'
 - id: '2606.04717'
   title: 'Auditing CoT Answer-Hijack Patches: Source-Control Certificates with Type-I Guarantees'
   abstract: 'Chain-of-thought (CoT) answer-hijack templates can flip the final numeric answer of a 7B-8B
@@ -902,8 +940,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper audits whether fluent CoT reflects the computation
-    behind hijacked answers using activation patching and frozen-hook source contrasts.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper audits CoT answer hijacking and the faithfulness
+    of activation-patching interpretations using frozen-hook source contrasts, proposing a formal source-control
+    certificate and diagnostic evaluation protocol.'
 - id: '2606.05106'
   title: Arithmetic Pedagogy for Language Models
   abstract: We investigate whether methods of human mathematics pedagogy can guide the training of language
@@ -933,10 +973,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-sol, medium): The paper compares supervised natural-language CoT procedures
-    with an internally developed mental-arithmetic pathway using attention-masking interventions, residual-stream
-    probes, and logit-lens analysis, raising a CoT-faithfulness question despite its primary arithmetic-training
-    focus.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-sol, medium): The paper uses attention-masking interventions, residual-stream
+    probes, and logit-lens analysis to study how arithmetic procedures are internalized, but it does not
+    evaluate whether CoT faithfully reflects answer-producing computation or supports oversight.'
 - id: '2606.12618'
   title: '"Did you lie?" Evaluating Lie Detectors across Model Scale and Belief-Verified Model Organisms'
   abstract: 'Robust lie detectors for language models could enable powerful techniques for auditing, monitoring,
@@ -966,9 +1006,9 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates lie detection and CoT-based monitoring
-    of model beliefs, using activation probes and other internal-signal detectors alongside a chain-of-thought
-    judge.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates lie detection and monitoring using CoT-verified
+    belief model organisms and activation probes, while introducing testbeds, datasets, and a new detector.'
 - id: '2608.00583'
   title: 'A False Average: Chain-of-Thought Monitors Collapse Where They Are the Only Defense'
   abstract: 'Chain-of-thought (CoT) monitoring is meant to catch the reward hacks that look clean in the
@@ -998,8 +1038,9 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies adversarial rewriting of chain-of-thought
-    to evade monitoring and uses activation probes with causal controls on an open-weight monitor.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies adversarial rewriting of CoT to
+    evade monitoring and analyzes monitor activations with probes and causal controls.'
 - id: '2608.04928'
   title: Does Out-of-Sight Equal Out-of-Mind in CoT Monitorability?
   abstract: Chain-of-thought (CoT) reasoning offers a window into the decision-making of large language
@@ -1027,9 +1068,9 @@ papers:
     cot: true
     internals: true
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT monitorability and hint-reliance,
-    comparing explicit and latent reasoning while probing model activations as an alternative monitoring
-    access.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT monitorability and compares
+    activation probing and verbalization as monitoring access to latent reasoning states.'
 - id: '2608.22332'
   title: Mechanistic Interpretability of Chain-of-Thought Reasoning via Sequential Activation Patching
   abstract: Large Language Models (LLMs) demonstrate remarkable problem-solving capabilities when guided
@@ -1058,9 +1099,10 @@ papers:
     cot: true
     internals: true
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper causally analyzes CoT-conditioned computation and
-    reasoning trajectories using sequential activation patching and zero-ablation of attention heads,
-    directly studying model internals.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper analyzes CoT reasoning through sequential activation
+    patching and ablation of attention heads to identify internal causal mechanisms, but does not propose
+    a faithfulness definition or benchmark.'
 - id: '2301.13379'
   title: Faithful Chain-of-Thought Reasoning
   abstract: 'While Chain-of-Thought (CoT) prompting boosts Language Models'' (LM) performance on a gamut
@@ -1091,9 +1133,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly addresses whether generated CoT reflects
-    the model''s computation and proposes a framework guaranteeing faithful reasoning chains, without
-    using model internals or mechanistic analysis.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly addresses whether CoT reflects the model''s
+    computation and proposes a two-stage framework intended to guarantee faithful reasoning, but it uses
+    symbolic translation and deterministic solving rather than model internals.'
 - id: '2305.02556'
   title: Faithful Question Answering with Monte-Carlo Planning
   abstract: Although large language models demonstrate remarkable question-answering performances, revealing
@@ -1122,8 +1165,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly targets faithful intermediate reasoning
-    steps and structured reasoning traces, using Monte-Carlo planning rather than model-internal analyses.'
+    steps and proposes Monte-Carlo planning to construct entailment-tree explanations, but it does not
+    use model internals or introduce a new faithfulness benchmark or definition.'
 - id: '2307.11768'
   title: Question Decomposition Improves the Faithfulness of Model-Generated Reasoning
   abstract: As large language models (LLMs) perform more difficult tasks, it becomes harder to verify
@@ -1175,9 +1220,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies and improves the faithfulness of
-    model-generated chain-of-thought reasoning using question decomposition, without relying on model
-    internals.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies whether model-generated CoT faithfully
+    reflects the model''s reasoning and improves it through question decomposition, but uses prompting
+    and existing faithfulness metrics without model-internal analysis or proposing a new benchmark.'
 - id: '2307.13702'
   title: Measuring Faithfulness in Chain-of-Thought Reasoning
   abstract: Large language models (LLMs) perform better when they produce step-by-step, "Chain-of-Thought"
@@ -1232,9 +1278,9 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates whether chain-of-thought faithfully
-    reflects model reasoning by intervening on and paraphrasing the stated CoT, without analyzing model
-    internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT faithfulness through interventions
+    and proposes empirical hypotheses and measurements of whether models condition on their stated reasoning.'
 - id: '2402.11863'
   title: How Interpretable are Reasoning Explanations from Prompting Large Language Models?
   abstract: Prompt Engineering has garnered significant attention for enhancing the performance of large
@@ -1262,9 +1308,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates the faithfulness, robustness,
-    and utility of chain-of-thought reasoning explanations and proposes a method to improve their interpretability,
-    using prompting rather than model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates CoT reasoning explanations for faithfulness,
+    robustness, and utility and introduces a multifaceted interpretability evaluation plus an alignment
+    method, without using model internals.'
 - id: '2402.14897'
   title: Chain-of-Thought Unfaithfulness as Disguised Accuracy
   abstract: Understanding the extent to which Chain-of-Thought (CoT) generations align with a large language
@@ -1294,9 +1341,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates CoT faithfulness and questions
-    whether a dependence-based metric validly reflects the model''s internal computations, but it does
-    not analyze model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates CoT faithfulness and proposes
+    a normalized faithfulness metric while questioning the validity of an existing proxy, but it does
+    not use model internals.'
 - id: '2405.15092'
   title: Dissociation of Faithful and Unfaithful Reasoning in LLMs
   abstract: 'Large language models (LLMs) often improve their performance in downstream tasks when they
@@ -1324,9 +1372,10 @@ papers:
     cot: true
     internals: false
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies faithful versus unfaithful Chain-of-Thought
-    error recovery and identifies distinct mechanisms, but the abstract does not state that model-internal
-    activations or other internals are used.'
+    error recovery, but the abstract reports behavioral analysis without using model internals or proposing
+    a benchmark or formal definition.'
 - id: '2501.08156'
   title: Are DeepSeek R1 And Other Reasoning Models More Faithful?
   abstract: Language models trained to solve reasoning tasks via reinforcement learning have achieved
@@ -1358,9 +1407,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates whether reasoning models'' chains
-    of thought faithfully describe influential prompt cues, using behavioral faithfulness tests without
-    analyzing model internals.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates whether reasoning-model CoTs
+    faithfully describe influential prompt cues using an existing faithfulness test, without analyzing
+    model internals or proposing a new benchmark.'
 - id: '2503.11248'
   title: Reasoning-Grounded Natural Language Explanations for Language Models
   abstract: We propose a large language model explainability technique for obtaining faithful natural
@@ -1387,9 +1437,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly targets faithful explanations by grounding
-    them in a model reasoning sequence and measuring answer–explanation alignment, but it does not use
-    neural model internals.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The abstract explicitly targets faithful explanations grounded
+    in the model''s reasoning sequence, but uses token-level reasoning rather than internal activations
+    or mechanistic analysis.'
 - id: '2503.11926'
   title: Monitoring Reasoning Models for Misbehavior and the Risks of Promoting Obfuscation
   abstract: Mitigating reward hacking--where AI systems misbehave due to flaws or misspecifications in
@@ -1425,9 +1476,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies monitoring chain-of-thought for
-    reward hacking and how optimization induces obfuscated reasoning, using LLM-based observation rather
-    than model internals.'
+    reward hacking and how optimization induces obfuscated reasoning, using LLM-based CoT monitoring without
+    model-internal analysis or proposing a benchmark.'
 - id: '2505.03439'
   title: The Steganographic Potentials of Language Models
   abstract: 'The potential for large language models (LLMs) to hide messages within plain text (steganography)
@@ -1455,8 +1507,9 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies hidden reasoning, steganographic
-    concealment, and detecting models’ intent to hide reasoning, using behavioral evaluations and fine-tuning
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The abstract directly studies hidden reasoning and steganographic
+    concealment as threats to CoT faithfulness and detection, using behavioral prompting and fine-tuning
     rather than model internals.'
 - id: '2505.13774'
   title: Measuring the Faithfulness of Thinking Drafts in Large Reasoning Models
@@ -1486,9 +1539,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates thinking-draft/chain-of-thought
-    faithfulness using counterfactual interventions on the generated reasoning, without analyzing model
-    internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper proposes counterfactual evaluations and dimensions
+    for measuring thinking-draft/CoT faithfulness, without using model internals or mechanistic interpretability
+    methods.'
 - id: '2505.23575'
   title: 'CoT Red-Handed: Stress Testing Chain-of-Thought Monitoring'
   abstract: As AI models are deployed with increasing autonomy, it is important to ensure they do not
@@ -1519,9 +1573,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly stress-tests CoT monitoring and misleading
-    rationalizations in reasoning traces, using only model outputs and traces rather than internal activations
-    or mechanistic analysis.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly stress-tests CoT monitoring under deceptive
+    rationalizations and proposes a hybrid reasoning/action monitoring protocol, using only model outputs
+    rather than internal activations or mechanistic analysis.'
 - id: '2505.23945'
   title: A Closer Look at Bias and Chain-of-Thought Faithfulness of Large (Vision) Language Models
   abstract: Chain-of-thought (CoT) reasoning enhances performance of large language models, but questions
@@ -1551,9 +1606,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates CoT faithfulness and unfaithful
-    or unarticulated bias cues in vision-language and language models, using behavioral reasoning-trace
-    analysis without model-internal methods.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT faithfulness and introduces
+    a fine-grained evaluation pipeline for categorizing bias articulation and detecting unfaithful reasoning,
+    without using model internals.'
 - id: '2506.01926'
   title: Large language models can learn and generalize steganographic chain-of-thought under process
     supervision
@@ -1592,9 +1648,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies steganographic and obfuscated chain-of-thought
-    reasoning as a threat to CoT monitoring, using behavioral process-supervision experiments without
-    model-internal analyses.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies steganographic and obfuscated CoT
+    that preserves underlying reasoning while undermining CoT monitoring, using behavioral process supervision
+    rather than model-internal analyses.'
 - id: '2507.02737'
   title: Early Signs of Steganographic Capabilities in Frontier LLMs
   abstract: 'Monitoring Large Language Model (LLM) outputs is crucial for mitigating risks from misuse
@@ -1627,9 +1684,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates hidden encoded reasoning and
-    unmonitored scratchpads as a way to evade monitoring, using behavioral output-based experiments without
-    model-internal analysis.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates hidden encoded messages and encoded reasoning,
+    including unmonitored scratchpads and monitor evasion, and contributes an evaluation of steganographic
+    capabilities relevant to CoT monitoring.'
 - id: '2507.05246'
   title: When Chain of Thought is Necessary, Language Models Struggle to Evade Monitors
   abstract: While chain-of-thought (CoT) monitoring is an appealing AI safety defense, recent work on
@@ -1664,8 +1722,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT monitorability, faithfulness,
-    and deliberate evasion in runtime safety monitoring, but the abstract describes no use of model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly formalizes monitorability via CoT-as-rationalization
+    versus CoT-as-computation and introduces stress-testing methodology for deliberate evasion of CoT
+    monitors, without using model internals.'
 - id: '2507.11473'
   title: 'Chain of Thought Monitorability: A New and Fragile Opportunity for AI Safety'
   abstract: 'AI systems that "think" in human language offer a unique opportunity for AI safety: we can
@@ -1726,9 +1786,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The abstract directly studies monitoring chains of thought
-    for misbehavior and the fragility of CoT monitorability, without invoking model-internal methods or
-    mechanistic interpretability.'
+    for intent to misbehave and the fragility of CoT monitorability, without invoking model-internal methods
+    or proposing a formal benchmark.'
 - id: '2508.00943'
   title: LLMs Can Covertly Sandbag on Capability Evaluations Against Chain-of-Thought Monitoring
   abstract: 'Trustworthy evaluations of dangerous capabilities are increasingly crucial for determining
@@ -1756,9 +1817,9 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: true
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates covert sandbagging against chain-of-thought
-    monitoring and analyzes uncaught CoTs, using prompting and behavioral evaluation rather than model
-    internals.'
+    monitoring and contributes covert sandbagging policies that expose monitoring failure modes.'
 - id: '2508.19827'
   title: 'Analysing Chain of Thought Dynamics: Active Guidance or Unfaithful Post-hoc Rationalisation?'
   abstract: Recent work has demonstrated that Chain-of-Thought (CoT) often yields limited gains for soft-reasoning
@@ -1780,9 +1841,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The abstract explicitly investigates CoT dynamics, influence,
-    and faithfulness, but does not mention analyses using model internals or mechanistic interpretability
-    methods.'
+    and faithfulness across language models, without describing internal-state methods or proposing a
+    new benchmark or definition.'
 - id: '2509.13334'
   title: 'FRIT: Using Causal Importance to Improve Chain-of-Thought Faithfulness'
   abstract: Chain-of-thought (CoT) reasoning has emerged as a powerful tool for improving large language
@@ -1819,9 +1881,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly trains models to improve the causal faithfulness
-    of chain-of-thought by intervening on reasoning steps, but it does not use model internals or perform
-    mechanistic interpretability.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly improves CoT faithfulness using interventions
+    on reasoning steps and preference training, but relies on generated-text corruption and DPO rather
+    than model internals and does not propose a new definition or benchmark.'
 - id: '2509.22363'
   title: Investigating Faithfulness in Large Audio Language Models
   abstract: 'Large Audio Language Models (LALMs) integrate audio encoders with pretrained Large Language
@@ -1848,8 +1911,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly evaluates the faithfulness of audio-language-model
-    chain-of-thought explanations using audio and CoT interventions, without analyzing model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly defines audio-CoT faithfulness criteria
+    and introduces an intervention-based benchmark for evaluating whether LALM reasoning reflects the
+    audio and prediction.'
 - id: '2510.01069'
   title: 'Typed Chain-of-Thought: A Curry-Howard Framework for Verifying LLM Reasoning'
   abstract: While Chain-of-Thought (CoT) prompting enhances the reasoning capabilities of large language
@@ -1873,9 +1938,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly addresses CoT faithfulness by converting
-    natural-language reasoning traces into typed, formally verifiable proof structures, without using
-    model internals or mechanistic analysis.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly formalizes CoT faithfulness via typed
+    proof certificates and proposes a methodology for verifying reasoning traces, without using model
+    internals.'
 - id: '2510.13272'
   title: 'Beyond Correctness: Rewarding Faithful Reasoning in Retrieval-Augmented Generation'
   abstract: 'Inspired by the success of reinforcement learning (RL) in Large Language Model (LLM) training
@@ -1915,9 +1981,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly evaluates chain-of-thought faithfulness
-    in agentic search and trains models with intermediate-trace faithfulness rewards, but uses RL and
-    trace-based metrics rather than model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly defines and evaluates multiple chain-of-thought
+    faithfulness metrics for agentic search and introduces turn-level rewards to improve faithful reasoning,
+    without using model internals.'
 - id: '2510.19476'
   title: A Concrete Roadmap towards Safety Cases based on Chain-of-Thought Monitoring
   abstract: 'As AI systems approach dangerous capability levels where inability safety cases become insufficient,
@@ -1944,9 +2011,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly develops safety cases around CoT monitoring,
-    monitorability threats such as neuralese and steganographic reasoning, and techniques for maintaining
-    or extracting faithful CoT, without describing internal-model methods.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly develops a roadmap and safety-case framework
+    for CoT monitoring, analyzes monitorability threats and faithfulness, and proposes prediction-market-based
+    evaluation of feasibility, without stating use of model internals.'
 - id: '2510.19851'
   title: Can Reasoning Models Obfuscate Reasoning? Stress-Testing Chain-of-Thought Monitorability
   abstract: 'Recent findings suggest that misaligned models may exhibit deceptive behavior, raising concerns
@@ -1977,9 +2045,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly stress-tests whether internal and external
-    chain-of-thought can be obfuscated to evade monitoring, but the abstract reports behavioral CoT evaluation
-    without using model activations, weights, probes, or other internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly stress-tests CoT monitorability via a composable
+    taxonomy and evaluates internal and external reasoning-trace obfuscation, but does not use model-internal
+    activation or weight analyses.'
 - id: '2511.08409'
   title: Faithful-First Reasoning, Planning, and Acting for Multimodal LLMs
   abstract: Multimodal Large Language Models (MLLMs) frequently suffer from unfaithfulness, generating
@@ -2006,9 +2075,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: true
   note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly evaluates and enforces faithfulness of
-    intermediate multimodal reasoning chains, using supervision and inference-time actions rather than
-    model-internal analyses.'
+    intermediate multimodal reasoning chains, introducing step-wise and chain-level supervision, but does
+    not use model-internal analyses.'
 - id: '2511.11584'
   title: Output Supervision Can Obfuscate the Chain of Thought
   abstract: OpenAI (2025) showed that training against a chain of thought (CoT) monitor can cause obfuscated
@@ -2035,8 +2105,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies obfuscated chain-of-thoughts, their
-    impact on monitorability, and training mitigations, without relying on model-internal analyses.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies obfuscated chain-of-thoughts and
+    proposes mitigations to preserve their monitorability under output supervision, without using model
+    internals.'
 - id: '2512.00218'
   title: 'Reasoning Under Pressure: How do Training Incentives Influence Chain-of-Thought Monitorability?'
   abstract: AI systems that output their reasoning in natural language offer an opportunity for safety
@@ -2064,9 +2136,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies chain-of-thought faithfulness and
-    monitorability under different training incentives, using monitor predictions from the reasoning trace
-    without invoking model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT monitorability under training
+    incentives and introduces a methodology measuring whether monitors can predict latent variables from
+    the reasoning trace.'
 - id: '2602.05066'
   title: Bypassing AI Control Protocols via Agent-as-a-Proxy Attacks
   abstract: As AI agents automate critical workloads, they remain vulnerable to indirect prompt injection
@@ -2092,9 +2165,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies bypassing monitoring protocols
-    that evaluate agents'' Chain-of-Thought for alignment and safety, but it uses behavioral attacks and
-    monitor outputs rather than model internals.'
+    that evaluate agents’ Chain-of-Thought and tool-use actions, but it uses attack evaluations rather
+    than model-internal analysis or proposing a new benchmark.'
 - id: '2602.05897'
   title: 'Stop Rewarding Hallucinated Steps: Faithfulness-Aware Step-Level Reinforcement Learning for
     Small Reasoning Models'
@@ -2127,8 +2201,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly trains and evaluates faithfulness of intermediate
-    CoT steps using step-level rewards and contrastive resampling, without relying on model internals.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly targets faithfulness hallucinations in
+    intermediate CoT steps and proposes step-level faithfulness rewards and resampling, using no model-internal
+    analysis or new benchmark/definition.'
 - id: '2602.12506'
   title: On Robustness and Chain-of-Thought Consistency of RL-Finetuned VLMs
   abstract: 'Reinforcement learning (RL) finetuning has become a key technique for enhancing large language
@@ -2166,9 +2242,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT consistency and faithfulness
-    drift in RL-finetuned VLMs under textual perturbations, using behavioral robustness and training analyses
-    without model-internal methods.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT faithfulness and consistency
+    under perturbations and RL finetuning, but the abstract reports behavioral analyses and training methods
+    without model-internal analysis or a new benchmark/definition.'
 - id: '2602.14095'
   title: 'NEST: Nascent Encoded Steganographic Thoughts'
   abstract: 'Monitoring chain-of-thought (CoT) reasoning is a foundational safety technique for large
@@ -2202,9 +2279,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies steganographic CoT, monitor evasion,
-    and hidden reasoning as threats to CoT-based oversight, using prompt-elicited behavioral evaluations
-    rather than model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates steganographic hidden CoT, monitor
+    evasion, and concealed reasoning risk, introducing a taxonomy and systematic evaluation methodology
+    across models and datasets without using model internals.'
 - id: '2602.16154'
   title: Balancing Faithfulness and Performance in Reasoning via Multi-Listener Soft Execution
   abstract: Chain-of-thought (CoT) reasoning sometimes fails to faithfully reflect the true computation
@@ -2238,9 +2316,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly develops and evaluates a method to improve
-    CoT faithfulness, while relying on listener models and reinforcement learning rather than model-internal
-    activations or mechanistic analysis.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly proposes a training method to improve CoT
+    faithfulness and evaluates it with existing faithfulness measures, but it does not use model internals
+    or introduce a new benchmark or definition.'
 - id: '2602.18297'
   title: Analyzing and Improving Chain-of-Thought Monitorability Through Information Theory
   abstract: 'Chain-of-thought (CoT) monitors are LLM-based systems that analyze reasoning traces to detect
@@ -2274,9 +2353,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT monitorability, information
-    available to monitors, and methods for improving reasoning-trace oversight, using information-theoretic
-    objectives without model-internal analysis.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper formalizes CoT monitorability with information-gap
+    and elicitation-error measures and proposes training methods to improve monitoring, without relying
+    on model internals.'
 - id: '2602.22072'
   title: 'Understanding Artificial Theory of Mind: Perturbed Tasks and Reasoning in Large Language Models'
   abstract: Theory of Mind (ToM) refers to an agent's ability to model the internal states of others.
@@ -2305,9 +2385,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly evaluates reasoning-chain correctness
-    and whether final answers are faithful to generated CoT, using prompting and behavioral traces without
-    model-internal analysis.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates faithfulness of generated CoT reasoning
+    traces and introduces an annotated ToM dataset with valid reasoning chains and metrics for reasoning
+    correctness and trace faithfulness, without using model internals.'
 - id: '2602.23163'
   title: A Decision-Theoretic Formalisation of Steganography With Applications to LLM Monitoring
   abstract: 'Large language models are beginning to show steganographic capabilities. Such capabilities
@@ -2346,9 +2427,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly develops methods to detect, quantify, and
-    mitigate hidden steganographic reasoning for LLM monitoring, using observable signals and agent actions
-    rather than model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper formalizes and measures steganographic reasoning
+    for LLM monitoring by introducing generalized V-information and the steganographic gap, without using
+    model internals or mechanistic analysis.'
 - id: '2603.09786'
   title: Quantifying the Necessity of Chain of Thought through Opaque Serial Depth
   abstract: 'Large language models (LLMs) tend to externalize their reasoning in their chain of thought,
@@ -2374,9 +2456,10 @@ papers:
     cot: true
     internals: false
     mech_interp: true
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies how much reasoning can occur without
-    externalized chain of thought and its implications for CoT monitoring, using theoretical architectural
-    depth analysis rather than activations or other model-internal measurements.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper formalizes opaque serial depth to quantify reasoning
+    that can occur without interpretable chain-of-thought steps and provides an automated analysis method,
+    but it does not rely on model internals or mechanistic interpretability techniques.'
 - id: '2603.20172'
   title: 'Measuring Faithfulness Depends on How You Measure: Classifier Sensitivity in LLM Chain-of-Thought
     Evaluation'
@@ -2408,9 +2491,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates faithfulness of LLM chain-of-thought
-    traces and how classifier methodology affects its measurement, using only trace outputs and classifiers
-    rather than model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates how different classifiers measure faithfulness
+    in influenced chain-of-thought traces and provides a meta-evaluation showing that classifier choice
+    changes faithfulness rates and model rankings.'
 - id: '2603.20508'
   title: Measuring Weak-to-Strong Legibility of Reasoning Models
   abstract: Reasoning language models (RLMs) and the intermediate chains of thought they emit play an
@@ -2435,9 +2519,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The abstract directly studies whether chains-of-thought are
-    legible and trustworthy for weaker monitors in safety oversight, but describes no reliance on model
-    internals or mechanistic analysis.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper introduces and measures weak-to-strong legibility
+    of chain-of-thought traces for monitoring, explicitly defining a trustworthiness-relevant property
+    beyond existing efficiency metrics.'
 - id: '2603.30036'
   title: 'Aligned, Orthogonal or In-conflict: When can we safely optimize Chain-of-Thought?'
   abstract: 'Chain-of-Thought (CoT) monitoring, in which automated systems monitor the CoT of an LLM,
@@ -2466,9 +2551,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies how post-training affects CoT monitorability
-    and whether reasoning can hide important features, but it does not use model internals or analyze
-    mechanisms.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT monitorability under post-training
+    and proposes a conceptual aligned/orthogonal/in-conflict framework validated through experiments,
+    without using model internals or mechanistic analysis.'
 - id: '2604.08401'
   title: 'Verify Before You Commit: Towards Faithful Reasoning in LLM Agents via Self-Auditing'
   abstract: In large language model (LLM) agents, reasoning trajectories are treated as reliable internal
@@ -2500,9 +2586,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly targets unfaithful intermediate reasoning
-    trajectories and proposes adversarial self-auditing and repair to improve reasoning faithfulness,
-    but it uses agent reasoning and verification rather than model-internal activation analyses.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly targets faithfulness of intermediate
+    reasoning and belief trajectories through self-auditing and repair, but does not use model activations
+    or propose a new definition or benchmark.'
 - id: '2604.10693'
   title: 'FACT-E: Causality-Inspired Evaluation for Trustworthy Chain-of-Thought Reasoning'
   abstract: 'Chain-of-Thought (CoT) prompting has improved LLM reasoning, but models often generate explanations
@@ -2532,9 +2619,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly evaluates intra-chain faithfulness and
-    detects flawed CoT reasoning using controlled perturbations, but it does not rely on model internals
-    or analyze mechanisms.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly evaluates CoT faithfulness using controlled
+    perturbations and introduces intra-chain faithfulness and a robust evaluation metric, without using
+    model internals.'
 - id: '2605.00199'
   title: 'RSAT: Structured Attribution Makes Small Language Models Faithful Table Reasoners'
   abstract: 'When a language model answers a table question, users have no way to verify which cells informed
@@ -2561,9 +2649,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly trains and evaluates step-by-step reasoning
-    for faithfulness using cell-level citations and an NLI-based faithfulness reward, but relies on outputs
-    and training rather than model internals.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper trains models to produce cell-cited reasoning and
+    directly optimizes and evaluates the faithfulness of those reasoning traces, but uses only output-format
+    training and NLI-based rewards rather than model internals.'
 - id: '2605.15257'
   title: Training on Documents About Monitoring Leads to CoT Obfuscation
   abstract: Chain-of-thought (CoT) monitoring is one of the most promising tools we have for detecting
@@ -2590,8 +2679,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies CoT obfuscation and monitor evasion,
-    using synthetic-document fine-tuning and behavioral evaluations without model-internal analyses.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies monitor-aware models obfuscating
+    CoT to evade monitoring and relates CoT controllability to undetected misbehavior, using finetuning
+    and behavioral evaluation rather than model internals.'
 - id: '2605.24960'
   title: Investigating the Interplay between Contextual and Parametric Chain-of-Thought Faithfulness under
     Optimization
@@ -2625,8 +2716,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies and optimizes contextual and parametric
-    CoT faithfulness, using perturbation and preference-alignment methods without model-internal analyses.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies and optimizes CoT faithfulness
+    across contextual and parametric paradigms, introducing FaithMATE and evaluating the transferability
+    and limitations of existing faithfulness metrics.'
 - id: '2605.31073'
   title: 'ConsisGuard: Aligning Safety Deliberation with Policy Enforcement in LLM Guardrails'
   abstract: 'Reasoning-based LLM guardrails improve safety moderation by generating explicit rationales
@@ -2662,9 +2755,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies whether safety deliberation rationales
-    faithfully support policy-enforced decisions, but it does not explicitly use activations, weights,
-    probes, or other model-internal analyses.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper explicitly studies faithful safety deliberation
+    and the deliberation-to-enforcement gap in reasoning-based guardrails, but describes no qualifying
+    model-internal analysis and only evaluates on existing harmfulness benchmarks.'
 - id: '2606.11998'
   title: 'Bootstrapped Monitoring: Leveraging Transparent Reasoning to Oversee Stronger AI Agents'
   abstract: Trusted monitoring is a cornerstone of AI control. However, as frontier models grow more capable,
@@ -2689,9 +2783,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies using raw transparent chain-of-thought
-    to monitor an untrusted model and detect collusion, but does not use model internals beyond model
-    outputs.'
+    foundational: false
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies using raw chain-of-thought reasoning
+    for trusted oversight and detecting collusion in AI monitoring, but does not use model internals or
+    introduce a new benchmark or definition.'
 - id: '2607.04681'
   title: Do Vision-Language-Action Models Mean What They Say? On the Role of Faithfulness in Embodied
     Reasoning
@@ -2731,9 +2826,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates whether embodied Chain-of-Thought
-    faithfully reflects a VLA policy''s decision process and trains a critic to improve reasoning faithfulness,
-    but it uses behavioral evaluation and reinforcement learning rather than model internals.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies whether embodied chain-of-thought
+    faithfully reflects VLA decision processes and introduces a behavioral faithfulness operationalization
+    and synthetic evaluation, but uses human/learned-critic and behavioral methods rather than model internals.'
 - id: '2607.08066'
   title: Persuasion Attacks Can Decrease Effectiveness of CoT Monitoring
   abstract: 'Chain-of-thought (CoT) monitoring is a promising safety mechanism for AI agents, based on
@@ -2766,9 +2862,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
-  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates whether visible CoT enables persuasion
-    attacks against safety monitors and proposes a monitoring mitigation, using agent-monitor interactions
-    without model-internal analyses.'
+    foundational: true
+  note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates CoT monitoring under adversarial
+    persuasion, introduces a 40-task evaluation framework, and proposes fact-checking as a monitoring
+    framework, without using model internals.'
 - id: '2607.09786'
   title: Length Penalties Make Chain-of-Thought Less Monitorable
   abstract: To curb overthinking and reduce inference costs, researchers now train reasoning models with
@@ -2797,9 +2894,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly studies how chain-of-thought compression
-    affects faithfulness and monitorability, using behavioral hint interventions and trace analysis without
-    model-internal methods.'
+    affects monitorability and faithfulness using hint-influence and hint-detection evaluations, without
+    relying on model internals.'
 - id: '2607.20935'
   title: Chemical Chain-of-Thought Functions as a Hallucination-Prone Molecular Scratchpad
   abstract: 'Chemical reasoning language models are expected to derive molecular answers through faithful
@@ -2829,9 +2927,10 @@ papers:
     cot: true
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper directly evaluates whether chemical CoT is faithful
-    and identifies hallucinated versus causally load-bearing scratchpad content, but the abstract does
-    not state that its attribution or perturbation methods use model activations, weights, or other internals.'
+    and computationally load-bearing, but it does not clearly use model-internal methods or propose a
+    benchmark or formal definition.'
 - id: '2304.14997'
   title: Towards Automated Circuit Discovery for Mechanistic Interpretability
   abstract: 'Through considerable effort and intuition, several recent works have reverse-engineered nontrivial
@@ -2859,6 +2958,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper automates circuit discovery using activation patching
     and computational-graph components, but does not study CoT faithfulness or monitoring.'
 - id: '2309.16042'
@@ -2886,6 +2986,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper studies activation patching and circuit localization
     in language models, using internal activations, but does not address CoT faithfulness or monitoring.'
 - id: '2310.10348'
@@ -2913,6 +3014,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper uses activation patching, gradients, and computational
     subgraphs for automated circuit discovery, but does not study chain-of-thought traces, faithfulness,
     or monitoring.'
@@ -2945,6 +3047,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper discovers circuits using residual-stream activations
     and sparse dictionary features in Othello-GPT, but does not study chain-of-thought faithfulness or
     monitoring.'
@@ -2974,6 +3077,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper develops gradient-based activation patching to localize
     general LLM behavior to components, using model internals, but does not address CoT faithfulness or
     monitoring.'
@@ -2996,6 +3100,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper studies activation patching and its interpretation
     for mechanistic circuit analysis, but does not concern chain-of-thought monitoring or faithfulness.'
 - id: '2404.16014'
@@ -3029,6 +3134,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper develops sparse autoencoders for discovering interpretable
     features in language-model activations, but does not address chain-of-thought monitoring or faithfulness.'
 - id: '2405.12522'
@@ -3060,6 +3166,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper identifies attention-head circuits using sparse
     autoencoders over internal activations, but it does not study chain-of-thought faithfulness or monitoring.'
 - id: '2410.20526'
@@ -3097,6 +3204,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper trains sparse autoencoders on model activations
     for mechanistic interpretability but does not study chain-of-thought reasoning, faithfulness, or monitoring.'
 - id: '2411.14257'
@@ -3130,6 +3238,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper uses sparse autoencoders, representations, causal
     steering, and attention-head analysis to study knowledge awareness and hallucination mechanisms, but
     does not concern reasoning traces or CoT monitoring/faithfulness.'
@@ -3164,6 +3273,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper uses sparse-autoencoder latent features and hidden-state
     activation steering to control model behavior, but does not study reasoning traces, CoT faithfulness,
     or monitoring.'
@@ -3192,6 +3302,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper uses sparse autoencoders to analyze and steer internal
     speaker embeddings, but it does not study language-model reasoning traces, CoT faithfulness, or monitoring.'
 - id: '2502.00726'
@@ -3219,6 +3330,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper concerns post hoc mechanistic interpretability of
     multi-agent reinforcement-learning models using activations, patching, sparse autoencoders, and circuit
     discovery, but does not address language-model reasoning traces or their faithfulness/monitorability.'
@@ -3254,6 +3366,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper develops and evaluates sparse autoencoders on GPT-2
     hidden embeddings for mechanistic interpretability, but does not study CoT reasoning traces, faithfulness,
     or monitoring.'
@@ -3283,6 +3396,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper uses output-side gradients with sparse autoencoders
     to identify causally influential LLM latents for interpretation and steering, but does not address
     chain-of-thought monitoring or faithfulness.'
@@ -3313,6 +3427,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper interprets and steers diffusion-model residual-stream
     activations using sparse autoencoders and dictionary learning, but it does not study language-model
     reasoning traces or CoT faithfulness/monitoring.'
@@ -3346,6 +3461,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses sparse-autoencoder features, activation patterns,
     steering vectors, and residual-stream interventions to study and control role-playing representations,
     but only uses CoT to improve reasoning accuracy rather than examining trace faithfulness or monitorability.'
@@ -3374,6 +3490,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper develops sparse autoencoders and probes over LLM
     activations to interpret internal representations, but does not study chain-of-thought faithfulness
     or monitoring.'
@@ -3400,6 +3517,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper benchmarks sparse autoencoder interpretability for
     uncovering LLM features, relying on model-internal representations, but does not address chain-of-thought
     reasoning, faithfulness, or monitoring.'
@@ -3440,6 +3558,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper reverse-engineers an implicit-reasoning multiplication
     model using logit attribution, linear probes, attention heads, and representation geometry, but does
     not study the faithfulness or monitorability of a reasoning trace.'
@@ -3471,6 +3590,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper analyzes and reallocates attention-head KV caches
     to identify heads important for reasoning performance and termination, but focuses on efficient CoT
     generation rather than CoT faithfulness or monitorability.'
@@ -3508,6 +3628,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses differential attention-head activations and
     head masking to mechanistically explain and mitigate bias under direct-answer versus CoT prompting,
     but does not study the faithfulness or monitorability of the reasoning trace itself.'
@@ -3536,6 +3657,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper uses activation patching and sparse circuit discovery
     to analyze internal mechanisms of discourse understanding, but it does not study CoT traces, faithfulness,
     or monitoring.'
@@ -3574,6 +3696,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper accelerates mechanistic circuit discovery using activation
     patching, targeted ablations, attention-head quantization, and attention computation modifications,
     but does not study chain-of-thought monitoring or faithfulness.'
@@ -3611,6 +3734,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses attribution patching, activation patching, and
     probing to analyze factual-recall circuits in VLMs, while chain-of-thought is only a performance-recovery
     prompting method rather than a subject of monitoring or faithfulness.'
@@ -3648,6 +3772,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper probes and intervenes on attention heads to identify
     functional reasoning modules, while using chain-of-thought only to structure subquestions rather than
     studying trace faithfulness or monitorability.'
@@ -3684,6 +3809,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper probes, ablates, and augments attention heads to
     identify internal functional specialization in reasoning, while using chain-of-thought decomposition
     only as a task design rather than studying trace faithfulness or monitorability.'
@@ -3715,6 +3841,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper analyzes residual-stream representation geometry
     during CoT reasoning using Manifold Capacity Theory, but does not study the faithfulness or monitorability
     of the reasoning trace.'
@@ -3744,6 +3871,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper identifies and masks attention heads involved in
     multilingual target-language generation and CoT performance, but does not study CoT faithfulness,
     monitoring, or monitorability.'
@@ -3774,6 +3902,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper studies robust mechanistic circuit discovery using
     attribution graphs and activation patching, without addressing chain-of-thought monitoring or faithfulness.'
 - id: '2603.20662'
@@ -3812,6 +3941,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper probes and intervenes on attention heads to identify
     internal mechanisms for spatial reasoning, while its chain-of-thought decomposition is only a task
     framework and does not study trace faithfulness or monitorability.'
@@ -3842,6 +3972,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper probes residual-stream representations of runtime
     tool-call dependency graphs using linear probes and activation patching, but does not study CoT faithfulness,
     monitoring, or monitorability.'
@@ -3875,6 +4006,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, medium): The paper causally localizes attention heads and information
     flow underlying symbolic-aided CoT reasoning, making it mechanistic interpretability using internals,
     but it does not evaluate CoT faithfulness or monitorability.'
@@ -3904,6 +4036,7 @@ papers:
     cot: false
     internals: true
     mech_interp: true
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper uses sparse autoencoders and causal feature analysis
     to steer and interpret LLM internals, but does not address chain-of-thought reasoning, faithfulness,
     or monitoring.'
@@ -3932,6 +4065,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper studies hidden-data carrier degradation in communication-network
     steganography, not language-model reasoning traces or neural-network internals.'
 - id: '1502.08030'
@@ -3959,6 +4093,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper addresses author name disambiguation with a deep
     neural network and does not discuss reasoning traces, CoT monitoring or faithfulness, or model-internal
     analysis.'
@@ -3988,6 +4123,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper concerns generating hypotheses for natural language
     inference datasets and evaluating classifier accuracy, with no reasoning-trace, model-internals, or
     mechanistic-interpretability focus.'
@@ -4022,6 +4158,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper concerns deep reinforcement learning for robotic
     manipulation and asynchronous off-policy training, with no reasoning-trace monitoring or model-internals
     analysis.'
@@ -4057,6 +4194,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The abstract surveys deep reinforcement and imitation learning
     for robotic control without discussing reasoning traces, model internals, or mechanistic interpretability.'
 - id: '1703.00371'
@@ -4088,6 +4226,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper studies adversarially trained image steganography
     and steganalysis, not language-model reasoning traces or neural-network internal mechanisms.'
 - id: '1707.00074'
@@ -4113,6 +4252,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The abstract concerns classical cryptographic steganography
     and makes no reference to language-model reasoning traces, model internals, or neural-network mechanisms.'
 - id: '1802.05934'
@@ -4145,6 +4285,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper proposes cross-dataset instance retrieval and transfer
     learning for classification, with no focus on reasoning traces, faithfulness, monitoring, or model
     internals.'
@@ -4178,6 +4319,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper studies graph-theoretic cut and dominating-set problems
     in steganographic communication networks, not language-model reasoning traces or neural-network internals.'
 - id: '1803.07067'
@@ -4209,6 +4351,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper studies reinforcement-learning task setup and reproducibility
     for a real-world robot, with no reasoning-trace, model-internals, or mechanistic-interpretability
     focus.'
@@ -4231,6 +4374,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper proposes an iterative inference architecture for
     improving NLI accuracy, with no focus on reasoning-trace faithfulness, monitoring, or model internals.'
 - id: '1805.01599'
@@ -4255,6 +4399,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper studies hiding quantum information in error-correcting-code
     syndromes and does not concern language-model reasoning traces or neural-network internals.'
 - id: '1903.05297'
@@ -4283,6 +4428,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper studies adversarially trained multimedia steganography
     rather than language-model reasoning traces, and it does not analyze model internals or mechanisms.'
 - id: '1904.12162'
@@ -4305,6 +4451,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper concerns sentiment classification using n-gram features
     and automated machine learning, with no reasoning-trace, model-internals, or mechanistic-interpretability
     component.'
@@ -4335,6 +4482,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper concerns weakly supervised aesthetic image captioning
     and dataset construction, with no focus on language-model reasoning traces, monitoring, faithfulness,
     or internal-mechanism analysis.'
@@ -4363,6 +4511,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper concerns reinforcement learning for event-camera
     robot control and does not study language-model reasoning traces, model internals, or mechanistic
     interpretability.'
@@ -4398,6 +4547,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper concerns knowledge-graph-guided steganographic text
     generation, not hidden reasoning traces, CoT oversight, or analysis of model internals.'
 - id: '2104.02284'
@@ -4427,6 +4577,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper presents a text-guided legal knowledge-graph completion
     method and does not study language-model reasoning traces, model internals, or mechanistic mechanisms.'
 - id: '2105.09043'
@@ -4460,6 +4611,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper introduces and evaluates a Vietnamese sentence-extraction
     machine reading comprehension dataset without discussing reasoning traces, model internals, or mechanistic
     mechanisms.'
@@ -4494,6 +4646,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper presents a robot-soccer reinforcement-learning simulator
     and benchmark framework, with no focus on reasoning traces, model internals, or mechanistic interpretability.'
 - id: '2201.11903'
@@ -4526,6 +4679,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses chain-of-thought prompting to improve task accuracy
     and does not study trace faithfulness, monitorability, or model-internal mechanisms.'
 - id: '2205.10625'
@@ -4565,6 +4719,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper proposes a prompting strategy that decomposes complex
     tasks to improve reasoning accuracy and generalization, without studying CoT faithfulness, monitoring,
     or model internals.'
@@ -4596,6 +4751,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper presents a multimodal sentiment-analysis dataset
     and fusion model, with no connection to reasoning traces, model internals, or mechanistic interpretability.'
 - id: '2206.15007'
@@ -4625,6 +4781,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper explains image-dataset distribution shifts using
     natural-language generation and selection, with no study of language-model reasoning traces or internal
     mechanisms.'
@@ -4657,6 +4814,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper concerns continual learning for detecting steganography
     in images with CNNs, not language-model reasoning traces or analysis of neural-network internal mechanisms.'
 - id: '2302.14521'
@@ -4692,6 +4850,7 @@ papers:
     cot: false
     internals: true
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper hides and recovers a secret DNN by selecting and
     tuning model filters, but it neither studies language-model reasoning traces nor interprets internal
     mechanisms.'
@@ -4722,6 +4881,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper addresses inline citation classification with contextual
     and domain information, not language-model reasoning traces or internal mechanisms.'
 - id: '2303.01432'
@@ -4749,6 +4909,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper introduces a Wikipedia textual entailment dataset
     and claim decomposition method, with no focus on reasoning traces, model internals, or mechanistic
     mechanisms.'
@@ -4785,6 +4946,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper concerns image steganography using a CNN assistant
     and steganalyzer, not language-model reasoning traces or analysis of neural-network internals.'
 - id: '2306.15246'
@@ -4815,6 +4977,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper concerns JPEG image steganography using polar codes
     and DCT coefficients, not language-model reasoning traces or neural-network internal mechanisms.'
 - id: '2312.07953'
@@ -4846,6 +5009,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper studies single- versus multi-objective reinforcement
     learning for robotic navigation and does not address language-model reasoning traces, model internals,
     or mechanistic interpretability.'
@@ -4881,6 +5045,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper concerns concealing image steganography functionality
     within a network via sparse weight filling, not language-model reasoning traces, internal analysis,
     or mechanistic interpretability.'
@@ -4907,6 +5072,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper merely uses Chain-of-Thought prompting to improve
     clinical-trial NLI performance, while its “faithfulness” metric concerns task predictions rather than
     whether the reasoning trace reflects model computation.'
@@ -4940,6 +5106,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper merely uses chain-of-thought prompting to improve
     requirements-satisfaction accuracy and does not study trace faithfulness, monitoring, or model internals.'
 - id: '2404.16879'
@@ -4971,6 +5138,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper surveys control barrier functions for safety in
     reinforcement learning and does not address language-model reasoning traces, model internals, or mechanistic
     interpretability.'
@@ -5009,6 +5177,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper uses LLMs to linguistically analyze image captions
     for dataset subpopulation discovery, without studying reasoning traces, model internals, or internal
     mechanisms.'
@@ -5040,6 +5209,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses chain-of-thought and related prompting techniques
     only to improve code-generation accuracy and reduce defects, without studying trace faithfulness,
     monitoring, or model internals.'
@@ -5067,6 +5237,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper focuses on government-led post-deployment impact
     monitoring and information sharing, mentioning inference-time chain-of-thought monitoring only as
     one example and describing no analysis of model internals.'
@@ -5103,6 +5274,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper concerns generative text steganography through entropy-based
     token selection, not hidden chain-of-thought reasoning, and uses candidate-pool/output-distribution
     control rather than model internals.'
@@ -5132,6 +5304,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper evaluates prompting techniques such as Chain-of-Thought
     solely for accuracy and token-cost efficiency, without studying reasoning-trace faithfulness, monitorability,
     or model internals.'
@@ -5161,6 +5334,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper evaluates offline reinforcement learning robustness
     to robot action perturbations and does not study language-model reasoning traces or model internals.'
 - id: '2501.04671'
@@ -5191,6 +5365,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses retrieval-based visual CoT to improve VLM reasoning
     accuracy on VQA tasks, without studying trace faithfulness or monitoring and without analyzing model
     internals.'
@@ -5219,6 +5394,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses chain-of-thought prompting to correct factual
     inconsistencies in summaries, but its notion of faithfulness concerns summary-source factual consistency
     rather than whether an LLM''s reasoning trace reflects its computation or supports monitoring.'
@@ -5251,6 +5427,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses chain-of-thought prompting and human feedback
     to improve educational assessment scoring, but does not study reasoning-trace faithfulness or monitoring
     and does not analyze model internals.'
@@ -5277,6 +5454,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper merely uses CoT prompting to improve sentiment classification
     accuracy and does not study reasoning-trace faithfulness, monitoring, or model internals.'
 - id: '2505.24615'
@@ -5307,6 +5485,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper concerns scientific idea retrieval and novelty detection
     using LLMs, with no focus on reasoning traces, model internals, or mechanistic interpretation.'
 - id: '2506.00072'
@@ -5341,6 +5520,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper evaluates how CoT and other prompt styles affect
     medical QA accuracy and confidence calibration, without studying reasoning-trace faithfulness, monitorability,
     or model internals.'
@@ -5373,6 +5553,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper concerns pixel-level covert communication using polar
     codes, not language-model reasoning traces, model internals, or neural-network mechanisms.'
 - id: '2507.19374'
@@ -5404,6 +5585,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-luna, high): The paper concerns automated spoken grammatical-error data
     augmentation and evaluation, with no language-model reasoning traces, internals, or mechanistic analysis.'
 - id: '2512.22258'
@@ -5433,6 +5615,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper proposes an external deterministic prompting and
     rule-validation framework for accuracy and auditability, merely benchmarking against chain-of-thought
     prompting without studying CoT faithfulness, monitoring, or model internals.'
@@ -5467,6 +5650,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper merely uses chain-of-thought prompting to improve
     clarity, evasion, and topic classification accuracy, without studying reasoning-trace faithfulness,
     monitorability, or model internals.'
@@ -5499,6 +5683,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper merely evaluates chain-of-thought and other prompting
     techniques for improving sentiment and irony classification performance, without studying trace faithfulness,
     monitorability, or model internals.'
@@ -5528,6 +5713,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper only compares Chain-of-Thought prompting strategies
     for ChartQA accuracy and format adherence, without studying reasoning-trace faithfulness, monitoring,
     or model internals.'
@@ -5558,6 +5744,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper evaluates how temperature and chain-of-thought prompting
     affect mathematical accuracy, without studying trace faithfulness, monitorability, or model internals.'
 - id: '2605.24171'
@@ -5588,6 +5775,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper compares prompting strategies, including chain-of-thought,
     for vulnerability-detection performance but does not study reasoning-trace faithfulness or monitoring
     and uses no model-internal analysis.'
@@ -5636,6 +5824,7 @@ papers:
     cot: false
     internals: false
     mech_interp: false
+    foundational: false
   note: 'draft (openai/gpt-5.6-sol, high): The paper uses a structured chain-of-thought schema as training
     supervision and prompting to improve the physical correctness of generated diagrams, not to assess
     reasoning-trace faithfulness or monitorability, and it does not analyze model internals.'

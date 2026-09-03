@@ -68,6 +68,14 @@ class Report:
     def rescreened(self) -> int:
         return sum(1 for s in self.scored if s.result and s.result.rescreened)
 
+    @property
+    def cost_by_model(self) -> dict[str, float]:
+        totals: dict[str, float] = {}
+        for s in self.scored:
+            for u in s.result.usage if s.result else []:
+                totals[u.model] = totals.get(u.model, 0.0) + (u.cost or 0.0)
+        return totals
+
 
 def score_tiers(pairs: list[tuple[Tier, Tier | None]]) -> dict[Tier, PRF]:
     per = {t: PRF() for t in Tier}

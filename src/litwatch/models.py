@@ -36,6 +36,10 @@ class Flags(BaseModel):
     cot: bool = Field(description="About CoT monitoring, faithfulness, or hidden reasoning")
     internals: bool = Field(description="Relies on model internals")
     mech_interp: bool = Field(description="Mechanistic interpretability work")
+    foundational: bool = Field(
+        default=False,
+        description="Proposes a definition, ground truth, benchmark, or metric meta-evaluation",
+    )
 
     @property
     def tier(self) -> Tier:
@@ -43,8 +47,12 @@ class Flags(BaseModel):
 
 
 def derive_tier(flags: Flags) -> Tier:
-    """Deterministic tier from the flags; the screener never picks a tier directly."""
-    if flags.cot and flags.internals:
+    """Deterministic tier from the flags; the screener never picks a tier directly.
+
+    On-topic papers are must-read when they use internals or when they are foundational:
+    a definition, ground truth, or benchmark is required reading whatever its method.
+    """
+    if flags.cot and (flags.internals or flags.foundational):
         return Tier.MUST_READ
     if flags.cot:
         return Tier.AWARE
@@ -59,6 +67,7 @@ class ScreenOutput(BaseModel):
     is_cot_monitoring_or_faithfulness: bool
     uses_internals: bool
     is_mech_interp: bool
+    proposes_definition_or_benchmark: bool
     confidence: Confidence
     reason: str = Field(description="One sentence")
 
@@ -68,11 +77,21 @@ class ScreenOutput(BaseModel):
             cot=self.is_cot_monitoring_or_faithfulness,
             internals=self.uses_internals,
             mech_interp=self.is_mech_interp,
+            foundational=self.proposes_definition_or_benchmark,
         )
 
     @property
     def tier(self) -> Tier:
         return self.flags.tier
+
+
+class Usage(BaseModel):
+    """One model call's accounting. `cost` is in USD as reported by the provider."""
+
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cost: float | None = None
 
 
 class ScreenResult(BaseModel):
@@ -84,7 +103,12 @@ class ScreenResult(BaseModel):
     prompt_version: str
     rescreened: bool = False
     first_stage: ScreenOutput | None = None
+    usage: list[Usage] = Field(default_factory=list)
 
     @property
     def tier(self) -> Tier:
         return self.output.tier
+
+    @property
+    def cost(self) -> float:
+        return sum(u.cost or 0.0 for u in self.usage)

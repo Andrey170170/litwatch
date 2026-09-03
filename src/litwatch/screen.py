@@ -6,10 +6,10 @@ from typing import Protocol
 
 from openai import AsyncOpenAI
 
-from litwatch.models import Confidence, Paper, ScreenOutput, ScreenResult
+from litwatch.models import Confidence, Paper, ScreenOutput, ScreenResult, Usage
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 # Recall safety net: a first-stage negative matching any of these is re-screened.
 AUDIT_PATTERNS = [
@@ -42,7 +42,7 @@ def render_user_prompt(paper: Paper) -> str:
 class Screener(Protocol):
     model: str
 
-    async def screen(self, paper: Paper) -> ScreenOutput: ...
+    async def screen(self, paper: Paper) -> tuple[ScreenOutput, Usage]: ...
 
 
 class ModelScreener:
@@ -54,7 +54,7 @@ class ModelScreener:
         self.effort = effort
         self._system = load_system_prompt()
 
-    async def screen(self, paper: Paper) -> ScreenOutput:
+    async def screen(self, paper: Paper) -> tuple[ScreenOutput, Usage]:
         completion = await self.client.chat.completions.parse(
             model=self.model,
             messages=[
@@ -62,12 +62,26 @@ class ModelScreener:
                 {"role": "user", "content": render_user_prompt(paper)},
             ],
             response_format=ScreenOutput,
-            extra_body={"reasoning": {"effort": self.effort}},
+            # `usage.include` makes OpenRouter report the call's cost in the usage block.
+            extra_body={"reasoning": {"effort": self.effort}, "usage": {"include": True}},
         )
         parsed = completion.choices[0].message.parsed
         if parsed is None:
             raise RuntimeError(f"{self.model} returned no parsable output for {paper.id}")
-        return parsed
+        return parsed, usage_of(completion, self.model)
+
+
+def usage_of(completion, model: str) -> Usage:
+    u = completion.usage
+    if u is None:
+        return Usage(model=model)
+    extra = getattr(u, "model_extra", None) or {}
+    return Usage(
+        model=model,
+        prompt_tokens=u.prompt_tokens or 0,
+        completion_tokens=u.completion_tokens or 0,
+        cost=extra.get("cost"),
+    )
 
 
 class Cascade:
@@ -83,15 +97,16 @@ class Cascade:
         return not output.is_cot_monitoring_or_faithfulness and keyword_hit(paper)
 
     async def screen(self, paper: Paper) -> ScreenResult:
-        first = await self.primary.screen(paper)
+        first, usage = await self.primary.screen(paper)
         if self.secondary is None or not self.needs_rescreen(paper, first):
             return ScreenResult(
                 paper_id=paper.id,
                 output=first,
                 model=self.primary.model,
                 prompt_version=PROMPT_VERSION,
+                usage=[usage],
             )
-        second = await self.secondary.screen(paper)
+        second, usage2 = await self.secondary.screen(paper)
         return ScreenResult(
             paper_id=paper.id,
             output=second,
@@ -99,6 +114,7 @@ class Cascade:
             prompt_version=PROMPT_VERSION,
             rescreened=True,
             first_stage=first,
+            usage=[usage, usage2],
         )
 
 

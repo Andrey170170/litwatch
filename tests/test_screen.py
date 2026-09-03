@@ -1,6 +1,6 @@
 import pytest
 
-from litwatch.models import Confidence, Paper, ScreenOutput
+from litwatch.models import Confidence, Paper, ScreenOutput, Usage
 from litwatch.screen import Cascade, keyword_hit, load_system_prompt, render_user_prompt
 
 
@@ -9,6 +9,7 @@ def out(cot: bool, confidence: Confidence = Confidence.HIGH) -> ScreenOutput:
         is_cot_monitoring_or_faithfulness=cot,
         uses_internals=False,
         is_mech_interp=False,
+        proposes_definition_or_benchmark=False,
         confidence=confidence,
         reason="r",
     )
@@ -20,9 +21,9 @@ class Fake:
         self.output = output
         self.calls = 0
 
-    async def screen(self, paper: Paper) -> ScreenOutput:
+    async def screen(self, paper: Paper) -> tuple[ScreenOutput, Usage]:
         self.calls += 1
-        return self.output
+        return self.output, Usage(model=self.model, cost=0.01)
 
 
 PLAIN = Paper(id="1", title="A survey of graph databases", abstract="We survey storage engines.")
@@ -58,6 +59,7 @@ async def test_cascade_rescreen_rule(paper, first, expect_rescreen):
     assert result.model == ("sol" if expect_rescreen else "luna")
     if expect_rescreen:
         assert result.first_stage == first
+    assert result.cost == (0.02 if expect_rescreen else 0.01)
 
 
 async def test_cascade_without_secondary():

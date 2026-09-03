@@ -33,9 +33,12 @@ One structured call per paper on title plus abstract. Output flags:
 | `is_cot_monitoring_or_faithfulness` | the paper is about CoT faithfulness, CoT monitoring, hidden or encoded reasoning, or methods that make CoT more faithful or monitorable |
 | `uses_internals` | the method or analysis relies on activations, attention, probes, SAEs, patching, steering, weights, or gradients |
 | `is_mech_interp` | the paper is mechanistic interpretability, whatever the topic |
+| `proposes_definition_or_benchmark` | a faithfulness or monitorability definition, ground-truth construction, benchmark, or metric meta-evaluation |
 
-Tier is derived from the flags: `must_read` (CoT and internals), `aware` (CoT,
-no internals), `mech_interp` (internals work off topic), `none`.
+Tier is derived from the flags: `must_read` (CoT, and either internals or a
+definition/benchmark), `aware` (other CoT papers), `mech_interp` (internals
+work off topic), `none`. Every model call records tokens and cost as reported
+by OpenRouter; `litwatch eval` prints the total per model.
 
 Low-confidence results, and negatives that hit the keyword audit list, are
 re-screened with the second-stage model. `litwatch eval` reports both stages.

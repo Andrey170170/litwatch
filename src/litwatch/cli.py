@@ -46,6 +46,7 @@ def screen(
     result = asyncio.run(build_cascade(settings, rescreen).screen(papers[0]))
     console.print(f"[bold]{papers[0].title}[/bold]")
     console.print_json(result.model_dump_json())
+    console.print(f"cost: ${result.cost:.4f}")
 
 
 def _fmt(value: float | None) -> str:
@@ -85,6 +86,12 @@ def eval_cmd(
     console.print(table)
     agreement = evaluation.flag_agreement(report.scored)
     console.print("flag accuracy: " + ", ".join(f"{k}={_fmt(v)}" for k, v in agreement.items()))
+    costs = report.cost_by_model
+    console.print(
+        f"cost: ${sum(costs.values()):.4f} ("
+        + ", ".join(f"{m} ${c:.4f}" for m, c in costs.items())
+        + ")"
+    )
 
     if report.misses:
         console.print(f"\n[red]{len(report.misses)} must_read papers missed:[/red]")
@@ -104,6 +111,7 @@ def eval_cmd(
                 "labeled": str(labeled),
                 "screen_model": settings.screen_model,
                 "rescreen_model": settings.rescreen_model if rescreen else None,
+                "cost_by_model": costs,
                 "results": [
                     {
                         "id": s.item.paper.id,
@@ -138,8 +146,12 @@ def candidates(
 
     cascade = build_cascade(Settings.from_env()) if prelabel else None
 
+    spent = 0.0
+
     async def label(paper):
+        nonlocal spent
         result = await cascade.screen(paper)
+        spent += result.cost
         return evalset.LabeledPaper(
             paper=paper,
             expected=result.output.flags,
@@ -151,6 +163,7 @@ def candidates(
 
     if cascade:
         new_items = asyncio.run(label_all())
+        console.print(f"cost: ${spent:.4f}")
     else:
         new_items = [evalset.LabeledPaper(paper=p) for p in found]
     existing.papers.extend(new_items)
