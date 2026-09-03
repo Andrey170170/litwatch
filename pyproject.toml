@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "litwatch"
-version = "0.3.0"
+version = "0.3.1"
 description = "Literature watch for CoT monitoring and faithfulness papers"
 readme = "README.md"
 requires-python = ">=3.13"

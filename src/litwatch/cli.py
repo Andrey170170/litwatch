@@ -185,6 +185,18 @@ def run(
     )
 
 
+@app.command("migrate-screens")
+def migrate_screens() -> None:
+    """Rewrite screen JSON stored before 0.3 into the staged shape."""
+    settings = Settings.from_env()
+
+    async def go():
+        async with await db.connect(settings.require_database()) as conn:
+            return await db.migrate_screens(conn)
+
+    console.print(f"rewrote {asyncio.run(go())} rows")
+
+
 @app.command()
 def reconfirm() -> None:
     """Run the confirm stage on tier 1 and 2 papers screened before it existed."""

@@ -9,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from litwatch.models import Paper, ScreenResult
+from litwatch.models import Paper, ScreenResult, Stage, StageRole, Usage
 
 
 async def connect(dsn: str) -> psycopg.AsyncConnection[dict[str, Any]]:
@@ -107,6 +107,39 @@ async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> N
     )
 
 
+def parse_screen(raw: dict[str, Any]) -> ScreenResult:
+    """Reads the stored screen JSON, including the pre-0.3 shape without `stages`."""
+    if "stages" in raw:
+        return ScreenResult.model_validate(raw)
+    usage = [Usage.model_validate(u) for u in raw.get("usage", [])] or [Usage(model=raw["model"])]
+    first = raw.get("first_stage") or raw["output"]
+    stages = [Stage(role=StageRole.SCREEN, model=usage[0].model, output=first, usage=usage[0])]
+    if raw.get("rescreened"):
+        stages.append(
+            Stage(
+                role=StageRole.RESCREEN, model=raw["model"], output=raw["output"], usage=usage[-1]
+            )
+        )
+    return ScreenResult(
+        paper_id=raw["paper_id"], prompt_version=raw["prompt_version"], stages=stages
+    )
+
+
+async def migrate_screens(conn: psycopg.AsyncConnection) -> int:
+    """Rewrites pre-0.3 screen JSON into the staged shape. Returns rows rewritten."""
+    rows = await (
+        await conn.execute(
+            "SELECT id, screen FROM papers WHERE screen IS NOT NULL AND screen->'stages' IS NULL"
+        )
+    ).fetchall()
+    for r in rows:
+        await conn.execute(
+            "UPDATE papers SET screen = %s WHERE id = %s",
+            (Jsonb(parse_screen(r["screen"]).model_dump(mode="json")), r["id"]),
+        )
+    return len(rows)
+
+
 async def unconfirmed_positives(conn: psycopg.AsyncConnection) -> list[tuple[Paper, ScreenResult]]:
     """Routed-tier papers whose screening predates the confirm stage."""
     rows = await (
@@ -114,12 +147,13 @@ async def unconfirmed_positives(conn: psycopg.AsyncConnection) -> list[tuple[Pap
             """
             SELECT * FROM papers
             WHERE tier IN ('must_read', 'aware')
-              AND NOT (screen->'stages' @> '[{"role": "confirm"}]')
+              AND (screen->'stages' IS NULL
+                   OR NOT (screen->'stages' @> '[{"role": "confirm"}]'))
             ORDER BY published DESC
             """
         )
     ).fetchall()
-    return [(row_to_paper(r), ScreenResult.model_validate(r["screen"])) for r in rows]
+    return [(row_to_paper(r), parse_screen(r["screen"])) for r in rows]
 
 
 async def store_screen_error(conn: psycopg.AsyncConnection, paper_id: str, error: str) -> None:
