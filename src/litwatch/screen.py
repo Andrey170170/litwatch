@@ -6,7 +6,16 @@ from typing import Protocol
 
 from openai import AsyncOpenAI
 
-from litwatch.models import Confidence, Paper, ScreenOutput, ScreenResult, Usage
+from litwatch.models import (
+    Confidence,
+    Paper,
+    ScreenOutput,
+    ScreenResult,
+    Stage,
+    StageRole,
+    Tier,
+    Usage,
+)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 PROMPT_VERSION = "v2"
@@ -84,38 +93,41 @@ def usage_of(completion, model: str) -> Usage:
     )
 
 
-class Cascade:
-    """First-stage screen, then re-screen low-confidence results and audited negatives."""
+ROUTED_TIERS = (Tier.MUST_READ, Tier.AWARE)
 
-    def __init__(self, primary: Screener, secondary: Screener | None) -> None:
+
+class Cascade:
+    """Screen everything; re-screen doubtful cases for recall; confirm positives for precision."""
+
+    def __init__(
+        self, primary: Screener, secondary: Screener | None, confirm: Screener | None = None
+    ) -> None:
         self.primary = primary
         self.secondary = secondary
+        self.confirm = confirm
 
     def needs_rescreen(self, paper: Paper, output: ScreenOutput) -> bool:
         if output.confidence == Confidence.LOW:
             return True
         return not output.is_cot_monitoring_or_faithfulness and keyword_hit(paper)
 
+    async def _stage(self, role: StageRole, screener: Screener, paper: Paper) -> Stage:
+        output, usage = await screener.screen(paper)
+        return Stage(role=role, model=screener.model, output=output, usage=usage)
+
     async def screen(self, paper: Paper) -> ScreenResult:
-        first, usage = await self.primary.screen(paper)
-        if self.secondary is None or not self.needs_rescreen(paper, first):
-            return ScreenResult(
-                paper_id=paper.id,
-                output=first,
-                model=self.primary.model,
-                prompt_version=PROMPT_VERSION,
-                usage=[usage],
-            )
-        second, usage2 = await self.secondary.screen(paper)
-        return ScreenResult(
-            paper_id=paper.id,
-            output=second,
-            model=self.secondary.model,
-            prompt_version=PROMPT_VERSION,
-            rescreened=True,
-            first_stage=first,
-            usage=[usage, usage2],
-        )
+        stages = [await self._stage(StageRole.SCREEN, self.primary, paper)]
+        if self.secondary and self.needs_rescreen(paper, stages[-1].output):
+            stages.append(await self._stage(StageRole.RESCREEN, self.secondary, paper))
+        if self.confirm and stages[-1].output.tier in ROUTED_TIERS:
+            stages.append(await self._stage(StageRole.CONFIRM, self.confirm, paper))
+        return ScreenResult(paper_id=paper.id, prompt_version=PROMPT_VERSION, stages=stages)
+
+    async def confirm_existing(self, paper: Paper, prior: ScreenResult) -> ScreenResult:
+        """Append the confirm stage to a result screened before the stage existed."""
+        assert self.confirm is not None
+        stage = await self._stage(StageRole.CONFIRM, self.confirm, paper)
+        return prior.model_copy(update={"stages": [*prior.stages, stage]})
 
 
 def openrouter_client(api_key: str) -> AsyncOpenAI:

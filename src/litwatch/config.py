@@ -33,6 +33,9 @@ class Settings:
     screen_effort: str = "low"
     rescreen_model: str = "openai/gpt-5.6-sol"
     rescreen_effort: str = "low"
+    # A different model family on purpose: its errors are less correlated with Luna's.
+    confirm_model: str = "meta/muse-spark-1.3-contributor"
+    confirm_effort: str = "high"
     database_url: str | None = None
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     screen_concurrency: int = 8
@@ -49,6 +52,8 @@ class Settings:
             screen_effort=os.environ.get("LITWATCH_SCREEN_EFFORT", cls.screen_effort),
             rescreen_model=os.environ.get("LITWATCH_RESCREEN_MODEL", cls.rescreen_model),
             rescreen_effort=os.environ.get("LITWATCH_RESCREEN_EFFORT", cls.rescreen_effort),
+            confirm_model=os.environ.get("LITWATCH_CONFIRM_MODEL", cls.confirm_model),
+            confirm_effort=os.environ.get("LITWATCH_CONFIRM_EFFORT", cls.confirm_effort),
             database_url=_database_url(),
             categories=tuple(
                 os.environ.get("LITWATCH_CATEGORIES", ",".join(cls.categories)).split(",")

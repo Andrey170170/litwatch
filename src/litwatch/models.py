@@ -96,21 +96,64 @@ class Usage(BaseModel):
     cost: float | None = None
 
 
+class StageRole(StrEnum):
+    """Cascade stages in order. Each later stage's output replaces the earlier verdict."""
+
+    SCREEN = "screen"  # every paper, cheap model
+    RESCREEN = "rescreen"  # low confidence or keyword-audit negatives: the recall step
+    CONFIRM = "confirm"  # tier 1 and 2 positives, different model family: the precision step
+
+
+STAGE_ORDER = [StageRole.SCREEN, StageRole.RESCREEN, StageRole.CONFIRM]
+
+
+class Stage(BaseModel):
+    role: StageRole
+    model: str
+    output: ScreenOutput
+    usage: Usage
+
+
 class ScreenResult(BaseModel):
-    """Final screening record for a paper, including which stage produced it."""
+    """Screening record for a paper: every stage that ran, last one wins."""
 
     paper_id: str
-    output: ScreenOutput
-    model: str
     prompt_version: str
-    rescreened: bool = False
-    first_stage: ScreenOutput | None = None
-    usage: list[Usage] = Field(default_factory=list)
+    stages: list[Stage] = Field(min_length=1)
+
+    @property
+    def output(self) -> ScreenOutput:
+        return self.stages[-1].output
+
+    @property
+    def model(self) -> str:
+        return self.stages[-1].model
 
     @property
     def tier(self) -> Tier:
         return self.output.tier
 
+    def output_after(self, role: StageRole) -> ScreenOutput:
+        """The verdict as it stood once stages up to `role` had run."""
+        cutoff = STAGE_ORDER.index(role)
+        eligible = [s for s in self.stages if STAGE_ORDER.index(s.role) <= cutoff]
+        return eligible[-1].output
+
+    def has(self, role: StageRole) -> bool:
+        return any(s.role == role for s in self.stages)
+
+    @property
+    def rescreened(self) -> bool:
+        return self.has(StageRole.RESCREEN)
+
+    @property
+    def confirmed(self) -> bool:
+        return self.has(StageRole.CONFIRM)
+
+    @property
+    def usage(self) -> list[Usage]:
+        return [s.usage for s in self.stages]
+
     @property
     def cost(self) -> float:
-        return sum(u.cost or 0.0 for u in self.usage)
+        return sum(s.usage.cost or 0.0 for s in self.stages)

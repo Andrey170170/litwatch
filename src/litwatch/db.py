@@ -107,6 +107,21 @@ async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> N
     )
 
 
+async def unconfirmed_positives(conn: psycopg.AsyncConnection) -> list[tuple[Paper, ScreenResult]]:
+    """Routed-tier papers whose screening predates the confirm stage."""
+    rows = await (
+        await conn.execute(
+            """
+            SELECT * FROM papers
+            WHERE tier IN ('must_read', 'aware')
+              AND NOT (screen->'stages' @> '[{"role": "confirm"}]')
+            ORDER BY published DESC
+            """
+        )
+    ).fetchall()
+    return [(row_to_paper(r), ScreenResult.model_validate(r["screen"])) for r in rows]
+
+
 async def store_screen_error(conn: psycopg.AsyncConnection, paper_id: str, error: str) -> None:
     """Leaves the paper pending so the next run retries it."""
     await conn.execute("UPDATE papers SET screen_error = %s WHERE id = %s", (error, paper_id))

@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from litwatch.evalset import LabeledPaper
-from litwatch.models import Flags, ScreenResult, Tier
+from litwatch.models import Flags, ScreenResult, StageRole, Tier
 from litwatch.screen import Cascade
 
 
@@ -38,18 +38,15 @@ class Scored:
     def predicted_tier(self) -> Tier | None:
         return self.result.tier if self.result else None
 
-    @property
-    def first_stage_tier(self) -> Tier | None:
-        if self.result is None:
-            return None
-        return (self.result.first_stage or self.result.output).tier
+    def tier_after(self, role: StageRole) -> Tier | None:
+        return self.result.output_after(role).tier if self.result else None
 
 
 @dataclass
 class Report:
     scored: list[Scored]
     per_tier: dict[Tier, PRF] = field(default_factory=dict)
-    per_tier_first_stage: dict[Tier, PRF] = field(default_factory=dict)
+    per_stage: dict[StageRole, dict[Tier, PRF]] = field(default_factory=dict)
 
     @property
     def misses(self) -> list[Scored]:
@@ -67,6 +64,10 @@ class Report:
     @property
     def rescreened(self) -> int:
         return sum(1 for s in self.scored if s.result and s.result.rescreened)
+
+    @property
+    def confirmed(self) -> int:
+        return sum(1 for s in self.scored if s.result and s.result.confirmed)
 
     @property
     def cost_by_model(self) -> dict[str, float]:
@@ -118,7 +119,7 @@ async def run(cascade: Cascade, items: list[LabeledPaper], concurrency: int = 8)
     scored = list(await asyncio.gather(*(one(i) for i in labeled)))
     report = Report(scored=scored)
     report.per_tier = score_tiers([(s.expected_tier, s.predicted_tier) for s in scored])
-    report.per_tier_first_stage = score_tiers(
-        [(s.expected_tier, s.first_stage_tier) for s in scored]
-    )
+    for role in StageRole:
+        pairs = [(s.expected_tier, s.tier_after(role)) for s in scored]
+        report.per_stage[role] = score_tiers(pairs)
     return report

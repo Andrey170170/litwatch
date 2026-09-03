@@ -12,9 +12,9 @@ from rich.console import Console
 from rich.table import Table
 
 from litwatch import arxiv_source, db, evalset, evaluation, ingest
+from litwatch.api import build_cascade
 from litwatch.config import Settings
-from litwatch.models import Tier
-from litwatch.screen import Cascade, ModelScreener, openrouter_client
+from litwatch.models import StageRole, Tier
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 console = Console()
@@ -23,28 +23,18 @@ LABELED = Path("evals/labeled.yaml")
 RUNS = Path("evals/runs")
 
 
-def build_cascade(settings: Settings, rescreen: bool = True) -> Cascade:
-    client = openrouter_client(settings.openrouter_api_key)
-    primary = ModelScreener(client, settings.screen_model, settings.screen_effort)
-    secondary = (
-        ModelScreener(client, settings.rescreen_model, settings.rescreen_effort)
-        if rescreen
-        else None
-    )
-    return Cascade(primary, secondary)
-
-
 @app.command()
 def screen(
     paper_id: Annotated[str, typer.Argument(help="arXiv id or URL")],
     rescreen: Annotated[bool, typer.Option(help="Apply the second-stage re-screen rule")] = True,
+    confirm: Annotated[bool, typer.Option(help="Confirm tier 1 and 2 with the third stage")] = True,
 ) -> None:
     """Screen one arXiv paper and print the result."""
     settings = Settings.from_env()
     papers = arxiv_source.fetch_by_ids([arxiv_source.id_from_url(paper_id)])
     if not papers:
         raise typer.BadParameter(f"arXiv returned nothing for {paper_id}")
-    result = asyncio.run(build_cascade(settings, rescreen).screen(papers[0]))
+    result = asyncio.run(build_cascade(settings, rescreen, confirm).screen(papers[0]))
     console.print(f"[bold]{papers[0].title}[/bold]")
     console.print_json(result.model_dump_json())
     console.print(f"cost: ${result.cost:.4f}")
@@ -58,32 +48,32 @@ def _fmt(value: float | None) -> str:
 def eval_cmd(
     labeled: Annotated[Path, typer.Option(help="Labeled set YAML")] = LABELED,
     rescreen: Annotated[bool, typer.Option(help="Apply the second-stage re-screen rule")] = True,
+    confirm: Annotated[bool, typer.Option(help="Confirm tier 1 and 2 with the third stage")] = True,
     concurrency: int = 8,
 ) -> None:
-    """Run the screener over the labeled set and report per-tier precision and recall."""
+    """Run the cascade over the labeled set; report precision and recall after each stage."""
     settings = Settings.from_env()
     items = evalset.load(labeled).papers
     report = asyncio.run(
-        evaluation.run(build_cascade(settings, rescreen), items, concurrency=concurrency)
+        evaluation.run(build_cascade(settings, rescreen, confirm), items, concurrency=concurrency)
     )
 
-    table = Table(title=f"{len(report.scored)} labeled papers, {report.rescreened} re-screened")
+    table = Table(
+        title=f"{len(report.scored)} labeled papers, {report.rescreened} re-screened, "
+        f"{report.confirmed} confirmed"
+    )
     table.add_column("tier")
-    table.add_column("P first")
-    table.add_column("R first")
-    table.add_column("P final")
-    table.add_column("R final")
+    for role in StageRole:
+        table.add_column(f"P {role.value}")
+        table.add_column(f"R {role.value}")
     table.add_column("n")
     for tier in Tier:
-        first, final = report.per_tier_first_stage[tier], report.per_tier[tier]
-        table.add_row(
-            tier.value,
-            _fmt(first.precision),
-            _fmt(first.recall),
-            _fmt(final.precision),
-            _fmt(final.recall),
-            str(final.tp + final.fn),
-        )
+        cells = [tier.value]
+        for role in StageRole:
+            prf = report.per_stage[role][tier]
+            cells += [_fmt(prf.precision), _fmt(prf.recall)]
+        final = report.per_tier[tier]
+        table.add_row(*cells, str(final.tp + final.fn))
     console.print(table)
     agreement = evaluation.flag_agreement(report.scored)
     console.print("flag accuracy: " + ", ".join(f"{k}={_fmt(v)}" for k, v in agreement.items()))
@@ -112,6 +102,7 @@ def eval_cmd(
                 "labeled": str(labeled),
                 "screen_model": settings.screen_model,
                 "rescreen_model": settings.rescreen_model if rescreen else None,
+                "confirm_model": settings.confirm_model if confirm else None,
                 "cost_by_model": costs,
                 "results": [
                     {
@@ -192,6 +183,39 @@ def run(
         f"run {s.run_id}: fetched {s.fetched} ({s.inserted} new), screened {s.screened}, "
         f"{s.rescreened} re-screened, {s.failed} failed, cost ${s.cost:.4f}, tiers {s.tiers}"
     )
+
+
+@app.command()
+def reconfirm() -> None:
+    """Run the confirm stage on tier 1 and 2 papers screened before it existed."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    settings = Settings.from_env()
+    cascade = build_cascade(settings)
+
+    async def go():
+        async with await db.connect(settings.require_database()) as conn:
+            todo = await db.unconfirmed_positives(conn)
+            sem = asyncio.Semaphore(settings.screen_concurrency)
+            lock = asyncio.Lock()
+            changed, cost = [], 0.0
+
+            async def one(paper, prior):
+                nonlocal cost
+                async with sem:
+                    result = await cascade.confirm_existing(paper, prior)
+                async with lock:
+                    await db.store_screen(conn, result)
+                    cost += result.stages[-1].usage.cost or 0.0
+                    if result.tier != prior.tier:
+                        changed.append((paper, prior.tier, result.tier))
+
+            await asyncio.gather(*(one(p, r) for p, r in todo))
+            return len(todo), changed, cost
+
+    n, changed, cost = asyncio.run(go())
+    console.print(f"confirmed {n} papers, {len(changed)} changed tier, cost ${cost:.4f}")
+    for paper, before, after in changed:
+        console.print(f"  {paper.id} {before.value} -> {after.value}  {paper.title[:70]}")
 
 
 @app.command()

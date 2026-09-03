@@ -23,11 +23,14 @@ class RunRequest(BaseModel):
     fetch: bool = True
 
 
-def build_cascade(settings: Settings) -> Cascade:
+def build_cascade(settings: Settings, rescreen: bool = True, confirm: bool = True) -> Cascade:
     client = openrouter_client(settings.openrouter_api_key)
     return Cascade(
         ModelScreener(client, settings.screen_model, settings.screen_effort),
-        ModelScreener(client, settings.rescreen_model, settings.rescreen_effort),
+        ModelScreener(client, settings.rescreen_model, settings.rescreen_effort)
+        if rescreen
+        else None,
+        ModelScreener(client, settings.confirm_model, settings.confirm_effort) if confirm else None,
     )
 
 

@@ -25,6 +25,7 @@ class RunSummary:
     updated: int = 0
     screened: int = 0
     rescreened: int = 0
+    confirmed: int = 0
     failed: int = 0
     cost: float = 0.0
     tiers: dict[str, int] = field(default_factory=dict)
@@ -65,6 +66,7 @@ async def run(
             updated=summary.updated,
             screened=summary.screened,
             rescreened=summary.rescreened,
+            confirmed=summary.confirmed,
             failed=summary.failed,
             cost=round(summary.cost, 4),
             tiers=summary.tiers,
@@ -105,15 +107,17 @@ async def _screen(
                 await db.store_screen(conn, result)
                 s.screened += 1
                 s.rescreened += int(result.rescreened)
+                s.confirmed += int(result.confirmed)
                 s.cost += result.cost
                 s.tiers[result.tier.value] = s.tiers.get(result.tier.value, 0) + 1
 
     await asyncio.gather(*(one(p) for p in todo))
     log.info(
-        "run %s screened %s (%s re-screened, %s failed) cost $%.4f tiers %s",
+        "run %s screened %s (%s re-screened, %s confirmed, %s failed) cost $%.4f tiers %s",
         s.run_id,
         s.screened,
         s.rescreened,
+        s.confirmed,
         s.failed,
         s.cost,
         s.tiers,

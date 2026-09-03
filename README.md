@@ -40,8 +40,17 @@ definition/benchmark), `aware` (other CoT papers), `mech_interp` (internals
 work off topic), `none`. Every model call records tokens and cost as reported
 by OpenRouter; `litwatch eval` prints the total per model.
 
-Low-confidence results, and negatives that hit the keyword audit list, are
-re-screened with the second-stage model. `litwatch eval` reports both stages.
+Three stages, each later verdict replacing the earlier one:
+
+1. `screen`: every paper, Luna at low effort.
+2. `rescreen`: low-confidence results and negatives that hit the keyword audit
+   list, Sol at low effort. The recall step.
+3. `confirm`: anything now in `must_read` or `aware`, Muse Spark at high
+   effort. The precision step, on a different model family so its errors
+   are less correlated with the first two. About 1% of the feed.
+
+`litwatch eval` reports precision and recall after each stage. `litwatch
+reconfirm` applies stage 3 to rows screened before it existed.
 
 ## Labeled set
 

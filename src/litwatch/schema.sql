@@ -43,3 +43,5 @@ CREATE TABLE IF NOT EXISTS runs (
     tiers        jsonb,
     error        text
 );
+
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS confirmed integer NOT NULL DEFAULT 0;
