@@ -54,3 +54,7 @@ ALTER TABLE papers ADD COLUMN IF NOT EXISTS routed_tier text;
 ALTER TABLE papers ADD COLUMN IF NOT EXISTS route_error text;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS routed integer NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS route_failed integer NOT NULL DEFAULT 0;
+
+-- Digest prose for the run (phase 3), written after routing.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS digest text;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS digest_model text;

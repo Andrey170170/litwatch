@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from litwatch import db, ingest
 from litwatch.config import Settings
+from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade, ModelScreener, openrouter_client
 from litwatch.webdav import WebDAVWriter
@@ -55,6 +56,11 @@ def build_router(settings: Settings, attach_pdf: bool = True) -> Router | None:
     )
 
 
+def build_digester(settings: Settings, model: str | None = None) -> Digester:
+    client = openrouter_client(settings.openrouter_api_key)
+    return Digester(client, model or settings.digest_model, settings.digest_effort)
+
+
 def create_app(settings: Settings) -> FastAPI:
     dsn = settings.require_database()
     state: dict[str, Any] = {"task": None, "last": None}
@@ -79,6 +85,7 @@ def create_app(settings: Settings) -> FastAPI:
                     req.days,
                     req.fetch,
                     router=build_router(settings),
+                    digester=build_digester(settings),
                 )
         except Exception:  # noqa: BLE001 - already recorded on the run row
             log.exception("background run failed")
@@ -113,7 +120,9 @@ def create_app(settings: Settings) -> FastAPI:
     async def papers(
         tier: str | None = None, since: datetime | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
+        """`tier` takes a comma-separated list, e.g. `must_read,aware`."""
+        tiers = [t for t in (tier or "").split(",") if t] or None
         async with await db.connect(dsn) as conn:
-            return await db.list_papers(conn, tier, since, min(limit, 1000))
+            return await db.list_papers(conn, tiers, since, min(limit, 1000))
 
     return app

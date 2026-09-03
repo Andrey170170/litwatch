@@ -37,6 +37,9 @@ class Settings:
     # The `-contributor` endpoint is far cheaper but needs OpenRouter's training opt-in.
     confirm_model: str = "meta/muse-spark-1.3"
     confirm_effort: str = "high"
+    # Digest prose. GLM 5.3 by default pending the blind pick against Kimi K3 and Sol.
+    digest_model: str = "z-ai/glm-5.3"
+    digest_effort: str = "low"
     database_url: str | None = None
     # Routing (phase 3). Unset Zotero credentials disable routing; unset WebDAV disables PDFs.
     zotero_user_id: str | None = None
@@ -61,6 +64,8 @@ class Settings:
             rescreen_effort=os.environ.get("LITWATCH_RESCREEN_EFFORT", cls.rescreen_effort),
             confirm_model=os.environ.get("LITWATCH_CONFIRM_MODEL", cls.confirm_model),
             confirm_effort=os.environ.get("LITWATCH_CONFIRM_EFFORT", cls.confirm_effort),
+            digest_model=os.environ.get("LITWATCH_DIGEST_MODEL", cls.digest_model),
+            digest_effort=os.environ.get("LITWATCH_DIGEST_EFFORT", cls.digest_effort),
             database_url=_database_url(),
             zotero_user_id=os.environ.get("LITWATCH_ZOTERO_USER_ID"),
             zotero_api_key=_secret("ZOTERO_API_KEY"),

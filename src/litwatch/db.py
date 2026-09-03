@@ -196,15 +196,15 @@ async def list_runs(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict
 
 async def list_papers(
     conn: psycopg.AsyncConnection,
-    tier: str | None = None,
+    tiers: list[str] | None = None,
     since: datetime | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """Screened papers, newest screening first, with the screen JSON inline."""
+    """Screened papers, newest screening first, with screen JSON and routing state inline."""
     clauses, params = ["screened_at IS NOT NULL"], []
-    if tier:
-        clauses.append("tier = %s")
-        params.append(tier)
+    if tiers:
+        clauses.append("tier = ANY(%s)")
+        params.append(tiers)
     if since:
         clauses.append("screened_at >= %s")
         params.append(since)
@@ -212,8 +212,9 @@ async def list_papers(
     rows = await (
         await conn.execute(
             f"""
-            SELECT id, title, authors, categories, published, url, screened_at, tier,
-                   keyword_hit, screen
+            SELECT id, title, authors, categories, primary_category, published, url, fetched_at,
+                   screened_at, tier, keyword_hit, screen,
+                   zotero_key, zotero_attachment_key, routed_at, routed_tier, route_error
             FROM papers WHERE {" AND ".join(clauses)}
             ORDER BY screened_at DESC LIMIT %s
             """,
@@ -221,6 +222,49 @@ async def list_papers(
         )
     ).fetchall()
     return rows
+
+
+async def run_positives(
+    conn: psycopg.AsyncConnection, run_id: int
+) -> list[tuple[Paper, ScreenResult]]:
+    """Tier 1/2 papers screened during the given run, newest first."""
+    rows = await (
+        await conn.execute(
+            """
+            SELECT p.* FROM papers p, runs r
+            WHERE r.id = %s AND p.tier IN ('must_read', 'aware')
+              AND p.screened_at >= r.started_at
+              AND p.screened_at <= coalesce(r.finished_at, now())
+            ORDER BY p.published DESC
+            """,
+            (run_id,),
+        )
+    ).fetchall()
+    return [(row_to_paper(r), parse_screen(r["screen"])) for r in rows]
+
+
+async def positives_since(
+    conn: psycopg.AsyncConnection, since: datetime
+) -> list[tuple[Paper, ScreenResult]]:
+    """Tier 1/2 papers screened since `since`, newest first (for ad hoc digests)."""
+    rows = await (
+        await conn.execute(
+            """
+            SELECT * FROM papers WHERE tier IN ('must_read', 'aware') AND screened_at >= %s
+            ORDER BY published DESC
+            """,
+            (since,),
+        )
+    ).fetchall()
+    return [(row_to_paper(r), parse_screen(r["screen"])) for r in rows]
+
+
+async def store_digest(
+    conn: psycopg.AsyncConnection, run_id: int, text: str, model: str | None
+) -> None:
+    await conn.execute(
+        "UPDATE runs SET digest = %s, digest_model = %s WHERE id = %s", (text, model, run_id)
+    )
 
 
 async def stats(conn: psycopg.AsyncConnection) -> dict[str, Any]:

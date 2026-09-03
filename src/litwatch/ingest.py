@@ -9,6 +9,7 @@ import psycopg
 
 from litwatch import arxiv_source, db
 from litwatch.config import Settings
+from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade
 
@@ -49,6 +50,7 @@ async def run(
     days: int,
     fetch: bool = True,
     router: Router | None = None,
+    digester: Digester | None = None,
 ) -> RunSummary:
     since, until = window(days)
     run_id = await db.start_run(conn, kind, since, until)
@@ -59,6 +61,8 @@ async def run(
         await _screen(conn, settings, cascade, summary)
         if router is not None:
             await route_pending(conn, router, summary)
+        if digester is not None:
+            await write_run_digest(conn, digester, summary)
     except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
         summary.error = f"{type(exc).__name__}: {exc}"
         log.exception("run %s failed", run_id)
@@ -162,3 +166,14 @@ async def route_pending(
     if s:
         log.info("run %s routed %s (%s failed)", s.run_id, s.routed, s.route_failed)
     return failures
+
+
+async def write_run_digest(conn: psycopg.AsyncConnection, digester: Digester, s: RunSummary) -> str:
+    """Digest of the papers this run promoted to tier 1/2; the model cost joins the run's."""
+    positives = await db.run_positives(conn, s.run_id)
+    text, usage = await digester.write(positives)
+    if usage:
+        s.cost += usage.cost or 0.0
+    await db.store_digest(conn, s.run_id, text, usage.model if usage else None)
+    log.info("run %s digest: %d papers, %d chars", s.run_id, len(positives), len(text))
+    return text

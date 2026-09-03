@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from litwatch import arxiv_source, db, evalset, evaluation, ingest
-from litwatch.api import build_cascade, build_router
+from litwatch.api import build_cascade, build_digester, build_router
 from litwatch.config import Settings
 from litwatch.models import StageRole, Tier
 
@@ -184,6 +184,7 @@ def run(
                 days,
                 fetch,
                 router=build_router(settings),
+                digester=build_digester(settings),
             )
 
     s = asyncio.run(go())
@@ -282,6 +283,40 @@ def reconfirm() -> None:
     console.print(f"confirmed {n} papers, {len(changed)} changed tier, cost ${cost:.4f}")
     for paper, before, after in changed:
         console.print(f"  {paper.id} {before.value} -> {after.value}  {paper.title[:70]}")
+
+
+@app.command()
+def digest(
+    run_id: Annotated[int | None, typer.Option("--run", help="Run id from the runs table")] = None,
+    days: Annotated[
+        int | None, typer.Option(help="Instead of a run: papers screened in the last N days")
+    ] = None,
+    model: Annotated[str | None, typer.Option(help="Override the digest model")] = None,
+    store: Annotated[bool, typer.Option(help="Write the digest onto the run row")] = False,
+) -> None:
+    """Write the prose digest for one run (or a recent window) and print it."""
+    if (run_id is None) == (days is None):
+        raise SystemExit("give exactly one of --run or --days")
+    settings = Settings.from_env()
+    digester = build_digester(settings, model)
+
+    async def go():
+        async with await db.connect(settings.require_database()) as conn:
+            if run_id is not None:
+                positives = await db.run_positives(conn, run_id)
+            else:
+                assert days is not None
+                since = datetime.now(UTC) - timedelta(days=days)
+                positives = await db.positives_since(conn, since)
+            text, usage = await digester.write(positives)
+            if store and run_id is not None:
+                await db.store_digest(conn, run_id, text, usage.model if usage else None)
+            return positives, text, usage
+
+    positives, text, usage = asyncio.run(go())
+    console.print(text)
+    cost = f"${usage.cost:.4f}" if usage and usage.cost is not None else "n/a"
+    console.print(f"\n[dim]{len(positives)} papers, {digester.model}, cost {cost}[/dim]")
 
 
 @app.command()
