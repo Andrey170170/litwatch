@@ -414,3 +414,524 @@ papers:
   expected: null
   note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending Ana''s view on
     scope (mechanistic CoT analysis, internals-based deception/hallucination detection)'
+- id: '2609.01779'
+  title: 'Agents That Model Agents: Five Principles Toward a Theory of Mind for 6G Networks'
+  abstract: 'Future 6G networks will rely on Large Language Model (LLM) agents to manage the Radio Access
+    Network (RAN). However, current architectures assume inter-agent messages convey objective facts.
+    A message is instead a \emph{trace} of the sender''s reasoning: it carries a subjective conclusion,
+    so a syntactically valid report can propagate an AI hallucination and trigger a cascading outage invisible
+    to protocol validation. Reading such a trace requires a Theory of Mind (ToM)---before acting, the
+    receiver must model what the peer believes, and what a peer in that position should have believed.
+    Modeling these interactions as cognitive channels on a cellular sheaf, we obtain a unified framework
+    for resilient multi-agent systems, from which five design principles emerge: (i) a message is evidence
+    of the sender''s hidden reasoning; (ii) trust is a continuous cognitive Signal-to-Noise Ratio (SNR)---asserted
+    precision over deviation from the modeled peer belief; (iii) network-wide consistency and resistance
+    to hallucination contagion are computable via the sheaf''s Laplacian; (iv) peer-modeling must halt
+    at exactly two levels to conserve compute and survive mutual information decay; and (v) credible capacity
+    is bounded by operational goal alignment, not link bandwidth. A signaling-storm study on locally deployed
+    1B-parameter telecom language models validates it: cognitive SNR isolates a hallucinating peer that
+    three of its four neighbors agree with, where a divergence gate ranks every wrong peer above the right
+    one; only depth two ToM recovers the correct action; and the spectral gap decides whether a topology
+    reaches consistency inside the near-real-time budget.'
+  authors: []
+  categories:
+  - cs.NI
+  - cs.AI
+  - cs.MA
+  url: http://arxiv.org/abs/2609.01779
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft aware, Terra none. Terra: The paper treats inter-agent
+    messages as evidence of hidden reasoning for network reliability and hallucination containment, but
+    does not study language-model chain-of-thought traces, their faithfulness, or model internals.'
+- id: '2608.28018'
+  title: 'Twin Worlds: Equivariance-Based Abstention for Evidence-Grounded Reasoning'
+  abstract: 'Knowledge-intensive reasoning requires Large Language Models (LLMs) to ground answers in
+    provided evidence. When evidence is insufficient, it is desirable that models abstain rather than
+    confidently generating unsupported answers. Existing abstention methods rely on uncertainty estimation
+    or evidence sufficiency checks, but neither tests whether the reasoning process for generation, driven
+    by the interaction of provided evidence and the model''s internal memory parameters, is actually grounded
+    in the evidence. A key contributing factor is that entity mentions in context activate memorised associations,
+    causing models to generate plausible responses ungrounded in evidence. We propose Twin Worlds (TW),
+    a framework for improving reliability in knowledge-intensive reasoning through equivariance-based
+    abstention: unlike invariance, which requires outputs to remain unchanged, equivariance requires outputs
+    to transform correspondingly under entity substitutions. A model grounded in the evidence should produce
+    answers that shift consistently when entities are substituted while their relations are preserved.
+    TW constructs multiple worlds via typed substitutions of the original input that preserve relational
+    structure while reducing parametric priors, and uses equivariance violations as an abstention signal.
+    Across four benchmarks and three model backbones, TW identifies when answers are not reliably grounded
+    in the provided evidence and outperforms uncertainty- and sufficiency-based baselines.'
+  authors: []
+  categories:
+  - cs.CL
+  - cs.AI
+  - cs.LG
+  url: http://arxiv.org/abs/2608.28018
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft aware, Terra none. Terra: The paper evaluates whether answers
+    are grounded in external evidence using input entity substitutions and abstention, without analyzing
+    or monitoring a model''s chain-of-thought or internal activations.'
+- id: '2609.00099'
+  title: Generative artificial intelligence for reliable mechanistic reasoning for corrosion
+  abstract: Corrosion accounts for approximately 4% of global GDP, and reliable prediction is essential
+    for timely mitigation. Machine learning effectively predicts corrosion rates from composition, microstructure,
+    and environmental variables, but cannot explain the underlying mechanisms. A reliable approach in
+    safety-critical materials engineering requires not only accurate retrieval but also mechanistically
+    defensible reasoning, a capability that existing factuality metrics cannot assess. This work presents
+    a domain-adapted retrieval-augmented generation framework for corrosion knowledge synthesis, demonstrated
+    on magnesium alloy corrosion. Three open-weight language models (Llama-3.1-8B, Qwen-2.5-7B, Mistral-7B)
+    are fine-tuned on 3,309 expert-verified question-answer pairs from 840 peer-reviewed papers and integrated
+    with a hybrid dense-lexical retrieval pipeline. Retrieval augmentation produces Token F1 gains of
+    143-194%, with system faithfulness of 0.964 and context recall of 0.988. Blind external validation
+    on newly published literature and in-house electrochemical data confirms trend-level generalisation.
+    Reason Map, a proposition-graph framework, is further introduced; it independently constructs directed
+    evidence graphs from generated answers and retrieved literature, enabling systematic detection of
+    causal direction inversions and unsupported inferential leaps that flat factuality metrics cannot
+    expose. The modular architecture can be applied across domains, offering a generalizable blueprint
+    for trustworthy AI-assisted knowledge synthesis to circumvent corrosion, which can also be applied
+    to other engineering domains.
+  authors: []
+  categories:
+  - cs.LG
+  - cond-mat.mtrl-sci
+  url: http://arxiv.org/abs/2609.00099
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft aware, Terra none. Terra: The paper evaluates retrieval-grounded
+    answer faithfulness and introduces proposition graphs for factual/mechanistic support, but does not
+    study language-model chain-of-thought or model internals.'
+- id: '2608.29835'
+  title: 'EVAR: Evidence-Validated Hypothesis Admission for Budget-Aware Narrative Reasoning'
+  abstract: 'Large language models (LLMs) often produce fluent but weakly grounded conclusions when reasoning
+    over non-interactive, long-form narratives. A central failure mode is that unsupported intermediate
+    hypotheses can enter the reasoning trajectory and contaminate subsequent inference, especially when
+    evidence is scattered across distant parts of the story. To address this problem, we propose EVAR,
+    an evidence-validated hypothesis admission framework for budget-aware narrative reasoning. EVAR first
+    compiles the narrative into an immutable evidence store of source-linked atomic claims and assigns
+    an instance-specific inference budget from unresolved gaps and uncertainty signals. During refinement,
+    EVAR directly proposes candidate hypotheses for unresolved gaps, constructs hypothesis-conditioned
+    validation challenges, and verifies each candidate against the locked store before admission: supported
+    hypotheses enter the answer-supporting state, unverifiable ones are quarantined, and contradictory
+    ones are discarded. A sufficiency-based stopping mechanism further avoids unnecessary refinement.
+    Experiments on NarraCrime and multiple public reasoning benchmarks show that EVAR improves both task
+    performance and evidence faithfulness while maintaining controllable inference cost.'
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.29835
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft aware, Terra none. Terra: The paper improves evidence-grounded
+    narrative reasoning by validating intermediate hypotheses, but does not study whether an LLM''s stated
+    chain of thought faithfully reflects its underlying computation or enable CoT monitoring.'
+- id: '2608.22857'
+  title: 'SAVER: Selective Auditing of Verbal Evidence for Error Recovery in VLM Change Reasoning'
+  abstract: Vision-language models (VLMs) frequently fail at visual change reasoning, even when their
+    vision encoders contain sufficient information. We observe that correct VLM outputs tend to contain
+    explicit verbal evidence (object names, colors, spatial locations) that supports the claimed change,
+    while incorrect outputs often lack such evidence. We propose SAVER (Selective Auditing of Verbal Evidence
+    for Error Recovery), a lightweight, rule-based method that parses VLM responses for this evidence
+    and triggers structured reprompting only when evidence is missing or inconsistent. Across three change
+    detection benchmarks and four VLMs, SAVER significantly improves accuracy on tasks where errors stem
+    from the model failing to articulate what it saw (expression failures), with gains up to +25.8% on
+    CLEVR-Change. The evidence patterns can also be generated by an LLM in a single call, matching the
+    hand-tuned gate on CLEVR-Change. Ablation experiments confirm that the evidence gate, not reprompting
+    alone, drives the improvement.
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.22857
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft aware, Terra none. Terra: SAVER audits explicit verbal
+    evidence in VLM answers to trigger reprompting for visual change-detection errors, rather than studying
+    language-model reasoning traces for faithfulness or monitorability.'
+- id: '2609.02754'
+  title: Untangling the Mechanisms of Misleading Context in Medical Question Answering
+  abstract: Large language models now answer medical questions with expert-level performance. However,
+    the context these systems act on can be misleading, and misleading context can corrupt a model's medical
+    judgment. To understand how misleading context corrupts this judgment, we examine the model's susceptibility
+    to the context, disclosure of it, mechanism of corrupted reasoning, and monitorability of the decision.
+    On the medical reasoning subset of MedMisBench, a clinician-reviewed question-answering benchmark
+    of 8,627 questions, we inject two types of misleading context cues, fabricated evidence and a bare
+    assertion. We test three reasoning models, two that expose their full reasoning trace and one frontier
+    model that exposes only its response. All three are more susceptible to the assertion than to the
+    fabricated evidence, adopting the asserted answer 10 to 27 points more often. The misleading cues
+    are disclosed in 81 to 98% of traces but only 7 to 90% of responses, and the assertion is disclosed
+    less often than evidence based cues. Resampling from reasoning traces without disclosure shows the
+    two cues corrupt reasoning differently, evidence entering early and accumulating while the assertion
+    redirects the conclusion near its end. An LLM monitor catches 78% of corrupted decisions at 5% false
+    positives when reading an open model's trace with guidance, against at most 32% from any response.
+    The misleading context that models are most susceptible to is disclosed least, and was caught reliably
+    only from an open reasoning trace, which frontier providers withhold.
+  authors: []
+  categories:
+  - cs.CL
+  - cs.AI
+  - cs.LG
+  url: http://arxiv.org/abs/2609.02754
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra aware. Terra: The paper evaluates disclosure
+    of misleading-context influence in reasoning traces and shows that an LLM monitor detects corrupted
+    decisions far better from open CoT than from final responses, without using model internals.'
+- id: '2609.01466'
+  title: 'Parsing the Stream: A Live Trace Model for Long-Horizon Agents and Their Observers'
+  abstract: 'A long-horizon agent''s trace outgrows both of its consumers: the human observer monitoring
+    the run, and the agent itself, whose bounded context the trace must be folded back into. We present
+    a live trace model, an append-only event ledger folded incrementally into typed run state and compiled
+    into per-consumer views, and evaluate it for both consumers against deterministic ground truth. For
+    the observer side, evaluated with an LLM reader as proxy, the compiled view answers monitoring questions
+    using approximately 14x and 15x fewer input tokens (by reader) and at 5-7x lower cost than a budget-capped
+    single-call reading of the raw trace, with higher accuracy (0.85-0.87 versus 0.48). Because the questions
+    were co-designed with the view schema, we treat the token and cost reduction, conditional on schema
+    coverage, as the transferable result. For the agent, on 120-link sequential-dependency tasks, mechanisms
+    that maintain the task''s running statistic in per-step state succeed where full-context prompting
+    fails (30/30 versus 8/30 under a clean protocol, n=30, labeled descriptive owing to benchmark-system
+    co-development); a prompt-level scratchpad matches the fold''s accuracy at lower cost, and a two-arm
+    decomposition attributes the fold''s accuracy to its deterministic aggregate and its cost advantage
+    to its compactness. The fold''s remaining value over cheaper alternatives is deterministic auditability
+    and serving the observer from the same state. We derive eleven candidate requirements for trace folding
+    from observed failures and delimit them with an order-sensitive task family on which the fold ceases
+    to help. Code, benchmarks, a regenerable synthetic corpus, and all workbench traces are released.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2609.01466
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra aware. Terra: The paper develops compact,
+    deterministically auditable views of long-horizon agent traces for an observer to answer monitoring
+    questions, but it does not analyze model internals or specifically establish CoT faithfulness.'
+- id: '2608.30650'
+  title: 'Geometry of Divergence: Tracking Hidden-State Trajectories for Adaptive Multi-Turn Reasoning'
+  abstract: 'LLM agents need to sustain goal-consistent reasoning across long multi-turn interactions
+    under strict resource constraints. However, as the multi-turn context accumulates, it can destabilize
+    the underlying LLM''s internal representation of task-relevant information from earlier turns, blurring
+    the boundary between constructive reasoning and representation drift. We formulate multi-turn reasoning
+    as a hidden-state trajectory of the underlying LLM that is characterized via two complementary signals:
+    temporal curvature that captures the directional consistency of turn-to-turn updates, and variance
+    slope which measures the expansion or contraction of the exploration space. Across four tasks and
+    three underlying LLMs, we observed that these geometric signals distinguish between correct and incorrect
+    episodes prior to completion. We further decompose each episode into three-action chains formed from
+    four actions (Read, Write, Respond, Transfer) and show that separability is action-dependent, with
+    different signals distinguishing various chain patterns. Our experiments demonstrate that trajectory
+    geometry can identify critical turns in the reasoning process, increasing task success rates on $τ$-Bench
+    from 24.1% to 39.6% while reducing token cost by 11.2%.'
+  authors: []
+  categories:
+  - cs.AI
+  - cs.CL
+  url: http://arxiv.org/abs/2608.30650
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra mech_interp. Terra: The paper analyzes
+    hidden-state trajectory geometry to predict and adapt multi-turn agent success, but does not address
+    whether a stated chain of thought faithfully reflects computation or can be monitored for misbehavior.'
+- id: '2608.30463'
+  title: 'More Capable, Less Faithful: A Multilingual Analysis of Mathematical (Un)Solvability Detection
+    in LLMs'
+  abstract: Solvability detection is one of the most challenging aspects of mathematical reasoning for
+    Large Language Models (LLMs). While prior work has studied this capability extensively, these analyses
+    have been limited to English. Consequently, it remains unclear whether multilingual failures arise
+    from differences in internal Solvability Belief or from language-dependent failures to express it.
+    To address this gap, we introduce the first multilingual benchmark of paired solvable and unsolvable
+    mathematical problems, extending ReliableMath to French and Greek. Using this, we train multilingual
+    probes predicting Solvability Belief and analyze the solvability detection capabilities of state-of-the-art
+    LLMs behaviorally, representationally, and in terms of faithfulness. We find that Solvability Belief
+    is encoded as a largely universal, language-agnostic feature, and that higher-resource languages such
+    as English, despite achieving stronger mathematical reasoning performance, exhibit lower solvability-detection
+    faithfulness.
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.30463
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra mech_interp. Terra: The paper probes internal
+    representations of a solvability belief and compares them with multilingual behavioral expression,
+    but does not study language-model chain-of-thought or reasoning-trace monitorability/faithfulness.'
+- id: '2608.27340'
+  title: 'Not All Eval-Awareness Is Equal: Capabilities Framing Predicts Compliance'
+  abstract: 'Steering interventions targeting eval-awareness, a model''s recognition that it is being
+    tested, are increasingly used in safety evaluation pipelines, where evaluation-awareness is treated
+    as a single quantity to be suppressed. We show that verbalized eval-awareness in chain-of-thought
+    can be identified as capabilities-flavored ("the user is testing my ability to follow instructions"),
+    safety-flavored ("the user is testing my boundaries"), both, or neither: framings that predict compliance
+    very differently. On Qwen3-32B over the FORTRESS dataset, capabilities-framing predicts compliance
+    with a +24 to +46 percentage-point gap over safety-framing across all tested steering conditions.
+    A CoT-prefill intervention on eval-awareness-negative rollouts suggests the link is causal, with 10
+    of 11 prefills shifting compliance in the predicted direction. Then, eval-awareness is not behaviorally
+    uniform: aggregate suppression rates can move while the safety-relevant component does not, and the
+    same "X% suppression of eval-awareness" can correspond to qualitatively different behavioral outcomes.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.27340
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra aware. Terra: The paper analyzes verbally
+    expressed eval-awareness in chain-of-thought as a safety-relevant signal and shows that distinct CoT
+    framings predict compliance, but describes no internal-model analysis or new benchmark.'
+- id: '2608.27141'
+  title: 'Safety Does Not Compose: Non-Decaying Loop State for Autonomous LLM Agents'
+  abstract: 'Large language model agents are increasingly deployed as autonomous loops. Starting from
+    one human goal, such a system repeatedly discovers work, plans, executes tool calls, verifies outcomes
+    and persists state across many unattended iterations. The agent safeguards in wide use, however, are
+    defined over a single trajectory, and their safety state is re-initialized when the next trajectory
+    begins. We show that this is a failure of composition rather than an implementation detail. Our central
+    result is a separation: against an attack whose evidence is fragmented across several iterations,
+    every trajectory-scoped monitor has a true-positive rate equal to its false-positive rate, however
+    expressive it is, because the evidence it would need never appears in the window it sees, whereas
+    a monitor retaining cross-iteration state separates the two perfectly. We further show that the obvious
+    repair of carrying a geometrically decaying risk score is insufficient, because the cooling-off period
+    a patient adversary must wait is a constant that does not grow with the horizon $N$. We then present
+    LoopHarness, which restores a persistent, non-decaying safety state at the loop level. Under mediated
+    commits and an arbiter detection floor $δ_M$, it bounds the expected number of unauthorized irreversible
+    actions by $B+m-1+m/δ_M$, a constant in $N$, of which the $B+m-1$ term is decided by a model-free
+    rule and therefore survives a fully colluding verifier. We give a complete evaluation protocol on
+    native Agent-SafetyBench tasks with paired clean and attacked episodes, an outer-state attack suite
+    whose decisive evidence exists only across iterations, per-module ablations, and an adaptive white-box
+    red team.'
+  authors: []
+  categories:
+  - cs.CR
+  - cs.AI
+  url: http://arxiv.org/abs/2608.27141
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra none. Terra: The paper concerns persistent
+    safety monitoring across iterations of autonomous LLM agent loops, not monitoring or faithfulness
+    of language-model chain-of-thought traces.'
+- id: '2608.26329'
+  title: 'Neuro-symbolic PRM: Enhancing Scientific Reasoning via Structured Traces and Symbolic Verification'
+  abstract: 'While tool-augmented Large Language Models have significantly improved multi-step reasoning
+    in quantitative STEM tasks, a critical residual failure mode remains: intermediate reasoning steps
+    that are syntactically well-formed, mathematically executable, and unit-consistent, yet contextually
+    ungrounded. Current approaches either rely on formal verifiers that cannot assess semantic intent,
+    or burden Process Reward Models (PRMs) with the dual task of checking both arithmetic and logic. In
+    this paper, we propose a neuro-symbolic framework that cleanly decouples reasoning into two formal
+    dimensions: Symbolic Validity ($V$) and Semantic Groundedness ($G$). We guarantee $V$ by construction
+    using a deterministic symbolic verifier acting as a hard filter. To assess $G$, we train a PRM conditionally
+    on the verifier-accepted manifold. To train this PRM efficiently, we introduce Counterfactual Symbolic
+    Perturbation (CSP), a novel data synthesis strategy that algorithmically generates constraint-preserving
+    hard negatives (steps that perfectly pass the verifier but are logically flawed). At inference, we
+    deploy a verifier-first constrained search that guarantees execution consistency for verifier-covered
+    operations while relying on the PRM solely to rank semantic grounding. By targeting the exact residual
+    error class of strong tool-using LLMs, our method significantly improves reasoning reliability without
+    the sprawling heuristics of prior frameworks.'
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.26329
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra none. Terra: The paper improves scientific
+    reasoning reliability by verifier-filtered process reward modeling and synthetic negative traces,
+    but does not study whether a model''s stated CoT faithfully reflects its internal computation or enable
+    oversight of it.'
+- id: '2608.26310'
+  title: 'FaithSieve: Fine-Grained Evaluation of Math Proofs with Faithful Formal Evidence'
+  abstract: 'Large language models can now generate complex, multi-step mathematical proofs, but reliably
+    determining their correctness and localizing early logical errors remains a critical challenge. Existing
+    evaluation approaches largely depend on model-based natural-language judgments, which often overlook
+    local reasoning gaps. While formal theorem provers like Lean offer a path to rigorous verification,
+    using them to evaluate informal text requires solving locality and semantic mismatches: a prover might
+    bypass a local flaw by proving an overly broad target, or validate an auto-formalized statement that
+    drifts from the original mathematical intent. To address this, we introduce FaithSieve, a Lean-assisted
+    framework for fine-grained evaluation of natural-language mathematical proofs. FaithSieve decomposes
+    coarse proof steps into local reasoning units, extracts typed proof obligations, and verifies them
+    through a formal evaluation agent. Formal validation is gated by semantic alignment scoring, so Lean
+    evidence is incorporated only when the formal statement faithfully preserves the context, objects,
+    and logical form of the original claim. We construct two expert-verified datasets, ProofLoc-Olympiad
+    and ProofLoc-University, to benchmark first-error localization. On the 350-problem Olympiad dataset,
+    FaithSieve using a GPT-5.4 backbone achieves 81.43% exact first-error accuracy, outperforming the
+    direct-judging baseline of 72.29%. Furthermore, on the 200-problem ProofLoc-University benchmark spanning
+    six advanced domains, FaithSieve reaches 84.5% exact accuracy, compared to 75.0% for the direct judge.
+    Our work demonstrates that decomposing proofs into fine-grained units and grounding them with faithful
+    formal evidence significantly improves reliable evaluation of natural-language reasoning.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.26310
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra none. Terra: The paper evaluates correctness
+    and local error localization in generated mathematical proofs using Lean-based formal evidence, rather
+    than whether a language model''s chain-of-thought faithfully reflects its own computation or can be
+    monitored.'
+- id: '2608.25347'
+  title: 'Short Horizons and Sparse Concepts: a Mathematical View of the Readout in the J-lens'
+  abstract: The Jacobian lens (J-lens) has been proposed as a way to read verbalizable representations
+    from language models. However, its principle and meaning lack a detailed and theoretical discussion.
+    We provide a mathematical view of this interpretation and of its assumed causal structure. Besides
+    treating the J-lens as a heuristic probe, we further regard it as a first-order causal transfer operator
+    from intermediate activations to expected future readouts. We study the Jacobian matrix as the optimal
+    local linear approximation of the downstream mapping, analyze its global approximation behavior and
+    bias, and identify its mathematical meaning as an expectation over anticipated future readouts. Further
+    analysis of the Jacobian energy distribution reveals that its causal geometry is highly sparse. The
+    energy decays with depth, concentrates in an extremely small proportion, and decomposes into diagonal
+    pathways and specific critical positions. This decomposition further resolves the expectation of the
+    J-lens over future outputs into short-horizon and sparse concept predictions, providing a more intuitive
+    attribution and explanation for the ability of the J-lens to visualize concepts during the thinking
+    process. Based on the theory, we propose a simple but effective improvement strategy and decoupling
+    method for the J-lens, which significantly enhances the ability of the J-lens to read out correct
+    intermediate concepts.
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.25347
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra mech_interp. Terra: The paper analyzes
+    Jacobians from intermediate activations to output readouts as an internal interpretability method,
+    but does not study whether a model''s chain-of-thought is faithful or monitorable.'
+- id: '2608.24022'
+  title: What Guides the Agent? Adjudicating Unauthorized Behavior via Localizing Behavior-Guiding Instructions
+  abstract: 'LLM agents integrated with external resources gain complex task capabilities, yet the unified
+    natural-language context channel makes them vulnerable to injection attacks: untrusted external data
+    may be dynamically parsed as behavior-guiding instructions during LLM inference, thereby subverting
+    the agent''s decision. Existing defenses focus on static detection or isolation of malicious content
+    at the input/output level, remains insufficient for detecting such dynamic inducements that arise
+    during model reasoning. We propose Attnlocate, a runtime framework for fine-grained localization of
+    context spans that genuinely influence tool-calling decisions, i.e., behavior-guiding instructions.
+    Attnlocate casts this localization problem as an object detection task, aiming to detect the distinctive
+    activation traces induced by behavior-guiding instructions within the attention matrix. Specifically,
+    we design a multi-head, multi-layer attention aggregation scheme to construct a token-level feature
+    space tailored for object detection. Then, a 1-D U-Net equipped with an anchor-free detection head
+    is deployed to detect these spans. Finally, based on the authority of the provider from which the
+    detected behavior-guiding spans originate, Attnlocate dynamically adjudicates malicious invocation
+    attempts. We evaluate Attnlocate across ten agent configurations from five LLM families, covering
+    scenarios involving indirect prompt injection and tool poisoning. Attnlocate achieves a mean IoU of
+    0.743, an average AUROC of 0.956, and a 0.934 true-positive rate at 0.067 false-positive rate. It
+    also transfers effectively across unseen models and supports authority policy adaptation without retraining.'
+  authors: []
+  categories:
+  - cs.CR
+  - cs.AI
+  url: http://arxiv.org/abs/2608.24022
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra mech_interp. Terra: The paper detects
+    prompt-injection-induced behavior-guiding context spans using multi-layer attention activations, but
+    it does not study language-model chain-of-thought traces or their faithfulness/monitorability.'
+- id: '2608.23941'
+  title: 'More Rejective, Not More Discriminative: The Unit of Verification in Pre-Execution LLM Oversight'
+  abstract: 'Pre-execution oversight is core to trusted monitoring in AI control: a fallible LLM monitor
+    vets planned actions before irreversible execution. Over-blocking forfeits usefulness and pressures
+    deployers to disable it. Every protocol must fix a unit of verification: how many actions one call
+    reviews. Existing designs take the unit as given; its effect on fallible monitors is unmeasured. Natural
+    traces cannot isolate it: review length co-varies with error type and position. Catch alone misleads:
+    rejecting everything catches everything. Measuring this needs boundary variation alone and a matched
+    clean control. We introduce the twin-prefix framework, which supplies both. Each gold plan yields
+    a prefix with one injected, environment-accepted error and a clean twin differing in one write. Judging
+    each pair at five nested lengths ties verdict changes to the unit alone. Discrimination is scored
+    by pre-registered informedness, catch minus false rejection. Longer review raises catch; false rejection
+    climbs in lockstep. Informedness peaks at one or two actions for all six judges in both domains: longer
+    windows make zero-shot monitors more rejective, not more discriminative. Replaying withheld observations
+    traces the failure largely to observation deprivation. Safety cases should state the unit and co-report
+    the clean series. Our framework is the first controlled, pre-registered instrument for this choice
+    and never reads catch alone. Our calibrated short unit recovers up to 0.95 informedness over eight-action
+    review, and no tested label-blind policy consistently beats it.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.23941
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra none. Terra: The paper evaluates pre-execution
+    action-plan oversight by LLM judges and verification-window length, not language-model chain-of-thought
+    traces or model internals.'
+- id: '2608.23497'
+  title: Mitigating Reasoning-Induced Misalignment via Safety-Direction Penalty
+  abstract: 'Reasoning-Induced Misalignment, where fine-tuning on reasoning data containing no harmful
+    content, including mathematics, code, and problem-solving with chain-of-thought traces can induce
+    harmful behaviors of LLM, posing a serious challenge to the safety of LLM reasoning. Cross-architecture,
+    cross-scale, and cross-dataset checks show that RIM does not always emerge. Previous work attributed
+    RIM to neuron-level entanglement, but did not identify the geometry of the representation space underlying
+    this entanglement or propose a training-time fix. We provide both: a representation-space analysis
+    of RIM and the Safety-Direction Penalty (SDP), which penalizes movement along a learned safety direction
+    during reasoning fine-tuning. The analysis extracts two activation-space directions, one encoding
+    reasoning ability and the other safety behavior. These directions are coupled: fine-tuning that improves
+    reasoning shifts safety representations, and prompts with larger shifts show larger safety degradation.
+    CKA distance ratios and probes locate the safety-decision layers where this shift is most relevant.
+    These findings guide the design of SDP: the coupling motivates penalizing displacement along the safety
+    direction, and the layer localization sets the initial scope. When the initial scope leaves compensatory
+    shifts beyond the penalized layers, the same diagnostics guide iterative expansion. On Qwen2.5-3B
+    and 7B, SDP restores safety while preserving benchmark reasoning performance.'
+  authors: []
+  categories:
+  - cs.AI
+  - cs.CL
+  url: http://arxiv.org/abs/2608.23497
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra mech_interp. Terra: The paper analyzes
+    activation-space safety and reasoning directions, CKA, and probes to mitigate safety degradation from
+    reasoning fine-tuning, but does not assess whether CoT traces faithfully expose the model''s reasoning
+    or support monitoring.'
+- id: '2608.23308'
+  title: 'FIDES: A Concordance Protocol for LLM-Generated Trading Strategies'
+  abstract: 'An LLM asked for a trading strategy returns three artifacts at once: a natural-language rationale,
+    an executable implementation, and once run, a track record. Whether these are the same object is rarely
+    checked. We present FIDES, a measurement protocol that treats them as three views to be reconciled
+    rather than one deliverable to be graded. Through dual delivery, a single model call returns both
+    a natural-language strategy with an explicit claimed edge and a self-contained strategy(df) function.
+    FIDES executes the code in a sandbox against a lag-one out-of-sample backtest and scores three concordance
+    gaps: say to do, do to real, and say to result. On 8 liquid US ETFs across four models plus a two-stage
+    elicitation arm, 40 strategies, 2023 to 2024 out-of-sample, three findings stand out. First, concordance
+    does not predict profit: only 2 of 40 strategies beat buy-and-hold, and a plain sma(50,200) rule outperforms
+    every model''s mean Sharpe. Second, self-assessment is badly calibrated: 32 of 40 strategies claim
+    to beat buy-and-hold and exactly one does. Third, swapping the language-code judge for a second model
+    flips say to do on more than half of items. Injecting Close.shift(-1) drops do to real by 0.33 on
+    average, while our runtime future-information probe fired on neither clean nor injected code. We frame
+    FIDES as a protocol for measurement fidelity, not a claim about market performance.'
+  authors: []
+  categories:
+  - cs.CR
+  - cs.AI
+  url: http://arxiv.org/abs/2608.23308
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra none. Terra: FIDES measures agreement
+    among an LLM''s trading rationale, generated code, and backtest outcomes rather than the faithfulness
+    or monitorability of a chain-of-thought reasoning trace.'
+- id: '2608.21043'
+  title: Evidence-Consistent Generative Detection under Scenario-Level Distribution Shift
+  abstract: 'Conventional in-distribution evaluation can overestimate robustness when training and test
+    data share recurring task-specific patterns or surface cues. This risk is especially relevant in social-engineering
+    fraud detection, where attackers can preserve malicious intent while changing the scenario, impersonated
+    entity, or wording. We study this problem as scenario-level out-of-distribution (SL-OOD) detection
+    for SMS and voice phishing, where entire attack scenarios are held out from training while the label
+    space remains fixed. This setting tests whether models can generalize to unseen attack scenarios using
+    decision-relevant evidence rather than familiar scenario-specific cues. Using this SL-OOD evaluation,
+    we find that high in-distribution performance does not reliably predict held-out robustness across
+    feature-, encoder-, and decoder-based baselines. We interpret this gap as scenario memorization: reliance
+    on recurring scenario-specific lexical or entity cues rather than decision-relevant evidence. We propose
+    ECoG, an evidence-consistent generative framework that combines evidence-span supervision with a rationale-label
+    consistency objective during training. On the 0.5B decoder, relative to the same backbone trained
+    without consistency regularization, ECoG raises Macro-F1 on OOD challenging instances by 3.22 points,
+    reduces the share of predictions whose generated rationale supports the opposite label by 4.22 points,
+    and increases token-level overlap with reference evidence spans by 8.38 points; the reduction in prediction-rationale
+    inconsistency is consistent across four decoder backbones. These results suggest that compact generative
+    detectors can benefit from evidence supervision and rationale-label consistency under social-engineering
+    shift.'
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.21043
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra none. Terra: The paper studies generated
+    rationales and evidence consistency for phishing classification robustness, not language-model chain-of-thought
+    monitoring or faithfulness.'
+- id: '2609.00879'
+  title: Towards reliable multimodal disaster severity assessment through preference optimization and
+    explainable vision-language reasoning
+  abstract: Reliable disaster damage assessment requires models that provide both accurate predictions
+    and transparent explanations. However, existing multimodal approaches are limited by scarce annotated
+    data and insufficient evaluation of reasoning quality. This study proposes a two-stage training framework
+    that integrates Supervised Fine-Tuning (SFT) and Direct Preference Optimization (DPO) within a unified
+    data construction pipeline. From a single Human-in-the-Loop (HITL) annotation workflow, two complementary
+    datasets are derived, namely ReasoningSet, which contains validated rationales for SFT, and PreferenceSet,
+    which comprises paired rationales for DPO-based alignment. The framework evaluates both classification
+    performance and explanation quality using automatic metrics, model-based scoring, and human ranking.
+    Experimental results show that SFT improves accuracy from 73.64% to 78.29% and increases Macro-F1
+    by 29% compared to the baseline, while explanation quality improves by approximately 25%. Subsequent
+    DPO alignment further enhances interpretability on the PreferenceSet. Cross-model validation on InternVL-3-8B
+    and LLaVA-1.5-7B demonstrates the robustness and generalizability of the approach. The proposed framework
+    improves detection of underrepresented mild damage cases, reduces high-risk misclassifications, and
+    strengthens alignment between model reasoning and human judgment. Overall, it provides a reproducible
+    pathway to develop reliable multimodal systems that deliver auditable, actionable disaster insights
+    for emergency management.
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2609.00879
+  expected: null
+  note: 'contested: backfill 2026-09-03, draft must_read, Terra none. Terra: The paper trains vision-language
+    models with validated rationales and preference optimization to improve explanation quality for disaster
+    assessment, but does not study whether reasoning traces faithfully reflect model computation or use
+    model internals.'

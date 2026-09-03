@@ -31,3 +31,19 @@ Update, same day: the three gold must_reads Terra labels mech_interp, plus
 labels as low confidence, and whether that wider scope belongs in tier 1
 is a question for the PI. The labeled set is now 162 papers; the tier 1
 scope stays at the PI's wording until she comments on concrete cases.
+
+## 2026-09-03 · backfill, real feed · prompt v2 · Luna low, Sol low re-screen
+
+14-day window over cs.CL, cs.AI, cs.LG: 3,695 papers, 270 re-screened (7%),
+$2.28, 15 minutes. Tiers: 35 must_read, 10 aware, 241 mech_interp, 3,409 none.
+
+Terra at high effort re-judged the 45 tier 1 and 2 papers ($0.18). It agreed
+on 20 of 35 must_reads and 5 of 10 awares. 23 of the 35 must_reads reached
+tier 1 through the foundational flag alone, and that is where most of the
+disagreement sits: "faithful" and "trace" in unrelated senses (formal math
+proofs, trading strategies, disaster assessment) read as faithfulness
+benchmarks. Internals-based must_reads were mostly confirmed. Precision on
+the real feed is therefore well below the eval-set number; the eval set was
+built from topical searches and had few of these near-negatives. The 25
+agreed papers joined `labeled.yaml` as silver, the 20 disagreements joined
+`contested.yaml`. Recall on the real feed is unmeasured.

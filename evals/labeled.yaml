@@ -5077,3 +5077,715 @@ papers:
     mech_interp: false
     foundational: false
   note: 'silver: Luna/Sol draft and Terra agree on tier'
+- id: '2608.30676'
+  title: 'MedAgent-R1: Faithfulness-Aware Reinforcement Learning for Evidence-Grounded Medical Reasoning'
+  abstract: 'When medical AI systems hallucinate clinical reasoning, the consequences extend beyond incorrect
+    answers: fabricated justifications that superficially reference retrieved evidence can mislead clinicians
+    into unsafe treatment decisions. Medical reasoning agents must therefore produce not only correct
+    answers but also faithful justifications that clinicians can verify against cited evidence. We identify
+    a systematic failure mode in RL-trained retrieval agents: outcome-only rewards improve accuracy while
+    degrading faithfulness, a phenomenon we term confident hallucination. The agent learns to answer from
+    parametric memory and backfill plausible but unsupported justifications; citation fabrication rates
+    rise from 16.5% to 31.8% even as accuracy improves by 5 points over the supervised baseline. We address
+    this with a faithfulness-gated reward design: accuracy credit is conditioned on evidence grounding
+    via a hard gate, complemented by retrieval validity and conciseness signals that close exploitation
+    paths unique to agentic retrieval. The resulting system, MedAgent-R1, reduces citation fabrication
+    from 31.8% to 4.7% and raises evidence completeness from 58.7 to 82.6 while maintaining 75.1% accuracy,
+    with 13.2-point gains on HealthBench Safety. Under the same agentic retrieval setup, MedAgent-R1 outscores
+    GPT-4o on faithfulness-specific dimensions (Factual Support 4.55 vs. 4.25; Overclaiming 4.40 vs. 4.15)
+    while remaining below GPT-4o in overall accuracy, suggesting that explicit faithfulness training yields
+    evidence-grounding gains not achieved by scaling alone.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.30676
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: false
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.25379'
+  title: Adaptive Triggering for Bias Correction in LLM Reasoning
+  abstract: 'Chain-of-thought prompting can expose and amplify demographic stereotypes within an LLM''s
+    intermediate reasoning and create a failure mode that final-answer debiasing alone cannot address.
+    Mitigating such bias during generation presents a fundamental timing problem: intervening too late
+    allows biased reasoning to propagate, while unnecessarily intervening can disrupt otherwise correct
+    reasoning. Existing approaches largely avoid this decision by either evaluating completed reasoning
+    chains post hoc or intervening at predetermined steps, leaving open when a developing reasoning trajectory
+    provides sufficient evidence to warrant correction. We formulate this decision as an online change-point
+    detection problem. A per-step bias signal updates a CUSUM statistic and a targeted correction is injected
+    only when accumulated evidence crosses a detector-specific threshold calibrated on held-out data.
+    We instantiate the framework with a white-box signal derived from next-token probabilities and a black-box
+    signal obtained from an LLM judge, enabling deployment with both open-weight and hosted models. On
+    gpt-4o-mini adaptive black-box triggering recovers most of the disambiguated-context accuracy lost
+    under fixed-interval intervention while requiring substantially fewer interventions. That result holds
+    even with an independent judge. Across six open-weight models, the white-box signal improves ambiguous-item
+    accuracy on all six but reduces disambiguated-item accuracy on five because it cannot distinguish
+    unsupported stereotype reliance from correct, stereotype-congruent evidence.'
+  authors: []
+  categories:
+  - cs.CL
+  - cs.AI
+  url: http://arxiv.org/abs/2608.25379
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: false
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.24231'
+  title: 'RecurSE: Bounded Recursive Self-Evaluation for LLM Rubric Judges'
+  abstract: 'LLM-as-judge is essential for evaluating open-ended text and steering post-training, yet
+    improving the judge itself typically relies on expensive annotations, reward models, or distillation
+    from stronger teachers. In this work, we eliminate external gold supervision from the RL training
+    reward: the model''s own evaluative capability generates learning signals for its optimization --
+    a closed-loop setting of bounded recursive self-improvement (RSI) termed Recursive Self-Evaluation
+    (RecurSE). We study two central questions: when can self-improvement occur, and when must it stop?
+    First, RecurSE pairs a trainable judge evaluating candidate responses under per-rule rubrics (Pass
+    1) with a synchronized policy-copy checker that audits the judge''s reasoning against meta-rubrics
+    to supply a scalar process reward (Pass 2). To enable learning, interface decoupling structurally
+    isolates the checker''s scalar score from the judge''s verdict tokens, eliminating a degenerative
+    token-copying shortcut that inflates self-assigned rewards. Second, because unanchored recursive learning
+    is inherently bounded, Pairwise Advantage Validity (PAV) serves as an unbiased validation monitor
+    that jointly tracks judge accuracy and checker fidelity to reliably identify the optimal early-stopping
+    window. Across Qwen3.5-9B, Gemma-4-E4B-it, and Qwen3.6-27B, RecurSE achieves consistent generalization
+    gains across held-out medical, pairwise, summarization, and professional benchmarks. Ablations demonstrate
+    that synchronized judge-checker co-evolution outperforms frozen checkers, external meta-judges, self-consistency,
+    and scaled teacher distillation. Furthermore, preference pairs curated by our judge effectively enhance
+    downstream policy alignment. Bounded RSI for LLM-as-judge is thus viable when self-produced reward
+    validity is explicitly decoupled and monitored.'
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.24231
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: false
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.26193'
+  title: 'AffectOmni: RL-Verifiable People-Centric Grounded Affective Reasoning for Social and Art-Related
+    Scenes'
+  abstract: Multimodal large language models (MLLMs) achieve strong performance on VQA and scene understanding,
+    yet affective reasoning remains vulnerable to shortcut behavior. Models may predict correct answers
+    while neglecting people-centric cues such as micro expressions and body language, which weakens traceability
+    and external verification. Prior reinforcement learning approaches mainly reward context or logical
+    coherence without explicitly enforcing attention to human evidence. In addition, LLM as a Judge scoring
+    often suffers from score clustering, which reduces reward discriminability. We propose AffectOmni,
+    a GRPO trained framework for verifiable affective reasoning. AffectOmni introduces People Focus and
+    Temporal Order rewards to encourage people-centric evidence selection and temporally structured reasoning,
+    and it adopts within-group comparative scoring to produce more stable and discriminative reward signals.
+    For verification, a Thinking Summarizer converts free form rationales into executable evidence instructions,
+    which are grounded into pixel level evidence regions via SAM3 to provide an externally auditable interface
+    outside the training loop. Experiments on IntentBench, Daily Omni, and WorldSense show consistent
+    improvements over open source 7B scale baselines, including gains of 4.66% on emotion recognition
+    and +14.29% on temporally sensitive tasks. Code is available at https://github.com/eliot127825-rgb/AffectOmni_nobody.
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.26193
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: false
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2609.00590'
+  title: 'CRAFT: Fine-Tuning Pre-hoc Explainability in AI-native 6G RAN'
+  abstract: 'The next generation of mobile networks is envisioned as fully AI-native, with AI-RAN architectures
+    embedding small language models (SLMs) to perform reasoning over real-time telemetry. The state-of-the-art
+    training paradigms for telecom LLMs, exemplified by RANSTRUCT-style supervised fine-tuning (SFT) on
+    curated instruction data, are limited to post hoc rationalization. Here, the explanations, when produced
+    at all, are generated after or independently of the decision, leaving the decision process unauditable.
+    Pre-hoc reasoning, where a causal reasoning trace is produced before the output label, is preferable,
+    and the broader LLM reasoning literature has made real progress toward it via RL methods such as Group
+    Relative Policy Optimization (GRPO). Here we observe that transplanting this recipe into the telecom
+    setting runs into a cold-start barrier: SLMs either learn to output the desired format or learn to
+    predict the label, but rarely both. We identify this barrier and propose CRAFT, which stands for Cold-start
+    Reasoning Alignment via Fine-Tuning, a data-centric method to autonomously generate a verified dataset
+    of (input, trace, label) triplets. CRAFT fine-tunes SLMs on this verified data using low-rank adaptation
+    (LoRA), requiring substantially less compute and wall-clock time than GRPO-based methods. On the TRACTOR
+    and IC xApp telecom datasets, CRAFT achieves up to 86.5% and 94.6% for accuracy and F1 with no parse
+    failures, while direct GRPO and SFT+GRPO fail to exceed 28% and 53.5% F1 with multiple parse failures.
+    We further show that CRAFT-initialized policies serve as a robust foundation for subsequent GRPO fine-tuning,
+    as under diverse reward functions the performance remains consistent with no parse failures. Finally,
+    we demonstrate that CRAFT consumes 59% less energy than GRPO-based baselines, making it a sustainable
+    path to deployable, auditable AI in 6G RAN.'
+  authors: []
+  categories:
+  - cs.LG
+  url: http://arxiv.org/abs/2609.00590
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: false
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2609.02852'
+  title: The Implications of Linguistic Illegibility for LLM Security
+  abstract: 'LLMs are trained to generate natural language. However, various strands of evidence indicate
+    that an LLM''s externalized linguistic outputs and mechanistically-extracted linguistic features can
+    be an unreliable lens for understanding internal model computation. We introduce the term ``linguistic
+    illegibility'''' to broadly refer to scenarios in which an LLM''s externalized or mechanistically-probed
+    language artifacts fail to represent how the model actually thinks. We argue that the specter of linguistic
+    illegibility is unavoidable for LLMs whose internal computations are not directly expressed via language,
+    but rather math over activation spaces (with lossy translations between activation spaces and natural
+    language happening at the bookends). If linguistic illegibility is always possible, then security
+    mechanisms that rely on a model''s linguistic self-reporting (e.g., chain-of-thought monitoring, constitutional
+    self-critique, activation probing for linguistically-defined feature vectors) can never be completely
+    sound; the model sandbox will always need isolation techniques whose guarantees do not depend on reading
+    a model''s linguistic state at all. We argue that observing a model''s outputs using taint tracking
+    is a promising approach for an effective sandbox: regardless of how a model linguistically self-reports,
+    a taint tracking policy can define, a priori, various pieces of system state that should never be
+    influenced by model-produced data. We also discuss several additional sandboxing mechanisms (e.g.,
+    robust virtualization, third-party auditing of sandboxing configurations) which collectively provide
+    a critical floor beneath linguistic monitoring, and would have mitigated recent sandbox exploits by
+    frontier models.'
+  authors: []
+  categories:
+  - cs.LG
+  - cs.CR
+  url: http://arxiv.org/abs/2609.02852
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.29464'
+  title: Chain-of-Thought Faithfulness of Reasoning Models Varies with Where and How Preference Cues Are
+    Delivered
+  abstract: Chain-of-thought (CoT) monitoring assumes that reasoning traces faithfully record the information
+    that shapes a model's answer. Existing faithfulness tests often place explicit bias cues in the user
+    message, while agents may encounter preferences through tool returns or raw artifacts. We introduce
+    FACE-Eval (Faithful Attribution of Cue Effects Evaluation), a 5,100-sample evaluation that varies
+    cue location (user message or tool return) and explicitness (direct summary or raw artifact). We measure
+    verbalized commitment among cue-following answers and unverbalized adoption among all cued samples.
+    We evaluate 15 open-weight models from eight families, with total parameters ranging from 4B to 1.60T.
+    Every model has lower verbalized commitment for tool-return than user-message cues and for implicit
+    than explicit cues. Unverbalized adoption is higher for tool-return cues on all 15 models and for
+    implicit cues in 28 of 30 model-channel comparisons. A source-attribution prompt narrows the channel
+    gap on seven models, sometimes by increasing user-channel unverbalized adoption, while telling models
+    that their reasoning will be monitored does not reliably close the gap. We also use two transcript
+    monitors (GPT-5.6-Luna and GPT-4o-mini) to detect preference adoption in the largest model of each
+    family. Across 32 model-channel-explicitness cells, higher unverbalized adoption is associated with
+    lower detection ability for both monitors (Pearson r=-0.54 and r=-0.78, respectively). These results
+    suggest that CoT monitoring may be less reliable when preference information arrives through tools
+    or must be inferred from raw artifacts, within the single-call, prefilled-tool setting tested here.
+  authors: []
+  categories:
+  - cs.CL
+  - cs.AI
+  url: http://arxiv.org/abs/2608.29464
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2609.00652'
+  title: 'Self-Reports Are Not Verification: Environment-Grounded Auditing of LLM Operators in Evolutionary
+    Search'
+  abstract: 'Language model agents increasingly propose actions, observe external feedback, and explain
+    their own behavior. Their confidence and rationales are convenient monitoring signals, but convenience
+    is not verification. We introduce an environment-grounded audit in which every intermediate proposal
+    receives an exact outcome. A language model operates an evolutionary Contexto search whose feedback
+    function assigns every valid guess an exact rank without human annotation. Across 200 runs spanning
+    five configurations and three model families, four reporting configurations produce 12,249 self-reports.
+    We test three assumptions: stated confidence is calibrated, inherited rationales affect later proposals,
+    and fitness-based selection improves report quality. All three fail. Operators overstate top-100 success
+    by factors of 4.8 to 9.3, while calibration and discrimination dissociate across model families. Controlled
+    interventions on 754 inherited rationales bound any measured benefit of the genuine rationale to roughly
+    250 ranks. Neither fitness-based nor random selection produces a detectable selection differential
+    or parent-to-offspring transmission in report accuracy, despite sharply different search behavior.
+    Agent self-reports should therefore be treated as claims to verify against the environment, not as
+    evidence of their own reliability.'
+  authors: []
+  categories:
+  - cs.AI
+  - cs.LG
+  - cs.NE
+  url: http://arxiv.org/abs/2609.00652
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2609.00264'
+  title: The Answer Is Not the Argument
+  abstract: 'Chain-of-thought monitoring is proposed for AI oversight, yet evaluations often provide monitors
+    with a trusted reference answer. We ask whether answer access improves reasoning verification or mainly
+    exposes incorrect conclusions. We collected 237 step-numbered solutions to 79 Humanity''s Last Exam
+    physics questions from three frontier models, with no inserted errors, and independently labelled
+    final-answer correctness and the first false step. The reference standard combined physicist annotations,
+    an independent LLM debate, and source-masked adjudication. This yielded 24 critical traces in which
+    the answer was correct but the trace contained a genuine error. 8 LLM monitors evaluated traces blind,
+    with an unverified or certified answer, or after a blind commitment. Certification raised mean balanced
+    accuracy from 0.637 to 0.796, while exact first-error localization rose from 0.261 to 0.379. Certification
+    changed recall (the fraction of error traces flagged as erroneous) from 0.653 to 0.951 on wrong-answer
+    traces but from 0.521 to 0.438 on critical traces; the contrast had the same direction for all 8 monitors
+    (question-bootstrap 95% CI [+0.256, +0.506]). After blind commitment, monitors shown the answer newly
+    flagged 93.8% of previously passed wrong-answer traces as erroneous, but only 18.0% of critical traces.
+    Answer access therefore improves conclusion-consistency checking rather than independent verification
+    of the supporting argument. For AI safety, these traces provide a benign analogue of reward hacking:
+    an acceptable output does not establish that the process producing it was sound. Although the errors
+    studied here were ordinary and mostly non-load-bearing rather than adversarial, trusted-answer evaluations
+    may similarly overstate monitoring capability when acceptable outputs conceal unsound reasoning.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2609.00264
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.26036'
+  title: 'Trace Integrity for LLM Data Agents: A Vision for Auditable Structured Reasoning in Real-World
+    Systems'
+  abstract: 'Answer accuracy is an insufficient reliability signal for LLM data agents. In structured-data
+    tasks, a benchmark-correct answer can be produced by an invalid trace. This paper introduces Trace
+    Integrity, a deployment reliability criterion for evaluating whether the computation recorded behind
+    an answer is explicit, executable, schema-valid, operator-faithful, replayable, answer-consistent,
+    and auditable. We identify the Structure Gap as the deployment failure mode that makes Trace Integrity
+    necessary: natural-language reasoning and free-form rationales do not reliably specify the operator-level
+    programs required by real-world systems. We operationalize Trace Integrity with execution contracts,
+    structured artifacts that bind user intent to schema elements, operator plans, assumptions, executable
+    queries, verification status, and final-answer linkage. We also introduce CAIT (Correct Answer / Invalid
+    Trace) Rate, which measures how often answer-only evaluation counts computationally unsupported outputs
+    as successes. In an empirical demonstration on BIRD Mini-Dev, Direct SQL, Operation Summary + SQL,
+    and Contract-First SQL achieve answer accuracies of 20%, 22%, and 24%, while their Trace Integrity
+    Pass Rates are 39%, 43%, and 40% and their CAIT Rates remain high at 55%, 59.1%, and 45.8%, showing
+    that answer accuracy, trace validity, and silent-failure risk are distinct evaluation signals. Real-world
+    LLM data agents should, therefore, be evaluated not only by whether their outputs match a reference
+    answer, but by whether those outputs are backed by auditable computation.'
+  authors: []
+  categories:
+  - cs.AI
+  - cs.CL
+  url: http://arxiv.org/abs/2608.26036
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.30679'
+  title: 'LCoT-GV: Graph Attention Networks for Verifying Long Reasoning Chains in Large Language Models'
+  abstract: Large Reasoning Models produce Long Chains-of-Thought (LCoTs) which involve breaking down
+    the problem into smaller reasoning steps before reaching the conclusion. However, these steps often
+    contain contradictions, unsupported inferences, or irrelevant steps, even when the final answer is
+    correct. We propose Long Chain-of-Thought Graph Verifier (LCoT-GV), a graph-based framework that represents
+    LCoTs as reasoning graphs. Each node in the graph represents a reasoning step and the edges encode
+    semantic and logical relations. A Graph Attention Network is then trained to predict chain-of-thought
+    correctness from the reasoning graph. We construct a new graph-oriented verification dataset from
+    multiple reasoning benchmarks for question answering in various domains. The results show that our
+    method is competitive with the most similar approaches.
+  authors: []
+  categories:
+  - cs.CL
+  - cs.AI
+  url: http://arxiv.org/abs/2608.30679
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.24232'
+  title: 'TRACE: An Evidence-Grounded Benchmark for Safety Evaluation of Large Reasoning Models'
+  abstract: 'Large Reasoning Models (LRMs) generate intermediate reasoning traces that may contain unsafe
+    content, even when their final responses appear safe. Guardrail models are designed to detect and
+    block unsafe content, yet existing benchmarks for unsafe content detection focus primarily on prompts
+    and final responses, leaving reasoning traces largely unexamined. Moreover, these benchmarks typically
+    provide only binary safety labels, without evidence annotations that justify the judgments. To address
+    these limitations, we introduce TRACE, an evidence-grounded safety evaluation benchmark that covers
+    the entire LRM inference pipeline: prompts, reasoning traces, and final responses. TRACE includes
+    prompts in two languages spanning nine risk categories and ten attack strategies. For each prompt,
+    four LRMs generate reasoning traces and final responses, and we annotate the safety of each component
+    and extract supporting evidence from the corresponding source text. Evaluating 18 guardrail models
+    on TRACE reveals that safety judgment for reasoning traces is substantially more challenging than
+    for prompts or final responses, and that current models struggle to accurately extract supporting
+    evidence. These findings highlight the need for guardrail models that can reliably detect and precisely
+    localize unsafe content across the LRM inference pipeline.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.24232
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.29956'
+  title: Detecting Hidden Chain-of-Thought in Large Language Models with Linguistic, Behavioral, and Mechanistic
+    Indicators
+  abstract: 'Large language models often answer complex reasoning questions without revealing intermediate
+    steps, raising whether they reason latently or complete patterns. We propose the Hidden CoT Detection
+    Score (HCDS), a comparative behavioral and mechanistic signal measuring whether neutral-prompt behavior
+    aligns more closely with explicit CoT or explicit no- CoT. Here, hidden CoT operationally denotes
+    this neutral-prompt CoT-like alignment; HCDS does not directly observe or prove an unexposed reasoning
+    trace. On GSM8K, HCDS is significantly positive for both Qwen3-4B variants (Thinking $+1.87$, $p =
+    1.2 \times 10^{-7}$; Instruct $+1.41$, $p = 1.9 \times 10^{-4}$), replicates across a different inference
+    stack and quantization within $0.08$ ($+1.80$ and $+1.45$), and is not significantly positive in seven
+    of eight length-adjusted calibration-control cells. The unadjusted score produces large positive scores
+    on single-step arithmetic and numeric factual lookup. The variants also respond differently to no-CoT
+    instructions: Instruct complies from the prompt alone, whereas Thinking continues reasoning and requires
+    intervention. These findings show stronger, less prompt-conditional CoT-like behavior in the reasoning-tuned
+    model, consistent with but not proof of latent reasoning. HCDS thus investigates latent reasoning
+    without relying on models'' self-reported traces.'
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.29956
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.29286'
+  title: 'MMPCBench: Benchmarking Multimodal Large Language Models on Proactive Critique of Flawed Inputs'
+  abstract: 'As Multimodal Large Language Models (MLLMs) evolve into sophisticated interactive assistants,
+    their reliability depends not only on following instructions but also on validating them. We define
+    Proactive Critique as the model''s autonomous ability to identify, analyze and fix faulty user inputs
+    without extra prompts. However, evaluations mainly test models under ideal circumstances or simple
+    refusal behaviors, largely ignoring active error processing. To fill this gap, we propose MMPCBench,
+    a comprehensive framework for evaluating MLLMs'' proactive critique competence. It features a fine-grained
+    taxonomy of 4 primary error types spanning 12 subcategories, ranging from cross-modal contradictions
+    to missing visual premises. We adopt a hierarchical evaluation protocol to measure models'' error
+    detection, diagnosis and resolution performance, and apply alignment-aware metrics to assess the coherence
+    between internal reasoning and final responses. Tests on 14 mainstream MLLMs show obvious weaknesses
+    in proactive critique, especially in dealing with subtle visual anomalies. Notably, we identify a
+    pervasive "consistency gap": reasoning models can often correctly identify and analyze errors during
+    internal reasoning yet suppress these valid insights in final outputs to prioritize response compliance.
+    The code and data is available at https://github.com/ALIENS32/MMPCBench.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.29286
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.29070'
+  title: 'Selective Disclosure of Hidden Directives in Reasoning Models: Behavioral Asymmetry and Steering'
+  abstract: 'Chain-of-thought (CoT) reasoning traces are increasingly proposed as a mechanism for AI oversight:
+    a monitor inspecting a model''s reasoning can, in principle, detect misbehavior invisible from outputs
+    alone. This assumes CoT surfaces what a model is instructed to do regardless of the instructions given.
+    We test this assumption along two axes. First, we introduce the Instruction-Compliance Gap (ICG):
+    the difference in probability that a model''s CoT explicitly references a hidden system prompt directive
+    when that directive is malign versus benign. Across 100 task pairs and 8 frontier reasoning models
+    from 5 families, we find consistent asymmetric disclosure, a higher probability of leaking malign
+    hidden instructions than benign ones, in Qwen3-14B (Wilcoxon $p=0.0001$, $+13.9$pp), Qwen3-32B ($p=0.0011$,
+    $+13.0$pp), Qwen3-235B ($p=0.035$, $+5.8$pp), and similar results with MiniMax-M2.5 and DeepSeek-R1.
+    The detector has 100% precision against two independent blinded labelling passes, and an LLM monitor
+    reading only the reasoning trace reproduces the asymmetry in all 8 models against directive-free controls,
+    identifying the specific directive in 82% of malign traces which the detector classifies as clean.
+    Second, steering vectors extracted in MiniMax-M2.5 via Contrastive Activation Addition causally induce
+    hiding from bare prompts and suppress it from prompts that would otherwise produce it, replicating
+    in Qwen3-14B under a pre-registered design. Benign and malign-derived hiding vectors are highly similar
+    (cosine $0.804$ in MiniMax-M2.5; $0.970$ in Qwen3-14B), implying that in these models the disclosure
+    asymmetry arises from differential activation of a shared hiding direction rather than separate mechanisms.'
+  authors: []
+  categories:
+  - cs.LG
+  url: http://arxiv.org/abs/2608.29070
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.28725'
+  title: 'Beyond the Answer Key: Robustness Evaluation of Large Language Models for Step-Level Mathematical
+    Verification'
+  abstract: 'Large language models (LLMs) are increasingly used as graders, verifiers, and process auditors,
+    but most mathematical evaluations still emphasize final-answer accuracy. This can obscure whether
+    a model can verify a non-canonical but valid solution trace. We introduce a controlled linear-equation
+    benchmark for evaluating LLMs in the evaluator role. Each instance asks the model to judge final-answer
+    correctness, step-level trace correctness, and the first incorrect step. Our evaluation of state-of-the-art
+    open LLMs reveals a significant robustness gap: models that accurately evaluate canonical solutions
+    often fail when presented with perturbed but logically equivalent variants. Across GPT-OSS 20B, Qwen3-14B,
+    and Phi-4-Reasoning, base models perform well on canonical traces but degrade substantially on perturbed
+    traces, especially for error localization. On valid perturbed traces, base-model false-rejection rates
+    reach 75.6-85.3%, showing strong sensitivity to canonical solution form. Supervised fine-tuning, distillation,
+    and test-time compute improve robustness in some settings, but gains are model dependent and can trade
+    off against canonical performance. The results show that reliable process-level verification remains
+    challenging, and evaluator robustness should be measured separately from solver accuracy, even in
+    a simple algebraic domain with exact ground truth.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.28725
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.20670'
+  title: 'Why2Speak: Faithful Reasoning for Abstaining Action Policies'
+  abstract: 'Many agentic systems must repeatedly choose between acting and abstaining, making faithful
+    reasoning important for oversight: an explanation is useful only if it reflects the computation that
+    produced the action. We study this problem through intervention timing in multi-party conversation,
+    where an assistant must decide whether to speak or remain silent. This setting exposes class imbalance,
+    asymmetric action costs, and the possibility that exposing reasoning changes the policy being audited.
+    Using Qwen3-8B, decoded with or without chain-of-thought reasoning, we compare direct decision policies,
+    reasoning policies, supervised fine-tuning, and reinforcement learning. We find a capability-auditability
+    tradeoff: the strongest direct policy achieves higher quality but exposes no reasoning to inspect,
+    while the reasoning policy provides a trace at the cost of lower performance, particularly recall
+    of true intervention opportunities. Supervised fine-tuning either suppresses reasoning or preserves
+    it without improving decision quality, while reinforcement learning also fails to improve the reasoning
+    policy. We identify one mechanism underlying this failure: group relative objectives provide no learning
+    signal on confidently wrong prompts when sampled rollouts all select the same action. Controlled activation
+    probes and behavioral ablations show that standard faithfulness methods can overstate evidence that
+    exposed reasoning reflects the underlying decision process. Probability-based metrics saturate under
+    confident decisions, probes are vulnerable to class imbalance and textual leakage, and reasoning ablations
+    can confound reasoning content with changes in inference mode. Together, these results show that exposing
+    reasoning can change an agent''s action policy rather than simply make it observable. We provide controls
+    for evaluating reasoning-based oversight of agents that can act or abstain.'
+  authors: []
+  categories:
+  - cs.AI
+  - cs.CL
+  url: http://arxiv.org/abs/2608.20670
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.27348'
+  title: INTENT-AS-A-TOOL Makes it Easy to Track Agentic Misalignment
+  abstract: 'As large language models (LLMs) are deployed as autonomous agents, safety failures increasingly
+    involve consequential actions. We study agentic misalignment, where agents take harmful actions under
+    goal conflicts and pressures. Using chain-of-thought (CoT) monitoring, we find that harmful execution
+    is often preceded by intent signals in reasoning. However, post-hoc CoT labels are too coarse to show
+    how intent changes during generation. We introduce INTENT-AS-A-TOOL, an approach that adds intent-targeted
+    tools to give the model a dedicated channel for expressing commitment to a target behavior. The probability
+    of calling an intent tool provides a judge-free, fine-grained signal of the model''s tendency to pursue
+    that behavior. Our results show that INTENT-AS-A-TOOL complements CoT monitoring, expands post-hoc
+    CoT labels into dense trajectories, and identifies critical steps for online intervention. These findings
+    suggest that action preferences are useful for tracking agentic misalignment during reasoning. Our
+    code and data are accessible: https://github.com/RebeccaZhang22/intent-as-a-tool.'
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.27348
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.27265'
+  title: 'SCIT: Testing Causal Cache Carriers in Latent Chain-of-Thought Models'
+  abstract: 'Latent chain-of-thought models move intermediate reasoning from emitted text into continuous
+    states, improving compactness but hiding the causal object. We introduce SCIT, the Suffix Cache Interchange
+    Test, a causal protocol that constructs exact source-recipient counterfactuals, patches declared cache
+    segments, and identifies which transformer object carries the counterfactual computation. SCIT combines
+    sufficiency tests with K/V component splits, hidden-state controls, semantic source controls, decoded
+    validation, and matched corruption. On CODI-GPT2 and a Sim-CoT-style GPT-2 reproduction, counterfactual
+    arithmetic transfers primarily through value-cache suffix trajectories rather than hidden states,
+    keys, reusable answer slots, or single-token triggers. Complete sufficiency-and-necessity evidence
+    for the late-value-suffix mechanism holds for the main CODI-GPT2 checkpoint; the Sim-CoT-style checkpoint
+    shows the same sufficiency and decoded-control pattern but insufficient matched-corruption evidence
+    for a necessity call. Beyond these local arithmetic cells, SCIT reveals carrier-regime shifts: arithmetic-like
+    GPT-2/1B cells preserve latent-tail value/KV transfer, whereas competent 8B and repaired non-arithmetic
+    cells route through prompt-prefix or full-cache K/V; boundary cells receive no mechanism call. SCIT
+    therefore contributes a cache-level diagnostic, a checkpoint-specific GPT-2 arithmetic mechanism,
+    and a competence-gated carrier map rather than a universal latent-tail claim.'
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.27265
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.25660'
+  title: 'Think-Probe-Respond: Improving Large Language Models as Judges of Research Idea Novelty'
+  abstract: 'Automated novelty judgment can accelerate scientific discovery by enabling efficient evaluation,
+    refinement, and comparison of research ideas. While large language models are increasingly adopted
+    for this task, we investigate a previously overlooked limitation in their judgment capabilities: despite
+    generating reasoning rationales that closely mirror those of human experts, their final novelty judgments
+    often diverge substantially. We demonstrate that this miscalibration stems from a systematic bias
+    towards judging ideas as "medium novel". To mitigate this, we propose Think-Probe-Respond (TPR), a
+    lightweight approach that probes latent novelty judgments from hidden states during the reasoning
+    phase and uses the probed judgments to condition the final response. Across strong baselines, TPR
+    improves novelty judgment performance by 22.30% and successfully mitigates the prevalent "medium novelty"
+    bias.'
+  authors: []
+  categories:
+  - cs.CL
+  - cs.AI
+  url: http://arxiv.org/abs/2608.25660
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+    foundational: false
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.24790'
+  title: Right Diagnoses, Decorative Reasoning:A Perturbation Audit of Medical Chain-of-Thought
+  abstract: 'Clinicians read chain-of-thought (CoT) rationales as evidence of medical reasoning, but whether
+    the visible chain plays that role is rarely tested. General-domain CoT-faithfulness probes ignore
+    clinical cost, and medical LLM evaluations treat the chain as a black box. We close this gap with
+    a medical perturbation audit: a 30-operator battery edits both the chain and the question with clinically
+    motivated operators (severity reversal, negation flip, demographic swap, evidence ablation), paired
+    with a chain-update times answer-flip joint analysis that classifies each model by its failure mode.
+    Applied to 14 LLMs on four medical QA benchmarks, three independent tests converge: the Chain-Decoupling
+    Rate (CDR; chain does not register the edit and the answer does not flip) is 72.9% panel-wide on clinically
+    meaningful destructive edits, chain corruption leaves accuracy unchanged, and removing CoT prompting
+    does not reduce accuracy. Two board-certified clinicians re-annotate N=197 perturbed questions; 98.5%
+    leave the gold defensible. The pattern holds across medical and reasoning fine-tuning and scale; on
+    the closed-source tier, where the chain text is unavailable, the answer-side signals are consistent
+    with the same decoupling. Our framework and CDR provide a reusable yardstick for auditing whether
+    medical CoT is faithful or merely documentation.'
+  authors: []
+  categories:
+  - cs.AI
+  url: http://arxiv.org/abs/2608.24790
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.24958'
+  title: Can We Read the Mind of an Audio LLM? A Verbalizable, Multilingual Middle-Layer Workspace
+  abstract: 'An audio language model is a black box in a specific way: we see what it says, never what
+    it works out on the way there, and chain-of-thought monitoring helps only if the model writes its
+    reasoning down. Reading a base Qwen3-Omni with a logit lens at the audio-token positions, we find
+    that the answer to a spoken question becomes legible - in words - in the model''s middle layers, before
+    it emits any token. Five findings follow. (1) The readout carries concepts in neither the question,
+    the options, nor the model''s own transcription: on a clip whose verbatim transcription is empty garbling,
+    it reconstructs Watergate and scandal, passes through the role president, and resolves to Nixon -
+    a hidden multi-hop chain, read with no chain-of-thought. (2) The content is language-agnostic: one
+    audio-inferred concept surfaces in several scripts at once, and 38% of top-1 readouts are Chinese
+    on English inputs. (3) It is paralinguistic: given the same clip as audio and as the model''s own
+    emotion-free caption, the audio mind forms the sound source, speaker role, or affect that the caption
+    discards, and answers correctly more often. (4) The audio-driven signal is absent at the input, turns
+    on about a tenth of the way into the network, separates most cleanly from the text prior in the middle
+    band (35-80% of depth), and activation patching shows it is causally used and committed before the
+    last fifth of the layers. (5) Deleting single layers maps the pipeline: reading the sound in is localized
+    to the entry layers and answer delivery to the output layer, while retrieval is distributed across
+    the interior. Throughout, a waveform-swap control - identical text, only the sound changed - isolates
+    the audio-driven signal from a prior over the printed options. This is a qualitative account of what
+    an audio model works out before it speaks: the quantities are controls, not benchmark scores.'
+  authors: []
+  categories:
+  - cs.SD
+  - cs.AI
+  - cs.CL
+  url: http://arxiv.org/abs/2608.24958
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+    foundational: false
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.24037'
+  title: 'Curved Inference II: Sleeper Agent Geometry - Extending Interpretability Beyond Probes'
+  abstract: This paper extends Anthropic's Sleeper Agents research [1], which showed artificial backdoors
+    persist through safety training & can be detected by linear probes with >99% accuracy [2]. However,
+    probe-based detection relies on linear separability that may be an artefact of backdoor insertion
+    rather than a property of naturally occurring deceptive alignment. Sophisticated deceptive behaviours
+    emerging through natural training are unlikely to produce such convenient linear signals. We introduce
+    a naturalistic methodology using multi-turn context windows that simulates realistic deceptive reasoning
+    without artificial triggers or supervised backdoor insertion. Rather than binary trigger-response
+    patterns, we examine how semantic complexity emerges through gradual context development. Building
+    on our Curved Inference framework, we analyse curvature, salience, & introduce semantic surface area
+    (A'), a new metric of representational work capturing both the magnitude & directional change of meaning
+    construction in unnormalised residual space. Without backdoors, labels, or probes, we apply this framework
+    to naturalistic deceptive prompts & classify model outputs via LLM consensus. Geometric structure
+    reliably predicts semantic classification, with statistically significant differences in surface area
+    across five prompt strategies & two model families. Critically, measurement precision can reveal geometric
+    signatures hidden by classification noise - some strategies improve from non-significant (p = 0.555)
+    to significant (p = 0.048). This validates that sophisticated reasoning creates intrinsic geometric
+    patterns that persist even when detection appears to fail, suggesting the shape of inference itself
+    encodes semantic patterns regardless of whether models have learned to suppress linear indicators
+    of deception - a scalable, unsupervised path for detection when linear methods fail.
+  authors: []
+  categories:
+  - cs.CL
+  url: http://arxiv.org/abs/2608.24037
+  expected:
+    cot: true
+    internals: true
+    mech_interp: true
+    foundational: false
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.23047'
+  title: 'Beyond Verdicts: A Graph-Based Analysis of Human and LLM Reasoning in Scientific Fact-Checking'
+  abstract: 'Misinformation that cites legitimate papers can be especially harmful when it distorts what
+    those studies actually report. While existing automatic fact-checking systems based on large language
+    models (LLMs) can assess whether a model assigns an Incorrect verdict and can gen- erate explanations
+    for that decision, they typi- cally do not indicate whether the model follows the same reasoning path
+    as human experts or arrives at the verdict through a different but still valid path. In this work,
+    we introduce a graph- based framework (typed reasoning graph) for comparing human and LLM reasoning
+    paths in scientific fact-checking. Building on prior work on fallacious reasoning in biomedical misinformation,
+    MISSCIPLUS (Glockner et al., 2025), we model each explanation as a rea- soning graph that links the
+    false claim to the relevant study context, study findings, fallacy- supporting premises, and fallacy
+    labels. This representation enables one-to-one alignment of human and LLM reasoning at the level of
+    fallacy-specific sub-graphs. For non-human- aligned LLM paths, we validate grounding in the cited
+    study, relevance to the claim, and suf- ficiency for the verdict. Using 84 false claims from MISSCIPLUS,
+    we evaluate GPT-5, Claude Opus 4.7, and Qwen3-32B across prompt and evidence settings. Results show
+    distinct perfor- mance dimensions: Qwen3-32B has the lowest verdict failure rate, GPT-5 the highest
+    human alignment, and Claude Opus 4.7 weak verdict prediction but often valid reasoning in success-
+    ful cases'
+  authors: []
+  categories:
+  - cs.CL
+  - cs.AI
+  url: http://arxiv.org/abs/2608.23047
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+- id: '2608.21713'
+  title: 'The Plan, Not the Decoder: Diagnosing and Repairing Compositional Failure in Reasoning-Augmented
+    Text-to-Image Generation'
+  abstract: 'Reasoning-augmented text-to-image models such as GoT-R1 emit an explicit textual plan - object
+    names, attributes, and bounding boxes - before generating image tokens. When such a model fails a
+    compositional prompt, is the plan wrong, or is the plan right and the decoder unfaithful? Because
+    the plan is machine-readable it can be edited before decoding, which makes the two separable. We first
+    validate the ruler. Swapping the two bounding boxes inside the model''s own chain demonstrably flips
+    the generated layout: detector-based accuracy falls 0.75 -> 0.48 (p<1e-3), while a widely used VQA-based
+    spatial metric rises. A five-rater human study agrees with the detector on 81% of items and with the
+    VQA judge on 57%. All spatial results therefore use geometric scoring. Under sound measurement the
+    decoder is a faithful executor: 94% of generated layouts realize the planned relation, and object-box
+    binding survives reordering of the plan''s object segments. The planner is the bottleneck. It writes
+    wrong relations for phrasing-dependent reasons - 98% accuracy on "left" against 54% on "right" for
+    semantically identical layouts, a raster-order bias we isolate with a mention-order control - and
+    cluttered geometry that the decoder faithfully reproduces. Editing the plan therefore fixes the image
+    without retraining: symbolic verification with resampling gives +5.0 points (p<1e-3), minimal in-place
+    repair +6.0 (p=.02), rewriting only box geometry +10.7 (p<1e-4), and replacing the plan outright +13.3
+    (p=1e-4). Gains are indifferent to the plan''s prose style and to its likelihood under the planner,
+    but not to its geometry. Modular planner-decoder designs are therefore viable, provided the plan is
+    internally consistent: box-text contradictions induce object duplication and identity fusion. We release
+    the plan-fidelity evaluation protocol, all plans, and 12k generated images.'
+  authors: []
+  categories:
+  - cs.CV
+  - cs.CL
+  - cs.LG
+  url: http://arxiv.org/abs/2608.21713
+  expected:
+    cot: true
+    internals: false
+    mech_interp: false
+    foundational: true
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
