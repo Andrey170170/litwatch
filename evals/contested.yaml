@@ -1,0 +1,301 @@
+schema_version: 1
+papers:
+- id: '2603.03031'
+  title: Step-Level Sparse Autoencoder for Reasoning Process Interpretation
+  abstract: Large Language Models (LLMs) have achieved strong complex reasoning capabilities through Chain-of-Thought
+    (CoT) reasoning. However, their reasoning patterns remain too complicated to analyze. While Sparse
+    Autoencoders (SAEs) have emerged as a powerful tool for interpretability, existing approaches predominantly
+    operate at the token level, creating a granularity mismatch when capturing more critical step-level
+    information, such as reasoning direction and semantic transitions. In this work, we propose step-level
+    sparse autoencoder (SSAE), which serves as an analytical tool to disentangle different aspects of
+    LLMs' reasoning steps into sparse features. Specifically, by precisely controlling the sparsity of
+    a step feature conditioned on its context, we form an information bottleneck in step reconstruction,
+    which splits incremental information from background information and disentangles it into several
+    sparsely activated dimensions. Experiments on multiple base models and reasoning tasks show the effectiveness
+    of the extracted features. By linear probing, we can easily predict surface-level information, such
+    as generation length and first token distribution, as well as more complicated properties, such as
+    the correctness and logicality of the step. These observations indicate that LLMs should already at
+    least partly know about these properties during generation, which provides the foundation for the
+    self-verification ability of LLMs. Our code is available at https://github.com/Miaow-Lab/SSAE.
+  authors:
+  - Xuan Yang
+  - Jiayu Liu
+  - Yuhang Lai
+  - Hao Xu
+  - Zhenya Huang
+  - Ning Miao
+  categories:
+  - cs.LG
+  published: '2026-03-03'
+  url: http://arxiv.org/abs/2603.03031v3
+  expected: null
+  note: 'contested: draft must_read, Terra mech_interp. draft (openai/gpt-5.6-luna, high): The paper interprets
+    CoT reasoning steps using sparse autoencoders and probes internal features for correctness and logicality,
+    but does not propose a faithfulness or monitoring benchmark or definition.'
+- id: '2608.22332'
+  title: Mechanistic Interpretability of Chain-of-Thought Reasoning via Sequential Activation Patching
+  abstract: Large Language Models (LLMs) demonstrate remarkable problem-solving capabilities when guided
+    by Chain-of-Thought (CoT) prompting, yet the internal mechanisms underlying these improvements remain
+    poorly understood. In this work, we investigate where CoT-related causal effects emerge across the
+    generated reasoning trajectory and which attention heads carry signals that contribute to final-answer
+    computation. Because CoT reasoning unfolds over multiple generated tokens, standard activation patching
+    at a single static token position is insufficient to characterize these temporally distributed effects.
+    To address this limitation, we introduce a sequential activation patching framework that traces CoT-conditioned
+    attention-head activations across token positions and aggregates their effects using Part-of-Speech-guided
+    analysis. We further introduce Sequential Multi-Head Patching to evaluate the joint contribution of
+    distributed head sets, together with cross-question and random activation controls. Targeted zero-ablation
+    experiments show that the identified heads are functionally important for successful answer generation
+    and affect several overlapping mechanisms, including reasoning-trajectory maintenance, answer anchoring,
+    exemplar-target separation, and numerical generation. Overall, our results provide evidence for distributed
+    reasoning-support sub-circuits associated with CoT-conditioned computation.
+  authors:
+  - Murat Dura
+  - Serkan Öztürk
+  - Selma Tekir
+  categories:
+  - cs.CL
+  published: '2026-08-23'
+  url: http://arxiv.org/abs/2608.22332v1
+  expected: null
+  note: 'contested: draft must_read, Terra mech_interp. draft (openai/gpt-5.6-luna, high): The paper analyzes
+    CoT reasoning through sequential activation patching and ablation of attention heads to identify internal
+    causal mechanisms, but does not propose a faithfulness definition or benchmark.'
+- id: '2307.13702'
+  title: Measuring Faithfulness in Chain-of-Thought Reasoning
+  abstract: Large language models (LLMs) perform better when they produce step-by-step, "Chain-of-Thought"
+    (CoT) reasoning before answering a question, but it is unclear if the stated reasoning is a faithful
+    explanation of the model's actual reasoning (i.e., its process for answering the question). We investigate
+    hypotheses for how CoT reasoning may be unfaithful, by examining how the model predictions change
+    when we intervene on the CoT (e.g., by adding mistakes or paraphrasing it). Models show large variation
+    across tasks in how strongly they condition on the CoT when predicting their answer, sometimes relying
+    heavily on the CoT and other times primarily ignoring it. CoT's performance boost does not seem to
+    come from CoT's added test-time compute alone or from information encoded via the particular phrasing
+    of the CoT. As models become larger and more capable, they produce less faithful reasoning on most
+    tasks we study. Overall, our results suggest that CoT can be faithful if the circumstances such as
+    the model size and task are carefully chosen.
+  authors:
+  - Tamera Lanham
+  - Anna Chen
+  - Ansh Radhakrishnan
+  - Benoit Steiner
+  - Carson Denison
+  - Danny Hernandez
+  - Dustin Li
+  - Esin Durmus
+  - Evan Hubinger
+  - Jackson Kernion
+  - Kamilė Lukošiūtė
+  - Karina Nguyen
+  - Newton Cheng
+  - Nicholas Joseph
+  - Nicholas Schiefer
+  - Oliver Rausch
+  - Robin Larson
+  - Sam McCandlish
+  - Sandipan Kundu
+  - Saurav Kadavath
+  - Shannon Yang
+  - Thomas Henighan
+  - Timothy Maxwell
+  - Timothy Telleen-Lawton
+  - Tristan Hume
+  - Zac Hatfield-Dodds
+  - Jared Kaplan
+  - Jan Brauner
+  - Samuel R. Bowman
+  - Ethan Perez
+  categories:
+  - cs.AI
+  - cs.CL
+  - cs.LG
+  published: '2023-07-17'
+  url: http://arxiv.org/abs/2307.13702v1
+  expected: null
+  note: 'contested: draft must_read, Terra aware. draft (openai/gpt-5.6-luna, high): The paper directly
+    studies CoT faithfulness through interventions and proposes empirical hypotheses and measurements
+    of whether models condition on their stated reasoning.'
+- id: '2508.00943'
+  title: LLMs Can Covertly Sandbag on Capability Evaluations Against Chain-of-Thought Monitoring
+  abstract: 'Trustworthy evaluations of dangerous capabilities are increasingly crucial for determining
+    whether an AI system is safe to deploy. One empirically demonstrated threat is sandbagging - the strategic
+    underperformance on evaluations by AI models or their developers. A promising defense is to monitor
+    a model''s chain-of-thought (CoT) reasoning, as this could reveal its intentions and plans. In this
+    work, we measure the ability of models to sandbag on dangerous capability evaluations against a CoT
+    monitor by prompting them to sandbag while being either monitor-oblivious or monitor-aware. We show
+    that both frontier models and small open-sourced models can covertly sandbag against CoT monitoring
+    0-shot without hints. However, they cannot yet do so reliably: they bypass the monitor 16-36% of the
+    time when monitor-aware, conditioned on sandbagging successfully. We qualitatively analyzed the uncaught
+    CoTs to understand why the monitor failed. We reveal a rich attack surface for CoT monitoring and
+    contribute five covert sandbagging policies generated by models. These results inform potential failure
+    modes of CoT monitoring and may help build more diverse sandbagging model organisms.'
+  authors:
+  - Chloe Li
+  - Mary Phuong
+  - Noah Y. Siegel
+  categories:
+  - cs.CR
+  - cs.AI
+  published: '2025-07-31'
+  url: http://arxiv.org/abs/2508.00943v2
+  expected: null
+  note: 'contested: draft must_read, Terra aware. draft (openai/gpt-5.6-luna, high): The paper directly
+    evaluates covert sandbagging against chain-of-thought monitoring and contributes covert sandbagging
+    policies that expose monitoring failure modes.'
+- id: '2511.08409'
+  title: Faithful-First Reasoning, Planning, and Acting for Multimodal LLMs
+  abstract: Multimodal Large Language Models (MLLMs) frequently suffer from unfaithfulness, generating
+    reasoning chains that drift from visual evidence or contradict final predictions. We propose Faithful-First
+    Reasoning, Planning, and Acting (RPA) framework in which FaithEvi provides step-wise and chain-level
+    supervision by evaluating the faithfulness of intermediate reasoning, and FaithAct uses these signals
+    to plan and execute faithfulness-aware actions during inference. Experiments across multiple multimodal
+    reasoning benchmarks show that faithful-first RPA improves perceptual faithfulness by up to 24% over
+    prompt-based and tool-augmented reasoning frameworks, without degrading task accuracy. Our analysis
+    shows that treating faithfulness as a guiding principle perceptually faithful reasoning trajectories
+    and mitigates hallucination behavior. This work thereby establishes a unified framework for both evaluating
+    and enforcing faithfulness in multimodal reasoning. Code is at https://github.com/lijunxian111/Faithful-First-RPA.
+  authors:
+  - Junxian Li
+  - Xinyue Xu
+  - Sai Ma
+  - Di Zhang
+  - Sichao Li
+  categories:
+  - cs.AI
+  published: '2025-11-11'
+  url: http://arxiv.org/abs/2511.08409v4
+  expected: null
+  note: 'contested: draft must_read, Terra aware. draft (openai/gpt-5.6-luna, high): The paper explicitly
+    evaluates and enforces faithfulness of intermediate multimodal reasoning chains, introducing step-wise
+    and chain-level supervision, but does not use model-internal analyses.'
+- id: '2605.24960'
+  title: Investigating the Interplay between Contextual and Parametric Chain-of-Thought Faithfulness under
+    Optimization
+  abstract: 'Chain-of-Thought (CoT) faithfulness, i.e., whether CoTs genuinely reflect large language
+    models'' (LLM) underlying behavior, is typically evaluated with metrics under two disjoint paradigms:
+    contextual faithfulness, measured by perturbing the input or CoT trace, and parametric faithfulness,
+    assessed by intervening on a model''s parametric knowledge. Yet prior work compares them only descriptively.
+    We fill this gap by proposing FaithMATE, a unified preference-alignment interface for optimizing models
+    towards either faithfulness paradigm. It enables us to investigate the interplay between the two paradigms,
+    examining whether and to what extent faithfulness gains generalize within and across paradigms. Across
+    three models, two datasets, and six faithfulness metrics, we find that the two paradigms are positively
+    coupled, yet asymmetric: optimizing towards parametric faithfulness yields consistent gains across
+    both paradigms, whereas the contextual counterpart delivers more variable gains. Within the contextual
+    paradigm, faithfulness gains on one metric do not consistently transfer to others, implying that existing
+    contextual metrics capture disjoint facets of faithfulness and exposing inherent trade-offs. These
+    findings imply that CoT faithfulness is not a monolithic objective and therefore requires multifaceted
+    optimization and evaluation.'
+  authors:
+  - Jingyi Sun
+  - Qianli Wang
+  - Pepa Atanasova
+  - Nils Feldhus
+  - Isabelle Augenstein
+  categories:
+  - cs.CL
+  - cs.AI
+  - cs.LG
+  published: '2026-05-24'
+  url: http://arxiv.org/abs/2605.24960v2
+  expected: null
+  note: 'contested: draft must_read, Terra aware. draft (openai/gpt-5.6-luna, high): The paper directly
+    studies and optimizes CoT faithfulness across contextual and parametric paradigms, introducing FaithMATE
+    and evaluating the transferability and limitations of existing faithfulness metrics.'
+- id: '2605.31073'
+  title: 'ConsisGuard: Aligning Safety Deliberation with Policy Enforcement in LLM Guardrails'
+  abstract: 'Reasoning-based LLM guardrails improve safety moderation by generating explicit rationales
+    before issuing final decisions. However, their rationales do not always lead to faithful enforcement:
+    a model may recognize a harmful intent in its reasoning but still predict a safe label, or issue an
+    unsafe decision without policy-grounded justification. We identify this safety-critical failure mode
+    as the deliberation-to-enforcement gap. Unlike general chain-of-thought faithfulness, guardrail reliability
+    requires policy execution consistency: the generated reasoning should be grounded in the safety policy,
+    and the final decision should be entailed by that reasoning. We propose ConsisGuard, a consistency-aware
+    framework for reasoning-based LLM guardrails. ConsisGuard performs Policy-to-Decision Trajectory Distillation
+    and Functional Coupling Alignment, aligning the internal coupling between safety deliberation and
+    decision enforcement. Experiments on prompt and response harmfulness detection benchmarks show that
+    ConsisGuard improves detection performance while reducing policy execution failures. These results
+    suggest that reliable reasoning-based guardrails require accurate faithful execution of safety policies.'
+  authors:
+  - Yan Wang
+  - Zhixuan Chu
+  - Zihao Xue
+  - Zhen Bi
+  - Bingyu Zhu
+  - YueFeng Chen
+  - Zeyu Yang
+  - Jungang Lou
+  - Longtao Huang
+  - Ningyu Zhang
+  - Kui Ren
+  - Hui Xue
+  categories:
+  - cs.CL
+  published: '2026-05-29'
+  url: http://arxiv.org/abs/2605.31073v1
+  expected: null
+  note: 'contested: draft aware, Terra must_read. draft (openai/gpt-5.6-luna, high): The paper explicitly
+    studies faithful safety deliberation and the deliberation-to-enforcement gap in reasoning-based guardrails,
+    but describes no qualifying model-internal analysis and only evaluates on existing harmfulness benchmarks.'
+- id: '2607.04681'
+  title: Do Vision-Language-Action Models Mean What They Say? On the Role of Faithfulness in Embodied
+    Reasoning
+  abstract: 'Embodied Chain-of-Thought has emerged as a promising mechanism to enhance robot decision-making
+    and interpretability in black-box Vision-Language Action (VLA) models. However, whether this verbalized
+    Chain-of-Thought truthfully reflects the policy''s underlying decision process remains poorly understood.
+    We distinguish between functional reasoning, in which reasoning improves task performance, and faithful
+    reasoning, in which reasoning truly reflects the policy''s internal decision process. We argue that
+    SoTA alignment strategies offer a necessary but insufficient notion of faithfulness, admitting reasoning
+    whose intermediate steps can mask the causal links in action prediction through confounding factors
+    (e.g., reasoning that is ungrounded in the environment and internally disconnected or inconsistent),
+    restricting policy generalization. We study this gap through a human evaluation of a SoTA reasoning
+    model for autonomous driving, revealing an inconsistent coupling between reasoning quality and downstream
+    trajectory improvement. We then operationalize a behavioral surrogate for embodied faithfulness through
+    a learned critic, Pinocchio, scoring observation grounding and stepwise coherence, and use this critic
+    as a dense reward signal in post-training an embodied policy with reinforcement learning. Across withheld
+    driving benchmarks, our post-trained planner improves faithfulness by 4% and 18% over SoTA alignment
+    and trajectory error post-training baselines, respectively, while maintaining competitive downstream
+    task performance. Finally, on a synthetic out-of-distribution test set, post-training for faithfulness
+    improves policy responsiveness to rare counterfactual scenarios by 1.6x that of a SoTA policy, suggesting
+    that faithful reasoning traces contribute to more robust, generalizable, and interpretable embodied
+    intelligence. Project page: https://mjf-su.github.io/pinocchio/'
+  authors:
+  - Matthew Foutter
+  - Matteo Cercola
+  - Lena Wild
+  - Yunshan Wang
+  - Michelle Li
+  - Daniele Gammelli
+  - Marco Pavone
+  categories:
+  - cs.RO
+  - cs.AI
+  published: '2026-07-06'
+  url: http://arxiv.org/abs/2607.04681v1
+  expected: null
+  note: 'contested: draft must_read, Terra aware. draft (openai/gpt-5.6-luna, high): The paper directly
+    studies whether embodied chain-of-thought faithfully reflects VLA decision processes and introduces
+    a behavioral faithfulness operationalization and synthetic evaluation, but uses human/learned-critic
+    and behavioral methods rather than model internals.'
+- id: '2410.04931'
+  title: The Role of Governments in Increasing Interconnected Post-Deployment Monitoring of AI
+  abstract: Language-based AI systems are diffusing into society, bringing positive and negative impacts.
+    Mitigating negative impacts depends on accurate impact assessments, drawn from an empirical evidence
+    base that makes causal connections between AI usage and impacts. Interconnected post-deployment monitoring
+    combines information about model integration and use, application use, and incidents and impacts.
+    For example, inference time monitoring of chain-of-thought reasoning can be combined with long-term
+    monitoring of sectoral AI diffusion, impacts and incidents. Drawing on information sharing mechanisms
+    in other industries, we highlight example data sources and specific data points that governments could
+    collect to inform AI risk management.
+  authors:
+  - Merlin Stein
+  - Jamie Bernardi
+  - Connor Dunlop
+  categories:
+  - cs.CY
+  - cs.AI
+  - cs.HC
+  published: '2024-10-07'
+  url: http://arxiv.org/abs/2410.04931v1
+  expected: null
+  note: 'contested: draft none, Terra aware. draft (openai/gpt-5.6-sol, high): The paper focuses on government-led
+    post-deployment impact monitoring and information sharing, mentioning inference-time chain-of-thought
+    monitoring only as one example and describing no analysis of model internals.'
