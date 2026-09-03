@@ -9,6 +9,7 @@ import psycopg
 
 from litwatch import arxiv_source, db
 from litwatch.config import Settings
+from litwatch.route import Router
 from litwatch.screen import Cascade
 
 log = logging.getLogger(__name__)
@@ -27,6 +28,8 @@ class RunSummary:
     rescreened: int = 0
     confirmed: int = 0
     failed: int = 0
+    routed: int = 0
+    route_failed: int = 0
     cost: float = 0.0
     tiers: dict[str, int] = field(default_factory=dict)
     error: str | None = None
@@ -45,6 +48,7 @@ async def run(
     kind: str,
     days: int,
     fetch: bool = True,
+    router: Router | None = None,
 ) -> RunSummary:
     since, until = window(days)
     run_id = await db.start_run(conn, kind, since, until)
@@ -53,6 +57,8 @@ async def run(
         if fetch:
             await _fetch(conn, settings, summary)
         await _screen(conn, settings, cascade, summary)
+        if router is not None:
+            await route_pending(conn, router, summary)
     except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
         summary.error = f"{type(exc).__name__}: {exc}"
         log.exception("run %s failed", run_id)
@@ -68,6 +74,8 @@ async def run(
             rescreened=summary.rescreened,
             confirmed=summary.confirmed,
             failed=summary.failed,
+            routed=summary.routed,
+            route_failed=summary.route_failed,
             cost=round(summary.cost, 4),
             tiers=summary.tiers,
             error=summary.error,
@@ -122,3 +130,35 @@ async def _screen(
         s.cost,
         s.tiers,
     )
+
+
+async def route_pending(
+    conn: psycopg.AsyncConnection,
+    router: Router,
+    s: RunSummary | None = None,
+    paper_id: str | None = None,
+) -> list[tuple[str, str]]:
+    """Route every tier 1/2 paper that is new or changed tier. Sequential: Zotero is one library.
+
+    Returns (paper_id, error) for failures; each is retried on the next run.
+    """
+    failures: list[tuple[str, str]] = []
+    for paper, result in await db.routable(conn, paper_id):
+        try:
+            routed = await router.route(paper, result)
+        except Exception as exc:  # noqa: BLE001 - per-paper failure, retried next run
+            error = f"{type(exc).__name__}: {exc}"
+            log.warning("routing %s failed: %s", paper.id, error)
+            await db.store_route_error(conn, paper.id, error)
+            failures.append((paper.id, error))
+            if s:
+                s.route_failed += 1
+            continue
+        await db.store_route(
+            conn, paper.id, routed.tier.value, routed.item_key, routed.attachment_key
+        )
+        if s:
+            s.routed += 1
+    if s:
+        log.info("run %s routed %s (%s failed)", s.run_id, s.routed, s.route_failed)
+    return failures

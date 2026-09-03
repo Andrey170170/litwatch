@@ -45,3 +45,12 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS confirmed integer NOT NULL DEFAULT 0;
+
+-- Routing state (phase 3): which Zotero item carries the paper, and at which tier it was routed.
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS zotero_key text;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS zotero_attachment_key text;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS routed_at timestamptz;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS routed_tier text;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS route_error text;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS routed integer NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS route_failed integer NOT NULL DEFAULT 0;

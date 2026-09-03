@@ -12,7 +12,10 @@ from pydantic import BaseModel, Field
 
 from litwatch import db, ingest
 from litwatch.config import Settings
+from litwatch.route import Router
 from litwatch.screen import Cascade, ModelScreener, openrouter_client
+from litwatch.webdav import WebDAVWriter
+from litwatch.zotero import ZoteroClient
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +37,24 @@ def build_cascade(settings: Settings, rescreen: bool = True, confirm: bool = Tru
     )
 
 
+def build_router(settings: Settings, attach_pdf: bool = True) -> Router | None:
+    """None when Zotero is not configured: runs then screen only, routing waits."""
+    if not settings.routing_enabled:
+        return None
+    assert settings.zotero_user_id and settings.zotero_api_key
+    webdav = None
+    if settings.webdav_enabled:
+        assert settings.webdav_url and settings.webdav_username and settings.webdav_password
+        webdav = WebDAVWriter(
+            settings.webdav_url, settings.webdav_username, settings.webdav_password
+        )
+    return Router(
+        ZoteroClient(settings.zotero_user_id, settings.zotero_api_key),
+        webdav,
+        attach_pdf=attach_pdf,
+    )
+
+
 def create_app(settings: Settings) -> FastAPI:
     dsn = settings.require_database()
     state: dict[str, Any] = {"task": None, "last": None}
@@ -51,7 +72,13 @@ def create_app(settings: Settings) -> FastAPI:
         try:
             async with await db.connect(dsn) as conn:
                 state["last"] = await ingest.run(
-                    conn, settings, build_cascade(settings), req.kind, req.days, req.fetch
+                    conn,
+                    settings,
+                    build_cascade(settings),
+                    req.kind,
+                    req.days,
+                    req.fetch,
+                    router=build_router(settings),
                 )
         except Exception:  # noqa: BLE001 - already recorded on the run row
             log.exception("background run failed")

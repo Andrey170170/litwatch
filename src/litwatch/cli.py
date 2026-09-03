@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from litwatch import arxiv_source, db, evalset, evaluation, ingest
-from litwatch.api import build_cascade
+from litwatch.api import build_cascade, build_router
 from litwatch.config import Settings
 from litwatch.models import StageRole, Tier
 
@@ -176,13 +176,67 @@ def run(
     async def go():
         async with await db.connect(settings.require_database()) as conn:
             await db.apply_schema(conn)
-            return await ingest.run(conn, settings, build_cascade(settings), kind, days, fetch)
+            return await ingest.run(
+                conn,
+                settings,
+                build_cascade(settings),
+                kind,
+                days,
+                fetch,
+                router=build_router(settings),
+            )
 
     s = asyncio.run(go())
     console.print(
         f"run {s.run_id}: fetched {s.fetched} ({s.inserted} new), screened {s.screened}, "
-        f"{s.rescreened} re-screened, {s.failed} failed, cost ${s.cost:.4f}, tiers {s.tiers}"
+        f"{s.rescreened} re-screened, {s.failed} failed, cost ${s.cost:.4f}, tiers {s.tiers}, "
+        f"routed {s.routed} ({s.route_failed} failed)"
     )
+
+
+@app.command()
+def route(
+    paper: Annotated[
+        str | None, typer.Option(help="One arXiv id; fetched and screened first if unknown")
+    ] = None,
+    pdf: Annotated[bool, typer.Option(help="Attach the arXiv PDF for tier 1")] = True,
+) -> None:
+    """Route tier 1/2 papers to Zotero: item, collection, tier tag, screen note, PDF."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    settings = Settings.from_env()
+    router = build_router(settings, attach_pdf=pdf)
+    if router is None:
+        raise SystemExit("ZOTERO_API_KEY and LITWATCH_ZOTERO_USER_ID are not set")
+
+    async def go():
+        async with await db.connect(settings.require_database()) as conn:
+            await db.apply_schema(conn)
+            if paper and not await db.get_paper(conn, paper):
+                found = arxiv_source.fetch_by_ids([paper])
+                if not found:
+                    raise SystemExit(f"{paper} not found on arXiv")
+                await db.upsert_papers(conn, found)
+                result = await build_cascade(settings).screen(found[0])
+                await db.store_screen(conn, result)
+                console.print(f"{paper}: screened as {result.tier.value}")
+            failures = await ingest.route_pending(conn, router, paper_id=paper)
+            rows = await (
+                await conn.execute(
+                    "SELECT id, routed_tier, zotero_key, zotero_attachment_key FROM papers "
+                    "WHERE routed_at >= now() - interval '1 minute' ORDER BY routed_at"
+                )
+            ).fetchall()
+            return rows, failures
+
+    rows, failures = asyncio.run(go())
+    for r in rows:
+        console.print(
+            f"  {r['id']} {r['routed_tier']} item={r['zotero_key']} "
+            f"pdf={r['zotero_attachment_key']}"
+        )
+    for pid, err in failures:
+        console.print(f"  [red]{pid} failed: {err}[/red]")
+    console.print(f"routed {len(rows)}, failed {len(failures)}")
 
 
 @app.command("migrate-screens")

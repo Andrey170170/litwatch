@@ -38,6 +38,12 @@ class Settings:
     confirm_model: str = "meta/muse-spark-1.3"
     confirm_effort: str = "high"
     database_url: str | None = None
+    # Routing (phase 3). Unset Zotero credentials disable routing; unset WebDAV disables PDFs.
+    zotero_user_id: str | None = None
+    zotero_api_key: str | None = None
+    webdav_url: str | None = None
+    webdav_username: str | None = None
+    webdav_password: str | None = None
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     screen_concurrency: int = 8
 
@@ -56,11 +62,24 @@ class Settings:
             confirm_model=os.environ.get("LITWATCH_CONFIRM_MODEL", cls.confirm_model),
             confirm_effort=os.environ.get("LITWATCH_CONFIRM_EFFORT", cls.confirm_effort),
             database_url=_database_url(),
+            zotero_user_id=os.environ.get("LITWATCH_ZOTERO_USER_ID"),
+            zotero_api_key=_secret("ZOTERO_API_KEY"),
+            webdav_url=_secret("WEBDAV_URL"),
+            webdav_username=_secret("WEBDAV_USERNAME"),
+            webdav_password=_secret("WEBDAV_PASSWORD"),
             categories=tuple(
                 os.environ.get("LITWATCH_CATEGORIES", ",".join(cls.categories)).split(",")
             ),
             screen_concurrency=int(os.environ.get("LITWATCH_SCREEN_CONCURRENCY", "8")),
         )
+
+    @property
+    def routing_enabled(self) -> bool:
+        return bool(self.zotero_user_id and self.zotero_api_key)
+
+    @property
+    def webdav_enabled(self) -> bool:
+        return bool(self.webdav_url and self.webdav_username and self.webdav_password)
 
     def require_database(self) -> str:
         if not self.database_url:

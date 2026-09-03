@@ -235,3 +235,53 @@ async def stats(conn: psycopg.AsyncConnection) -> dict[str, Any]:
 
 def dumps(value: Any) -> str:
     return json.dumps(value, default=str)
+
+
+async def routable(
+    conn: psycopg.AsyncConnection, paper_id: str | None = None, limit: int = 200
+) -> list[tuple[Paper, ScreenResult]]:
+    """Tier 1/2 papers not yet routed, or routed at a different tier, or with a PDF still due."""
+    clauses = [
+        "tier IN ('must_read', 'aware')",
+        """(routed_at IS NULL
+            OR routed_tier IS DISTINCT FROM tier
+            OR (tier = 'must_read' AND zotero_attachment_key IS NULL))""",
+    ]
+    params: list[Any] = []
+    if paper_id:
+        clauses.append("id = %s")
+        params.append(paper_id)
+    params.append(limit)
+    rows = await (
+        await conn.execute(
+            f"SELECT * FROM papers WHERE {' AND '.join(clauses)} ORDER BY published DESC LIMIT %s",
+            params,
+        )
+    ).fetchall()
+    return [(row_to_paper(r), parse_screen(r["screen"])) for r in rows]
+
+
+async def store_route(
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    tier: str,
+    zotero_key: str,
+    attachment_key: str | None,
+) -> None:
+    await conn.execute(
+        """
+        UPDATE papers SET routed_at = now(), routed_tier = %s, zotero_key = %s,
+                          zotero_attachment_key = coalesce(%s, zotero_attachment_key),
+                          route_error = NULL
+        WHERE id = %s
+        """,
+        (tier, zotero_key, attachment_key, paper_id),
+    )
+
+
+async def store_route_error(conn: psycopg.AsyncConnection, paper_id: str, error: str) -> None:
+    await conn.execute("UPDATE papers SET route_error = %s WHERE id = %s", (error, paper_id))
+
+
+async def get_paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+    return await (await conn.execute("SELECT * FROM papers WHERE id = %s", (paper_id,))).fetchone()
