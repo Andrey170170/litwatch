@@ -37,8 +37,8 @@ class Settings:
     # The `-contributor` endpoint is far cheaper but needs OpenRouter's training opt-in.
     confirm_model: str = "meta/muse-spark-1.3"
     confirm_effort: str = "high"
-    # Digest prose. GLM 5.3 by default pending the blind pick against Kimi K3 and Sol.
-    digest_model: str = "z-ai/glm-5.3"
+    # Digest prose. Kimi K3 won the blind three-way pick against GLM 5.3 and Sol (2026-09-03).
+    digest_model: str = "moonshotai/kimi-k3"
     digest_effort: str = "low"
     database_url: str | None = None
     # Routing (phase 3). Unset Zotero credentials disable routing; unset WebDAV disables PDFs.
