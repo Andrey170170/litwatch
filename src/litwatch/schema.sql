@@ -58,3 +58,19 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS route_failed integer NOT NULL DEFAULT 
 -- Digest prose for the run (phase 3), written after routing.
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS digest text;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS digest_model text;
+
+-- Paper text and deep processing (phase 4). The trace is the material for evolving the profile.
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS body text;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS body_source text;          -- html | pdf
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS body_fetched_at timestamptz;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS enrichment jsonb;          -- validated deep result
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS enriched_at timestamptz;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS enrichment_model text;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS enrichment_error text;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS deep_trace jsonb;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS deep_stats jsonb;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS deep_attempts integer NOT NULL DEFAULT 0;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS zotero_enriched_at timestamptz;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS processed integer NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS process_failed integer NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS deep_list_cost numeric(10, 4) NOT NULL DEFAULT 0;

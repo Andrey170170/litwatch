@@ -47,6 +47,10 @@ class Settings:
     webdav_url: str | None = None
     webdav_username: str | None = None
     webdav_password: str | None = None
+    # Deep processing (phase 4): the litwatch-deep service; unset disables it.
+    deep_url: str | None = None
+    # Tier 1 items join this collection once enriched, so paperflow-lite picks them up.
+    inbox_collection: str | None = None
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     screen_concurrency: int = 8
 
@@ -72,6 +76,8 @@ class Settings:
             webdav_url=_secret("WEBDAV_URL"),
             webdav_username=_secret("WEBDAV_USERNAME"),
             webdav_password=_secret("WEBDAV_PASSWORD"),
+            deep_url=os.environ.get("LITWATCH_DEEP_URL"),
+            inbox_collection=os.environ.get("LITWATCH_INBOX_COLLECTION"),
             categories=tuple(
                 os.environ.get("LITWATCH_CATEGORIES", ",".join(cls.categories)).split(",")
             ),
@@ -85,6 +91,10 @@ class Settings:
     @property
     def webdav_enabled(self) -> bool:
         return bool(self.webdav_url and self.webdav_username and self.webdav_password)
+
+    @property
+    def deep_enabled(self) -> bool:
+        return bool(self.deep_url)
 
     def require_database(self) -> str:
         if not self.database_url:

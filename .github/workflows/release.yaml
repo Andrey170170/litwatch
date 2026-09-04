@@ -17,7 +17,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ghcr.io/andrey170170/litwatch
 
 jobs:
   verify:
@@ -58,12 +57,24 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --extra dev
 
-
       - name: Run release checks
         run: |
           uv run ruff check src tests
           uv run ruff format --check src tests
           uv run pytest --strict-markers
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: deep/package-lock.json
+
+      - name: Run deep processor checks
+        working-directory: deep
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm test
 
       - name: Build smoke-test image
         run: >-
@@ -83,7 +94,7 @@ jobs:
           litwatch:release-test --help
 
   publish:
-    name: Publish multi-platform image
+    name: Publish ${{ matrix.image }}
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -92,6 +103,15 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    strategy:
+      matrix:
+        include:
+          - image: litwatch
+            context: .
+          - image: litwatch-deep
+            context: deep
+    env:
+      IMAGE_NAME: ghcr.io/andrey170170/${{ matrix.image }}
     steps:
       - name: Check out exact tag
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -125,7 +145,7 @@ jobs:
         id: push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -157,7 +177,7 @@ jobs:
       - name: Write release summary
         shell: bash
         run: |
-          echo "### Published litwatch ${{ needs.verify.outputs.version }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Published ${{ matrix.image }} ${{ needs.verify.outputs.version }}" >> "${GITHUB_STEP_SUMMARY}"
           echo '```text' >> "${GITHUB_STEP_SUMMARY}"
           echo "${IMAGE_NAME}:${{ needs.verify.outputs.version }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "${{ steps.push.outputs.digest }}" >> "${GITHUB_STEP_SUMMARY}"

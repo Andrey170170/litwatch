@@ -214,7 +214,8 @@ async def list_papers(
             f"""
             SELECT id, title, authors, categories, primary_category, published, url, fetched_at,
                    screened_at, tier, keyword_hit, screen,
-                   zotero_key, zotero_attachment_key, routed_at, routed_tier, route_error
+                   zotero_key, zotero_attachment_key, routed_at, routed_tier, route_error,
+                   enrichment, enriched_at, enrichment_model, enrichment_error, deep_stats
             FROM papers WHERE {" AND ".join(clauses)}
             ORDER BY screened_at DESC LIMIT %s
             """,
@@ -329,3 +330,147 @@ async def store_route_error(conn: psycopg.AsyncConnection, paper_id: str, error:
 
 async def get_paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
     return await (await conn.execute("SELECT * FROM papers WHERE id = %s", (paper_id,))).fetchone()
+
+
+# -- paper text and deep processing (phase 4) -----------------------------------------------------
+
+
+async def store_body(conn: psycopg.AsyncConnection, paper_id: str, body: str, source: str) -> None:
+    await conn.execute(
+        "UPDATE papers SET body = %s, body_source = %s, body_fetched_at = now() WHERE id = %s",
+        (body, source, paper_id),
+    )
+
+
+async def deep_pending(
+    conn: psycopg.AsyncConnection,
+    paper_id: str | None = None,
+    limit: int = 20,
+    max_attempts: int = 3,
+) -> list[dict[str, Any]]:
+    """Tier 1 papers with a Zotero item and no enrichment yet. A named paper ignores attempts."""
+    if paper_id:
+        rows = await (
+            await conn.execute("SELECT * FROM papers WHERE id = %s", (paper_id,))
+        ).fetchall()
+        return rows
+    return await (
+        await conn.execute(
+            """
+            SELECT * FROM papers
+            WHERE tier = 'must_read' AND zotero_key IS NOT NULL AND enrichment IS NULL
+              AND deep_attempts < %s
+            ORDER BY published DESC LIMIT %s
+            """,
+            (max_attempts, limit),
+        )
+    ).fetchall()
+
+
+async def zotero_enrichment_pending(
+    conn: psycopg.AsyncConnection, paper_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Enriched papers whose Zotero item has not received the note and tags yet."""
+    clause = "AND id = %s" if paper_id else ""
+    params: tuple[Any, ...] = (paper_id,) if paper_id else ()
+    return await (
+        await conn.execute(
+            f"""
+            SELECT id, title, abstract, authors, published, url, zotero_key, enrichment,
+                   enrichment_model, deep_stats
+            FROM papers
+            WHERE enrichment IS NOT NULL AND zotero_key IS NOT NULL
+              AND zotero_enriched_at IS NULL {clause}
+            ORDER BY published DESC
+            """,
+            params,
+        )
+    ).fetchall()
+
+
+async def store_enrichment(
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    result: dict[str, Any],
+    model: str,
+    trace: list[dict[str, Any]],
+    stats: dict[str, Any],
+) -> None:
+    await conn.execute(
+        """
+        UPDATE papers SET enrichment = %s, enriched_at = now(), enrichment_model = %s,
+                          enrichment_error = NULL, deep_trace = %s, deep_stats = %s,
+                          deep_attempts = deep_attempts + 1, zotero_enriched_at = NULL
+        WHERE id = %s
+        """,
+        (Jsonb(result), model, Jsonb(trace), Jsonb(stats), paper_id),
+    )
+
+
+async def store_enrichment_error(
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    error: str,
+    trace: list[dict[str, Any]] | None = None,
+    stats: dict[str, Any] | None = None,
+) -> None:
+    await conn.execute(
+        """
+        UPDATE papers SET enrichment_error = %s, deep_attempts = deep_attempts + 1,
+                          deep_trace = coalesce(%s, deep_trace),
+                          deep_stats = coalesce(%s, deep_stats)
+        WHERE id = %s
+        """,
+        (
+            error,
+            Jsonb(trace) if trace is not None else None,
+            Jsonb(stats) if stats else None,
+            paper_id,
+        ),
+    )
+
+
+async def mark_zotero_enriched(conn: psycopg.AsyncConnection, paper_id: str) -> None:
+    await conn.execute(
+        "UPDATE papers SET zotero_enriched_at = now(), enrichment_error = NULL WHERE id = %s",
+        (paper_id,),
+    )
+
+
+async def search_papers(
+    conn: psycopg.AsyncConnection, query: str, limit: int = 10
+) -> list[dict[str, Any]]:
+    """Full-text search over title and abstract for the deep processor's `store.search`."""
+    rows = await (
+        await conn.execute(
+            """
+            SELECT id, title, tier, published,
+                   screen -> 'stages' -> -1 -> 'output' ->> 'reason' AS reason,
+                   left(abstract, 400) AS abstract
+            FROM papers, websearch_to_tsquery('english', %s) q
+            WHERE search @@ q
+            ORDER BY ts_rank(search, q) DESC, published DESC
+            LIMIT %s
+            """,
+            (query, min(limit, 50)),
+        )
+    ).fetchall()
+    return rows
+
+
+async def paper_summary(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+    """One paper without the text and trace, which are big and served separately."""
+    return await (
+        await conn.execute(
+            """
+            SELECT id, title, abstract, authors, categories, primary_category, published, url,
+                   fetched_at, screened_at, tier, keyword_hit, screen,
+                   zotero_key, zotero_attachment_key, routed_at, routed_tier, route_error,
+                   body_source, body_fetched_at, length(body) AS body_chars,
+                   enrichment, enriched_at, enrichment_model, enrichment_error, deep_stats,
+                   deep_attempts, zotero_enriched_at
+            FROM papers WHERE id = %s
+            """,
+            (paper_id,),
+        )
+    ).fetchone()

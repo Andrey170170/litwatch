@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from litwatch import arxiv_source, db, evalset, evaluation, ingest
-from litwatch.api import build_cascade, build_digester, build_router
+from litwatch.api import build_cascade, build_deep, build_digester, build_router
 from litwatch.config import Settings
 from litwatch.models import StageRole, Tier
 
@@ -185,13 +185,15 @@ def run(
                 fetch,
                 router=build_router(settings),
                 digester=build_digester(settings),
+                deep=build_deep(settings),
             )
 
     s = asyncio.run(go())
     console.print(
         f"run {s.run_id}: fetched {s.fetched} ({s.inserted} new), screened {s.screened}, "
         f"{s.rescreened} re-screened, {s.failed} failed, cost ${s.cost:.4f}, tiers {s.tiers}, "
-        f"routed {s.routed} ({s.route_failed} failed)"
+        f"routed {s.routed} ({s.route_failed} failed), "
+        f"deep-processed {s.processed} ({s.process_failed} failed, list ${s.deep_list_cost:.2f})"
     )
 
 
@@ -317,6 +319,107 @@ def digest(
     print(text)  # raw, unwrapped: the console printer would insert line breaks
     cost = f"${usage.cost:.4f}" if usage and usage.cost is not None else "n/a"
     console.print(f"\n[dim]{len(positives)} papers, {digester.model}, cost {cost}[/dim]")
+
+
+@app.command()
+def deep(
+    paper: Annotated[
+        str | None, typer.Option(help="One arXiv id, processed even if it was tried before")
+    ] = None,
+    limit: Annotated[int, typer.Option(help="Pending papers to process at most")] = 20,
+) -> None:
+    """Deep-process pending tier 1 papers (or one paper) and write the results to Zotero."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    settings = Settings.from_env()
+    processor = build_deep(settings)
+    if processor is None:
+        raise SystemExit("LITWATCH_DEEP_URL is not set")
+
+    async def go():
+        async with await db.connect(settings.require_database()) as conn:
+            await db.apply_schema(conn)
+            return await processor.process_pending(conn, paper, limit)
+
+    s = asyncio.run(go())
+    for pid, err in s.failures:
+        console.print(f"  [red]{pid}: {err}[/red]")
+    console.print(f"processed {s.processed}, failed {s.failed}, list cost ${s.list_cost:.2f}")
+
+
+@app.command("deep-status")
+def deep_status() -> None:
+    """What litwatch-deep is doing: auth state, running job, recent jobs, pending papers."""
+    settings = Settings.from_env()
+    if not settings.deep_url:
+        raise SystemExit("LITWATCH_DEEP_URL is not set")
+    from litwatch.deep import DeepClient
+
+    async def go():
+        client = DeepClient(settings.deep_url)
+        health, jobs = await client.health(), await client.jobs()
+        async with await db.connect(settings.require_database()) as conn:
+            pending = await db.deep_pending(conn)
+        return health, jobs, pending
+
+    health, jobs, pending = asyncio.run(go())
+    console.print(
+        f"deep: {health.get('model')} auth={health.get('auth')} "
+        f"running={health.get('running')} queued={health.get('queued')}"
+    )
+    for j in jobs[:10]:
+        st = j.get("stats") or {}
+        console.print(
+            f"  {j['paper_id']} {j['status']:7} cells={st.get('cells', 0):2} "
+            f"turns={st.get('turns', 0):2} ${st.get('list_cost', 0):.2f} {st.get('seconds', 0)}s "
+            f"{j.get('last_event', '')} {j.get('error') or ''}"
+        )
+    console.print(
+        f"pending in litwatch: {len(pending)}"
+        + (": " + ", ".join(p["id"] for p in pending) if pending else "")
+    )
+
+
+@app.command()
+def trace(
+    paper: Annotated[str, typer.Argument(help="arXiv id")],
+    ipynb: Annotated[str | None, typer.Option(help="Write the trace as a notebook here")] = None,
+) -> None:
+    """Show a paper's deep-processing trace, or export it as a Jupyter notebook."""
+    from litwatch.notebook import trace_notebook
+
+    settings = Settings.from_env()
+
+    async def go():
+        async with await db.connect(settings.require_database()) as conn:
+            return await db.get_paper(conn, paper)
+
+    row = asyncio.run(go())
+    if row is None or not row.get("deep_trace"):
+        raise SystemExit(f"{paper}: no trace stored")
+    if ipynb:
+        with open(ipynb, "w") as f:
+            json.dump(trace_notebook(row), f, indent=1)
+        console.print(f"wrote {ipynb}")
+        return
+    for ev in row["deep_trace"]:
+        if ev["type"] == "cell":
+            console.rule(f"cell {ev['n']} ({ev['ms']} ms)")
+            print(ev["code"])
+            if ev.get("output"):
+                console.print(
+                    "[dim]" + ev["output"][:2000] + "[/dim]", markup=False, highlight=False
+                )
+            if ev.get("error"):
+                console.print(f"[red]{ev['error']}[/red]")
+        elif ev["type"] == "assistant" and (ev.get("text") or ev.get("thinking")):
+            console.rule("assistant")
+            print(ev.get("thinking") or "", ev.get("text") or "")
+        elif ev["type"] == "submit":
+            console.rule("submit " + ("ok" if ev["ok"] else "rejected"))
+            for e in ev.get("errors") or []:
+                print("  " + e)
+    st = row.get("deep_stats") or {}
+    console.print(f"{st}")
 
 
 @app.command()

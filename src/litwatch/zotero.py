@@ -26,6 +26,8 @@ API = "https://api.zotero.org"
 TAG_PREFIX = "litwatch:"
 NOTE_TAG = "litwatch:screen"
 NOTE_MARKER = "<!-- litwatch:screen schema=1 -->"
+ENRICH_TAG = "litwatch:enrichment"
+ENRICH_MARKER = "<!-- litwatch:enrichment schema=1 -->"
 COLLECTION = "Litwatch"
 SUBCOLLECTIONS = {Tier.MUST_READ: "Must Read", Tier.AWARE: "Aware"}
 TIER_TAGS = {Tier.MUST_READ: "litwatch:tier:1", Tier.AWARE: "litwatch:tier:2"}
@@ -181,26 +183,37 @@ class ZoteroClient:
         await self.patch_item(key, mutate)
         return key
 
-    async def upsert_note(self, parent_key: str, html: str) -> str:
-        """One litwatch note per item, found by its marker, replaced in place."""
+    async def upsert_note(
+        self, parent_key: str, html: str, marker: str = NOTE_MARKER, tag: str = NOTE_TAG
+    ) -> str:
+        """One note per marker per item, replaced in place. `html` must contain the marker."""
         for child in await self.children(parent_key):
             data = child["data"]
-            if data.get("itemType") == "note" and NOTE_MARKER in data.get("note", ""):
+            if data.get("itemType") == "note" and marker in data.get("note", ""):
                 if data["note"] != html:
                     await self.patch_item(child["key"], lambda d: d.__setitem__("note", html))
                 return child["key"]
         (key,) = await self._create(
             "/items",
-            [
-                {
-                    "itemType": "note",
-                    "parentItem": parent_key,
-                    "note": html,
-                    "tags": [{"tag": NOTE_TAG}],
-                }
-            ],
+            [{"itemType": "note", "parentItem": parent_key, "note": html, "tags": [{"tag": tag}]}],
         )
         return key
+
+    async def set_tags(self, key: str, tags: list[str], prefixes: tuple[str, ...]) -> None:
+        """Replace the item's tags under the given litwatch prefixes; everything else stays."""
+
+        def mutate(data: dict[str, Any]) -> None:
+            kept = [t for t in data.get("tags", []) if not str(t.get("tag")).startswith(prefixes)]
+            data["tags"] = [*kept, *({"tag": t} for t in tags)]
+
+        await self.patch_item(key, mutate)
+
+    async def add_to_collection(self, key: str, collection_key: str) -> None:
+        def mutate(data: dict[str, Any]) -> None:
+            if collection_key not in data.get("collections", []):
+                data["collections"] = [*data.get("collections", []), collection_key]
+
+        await self.patch_item(key, mutate)
 
     async def pdf_attachment(self, parent_key: str) -> str | None:
         for child in await self.children(parent_key):

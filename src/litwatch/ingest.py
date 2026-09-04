@@ -9,6 +9,7 @@ import psycopg
 
 from litwatch import arxiv_source, db
 from litwatch.config import Settings
+from litwatch.deep import DeepProcessor
 from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade
@@ -31,6 +32,9 @@ class RunSummary:
     failed: int = 0
     routed: int = 0
     route_failed: int = 0
+    processed: int = 0
+    process_failed: int = 0
+    deep_list_cost: float = 0.0
     cost: float = 0.0
     tiers: dict[str, int] = field(default_factory=dict)
     error: str | None = None
@@ -51,6 +55,7 @@ async def run(
     fetch: bool = True,
     router: Router | None = None,
     digester: Digester | None = None,
+    deep: DeepProcessor | None = None,
 ) -> RunSummary:
     since, until = window(days)
     run_id = await db.start_run(conn, kind, since, until)
@@ -63,6 +68,8 @@ async def run(
             await route_pending(conn, router, summary)
         if digester is not None:
             await write_run_digest(conn, digester, summary)
+        if deep is not None:
+            await process_deep(conn, deep, summary)
     except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
         summary.error = f"{type(exc).__name__}: {exc}"
         log.exception("run %s failed", run_id)
@@ -80,6 +87,9 @@ async def run(
             failed=summary.failed,
             routed=summary.routed,
             route_failed=summary.route_failed,
+            processed=summary.processed,
+            process_failed=summary.process_failed,
+            deep_list_cost=round(summary.deep_list_cost, 4),
             cost=round(summary.cost, 4),
             tiers=summary.tiers,
             error=summary.error,
@@ -177,3 +187,17 @@ async def write_run_digest(conn: psycopg.AsyncConnection, digester: Digester, s:
     await db.store_digest(conn, s.run_id, text, usage.model if usage else None)
     log.info("run %s digest: %d papers, %d chars", s.run_id, len(positives), len(text))
     return text
+
+
+async def process_deep(conn: psycopg.AsyncConnection, deep: DeepProcessor, s: RunSummary) -> None:
+    """Deep-process pending tier 1 papers. Last step: slow, and the digest must not wait."""
+    result = await deep.process_pending(conn)
+    s.processed, s.process_failed = result.processed, result.failed
+    s.deep_list_cost = result.list_cost
+    log.info(
+        "run %s deep-processed %s (%s failed) list cost $%.2f",
+        s.run_id,
+        s.processed,
+        s.process_failed,
+        s.deep_list_cost,
+    )

@@ -30,9 +30,27 @@ jobs:
       - run: uv run ruff format --check src tests
       - run: uv run pytest --strict-markers
 
+  deep:
+    name: Deep processor tests and type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: deep
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: deep/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+
   container:
     name: Container smoke test
-    needs: quality
+    needs: [quality, deep]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -46,3 +64,4 @@ jobs:
           docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges
           --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m
           litwatch:ci --help
+      - run: docker build --tag litwatch-deep:ci --build-arg VERSION=ci --build-arg REVISION="${GITHUB_SHA}" deep

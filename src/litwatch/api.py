@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from litwatch import db, ingest
 from litwatch.config import Settings
+from litwatch.deep import DeepClient, DeepProcessor
 from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade, ModelScreener, openrouter_client
@@ -61,6 +62,19 @@ def build_digester(settings: Settings, model: str | None = None) -> Digester:
     return Digester(client, model or settings.digest_model, settings.digest_effort)
 
 
+def build_deep(settings: Settings) -> DeepProcessor | None:
+    """None when litwatch-deep is not configured. Zotero write-back needs routing too."""
+    if not settings.deep_enabled:
+        return None
+    assert settings.deep_url
+    router = build_router(settings)
+    return DeepProcessor(
+        DeepClient(settings.deep_url),
+        router.zotero if router else None,
+        settings.inbox_collection,
+    )
+
+
 def create_app(settings: Settings) -> FastAPI:
     dsn = settings.require_database()
     state: dict[str, Any] = {"task": None, "last": None}
@@ -86,6 +100,7 @@ def create_app(settings: Settings) -> FastAPI:
                     req.fetch,
                     router=build_router(settings),
                     digester=build_digester(settings),
+                    deep=build_deep(settings),
                 )
         except Exception:  # noqa: BLE001 - already recorded on the run row
             log.exception("background run failed")
@@ -124,5 +139,27 @@ def create_app(settings: Settings) -> FastAPI:
         tiers = [t for t in (tier or "").split(",") if t] or None
         async with await db.connect(dsn) as conn:
             return await db.list_papers(conn, tiers, since, min(limit, 1000))
+
+    @app.get("/papers/search")
+    async def search(q: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Full-text search for the deep processor's `store.search`."""
+        async with await db.connect(dsn) as conn:
+            return await db.search_papers(conn, q, limit)
+
+    @app.get("/papers/{paper_id}")
+    async def paper(paper_id: str) -> dict[str, Any]:
+        async with await db.connect(dsn) as conn:
+            row = await db.paper_summary(conn, paper_id)
+        if row is None:
+            raise HTTPException(404, "no such paper")
+        return row
+
+    @app.get("/papers/{paper_id}/trace")
+    async def trace(paper_id: str) -> list[dict[str, Any]]:
+        async with await db.connect(dsn) as conn:
+            row = await db.get_paper(conn, paper_id)
+        if row is None:
+            raise HTTPException(404, "no such paper")
+        return row.get("deep_trace") or []
 
     return app
