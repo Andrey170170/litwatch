@@ -406,9 +406,7 @@ def trace(
             console.rule(f"cell {ev['n']} ({ev['ms']} ms)")
             print(ev["code"])
             if ev.get("output"):
-                console.print(
-                    "[dim]" + ev["output"][:2000] + "[/dim]", markup=False, highlight=False
-                )
+                console.print(ev["output"][:2000], style="dim", markup=False, highlight=False)
             if ev.get("error"):
                 console.print(f"[red]{ev['error']}[/red]")
         elif ev["type"] == "assistant" and (ev.get("text") or ev.get("thinking")):

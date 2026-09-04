@@ -29,11 +29,12 @@ Session API:
 - paper: the full paper as a markdown string; meta: {id, title, authors, published, url}
 - sections(): headings with character offsets; section(title): the text of one section (substring match)
 - find(pattern, context = 200, limit = 20): matches of a string or RegExp with surrounding text and section
-- refs(): the bibliography as an array of strings
+- refs(): the bibliography as an array of strings; entries usually carry arXiv ids
 - await store.search(query, limit = 10): full-text search over papers this lab's watch already screened; \
 returns id, title, tier, and the screening reason
 - await s2.lookup(idOrQuery): Semantic Scholar. An arXiv id, DOI, or S2 id returns the paper with its \
-references; any other text searches by title and returns candidates
+references; any other text searches by title and returns candidates. Unauthenticated access is \
+rate-limited, so a lookup can fail; the paper's own bibliography is the primary source for prior work
 - await fetch(url): GET on arxiv.org, semanticscholar.org, openreview.net, github.com, huggingface.co; \
 HTML comes back as text ({status, contentType, text})
 - await submit(result): validates the result and returns {ok: true} or {ok: false, errors: [...]}. \
