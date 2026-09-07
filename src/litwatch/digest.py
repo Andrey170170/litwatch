@@ -1,4 +1,4 @@
-"""Daily digest: prose per selection about the run's member papers, must-reads from their cards."""
+"""Daily digest: prose on tier 1 and 2 papers per selection, tier 3 as a code-rendered list."""
 
 from __future__ import annotations
 
@@ -13,32 +13,37 @@ from litwatch.selection import Selection
 
 SYSTEM_PROMPT = """You write a short daily digest for an NLP research lab's literature watch. \
 The lab follows several selections, each a topic one member owns with a subject and, for some, \
-a tier 1 rubric. You are given the selections and today's member papers grouped by selection \
-and tier: tier 1 (must read), tier 2 (recommended), tier 3 (good to know). Tier 1 papers come \
-with a reading card written from the full text; the others come with the abstract and the \
-screener's one-sentence reason.
+a tier 1 rubric. You are given the selections and today's tier 1 (must read) and tier 2 \
+(recommended) papers grouped by selection. Tier 1 papers come with a reading card written from \
+the full text; tier 2 papers come with the abstract and the screener's one-sentence reason.
 
-Write one section per selection that has papers, in the order given. Start each section with \
-a paragraph that begins with the selection's name followed by a colon. For every tier 1 paper, \
-two to four sentences: what it contributes to the subject, by what method, and against what \
-ground truth or evidence; where a card names a detection method or ground truth, center on \
-that. For tier 2 papers one sentence each. For tier 3, one sentence listing the titles. \
-Mention every paper by its exact title once. Be concrete about methods and claims; do not \
-hype, do not speculate beyond what you are given, and do not use headers, bullet points, or \
-bold text. Stay under 180 words per selection."""
+Write one section per selection that has papers, in the order given, as a single paragraph \
+that begins with the selection's name followed by a colon. For every tier 1 paper, two to four \
+sentences: what it contributes to the subject, by what method, and against what ground truth \
+or evidence; where a card names a detection method or ground truth, center on that. For every \
+tier 2 paper exactly one sentence. Mention every paper by its exact title once and no paper \
+that is not listed. Be concrete about methods and claims; do not hype, do not speculate beyond \
+what you are given, and do not use headers, bullet points, or bold text."""
 
 EMPTY_DIGEST = "No new member papers in this run."
 
 
+def _by_tier(
+    selection: Selection, papers: list[dict[str, Any]], tiers: tuple[int, ...]
+) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = {t: [] for t in tiers}
+    for row in papers:
+        verdict = (row.get("verdicts") or {}).get(selection.slug)
+        if verdict and verdict["tier"] in grouped:
+            grouped[verdict["tier"]].append(row)
+    return grouped
+
+
 def render_papers(selections: list[Selection], papers: list[dict[str, Any]]) -> str:
-    """Group member papers by selection and tier for the digest prompt. Empty when no members."""
+    """Tier 1 and 2 papers grouped by selection for the digest prompt. Empty when there are none."""
     blocks = []
     for s in selections:
-        by_tier: dict[int, list[dict[str, Any]]] = {1: [], 2: [], 3: []}
-        for row in papers:
-            verdict = (row.get("verdicts") or {}).get(s.slug)
-            if verdict and verdict["tier"] in by_tier:
-                by_tier[verdict["tier"]].append(row)
+        by_tier = _by_tier(s, papers, (1, 2))
         if not any(by_tier.values()):
             continue
         lines = [f"# {s.name}", f"Subject: {s.subject}"]
@@ -64,6 +69,17 @@ def render_papers(selections: list[Selection], papers: list[dict[str, Any]]) -> 
     return "\n\n---\n\n".join(blocks)
 
 
+def render_tier3(selections: list[Selection], papers: list[dict[str, Any]]) -> str:
+    """One paragraph per selection listing its tier 3 titles; written by code, not the model."""
+    paragraphs = []
+    for s in selections:
+        rows = _by_tier(s, papers, (3,))[3]
+        if rows:
+            titles = "; ".join(" ".join(r["title"].split()) for r in rows)
+            paragraphs.append(f"{s.name}, good to know: {titles}.")
+    return "\n\n".join(paragraphs)
+
+
 async def write_digest(
     client: AsyncOpenAI,
     model: str,
@@ -71,10 +87,14 @@ async def write_digest(
     papers: list[dict[str, Any]],
     effort: str = "low",
 ) -> tuple[str, Usage | None]:
-    """Prose digest for the given papers; no model call when there is nothing to say."""
+    """Prose digest for the given papers; the model sees tiers 1 and 2, tier 3 is a title list.
+
+    No model call when there is nothing to write prose about.
+    """
     rendered = render_papers(selections, papers)
+    tail = render_tier3(selections, papers)
     if not rendered:
-        return EMPTY_DIGEST, None
+        return (tail or EMPTY_DIGEST), None
     completion = await client.chat.completions.create(
         model=model,
         messages=[
@@ -86,7 +106,7 @@ async def write_digest(
     text = normalize(completion.choices[0].message.content or "")
     if not text:
         raise RuntimeError(f"{model} returned an empty digest")
-    return text, usage_of(completion, model)
+    return "\n\n".join(t for t in (text, tail) if t), usage_of(completion, model)
 
 
 def normalize(text: str) -> str:
