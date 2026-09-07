@@ -1,6 +1,6 @@
 /** The profile prompt: task, runtime API, schema, budget. No procedure. */
 
-import { SCHEMA_JSON } from "./schema.ts";
+import { schemaJson } from "./schema.ts";
 
 export interface PaperInput {
   id: string;
@@ -13,13 +13,27 @@ export interface PaperInput {
   body_source?: string | null;
 }
 
+/** A selection the paper was screened into: why the lab watches this topic and what it wants noticed. */
+export interface SelectionContext {
+  name: string;
+  subject: string;
+  rubric?: string | null;
+}
+
 export const MAX_BODY_CHARS_IN_CONTEXT = 200_000;
 
-export function systemPrompt(maxCells: number, maxOutputChars: number): string {
-  return `You are the deep processor of litwatch, a literature watch run by an NLP research lab that works on \
-chain-of-thought monitoring and chain-of-thought faithfulness, with a mechanistic interpretability angle. \
-Screening flagged this paper as must-read. Your job is the lab's reading card for it: the result described \
-by the schema below, delivered through submit().
+export function systemPrompt(
+  maxCells: number,
+  maxOutputChars: number,
+  extensions: string[],
+  context: SelectionContext[],
+): string {
+  return `You are the deep processor of litwatch, a literature watch run by an NLP research lab. The lab keeps \
+selections: topics it follows, each with a rubric for what counts as tier 1, the papers its members must read. \
+Screening placed this paper in tier 1 of the selections listed below. Your job is the lab's reading card for it: \
+the result described by the schema below, delivered through submit().
+
+${renderSelections(context)}
 
 You have one tool, run_code. It runs JavaScript in a session that persists for this paper: variables \
 and functions carry over between cells, top-level await works, an exception is just output. Nothing \
@@ -45,12 +59,22 @@ The paper's full text is also in your first message, so read there and use the s
 counting, cross-referencing, and checking things outside the paper.
 
 Result schema (JSON Schema):
-${SCHEMA_JSON}
+${schemaJson(extensions)}
 
 Standards: every statement about the paper comes from its text. Prior work and code availability are \
 checked, not assumed: an unreachable or empty repository is not available. Write for lab members who \
 have not read the paper: specific methods, numbers, and model names; no hype; no markdown in strings. \
 Budget: ${maxCells} cells. The run ends on a successful submit.`;
+}
+
+function renderSelections(context: SelectionContext[]): string {
+  if (context.length === 0) return "Selections: none recorded for this job.";
+  const lines = ["Selections this paper is in:"];
+  for (const s of context) {
+    lines.push(`- ${s.name}: ${s.subject}`);
+    if (s.rubric) lines.push(`  Rubric: ${s.rubric}`);
+  }
+  return lines.join("\n");
 }
 
 export function userMessage(paper: PaperInput): string {

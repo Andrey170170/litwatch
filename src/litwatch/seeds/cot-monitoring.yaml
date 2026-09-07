@@ -1,0 +1,20 @@
+name: CoT monitoring
+slug: cot-monitoring
+owner: Ana
+status: active
+subject: >-
+  Reading a model's reasoning trace for oversight: monitors that detect misbehavior, deception,
+  reward hacking, sandbagging, or unsafe intent from the chain of thought; monitorability, what
+  erodes it, and training or optimization pressure on traces; evasion of monitors, hidden or
+  encoded reasoning, and evaluation-awareness in traces; legibility of traces for humans or
+  weaker models; and evaluations or benchmarks for any of these. Papers whose subject is
+  faithfulness of the trace to the model's computation belong primarily to the CoT faithfulness
+  selection but are members here too.
+keywords:
+  - chain.of.thought monitor
+  - CoT monitor
+  - monitorab
+  - hidden reasoning
+  - reward hacking
+  - sandbag
+  - obfuscat

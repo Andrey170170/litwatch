@@ -2,7 +2,8 @@
  * litwatch-deep entry point.
  *   serve          run the HTTP service (default)
  *   login          device-code login to the Codex subscription
- *   run FILE.json  process one paper from a JSON file and print the outcome (development)
+ *   run FILE.json  process one paper from a JSON file and print the outcome (development);
+ *                  the file is a PaperInput, optionally with `extensions` and `selections` as in POST /process
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -10,7 +11,7 @@ import { processPaper, type RunOptions } from "./agent.ts";
 import { authState, buildModels, loginDeviceCode } from "./auth.ts";
 import type { HostConfig } from "./hosts.ts";
 import { JobQueue } from "./jobs.ts";
-import type { PaperInput } from "./prompt.ts";
+import type { PaperInput, SelectionContext } from "./prompt.ts";
 import { buildServer } from "./server.ts";
 
 const env = (name: string, fallback: string) => process.env[name] ?? fallback;
@@ -51,8 +52,11 @@ async function main(): Promise<void> {
 
   if (command === "run") {
     if (!arg) throw new Error("usage: run FILE.json");
-    const paper = JSON.parse(readFileSync(arg, "utf8")) as PaperInput;
-    const outcome = await processPaper(paper, models, config.hosts, config.run, (event, stats) =>
+    const { extensions = [], selections = [], ...paper } = JSON.parse(readFileSync(arg, "utf8")) as PaperInput & {
+      extensions?: string[];
+      selections?: SelectionContext[];
+    };
+    const outcome = await processPaper(paper, { extensions, selections }, models, config.hosts, config.run, (event, stats) =>
       log(`${event.type} cells=${stats.cells} turns=${stats.turns} tokens=${stats.input}/${stats.output} $${stats.list_cost.toFixed(2)}`),
     );
     const out = arg.replace(/\.json$/, "") + ".outcome.json";
@@ -63,8 +67,8 @@ async function main(): Promise<void> {
   }
 
   if (command !== "serve") throw new Error(`unknown command ${command}`);
-  const jobs = new JobQueue((paper, progress) =>
-    processPaper(paper, models, config.hosts, config.run, (event, stats) => {
+  const jobs = new JobQueue(({ paper, extensions, selections }, progress) =>
+    processPaper(paper, { extensions, selections }, models, config.hosts, config.run, (event, stats) => {
       progress(event, stats);
       if (event.type === "cell" || event.type === "submit" || event.type === "system")
         log(`${paper.id} ${event.type}${event.type === "cell" ? ` ${event.n}` : ""} cells=${stats.cells} turns=${stats.turns} $${stats.list_cost.toFixed(2)}`);

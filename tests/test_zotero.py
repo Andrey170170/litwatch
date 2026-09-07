@@ -11,19 +11,11 @@ import httpx
 import pytest
 
 from litwatch import route as route_mod
-from litwatch.models import (
-    Confidence,
-    Paper,
-    ScreenOutput,
-    ScreenResult,
-    Stage,
-    StageRole,
-    Tier,
-    Usage,
-)
+from litwatch.models import Paper
 from litwatch.route import Router
 from litwatch.webdav import WebDAVWriter
 from litwatch.zotero import NOTE_MARKER, ZoteroClient, attachment_filename, webdav_payload
+from tests.conftest import screen_result
 
 PAPER = Paper(
     id="2605.25052",
@@ -38,21 +30,8 @@ PAPER = Paper(
 PDF = b"%PDF-1.7 fake body"
 
 
-def result(tier: Tier) -> ScreenResult:
-    out = ScreenOutput(
-        is_cot_monitoring_or_faithfulness=True,
-        uses_internals=False,
-        is_mech_interp=False,
-        proposes_definition_or_benchmark=tier is Tier.MUST_READ,
-        confidence=Confidence.HIGH,
-        reason="Defines faithfulness & a benchmark.",
-    )
-    assert out.tier is tier
-    return ScreenResult(
-        paper_id=PAPER.id,
-        prompt_version="v2",
-        stages=[Stage(role=StageRole.SCREEN, model="m", output=out, usage=Usage(model="m"))],
-    )
+def result(tier: int):
+    return screen_result(PAPER.id, cot_faithfulness=tier, mech_interp=3)
 
 
 class FakeZotero:
@@ -138,9 +117,9 @@ def tags(fake: FakeZotero, key: str) -> set[str]:
 
 
 async def test_ensure_item_creates_tree_and_converges_on_tier_change(fake, client):
-    key = await client.ensure_item(PAPER, Tier.MUST_READ)
+    key = await client.ensure_item(PAPER, 1, ["litwatch:sel:cot-faithfulness:1"])
     names = {c["data"]["name"] for c in fake.collections.values()}
-    assert names == {"Litwatch", "Must Read", "Aware"}
+    assert names == {"Litwatch", "Tier 1", "Tier 2"}
     cols = await client.collections()
     data = fake.items[key]["data"]
     assert data["itemType"] == "preprint" and data["archiveID"] == "arXiv:2605.25052"
@@ -149,18 +128,36 @@ async def test_ensure_item_creates_tree_and_converges_on_tier_change(fake, clien
         "firstName": "Ana",
         "lastName": "Marasović",
     }
-    assert set(data["collections"]) == {cols.root, cols.by_tier[Tier.MUST_READ]}
-    assert tags(fake, key) == {"litwatch:tier:1"}
+    assert set(data["collections"]) == {cols.root, cols.by_tier[1]}
+    assert tags(fake, key) == {"litwatch:tier:1", "litwatch:sel:cot-faithfulness:1"}
 
     # The user adds their own collection and tag; a later demotion keeps both.
     data["collections"].append("USERCOLL")
     data["tags"].append({"tag": "mine"})
-    again = await client.ensure_item(PAPER, Tier.AWARE)
+    again = await client.ensure_item(PAPER, 2, ["litwatch:sel:cot-faithfulness:2"])
     assert again == key, "no duplicate item"
     data = fake.items[key]["data"]
-    assert set(data["collections"]) == {"USERCOLL", cols.root, cols.by_tier[Tier.AWARE]}
-    assert tags(fake, key) == {"mine", "litwatch:tier:2"}
+    assert set(data["collections"]) == {"USERCOLL", cols.root, cols.by_tier[2]}
+    assert tags(fake, key) == {"mine", "litwatch:tier:2", "litwatch:sel:cot-faithfulness:2"}
     assert sum(1 for i in fake.items.values() if not i["data"].get("parentItem")) == 1
+
+    # Dropping below tier 2 releases the item: managed collections and litwatch tags go.
+    await client.release_item(key)
+    data = fake.items[key]["data"]
+    assert data["collections"] == ["USERCOLL"] and tags(fake, key) == {"mine"}
+
+
+async def test_legacy_subcollections_are_managed(fake, client):
+    """Items filed under the phase 3 names move to the tier collections on re-route."""
+    fake._create(fake.collections, [{"name": "Litwatch"}])
+    (root,) = fake.collections
+    fake._create(fake.collections, [{"name": "Must Read", "parentCollection": root}])
+    legacy = [k for k in fake.collections if k != root][0]
+    key = await client.ensure_item(PAPER, 2)
+    fake.items[key]["data"]["collections"].append(legacy)
+    await client.ensure_item(PAPER, 2)
+    cols = await client.collections()
+    assert legacy in cols.managed and legacy not in fake.items[key]["data"]["collections"]
 
 
 async def test_find_item_adopts_hand_added_item(fake, client):
@@ -177,11 +174,11 @@ async def test_find_item_adopts_hand_added_item(fake, client):
         ],
     )
     (existing,) = fake.items
-    assert await client.ensure_item(PAPER, Tier.AWARE) == existing
+    assert await client.ensure_item(PAPER, 2) == existing
 
 
 async def test_upsert_note_is_single_and_replaced_in_place(fake, client):
-    key = await client.ensure_item(PAPER, Tier.AWARE)
+    key = await client.ensure_item(PAPER, 2)
     note = await client.upsert_note(key, f"{NOTE_MARKER}<p>one</p>")
     assert await client.upsert_note(key, f"{NOTE_MARKER}<p>two</p>") == note
     assert fake.items[note]["data"]["note"].endswith("<p>two</p>")
@@ -191,7 +188,7 @@ async def test_upsert_note_is_single_and_replaced_in_place(fake, client):
 
 
 async def test_patch_retries_after_version_conflict(fake, client, monkeypatch):
-    key = await client.ensure_item(PAPER, Tier.AWARE)
+    key = await client.ensure_item(PAPER, 2)
     real = fake.handle
     bumped = False
 
@@ -256,24 +253,36 @@ def router(fake: FakeZotero, monkeypatch) -> tuple[Router, FakeDAV, list[str]]:
 
 async def test_router_attaches_pdf_once_for_tier_1(fake, router):
     r, dav, downloads = router
-    routed = await r.route(PAPER, result(Tier.MUST_READ))
-    assert routed.attachment_key
+    routed = await r.route(PAPER, result(1))
+    assert routed.tier == 1 and routed.attachment_key
     att = fake.items[routed.attachment_key]["data"]
     assert att["parentItem"] == routed.item_key and att["linkMode"] == "imported_url"
     assert att["md5"] == hashlib.md5(PDF).hexdigest()  # noqa: S324
     assert set(dav.files) == {f"{routed.attachment_key}.zip", f"{routed.attachment_key}.prop"}
     note = next(i for i in fake.items.values() if i["data"].get("itemType") == "note")
+    assert "Best tier</b></td><td>1" in note["data"]["note"]
     assert (
-        "must read" in note["data"]["note"]
-        and "Defines faithfulness &amp; a" in note["data"]["note"]
+        "<b>cot-faithfulness</b></td><td>tier 1, high: Defines faithfulness &amp; a"
+        in note["data"]["note"]
     )
+    assert tags(fake, routed.item_key) == {
+        "litwatch:tier:1",
+        "litwatch:sel:cot-faithfulness:1",
+        "litwatch:sel:mech-interp:3",
+    }
 
-    again = await r.route(PAPER, result(Tier.MUST_READ))
+    again = await r.route(PAPER, result(1))
     assert again == routed
     assert downloads == ["/pdf/2605.25052"], "downloaded exactly once"
 
 
 async def test_router_skips_pdf_for_tier_2(fake, router):
     r, dav, downloads = router
-    routed = await r.route(PAPER, result(Tier.AWARE))
+    routed = await r.route(PAPER, result(2))
     assert routed.attachment_key is None and not dav.files and not downloads
+
+
+async def test_router_refuses_non_members(router):
+    r, _, _ = router
+    with pytest.raises(ValueError, match="not routable"):
+        await r.route(PAPER, result(3))

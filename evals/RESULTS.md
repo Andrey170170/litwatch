@@ -61,3 +61,59 @@ Applied to the live database with `litwatch reconfirm`: 45 confirmed, 26
 changed tier. Routed set after all three stages: 10 must_read, 9 aware, out
 of 3,695 papers. Cost of the confirm pass: about $0.60 on the regular Muse
 endpoint.
+
+## 2026-09-07 · selections v3 · Luna low, Sol low re-screen, Muse high confirm per selection
+
+The tier scheme changed: verdicts are per selection on a 1..4 scale, and the
+labeled set carries an expected tier per selection (schema 2). The
+`cot-faithfulness` rubric is the PI's, from BonaFide's definition; see
+`src/litwatch/seeds/`. Run: `evals/runs/20260907T185457Z.json`, 191 papers,
+$0.34, seeds at versions 62badefff02c / ac05422d497d / d9aef060102b.
+
+How the labels were made. The v1 flags were converted mechanically
+(must_read -> faithfulness 2, aware -> 3, mech_interp flag -> mech-interp 2),
+which is why the raw table below reads badly: tier 1 precision 0.09 and
+tier 1+2 recall 0.38 against those labels. The disagreement list was then
+reviewed. Every paper the cascade put in tier 1 was read against its
+confirmed reason: 9 of 11 are tier 1 under the rubric (model-editing and
+hint ground truth, probes against the trace, meta-evaluations of
+hint-acknowledgment classifiers), 2 are tier 2. Of the 37 old positives the
+cascade demoted to tier 3 or 4, all but one were monitoring, steganography,
+encoded reasoning, grounding, or correctness papers, exactly what the rubric
+excludes; their labels now follow the verdict and are marked silver. The
+one real miss was Selective Disclosure of Hidden Directives (2608.29070,
+gold tier 1 -> 3, "does not establish whether the trace faithfully reports
+computations"); the rubric gained a sentence saying that disclosure of a
+demonstrably followed hint, cue, or directive is an omission test. Why2Speak
+(2608.20670) went from a hand-pass tier 1 to tier 2 on the rubric's own
+single-task exclusion, which the confirm model applied correctly.
+
+Raw table on the converted labels, before the review (final stage):
+
+| selection | tier | P | R | n |
+|---|---|---|---|---|
+| cot-faithfulness | 1 | 0.09 | 0.33 | 3 |
+| cot-faithfulness | 2 | 0.60 | 0.21 | 57 |
+| cot-faithfulness | 3 | 0.31 | 0.63 | 35 |
+| mech-interp | 2 | 1.00 | 0.60 | 63 |
+
+On the 39 papers labeled by hand (28 from abstracts on 2026-09-07 plus
+BonaFide and Lanham, and 11 tier 1 candidates reviewed against their
+confirmed reasons, which flatters tier 1):
+
+| tier | P | R | n |
+|---|---|---|---|
+| 1 | 0.82 | 0.90 | 10 |
+| 2 | 0.88 | 0.58 | 12 |
+| 3 | 0.47 | 0.80 | 10 |
+| 4 | 0.67 | 0.29 | 7 |
+
+Tier 1+2 recall on that subset is 0.82. The tier 2/3 boundary is where the
+model is inconsistent, as expected for "recommended" versus "good to know";
+the tier 1 boundary is the one the rubric defines and it holds. Labeled set
+after the review: 193 papers, 12 tier 1, 24 tier 2, 64 tier 3 for
+`cot-faithfulness`; 52 papers carry a `cot-monitoring` label, all silver.
+Caveat as before: silver labels come from the same prompt family, so the
+next run's numbers on them are an upper bound; the hand-labeled subset is
+the signal to watch, and the PI's own labels on the boundary cases will
+replace it.

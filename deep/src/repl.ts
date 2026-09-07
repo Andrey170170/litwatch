@@ -115,7 +115,9 @@ export class Repl {
       );
       if (failure) error = failure;
     } catch (e) {
-      error = formatError(e);
+      // isolated-vm's own timeout can win the race against the host timer; either way the
+      // contract is the same: the session is gone.
+      error = /timed out/i.test(String(e)) ? this.kill() : formatError(e);
     }
     let last = "";
     if (!this.dead) {
@@ -128,18 +130,19 @@ export class Repl {
     return done([...this.prints, last].filter(Boolean).join("\n"), error);
   }
 
+  /** Marks the session dead and frees the isolate; returns the message cells report. */
+  private kill(): string {
+    if (!this.dead) {
+      this.dead = true;
+      this.isolate.dispose();
+    }
+    return `cell ran longer than ${this.opts.cellTimeoutMs / 1000}s; the session was terminated and all state is lost`;
+  }
+
   private async withTimeout<T>(work: Promise<T>): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
     const limit = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        this.dead = true;
-        this.isolate.dispose();
-        reject(
-          new Error(
-            `cell ran longer than ${this.opts.cellTimeoutMs / 1000}s; the session was terminated and all state is lost`,
-          ),
-        );
-      }, this.opts.cellTimeoutMs);
+      timer = setTimeout(() => reject(new Error(this.kill())), this.opts.cellTimeoutMs);
     });
     work.catch(() => undefined); // the loser of the race must not surface as unhandled
     try {

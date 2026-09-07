@@ -48,3 +48,24 @@ async def test_run_request_validation(app):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         assert (await c.post("/runs", json={"days": 0})).status_code == 422
         assert (await c.post("/runs", json={"kind": "weird"})).status_code == 422
+
+
+async def test_papers_tier_filter_must_be_integers(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/papers", params={"tier": "must_read"})).status_code == 422
+
+
+def test_selection_rows_report_validation_errors_per_row():
+    from pydantic import ValidationError
+
+    from litwatch.api import SelectionRow, _brief
+    from litwatch.selection import from_spec
+
+    row = SelectionRow(name="Agents", subject="too short")
+    with pytest.raises(ValidationError) as exc:
+        from_spec(row.model_dump())
+    assert "subject" in _brief(exc.value)
+    ok = from_spec(
+        SelectionRow(name="Agents and tools", subject="s" * 30, keywords="a, b").model_dump()
+    )
+    assert ok.slug == "agents-and-tools" and ok.keywords == ["a", "b"]

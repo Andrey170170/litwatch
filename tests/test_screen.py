@@ -1,86 +1,88 @@
 import pytest
 
-from litwatch.models import Confidence, Paper, ScreenOutput, StageRole, Tier, Usage
-from litwatch.screen import Cascade, keyword_hit, load_system_prompt, render_user_prompt
-
-
-def out(
-    cot: bool, internals: bool = False, confidence: Confidence = Confidence.HIGH
-) -> ScreenOutput:
-    return ScreenOutput(
-        is_cot_monitoring_or_faithfulness=cot,
-        uses_internals=internals,
-        is_mech_interp=False,
-        proposes_definition_or_benchmark=False,
-        confidence=confidence,
-        reason="r",
-    )
+from litwatch.models import Confidence, Paper, StageRole, Usage, Verdict
+from litwatch.screen import Cascade, output_model, render_system_prompt, render_user_prompt
+from litwatch.selection import Selection
+from tests.conftest import FAITH, INTERP, SELECTIONS, verdict
 
 
 class Fake:
-    def __init__(self, model: str, output: ScreenOutput) -> None:
-        self.model = model
-        self.output = output
-        self.calls = 0
+    """A screener answering the same tiers for every selection it is asked about."""
 
-    async def screen(self, paper: Paper) -> tuple[ScreenOutput, Usage]:
-        self.calls += 1
-        return self.output, Usage(model=self.model, cost=0.01)
+    def __init__(self, model: str, tier: int, confidence: Confidence = Confidence.HIGH) -> None:
+        self.model, self.tier, self.confidence = model, tier, confidence
+        self.calls: list[list[str]] = []
+
+    async def screen(self, paper: Paper, selections: list[Selection]):
+        self.calls.append([s.slug for s in selections])
+        out = {s.slug: verdict(max(self.tier, s.max_tier), self.confidence) for s in selections}
+        return out, Usage(model=self.model, cost=0.01)
 
 
 PLAIN = Paper(id="1", title="A survey of graph databases", abstract="We survey storage engines.")
 COT = Paper(id="2", title="On CoT monitoring", abstract="We study chain-of-thought monitors.")
 
 
-def test_keyword_hit():
-    assert keyword_hit(COT)
-    assert not keyword_hit(PLAIN)
-
-
-def test_prompt_contains_field_names():
-    system = load_system_prompt()
-    for name in ScreenOutput.model_fields:
+def test_prompt_and_output_model_follow_the_selections():
+    system = render_system_prompt(SELECTIONS)
+    assert "CoT faithfulness" in system and "cot-faithfulness" in system
+    for name in Verdict.model_fields:
         assert name in system
     assert COT.title in render_user_prompt(COT)
+    schema = output_model(SELECTIONS).model_json_schema()
+    assert set(schema["required"]) == {"cot_faithfulness", "mech_interp"}
 
 
 @pytest.mark.parametrize(
-    ("paper", "first", "expect_rescreen"),
+    ("paper", "tier", "confidence", "expect_rescreen"),
     [
-        (PLAIN, out(False), False),  # confident negative, no keywords
-        (PLAIN, out(False, confidence=Confidence.LOW), True),  # low confidence always re-screens
-        (COT, out(False), True),  # negative with keyword hit re-screens
-        (COT, out(True), False),  # confident positive stays
+        (PLAIN, 4, Confidence.HIGH, False),  # confident non-member, no keywords
+        (PLAIN, 4, Confidence.LOW, True),  # low confidence always re-screens
+        (COT, 4, Confidence.HIGH, True),  # non-member with a keyword hit re-screens
+        (COT, 2, Confidence.HIGH, False),  # confident member stays
     ],
 )
-async def test_rescreen_rule(paper, first, expect_rescreen):
-    primary, secondary = Fake("luna", first), Fake("sol", out(False))
-    result = await Cascade(primary, secondary).screen(paper)
+async def test_rescreen_rule(paper, tier, confidence, expect_rescreen):
+    primary, secondary = Fake("luna", tier, confidence), Fake("sol", 4)
+    result = await Cascade(SELECTIONS, primary, secondary).screen(paper)
     assert result.rescreened is expect_rescreen
-    assert secondary.calls == (1 if expect_rescreen else 0)
+    assert len(secondary.calls) == (1 if expect_rescreen else 0)
     assert result.model == ("sol" if expect_rescreen else "luna")
-    assert result.stages[0].output == first
     assert result.cost == (0.02 if expect_rescreen else 0.01)
+    assert result.versions == {FAITH.slug: FAITH.version, INTERP.slug: INTERP.version}
 
 
-async def test_confirm_runs_only_on_routed_tiers_and_wins():
-    confirm = Fake("muse", out(True, internals=False))  # demotes to aware
-    cascade = Cascade(Fake("luna", out(True, internals=True)), None, confirm)
+async def test_confirm_runs_per_selection_on_tiers_1_and_2_and_wins():
+    confirm = Fake("muse", 3)  # demotes whatever it sees to tier 3
+    cascade = Cascade(SELECTIONS, Fake("luna", 1), None, confirm)
     result = await cascade.screen(COT)
-    assert confirm.calls == 1 and result.confirmed
-    assert result.output_after(StageRole.SCREEN).tier == Tier.MUST_READ
-    assert result.output_after(StageRole.RESCREEN).tier == Tier.MUST_READ  # no rescreen ran
-    assert result.tier == Tier.AWARE
+    # Tier 1 for faithfulness (has a rubric), tier 2 for mech-interp (no rubric): both confirmed.
+    assert confirm.calls == [["cot-faithfulness"], ["mech-interp"]]
+    assert [s.role for s in result.stages] == [
+        StageRole.SCREEN,
+        StageRole.CONFIRM,
+        StageRole.CONFIRM,
+    ]
+    assert result.verdicts_after(StageRole.SCREEN)["cot-faithfulness"].tier == 1
+    assert result.verdicts_after(StageRole.SCREEN)["mech-interp"].tier == 2
+    assert result.best_tier == 3
 
-    confirm.calls = 0
-    negative = await Cascade(Fake("luna", out(False)), None, confirm).screen(PLAIN)
-    assert confirm.calls == 0 and not negative.confirmed and negative.tier == Tier.NONE
+    confirm.calls = []
+    negative = await Cascade(SELECTIONS, Fake("luna", 4), None, confirm).screen(PLAIN)
+    assert confirm.calls == [] and not negative.confirmed and negative.best_tier == 4
 
 
-async def test_confirm_existing_appends_stage():
-    cascade = Cascade(Fake("luna", out(True, internals=True)), None, None)
+async def test_confirm_existing_skips_already_confirmed_selections():
+    cascade = Cascade(SELECTIONS, Fake("luna", 1), None, None)
     prior = await cascade.screen(COT)
-    cascade.confirm = Fake("muse", out(False))
+    cascade.confirm = Fake("muse", 4)
     result = await cascade.confirm_existing(COT, prior)
-    assert [s.role for s in result.stages] == [StageRole.SCREEN, StageRole.CONFIRM]
-    assert prior.tier == Tier.MUST_READ and result.tier == Tier.NONE
+    assert result.confirmed_slugs() == {"cot-faithfulness", "mech-interp"} and result.best_tier == 4
+    cascade.confirm = Fake("muse", 1)
+    again = await cascade.confirm_existing(COT, result)
+    assert cascade.confirm.calls == [] and again == result
+
+
+def test_cascade_needs_selections():
+    with pytest.raises(ValueError):
+        Cascade([], Fake("luna", 4))

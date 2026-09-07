@@ -9,16 +9,22 @@ import pytest
 
 from litwatch import deep as deep_mod
 from litwatch.deep import DeepClient, DeepProcessor, enrichment_note, enrichment_tags
-from litwatch.models import Paper
+from litwatch.models import Paper, Verdict
+from tests.conftest import FAITH, INTERP
 
 RESULT = {
     "summary": "First paragraph.\n\nSecond paragraph.",
     "key_claim": "Probes predict unfaithful reasoning.",
     "paper_kind": "method",
-    "monitor_type": "white-box",
-    "internals_signal": ["probes", "sparse autoencoders"],
-    "threat_model": ["hint non-acknowledgement"],
-    "faithfulness_definition": "Faithfulness is defined as acknowledging the hint.",
+    "faithfulness": {
+        "mismatch": ["omission"],
+        "ground_truth": "task construction",
+        "detection_method": "Hints whose use is revealed by the answer; probes on the residual.",
+        "definition": "A step is faithful iff it acknowledges the hint it followed.",
+        "monitor_type": "white-box",
+        "internals_signal": ["probes", "sparse autoencoders"],
+        "generality": "Three tasks, two models.",
+    },
     "evaluation_setup": {
         "models": ["Qwen3-8B"],
         "tasks": ["MMLU"],
@@ -54,7 +60,8 @@ class FakeDeep:
 
     def handle(self, req: httpx.Request) -> httpx.Response:
         if req.method == "POST" and req.url.path == "/process":
-            self.submitted = json.loads(req.content)["paper"]
+            self.request = json.loads(req.content)
+            self.submitted = self.request["paper"]
             return httpx.Response(202, json={"id": "job-1", "status": "queued"})
         if req.url.path == "/jobs/job-1":
             self.polls += 1
@@ -117,6 +124,9 @@ class FakeDb:
             if self.row.get("enrichment") and not self.row.get("zotero_enriched_at")
             else []
         )
+
+    async def verdicts_for(self, conn, paper_id):
+        return {"cot-faithfulness": Verdict(tier=1, confidence="high", reason="r")}
 
     async def store_body(self, conn, paper_id, body, source):
         self.row.update(body=body, body_source=source)
@@ -181,7 +191,15 @@ async def test_processor_fetches_text_stores_result_and_writes_zotero(row, monke
         {"result": RESULT, "trace": [], "stats": STATS, "model": "openai-codex/gpt-5.6-sol"}
     )
     zot = FakeZotero()
-    proc = DeepProcessor(client(fake), zot, inbox_collection="INBOX", fetcher=FakeFetcher())
+    proc = DeepProcessor(
+        client(fake),
+        zot,
+        [FAITH, INTERP],
+        extensions={"cot-faithfulness": "faithfulness"},
+        inbox_collection="INBOX",
+        inbox_selections=("cot-faithfulness",),
+        fetcher=FakeFetcher(),
+    )
     conn = SimpleNamespace(execute=None)
 
     s = await proc.process_pending(conn)
@@ -190,6 +208,10 @@ async def test_processor_fetches_text_stores_result_and_writes_zotero(row, monke
         fake.submitted["body"].startswith("# Fetched body")
         and fake.submitted["body_source"] == "html"
     )
+    assert fake.request["extensions"] == ["faithfulness"]
+    assert fake.request["selections"] == [
+        {"name": FAITH.name, "subject": FAITH.subject, "rubric": FAITH.rubric}
+    ]
     assert row["enrichment"] == RESULT
     assert [c[0] for c in fake_db.calls] == ["store_enrichment", "mark_zotero_enriched"]
     (key, html, marker, tag) = zot.notes[0]
@@ -202,11 +224,12 @@ async def test_processor_fetches_text_stores_result_and_writes_zotero(row, monke
     assert zot.tags[0][1] == [
         "litwatch:processed",
         "litwatch:kind:method",
+        "litwatch:code",
         "litwatch:monitor:white-box",
         "litwatch:signal:probes",
         "litwatch:signal:sparse-autoencoders",
-        "litwatch:threat:hint-non-acknowledgement",
-        "litwatch:code",
+        "litwatch:mismatch:omission",
+        "litwatch:ground-truth:task-construction",
     ]
     assert zot.collections == [("ZK1", "INBOX")]
 
@@ -226,7 +249,7 @@ async def test_processor_records_a_failed_run_without_touching_zotero(row, monke
         }
     )
     zot = FakeZotero()
-    s = await DeepProcessor(client(fake), zot, fetcher=FakeFetcher()).process_pending(
+    s = await DeepProcessor(client(fake), zot, [FAITH], fetcher=FakeFetcher()).process_pending(
         SimpleNamespace()
     )
     assert s.failed == 1 and s.failures == [("2601.00001", "the model stopped without submitting")]
@@ -242,6 +265,14 @@ def test_note_and_tags_are_pure():
     assert html.startswith("<!-- litwatch:enrichment schema=1 -->")
     assert "<p>First paragraph.</p><p>Second paragraph.</p>" in html
     assert "Turpin et al. (arXiv:2305.04388): Reuses the setup." in html
+    assert "<b>Detection method.</b> Hints whose use" in html
+    core_only = {k: v for k, v in RESULT.items() if k != "faithfulness"}
+    assert "Faithfulness" not in enrichment_note(paper, core_only)
+    assert enrichment_tags(core_only) == [
+        "litwatch:processed",
+        "litwatch:kind:method",
+        "litwatch:code",
+    ]
     assert "12 cells, 14 turns, 300s" in html
     assert "litwatch:code" in enrichment_tags(RESULT)
     assert "litwatch:code" not in enrichment_tags({**RESULT, "code_available": False})

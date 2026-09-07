@@ -1,19 +1,23 @@
-"""Labeled evaluation set on disk: YAML with paper metadata and expected flags."""
+"""Labeled evaluation set on disk: YAML with paper metadata and expected tier per selection."""
 
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, Field
 
-from litwatch.models import Flags, Paper
+from litwatch.models import Paper
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class LabeledPaper(BaseModel):
     paper: Paper
-    expected: Flags | None = None
+    # selection slug -> expected tier (1..4). A selection absent here is not scored for the paper.
+    expected: dict[str, int] | None = None
     note: str | None = None
+
+    def expected_tier(self, slug: str) -> int | None:
+        return (self.expected or {}).get(slug)
 
 
 class EvalSet(BaseModel):
@@ -23,7 +27,7 @@ class EvalSet(BaseModel):
 
 def _to_entry(item: LabeledPaper) -> dict:
     entry = item.paper.model_dump(exclude_none=True)
-    entry["expected"] = item.expected.model_dump() if item.expected else None
+    entry["expected"] = dict(item.expected) if item.expected else None
     if item.note:
         entry["note"] = item.note
     return entry
@@ -33,11 +37,7 @@ def _from_entry(entry: dict) -> LabeledPaper:
     entry = dict(entry)
     expected = entry.pop("expected", None)
     note = entry.pop("note", None)
-    return LabeledPaper(
-        paper=Paper(**entry),
-        expected=Flags(**expected) if expected else None,
-        note=note,
-    )
+    return LabeledPaper(paper=Paper(**entry), expected=expected or None, note=note)
 
 
 def load(path: Path) -> EvalSet:

@@ -74,3 +74,40 @@ ALTER TABLE papers ADD COLUMN IF NOT EXISTS zotero_enriched_at timestamptz;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS processed integer NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS process_failed integer NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS deep_list_cost numeric(10, 4) NOT NULL DEFAULT 0;
+
+-- Selections (phase 5): human-written topic specs synced from Notion, versioned by content hash,
+-- and one verdict row per (paper, selection). `best_tier` is the paper's best verdict across
+-- active selections; NULL means the paper has not been judged under selections yet. The legacy
+-- `tier` column stops being written and can be dropped once every row in use has a best_tier.
+CREATE TABLE IF NOT EXISTS selections (
+    slug        text PRIMARY KEY,
+    name        text NOT NULL,
+    owner       text,
+    status      text NOT NULL,                  -- draft | active | paused
+    subject     text NOT NULL,
+    rubric      text,
+    keywords    text[] NOT NULL DEFAULT '{}',
+    version     text NOT NULL,                  -- content hash of name, subject, rubric, keywords
+    notion_id   text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    synced_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS verdicts (
+    paper_id    text NOT NULL REFERENCES papers (id) ON DELETE CASCADE,
+    selection   text NOT NULL,
+    tier        smallint NOT NULL,
+    confidence  text NOT NULL,
+    reason      text NOT NULL,
+    version     text NOT NULL,                  -- selection version the verdict was judged under
+    model       text,
+    screened_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (paper_id, selection)
+);
+
+CREATE INDEX IF NOT EXISTS verdicts_selection_tier_idx ON verdicts (selection, tier, screened_at DESC);
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS best_tier smallint;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS selections_version text;
+CREATE INDEX IF NOT EXISTS papers_best_tier_idx ON papers (best_tier, screened_at DESC)
+    WHERE best_tier IS NOT NULL;

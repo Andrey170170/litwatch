@@ -1,7 +1,9 @@
-"""PostgreSQL store: papers and runs. One async connection per unit of work."""
+"""PostgreSQL store: papers, verdicts, selections, runs. One async connection per unit of work."""
+
+from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from importlib import resources
 from typing import Any
 
@@ -9,7 +11,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from litwatch.models import Paper, ScreenResult, Stage, StageRole, Usage
+from litwatch.models import NOT_MEMBER, Paper, ScreenResult, Verdict
+from litwatch.selection import Selection, Status, versions_hash
 
 
 async def connect(dsn: str) -> psycopg.AsyncConnection[dict[str, Any]]:
@@ -18,6 +21,9 @@ async def connect(dsn: str) -> psycopg.AsyncConnection[dict[str, Any]]:
 
 async def apply_schema(conn: psycopg.AsyncConnection) -> None:
     await conn.execute(resources.files("litwatch").joinpath("schema.sql").read_text())
+
+
+# -- papers ---------------------------------------------------------------------------------------
 
 
 async def upsert_papers(conn: psycopg.AsyncConnection, papers: list[Paper]) -> tuple[int, int]:
@@ -31,22 +37,17 @@ async def upsert_papers(conn: psycopg.AsyncConnection, papers: list[Paper]) -> t
             await cur.execute(
                 """
                 INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
-                                    published, updated, url, keyword_hit)
+                                    published, updated, url)
                 VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
-                        %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(keyword_hit)s)
+                        %(primary_category)s, %(published)s, %(updated)s, %(url)s)
                 ON CONFLICT (id) DO UPDATE SET
                     title = EXCLUDED.title, abstract = EXCLUDED.abstract,
                     authors = EXCLUDED.authors, categories = EXCLUDED.categories,
                     primary_category = EXCLUDED.primary_category,
-                    updated = EXCLUDED.updated, url = EXCLUDED.url,
-                    keyword_hit = EXCLUDED.keyword_hit
+                    updated = EXCLUDED.updated, url = EXCLUDED.url
                 RETURNING (xmax = 0) AS inserted
                 """,
-                {
-                    **p.model_dump(),
-                    "authors": Jsonb(p.authors),
-                    "keyword_hit": _keyword_hit(p),
-                },
+                {**p.model_dump(), "authors": Jsonb(p.authors)},
             )
             row = await cur.fetchone()
             if row and row["inserted"]:
@@ -54,23 +55,6 @@ async def upsert_papers(conn: psycopg.AsyncConnection, papers: list[Paper]) -> t
             else:
                 updated += 1
     return inserted, updated
-
-
-def _keyword_hit(paper: Paper) -> bool:
-    from litwatch.screen import keyword_hit  # local import: screen imports models only
-
-    return keyword_hit(paper)
-
-
-async def pending(conn: psycopg.AsyncConnection, limit: int = 5000) -> list[Paper]:
-    """Unscreened papers, oldest fetched first."""
-    rows = await (
-        await conn.execute(
-            "SELECT * FROM papers WHERE screened_at IS NULL ORDER BY fetched_at LIMIT %s",
-            (limit,),
-        )
-    ).fetchall()
-    return [row_to_paper(r) for r in rows]
 
 
 def row_to_paper(row: dict[str, Any]) -> Paper:
@@ -91,74 +75,257 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> None:
-    await conn.execute(
-        """
-        UPDATE papers SET screened_at = now(), screen = %s, tier = %s,
-                          prompt_version = %s, screen_error = NULL
-        WHERE id = %s
-        """,
-        (
-            Jsonb(result.model_dump(mode="json")),
-            result.tier.value,
-            result.prompt_version,
-            result.paper_id,
-        ),
-    )
+async def pending(
+    conn: psycopg.AsyncConnection,
+    selections: list[Selection],
+    window_days: int = 30,
+    limit: int = 20000,
+) -> list[Paper]:
+    """Papers that need a screening call under the given selections.
 
-
-def parse_screen(raw: dict[str, Any]) -> ScreenResult:
-    """Reads the stored screen JSON, including the pre-0.3 shape without `stages`."""
-    if "stages" in raw:
-        return ScreenResult.model_validate(raw)
-    usage = [Usage.model_validate(u) for u in raw.get("usage", [])] or [Usage(model=raw["model"])]
-    first = raw.get("first_stage") or raw["output"]
-    stages = [Stage(role=StageRole.SCREEN, model=usage[0].model, output=first, usage=usage[0])]
-    if raw.get("rescreened"):
-        stages.append(
-            Stage(
-                role=StageRole.RESCREEN, model=raw["model"], output=raw["output"], usage=usage[-1]
+    New papers always. Papers in the window whose stored judgement for some selection is missing
+    or predates its current version, restricted for an edited selection to its members and keyword
+    hits; a selection with no verdicts at all is new and takes the whole window.
+    """
+    current = {s.slug: s.version for s in selections}
+    since = datetime.now(UTC) - timedelta(days=window_days)
+    new = await (
+        await conn.execute(
+            "SELECT * FROM papers WHERE screened_at IS NULL ORDER BY fetched_at LIMIT %s", (limit,)
+        )
+    ).fetchall()
+    chosen = {r["id"]: r for r in new}
+    fresh = {s.slug for s in selections if not await has_verdicts(conn, s.slug)}
+    for s in selections:
+        rows = await (
+            await conn.execute(
+                """
+                SELECT p.*, coalesce((SELECT v.tier FROM verdicts v
+                                      WHERE v.paper_id = p.id AND v.selection = %(slug)s), 4) AS t
+                FROM papers p
+                WHERE p.screened_at IS NOT NULL AND p.published >= %(since)s
+                  AND NOT EXISTS (SELECT 1 FROM verdicts v
+                                  WHERE v.paper_id = p.id AND v.selection = %(slug)s
+                                    AND v.version = %(version)s)
+                ORDER BY p.published DESC LIMIT %(limit)s
+                """,
+                {"slug": s.slug, "version": current[s.slug], "since": since, "limit": limit},
             )
-        )
-    return ScreenResult(
-        paper_id=raw["paper_id"], prompt_version=raw["prompt_version"], stages=stages
-    )
+        ).fetchall()
+        for r in rows:
+            if r["id"] in chosen:
+                continue
+            if s.slug in fresh or r["t"] < NOT_MEMBER or s.keyword_hit(row_to_paper(r)):
+                chosen[r["id"]] = r
+    return [row_to_paper(r) for r in chosen.values()]
 
 
-async def migrate_screens(conn: psycopg.AsyncConnection) -> int:
-    """Rewrites pre-0.3 screen JSON into the staged shape. Returns rows rewritten."""
-    rows = await (
-        await conn.execute(
-            "SELECT id, screen FROM papers WHERE screen IS NOT NULL AND screen->'stages' IS NULL"
-        )
-    ).fetchall()
-    for r in rows:
-        await conn.execute(
-            "UPDATE papers SET screen = %s WHERE id = %s",
-            (Jsonb(parse_screen(r["screen"]).model_dump(mode="json")), r["id"]),
-        )
-    return len(rows)
+async def has_verdicts(conn: psycopg.AsyncConnection, slug: str) -> bool:
+    row = await (
+        await conn.execute("SELECT 1 AS x FROM verdicts WHERE selection = %s LIMIT 1", (slug,))
+    ).fetchone()
+    return row is not None
 
 
-async def unconfirmed_positives(conn: psycopg.AsyncConnection) -> list[tuple[Paper, ScreenResult]]:
-    """Routed-tier papers whose screening predates the confirm stage."""
-    rows = await (
+async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> None:
+    """The staged JSON on the paper, one verdict row per selection, and the paper's best tier."""
+    verdicts = result.verdicts
+    async with conn.transaction():
         await conn.execute(
             """
-            SELECT * FROM papers
-            WHERE tier IN ('must_read', 'aware')
-              AND (screen->'stages' IS NULL
-                   OR NOT (screen->'stages' @> '[{"role": "confirm"}]'))
-            ORDER BY published DESC
-            """
+            UPDATE papers SET screened_at = now(), screen = %s, best_tier = %s,
+                              prompt_version = %s, selections_version = %s, screen_error = NULL
+            WHERE id = %s
+            """,
+            (
+                Jsonb(result.model_dump(mode="json")),
+                result.best_tier,
+                result.prompt_version,
+                versions_hash(result.versions),
+                result.paper_id,
+            ),
         )
-    ).fetchall()
-    return [(row_to_paper(r), parse_screen(r["screen"])) for r in rows]
+        for slug, v in verdicts.items():
+            await conn.execute(
+                """
+                INSERT INTO verdicts (paper_id, selection, tier, confidence, reason, version,
+                                      model, screened_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (paper_id, selection) DO UPDATE SET
+                    tier = EXCLUDED.tier, confidence = EXCLUDED.confidence,
+                    reason = EXCLUDED.reason, version = EXCLUDED.version,
+                    model = EXCLUDED.model, screened_at = now()
+                """,
+                (
+                    result.paper_id,
+                    slug,
+                    v.tier,
+                    v.confidence.value,
+                    v.reason,
+                    result.versions.get(slug, ""),
+                    result.model,
+                ),
+            )
+
+
+def parse_screen(raw: dict[str, Any] | None) -> ScreenResult | None:
+    """The stored screen JSON, or None for rows screened before selections existed."""
+    if not raw or raw.get("schema_version") != 2:
+        return None
+    return ScreenResult.model_validate(raw)
 
 
 async def store_screen_error(conn: psycopg.AsyncConnection, paper_id: str, error: str) -> None:
     """Leaves the paper pending so the next run retries it."""
     await conn.execute("UPDATE papers SET screen_error = %s WHERE id = %s", (error, paper_id))
+
+
+async def verdicts_for(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Verdict]:
+    rows = await (
+        await conn.execute(
+            "SELECT selection, tier, confidence, reason FROM verdicts WHERE paper_id = %s",
+            (paper_id,),
+        )
+    ).fetchall()
+    return {
+        r["selection"]: Verdict(tier=r["tier"], confidence=r["confidence"], reason=r["reason"])
+        for r in rows
+    }
+
+
+async def unconfirmed_positives(
+    conn: psycopg.AsyncConnection,
+) -> list[tuple[Paper, ScreenResult]]:
+    """Papers with a tier 1/2 verdict that no confirm stage has judged."""
+    rows = await (
+        await conn.execute(
+            """
+            SELECT p.* FROM papers p
+            WHERE p.best_tier <= 2 AND p.screen->>'schema_version' = '2'
+            ORDER BY p.published DESC
+            """
+        )
+    ).fetchall()
+    out = []
+    for r in rows:
+        result = parse_screen(r["screen"])
+        if result and any(
+            v.tier <= 2 and slug not in result.confirmed_slugs()
+            for slug, v in result.verdicts.items()
+        ):
+            out.append((row_to_paper(r), result))
+    return out
+
+
+async def forget_verdicts(
+    conn: psycopg.AsyncConnection, slug: str, window_days: int | None = None
+) -> int:
+    """Drop a selection's verdicts (in a window) so the next run judges them again."""
+    if window_days is None:
+        cur = await conn.execute("DELETE FROM verdicts WHERE selection = %s", (slug,))
+    else:
+        since = datetime.now(UTC) - timedelta(days=window_days)
+        cur = await conn.execute(
+            """
+            DELETE FROM verdicts v USING papers p
+            WHERE v.paper_id = p.id AND v.selection = %s AND p.published >= %s
+            """,
+            (slug, since),
+        )
+    return cur.rowcount
+
+
+# -- selections -----------------------------------------------------------------------------------
+
+
+async def list_selections(
+    conn: psycopg.AsyncConnection, status: Status | None = None
+) -> list[Selection]:
+    clause = "WHERE status = %s" if status else ""
+    rows = await (
+        await conn.execute(
+            f"SELECT * FROM selections {clause} ORDER BY created_at, slug",
+            (status.value,) if status else (),
+        )
+    ).fetchall()
+    return [_row_to_selection(r) for r in rows]
+
+
+def _row_to_selection(r: dict[str, Any]) -> Selection:
+    return Selection(
+        slug=r["slug"],
+        name=r["name"],
+        subject=r["subject"],
+        rubric=r["rubric"],
+        keywords=list(r["keywords"] or []),
+        owner=r["owner"],
+        status=Status(r["status"]),
+        notion_id=r["notion_id"],
+    )
+
+
+async def upsert_selection(conn: psycopg.AsyncConnection, s: Selection) -> bool:
+    """Insert or update by slug. Returns True when the screener-visible content changed."""
+    row = await (
+        await conn.execute(
+            """
+            INSERT INTO selections (slug, name, owner, status, subject, rubric, keywords, version,
+                                    notion_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (slug) DO UPDATE SET
+                name = EXCLUDED.name, owner = EXCLUDED.owner, status = EXCLUDED.status,
+                subject = EXCLUDED.subject, rubric = EXCLUDED.rubric,
+                keywords = EXCLUDED.keywords, version = EXCLUDED.version,
+                notion_id = coalesce(EXCLUDED.notion_id, selections.notion_id),
+                updated_at = CASE WHEN selections.version = EXCLUDED.version
+                                  THEN selections.updated_at ELSE now() END,
+                synced_at = now()
+            RETURNING (xmax = 0) AS inserted, (updated_at = synced_at) AS changed
+            """,
+            (
+                s.slug,
+                s.name,
+                s.owner,
+                s.status.value,
+                s.subject,
+                s.rubric,
+                s.keywords,
+                s.version,
+                s.notion_id,
+            ),
+        )
+    ).fetchone()
+    return bool(row and (row["inserted"] or row["changed"]))
+
+
+async def pause_missing_selections(conn: psycopg.AsyncConnection, keep: list[str]) -> list[str]:
+    """Selections absent from an authoritative sync are paused, never deleted."""
+    rows = await (
+        await conn.execute(
+            """
+            UPDATE selections SET status = 'paused', synced_at = now()
+            WHERE status <> 'paused' AND NOT (slug = ANY(%s)) RETURNING slug
+            """,
+            (keep,),
+        )
+    ).fetchall()
+    return [r["slug"] for r in rows]
+
+
+async def selection_counts(conn: psycopg.AsyncConnection) -> dict[str, dict[int, int]]:
+    """Members per tier per selection, for the Notion status columns."""
+    rows = await (
+        await conn.execute(
+            "SELECT selection, tier, count(*) AS n FROM verdicts WHERE tier < 4 GROUP BY 1, 2"
+        )
+    ).fetchall()
+    out: dict[str, dict[int, int]] = {}
+    for r in rows:
+        out.setdefault(r["selection"], {})[int(r["tier"])] = int(r["n"])
+    return out
+
+
+# -- runs -----------------------------------------------------------------------------------------
 
 
 async def start_run(
@@ -194,72 +361,6 @@ async def list_runs(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict
     ).fetchall()
 
 
-async def list_papers(
-    conn: psycopg.AsyncConnection,
-    tiers: list[str] | None = None,
-    since: datetime | None = None,
-    limit: int = 100,
-) -> list[dict[str, Any]]:
-    """Screened papers, newest screening first, with screen JSON and routing state inline."""
-    clauses, params = ["screened_at IS NOT NULL"], []
-    if tiers:
-        clauses.append("tier = ANY(%s)")
-        params.append(tiers)
-    if since:
-        clauses.append("screened_at >= %s")
-        params.append(since)
-    params.append(limit)
-    rows = await (
-        await conn.execute(
-            f"""
-            SELECT id, title, authors, categories, primary_category, published, url, fetched_at,
-                   screened_at, tier, keyword_hit, screen,
-                   zotero_key, zotero_attachment_key, routed_at, routed_tier, route_error,
-                   enrichment, enriched_at, enrichment_model, enrichment_error, deep_stats
-            FROM papers WHERE {" AND ".join(clauses)}
-            ORDER BY screened_at DESC LIMIT %s
-            """,
-            params,
-        )
-    ).fetchall()
-    return rows
-
-
-async def run_positives(
-    conn: psycopg.AsyncConnection, run_id: int
-) -> list[tuple[Paper, ScreenResult]]:
-    """Tier 1/2 papers screened during the given run, newest first."""
-    rows = await (
-        await conn.execute(
-            """
-            SELECT p.* FROM papers p, runs r
-            WHERE r.id = %s AND p.tier IN ('must_read', 'aware')
-              AND p.screened_at >= r.started_at
-              AND p.screened_at <= coalesce(r.finished_at, now())
-            ORDER BY p.published DESC
-            """,
-            (run_id,),
-        )
-    ).fetchall()
-    return [(row_to_paper(r), parse_screen(r["screen"])) for r in rows]
-
-
-async def positives_since(
-    conn: psycopg.AsyncConnection, since: datetime
-) -> list[tuple[Paper, ScreenResult]]:
-    """Tier 1/2 papers screened since `since`, newest first (for ad hoc digests)."""
-    rows = await (
-        await conn.execute(
-            """
-            SELECT * FROM papers WHERE tier IN ('must_read', 'aware') AND screened_at >= %s
-            ORDER BY published DESC
-            """,
-            (since,),
-        )
-    ).fetchall()
-    return [(row_to_paper(r), parse_screen(r["screen"])) for r in rows]
-
-
 async def store_digest(
     conn: psycopg.AsyncConnection, run_id: int, text: str, model: str | None
 ) -> None:
@@ -268,29 +369,125 @@ async def store_digest(
     )
 
 
+# -- reading papers -------------------------------------------------------------------------------
+
+VERDICTS_JSON = """
+    (SELECT jsonb_object_agg(v.selection, jsonb_build_object(
+                'tier', v.tier, 'confidence', v.confidence, 'reason', v.reason))
+     FROM verdicts v WHERE v.paper_id = p.id AND v.tier < 4) AS verdicts
+"""
+PAPER_COLUMNS = """
+    p.id, p.title, p.authors, p.categories, p.primary_category, p.published, p.url, p.fetched_at,
+    p.screened_at, p.best_tier, p.prompt_version, p.selections_version,
+    p.zotero_key, p.zotero_attachment_key, p.routed_at, p.routed_tier, p.route_error,
+    p.enrichment, p.enriched_at, p.enrichment_model, p.enrichment_error, p.deep_stats
+"""
+
+
+async def list_papers(
+    conn: psycopg.AsyncConnection,
+    selection: str | None = None,
+    tiers: list[int] | None = None,
+    since: datetime | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Member papers (best tier 1..3), newest screening first, with verdicts and state inline.
+
+    `selection` restricts to members of that selection; `tiers` then applies to its verdict,
+    otherwise to the paper's best tier.
+    """
+    tiers = tiers or [1, 2, 3]
+    clauses, params = ["p.screened_at IS NOT NULL"], []
+    if selection:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM verdicts v WHERE v.paper_id = p.id AND v.selection = %s "
+            "AND v.tier = ANY(%s))"
+        )
+        params += [selection, tiers]
+    else:
+        clauses.append("p.best_tier = ANY(%s)")
+        params.append(tiers)
+    if since:
+        clauses.append("p.screened_at >= %s")
+        params.append(since)
+    params.append(limit)
+    return await (
+        await conn.execute(
+            f"""
+            SELECT {PAPER_COLUMNS}, {VERDICTS_JSON}
+            FROM papers p WHERE {" AND ".join(clauses)}
+            ORDER BY p.screened_at DESC LIMIT %s
+            """,
+            params,
+        )
+    ).fetchall()
+
+
+async def run_members(conn: psycopg.AsyncConnection, run_id: int) -> list[dict[str, Any]]:
+    """Papers screened during the run that are members of some selection, for the digest."""
+    return await (
+        await conn.execute(
+            f"""
+            SELECT {PAPER_COLUMNS}, p.abstract, {VERDICTS_JSON}
+            FROM papers p, runs r
+            WHERE r.id = %s AND p.best_tier < 4
+              AND p.screened_at >= r.started_at
+              AND p.screened_at <= coalesce(r.finished_at, now())
+            ORDER BY p.best_tier, p.published DESC
+            """,
+            (run_id,),
+        )
+    ).fetchall()
+
+
+async def members_since(conn: psycopg.AsyncConnection, since: datetime) -> list[dict[str, Any]]:
+    return await (
+        await conn.execute(
+            f"""
+            SELECT {PAPER_COLUMNS}, p.abstract, {VERDICTS_JSON}
+            FROM papers p WHERE p.best_tier < 4 AND p.screened_at >= %s
+            ORDER BY p.best_tier, p.published DESC
+            """,
+            (since,),
+        )
+    ).fetchall()
+
+
 async def stats(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     tiers = await (
         await conn.execute(
-            "SELECT coalesce(tier, 'pending') AS tier, count(*) AS n FROM papers GROUP BY 1"
+            """
+            SELECT CASE WHEN screened_at IS NULL THEN 'pending'
+                        WHEN best_tier IS NULL THEN 'legacy'
+                        ELSE best_tier::text END AS tier, count(*) AS n
+            FROM papers GROUP BY 1
+            """
         )
     ).fetchall()
     total = await (await conn.execute("SELECT count(*) AS n FROM papers")).fetchone()
-    return {"papers": total["n"] if total else 0, "tiers": {r["tier"]: r["n"] for r in tiers}}
+    return {
+        "papers": total["n"] if total else 0,
+        "tiers": {r["tier"]: r["n"] for r in tiers},
+        "selections": await selection_counts(conn),
+    }
 
 
 def dumps(value: Any) -> str:
     return json.dumps(value, default=str)
 
 
+# -- routing state --------------------------------------------------------------------------------
+
+
 async def routable(
     conn: psycopg.AsyncConnection, paper_id: str | None = None, limit: int = 200
 ) -> list[tuple[Paper, ScreenResult]]:
-    """Tier 1/2 papers not yet routed, or routed at a different tier, or with a PDF still due."""
+    """Tier 1/2 papers not yet routed, routed at a different tier, or with a PDF still due."""
     clauses = [
-        "tier IN ('must_read', 'aware')",
+        "best_tier <= 2",
         """(routed_at IS NULL
-            OR routed_tier IS DISTINCT FROM tier
-            OR (tier = 'must_read' AND zotero_attachment_key IS NULL))""",
+            OR routed_tier IS DISTINCT FROM best_tier::text
+            OR (best_tier = 1 AND zotero_attachment_key IS NULL))""",
     ]
     params: list[Any] = []
     if paper_id:
@@ -303,24 +500,40 @@ async def routable(
             params,
         )
     ).fetchall()
-    return [(row_to_paper(r), parse_screen(r["screen"])) for r in rows]
+    return [(row_to_paper(r), s) for r in rows if (s := parse_screen(r["screen"]))]
+
+
+async def demoted(conn: psycopg.AsyncConnection, limit: int = 200) -> list[dict[str, Any]]:
+    """Papers with a Zotero item that no longer earn one: routed, now below tier 2."""
+    return await (
+        await conn.execute(
+            """
+            SELECT id, zotero_key, routed_tier, best_tier FROM papers
+            WHERE zotero_key IS NOT NULL AND routed_tier IS DISTINCT FROM 'none'
+              AND best_tier IS NOT NULL AND best_tier > 2
+            ORDER BY published DESC LIMIT %s
+            """,
+            (limit,),
+        )
+    ).fetchall()
 
 
 async def store_route(
     conn: psycopg.AsyncConnection,
     paper_id: str,
-    tier: str,
-    zotero_key: str,
+    tier: int | str,
+    zotero_key: str | None,
     attachment_key: str | None,
 ) -> None:
     await conn.execute(
         """
-        UPDATE papers SET routed_at = now(), routed_tier = %s, zotero_key = %s,
+        UPDATE papers SET routed_at = now(), routed_tier = %s,
+                          zotero_key = coalesce(%s, zotero_key),
                           zotero_attachment_key = coalesce(%s, zotero_attachment_key),
                           route_error = NULL
         WHERE id = %s
         """,
-        (tier, zotero_key, attachment_key, paper_id),
+        (str(tier), zotero_key, attachment_key, paper_id),
     )
 
 
@@ -332,7 +545,7 @@ async def get_paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, A
     return await (await conn.execute("SELECT * FROM papers WHERE id = %s", (paper_id,))).fetchone()
 
 
-# -- paper text and deep processing (phase 4) -----------------------------------------------------
+# -- paper text and deep processing ---------------------------------------------------------------
 
 
 async def store_body(conn: psycopg.AsyncConnection, paper_id: str, body: str, source: str) -> None:
@@ -350,15 +563,14 @@ async def deep_pending(
 ) -> list[dict[str, Any]]:
     """Tier 1 papers with a Zotero item and no enrichment yet. A named paper ignores attempts."""
     if paper_id:
-        rows = await (
+        return await (
             await conn.execute("SELECT * FROM papers WHERE id = %s", (paper_id,))
         ).fetchall()
-        return rows
     return await (
         await conn.execute(
             """
             SELECT * FROM papers
-            WHERE tier = 'must_read' AND zotero_key IS NOT NULL AND enrichment IS NULL
+            WHERE best_tier = 1 AND zotero_key IS NOT NULL AND enrichment IS NULL
               AND deep_attempts < %s
             ORDER BY published DESC LIMIT %s
             """,
@@ -441,35 +653,33 @@ async def search_papers(
     conn: psycopg.AsyncConnection, query: str, limit: int = 10
 ) -> list[dict[str, Any]]:
     """Full-text search over title and abstract for the deep processor's `store.search`."""
-    rows = await (
+    return await (
         await conn.execute(
-            """
-            SELECT id, title, tier, published,
-                   screen -> 'stages' -> -1 -> 'output' ->> 'reason' AS reason,
-                   left(abstract, 400) AS abstract
-            FROM papers, websearch_to_tsquery('english', %s) q
-            WHERE search @@ q
-            ORDER BY ts_rank(search, q) DESC, published DESC
+            f"""
+            SELECT p.id, p.title, p.best_tier AS tier, p.published,
+                   left(p.abstract, 400) AS abstract,
+                   (SELECT v.reason FROM verdicts v WHERE v.paper_id = p.id AND v.tier < 4
+                    ORDER BY v.tier LIMIT 1) AS reason,
+                   {VERDICTS_JSON}
+            FROM papers p, websearch_to_tsquery('english', %s) q
+            WHERE p.search @@ q
+            ORDER BY ts_rank(p.search, q) DESC, p.published DESC
             LIMIT %s
             """,
             (query, min(limit, 50)),
         )
     ).fetchall()
-    return rows
 
 
 async def paper_summary(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
     """One paper without the text and trace, which are big and served separately."""
     return await (
         await conn.execute(
-            """
-            SELECT id, title, abstract, authors, categories, primary_category, published, url,
-                   fetched_at, screened_at, tier, keyword_hit, screen,
-                   zotero_key, zotero_attachment_key, routed_at, routed_tier, route_error,
-                   body_source, body_fetched_at, length(body) AS body_chars,
-                   enrichment, enriched_at, enrichment_model, enrichment_error, deep_stats,
-                   deep_attempts, zotero_enriched_at
-            FROM papers WHERE id = %s
+            f"""
+            SELECT {PAPER_COLUMNS}, p.abstract, p.screen, p.body_source, p.body_fetched_at,
+                   length(p.body) AS body_chars, p.deep_attempts, p.zotero_enriched_at,
+                   {VERDICTS_JSON}
+            FROM papers p WHERE p.id = %s
             """,
             (paper_id,),
         )

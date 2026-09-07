@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Outcome, Progress, Stats, TraceEvent } from "./agent.ts";
-import type { PaperInput } from "./prompt.ts";
+import type { PaperInput, SelectionContext } from "./prompt.ts";
 
 export type JobStatus = "queued" | "running" | "done" | "error";
 
@@ -10,6 +10,7 @@ export interface Job {
   id: string;
   paper_id: string;
   title: string;
+  extensions: string[];
   status: JobStatus;
   created_at: string;
   started_at?: string;
@@ -23,13 +24,20 @@ export interface Job {
   error?: string;
 }
 
-export type Runner = (paper: PaperInput, progress: Progress) => Promise<Outcome>;
+/** What a job carries into the run: the paper, the requested extensions, and the selections it is in. */
+export interface JobInput {
+  paper: PaperInput;
+  extensions: string[];
+  selections: SelectionContext[];
+}
+
+export type Runner = (input: JobInput, progress: Progress) => Promise<Outcome>;
 
 const EMPTY: Stats = { cells: 0, turns: 0, input: 0, output: 0, reasoning: 0, cache_read: 0, list_cost: 0, seconds: 0 };
 
 export class JobQueue {
   private readonly jobs = new Map<string, Job>();
-  private readonly papers = new Map<string, PaperInput>();
+  private readonly inputs = new Map<string, JobInput>();
   private readonly queue: string[] = [];
   private running: string | null = null;
   private readonly runner: Runner;
@@ -40,18 +48,19 @@ export class JobQueue {
     this.keep = keep;
   }
 
-  submit(paper: PaperInput): Job {
+  submit(paper: PaperInput, extensions: string[] = [], selections: SelectionContext[] = []): Job {
     const job: Job = {
       id: randomUUID(),
       paper_id: paper.id,
       title: paper.title,
+      extensions,
       status: "queued",
       created_at: new Date().toISOString(),
       stats: { ...EMPTY },
       last_activity: new Date().toISOString(),
     };
     this.jobs.set(job.id, job);
-    this.papers.set(job.id, paper);
+    this.inputs.set(job.id, { paper, extensions, selections });
     this.queue.push(job.id);
     this.prune();
     void this.pump();
@@ -78,14 +87,14 @@ export class JobQueue {
     const id = this.queue.shift();
     if (!id) return;
     const job = this.jobs.get(id);
-    const paper = this.papers.get(id);
-    this.papers.delete(id);
-    if (!job || !paper) return void this.pump();
+    const input = this.inputs.get(id);
+    this.inputs.delete(id);
+    if (!job || !input) return void this.pump();
     this.running = id;
     job.status = "running";
     job.started_at = new Date().toISOString();
     try {
-      const outcome = await this.runner(paper, (event, stats) => {
+      const outcome = await this.runner(input, (event, stats) => {
         job.stats = { ...stats };
         job.last_event = describe(event);
         job.last_activity = new Date().toISOString();

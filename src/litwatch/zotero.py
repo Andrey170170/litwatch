@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from litwatch.models import Paper, ScreenResult, Tier
+from litwatch.models import ROUTED_TIERS, Paper, ScreenResult
 
 log = logging.getLogger(__name__)
 
@@ -29,8 +29,10 @@ NOTE_MARKER = "<!-- litwatch:screen schema=1 -->"
 ENRICH_TAG = "litwatch:enrichment"
 ENRICH_MARKER = "<!-- litwatch:enrichment schema=1 -->"
 COLLECTION = "Litwatch"
-SUBCOLLECTIONS = {Tier.MUST_READ: "Must Read", Tier.AWARE: "Aware"}
-TIER_TAGS = {Tier.MUST_READ: "litwatch:tier:1", Tier.AWARE: "litwatch:tier:2"}
+SUBCOLLECTIONS = {1: "Tier 1", 2: "Tier 2"}
+LEGACY_SUBCOLLECTIONS = ("Must Read", "Aware")  # phase 3 names, emptied as items re-route
+TIER_TAG_PREFIX = "litwatch:tier:"
+SELECTION_TAG_PREFIX = "litwatch:sel:"
 RETRY_STATUSES = {409, 412, 429, 500, 502, 503, 504}
 
 
@@ -43,11 +45,12 @@ class Collections:
     """Keys of the managed collection tree, resolved once per client."""
 
     root: str
-    by_tier: dict[Tier, str]
+    by_tier: dict[int, str]
+    legacy: frozenset[str] = frozenset()
 
     @property
     def managed(self) -> set[str]:
-        return {self.root, *self.by_tier.values()}
+        return {self.root, *self.by_tier.values(), *self.legacy}
 
 
 class ZoteroClient:
@@ -133,7 +136,7 @@ class ZoteroClient:
         if not root:
             (root,) = await self._create("/collections", [{"name": COLLECTION}])
             log.info("created Zotero collection %s (%s)", COLLECTION, root)
-        by_tier: dict[Tier, str] = {}
+        by_tier: dict[int, str] = {}
         for tier, name in SUBCOLLECTIONS.items():
             key = by_name.get((name, root))
             if not key:
@@ -142,7 +145,8 @@ class ZoteroClient:
                 )
                 log.info("created Zotero subcollection %s (%s)", name, key)
             by_tier[tier] = key
-        self._collections = Collections(root=root, by_tier=by_tier)
+        legacy = frozenset(k for n in LEGACY_SUBCOLLECTIONS if (k := by_name.get((n, root))))
+        self._collections = Collections(root=root, by_tier=by_tier, legacy=legacy)
         return self._collections
 
     # -- items --------------------------------------------------------------------------------
@@ -163,25 +167,48 @@ class ZoteroClient:
         (key,) = await self._create("/items", [item_data(paper, collections)])
         return key
 
-    async def ensure_item(self, paper: Paper, tier: Tier) -> str:
-        """Find or create the item, then converge collections and tier tag."""
+    async def ensure_item(self, paper: Paper, tier: int, selection_tags: list[str] = ()) -> str:
+        """Find or create the item, then converge collections, tier tag, and selection tags."""
+        if tier not in ROUTED_TIERS:
+            raise ValueError(f"tier {tier} gets no Zotero item")
         cols = await self.collections()
         wanted = {cols.root, cols.by_tier[tier]}
         key = await self.find_item(paper)
         if key is None:
             key = await self.create_item(paper, sorted(wanted))
             log.info("created Zotero item %s for %s", key, paper.id)
-        tag = TIER_TAGS[tier]
+        tags = [f"{TIER_TAG_PREFIX}{tier}", *selection_tags]
 
         def mutate(data: dict[str, Any]) -> None:
             kept = [c for c in data.get("collections", []) if c not in cols.managed]
             data["collections"] = [*kept, *sorted(wanted)]
-            # Only the tier tag is replaced; other litwatch:* tags belong to later stages.
-            tags = [t for t in data.get("tags", []) if t.get("tag") not in TIER_TAGS.values()]
-            data["tags"] = [*tags, {"tag": tag}]
+            # Tier and selection tags are replaced; other litwatch:* tags belong to later stages.
+            others = [
+                t
+                for t in data.get("tags", [])
+                if not str(t.get("tag")).startswith((TIER_TAG_PREFIX, SELECTION_TAG_PREFIX))
+            ]
+            data["tags"] = [*others, *({"tag": t} for t in tags)]
 
         await self.patch_item(key, mutate)
         return key
+
+    async def release_item(self, key: str) -> None:
+        """Take the item out of the managed collections and drop its tier and selection tags.
+
+        The item itself stays in the library: deleting is the user's call, and it may carry a PDF.
+        """
+        cols = await self.collections()
+
+        def mutate(data: dict[str, Any]) -> None:
+            data["collections"] = [c for c in data.get("collections", []) if c not in cols.managed]
+            data["tags"] = [
+                t
+                for t in data.get("tags", [])
+                if not str(t.get("tag")).startswith((TIER_TAG_PREFIX, SELECTION_TAG_PREFIX))
+            ]
+
+        await self.patch_item(key, mutate)
 
     async def upsert_note(
         self, parent_key: str, html: str, marker: str = NOTE_MARKER, tag: str = NOTE_TAG
@@ -309,18 +336,21 @@ def webdav_payload(paper: Paper, pdf: bytes) -> tuple[bytes, bytes]:
     return buf.getvalue(), prop
 
 
+def selection_tags(result: ScreenResult) -> list[str]:
+    """`litwatch:sel:<slug>:<tier>` for every selection the paper is a member of."""
+    return [
+        f"{SELECTION_TAG_PREFIX}{slug}:{v.tier}"
+        for slug, v in result.verdicts.items()
+        if v.tier < 4
+    ]
+
+
 def screen_note(paper: Paper, result: ScreenResult) -> str:
-    """The `litwatch:screen` note: tier, flags, reason, and which models said so."""
-    out = result.output
-    flags = out.flags
-    rows = [
-        ("Tier", result.tier.value.replace("_", " ")),
-        ("CoT monitoring / faithfulness", _yn(flags.cot)),
-        ("Uses internals", _yn(flags.internals)),
-        ("Mechanistic interpretability", _yn(flags.mech_interp)),
-        ("Definition / benchmark", _yn(flags.foundational)),
-        ("Confidence", out.confidence.value),
-        ("Reason", _esc(out.reason)),
+    """The `litwatch:screen` note: one row per selection, then which models said so."""
+    rows = [("Best tier", str(result.best_tier))]
+    for slug, v in sorted(result.verdicts.items(), key=lambda kv: (kv[1].tier, kv[0])):
+        rows.append((_esc(slug), f"tier {v.tier}, {v.confidence.value}: {_esc(v.reason)}"))
+    rows += [
         ("Stages", ", ".join(f"{s.role.value} ({_esc(s.model)})" for s in result.stages)),
         ("Prompt", result.prompt_version),
         ("arXiv", paper.id),

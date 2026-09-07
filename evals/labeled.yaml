@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 papers:
 - id: '2502.05242'
   title: 'Beyond External Monitors: Enhancing Transparency of Large Language Models for Easier Monitoring'
@@ -28,11 +28,10 @@ papers:
   published: '2025-02-07'
   url: http://arxiv.org/abs/2502.05242v3
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
+    cot-faithfulness: 2
+    mech-interp: 2
+  note: 'gold: Andrei. | converted from v1 must_read on 2026-09-07; tier 1 or 2 under the BonaFide rubric,
+    unverified'
 - id: '2412.01113'
   title: 'LLMs Faithfully and Iteratively Compute Answers During CoT: A Systematic Analysis With Multi-step
     Arithmetics'
@@ -59,11 +58,10 @@ papers:
   published: '2024-12-02'
   url: http://arxiv.org/abs/2412.01113v4
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
+    cot-faithfulness: 2
+    mech-interp: 2
+  note: 'gold: Andrei. | converted from v1 must_read on 2026-09-07; tier 1 or 2 under the BonaFide rubric,
+    unverified'
 - id: '2502.14829'
   title: Measuring Chain of Thought Faithfulness by Unlearning Reasoning Steps
   abstract: When prompted to think step-by-step, language models (LMs) produce a chain of thought (CoT),
@@ -87,11 +85,10 @@ papers:
   published: '2025-02-20'
   url: http://arxiv.org/abs/2502.14829v4
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
+    cot-faithfulness: 2
+    mech-interp: 2
+  note: 'gold: Andrei. | converted from v1 must_read on 2026-09-07; tier 1 or 2 under the BonaFide rubric,
+    unverified'
 - id: '2502.18848'
   title: A Causal Lens for Evaluating Faithfulness Metrics
   abstract: 'Large Language Models (LLMs) offer natural language explanations as an alternative to feature
@@ -117,11 +114,10 @@ papers:
   published: '2025-02-26'
   url: http://arxiv.org/abs/2502.18848v3
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei. why not mech interp? wouldn''t mech interp as a field be the widest?'
+    cot-faithfulness: 1
+    mech-interp: 2
+  note: 'gold: Andrei. why not mech interp? wouldn''t mech interp as a field be the widest? | tier reviewed
+    by hand against the confirmed v3 verdict 2026-09-07'
 - id: '2507.12379'
   title: Probing for Arithmetic Errors in Language Models
   abstract: We investigate whether internal activations in language models can be used to detect arithmetic
@@ -145,11 +141,10 @@ papers:
   published: '2025-07-16'
   url: http://arxiv.org/abs/2507.12379v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
+    cot-faithfulness: 2
+    mech-interp: 2
+  note: 'gold: Andrei. | converted from v1 must_read on 2026-09-07; tier 1 or 2 under the BonaFide rubric,
+    unverified'
 - id: '2507.22928'
   title: How does Chain of Thought Think? Mechanistic Interpretability of Chain-of-Thought Reasoning with
     Sparse Autoencoding
@@ -176,11 +171,10 @@ papers:
   published: '2025-07-24'
   url: http://arxiv.org/abs/2507.22928v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
+    cot-faithfulness: 2
+    mech-interp: 2
+  note: 'gold: Andrei. | converted from v1 must_read on 2026-09-07; tier 1 or 2 under the BonaFide rubric,
+    unverified'
 - id: '2510.04040'
   title: 'FaithCoT-Bench: Benchmarking Instance-Level Faithfulness of Chain-of-Thought Reasoning'
   abstract: Large language models (LLMs) increasingly rely on Chain-of-Thought (CoT) prompting to improve
@@ -214,11 +208,9 @@ papers:
   published: '2025-10-05'
   url: http://arxiv.org/abs/2510.04040v2
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
+    cot-faithfulness: 1
+    mech-interp: 2
+  note: 'gold: Andrei. | tier reviewed by hand against the confirmed v3 verdict 2026-09-07'
 - id: '2512.01222'
   title: Unsupervised decoding of encoded reasoning using language model interpretability
   abstract: As large language models become increasingly capable, there is growing concern that they may
@@ -243,11 +235,10 @@ papers:
   published: '2025-12-01'
   url: http://arxiv.org/abs/2512.01222v2
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'gold: Andrei.'
+    cot-faithfulness: 2
+    mech-interp: 2
+  note: 'gold: Andrei. | converted from v1 must_read on 2026-09-07; tier 1 or 2 under the BonaFide rubric,
+    unverified'
 - id: '2301.13379'
   title: Faithful Chain-of-Thought Reasoning
   abstract: 'While Chain-of-Thought (CoT) prompting boosts Language Models'' (LM) performance on a gamut
@@ -275,10 +266,8 @@ papers:
   published: '2023-01-31'
   url: http://arxiv.org/abs/2301.13379v3
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'gold: Andrei.'
 - id: '2305.02556'
   title: Faithful Question Answering with Monte-Carlo Planning
@@ -305,10 +294,8 @@ papers:
   published: '2023-05-04'
   url: http://arxiv.org/abs/2305.02556v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'gold: Andrei.'
 - id: '2602.00449'
   title: Do Latent-CoT Models Think Step-by-Step? A Mechanistic Study on Sequential Reasoning Tasks
@@ -334,11 +321,11 @@ papers:
   published: '2026-01-31'
   url: http://arxiv.org/abs/2602.00449v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 2
+    cot-monitoring: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2602.02496'
   title: 'The Hypocrisy Gap: Quantifying Divergence Between Internal Belief and Chain-of-Thought Explanation
     via Sparse Autoencoders'
@@ -362,11 +349,10 @@ papers:
   published: '2026-01-14'
   url: http://arxiv.org/abs/2602.02496v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 1
+    mech-interp: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | tier reviewed by hand against the confirmed
+    v3 verdict 2026-09-07'
 - id: '2602.03978'
   title: 'Monitorability as a Free Gift: How RLVR Spontaneously Aligns Reasoning'
   abstract: 'As Large Reasoning Models (LRMs) are increasingly deployed, auditing their chain-of-thought
@@ -393,11 +379,11 @@ papers:
   published: '2026-02-03'
   url: http://arxiv.org/abs/2602.03978v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2602.04856'
   title: 'CoT is Not the Chain of Truth: An Empirical Internal Analysis of Reasoning LLMs for Fake News
     Generation'
@@ -429,11 +415,10 @@ papers:
   published: '2026-02-04'
   url: http://arxiv.org/abs/2602.04856v3
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2602.07833'
   title: 'SPD-Faith Bench: Diagnosing and Improving Faithfulness in Chain-of-Thought for Multimodal Large
     Language Models'
@@ -463,11 +448,10 @@ papers:
   published: '2026-02-08'
   url: http://arxiv.org/abs/2602.07833v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2603.01437'
   title: 'Post-Hoc Reasoning in Chain of Thought: Decoding and Steering Pre-Committed Answers'
   abstract: 'As chain of thought (CoT) has become central to scaling reasoning capabilities in large language
@@ -493,11 +477,10 @@ papers:
   published: '2026-03-02'
   url: http://arxiv.org/abs/2603.01437v2
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 1
+    mech-interp: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | tier reviewed by hand against the confirmed
+    v3 verdict 2026-09-07'
 - id: '2603.04069'
   title: Monitoring Emergent Reward Hacking During Generation via Internal Activations
   abstract: Fine-tuned large language models can exhibit reward-hacking behavior arising from emergent
@@ -524,11 +507,11 @@ papers:
   published: '2026-03-04'
   url: http://arxiv.org/abs/2603.04069v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+    cot-monitoring: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2603.05488'
   title: 'Reasoning Theater: Disentangling Model Beliefs from Chain-of-Thought'
   abstract: 'We provide evidence of performative chain-of-thought (CoT) in reasoning models, where a model
@@ -559,11 +542,10 @@ papers:
   published: '2026-03-05'
   url: http://arxiv.org/abs/2603.05488v4
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 1
+    mech-interp: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | tier reviewed by hand against the confirmed
+    v3 verdict 2026-09-07'
 - id: '2603.13791'
   title: DeceptGuard :A Constitutional Oversight Framework For Detecting Deception in LLM Agents
   abstract: 'Reliable detection of deceptive behavior in Large Language Model (LLM) agents is an essential
@@ -592,11 +574,11 @@ papers:
   published: '2026-03-14'
   url: http://arxiv.org/abs/2603.13791v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2603.17199'
   title: 'Catching rationalization in the act: detecting motivated reasoning before and after CoT via
     activation probing'
@@ -622,11 +604,10 @@ papers:
   published: '2026-03-17'
   url: http://arxiv.org/abs/2603.17199v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 1
+    mech-interp: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | tier reviewed by hand against the confirmed
+    v3 verdict 2026-09-07'
 - id: '2603.18579'
   title: 'ICE: Intervention-Consistent Explanation Evaluation with Statistical Grounding for LLMs'
   abstract: Evaluating whether explanations faithfully reflect a model's reasoning remains an open problem.
@@ -652,11 +633,10 @@ papers:
   published: '2026-03-19'
   url: http://arxiv.org/abs/2603.18579v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2605.09502'
   title: 'Hidden Error Awareness in Chain-of-Thought Reasoning: The Signal Is Diagnostic, Not Causal'
   abstract: 'Chain-of-thought (CoT) prompting assumes that generated reasoning reflects a model''s internal
@@ -686,11 +666,11 @@ papers:
   published: '2026-05-10'
   url: http://arxiv.org/abs/2605.09502v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 2
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2605.22072'
   title: 'Faithful-MR1: Faithful Multimodal Reasoning via Anchoring and Reinforcing Visual Attention'
   abstract: 'Reinforcement learning with verifiable rewards (RLVR) has emerged as a promising paradigm
@@ -725,11 +705,10 @@ papers:
   published: '2026-05-21'
   url: http://arxiv.org/abs/2605.22072v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: false
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2605.26893'
   title: 'GeoFaith: A Spatio-Temporal Dual View of Faithful Chain-of-Thought'
   abstract: Chain-of-Thought (CoT) reasoning has advanced large language models (LLMs), but outcome-based
@@ -756,11 +735,10 @@ papers:
   published: '2026-05-26'
   url: http://arxiv.org/abs/2605.26893v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2606.04717'
   title: 'Auditing CoT Answer-Hijack Patches: Source-Control Certificates with Type-I Guarantees'
   abstract: 'Chain-of-thought (CoT) answer-hijack templates can flip the final numeric answer of a 7B-8B
@@ -789,11 +767,10 @@ papers:
   published: '2026-06-03'
   url: http://arxiv.org/abs/2606.04717v2
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2606.05106'
   title: Arithmetic Pedagogy for Language Models
   abstract: We investigate whether methods of human mathematics pedagogy can guide the training of language
@@ -820,11 +797,10 @@ papers:
   published: '2026-06-03'
   url: http://arxiv.org/abs/2606.05106v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2606.12618'
   title: '"Did you lie?" Evaluating Lie Detectors across Model Scale and Belief-Verified Model Organisms'
   abstract: 'Robust lie detectors for language models could enable powerful techniques for auditing, monitoring,
@@ -851,11 +827,10 @@ papers:
   published: '2026-06-10'
   url: http://arxiv.org/abs/2606.12618v2
   expected:
-    cot: true
-    internals: true
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2608.00583'
   title: 'A False Average: Chain-of-Thought Monitors Collapse Where They Are the Only Defense'
   abstract: 'Chain-of-thought (CoT) monitoring is meant to catch the reward hacks that look clean in the
@@ -882,11 +857,11 @@ papers:
   published: '2026-08-01'
   url: http://arxiv.org/abs/2608.00583v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2608.04928'
   title: Does Out-of-Sight Equal Out-of-Mind in CoT Monitorability?
   abstract: Chain-of-thought (CoT) reasoning offers a window into the decision-making of large language
@@ -911,11 +886,10 @@ papers:
   published: '2026-08-05'
   url: http://arxiv.org/abs/2608.04928v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: false
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | tier reviewed by hand against the confirmed
+    v3 verdict 2026-09-07'
 - id: '2307.11768'
   title: Question Decomposition Improves the Faithfulness of Model-Generated Reasoning
   abstract: As large language models (LLMs) perform more difficult tasks, it becomes harder to verify
@@ -964,10 +938,8 @@ papers:
   published: '2023-07-17'
   url: http://arxiv.org/abs/2307.11768v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 2
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2402.11863'
   title: How Interpretable are Reasoning Explanations from Prompting Large Language Models?
@@ -993,11 +965,10 @@ papers:
   published: '2024-02-19'
   url: http://arxiv.org/abs/2402.11863v3
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2402.14897'
   title: Chain-of-Thought Unfaithfulness as Disguised Accuracy
   abstract: Understanding the extent to which Chain-of-Thought (CoT) generations align with a large language
@@ -1024,11 +995,10 @@ papers:
   published: '2024-02-22'
   url: http://arxiv.org/abs/2402.14897v3
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2405.15092'
   title: Dissociation of Faithful and Unfaithful Reasoning in LLMs
   abstract: 'Large language models (LLMs) often improve their performance in downstream tasks when they
@@ -1053,10 +1023,8 @@ papers:
   published: '2024-05-23'
   url: http://arxiv.org/abs/2405.15092v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 3
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2501.08156'
   title: Are DeepSeek R1 And Other Reasoning Models More Faithful?
@@ -1086,10 +1054,8 @@ papers:
   published: '2025-01-14'
   url: http://arxiv.org/abs/2501.08156v5
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 2
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2503.11248'
   title: Reasoning-Grounded Natural Language Explanations for Language Models
@@ -1114,10 +1080,8 @@ papers:
   published: '2025-03-14'
   url: http://arxiv.org/abs/2503.11248v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2503.11926'
   title: Monitoring Reasoning Models for Misbehavior and the Risks of Promoting Obfuscation
@@ -1151,10 +1115,9 @@ papers:
   published: '2025-03-14'
   url: http://arxiv.org/abs/2503.11926v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2505.03439'
   title: The Steganographic Potentials of Language Models
@@ -1180,10 +1143,9 @@ papers:
   published: '2025-05-06'
   url: http://arxiv.org/abs/2505.03439v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2505.13774'
   title: Measuring the Faithfulness of Thinking Drafts in Large Reasoning Models
@@ -1210,11 +1172,10 @@ papers:
   published: '2025-05-19'
   url: http://arxiv.org/abs/2505.13774v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2505.23575'
   title: 'CoT Red-Handed: Stress Testing Chain-of-Thought Monitoring'
   abstract: As AI models are deployed with increasing autonomy, it is important to ensure they do not
@@ -1242,10 +1203,9 @@ papers:
   published: '2025-05-29'
   url: http://arxiv.org/abs/2505.23575v3
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2505.23945'
   title: A Closer Look at Bias and Chain-of-Thought Faithfulness of Large (Vision) Language Models
@@ -1273,11 +1233,10 @@ papers:
   published: '2025-05-29'
   url: http://arxiv.org/abs/2505.23945v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 1
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | tier reviewed by hand against the confirmed
+    v3 verdict 2026-09-07'
 - id: '2506.01926'
   title: Large language models can learn and generalize steganographic chain-of-thought under process
     supervision
@@ -1313,10 +1272,9 @@ papers:
   published: '2025-06-02'
   url: http://arxiv.org/abs/2506.01926v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2507.02737'
   title: Early Signs of Steganographic Capabilities in Frontier LLMs
@@ -1347,11 +1305,11 @@ papers:
   published: '2025-07-03'
   url: http://arxiv.org/abs/2507.02737v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2507.05246'
   title: When Chain of Thought is Necessary, Language Models Struggle to Evade Monitors
   abstract: While chain-of-thought (CoT) monitoring is an appealing AI safety defense, recent work on
@@ -1383,11 +1341,11 @@ papers:
   published: '2025-07-07'
   url: http://arxiv.org/abs/2507.05246v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2507.11473'
   title: 'Chain of Thought Monitorability: A New and Fragile Opportunity for AI Safety'
   abstract: 'AI systems that "think" in human language offer a unique opportunity for AI safety: we can
@@ -1445,10 +1403,9 @@ papers:
   published: '2025-07-15'
   url: http://arxiv.org/abs/2507.11473v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2508.19827'
   title: 'Analysing Chain of Thought Dynamics: Active Guidance or Unfaithful Post-hoc Rationalisation?'
@@ -1468,10 +1425,8 @@ papers:
   published: '2025-08-27'
   url: http://arxiv.org/abs/2508.19827v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 2
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2509.13334'
   title: 'FRIT: Using Causal Importance to Improve Chain-of-Thought Faithfulness'
@@ -1506,10 +1461,8 @@ papers:
   published: '2025-09-10'
   url: http://arxiv.org/abs/2509.13334v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 2
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2509.22363'
   title: Investigating Faithfulness in Large Audio Language Models
@@ -1534,11 +1487,10 @@ papers:
   published: '2025-09-26'
   url: http://arxiv.org/abs/2509.22363v4
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2510.01069'
   title: 'Typed Chain-of-Thought: A Curry-Howard Framework for Verifying LLM Reasoning'
   abstract: While Chain-of-Thought (CoT) prompting enhances the reasoning capabilities of large language
@@ -1559,11 +1511,10 @@ papers:
   published: '2025-10-01'
   url: http://arxiv.org/abs/2510.01069v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2510.13272'
   title: 'Beyond Correctness: Rewarding Faithful Reasoning in Retrieval-Augmented Generation'
   abstract: 'Inspired by the success of reinforcement learning (RL) in Large Language Model (LLM) training
@@ -1600,11 +1551,10 @@ papers:
   published: '2025-10-15'
   url: http://arxiv.org/abs/2510.13272v3
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2510.19476'
   title: A Concrete Roadmap towards Safety Cases based on Chain-of-Thought Monitoring
   abstract: 'As AI systems approach dangerous capability levels where inability safety cases become insufficient,
@@ -1628,11 +1578,11 @@ papers:
   published: '2025-10-22'
   url: http://arxiv.org/abs/2510.19476v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2510.19851'
   title: Can Reasoning Models Obfuscate Reasoning? Stress-Testing Chain-of-Thought Monitorability
   abstract: 'Recent findings suggest that misaligned models may exhibit deceptive behavior, raising concerns
@@ -1660,11 +1610,11 @@ papers:
   published: '2025-10-21'
   url: http://arxiv.org/abs/2510.19851v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2511.11584'
   title: Output Supervision Can Obfuscate the Chain of Thought
   abstract: OpenAI (2025) showed that training against a chain of thought (CoT) monitor can cause obfuscated
@@ -1688,10 +1638,9 @@ papers:
   published: '2025-10-11'
   url: http://arxiv.org/abs/2511.11584v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2512.00218'
   title: 'Reasoning Under Pressure: How do Training Incentives Influence Chain-of-Thought Monitorability?'
@@ -1717,11 +1666,11 @@ papers:
   published: '2025-11-28'
   url: http://arxiv.org/abs/2512.00218v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2602.05066'
   title: Bypassing AI Control Protocols via Agent-as-a-Proxy Attacks
   abstract: As AI agents automate critical workloads, they remain vulnerable to indirect prompt injection
@@ -1744,10 +1693,9 @@ papers:
   published: '2026-02-04'
   url: http://arxiv.org/abs/2602.05066v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2602.05897'
   title: 'Stop Rewarding Hallucinated Steps: Faithfulness-Aware Step-Level Reinforcement Learning for
@@ -1778,10 +1726,8 @@ papers:
   published: '2026-02-05'
   url: http://arxiv.org/abs/2602.05897v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2602.12506'
   title: On Robustness and Chain-of-Thought Consistency of RL-Finetuned VLMs
@@ -1817,10 +1763,8 @@ papers:
   published: '2026-02-13'
   url: http://arxiv.org/abs/2602.12506v3
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2602.14095'
   title: 'NEST: Nascent Encoded Steganographic Thoughts'
@@ -1852,11 +1796,11 @@ papers:
   published: '2026-02-15'
   url: http://arxiv.org/abs/2602.14095v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2602.16154'
   title: Balancing Faithfulness and Performance in Reasoning via Multi-Listener Soft Execution
   abstract: Chain-of-thought (CoT) reasoning sometimes fails to faithfully reflect the true computation
@@ -1887,10 +1831,8 @@ papers:
   published: '2026-02-18'
   url: http://arxiv.org/abs/2602.16154v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 2
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2602.18297'
   title: Analyzing and Improving Chain-of-Thought Monitorability Through Information Theory
@@ -1922,11 +1864,11 @@ papers:
   published: '2026-02-20'
   url: http://arxiv.org/abs/2602.18297v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2602.22072'
   title: 'Understanding Artificial Theory of Mind: Perturbed Tasks and Reasoning in Large Language Models'
   abstract: Theory of Mind (ToM) refers to an agent's ability to model the internal states of others.
@@ -1952,11 +1894,10 @@ papers:
   published: '2026-02-25'
   url: http://arxiv.org/abs/2602.22072v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2602.23163'
   title: A Decision-Theoretic Formalisation of Steganography With Applications to LLM Monitoring
   abstract: 'Large language models are beginning to show steganographic capabilities. Such capabilities
@@ -1992,11 +1933,11 @@ papers:
   published: '2026-02-26'
   url: http://arxiv.org/abs/2602.23163v3
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2603.09786'
   title: Quantifying the Necessity of Chain of Thought through Opaque Serial Depth
   abstract: 'Large language models (LLMs) tend to externalize their reasoning in their chain of thought,
@@ -2019,11 +1960,10 @@ papers:
   published: '2026-03-10'
   url: http://arxiv.org/abs/2603.09786v1
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 3
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2603.20172'
   title: 'Measuring Faithfulness Depends on How You Measure: Classifier Sensitivity in LLM Chain-of-Thought
     Evaluation'
@@ -2052,11 +1992,10 @@ papers:
   published: '2026-03-20'
   url: http://arxiv.org/abs/2603.20172v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 1
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | tier reviewed by hand against the confirmed
+    v3 verdict 2026-09-07'
 - id: '2603.20508'
   title: Measuring Weak-to-Strong Legibility of Reasoning Models
   abstract: Reasoning language models (RLMs) and the intermediate chains of thought they emit play an
@@ -2078,11 +2017,11 @@ papers:
   published: '2026-03-20'
   url: http://arxiv.org/abs/2603.20508v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2603.30036'
   title: 'Aligned, Orthogonal or In-conflict: When can we safely optimize Chain-of-Thought?'
   abstract: 'Chain-of-Thought (CoT) monitoring, in which automated systems monitor the CoT of an LLM,
@@ -2108,11 +2047,11 @@ papers:
   published: '2026-03-31'
   url: http://arxiv.org/abs/2603.30036v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2604.08401'
   title: 'Verify Before You Commit: Towards Faithful Reasoning in LLM Agents via Self-Auditing'
   abstract: In large language model (LLM) agents, reasoning trajectories are treated as reliable internal
@@ -2141,10 +2080,8 @@ papers:
   published: '2026-04-09'
   url: http://arxiv.org/abs/2604.08401v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2604.10693'
   title: 'FACT-E: Causality-Inspired Evaluation for Trustworthy Chain-of-Thought Reasoning'
@@ -2172,11 +2109,10 @@ papers:
   published: '2026-04-12'
   url: http://arxiv.org/abs/2604.10693v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2605.00199'
   title: 'RSAT: Structured Attribution Makes Small Language Models Faithful Table Reasoners'
   abstract: 'When a language model answers a table question, users have no way to verify which cells informed
@@ -2200,10 +2136,8 @@ papers:
   published: '2026-04-30'
   url: http://arxiv.org/abs/2605.00199v2
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2605.15257'
   title: Training on Documents About Monitoring Leads to CoT Obfuscation
@@ -2228,10 +2162,9 @@ papers:
   published: '2026-05-14'
   url: http://arxiv.org/abs/2605.15257v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2606.11998'
   title: 'Bootstrapped Monitoring: Leveraging Transparent Reasoning to Oversee Stronger AI Agents'
@@ -2254,10 +2187,9 @@ papers:
   published: '2026-06-10'
   url: http://arxiv.org/abs/2606.11998v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2607.08066'
   title: Persuasion Attacks Can Decrease Effectiveness of CoT Monitoring
@@ -2288,11 +2220,11 @@ papers:
   published: '2026-07-09'
   url: http://arxiv.org/abs/2607.08066v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: 'silver: Luna/Sol draft and Terra agree on tier | silver: v3 cascade verdict accepted 2026-09-07
+    (same prompt family; upper bound)'
 - id: '2607.09786'
   title: Length Penalties Make Chain-of-Thought Less Monitorable
   abstract: To curb overthinking and reduce inference costs, researchers now train reasoning models with
@@ -2318,11 +2250,10 @@ papers:
   published: '2026-07-08'
   url: http://arxiv.org/abs/2607.09786v3
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
-  note: 'silver: Luna/Sol draft and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: 'silver: Luna/Sol draft and Terra agree on tier | tier reviewed by hand against the confirmed
+    v3 verdict 2026-09-07'
 - id: '2607.20935'
   title: Chemical Chain-of-Thought Functions as a Hallucination-Prone Molecular Scratchpad
   abstract: 'Chemical reasoning language models are expected to derive molecular answers through faithful
@@ -2349,10 +2280,8 @@ papers:
   published: '2026-07-23'
   url: http://arxiv.org/abs/2607.20935v1
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 2
+    mech-interp: 3
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2304.14997'
   title: Towards Automated Circuit Discovery for Mechanistic Interpretability
@@ -2378,10 +2307,8 @@ papers:
   published: '2023-04-28'
   url: http://arxiv.org/abs/2304.14997v4
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2309.16042'
   title: 'Towards Best Practices of Activation Patching in Language Models: Metrics and Methods'
@@ -2405,10 +2332,8 @@ papers:
   published: '2023-09-27'
   url: http://arxiv.org/abs/2309.16042v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2310.10348'
   title: Attribution Patching Outperforms Automated Circuit Discovery
@@ -2432,10 +2357,8 @@ papers:
   published: '2023-10-16'
   url: http://arxiv.org/abs/2310.10348v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2402.12201'
   title: 'Dictionary Learning Improves Patch-Free Circuit Discovery in Mechanistic Interpretability: A
@@ -2463,10 +2386,8 @@ papers:
   published: '2024-02-19'
   url: http://arxiv.org/abs/2402.12201v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2403.00745'
   title: 'AtP*: An efficient and scalable method for localizing LLM behaviour to components'
@@ -2491,10 +2412,8 @@ papers:
   published: '2024-03-01'
   url: http://arxiv.org/abs/2403.00745v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2404.15255'
   title: How to use and interpret activation patching
@@ -2512,10 +2431,8 @@ papers:
   published: '2024-04-23'
   url: http://arxiv.org/abs/2404.15255v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2404.16014'
   title: Improving Dictionary Learning with Gated Sparse Autoencoders
@@ -2545,10 +2462,9 @@ papers:
   published: '2024-04-24'
   url: http://arxiv.org/abs/2404.16014v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2405.12522'
   title: Sparse Autoencoders Enable Scalable and Reliable Circuit Identification in Language Models
@@ -2576,10 +2492,9 @@ papers:
   published: '2024-05-21'
   url: http://arxiv.org/abs/2405.12522v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2410.20526'
   title: 'Llama Scope: Extracting Millions of Features from Llama-3.1-8B with Sparse Autoencoders'
@@ -2613,10 +2528,9 @@ papers:
   published: '2024-10-27'
   url: http://arxiv.org/abs/2410.20526v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2411.14257'
   title: Do I Know This Entity? Knowledge Awareness and Hallucinations in Language Models
@@ -2646,10 +2560,8 @@ papers:
   published: '2024-11-21'
   url: http://arxiv.org/abs/2411.14257v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2501.09929'
   title: Interpretable Steering of Large Language Models with Feature Guided Activation Additions
@@ -2679,10 +2591,8 @@ papers:
   published: '2025-01-17'
   url: http://arxiv.org/abs/2501.09929v3
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2502.00127'
   title: Sparse Autoencoder Insights on Voice Embeddings
@@ -2706,10 +2616,9 @@ papers:
   published: '2025-01-31'
   url: http://arxiv.org/abs/2502.00127v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 3
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2502.00726'
   title: Perspectives for Direct Interpretability in Multi-Agent Deep Reinforcement Learning
@@ -2733,10 +2642,8 @@ papers:
   published: '2025-02-02'
   url: http://arxiv.org/abs/2502.00726v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 3
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2503.24277'
   title: Evaluating and Designing Sparse Autoencoders by Approximating Quasi-Orthogonality
@@ -2767,10 +2674,9 @@ papers:
   published: '2025-03-31'
   url: http://arxiv.org/abs/2503.24277v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2505.08080'
   title: 'Beyond Input Activations: Identifying Influential Latents by Gradient Sparse Autoencoders'
@@ -2795,10 +2701,9 @@ papers:
   published: '2025-05-12'
   url: http://arxiv.org/abs/2505.08080v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2505.24360'
   title: Interpreting Large Text-to-Image Diffusion Models with Dictionary Learning
@@ -2824,10 +2729,8 @@ papers:
   published: '2025-05-30'
   url: http://arxiv.org/abs/2505.24360v3
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 3
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2506.07335'
   title: Improving LLM Reasoning through Interpretable Role-Playing Steering
@@ -2856,10 +2759,8 @@ papers:
   published: '2025-06-09'
   url: http://arxiv.org/abs/2506.07335v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 3
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2508.17320'
   title: 'AdaptiveK: Complexity-Driven Sparse Autoencoders for Interpretable Language Model Representations'
@@ -2883,10 +2784,9 @@ papers:
   published: '2025-08-24'
   url: http://arxiv.org/abs/2508.17320v3
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2509.00691'
   title: 'CE-Bench: Towards a Reliable Contrastive Evaluation Benchmark of Interpretability of Sparse
@@ -2908,10 +2808,9 @@ papers:
   published: '2025-08-31'
   url: http://arxiv.org/abs/2509.00691v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2510.00184'
   title: Why Can't Transformers Learn Multiplication? Reverse-Engineering Reveals Long-Range Dependency
@@ -2947,10 +2846,8 @@ papers:
   published: '2025-09-30'
   url: http://arxiv.org/abs/2510.00184v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2510.08525'
   title: Which Heads Matter for Reasoning? RL-Guided KV Cache Compression
@@ -2977,10 +2874,8 @@ papers:
   published: '2025-10-09'
   url: http://arxiv.org/abs/2510.08525v3
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 3
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2510.10142'
   title: Debiasing LLMs by Masking Unfairness-Driving Attention Heads
@@ -3013,10 +2908,8 @@ papers:
   published: '2025-10-11'
   url: http://arxiv.org/abs/2510.10142v3
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 3
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2510.11210'
   title: 'Discursive Circuits: How Do Language Models Understand Discourse Relations?'
@@ -3040,10 +2933,8 @@ papers:
   published: '2025-10-13'
   url: http://arxiv.org/abs/2510.11210v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2510.23264'
   title: 'PAHQ: Accelerating Automated Circuit Discovery through Mixed-Precision Inference Optimization'
@@ -3077,10 +2968,8 @@ papers:
   published: '2025-10-27'
   url: http://arxiv.org/abs/2510.23264v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2512.03276'
   title: 'Too Late to Recall: Explaining the Two-Hop Problem in Multimodal Knowledge Retrieval'
@@ -3113,10 +3002,8 @@ papers:
   published: '2025-12-02'
   url: http://arxiv.org/abs/2512.03276v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2512.10300'
   title: 'Investigating The Functional Roles of Attention Heads in Vision Language Models: Evidence for
@@ -3149,10 +3036,8 @@ papers:
   published: '2025-12-11'
   url: http://arxiv.org/abs/2512.10300v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2512.10978'
   title: 'Cognitive Mirrors: Exploring the Diverse Functional Roles of Attention Heads in LLM Reasoning'
@@ -3184,10 +3069,8 @@ papers:
   published: '2025-12-03'
   url: http://arxiv.org/abs/2512.10978v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2602.20338'
   title: Emergent Manifold Separability during Reasoning in Large Language Models
@@ -3214,10 +3097,8 @@ papers:
   published: '2026-02-23'
   url: http://arxiv.org/abs/2602.20338v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2602.22453'
   title: Bridging Latent Reasoning and Target-Language Generation via Retrieval-Transition Heads
@@ -3242,10 +3123,8 @@ papers:
   published: '2026-02-25'
   url: http://arxiv.org/abs/2602.22453v3
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2603.00523'
   title: 'CIRCUS: Circuit Consensus under Uncertainty via Stability Ensembles'
@@ -3271,10 +3150,8 @@ papers:
   published: '2026-02-28'
   url: http://arxiv.org/abs/2603.00523v2
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2603.20662'
   title: 'Attention in Space: Functional Roles of VLM Heads for Spatial Reasoning'
@@ -3309,10 +3186,8 @@ papers:
   published: '2026-03-21'
   url: http://arxiv.org/abs/2603.20662v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2605.25310'
   title: Tool-Call Dependency Structure is Linearly Decodable in LLM Agent Residual Streams
@@ -3338,10 +3213,8 @@ papers:
   published: '2026-05-25'
   url: http://arxiv.org/abs/2605.25310v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2605.27824'
   title: Revealing Algorithmic Deductive Circuits for Logical Reasoning
@@ -3370,10 +3243,8 @@ papers:
   published: '2026-05-27'
   url: http://arxiv.org/abs/2605.27824v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 2
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2605.31183'
   title: Steering LLMs? Actually, Sparse Autoencoders can outperform simple baselines
@@ -3398,10 +3269,9 @@ papers:
   published: '2026-05-29'
   url: http://arxiv.org/abs/2605.31183v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: true
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1406.2519'
   title: On Importance of Steganographic Cost For Network Steganography
@@ -3425,10 +3295,9 @@ papers:
   published: '2014-06-10'
   url: http://arxiv.org/abs/1406.2519v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1502.08030'
   title: Author Name Disambiguation by Using Deep Neural Network
@@ -3452,10 +3321,8 @@ papers:
   published: '2015-02-27'
   url: http://arxiv.org/abs/1502.08030v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1607.06025'
   title: Constructing a Natural Language Inference Dataset using Generative Neural Networks
@@ -3480,10 +3347,8 @@ papers:
   published: '2016-07-20'
   url: http://arxiv.org/abs/1607.06025v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1610.00633'
   title: Deep Reinforcement Learning for Robotic Manipulation with Asynchronous Off-Policy Updates
@@ -3513,10 +3378,8 @@ papers:
   published: '2016-10-03'
   url: http://arxiv.org/abs/1610.00633v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1612.07139'
   title: 'A Survey of Deep Network Solutions for Learning Control in Robotics: From Reinforcement to Imitation'
@@ -3547,10 +3410,8 @@ papers:
   published: '2016-12-21'
   url: http://arxiv.org/abs/1612.07139v4
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1703.00371'
   title: Generating Steganographic Images via Adversarial Training
@@ -3578,10 +3439,9 @@ papers:
   published: '2017-03-01'
   url: http://arxiv.org/abs/1703.00371v3
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1707.00074'
   title: Achieving Efficient and Provably Secure Steganography in Practice
@@ -3603,10 +3463,9 @@ papers:
   published: '2017-07-01'
   url: http://arxiv.org/abs/1707.00074v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1802.05934'
   title: Instance-based Inductive Deep Transfer Learning by Cross-Dataset Querying with Locality Sensitive
@@ -3635,10 +3494,8 @@ papers:
   published: '2018-02-16'
   url: http://arxiv.org/abs/1802.05934v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1802.09333'
   title: The Cut and Dominating Set Problem in A Steganographer Network
@@ -3667,10 +3524,9 @@ papers:
   published: '2018-02-20'
   url: http://arxiv.org/abs/1802.09333v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1803.07067'
   title: Setting up a Reinforcement Learning Task with a Real-World Robot
@@ -3698,10 +3554,8 @@ papers:
   published: '2018-03-19'
   url: http://arxiv.org/abs/1803.07067v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1804.07888'
   title: Stochastic Answer Networks for Natural Language Inference
@@ -3719,10 +3573,8 @@ papers:
   published: '2018-04-21'
   url: http://arxiv.org/abs/1804.07888v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1805.01599'
   title: 'Quantum Steganography over Noiseless Channels: Achievability and Bounds'
@@ -3743,10 +3595,9 @@ papers:
   published: '2018-05-04'
   url: http://arxiv.org/abs/1805.01599v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1903.05297'
   title: Learning Symmetric and Asymmetric Steganography via Adversarial Training
@@ -3771,10 +3622,9 @@ papers:
   published: '2019-03-13'
   url: http://arxiv.org/abs/1903.05297v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1904.12162'
   title: Sentiment Classification using N-gram IDF and Automated Machine Learning
@@ -3793,10 +3643,8 @@ papers:
   published: '2019-04-27'
   url: http://arxiv.org/abs/1904.12162v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '1908.11310'
   title: Aesthetic Image Captioning From Weakly-Labelled Photographs
@@ -3822,10 +3670,8 @@ papers:
   published: '2019-08-29'
   url: http://arxiv.org/abs/1908.11310v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2004.00801'
   title: Exploration of Reinforcement Learning for Event Camera using Car-like Robots
@@ -3849,10 +3695,8 @@ papers:
   published: '2020-04-02'
   url: http://arxiv.org/abs/2004.00801v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2006.08339'
   title: 'Graph-Stega: Semantic Controllable Steganographic Text Generation Guided by Knowledge Graph'
@@ -3883,10 +3727,9 @@ papers:
   published: '2020-06-02'
   url: http://arxiv.org/abs/2006.08339v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2104.02284'
   title: Text-guided Legal Knowledge Graph Reasoning
@@ -3912,10 +3755,8 @@ papers:
   published: '2021-04-06'
   url: http://arxiv.org/abs/2104.02284v4
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2105.09043'
   title: Sentence Extraction-Based Machine Reading Comprehension for Vietnamese
@@ -3945,10 +3786,8 @@ papers:
   published: '2021-05-19'
   url: http://arxiv.org/abs/2105.09043v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2106.12895'
   title: 'rSoccer: A Framework for Studying Reinforcement Learning in Small and Very Small Size Robot
@@ -3978,10 +3817,8 @@ papers:
   published: '2021-06-15'
   url: http://arxiv.org/abs/2106.12895v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2201.11903'
   title: Chain-of-Thought Prompting Elicits Reasoning in Large Language Models
@@ -4010,10 +3847,8 @@ papers:
   published: '2022-01-28'
   url: http://arxiv.org/abs/2201.11903v6
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2205.10625'
   title: Least-to-Most Prompting Enables Complex Reasoning in Large Language Models
@@ -4049,10 +3884,8 @@ papers:
   published: '2022-05-21'
   url: http://arxiv.org/abs/2205.10625v3
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2206.13969'
   title: 'MACSA: A Multimodal Aspect-Category Sentiment Analysis Dataset with Multimodal Fine-grained
@@ -4079,10 +3912,8 @@ papers:
   published: '2022-06-28'
   url: http://arxiv.org/abs/2206.13969v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2206.15007'
   title: 'GSCLIP : A Framework for Explaining Distribution Shifts in Natural Language'
@@ -4108,10 +3939,8 @@ papers:
   published: '2022-06-30'
   url: http://arxiv.org/abs/2206.15007v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2209.01326'
   title: Continual Learning for Steganalysis
@@ -4139,10 +3968,8 @@ papers:
   published: '2022-09-03'
   url: http://arxiv.org/abs/2209.01326v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2302.14521'
   title: Steganography of Steganographic Networks
@@ -4174,10 +4001,9 @@ papers:
   published: '2023-02-28'
   url: http://arxiv.org/abs/2302.14521v1
   expected:
-    cot: false
-    internals: true
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2303.00344'
   title: Inline Citation Classification using Peripheral Context and Time-evolving Augmentation
@@ -4203,10 +4029,8 @@ papers:
   published: '2023-03-01'
   url: http://arxiv.org/abs/2303.00344v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2303.01432'
   title: 'WiCE: Real-World Entailment for Claims in Wikipedia'
@@ -4230,10 +4054,8 @@ papers:
   published: '2023-03-02'
   url: http://arxiv.org/abs/2303.01432v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2304.12503'
   title: CNN-Assisted Steganography -- Integrating Machine Learning with Established Steganographic Techniques
@@ -4265,10 +4087,9 @@ papers:
   published: '2023-04-25'
   url: http://arxiv.org/abs/2304.12503v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2306.15246'
   title: Errorless Robust JPEG Steganography Using Steganographic Polar Codes
@@ -4295,10 +4116,9 @@ papers:
   published: '2023-06-27'
   url: http://arxiv.org/abs/2306.15246v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2312.07953'
   title: 'Enhancing Robotic Navigation: An Evaluation of Single and Multi-Objective Reinforcement Learning
@@ -4326,10 +4146,8 @@ papers:
   published: '2023-12-13'
   url: http://arxiv.org/abs/2312.07953v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2402.17210'
   title: Purified and Unified Steganographic Network
@@ -4360,10 +4178,9 @@ papers:
   published: '2024-02-27'
   url: http://arxiv.org/abs/2402.17210v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2404.03977'
   title: 'SEME at SemEval-2024 Task 2: Comparing Masked and Generative Language Models on Natural Language
@@ -4385,10 +4202,8 @@ papers:
   published: '2024-04-05'
   url: http://arxiv.org/abs/2404.03977v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2404.12576'
   title: Requirements Satisfiability with In-Context Learning
@@ -4417,10 +4232,8 @@ papers:
   published: '2024-04-19'
   url: http://arxiv.org/abs/2404.12576v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2404.16879'
   title: 'Learning Control Barrier Functions and their application in Reinforcement Learning: A Survey'
@@ -4448,10 +4261,8 @@ papers:
   published: '2024-04-22'
   url: http://arxiv.org/abs/2404.16879v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2405.02363'
   title: 'LLM as Dataset Analyst: Subpopulation Structure Discovery with Large Language Model'
@@ -4485,10 +4296,8 @@ papers:
   published: '2024-05-03'
   url: http://arxiv.org/abs/2405.02363v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2408.13372'
   title: Understanding Defects in Generated Codes by Language Models
@@ -4515,10 +4324,8 @@ papers:
   published: '2024-08-23'
   url: http://arxiv.org/abs/2408.13372v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2410.20825'
   title: 'ADLM -- stega: A Universal Adaptive Token Selection Algorithm for Improving Steganographic Text
@@ -4550,10 +4357,9 @@ papers:
   published: '2024-10-28'
   url: http://arxiv.org/abs/2410.20825v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2412.01690'
   title: Can We Afford The Perfect Prompt? Balancing Cost and Accuracy with the Economical Prompting Index
@@ -4578,10 +4384,8 @@ papers:
   published: '2024-12-02'
   url: http://arxiv.org/abs/2412.01690v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2412.18781'
   title: Robustness Evaluation of Offline Reinforcement Learning for Robot Control Against Action Perturbations
@@ -4606,10 +4410,8 @@ papers:
   published: '2024-12-25'
   url: http://arxiv.org/abs/2412.18781v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2501.04671'
   title: Retrieval-Based Interleaved Visual Chain-of-Thought in Real-World Driving Scenarios
@@ -4636,10 +4438,8 @@ papers:
   published: '2025-01-08'
   url: http://arxiv.org/abs/2501.04671v2
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2501.11273'
   title: Multi-round, Chain-of-thought Post-editing for Unfaithful Summaries
@@ -4663,10 +4463,8 @@ papers:
   published: '2025-01-20'
   url: http://arxiv.org/abs/2501.11273v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2504.02323'
   title: 'CoTAL: Human-in-the-Loop Prompt Engineering for Generalizable Formative Assessment Scoring and
@@ -4694,10 +4492,8 @@ papers:
   published: '2025-04-03'
   url: http://arxiv.org/abs/2504.02323v4
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2505.04135'
   title: Enhancing Granular Sentiment Classification with Chain-of-Thought Prompting in Large Language
@@ -4719,10 +4515,8 @@ papers:
   published: '2025-05-07'
   url: http://arxiv.org/abs/2505.04135v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2505.24615'
   title: Harnessing Large Language Models for Scientific Novelty Detection
@@ -4749,10 +4543,8 @@ papers:
   published: '2025-05-30'
   url: http://arxiv.org/abs/2505.24615v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2506.00072'
   title: Evaluating Prompt Engineering Techniques for Accuracy and Confidence Elicitation in Medical LLMs
@@ -4783,10 +4575,8 @@ papers:
   published: '2025-05-29'
   url: http://arxiv.org/abs/2506.00072v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2506.07404'
   title: Pixel-Sensitive and Robust Steganography Based on Polar Codes
@@ -4814,10 +4604,9 @@ papers:
   published: '2025-06-09'
   url: http://arxiv.org/abs/2506.07404v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
+    cot-monitoring: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2507.19374'
   title: Data Augmentation for Spoken Grammatical Error Correction
@@ -4845,10 +4634,8 @@ papers:
   published: '2025-07-25'
   url: http://arxiv.org/abs/2507.19374v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2512.22258'
   title: 'Logic Sketch Prompting (LSP): A Deterministic and Interpretable Prompting Method'
@@ -4874,10 +4661,8 @@ papers:
   published: '2025-12-24'
   url: http://arxiv.org/abs/2512.22258v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2601.08176'
   title: Prompt-Based Clarity Evaluation and Topic Detection in Political Question Answering
@@ -4907,10 +4692,8 @@ papers:
   published: '2026-01-13'
   url: http://arxiv.org/abs/2601.08176v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2601.08302'
   title: Enhancing Sentiment Classification and Irony Detection in Large Language Models through Advanced
@@ -4938,10 +4721,8 @@ papers:
   published: '2026-01-13'
   url: http://arxiv.org/abs/2601.08302v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2603.22288'
   title: Evaluating Prompting Strategies for Chart Question Answering with Large Language Models
@@ -4966,10 +4747,8 @@ papers:
   published: '2026-03-03'
   url: http://arxiv.org/abs/2603.22288v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2604.08563'
   title: Temperature-Dependent Performance of Prompting Strategies in Extended Reasoning Large Language
@@ -4995,10 +4774,8 @@ papers:
   published: '2026-03-18'
   url: http://arxiv.org/abs/2604.08563v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2605.24171'
   title: 'PromptAudit: Auditing Prompt Sensitivity in LLM-Based Vulnerability Detection'
@@ -5025,10 +4802,8 @@ papers:
   published: '2026-05-22'
   url: http://arxiv.org/abs/2605.24171v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2608.13112'
   title: Towards Physics-Faithful Generation of Scientific Diagrams
@@ -5072,10 +4847,8 @@ papers:
   published: '2026-08-13'
   url: http://arxiv.org/abs/2608.13112v1
   expected:
-    cot: false
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 4
+    mech-interp: 4
   note: 'silver: Luna/Sol draft and Terra agree on tier'
 - id: '2608.30676'
   title: 'MedAgent-R1: Faithfulness-Aware Reinforcement Learning for Evidence-Grounded Medical Reasoning'
@@ -5100,11 +4873,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.30676
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.25379'
   title: Adaptive Triggering for Bias Correction in LLM Reasoning
   abstract: 'Chain-of-thought prompting can expose and amplify demographic stereotypes within an LLM''s
@@ -5129,11 +4901,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.25379
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.24231'
   title: 'RecurSE: Bounded Recursive Self-Evaluation for LLM Rubric Judges'
   abstract: 'LLM-as-judge is essential for evaluating open-ended text and steering post-training, yet
@@ -5160,10 +4931,8 @@ papers:
   - cs.CL
   url: http://arxiv.org/abs/2608.24231
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
 - id: '2608.26193'
   title: 'AffectOmni: RL-Verifiable People-Centric Grounded Affective Reasoning for Social and Art-Related
@@ -5187,10 +4956,8 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.26193
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
 - id: '2609.00590'
   title: 'CRAFT: Fine-Tuning Pre-hoc Explainability in AI-native 6G RAN'
@@ -5218,10 +4985,8 @@ papers:
   - cs.LG
   url: http://arxiv.org/abs/2609.00590
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: false
+    cot-faithfulness: 3
+    mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
 - id: '2609.02852'
   title: The Implications of Linguistic Illegibility for LLM Security
@@ -5249,11 +5014,10 @@ papers:
   - cs.CR
   url: http://arxiv.org/abs/2609.02852
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 2
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.29464'
   title: Chain-of-Thought Faithfulness of Reasoning Models Varies with Where and How Preference Cues Are
     Delivered
@@ -5280,11 +5044,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.29464
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 1
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2609.00652'
   title: 'Self-Reports Are Not Verification: Environment-Grounded Auditing of LLM Operators in Evolutionary
     Search'
@@ -5309,11 +5072,10 @@ papers:
   - cs.NE
   url: http://arxiv.org/abs/2609.00652
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2609.00264'
   title: The Answer Is Not the Argument
   abstract: 'Chain-of-thought monitoring is proposed for AI oversight, yet evaluations often provide monitors
@@ -5339,11 +5101,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2609.00264
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.26036'
   title: 'Trace Integrity for LLM Data Agents: A Vision for Auditable Structured Reasoning in Real-World
     Systems'
@@ -5369,11 +5130,10 @@ papers:
   - cs.CL
   url: http://arxiv.org/abs/2608.26036
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.30679'
   title: 'LCoT-GV: Graph Attention Networks for Verifying Long Reasoning Chains in Large Language Models'
   abstract: Large Reasoning Models produce Long Chains-of-Thought (LCoTs) which involve breaking down
@@ -5391,11 +5151,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.30679
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.24232'
   title: 'TRACE: An Evidence-Grounded Benchmark for Safety Evaluation of Large Reasoning Models'
   abstract: 'Large Reasoning Models (LRMs) generate intermediate reasoning traces that may contain unsafe
@@ -5417,11 +5176,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.24232
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.29956'
   title: Detecting Hidden Chain-of-Thought in Large Language Models with Linguistic, Behavioral, and Mechanistic
     Indicators
@@ -5444,11 +5202,10 @@ papers:
   - cs.CL
   url: http://arxiv.org/abs/2608.29956
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 2
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.29286'
   title: 'MMPCBench: Benchmarking Multimodal Large Language Models on Proactive Critique of Flawed Inputs'
   abstract: 'As Multimodal Large Language Models (MLLMs) evolve into sophisticated interactive assistants,
@@ -5470,11 +5227,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.29286
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.29070'
   title: 'Selective Disclosure of Hidden Directives in Reasoning Models: Behavioral Asymmetry and Steering'
   abstract: 'Chain-of-thought (CoT) reasoning traces are increasingly proposed as a mechanism for AI oversight:
@@ -5499,11 +5255,10 @@ papers:
   - cs.LG
   url: http://arxiv.org/abs/2608.29070
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 1
+    mech-interp: 3
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.28725'
   title: 'Beyond the Answer Key: Robustness Evaluation of Large Language Models for Step-Level Mathematical
     Verification'
@@ -5526,11 +5281,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.28725
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | silver: v3 cascade verdict accepted
+    2026-09-07 (same prompt family; upper bound)'
 - id: '2608.20670'
   title: 'Why2Speak: Faithful Reasoning for Abstaining Action Policies'
   abstract: 'Many agentic systems must repeatedly choose between acting and abstaining, making faithful
@@ -5558,11 +5312,10 @@ papers:
   - cs.CL
   url: http://arxiv.org/abs/2608.20670
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 3
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana) | tier reviewed by hand against the confirmed v3 verdict 2026-09-07'
 - id: '2608.27348'
   title: INTENT-AS-A-TOOL Makes it Easy to Track Agentic Misalignment
   abstract: 'As large language models (LLMs) are deployed as autonomous agents, safety failures increasingly
@@ -5581,11 +5334,10 @@ papers:
   - cs.CL
   url: http://arxiv.org/abs/2608.27348
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.27265'
   title: 'SCIT: Testing Causal Cache Carriers in Latent Chain-of-Thought Models'
   abstract: 'Latent chain-of-thought models move intermediate reasoning from emitted text into continuous
@@ -5608,11 +5360,10 @@ papers:
   - cs.CL
   url: http://arxiv.org/abs/2608.27265
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 2
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | silver: v3 cascade verdict accepted
+    2026-09-07 (same prompt family; upper bound)'
 - id: '2608.25660'
   title: 'Think-Probe-Respond: Improving Large Language Models as Judges of Research Idea Novelty'
   abstract: 'Automated novelty judgment can accelerate scientific discovery by enabling efficient evaluation,
@@ -5631,11 +5382,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.25660
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 3
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | silver: v3 cascade verdict accepted
+    2026-09-07 (same prompt family; upper bound)'
 - id: '2608.24790'
   title: Right Diagnoses, Decorative Reasoning:A Perturbation Audit of Medical Chain-of-Thought
   abstract: 'Clinicians read chain-of-thought (CoT) rationales as evidence of medical reasoning, but whether
@@ -5657,11 +5407,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.24790
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.24958'
   title: Can We Read the Mind of an Audio LLM? A Verbalizable, Multilingual Middle-Layer Workspace
   abstract: 'An audio language model is a black box in a specific way: we see what it says, never what
@@ -5690,11 +5439,10 @@ papers:
   - cs.CL
   url: http://arxiv.org/abs/2608.24958
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 2
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
 - id: '2608.24037'
   title: 'Curved Inference II: Sleeper Agent Geometry - Extending Interpretability Beyond Probes'
   abstract: This paper extends Anthropic's Sleeper Agents research [1], which showed artificial backdoors
@@ -5721,11 +5469,11 @@ papers:
   - cs.CL
   url: http://arxiv.org/abs/2608.24037
   expected:
-    cot: true
-    internals: true
-    mech_interp: true
-    foundational: false
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 2
+    cot-monitoring: 3
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | silver: v3 cascade verdict accepted
+    2026-09-07 (same prompt family; upper bound)'
 - id: '2608.23047'
   title: 'Beyond Verdicts: A Graph-Based Analysis of Human and LLM Reasoning in Scientific Fact-Checking'
   abstract: 'Misinformation that cites legitimate papers can be especially harmful when it distorts what
@@ -5750,11 +5498,10 @@ papers:
   - cs.AI
   url: http://arxiv.org/abs/2608.23047
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 3
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | silver: v3 cascade verdict accepted
+    2026-09-07 (same prompt family; upper bound)'
 - id: '2608.21713'
   title: 'The Plan, Not the Decoder: Diagnosing and Repairing Compositional Failure in Reasoning-Augmented
     Text-to-Image Generation'
@@ -5784,8 +5531,222 @@ papers:
   - cs.LG
   url: http://arxiv.org/abs/2608.21713
   expected:
-    cot: true
-    internals: false
-    mech_interp: false
-    foundational: true
-  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier'
+    cot-faithfulness: 4
+    mech-interp: 4
+  note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
+    pending Andrei/Ana)'
+- id: '2608.27340'
+  title: 'Not All Eval-Awareness Is Equal: Capabilities Framing Predicts Compliance'
+  abstract: 'Steering interventions targeting eval-awareness, a model''s recognition that it is being
+    tested, are increasingly used in safety evaluation pipelines, where evaluation-awareness is treated
+    as a single quantity to be suppressed. We show that verbalized eval-awareness in chain-of-thought
+    can be identified as capabilities-flavored ("the user is testing my ability to follow instructions"),
+    safety-flavored ("the user is testing my boundaries"), both, or neither: framings that predict compliance
+    very differently. On Qwen3-32B over the FORTRESS dataset, capabilities-framing predicts compliance
+    with a +24 to +46 percentage-point gap over safety-framing across all tested steering conditions.
+    A CoT-prefill intervention on eval-awareness-negative rollouts suggests the link is causal, with 10
+    of 11 prefills shifting compliance in the predicted direction. Then, eval-awareness is not behaviorally
+    uniform: aggregate suppression rates can move while the safety-relevant component does not, and the
+    same "X% suppression of eval-awareness" can correspond to qualitatively different behavioral outcomes.'
+  authors:
+  - Allison Zhuang
+  - Santiago Aranguri
+  categories:
+  - cs.AI
+  primary_category: cs.AI
+  published: '2026-08-27'
+  url: http://arxiv.org/abs/2608.27340v1
+  expected:
+    cot-faithfulness: 3
+    mech-interp: 4
+    cot-monitoring: 2
+  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/Ana)
+- id: '2609.02754'
+  title: Untangling the Mechanisms of Misleading Context in Medical Question Answering
+  abstract: Large language models now answer medical questions with expert-level performance. However,
+    the context these systems act on can be misleading, and misleading context can corrupt a model's medical
+    judgment. To understand how misleading context corrupts this judgment, we examine the model's susceptibility
+    to the context, disclosure of it, mechanism of corrupted reasoning, and monitorability of the decision.
+    On the medical reasoning subset of MedMisBench, a clinician-reviewed question-answering benchmark
+    of 8,627 questions, we inject two types of misleading context cues, fabricated evidence and a bare
+    assertion. We test three reasoning models, two that expose their full reasoning trace and one frontier
+    model that exposes only its response. All three are more susceptible to the assertion than to the
+    fabricated evidence, adopting the asserted answer 10 to 27 points more often. The misleading cues
+    are disclosed in 81 to 98% of traces but only 7 to 90% of responses, and the assertion is disclosed
+    less often than evidence based cues. Resampling from reasoning traces without disclosure shows the
+    two cues corrupt reasoning differently, evidence entering early and accumulating while the assertion
+    redirects the conclusion near its end. An LLM monitor catches 78% of corrupted decisions at 5% false
+    positives when reading an open model's trace with guidance, against at most 32% from any response.
+    The misleading context that models are most susceptible to is disclosed least, and was caught reliably
+    only from an open reasoning trace, which frontier providers withhold.
+  authors:
+  - Robin Linzmayer
+  - Noémie Elhadad
+  categories:
+  - cs.CL
+  - cs.AI
+  - cs.LG
+  primary_category: cs.CL
+  published: '2026-09-02'
+  url: http://arxiv.org/abs/2609.02754v1
+  expected:
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/Ana)
+- id: '2609.03366'
+  title: 'Accountable AI with Grounded, Faithful, Consistent, Actionable Rationales: A Case Study in Clinical
+    Trial Matching with VERDICT'
+  abstract: 'Accountability means a decision can be examined, justified, and contested. LLMs make this
+    hard: fluent output may be ungrounded, incomplete, or unfaithful to the decision process. Achieving
+    accountability requires verified rationales (how was the decision reached), assumptions (what was
+    assumed rather than known), policy consistency (the same treatment for the same facts), and pivotal
+    conditions (what would change the outcome). We introduce self-faithfulness as an automatic test of
+    accountability: changing the pivotal conditions should change the decision. We examine accountable
+    AI through clinical trial matching, a high-stakes task central to evidence-based medicine. Although
+    LLM-based matchers match patients to trials reasonably accurately, they apply decision policies inconsistently
+    and produce rationales that are unfaithful to their own decisions. We introduce VERDICT, an LLM-based
+    agent that translates a decision task, its constraints, and its policy into Satisfiability Modulo
+    Theories (SMT), then derives the decision with SMT and MaxSMT solvers -- so policies are applied consistently
+    and decisions are accountable by construction. Across a SIGIR 2016-derived dataset and TREC 2021,
+    VERDICT achieves the strongest decision accuracy among LLM-only and neurosymbolic baselines, applies
+    policies with perfect consistency, and produces clinician-preferred rationales grounded in explicit
+    assumptions and pivotal conditions, with improved counterfactual self-faithfulness.'
+  authors:
+  - Zikai Zhou
+  - Yufei Jin
+  - Yilin Xu
+  - Yu-Chiang Wang
+  - Chieh-Ju Chao
+  - Monica S. Lam
+  categories:
+  - cs.CL
+  - cs.CY
+  - cs.LO
+  primary_category: cs.CL
+  published: '2026-09-03'
+  url: http://arxiv.org/abs/2609.03366v1
+  expected:
+    cot-faithfulness: 3
+    mech-interp: 4
+  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/Ana)
+- id: '2609.04194'
+  title: 'Legibility is Not Interpretability: Comparing Judged and Actual Importance in Chain-Of-Thought
+    Reasoning'
+  abstract: 'Reasoning traces from chain-of-thought models appear to offer a legible window into how a
+    model arrives at its answer. A growing body of work treats them as such, using LLM judges to diagnose
+    errors, evaluate faithfulness, and provide step-level supervision via process reward models and generative
+    critics. These practices rely on the text of a reasoning step carrying information about its functional
+    role. But does the text actually encode information about which reasoning steps matter? We operationalize
+    the importance of a reasoning step as its advantage: the change in expected reward, e.g., producing
+    the correct final answer, from including that step, estimated via Monte Carlo rollouts. Basing ground
+    truth on these estimates, we evaluate whether LLM judges can identify high-advantage steps and find
+    that sufficiently capable LLMs can outperform a prevalence baseline but fall well short of a noise
+    ceiling. Fine-tuning a model as a step-level critic yields strong improvement for incorrect responses
+    but remains distant from ceiling for correct responses, suggesting that step importance is only partially
+    recoverable from the text of the reasoning trace. Our findings contribute to a growing body of chain-of-thought
+    faithfulness work that cautions against treating the legibility of reasoning traces as interpretability,
+    especially with implications for process reward modeling.'
+  authors:
+  - Kevin Du
+  - Alexander Hoyle
+  - Laura Ruis
+  - Acyr Locatelli
+  categories:
+  - cs.CL
+  - cs.LG
+  primary_category: cs.CL
+  published: '2026-09-03'
+  url: http://arxiv.org/abs/2609.04194v1
+  expected:
+    cot-faithfulness: 2
+    mech-interp: 4
+  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/Ana)
+- id: '2605.25052'
+  title: 'Faithfulness Metrics Don''t Measure Faithfulness: A Meta-Evaluation with Ground Truth'
+  abstract: Chains of thought (CoTs) have become central in interpreting and auditing behaviors of large
+    language models. Yet growing evidence suggests that these traces often fail to faithfully represent
+    the computations behind a model's predictions. Several faithfulness metrics have been proposed, but
+    whether they indeed measure faithfulness remains unknown. Answering this requires ground-truth labels,
+    which are hard to obtain since internal computations are not directly observable. Consequently, most
+    works proposing metrics report only absolute scores or comparisons to prior metrics, and the few existing
+    benchmarks rely on proxies like plausibility or importance, properties orthogonal to faithfulness
+    that can mislead about whether a CoT can be trusted. We address this challenge by constructing tasks
+    whose outputs reveal which intermediate computations must have produced them, and developing an automated
+    labeling pipeline that yields ground-truth faithfulness labels at both the step and CoT level. Building
+    on this methodology, we present BonaFide, a benchmark of 3,066 labeled CoTs across 13 tasks and 10
+    models, and use it to conduct the first systematic evaluation of prominent faithfulness metrics. Our
+    experiments show that most metrics perform near chance, exhibit strong prediction biases and degrade
+    on longer CoTs. The best metric reaches only 0.70 AUROC at the CoT level while another reaches 0.59
+    at the step level, with neither transferring across settings, while entailing prohibitively high computational
+    cost. Our results expose fundamental gaps in current faithfulness evaluation and call for the development
+    of more reliable and efficient metrics.
+  authors:
+  - Yoav Gur-Arieh
+  - Ana Marasović
+  - Mor Geva
+  categories:
+  - cs.CL
+  primary_category: cs.CL
+  published: '2026-05-24'
+  url: http://arxiv.org/abs/2605.25052v1
+  expected:
+    cot-faithfulness: 1
+    mech-interp: 4
+    cot-monitoring: 3
+  note: 'gold: the PI''s anchor paper; its definitions are the cot-faithfulness selection'
+- id: '2307.13702'
+  title: Measuring Faithfulness in Chain-of-Thought Reasoning
+  abstract: Large language models (LLMs) perform better when they produce step-by-step, "Chain-of-Thought"
+    (CoT) reasoning before answering a question, but it is unclear if the stated reasoning is a faithful
+    explanation of the model's actual reasoning (i.e., its process for answering the question). We investigate
+    hypotheses for how CoT reasoning may be unfaithful, by examining how the model predictions change
+    when we intervene on the CoT (e.g., by adding mistakes or paraphrasing it). Models show large variation
+    across tasks in how strongly they condition on the CoT when predicting their answer, sometimes relying
+    heavily on the CoT and other times primarily ignoring it. CoT's performance boost does not seem to
+    come from CoT's added test-time compute alone or from information encoded via the particular phrasing
+    of the CoT. As models become larger and more capable, they produce less faithful reasoning on most
+    tasks we study. Overall, our results suggest that CoT can be faithful if the circumstances such as
+    the model size and task are carefully chosen.
+  authors:
+  - Tamera Lanham
+  - Anna Chen
+  - Ansh Radhakrishnan
+  - Benoit Steiner
+  - Carson Denison
+  - Danny Hernandez
+  - Dustin Li
+  - Esin Durmus
+  - Evan Hubinger
+  - Jackson Kernion
+  - Kamilė Lukošiūtė
+  - Karina Nguyen
+  - Newton Cheng
+  - Nicholas Joseph
+  - Nicholas Schiefer
+  - Oliver Rausch
+  - Robin Larson
+  - Sam McCandlish
+  - Sandipan Kundu
+  - Saurav Kadavath
+  - Shannon Yang
+  - Thomas Henighan
+  - Timothy Maxwell
+  - Timothy Telleen-Lawton
+  - Tristan Hume
+  - Zac Hatfield-Dodds
+  - Jared Kaplan
+  - Jan Brauner
+  - Samuel R. Bowman
+  - Ethan Perez
+  categories:
+  - cs.AI
+  - cs.CL
+  - cs.LG
+  published: '2023-07-17'
+  url: http://arxiv.org/abs/2307.13702v1
+  expected:
+    cot-faithfulness: 1
+    mech-interp: 4
+    cot-monitoring: 3
+  note: 'gold: intervention-based faithfulness tests, the method class BonaFide meta-evaluates; hand pass
+    2026-09-07 (Claude, pending Andrei/Ana)'

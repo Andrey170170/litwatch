@@ -1,4 +1,5 @@
-"""One run: fetch the arXiv window, store, screen whatever is pending, record the run."""
+"""One run: fetch the arXiv window, store, screen whatever is pending under the active
+selections, route, deep-process, and write the digest; record the run."""
 
 import asyncio
 import logging
@@ -13,6 +14,7 @@ from litwatch.deep import DeepProcessor
 from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade
+from litwatch.selection import Selection
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ class RunSummary:
     process_failed: int = 0
     deep_list_cost: float = 0.0
     cost: float = 0.0
-    tiers: dict[str, int] = field(default_factory=dict)
+    tiers: dict[str, object] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -66,10 +68,11 @@ async def run(
         await _screen(conn, settings, cascade, summary)
         if router is not None:
             await route_pending(conn, router, summary)
-        if digester is not None:
-            await write_run_digest(conn, digester, summary)
+        # Deep before digest: tier 1 prose is written from the reading card.
         if deep is not None:
-            await process_deep(conn, deep, summary)
+            await process_deep(conn, deep, summary, settings.deep_max_per_run)
+        if digester is not None:
+            await write_run_digest(conn, digester, cascade.selections, summary)
     except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
         summary.error = f"{type(exc).__name__}: {exc}"
         log.exception("run %s failed", run_id)
@@ -112,9 +115,12 @@ async def _fetch(conn: psycopg.AsyncConnection, settings: Settings, s: RunSummar
 async def _screen(
     conn: psycopg.AsyncConnection, settings: Settings, cascade: Cascade, s: RunSummary
 ) -> None:
-    todo = await db.pending(conn)
+    todo = await db.pending(conn, cascade.selections, settings.rescreen_window_days)
+    log.info("run %s screening %s papers", s.run_id, len(todo))
     sem = asyncio.Semaphore(settings.screen_concurrency)
     lock = asyncio.Lock()  # one connection, so serialize the writes
+    best: dict[str, int] = {}
+    by_selection: dict[str, dict[str, int]] = {}
 
     async def one(paper):
         async with sem:
@@ -131,9 +137,15 @@ async def _screen(
                 s.rescreened += int(result.rescreened)
                 s.confirmed += int(result.confirmed)
                 s.cost += result.cost
-                s.tiers[result.tier.value] = s.tiers.get(result.tier.value, 0) + 1
+                key = str(result.best_tier)
+                best[key] = best.get(key, 0) + 1
+                for slug, v in result.verdicts.items():
+                    if v.tier < 4:
+                        counts = by_selection.setdefault(slug, {})
+                        counts[str(v.tier)] = counts.get(str(v.tier), 0) + 1
 
     await asyncio.gather(*(one(p) for p in todo))
+    s.tiers = {**best, "by_selection": by_selection}
     log.info(
         "run %s screened %s (%s re-screened, %s confirmed, %s failed) cost $%.4f tiers %s",
         s.run_id,
@@ -152,7 +164,8 @@ async def route_pending(
     s: RunSummary | None = None,
     paper_id: str | None = None,
 ) -> list[tuple[str, str]]:
-    """Route every tier 1/2 paper that is new or changed tier. Sequential: Zotero is one library.
+    """Route every tier 1/2 paper that is new or changed tier, and release papers that dropped
+    below tier 2. Sequential: Zotero is one library.
 
     Returns (paper_id, error) for failures; each is retried on the next run.
     """
@@ -168,30 +181,47 @@ async def route_pending(
             if s:
                 s.route_failed += 1
             continue
-        await db.store_route(
-            conn, paper.id, routed.tier.value, routed.item_key, routed.attachment_key
-        )
+        await db.store_route(conn, paper.id, routed.tier, routed.item_key, routed.attachment_key)
         if s:
             s.routed += 1
+    if paper_id is None:
+        for row in await db.demoted(conn):
+            try:
+                await router.release(row["zotero_key"])
+            except Exception as exc:  # noqa: BLE001
+                error = f"{type(exc).__name__}: {exc}"
+                log.warning("releasing %s failed: %s", row["id"], error)
+                await db.store_route_error(conn, row["id"], error)
+                failures.append((row["id"], error))
+                continue
+            await db.store_route(conn, row["id"], "none", None, None)
+            log.info("%s: released from Litwatch (tier %s)", row["id"], row["best_tier"])
     if s:
         log.info("run %s routed %s (%s failed)", s.run_id, s.routed, s.route_failed)
     return failures
 
 
-async def write_run_digest(conn: psycopg.AsyncConnection, digester: Digester, s: RunSummary) -> str:
-    """Digest of the papers this run promoted to tier 1/2; the model cost joins the run's."""
-    positives = await db.run_positives(conn, s.run_id)
-    text, usage = await digester.write(positives)
+async def write_run_digest(
+    conn: psycopg.AsyncConnection,
+    digester: Digester,
+    selections: list[Selection],
+    s: RunSummary,
+) -> str:
+    """Digest of the papers this run placed in some selection; the model cost joins the run's."""
+    members = await db.run_members(conn, s.run_id)
+    text, usage = await digester.write(selections, members)
     if usage:
         s.cost += usage.cost or 0.0
     await db.store_digest(conn, s.run_id, text, usage.model if usage else None)
-    log.info("run %s digest: %d papers, %d chars", s.run_id, len(positives), len(text))
+    log.info("run %s digest: %d papers, %d chars", s.run_id, len(members), len(text))
     return text
 
 
-async def process_deep(conn: psycopg.AsyncConnection, deep: DeepProcessor, s: RunSummary) -> None:
-    """Deep-process pending tier 1 papers. Last step: slow, and the digest must not wait."""
-    result = await deep.process_pending(conn)
+async def process_deep(
+    conn: psycopg.AsyncConnection, deep: DeepProcessor, s: RunSummary, limit: int
+) -> None:
+    """Deep-process pending tier 1 papers, at most `limit` per run."""
+    result = await deep.process_pending(conn, limit=limit)
     s.processed, s.process_failed = result.processed, result.failed
     s.deep_list_cost = result.list_cost
     log.info(

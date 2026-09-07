@@ -1,9 +1,10 @@
 """Deep processing: hand tier 1 papers to litwatch-deep, keep the outcome, write it to Zotero.
 
-litwatch owns all state. The deep service is a stateless job runner: it gets the paper text,
-returns the validated result with a trace and token stats, and litwatch stores them, writes
-the `litwatch:enrichment` note and `litwatch:*` tags, and adds the item to `Inbox` so the
-personal pipeline picks it up.
+litwatch owns all state. The deep service is a stateless job runner: it gets the paper text, the
+selections that placed the paper in tier 1, and the card extensions those selections ask for; it
+returns the validated result with a trace and token stats. litwatch stores them, writes the
+`litwatch:enrichment` note and `litwatch:*` tags, and adds the item to `Inbox` when one of the
+tier 1 selections is on the personal list.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import psycopg
 
 from litwatch import db
 from litwatch.models import Paper
+from litwatch.selection import Selection
 from litwatch.text import BodyFetcher
 from litwatch.zotero import ENRICH_MARKER, ENRICH_TAG, ZoteroClient, _esc
 
@@ -27,7 +29,9 @@ TAG_PREFIXES = (
     "litwatch:kind:",
     "litwatch:monitor:",
     "litwatch:signal:",
-    "litwatch:threat:",
+    "litwatch:mismatch:",
+    "litwatch:ground-truth:",
+    "litwatch:threat:",  # pre-0.6 cards; cleared on rewrite
     "litwatch:code",
     "litwatch:processed",
 )
@@ -75,9 +79,17 @@ class DeepClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def process(self, paper: dict[str, Any]) -> Outcome:
+    async def process(
+        self,
+        paper: dict[str, Any],
+        extensions: list[str] | None = None,
+        selections: list[dict[str, Any]] | None = None,
+    ) -> Outcome:
         """Runs one paper to completion. Progress is logged whenever the job advances."""
-        resp = await self.http.post(f"{self.base_url}/process", json={"paper": paper})
+        resp = await self.http.post(
+            f"{self.base_url}/process",
+            json={"paper": paper, "extensions": extensions or [], "selections": selections or []},
+        )
         resp.raise_for_status()
         job_id = resp.json()["id"]
         deadline = asyncio.get_running_loop().time() + self.timeout_seconds
@@ -122,12 +134,18 @@ class DeepProcessor:
         self,
         client: DeepClient,
         zotero: ZoteroClient | None,
+        selections: list[Selection],
+        extensions: dict[str, str] | None = None,
         inbox_collection: str | None = None,
+        inbox_selections: tuple[str, ...] = (),
         fetcher: BodyFetcher | None = None,
     ) -> None:
         self.client = client
         self.zotero = zotero
+        self.selections = {s.slug: s for s in selections}
+        self.extensions = extensions or {}
         self.inbox = inbox_collection
+        self.inbox_selections = set(inbox_selections)
         self.fetcher = fetcher or BodyFetcher()
 
     async def process_pending(
@@ -135,7 +153,13 @@ class DeepProcessor:
     ) -> ProcessSummary:
         s = ProcessSummary()
         for row in await db.deep_pending(conn, paper_id, limit):
-            error = await self._process_one(conn, row, s)
+            verdicts = await db.verdicts_for(conn, row["id"])
+            tier1 = [
+                slug for slug, v in verdicts.items() if v.tier == 1 and slug in self.selections
+            ]
+            if paper_id and not tier1:
+                tier1 = [slug for slug in self.selections if self.selections[slug].has_rubric]
+            error = await self._process_one(conn, row, s, tier1)
             if error:
                 s.failed += 1
                 s.failures.append((row["id"], error))
@@ -145,7 +169,10 @@ class DeepProcessor:
         if self.zotero is not None:
             for row in await db.zotero_enrichment_pending(conn, paper_id):
                 try:
-                    await self._write_back(row)
+                    verdicts = await db.verdicts_for(conn, row["id"])
+                    await self._write_back(
+                        row, [slug for slug, v in verdicts.items() if v.tier == 1]
+                    )
                     await db.mark_zotero_enriched(conn, row["id"])
                 except Exception as exc:  # noqa: BLE001 - retried on the next run
                     error = f"zotero: {type(exc).__name__}: {exc}"
@@ -157,7 +184,11 @@ class DeepProcessor:
         return s
 
     async def _process_one(
-        self, conn: psycopg.AsyncConnection, row: dict[str, Any], s: ProcessSummary
+        self,
+        conn: psycopg.AsyncConnection,
+        row: dict[str, Any],
+        s: ProcessSummary,
+        tier1: list[str],
     ) -> str | None:
         body, source = row.get("body"), row.get("body_source")
         if not body:
@@ -178,7 +209,16 @@ class DeepProcessor:
                 "url": row.get("url"),
                 "body": body,
                 "body_source": source,
-            }
+            },
+            extensions=sorted({self.extensions[x] for x in tier1 if x in self.extensions}),
+            selections=[
+                {
+                    "name": self.selections[x].name,
+                    "subject": self.selections[x].subject,
+                    "rubric": self.selections[x].rubric,
+                }
+                for x in tier1
+            ],
         )
         s.list_cost += float(outcome.stats.get("list_cost") or 0.0)
         if outcome.error or outcome.result is None:
@@ -197,7 +237,7 @@ class DeepProcessor:
         )
         return None
 
-    async def _write_back(self, row: dict[str, Any]) -> None:
+    async def _write_back(self, row: dict[str, Any], tier1: list[str]) -> None:
         assert self.zotero is not None
         key = row["zotero_key"]
         paper = db.row_to_paper(
@@ -212,7 +252,7 @@ class DeepProcessor:
             tag=ENRICH_TAG,
         )
         await self.zotero.set_tags(key, enrichment_tags(row["enrichment"]), TAG_PREFIXES)
-        if self.inbox:
+        if self.inbox and self.inbox_selections & set(tier1):
             await self.zotero.add_to_collection(key, self.inbox)
 
 
@@ -224,15 +264,16 @@ def _slug(value: str) -> str:
 
 
 def enrichment_tags(result: dict[str, Any]) -> list[str]:
-    tags = [
-        "litwatch:processed",
-        f"litwatch:kind:{_slug(result['paper_kind'])}",
-        f"litwatch:monitor:{_slug(result['monitor_type'])}",
-        *(f"litwatch:signal:{_slug(x)}" for x in result.get("internals_signal", [])),
-        *(f"litwatch:threat:{_slug(x)}" for x in result.get("threat_model", [])),
-    ]
+    tags = ["litwatch:processed", f"litwatch:kind:{_slug(result['paper_kind'])}"]
     if result.get("code_available"):
         tags.append("litwatch:code")
+    if faith := result.get("faithfulness"):
+        tags += [
+            f"litwatch:monitor:{_slug(faith['monitor_type'])}",
+            *(f"litwatch:signal:{_slug(x)}" for x in faith.get("internals_signal", [])),
+            *(f"litwatch:mismatch:{_slug(x)}" for x in faith.get("mismatch", [])),
+            f"litwatch:ground-truth:{_slug(faith['ground_truth'])}",
+        ]
     return tags
 
 
@@ -242,7 +283,7 @@ def enrichment_note(
     model: str | None = None,
     stats: dict[str, Any] | None = None,
 ) -> str:
-    """The `litwatch:enrichment` note: the reading card as HTML."""
+    """The `litwatch:enrichment` note: the reading card as HTML, core first, extensions after."""
     setup = result.get("evaluation_setup", {})
     parts = [
         ENRICH_MARKER,
@@ -251,9 +292,6 @@ def enrichment_note(
         *(f"<p>{_esc(p)}</p>" for p in _paragraphs(result["summary"])),
         "<table>",
         _row("Kind", result["paper_kind"]),
-        _row("Monitor type", result["monitor_type"]),
-        _row("Internals signal", ", ".join(result.get("internals_signal", [])) or "none"),
-        _row("Threat model", ", ".join(result.get("threat_model", []))),
         _row("Models", ", ".join(setup.get("models", []))),
         _row("Tasks", ", ".join(setup.get("tasks", []))),
         _row("Generalization", setup.get("generalization", "")),
@@ -267,8 +305,20 @@ def enrichment_note(
             + ("; weights released" if result.get("weights_available") else ""),
         ),
         "</table>",
-        "<p><b>Faithfulness definition and ground truth.</b> "
-        f"{_esc(result['faithfulness_definition'])}</p>",
+    ]
+    if faith := result.get("faithfulness"):
+        parts += [
+            "<p><b>Faithfulness.</b></p><table>",
+            _row("Mismatch detected", ", ".join(faith.get("mismatch", [])) or "none"),
+            _row("Ground truth", faith["ground_truth"]),
+            _row("Monitor type", faith["monitor_type"]),
+            _row("Internals signal", ", ".join(faith.get("internals_signal", [])) or "none"),
+            "</table>",
+            f"<p><b>Detection method.</b> {_esc(faith['detection_method'])}</p>",
+            f"<p><b>Definition.</b> {_esc(faith['definition'])}</p>",
+            f"<p><b>Generality.</b> {_esc(faith['generality'])}</p>",
+        ]
+    parts += [
         "<p><b>Closest prior work.</b></p><ul>",
         *(
             f"<li>{_esc(w['title'])}"

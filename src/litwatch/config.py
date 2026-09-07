@@ -1,7 +1,7 @@
 """Runtime settings from the environment. Secrets never live in files inside the repo."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -49,8 +49,18 @@ class Settings:
     webdav_password: str | None = None
     # Deep processing (phase 4): the litwatch-deep service; unset disables it.
     deep_url: str | None = None
-    # Tier 1 items join this collection once enriched, so paperflow-lite picks them up.
+    # Tier 1 items of these selections join this collection once enriched, so paperflow-lite
+    # picks them up. Personal routing stays out of the lab-facing selection spec on purpose.
     inbox_collection: str | None = None
+    inbox_selections: tuple[str, ...] = ("cot-faithfulness",)
+    # Deep card extensions per selection (`slug=extension,...`); a tier 1 in a selection without
+    # an extension still gets the core card. The cap protects the subscription from a loose rubric.
+    deep_extensions: dict[str, str] = field(
+        default_factory=lambda: {"cot-faithfulness": "faithfulness"}
+    )
+    deep_max_per_run: int = 10
+    # An edited or new selection re-judges papers published within this many days.
+    rescreen_window_days: int = 30
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     screen_concurrency: int = 8
 
@@ -78,6 +88,12 @@ class Settings:
             webdav_password=_secret("WEBDAV_PASSWORD"),
             deep_url=os.environ.get("LITWATCH_DEEP_URL"),
             inbox_collection=os.environ.get("LITWATCH_INBOX_COLLECTION"),
+            inbox_selections=_csv("LITWATCH_INBOX_SELECTIONS", cls.inbox_selections),
+            deep_extensions=_mapping(
+                "LITWATCH_DEEP_EXTENSIONS", {"cot-faithfulness": "faithfulness"}
+            ),
+            deep_max_per_run=int(os.environ.get("LITWATCH_DEEP_MAX_PER_RUN", "10")),
+            rescreen_window_days=int(os.environ.get("LITWATCH_RESCREEN_WINDOW_DAYS", "30")),
             categories=tuple(
                 os.environ.get("LITWATCH_CATEGORIES", ",".join(cls.categories)).split(",")
             ),
@@ -100,6 +116,22 @@ class Settings:
         if not self.database_url:
             raise SystemExit("LITWATCH_DATABASE_URL or LITWATCH_DB_* is not set")
         return self.database_url
+
+
+def _csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return tuple(x.strip() for x in raw.split(",") if x.strip())
+
+
+def _mapping(name: str, default: dict[str, str]) -> dict[str, str]:
+    """`a=b,c=d` from the environment, or the default when unset."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return dict(default)
+    pairs = (x.split("=", 1) for x in raw.split(",") if "=" in x)
+    return {k.strip(): v.strip() for k, v in pairs}
 
 
 def _database_url() -> str | None:

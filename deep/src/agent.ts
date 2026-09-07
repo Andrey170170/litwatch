@@ -8,7 +8,7 @@ import type { Models, ThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { PROVIDER } from "./auth.ts";
 import { buildHosts, type HostConfig } from "./hosts.ts";
-import { systemPrompt, userMessage, type PaperInput } from "./prompt.ts";
+import { systemPrompt, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
 import { Repl, type HostFn } from "./repl.ts";
 import { validate, type Result } from "./schema.ts";
 
@@ -52,12 +52,19 @@ export interface Outcome {
 
 export type Progress = (event: TraceEvent, stats: Stats) => void;
 
+/** Per-job shape of the card: which extensions the result must carry, and why the paper was selected. */
+export interface CardSpec {
+  extensions: string[];
+  selections: SelectionContext[];
+}
+
 const NUDGE =
   "No result has been submitted. Call submit(result) with the complete result now; fix any errors it reports.";
 const MAX_NUDGES = 2;
 
 export async function processPaper(
   paper: PaperInput,
+  spec: CardSpec,
   models: Models,
   hostCfg: HostConfig,
   opts: RunOptions,
@@ -94,7 +101,7 @@ export async function processPaper(
     Object.entries(buildHosts(hostCfg)).map(([name, fn]) => [name, traced(name, fn)]),
   );
   hosts.submit = async ([result]) => {
-    const v = validate(result);
+    const v = validate(result, spec.extensions);
     if (v.ok) {
       submitted = v.value;
       record({ t: now(), type: "submit", ok: true });
@@ -135,7 +142,7 @@ export async function processPaper(
   };
 
   const agent = new Agent({
-    initialState: { systemPrompt: systemPrompt(opts.maxCells, opts.maxOutputChars), model, thinkingLevel: opts.effort, tools: [runCode] },
+    initialState: { systemPrompt: systemPrompt(opts.maxCells, opts.maxOutputChars, spec.extensions, spec.selections), model, thinkingLevel: opts.effort, tools: [runCode] },
     streamFn: models.streamSimple.bind(models),
     sessionId: `litwatch-${paper.id}-${started}`,
     toolExecution: "sequential",

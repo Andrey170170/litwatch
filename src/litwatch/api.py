@@ -1,5 +1,5 @@
-"""Internal HTTP API for n8n: start a run, read runs and screened papers. No auth: it is
-reachable only on the stack network and never published on a host port."""
+"""Internal HTTP API for n8n: sync selections, start a run, read runs and member papers. No
+auth: it is reachable only on the stack network and never published on a host port."""
 
 import asyncio
 import logging
@@ -7,8 +7,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
+import psycopg
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from litwatch import db, ingest
 from litwatch.config import Settings
@@ -16,6 +17,7 @@ from litwatch.deep import DeepClient, DeepProcessor
 from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade, ModelScreener, openrouter_client
+from litwatch.selection import Selection, Status, from_spec
 from litwatch.webdav import WebDAVWriter
 from litwatch.zotero import ZoteroClient
 
@@ -28,9 +30,31 @@ class RunRequest(BaseModel):
     fetch: bool = True
 
 
-def build_cascade(settings: Settings, rescreen: bool = True, confirm: bool = True) -> Cascade:
+class SelectionRow(BaseModel):
+    """One Notion row as n8n sends it. Validation errors go back per row, never as a 4xx."""
+
+    notion_id: str | None = None
+    slug: str | None = None
+    name: str
+    owner: str | None = None
+    status: str = "active"
+    subject: str = ""
+    rubric: str | None = None
+    keywords: list[str] | str | None = None
+
+
+class SelectionsSync(BaseModel):
+    selections: list[SelectionRow]
+    # An authoritative sync (the Notion data source) pauses selections it does not mention.
+    authoritative: bool = True
+
+
+def build_cascade(
+    settings: Settings, selections: list[Selection], rescreen: bool = True, confirm: bool = True
+) -> Cascade:
     client = openrouter_client(settings.openrouter_api_key)
     return Cascade(
+        selections,
         ModelScreener(client, settings.screen_model, settings.screen_effort),
         ModelScreener(client, settings.rescreen_model, settings.rescreen_effort)
         if rescreen
@@ -62,7 +86,7 @@ def build_digester(settings: Settings, model: str | None = None) -> Digester:
     return Digester(client, model or settings.digest_model, settings.digest_effort)
 
 
-def build_deep(settings: Settings) -> DeepProcessor | None:
+def build_deep(settings: Settings, selections: list[Selection]) -> DeepProcessor | None:
     """None when litwatch-deep is not configured. Zotero write-back needs routing too."""
     if not settings.deep_enabled:
         return None
@@ -71,8 +95,58 @@ def build_deep(settings: Settings) -> DeepProcessor | None:
     return DeepProcessor(
         DeepClient(settings.deep_url),
         router.zotero if router else None,
-        settings.inbox_collection,
+        selections,
+        extensions=settings.deep_extensions,
+        inbox_collection=settings.inbox_collection,
+        inbox_selections=settings.inbox_selections,
     )
+
+
+async def active_selections(conn: psycopg.AsyncConnection) -> list[Selection]:
+    return await db.list_selections(conn, Status.ACTIVE)
+
+
+async def sync_selections(
+    conn: psycopg.AsyncConnection, sync: SelectionsSync
+) -> list[dict[str, Any]]:
+    """Validate and upsert each row; report per row. Missing rows are paused when authoritative."""
+    report, kept = [], []
+    counts = await db.selection_counts(conn)
+    for row in sync.selections:
+        try:
+            spec = from_spec(row.model_dump())
+        except (ValidationError, ValueError) as exc:
+            report.append(
+                {"notion_id": row.notion_id, "name": row.name, "ok": False, "error": _brief(exc)}
+            )
+            continue
+        changed = await db.upsert_selection(conn, spec)
+        kept.append(spec.slug)
+        tiers = counts.get(spec.slug, {})
+        report.append(
+            {
+                "notion_id": spec.notion_id,
+                "name": spec.name,
+                "slug": spec.slug,
+                "ok": True,
+                "version": spec.version,
+                "changed": changed,
+                "status": spec.status.value,
+                "tier_1": tiers.get(1, 0),
+                "tier_2": tiers.get(2, 0),
+                "tier_3": tiers.get(3, 0),
+            }
+        )
+    if sync.authoritative:
+        for slug in await db.pause_missing_selections(conn, kept):
+            log.info("selection %s paused: absent from the sync", slug)
+    return report
+
+
+def _brief(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        return "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors())
+    return str(exc)
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -91,16 +165,17 @@ def create_app(settings: Settings) -> FastAPI:
     async def execute(req: RunRequest) -> None:
         try:
             async with await db.connect(dsn) as conn:
+                selections = await active_selections(conn)
                 state["last"] = await ingest.run(
                     conn,
                     settings,
-                    build_cascade(settings),
+                    build_cascade(settings, selections),
                     req.kind,
                     req.days,
                     req.fetch,
                     router=build_router(settings),
                     digester=build_digester(settings),
-                    deep=build_deep(settings),
+                    deep=build_deep(settings, selections),
                 )
         except Exception:  # noqa: BLE001 - already recorded on the run row
             log.exception("background run failed")
@@ -109,6 +184,19 @@ def create_app(settings: Settings) -> FastAPI:
     async def healthz() -> dict[str, Any]:
         async with await db.connect(dsn) as conn:
             return {"ok": True, **await db.stats(conn)}
+
+    @app.get("/selections")
+    async def selections() -> list[dict[str, Any]]:
+        async with await db.connect(dsn) as conn:
+            rows, counts = await db.list_selections(conn), await db.selection_counts(conn)
+        return [
+            {**s.model_dump(), "version": s.version, "counts": counts.get(s.slug, {})} for s in rows
+        ]
+
+    @app.put("/selections")
+    async def put_selections(sync: SelectionsSync) -> list[dict[str, Any]]:
+        async with await db.connect(dsn) as conn:
+            return await sync_selections(conn, sync)
 
     @app.post("/runs", status_code=202)
     async def start_run(req: RunRequest) -> dict[str, Any]:
@@ -133,12 +221,19 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/papers")
     async def papers(
-        tier: str | None = None, since: datetime | None = None, limit: int = 100
+        selection: str | None = None,
+        tier: str | None = None,
+        since: datetime | None = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """`tier` takes a comma-separated list, e.g. `must_read,aware`."""
-        tiers = [t for t in (tier or "").split(",") if t] or None
+        """Member papers. `tier` is a comma-separated list such as `1,2`; with `selection` it
+        applies to that selection's verdict, otherwise to the paper's best tier."""
+        try:
+            tiers = [int(t) for t in (tier or "").split(",") if t] or None
+        except ValueError as exc:
+            raise HTTPException(422, "tier must be integers 1..3") from exc
         async with await db.connect(dsn) as conn:
-            return await db.list_papers(conn, tiers, since, min(limit, 1000))
+            return await db.list_papers(conn, selection, tiers, since, min(limit, 1000))
 
     @app.get("/papers/search")
     async def search(q: str, limit: int = 10) -> list[dict[str, Any]]:

@@ -2,7 +2,8 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { JobQueue } from "./jobs.ts";
-import type { PaperInput } from "./prompt.ts";
+import type { PaperInput, SelectionContext } from "./prompt.ts";
+import { EXTENSIONS } from "./schema.ts";
 
 export interface ServerDeps {
   jobs: JobQueue;
@@ -42,20 +43,31 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     return json(res, 200, job);
   }
   if (req.method === "POST" && path === "/process") {
-    const body = (await readJson(req)) as { paper?: Partial<PaperInput> };
+    const body = (await readJson(req)) as {
+      paper?: Partial<PaperInput>;
+      extensions?: string[];
+      selections?: SelectionContext[];
+    };
     const paper = body.paper;
     if (!paper || typeof paper.id !== "string" || typeof paper.title !== "string" || typeof paper.body !== "string")
       throw new HttpError(422, "paper.id, paper.title, and paper.body are required");
-    const job = deps.jobs.submit({
-      id: paper.id,
-      title: paper.title,
-      abstract: paper.abstract ?? "",
-      authors: paper.authors ?? [],
-      published: paper.published ?? null,
-      url: paper.url ?? null,
-      body: paper.body,
-      body_source: paper.body_source ?? null,
-    });
+    const extensions = body.extensions ?? [];
+    for (const name of extensions)
+      if (!(name in EXTENSIONS)) throw new HttpError(400, `unknown extension "${name}"; known: ${Object.keys(EXTENSIONS).join(", ")}`);
+    const job = deps.jobs.submit(
+      {
+        id: paper.id,
+        title: paper.title,
+        abstract: paper.abstract ?? "",
+        authors: paper.authors ?? [],
+        published: paper.published ?? null,
+        url: paper.url ?? null,
+        body: paper.body,
+        body_source: paper.body_source ?? null,
+      },
+      extensions,
+      body.selections ?? [],
+    );
     return json(res, 202, { id: job.id, status: job.status });
   }
   throw new HttpError(404, "not found");

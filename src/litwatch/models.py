@@ -1,4 +1,4 @@
-"""Core data types: papers, screening output, tier derivation."""
+"""Core data types: papers, per-selection verdicts, screening results."""
 
 from enum import StrEnum
 
@@ -25,66 +25,24 @@ class Confidence(StrEnum):
     HIGH = "high"
 
 
-class Tier(StrEnum):
-    MUST_READ = "must_read"
-    AWARE = "aware"
-    MECH_INTERP = "mech_interp"
-    NONE = "none"
+# Tiers are per selection, one scale for all of them:
+#   1 must read, 2 recommended, 3 good to know, 4 not a member (stored as absence in lists).
+TIERS = (1, 2, 3, 4)
+NOT_MEMBER = 4
+ROUTED_TIERS = (1, 2)  # Zotero item; tier 1 also gets the PDF and deep processing
+VISIBLE_TIERS = (1, 2, 3)  # what the lab sees in Notion
 
 
-class Flags(BaseModel):
-    """The three topic flags. Labels in the eval set and screener output share this shape."""
+class Verdict(BaseModel):
+    """One selection's judgement of one paper. Field names are part of the prompt contract."""
 
-    cot: bool = Field(description="About CoT monitoring, faithfulness, or hidden reasoning")
-    internals: bool = Field(description="Relies on model internals")
-    mech_interp: bool = Field(description="Mechanistic interpretability work")
-    foundational: bool = Field(
-        default=False,
-        description="Proposes a definition, ground truth, benchmark, or metric meta-evaluation",
-    )
-
-    @property
-    def tier(self) -> Tier:
-        return derive_tier(self)
-
-
-def derive_tier(flags: Flags) -> Tier:
-    """Deterministic tier from the flags; the screener never picks a tier directly.
-
-    On-topic papers are must-read when they use internals or when they are foundational:
-    a definition, ground truth, or benchmark is required reading whatever its method.
-    """
-    if flags.cot and (flags.internals or flags.foundational):
-        return Tier.MUST_READ
-    if flags.cot:
-        return Tier.AWARE
-    if flags.mech_interp:
-        return Tier.MECH_INTERP
-    return Tier.NONE
-
-
-class ScreenOutput(BaseModel):
-    """Structured model output. Field names are part of the prompt contract."""
-
-    is_cot_monitoring_or_faithfulness: bool
-    uses_internals: bool
-    is_mech_interp: bool
-    proposes_definition_or_benchmark: bool
+    tier: int = Field(ge=1, le=4)
     confidence: Confidence
     reason: str = Field(description="One sentence")
 
-    @property
-    def flags(self) -> Flags:
-        return Flags(
-            cot=self.is_cot_monitoring_or_faithfulness,
-            internals=self.uses_internals,
-            mech_interp=self.is_mech_interp,
-            foundational=self.proposes_definition_or_benchmark,
-        )
 
-    @property
-    def tier(self) -> Tier:
-        return self.flags.tier
+def best_tier(verdicts: dict[str, Verdict]) -> int:
+    return min((v.tier for v in verdicts.values()), default=NOT_MEMBER)
 
 
 class Usage(BaseModel):
@@ -97,11 +55,11 @@ class Usage(BaseModel):
 
 
 class StageRole(StrEnum):
-    """Cascade stages in order. Each later stage's output replaces the earlier verdict."""
+    """Cascade stages in order. A later stage's verdict replaces the earlier one per selection."""
 
-    SCREEN = "screen"  # every paper, cheap model
+    SCREEN = "screen"  # every paper, every selection, cheap model
     RESCREEN = "rescreen"  # low confidence or keyword-audit negatives: the recall step
-    CONFIRM = "confirm"  # tier 1 and 2 positives, different model family: the precision step
+    CONFIRM = "confirm"  # tier 1 and 2 verdicts, one selection at a time: the precision step
 
 
 STAGE_ORDER = [StageRole.SCREEN, StageRole.RESCREEN, StageRole.CONFIRM]
@@ -110,34 +68,52 @@ STAGE_ORDER = [StageRole.SCREEN, StageRole.RESCREEN, StageRole.CONFIRM]
 class Stage(BaseModel):
     role: StageRole
     model: str
-    output: ScreenOutput
+    output: dict[str, Verdict]  # selection slug -> verdict; a confirm stage carries one slug
     usage: Usage
 
 
 class ScreenResult(BaseModel):
-    """Screening record for a paper: every stage that ran, last one wins."""
+    """Screening record for a paper: every stage that ran, later stages win per selection."""
 
+    schema_version: int = 2
     paper_id: str
     prompt_version: str
+    versions: dict[str, str]  # selection slug -> spec version the verdict was judged under
     stages: list[Stage] = Field(min_length=1)
 
     @property
-    def output(self) -> ScreenOutput:
-        return self.stages[-1].output
+    def verdicts(self) -> dict[str, Verdict]:
+        return self.verdicts_after(StageRole.CONFIRM)
+
+    def verdicts_after(self, role: StageRole) -> dict[str, Verdict]:
+        """The verdicts as they stood once stages up to `role` had run."""
+        cutoff = STAGE_ORDER.index(role)
+        merged: dict[str, Verdict] = {}
+        for stage in self.stages:
+            if STAGE_ORDER.index(stage.role) <= cutoff:
+                merged.update(stage.output)
+        return merged
+
+    @property
+    def best_tier(self) -> int:
+        return best_tier(self.verdicts)
+
+    @property
+    def best(self) -> tuple[str, Verdict] | None:
+        """The selection that places the paper highest; None when it is a member of none."""
+        members = [(slug, v) for slug, v in self.verdicts.items() if v.tier < NOT_MEMBER]
+        return min(members, key=lambda kv: kv[1].tier) if members else None
+
+    def tier_for(self, slug: str) -> int:
+        verdict = self.verdicts.get(slug)
+        return verdict.tier if verdict else NOT_MEMBER
+
+    def members(self, max_tier: int = 3) -> list[str]:
+        return [slug for slug, v in self.verdicts.items() if v.tier <= max_tier]
 
     @property
     def model(self) -> str:
         return self.stages[-1].model
-
-    @property
-    def tier(self) -> Tier:
-        return self.output.tier
-
-    def output_after(self, role: StageRole) -> ScreenOutput:
-        """The verdict as it stood once stages up to `role` had run."""
-        cutoff = STAGE_ORDER.index(role)
-        eligible = [s for s in self.stages if STAGE_ORDER.index(s.role) <= cutoff]
-        return eligible[-1].output
 
     def has(self, role: StageRole) -> bool:
         return any(s.role == role for s in self.stages)
@@ -149,6 +125,9 @@ class ScreenResult(BaseModel):
     @property
     def confirmed(self) -> bool:
         return self.has(StageRole.CONFIRM)
+
+    def confirmed_slugs(self) -> set[str]:
+        return {slug for s in self.stages if s.role == StageRole.CONFIRM for slug in s.output}
 
     @property
     def usage(self) -> list[Usage]:

@@ -1,10 +1,10 @@
-"""Run the screener over the labeled set and score per-tier precision and recall."""
+"""Run the cascade over the labeled set and score per-selection, per-tier precision and recall."""
 
 import asyncio
 from dataclasses import dataclass, field
 
 from litwatch.evalset import LabeledPaper
-from litwatch.models import Flags, ScreenResult, StageRole, Tier
+from litwatch.models import TIERS, ScreenResult, StageRole
 from litwatch.screen import Cascade
 
 
@@ -29,33 +29,41 @@ class Scored:
     result: ScreenResult | None
     error: str | None = None
 
-    @property
-    def expected_tier(self) -> Tier:
-        assert self.item.expected is not None
-        return self.item.expected.tier
+    def predicted(self, slug: str, role: StageRole = StageRole.CONFIRM) -> int | None:
+        if self.result is None:
+            return None
+        verdict = self.result.verdicts_after(role).get(slug)
+        return verdict.tier if verdict else None
+
+
+@dataclass
+class SelectionReport:
+    slug: str
+    scored: list[Scored]  # only papers labeled for this selection
+    per_tier: dict[int, PRF] = field(default_factory=dict)
+    per_stage: dict[StageRole, dict[int, PRF]] = field(default_factory=dict)
 
     @property
-    def predicted_tier(self) -> Tier | None:
-        return self.result.tier if self.result else None
+    def misses(self) -> list[Scored]:
+        """Expected tier 1 papers that did not land in tier 1: the recall bar."""
+        return [
+            s
+            for s in self.scored
+            if s.item.expected_tier(self.slug) == 1 and s.predicted(self.slug) != 1
+        ]
 
-    def tier_after(self, role: StageRole) -> Tier | None:
-        return self.result.output_after(role).tier if self.result else None
+    @property
+    def recommended_recall(self) -> float | None:
+        """Recall of expected tier 1/2 papers into tier 1/2: the lab-visible reading list."""
+        want = [s for s in self.scored if (s.item.expected_tier(self.slug) or 4) <= 2]
+        hit = [s for s in want if (s.predicted(self.slug) or 4) <= 2]
+        return len(hit) / len(want) if want else None
 
 
 @dataclass
 class Report:
     scored: list[Scored]
-    per_tier: dict[Tier, PRF] = field(default_factory=dict)
-    per_stage: dict[StageRole, dict[Tier, PRF]] = field(default_factory=dict)
-
-    @property
-    def misses(self) -> list[Scored]:
-        """Expected must_read papers that did not land in must_read: the recall bar."""
-        return [
-            s
-            for s in self.scored
-            if s.expected_tier == Tier.MUST_READ and s.predicted_tier != Tier.MUST_READ
-        ]
+    selections: dict[str, SelectionReport] = field(default_factory=dict)
 
     @property
     def errors(self) -> list[Scored]:
@@ -78,10 +86,10 @@ class Report:
         return totals
 
 
-def score_tiers(pairs: list[tuple[Tier, Tier | None]]) -> dict[Tier, PRF]:
-    per = {t: PRF() for t in Tier}
+def score_tiers(pairs: list[tuple[int, int | None]]) -> dict[int, PRF]:
+    per = {t: PRF() for t in TIERS}
     for expected, predicted in pairs:
-        for tier in Tier:
+        for tier in TIERS:
             if expected == tier and predicted == tier:
                 per[tier].tp += 1
             elif predicted == tier:
@@ -91,22 +99,21 @@ def score_tiers(pairs: list[tuple[Tier, Tier | None]]) -> dict[Tier, PRF]:
     return per
 
 
-def flag_agreement(scored: list[Scored]) -> dict[str, float | None]:
-    """Per-flag accuracy, useful for seeing which flag drives tier errors."""
-    counts: dict[str, list[int]] = {k: [0, 0] for k in Flags.model_fields}
-    for s in scored:
-        if s.result is None or s.item.expected is None:
-            continue
-        predicted = s.result.output.flags
-        for key in counts:
-            counts[key][1] += 1
-            if getattr(predicted, key) == getattr(s.item.expected, key):
-                counts[key][0] += 1
-    return {k: (ok / n if n else None) for k, (ok, n) in counts.items()}
+def score_selection(slug: str, scored: list[Scored]) -> SelectionReport:
+    labeled = [s for s in scored if s.item.expected_tier(slug) is not None]
+    report = SelectionReport(slug=slug, scored=labeled)
+
+    def pairs(role: StageRole) -> list[tuple[int, int | None]]:
+        return [(s.item.expected_tier(slug) or 4, s.predicted(slug, role)) for s in labeled]
+
+    report.per_tier = score_tiers(pairs(StageRole.CONFIRM))
+    for role in StageRole:
+        report.per_stage[role] = score_tiers(pairs(role))
+    return report
 
 
 async def run(cascade: Cascade, items: list[LabeledPaper], concurrency: int = 8) -> Report:
-    labeled = [i for i in items if i.expected is not None]
+    labeled = [i for i in items if i.expected]
     sem = asyncio.Semaphore(concurrency)
 
     async def one(item: LabeledPaper) -> Scored:
@@ -118,8 +125,6 @@ async def run(cascade: Cascade, items: list[LabeledPaper], concurrency: int = 8)
 
     scored = list(await asyncio.gather(*(one(i) for i in labeled)))
     report = Report(scored=scored)
-    report.per_tier = score_tiers([(s.expected_tier, s.predicted_tier) for s in scored])
-    for role in StageRole:
-        pairs = [(s.expected_tier, s.tier_after(role)) for s in scored]
-        report.per_stage[role] = score_tiers(pairs)
+    for s in cascade.selections:
+        report.selections[s.slug] = score_selection(s.slug, scored)
     return report
