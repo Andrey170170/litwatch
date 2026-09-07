@@ -117,3 +117,18 @@ Caveat as before: silver labels come from the same prompt family, so the
 next run's numbers on them are an upper bound; the hand-labeled subset is
 the signal to watch, and the PI's own labels on the boundary cases will
 replace it.
+
+Second run, same day, after the review and the rubric sentence
+(`evals/runs/20260907T190436Z.json`, 193 papers, $0.33, cot-faithfulness at
+0dc850a0bcbd): tier 1 P 0.78 R 0.58, tier 2 P 0.78 R 0.75, tier 3 P 0.84
+R 0.88, tier 1+2 recall 0.89. Selective Disclosure now lands in tier 1. Luna
+alone has tier 1 recall 0.75; the confirm stage demotes five expected tier 1
+papers to tier 2 by applying the ground-truth clause literally: FaithCoT-Bench
+(expert-annotated labels, no hint or internals ground truth), Hypocrisy Gap
+(one benchmark only), Post-Hoc Reasoning and Reasoning Theater (probes show a
+pre-committed answer but the reasons argue no explicit omission test), and
+Lanham et al. (intervention metrics, which the rubric itself files under
+importance). All five stay visible as tier 2. Whether human-annotated
+benchmarks and probe-versus-trace analyses should count as tier 1 is a
+rubric question for the PI; the sentence to loosen is the one starting "The
+knowledge of what the model actually computed must come from".
