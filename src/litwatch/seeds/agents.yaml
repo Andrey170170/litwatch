@@ -9,10 +9,11 @@ subject: >-
   memory for agents, agent benchmarks and evaluations, and training methods specific to agents.
   Papers that use an off-the-shelf agent only as a baseline for a different topic are tier 3.
 rubric: >-
-  Tier 1 only for work likely to become a reference point for this subject: a new capability or
-  paradigm, a result that changes how the field approaches the problem, a benchmark, dataset, or
-  tool the community will adopt, or a rigorous negative result that overturns common practice.
-  Incremental improvements, single-domain applications, and surveys are at most tier 2.
+  Tier 1 is rare, about one member in fifty. It requires evidence in the abstract that the field
+  will treat the paper as a reference: a new model family or training recipe with released
+  weights, a large margin on a widely used benchmark, a method shown to work across several
+  domains, or strong evidence overturning a common assumption. Incremental gains, single-domain
+  applications, surveys, and position papers are at most tier 2. When in doubt, tier 2.
 keywords:
   - agent
   - tool use
