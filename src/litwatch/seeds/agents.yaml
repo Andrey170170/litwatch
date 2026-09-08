@@ -1,0 +1,24 @@
+name: Agents and tool use
+slug: agents
+owner: Andrei
+status: active
+digest: true
+subject: >-
+  Language models acting over multiple steps: agent architectures and frameworks, tool and
+  function calling, computer and browser use, coding agents, multi-agent systems, planning and
+  memory for agents, agent benchmarks and evaluations, and training methods specific to agents.
+  Papers that use an off-the-shelf agent only as a baseline for a different topic are tier 3.
+rubric: >-
+  Tier 1 only for work likely to become a reference point for this subject: a new capability or
+  paradigm, a result that changes how the field approaches the problem, a benchmark, dataset, or
+  tool the community will adopt, or a rigorous negative result that overturns common practice.
+  Incremental improvements, single-domain applications, and surveys are at most tier 2.
+keywords:
+  - agent
+  - tool use
+  - tool-use
+  - function calling
+  - computer use
+  - multi-agent
+  - web navigation
+  - SWE-bench

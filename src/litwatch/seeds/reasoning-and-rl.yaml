@@ -1,0 +1,23 @@
+name: Reasoning and RL post-training
+slug: reasoning-and-rl
+owner: Andrei
+status: active
+digest: true
+subject: >-
+  Training and using language models to reason: reinforcement learning from verifiable rewards
+  and reward models, GRPO-style post-training, reasoning models and their thinking budgets,
+  test-time scaling and search, self-verification and reflection, distillation of reasoning, and
+  analyses of what such training changes. Prompting tricks evaluated on one benchmark are tier 3.
+rubric: >-
+  Tier 1 only for work likely to become a reference point for this subject: a new capability or
+  paradigm, a result that changes how the field approaches the problem, a benchmark, dataset, or
+  tool the community will adopt, or a rigorous negative result that overturns common practice.
+  Incremental improvements, single-domain applications, and surveys are at most tier 2.
+keywords:
+  - reinforcement learning
+  - RLVR
+  - GRPO
+  - test-time compute
+  - reasoning model
+  - chain-of-thought
+  - self-verification

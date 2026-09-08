@@ -1,37 +1,55 @@
-"""Digest rendering and the run-level digest step."""
+"""Digest rendering and the per-run digest set."""
 
 from types import SimpleNamespace
 
-from litwatch.digest import EMPTY_DIGEST, Digester, normalize, render_papers, render_tier3
-from tests.conftest import SELECTIONS
+from litwatch.digest import (
+    EMPTY_DIGEST,
+    GENERAL,
+    RECOMMENDED_CAP,
+    Digester,
+    GeneralOutput,
+    Note,
+    SelectionOutput,
+    by_tier,
+    render_selection_digest,
+    render_selection_input,
+)
+from tests.conftest import FAITH, INTERP
+
+FAITH_D = FAITH.model_copy(update={"digest": True})
+INTERP_D = INTERP.model_copy(update={"digest": True})
 
 
 class FakeCompletions:
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
+    """Answers with a canned output per schema; records every call."""
 
-    async def create(self, **kw):
+    def __init__(self, outputs: dict[type, object]) -> None:
+        self.outputs, self.calls = outputs, []
+
+    async def parse(self, **kw):
         self.calls.append(kw)
         usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, model_extra={"cost": 0.002})
+        parsed = self.outputs[kw["response_format"]]
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="  A digest.  "))],
-            usage=usage,
+            choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))], usage=usage
         )
 
 
-def fake_client() -> tuple[object, FakeCompletions]:
-    completions = FakeCompletions()
+def fake_client(outputs: dict[type, object]) -> tuple[object, FakeCompletions]:
+    completions = FakeCompletions(outputs)
     return SimpleNamespace(chat=SimpleNamespace(completions=completions)), completions
 
 
-def member(paper_id: str, title: str, tier: int, card: dict | None = None) -> dict:
+def member(paper_id: str, title: str, tiers: dict[str, int], card: dict | None = None) -> dict:
     return {
         "id": paper_id,
         "title": title,
+        "url": f"https://arxiv.org/abs/{paper_id}",
         "abstract": "Abstract text.",
         "enrichment": card,
         "verdicts": {
-            "cot-faithfulness": {"tier": tier, "confidence": "high", "reason": "Because."}
+            slug: {"tier": t, "confidence": "high", "reason": "Because."}
+            for slug, t in tiers.items()
         },
     }
 
@@ -46,48 +64,85 @@ CARD = {
         "generality": "13 tasks, 10 models.",
     },
 }
+SEL_OUT = SelectionOutput(
+    overview="Two omission tests today.",
+    must_read=[Note(id="1", text="Plants hints and checks disclosure.")],
+    recommended=[Note(id="2", text="A proxy study."), Note(id="999", text="Hallucinated id.")],
+)
+GEN_OUT = GeneralOutput(overview="A quiet day.", must_read=[Note(id="1", text="Hint test.")])
 
 
-async def test_empty_run_needs_no_model_call():
-    client, completions = fake_client()
-    text, usage = await Digester(client, "k").write(SELECTIONS, [])
-    assert text == EMPTY_DIGEST and usage is None and completions.calls == []
-    non_member = {**member("1", "T", 3), "verdicts": {}}
-    assert (await Digester(client, "k").write(SELECTIONS, [non_member]))[0] == EMPTY_DIGEST
+def test_selection_input_carries_cards_for_tier1_and_abstracts_for_tier2():
+    papers = [
+        member("1", "First", {"cot-faithfulness": 1}, CARD),
+        member("2", "Second", {"cot-faithfulness": 2}),
+    ]
+    text = render_selection_input(FAITH, by_tier(FAITH, papers))
+    assert text.startswith("# CoT faithfulness\n")
+    assert "## Tier 1: First (arXiv 1)" in text and "Detection method: Hint injection" in text
+    assert "## Tier 2: Second (arXiv 2)" in text and "Abstract: Abstract text." in text
 
 
-async def test_digest_call_groups_by_selection_and_tier():
-    client, completions = fake_client()
-    papers = [member("1", "First Paper", 1, CARD), member("2", "Second Paper", 2)]
-    text, usage = await Digester(client, "k").write(SELECTIONS, papers)
-    assert text == "A digest."
-    assert usage is not None and usage.model == "k" and usage.cost == 0.002
-    (call,) = completions.calls
-    user = call["messages"][1]["content"]
-    assert user == render_papers(SELECTIONS, papers)
-    assert user.startswith("# CoT faithfulness\n") and "Mechanistic" not in user
-    assert "## Tier 1: First Paper" in user and "Detection method: Hint injection" in user
-    assert "## Tier 2: Second Paper" in user and "Abstract: Abstract text." in user
-    assert call["extra_body"]["usage"] == {"include": True}
+def test_selection_markdown_links_titles_and_counts_the_rest():
+    papers = [member("1", "First  Paper", {"cot-faithfulness": 1}, CARD)]
+    papers += [
+        member(str(i), f"P{i}", {"cot-faithfulness": 2}) for i in range(2, 2 + RECOMMENDED_CAP + 3)
+    ]
+    papers += [
+        member("50", "T3", {"cot-faithfulness": 3}),
+        member("51", "Other", {"mech-interp": 2}),
+    ]
+    out = SelectionOutput(
+        overview="Overview.",
+        must_read=[],  # the model skipped the tier 1 paper: it is listed anyway
+        recommended=[Note(id=str(i), text=f"note {i}") for i in range(2, 2 + RECOMMENDED_CAP + 1)],
+    )
+    body = render_selection_digest(FAITH, by_tier(FAITH, papers), out)
+    assert "**Must read**\n- [First Paper](https://arxiv.org/abs/1) — Probes predict" in body
+    assert body.count("\n- [P") == RECOMMENDED_CAP
+    assert "Plus 3 more recommended and 1 good to know" in body
+    assert "Other" not in body
 
 
-async def test_tier3_titles_are_listed_by_code_not_the_model():
-    client, completions = fake_client()
-    papers = [member("1", "First Paper", 2), member("2", "Second  Paper", 3), member("3", "T3", 3)]
-    text, _ = await Digester(client, "k").write(SELECTIONS, papers)
-    (call,) = completions.calls
-    assert "Second" not in call["messages"][1]["content"]
-    tail = "CoT faithfulness, good to know: Second Paper; T3."
-    assert text == f"A digest.\n\n{tail}" and render_tier3(SELECTIONS, papers) == tail
+async def test_write_all_makes_general_plus_flagged_selection_digests():
+    client, completions = fake_client({SelectionOutput: SEL_OUT, GeneralOutput: GEN_OUT})
+    papers = [
+        member("1", "First", {"cot-faithfulness": 1, "mech-interp": 2}, CARD),
+        member("2", "Second", {"cot-faithfulness": 2}),
+    ]
+    digests = await Digester(client, "k").write_all([FAITH_D, INTERP], papers)
+    assert [d.source for d in digests] == [GENERAL, "cot-faithfulness"]
+    general, faith = digests
+    # The suffix names the selections where the paper is tier 1, not every membership.
+    link = "[First](https://arxiv.org/abs/1)"
+    head = f"A quiet day.\n\n**Must read**\n- {link} (CoT faithfulness) — Hint test."
+    assert general.body.startswith(head)
+    assert "- CoT faithfulness: 1 must read, 1 recommended, 0 good to know" in general.body
+    assert (
+        "- Mechanistic interpretability: 0 must read, 1 recommended, 0 good to know" in general.body
+    )
+    assert faith.body == (
+        "Two omission tests today.\n\n"
+        f"**Must read**\n- {link} — Plants hints and checks disclosure.\n\n"
+        "**Recommended**\n- [Second](https://arxiv.org/abs/2) — A proxy study."
+    )
+    assert faith.model == "k" and faith.cost == 0.002 and general.cost == 0.002
+    assert len(completions.calls) == 2
+    assert completions.calls[0]["extra_body"]["usage"] == {"include": True}
 
 
 async def test_only_tier3_members_need_no_model_call():
-    client, completions = fake_client()
-    text, usage = await Digester(client, "k").write(SELECTIONS, [member("2", "Only Paper", 3)])
-    assert text == "CoT faithfulness, good to know: Only Paper." and usage is None
-    assert completions.calls == []
+    client, completions = fake_client({GeneralOutput: GEN_OUT})
+    papers = [member("3", "Only", {"cot-faithfulness": 3})]
+    general, faith = await Digester(client, "k").write_all([FAITH_D], papers)
+    assert (
+        faith.body
+        == "Plus 1 good to know in the Papers table (filter Selections = CoT faithfulness)."
+    )
+    assert faith.cost is None and len(completions.calls) == 1  # the general digest still runs
 
 
-def test_normalize_joins_wrapped_lines_and_keeps_paragraphs():
-    wrapped = "First line\ncontinues here.  \n\n\nSecond paragraph\nalso wrapped.\n"
-    assert normalize(wrapped) == "First line continues here.\n\nSecond paragraph also wrapped."
+async def test_empty_run_needs_no_model_call():
+    client, completions = fake_client({})
+    (general,) = await Digester(client, "k").write_all([FAITH_D], [])
+    assert general.body == EMPTY_DIGEST and completions.calls == []

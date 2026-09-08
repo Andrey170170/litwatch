@@ -447,9 +447,9 @@ def digest(
         int | None, typer.Option(help="Instead of a run: papers screened in the last N days")
     ] = None,
     model: Annotated[str | None, typer.Option(help="Override the digest model")] = None,
-    store: Annotated[bool, typer.Option(help="Write the digest onto the run row")] = False,
+    store: Annotated[bool, typer.Option(help="Store the digests for the run")] = False,
 ) -> None:
-    """Write the prose digest for one run (or a recent window) and print it."""
+    """Write the digests for one run (or a recent window) and print them."""
     if (run_id is None) == (days is None):
         raise SystemExit("give exactly one of --run or --days")
     settings = Settings.from_env()
@@ -463,15 +463,17 @@ def digest(
             else:
                 assert days is not None
                 members = await db.members_since(conn, datetime.now(UTC) - timedelta(days=days))
-            text, usage = await digester.write(selections, members)
+            digests = await digester.write_all(selections, members)
             if store and run_id is not None:
-                await db.store_digest(conn, run_id, text, usage.model if usage else None)
-            return members, text, usage
+                for d in digests:
+                    await db.store_digest(conn, run_id, d.source, d.title, d.body, d.model, d.cost)
+            return members, digests
 
-    members, text, usage = asyncio.run(go())
-    print(text)  # raw, unwrapped: the console printer would insert line breaks
-    cost = f"${usage.cost:.4f}" if usage and usage.cost is not None else "n/a"
-    console.print(f"\n[dim]{len(members)} papers, {digester.model}, cost {cost}[/dim]")
+    members, digests = asyncio.run(go())
+    for d in digests:
+        print(f"===== {d.title} =====\n{d.body}\n")  # raw: the console printer would wrap
+    cost = sum(d.cost or 0.0 for d in digests)
+    console.print(f"[dim]{len(members)} papers, {digester.model}, cost ${cost:.4f}[/dim]")
 
 
 @app.command()

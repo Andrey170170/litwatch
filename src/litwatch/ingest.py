@@ -11,7 +11,7 @@ import psycopg
 from litwatch import arxiv_source, db
 from litwatch.config import Settings
 from litwatch.deep import DeepProcessor
-from litwatch.digest import Digester
+from litwatch.digest import Digest, Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade
 from litwatch.selection import Selection
@@ -206,15 +206,20 @@ async def write_run_digest(
     digester: Digester,
     selections: list[Selection],
     s: RunSummary,
-) -> str:
-    """Digest of the papers this run placed in some selection; the model cost joins the run's."""
+) -> list[Digest]:
+    """Digests of the papers this run placed in some selection; model costs join the run's."""
     members = await db.run_members(conn, s.run_id)
-    text, usage = await digester.write(selections, members)
-    if usage:
-        s.cost += usage.cost or 0.0
-    await db.store_digest(conn, s.run_id, text, usage.model if usage else None)
-    log.info("run %s digest: %d papers, %d chars", s.run_id, len(members), len(text))
-    return text
+    digests = await digester.write_all(selections, members)
+    for d in digests:
+        s.cost += d.cost or 0.0
+        await db.store_digest(conn, s.run_id, d.source, d.title, d.body, d.model, d.cost)
+    log.info(
+        "run %s digests: %d papers, %s",
+        s.run_id,
+        len(members),
+        ", ".join(f"{d.source} {len(d.body)} chars" for d in digests),
+    )
+    return digests
 
 
 async def process_deep(

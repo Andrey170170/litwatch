@@ -38,6 +38,7 @@ class Selection(BaseModel):
     keywords: list[str] = Field(default_factory=list, description="Regexes for the recall audit")
     owner: str | None = None
     status: Status = Status.ACTIVE
+    digest: bool = Field(default=False, description="Gets its own digest per run")
     notion_id: str | None = None
 
     @field_validator("rubric", mode="before")
@@ -81,7 +82,7 @@ class Selection(BaseModel):
 
     @property
     def version(self) -> str:
-        """Content hash of what the screener sees; owner, status, and ids do not count."""
+        """Content hash of what the screener sees; owner, status, digest, and ids do not count."""
         content = json.dumps(
             [self.name, self.subject, self.rubric, self.keywords], ensure_ascii=False
         )

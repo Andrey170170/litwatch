@@ -1,0 +1,27 @@
+name: Alignment, safety and evaluation
+slug: alignment-and-safety
+owner: Andrei
+status: active
+digest: true
+subject: >-
+  Making language models behave as intended and knowing whether they do: preference and
+  constitutional training, refusal and jailbreak robustness, reward hacking and specification
+  gaming, deception and sandbagging, chain-of-thought and action monitoring, scalable oversight,
+  and evaluation methodology and benchmarks for capabilities and safety. Narrow domain benchmarks
+  without a methodological contribution are tier 3.
+rubric: >-
+  Tier 1 only for work likely to become a reference point for this subject: a new capability or
+  paradigm, a result that changes how the field approaches the problem, a benchmark, dataset, or
+  tool the community will adopt, or a rigorous negative result that overturns common practice.
+  Incremental improvements, single-domain applications, and surveys are at most tier 2.
+keywords:
+  - alignment
+  - RLHF
+  - jailbreak
+  - red team
+  - safety
+  - reward hacking
+  - sycophancy
+  - monitoring
+  - oversight
+  - benchmark

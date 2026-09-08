@@ -2,6 +2,7 @@ name: CoT faithfulness
 slug: cot-faithfulness
 owner: Ana
 status: active
+digest: true
 subject: >-
   Whether a language model's reasoning trace (chain of thought, thinking tokens, scratchpad)
   omits or contradicts a computation the model actually performed. A step is faithful iff it

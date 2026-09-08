@@ -83,9 +83,10 @@ async def pending(
 ) -> list[Paper]:
     """Papers that need a screening call under the given selections.
 
-    New papers always. Papers in the window whose stored judgement for some selection is missing
-    or predates its current version, restricted for an edited selection to its members and keyword
-    hits; a selection with no verdicts at all is new and takes the whole window.
+    New papers always. Papers whose stored judgement for some selection is missing or predates
+    its current version: for an edited selection its current members whatever their age plus
+    keyword hits in the window; a selection with no verdicts at all is new and takes the whole
+    window.
     """
     current = {s.slug: s.version for s in selections}
     since = datetime.now(UTC) - timedelta(days=window_days)
@@ -103,7 +104,11 @@ async def pending(
                 SELECT p.*, coalesce((SELECT v.tier FROM verdicts v
                                       WHERE v.paper_id = p.id AND v.selection = %(slug)s), 4) AS t
                 FROM papers p
-                WHERE p.screened_at IS NOT NULL AND p.published >= %(since)s
+                WHERE p.screened_at IS NOT NULL
+                  AND (p.published >= %(since)s
+                       OR EXISTS (SELECT 1 FROM verdicts v
+                                  WHERE v.paper_id = p.id AND v.selection = %(slug)s
+                                    AND v.tier < 4))
                   AND NOT EXISTS (SELECT 1 FROM verdicts v
                                   WHERE v.paper_id = p.id AND v.selection = %(slug)s
                                     AND v.version = %(version)s)
@@ -260,6 +265,7 @@ def _row_to_selection(r: dict[str, Any]) -> Selection:
         keywords=list(r["keywords"] or []),
         owner=r["owner"],
         status=Status(r["status"]),
+        digest=bool(r.get("digest")),
         notion_id=r["notion_id"],
     )
 
@@ -270,12 +276,13 @@ async def upsert_selection(conn: psycopg.AsyncConnection, s: Selection) -> bool:
         await conn.execute(
             """
             INSERT INTO selections (slug, name, owner, status, subject, rubric, keywords, version,
-                                    notion_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    digest, notion_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (slug) DO UPDATE SET
                 name = EXCLUDED.name, owner = EXCLUDED.owner, status = EXCLUDED.status,
                 subject = EXCLUDED.subject, rubric = EXCLUDED.rubric,
                 keywords = EXCLUDED.keywords, version = EXCLUDED.version,
+                digest = EXCLUDED.digest,
                 notion_id = coalesce(EXCLUDED.notion_id, selections.notion_id),
                 updated_at = CASE WHEN selections.version = EXCLUDED.version
                                   THEN selections.updated_at ELSE now() END,
@@ -291,6 +298,7 @@ async def upsert_selection(conn: psycopg.AsyncConnection, s: Selection) -> bool:
                 s.rubric,
                 s.keywords,
                 s.version,
+                s.digest,
                 s.notion_id,
             ),
         )
@@ -299,7 +307,11 @@ async def upsert_selection(conn: psycopg.AsyncConnection, s: Selection) -> bool:
 
 
 async def pause_missing_selections(conn: psycopg.AsyncConnection, keep: list[str]) -> list[str]:
-    """Selections absent from an authoritative sync are paused, never deleted."""
+    """Selections absent from an authoritative sync are paused, never deleted.
+
+    Their members' best tier is recomputed over the selections that stay active, so routing
+    releases what only a paused selection wanted.
+    """
     rows = await (
         await conn.execute(
             """
@@ -309,7 +321,31 @@ async def pause_missing_selections(conn: psycopg.AsyncConnection, keep: list[str
             (keep,),
         )
     ).fetchall()
-    return [r["slug"] for r in rows]
+    paused = [r["slug"] for r in rows]
+    if paused:
+        await recompute_best_tier(conn, paused)
+    return paused
+
+
+async def recompute_best_tier(conn: psycopg.AsyncConnection, slugs: list[str]) -> int:
+    """Best tier over active selections for every paper judged under one of `slugs`."""
+    row = await (
+        await conn.execute(
+            """
+            WITH affected AS (SELECT DISTINCT paper_id FROM verdicts WHERE selection = ANY(%s)),
+            updated AS (
+                UPDATE papers p SET best_tier = coalesce(
+                    (SELECT min(v.tier) FROM verdicts v
+                     JOIN selections s ON s.slug = v.selection AND s.status = 'active'
+                     WHERE v.paper_id = p.id), 4)
+                FROM affected a WHERE p.id = a.paper_id AND p.best_tier IS NOT NULL
+                RETURNING 1)
+            SELECT count(*) AS n FROM updated
+            """,
+            (slugs,),
+        )
+    ).fetchone()
+    return int(row["n"]) if row else 0
 
 
 async def selection_counts(conn: psycopg.AsyncConnection) -> dict[str, dict[int, int]]:
@@ -362,11 +398,40 @@ async def list_runs(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict
 
 
 async def store_digest(
-    conn: psycopg.AsyncConnection, run_id: int, text: str, model: str | None
+    conn: psycopg.AsyncConnection,
+    run_id: int,
+    source: str,
+    title: str,
+    body: str,
+    model: str | None,
+    cost: float | None,
 ) -> None:
+    """One digest per (run, source); rewriting replaces it."""
     await conn.execute(
-        "UPDATE runs SET digest = %s, digest_model = %s WHERE id = %s", (text, model, run_id)
+        """
+        INSERT INTO digests (run_id, source, title, body, model, cost)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (run_id, source) DO UPDATE SET
+            title = EXCLUDED.title, body = EXCLUDED.body, model = EXCLUDED.model,
+            cost = EXCLUDED.cost, created_at = now()
+        """,
+        (run_id, source, title, body, model, cost),
     )
+
+
+async def list_digests(conn: psycopg.AsyncConnection, limit: int = 40) -> list[dict[str, Any]]:
+    """Newest runs first, the general digest before the selection ones, with run facts."""
+    return await (
+        await conn.execute(
+            """
+            SELECT d.run_id, r.kind, r.started_at, r.finished_at, r.fetched, r.screened,
+                   r.cost AS run_cost, r.tiers, d.source, d.title, d.body, d.model, d.cost
+            FROM digests d JOIN runs r ON r.id = d.run_id
+            ORDER BY d.run_id DESC, (d.source <> 'general'), d.title LIMIT %s
+            """,
+            (limit,),
+        )
+    ).fetchall()
 
 
 # -- reading papers -------------------------------------------------------------------------------
@@ -374,7 +439,8 @@ async def store_digest(
 VERDICTS_JSON = """
     (SELECT jsonb_object_agg(v.selection, jsonb_build_object(
                 'tier', v.tier, 'confidence', v.confidence, 'reason', v.reason))
-     FROM verdicts v WHERE v.paper_id = p.id AND v.tier < 4) AS verdicts
+     FROM verdicts v JOIN selections s ON s.slug = v.selection AND s.status = 'active'
+     WHERE v.paper_id = p.id AND v.tier < 4) AS verdicts
 """
 PAPER_COLUMNS = """
     p.id, p.title, p.authors, p.categories, p.primary_category, p.published, p.url, p.fetched_at,

@@ -111,3 +111,17 @@ ALTER TABLE papers ADD COLUMN IF NOT EXISTS best_tier smallint;
 ALTER TABLE papers ADD COLUMN IF NOT EXISTS selections_version text;
 CREATE INDEX IF NOT EXISTS papers_best_tier_idx ON papers (best_tier, screened_at DESC)
     WHERE best_tier IS NOT NULL;
+
+ALTER TABLE selections ADD COLUMN IF NOT EXISTS digest boolean NOT NULL DEFAULT false;
+
+-- One digest per run and source: 'general' across the feed, or a selection slug.
+CREATE TABLE IF NOT EXISTS digests (
+    run_id      bigint NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+    source      text NOT NULL,
+    title       text NOT NULL,
+    body        text NOT NULL,                  -- markdown: ##, ###, - bullets, [title](url), **bold**
+    model       text,
+    cost        numeric(10,4),
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (run_id, source)
+);

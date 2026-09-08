@@ -1,0 +1,26 @@
+name: Efficiency and architecture
+slug: efficiency-and-architecture
+owner: Andrei
+status: active
+digest: true
+subject: >-
+  How language models are built and run: architectures beyond the standard transformer, mixture
+  of experts, long-context and memory mechanisms, KV-cache and attention efficiency,
+  quantization, pruning, distillation, speculative decoding, and training and inference systems.
+  Hardware-specific kernels with no modelling change are tier 3.
+rubric: >-
+  Tier 1 only for work likely to become a reference point for this subject: a new capability or
+  paradigm, a result that changes how the field approaches the problem, a benchmark, dataset, or
+  tool the community will adopt, or a rigorous negative result that overturns common practice.
+  Incremental improvements, single-domain applications, and surveys are at most tier 2.
+keywords:
+  - mixture of experts
+  - MoE
+  - long context
+  - KV cache
+  - quantization
+  - speculative decoding
+  - state space
+  - linear attention
+  - distillation
+  - memory

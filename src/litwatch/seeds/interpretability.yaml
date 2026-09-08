@@ -1,13 +1,19 @@
-name: Mechanistic interpretability
-slug: mech-interp
+name: Interpretability
+slug: interpretability
 owner: Andrei
 status: active
+digest: true
 subject: >-
   Understanding the internal mechanisms, representations, or circuits of neural language models:
   probes, sparse autoencoders, attention and attribution analysis, activation patching and
   ablation, steering vectors, logit lens, feature and circuit discovery, and the methods and
   evaluations for these tools. Work that merely uses a probe or an ablation as an auxiliary
   measurement inside another study is tier 3.
+rubric: >-
+  Tier 1 only for work likely to become a reference point for this subject: a new capability or
+  paradigm, a result that changes how the field approaches the problem, a benchmark, dataset, or
+  tool the community will adopt, or a rigorous negative result that overturns common practice.
+  Incremental improvements, single-domain applications, and surveys are at most tier 2.
 keywords:
   - mechanistic interpretab
   - sparse autoencoder
@@ -15,4 +21,5 @@ keywords:
   - steering vector
   - logit lens
   - residual stream
+  - probing classifier
   - circuit

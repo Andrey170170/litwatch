@@ -1,37 +1,88 @@
-"""Daily digest: prose on tier 1 and 2 papers per selection, tier 3 as a code-rendered list."""
+"""Digests: a general one across the feed plus one per flagged selection, per run.
+
+The model returns structured notes keyed by arXiv id; the markdown is rendered here, so titles
+and links are never the model's to get wrong. Markdown stays within the subset the Notion
+projection renders: `**bold**` lines, `- ` bullets, `[title](url)` links.
+"""
 
 from __future__ import annotations
 
-import re
+import asyncio
+from dataclasses import dataclass
 from typing import Any
 
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 
 from litwatch.models import Usage
 from litwatch.screen import usage_of
 from litwatch.selection import Selection
 
-SYSTEM_PROMPT = """You write a short daily digest for an NLP research lab's literature watch. \
-The lab follows several selections, each a topic one member owns with a subject and, for some, \
-a tier 1 rubric. You are given the selections and today's tier 1 (must read) and tier 2 \
-(recommended) papers grouped by selection. Tier 1 papers come with a reading card written from \
-the full text; tier 2 papers come with the abstract and the screener's one-sentence reason.
-
-Write one section per selection that has papers, in the order given, as a single paragraph \
-that begins with the selection's name followed by a colon. For every tier 1 paper, two to four \
-sentences: what it contributes to the subject, by what method, and against what ground truth \
-or evidence; where a card names a detection method or ground truth, center on that. For every \
-tier 2 paper exactly one sentence. Mention every paper by its exact title once and no paper \
-that is not listed. Be concrete about methods and claims; do not hype, do not speculate beyond \
-what you are given, and do not use headers, bullet points, or bold text."""
-
+GENERAL = "general"
+GENERAL_TITLE = "General"
+RECOMMENDED_CAP = 8  # tier 2 bullets per selection digest; the rest are counted
+GENERAL_TIER2_CAP = 15  # tier 2 titles per selection shown to the general-digest model
 EMPTY_DIGEST = "No new member papers in this run."
 
 
-def _by_tier(
-    selection: Selection, papers: list[dict[str, Any]], tiers: tuple[int, ...]
-) -> dict[int, list[dict[str, Any]]]:
-    grouped: dict[int, list[dict[str, Any]]] = {t: [] for t in tiers}
+class Note(BaseModel):
+    id: str = Field(description="The paper's arXiv id exactly as given")
+    text: str
+
+
+class SelectionOutput(BaseModel):
+    overview: str = Field(description="Two or three sentences on what today adds to the subject")
+    must_read: list[Note] = Field(description="Every tier 1 paper, two or three sentences each")
+    recommended: list[Note] = Field(
+        description=f"Up to {RECOMMENDED_CAP} tier 2 papers, one sentence each, most notable first"
+    )
+
+
+class GeneralOutput(BaseModel):
+    overview: str = Field(description="Three or four sentences across the whole feed")
+    must_read: list[Note] = Field(description="Every tier 1 paper, one sentence each")
+
+
+SELECTION_PROMPT = f"""You write the daily digest for one selection of an NLP research lab's \
+literature watch: a topic one member owns, with a subject and, for some, a tier 1 rubric. You \
+are given the selection and today's papers: tier 1 (must read) with a reading card written from \
+the full text, and tier 2 (recommended) with the abstract and the screener's reason.
+
+Return JSON. `overview`: two or three sentences on what today adds to the subject, naming no \
+more than two papers. `must_read`: one entry per tier 1 paper, all of them, two or three \
+sentences each: what it contributes, by what method, against what ground truth or evidence; \
+where the card names a detection method or ground truth, center on that. `recommended`: at most \
+{RECOMMENDED_CAP} tier 2 papers, the most notable first, one sentence each on what the paper \
+does. Use each paper's arXiv id as `id`, exactly as given. Do not repeat titles inside the \
+text; the reader sees the title next to it. Be concrete about methods and claims, do not hype, \
+do not speculate beyond what you are given."""
+
+GENERAL_PROMPT = """You write the front page of the daily digest for an NLP research lab's \
+literature watch. The lab follows several selections, each a topic with tiers: 1 must read, 2 \
+recommended, 3 good to know. You are given, per selection, today's counts, the tier 1 papers \
+with their key claims, and the tier 2 titles with the screener's reasons.
+
+Return JSON. `overview`: three or four sentences across the whole feed on what stands out today \
+and where the volume is, naming no more than three papers. `must_read`: one entry per tier 1 \
+paper across all selections, one sentence each on what it contributes. Use each paper's arXiv \
+id as `id`, exactly as given. Do not repeat titles inside the text. Be concrete, do not hype."""
+
+
+@dataclass
+class Digest:
+    source: str  # GENERAL or a selection slug
+    title: str  # GENERAL_TITLE or the selection name
+    body: str  # markdown
+    model: str | None = None
+    cost: float | None = None
+
+
+# -- grouping and prompt inputs --------------------------------------------------------------------
+
+
+def by_tier(selection: Selection, papers: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    """Member rows of one selection keyed by its tier there (1..3)."""
+    grouped: dict[int, list[dict[str, Any]]] = {1: [], 2: [], 3: []}
     for row in papers:
         verdict = (row.get("verdicts") or {}).get(selection.slug)
         if verdict and verdict["tier"] in grouped:
@@ -39,89 +90,207 @@ def _by_tier(
     return grouped
 
 
-def render_papers(selections: list[Selection], papers: list[dict[str, Any]]) -> str:
-    """Tier 1 and 2 papers grouped by selection for the digest prompt. Empty when there are none."""
+def _card_lines(row: dict[str, Any]) -> list[str]:
+    card = row.get("enrichment")
+    if not card:
+        return [f"Abstract: {(row.get('abstract') or '').strip()}"]
+    lines = [f"Key claim: {card['key_claim']}", f"Summary: {card['summary']}"]
+    if faith := card.get("faithfulness"):
+        lines += [
+            f"Mismatch detected: {', '.join(faith['mismatch']) or 'none'}",
+            f"Ground truth: {faith['ground_truth']}",
+            f"Detection method: {faith['detection_method']}",
+            f"Generality: {faith['generality']}",
+        ]
+    return lines
+
+
+def render_selection_input(selection: Selection, groups: dict[int, list[dict[str, Any]]]) -> str:
+    lines = [f"# {selection.name}", f"Subject: {selection.subject}"]
+    if selection.rubric:
+        lines.append(f"Tier 1 rubric: {selection.rubric}")
+    for tier in (1, 2):
+        for row in groups[tier]:
+            lines += ["", f"## Tier {tier}: {row['title']} (arXiv {row['id']})"]
+            lines.append(f"Reason: {row['verdicts'][selection.slug]['reason']}")
+            if tier == 1:
+                lines += _card_lines(row)
+            else:
+                lines.append(f"Abstract: {(row.get('abstract') or '').strip()}")
+    return "\n".join(lines)
+
+
+def render_general_input(
+    selections: list[Selection], groups: dict[str, dict[int, list[dict[str, Any]]]]
+) -> str:
     blocks = []
     for s in selections:
-        by_tier = _by_tier(s, papers, (1, 2))
-        if not any(by_tier.values()):
+        g = groups[s.slug]
+        if not any(g.values()):
             continue
-        lines = [f"# {s.name}", f"Subject: {s.subject}"]
-        if s.rubric:
-            lines.append(f"Tier 1 rubric: {s.rubric}")
-        for tier, rows in by_tier.items():
-            for row in rows:
-                lines.append("")
-                lines.append(f"## Tier {tier}: {row['title']}")
-                lines.append(f"Reason: {row['verdicts'][s.slug]['reason']}")
-                card = row.get("enrichment") if tier == 1 else None
-                if card:
-                    lines.append(f"Key claim: {card['key_claim']}")
-                    lines.append(f"Summary: {card['summary']}")
-                    if faith := card.get("faithfulness"):
-                        lines.append(f"Mismatch detected: {', '.join(faith['mismatch']) or 'none'}")
-                        lines.append(f"Ground truth: {faith['ground_truth']}")
-                        lines.append(f"Detection method: {faith['detection_method']}")
-                        lines.append(f"Generality: {faith['generality']}")
-                else:
-                    lines.append(f"Abstract: {(row.get('abstract') or '').strip()}")
+        lines = [
+            f"# {s.name}",
+            f"Counts: {len(g[1])} tier 1, {len(g[2])} tier 2, {len(g[3])} tier 3",
+        ]
+        for row in g[1]:
+            card = row.get("enrichment") or {}
+            claim = card.get("key_claim") or (row.get("abstract") or "").strip()
+            lines += ["", f"## Tier 1: {row['title']} (arXiv {row['id']})", f"Key claim: {claim}"]
+        for row in g[2][:GENERAL_TIER2_CAP]:
+            reason = row["verdicts"][s.slug]["reason"]
+            lines.append(f"- Tier 2: {row['title']} (arXiv {row['id']}): {reason}")
         blocks.append("\n".join(lines))
     return "\n\n---\n\n".join(blocks)
 
 
-def render_tier3(selections: list[Selection], papers: list[dict[str, Any]]) -> str:
-    """One paragraph per selection listing its tier 3 titles; written by code, not the model."""
-    paragraphs = []
-    for s in selections:
-        rows = _by_tier(s, papers, (3,))[3]
-        if rows:
-            titles = "; ".join(" ".join(r["title"].split()) for r in rows)
-            paragraphs.append(f"{s.name}, good to know: {titles}.")
-    return "\n\n".join(paragraphs)
+# -- markdown rendering ----------------------------------------------------------------------------
 
 
-async def write_digest(
-    client: AsyncOpenAI,
-    model: str,
+def _link(row: dict[str, Any]) -> str:
+    title = " ".join(str(row["title"]).split())
+    return f"[{title}]({row.get('url') or f'https://arxiv.org/abs/{row["id"]}'})"
+
+
+def _bullets(notes: list[Note], rows: list[dict[str, Any]], suffix=lambda r: "") -> list[str]:
+    """Bullets in the model's order, unknown ids dropped, listed papers never omitted."""
+    by_id = {r["id"]: r for r in rows}
+    seen: set[str] = set()
+    out = []
+    for note in notes:
+        if (row := by_id.get(note.id)) and note.id not in seen:
+            seen.add(note.id)
+            out.append(f"- {_link(row)}{suffix(row)} — {' '.join(note.text.split())}")
+    return out
+
+
+def _all_bullets(notes: list[Note], rows: list[dict[str, Any]], suffix=lambda r: "") -> list[str]:
+    """Every row gets a bullet: tier 1 papers must appear even when the model skipped one."""
+    out = _bullets(notes, rows, suffix)
+    covered = {n.id for n in notes}
+    for row in rows:
+        if row["id"] not in covered:
+            card = row.get("enrichment") or {}
+            fallback = card.get("key_claim") or "See the reading card."
+            out.append(f"- {_link(row)}{suffix(row)} — {fallback}")
+    return out
+
+
+def render_selection_digest(
+    selection: Selection, groups: dict[int, list[dict[str, Any]]], out: SelectionOutput | None
+) -> str:
+    """The selection's page: overview, must-read bullets, recommended bullets, the rest counted."""
+    t1, t2, t3 = groups[1], groups[2], groups[3]
+    parts: list[str] = []
+    if out is not None:
+        parts.append(" ".join(out.overview.split()))
+        if t1:
+            parts.append("**Must read**\n" + "\n".join(_all_bullets(out.must_read, t1)))
+        if t2:
+            bullets = _bullets(out.recommended[:RECOMMENDED_CAP], t2)
+            parts.append("**Recommended**\n" + "\n".join(bullets))
+            rest = len(t2) - len(bullets)
+        else:
+            rest = 0
+    else:
+        rest = len(t2)
+    tail = []
+    if rest:
+        tail.append(f"{rest} more recommended")
+    if t3:
+        tail.append(f"{len(t3)} good to know")
+    if tail:
+        parts.append(
+            f"Plus {' and '.join(tail)} in the Papers table (filter Selections = {selection.name})."
+        )
+    return "\n\n".join(parts) if parts else EMPTY_DIGEST
+
+
+def render_general_digest(
     selections: list[Selection],
-    papers: list[dict[str, Any]],
-    effort: str = "low",
-) -> tuple[str, Usage | None]:
-    """Prose digest for the given papers; the model sees tiers 1 and 2, tier 3 is a title list.
+    groups: dict[str, dict[int, list[dict[str, Any]]]],
+    out: GeneralOutput | None,
+) -> str:
+    """The front page: overview, every must-read across the feed, counts per selection."""
+    names = {s.slug: s.name for s in selections}
+    tier1_rows, owner = [], {}
+    for s in selections:
+        for row in groups[s.slug][1]:
+            if row["id"] not in owner:
+                tier1_rows.append(row)
+            owner.setdefault(row["id"], []).append(names[s.slug])
+    parts: list[str] = []
+    if out is not None:
+        parts.append(" ".join(out.overview.split()))
+    if tier1_rows:
+        notes = out.must_read if out is not None else []
+        bullets = _all_bullets(notes, tier1_rows, lambda r: f" ({', '.join(owner[r['id']])})")
+        parts.append("**Must read**\n" + "\n".join(bullets))
+    counts = []
+    for s in selections:
+        g = groups[s.slug]
+        if any(g.values()):
+            counts.append(
+                f"- {s.name}: {len(g[1])} must read, {len(g[2])} recommended, "
+                f"{len(g[3])} good to know"
+            )
+    if counts:
+        parts.append("**By selection**\n" + "\n".join(counts))
+    return "\n\n".join(parts) if parts else EMPTY_DIGEST
 
-    No model call when there is nothing to write prose about.
-    """
-    rendered = render_papers(selections, papers)
-    tail = render_tier3(selections, papers)
-    if not rendered:
-        return (tail or EMPTY_DIGEST), None
-    completion = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": rendered},
-        ],
-        extra_body={"reasoning": {"effort": effort}, "usage": {"include": True}},
-    )
-    text = normalize(completion.choices[0].message.content or "")
-    if not text:
-        raise RuntimeError(f"{model} returned an empty digest")
-    return "\n\n".join(t for t in (text, tail) if t), usage_of(completion, model)
 
-
-def normalize(text: str) -> str:
-    """One line per paragraph, paragraphs separated by a blank line."""
-    paragraphs = re.split(r"\n\s*\n", text.strip())
-    return "\n\n".join(" ".join(p.split()) for p in paragraphs if p.strip())
+# -- the model calls -------------------------------------------------------------------------------
 
 
 class Digester:
-    """`write_digest` bound to a client and model, for the run pipeline."""
+    """Writes the run's digests: general first in the result, then one per flagged selection."""
 
     def __init__(self, client: AsyncOpenAI, model: str, effort: str = "low") -> None:
         self.client, self.model, self.effort = client, model, effort
 
-    async def write(
+    async def _ask(self, system: str, user: str, schema: type[BaseModel]) -> tuple[Any, Usage]:
+        completion = await self.client.chat.completions.parse(
+            model=self.model,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            response_format=schema,
+            extra_body={"reasoning": {"effort": self.effort}, "usage": {"include": True}},
+        )
+        parsed = completion.choices[0].message.parsed
+        if parsed is None:
+            raise RuntimeError(f"{self.model} returned no parsable digest")
+        return parsed, usage_of(completion, self.model)
+
+    async def write_selection(
+        self, selection: Selection, groups: dict[int, list[dict[str, Any]]]
+    ) -> Digest:
+        """No model call when there is nothing above tier 3."""
+        if not (groups[1] or groups[2]):
+            return Digest(
+                selection.slug, selection.name, render_selection_digest(selection, groups, None)
+            )
+        out, usage = await self._ask(
+            SELECTION_PROMPT, render_selection_input(selection, groups), SelectionOutput
+        )
+        body = render_selection_digest(selection, groups, out)
+        return Digest(selection.slug, selection.name, body, usage.model, usage.cost)
+
+    async def write_general(
+        self, selections: list[Selection], groups: dict[str, dict[int, list[dict[str, Any]]]]
+    ) -> Digest:
+        rendered = render_general_input(selections, groups)
+        if not rendered:
+            return Digest(GENERAL, GENERAL_TITLE, EMPTY_DIGEST)
+        out, usage = await self._ask(GENERAL_PROMPT, rendered, GeneralOutput)
+        body = render_general_digest(selections, groups, out)
+        return Digest(GENERAL, GENERAL_TITLE, body, usage.model, usage.cost)
+
+    async def write_all(
         self, selections: list[Selection], papers: list[dict[str, Any]]
-    ) -> tuple[str, Usage | None]:
-        return await write_digest(self.client, self.model, selections, papers, self.effort)
+    ) -> list[Digest]:
+        """General digest plus one per selection with `digest` set and at least one member."""
+        groups = {s.slug: by_tier(s, papers) for s in selections}
+        flagged = [s for s in selections if s.digest and any(groups[s.slug].values())]
+        general, *per_selection = await asyncio.gather(
+            self.write_general(selections, groups),
+            *(self.write_selection(s, groups[s.slug]) for s in flagged),
+        )
+        return [general, *per_selection]

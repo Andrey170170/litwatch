@@ -41,6 +41,7 @@ class SelectionRow(BaseModel):
     subject: str = ""
     rubric: str | None = None
     keywords: list[str] | str | None = None
+    digest: bool = False
 
 
 class SelectionsSync(BaseModel):
@@ -218,6 +219,11 @@ def create_app(settings: Settings) -> FastAPI:
         if row is None:
             raise HTTPException(404, "no such run")
         return row
+
+    @app.get("/digests")
+    async def digests(limit: int = 40) -> list[dict[str, Any]]:
+        async with await db.connect(dsn) as conn:
+            return await db.list_digests(conn, limit)
 
     @app.get("/papers")
     async def papers(
