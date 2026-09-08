@@ -141,6 +141,10 @@ async def sync_selections(
     if sync.authoritative:
         for slug in await db.pause_missing_selections(conn, kept):
             log.info("selection %s paused: absent from the sync", slug)
+    # A row set to draft or paused in Notion stops counting toward its members' best tier.
+    inactive = [r["slug"] for r in report if r.get("ok") and r["status"] != Status.ACTIVE.value]
+    if inactive:
+        await db.recompute_best_tier(conn, inactive)
     return report
 
 
