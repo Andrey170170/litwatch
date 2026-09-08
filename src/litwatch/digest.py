@@ -8,6 +8,8 @@ projection renders: `**bold**` lines, `- ` bullets, `[title](url)` links.
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +19,8 @@ from pydantic import BaseModel, Field
 from litwatch.models import Usage
 from litwatch.screen import usage_of
 from litwatch.selection import Selection
+
+log = logging.getLogger(__name__)
 
 GENERAL = "general"
 GENERAL_TITLE = "General"
@@ -240,6 +244,14 @@ def render_general_digest(
 
 # -- the model calls -------------------------------------------------------------------------------
 
+FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+
+
+def unfence(text: str) -> str:
+    """The JSON inside a ```json fence, or the text as is."""
+    m = FENCE.match(text)
+    return m.group(1) if m else text.strip()
+
 
 class Digester:
     """Writes the run's digests: general first in the result, then one per flagged selection."""
@@ -248,16 +260,29 @@ class Digester:
         self.client, self.model, self.effort = client, model, effort
 
     async def _ask(self, system: str, user: str, schema: type[BaseModel]) -> tuple[Any, Usage]:
-        completion = await self.client.chat.completions.parse(
-            model=self.model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            response_format=schema,
-            extra_body={"reasoning": {"effort": self.effort}, "usage": {"include": True}},
-        )
-        parsed = completion.choices[0].message.parsed
-        if parsed is None:
-            raise RuntimeError(f"{self.model} returned no parsable digest")
-        return parsed, usage_of(completion, self.model)
+        """Structured output the lenient way: writing models wrap JSON in fences now and then."""
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()},
+        }
+        last: Exception | None = None
+        for _attempt in range(2):
+            completion = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                response_format=response_format,
+                extra_body={"reasoning": {"effort": self.effort}, "usage": {"include": True}},
+            )
+            text = completion.choices[0].message.content or ""
+            try:
+                return schema.model_validate_json(unfence(text)), usage_of(completion, self.model)
+            except ValueError as exc:
+                last = exc
+                log.warning("%s digest output rejected, retrying: %s", self.model, exc)
+        raise RuntimeError(f"{self.model} returned no parsable digest: {last}")
 
     async def write_selection(
         self, selection: Selection, groups: dict[int, list[dict[str, Any]]]
@@ -289,8 +314,16 @@ class Digester:
         """General digest plus one per selection with `digest` set and at least one member."""
         groups = {s.slug: by_tier(s, papers) for s in selections}
         flagged = [s for s in selections if s.digest and any(groups[s.slug].values())]
-        general, *per_selection = await asyncio.gather(
+        results = await asyncio.gather(
             self.write_general(selections, groups),
             *(self.write_selection(s, groups[s.slug]) for s in flagged),
+            return_exceptions=True,
         )
-        return [general, *per_selection]
+        digests: list[Digest] = []
+        for source, result in zip([GENERAL, *(s.slug for s in flagged)], results, strict=True):
+            if isinstance(result, BaseException):
+                # One digest failing must not lose the others or the run; it is rewritten by hand.
+                log.error("digest %s failed: %s", source, result)
+            else:
+                digests.append(result)
+        return digests

@@ -26,12 +26,16 @@ class FakeCompletions:
     def __init__(self, outputs: dict[type, object]) -> None:
         self.outputs, self.calls = outputs, []
 
-    async def parse(self, **kw):
+    async def create(self, **kw):
         self.calls.append(kw)
         usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, model_extra={"cost": 0.002})
-        parsed = self.outputs[kw["response_format"]]
+        name = kw["response_format"]["json_schema"]["name"]
+        out = self.outputs[
+            {"SelectionOutput": SelectionOutput, "GeneralOutput": GeneralOutput}[name]
+        ]
+        content = out if isinstance(out, str) else f"```json\n{out.model_dump_json()}\n```"
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))], usage=usage
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))], usage=usage
         )
 
 
@@ -146,3 +150,11 @@ async def test_empty_run_needs_no_model_call():
     client, completions = fake_client({})
     (general,) = await Digester(client, "k").write_all([FAITH_D], [])
     assert general.body == EMPTY_DIGEST and completions.calls == []
+
+
+async def test_a_bad_selection_digest_is_skipped_not_fatal():
+    client, completions = fake_client({SelectionOutput: "not json", GeneralOutput: GEN_OUT})
+    papers = [member("1", "First", {"cot-faithfulness": 1}, CARD)]
+    digests = await Digester(client, "k").write_all([FAITH_D], papers)
+    assert [d.source for d in digests] == [GENERAL]
+    assert len(completions.calls) == 3  # general once, the selection twice before giving up
