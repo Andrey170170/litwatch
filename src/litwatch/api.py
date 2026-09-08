@@ -243,7 +243,7 @@ def create_app(settings: Settings) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(422, "tier must be integers 1..3") from exc
         async with await db.connect(dsn) as conn:
-            return await db.list_papers(conn, selection, tiers, since, min(limit, 1000))
+            return await db.list_papers(conn, selection, tiers, since, min(limit, 5000))
 
     @app.get("/papers/search")
     async def search(q: str, limit: int = 10) -> list[dict[str, Any]]:

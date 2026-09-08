@@ -474,7 +474,8 @@ async def list_papers(
         clauses.append("p.best_tier = ANY(%s)")
         params.append(tiers)
     if since:
-        clauses.append("p.screened_at >= %s")
+        # "changed since": screening, routing, and deep processing all matter to the projection
+        clauses.append("greatest(p.screened_at, p.routed_at, p.enriched_at) >= %s")
         params.append(since)
     params.append(limit)
     return await (
