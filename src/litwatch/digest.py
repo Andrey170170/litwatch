@@ -57,9 +57,10 @@ more than two papers. `must_read`: one entry per tier 1 paper, all of them, two 
 sentences each: what it contributes, by what method, against what ground truth or evidence; \
 where the card names a detection method or ground truth, center on that. `recommended`: at most \
 {RECOMMENDED_CAP} tier 2 papers, the most notable first, one sentence each on what the paper \
-does. Use each paper's arXiv id as `id`, exactly as given. Do not repeat titles inside the \
-text; the reader sees the title next to it. Be concrete about methods and claims, do not hype, \
-do not speculate beyond what you are given."""
+does. Use each paper's arXiv id as `id`, exactly as given, and never mention arXiv ids in \
+prose; in the overview refer to a paper by a short name from its title. Do not repeat titles \
+inside the notes; the reader sees the title next to each. Be concrete about methods and \
+claims, do not hype, do not speculate beyond what you are given."""
 
 GENERAL_PROMPT = """You write the front page of the daily digest for an NLP research lab's \
 literature watch. The lab follows several selections, each a topic with tiers: 1 must read, 2 \
@@ -69,7 +70,8 @@ with their key claims, and the tier 2 titles with the screener's reasons.
 Return JSON. `overview`: three or four sentences across the whole feed on what stands out today \
 and where the volume is, naming no more than three papers. `must_read`: one entry per tier 1 \
 paper across all selections, one sentence each on what it contributes. Use each paper's arXiv \
-id as `id`, exactly as given. Do not repeat titles inside the text. Be concrete, do not hype."""
+id as `id`, exactly as given, and never mention arXiv ids in prose; refer to a paper by a \
+short name from its title. Do not repeat titles inside the notes. Be concrete, do not hype."""
 
 
 @dataclass
