@@ -2,7 +2,7 @@ name: Interpretability
 slug: interpretability
 owner: Andrei
 status: active
-digest: true
+digest: false
 subject: >-
   Understanding the internal mechanisms, representations, or circuits of neural language models:
   probes, sparse autoencoders, attention and attribution analysis, activation patching and

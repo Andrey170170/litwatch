@@ -1,4 +1,8 @@
-"""Digests: a general one across the feed plus one per flagged selection, per run.
+"""Digests: one general digest across the feed plus one per flagged selection, per run.
+
+The general digest is the whole day in one page: an overview, then a section per selection with
+its must-read and top recommended papers; a paper in several selections is placed under the one
+where it ranks highest. A selection digest covers every member of that selection in more depth.
 
 The model returns structured notes keyed by arXiv id; the markdown is rendered here, so titles
 and links are never the model's to get wrong. Markdown stays within the subset the Notion
@@ -25,7 +29,7 @@ log = logging.getLogger(__name__)
 GENERAL = "general"
 GENERAL_TITLE = "General"
 RECOMMENDED_CAP = 8  # tier 2 bullets per selection digest; the rest are counted
-GENERAL_TIER2_CAP = 15  # tier 2 titles per selection shown to the general-digest model
+GENERAL_RECOMMENDED_CAP = 5  # tier 2 bullets per section of the general digest
 EMPTY_DIGEST = "No new member papers in this run."
 
 
@@ -42,9 +46,21 @@ class SelectionOutput(BaseModel):
     )
 
 
+class Section(BaseModel):
+    slug: str = Field(description="The selection's slug exactly as given")
+    overview: str = Field(description="One or two sentences on what today adds to the selection")
+    must_read: list[Note] = Field(
+        description="Every tier 1 paper of the section, one or two sentences each"
+    )
+    recommended: list[Note] = Field(
+        description=f"Up to {GENERAL_RECOMMENDED_CAP} tier 2 papers, one sentence each, "
+        "most notable first"
+    )
+
+
 class GeneralOutput(BaseModel):
     overview: str = Field(description="Three or four sentences across the whole feed")
-    must_read: list[Note] = Field(description="Every tier 1 paper, one sentence each")
+    sections: list[Section] = Field(description="One per selection given, in the order given")
 
 
 SELECTION_PROMPT = f"""You write the daily digest for one selection of an NLP research lab's \
@@ -62,16 +78,22 @@ prose; in the overview refer to a paper by a short name from its title. Do not r
 inside the notes; the reader sees the title next to each. Be concrete about methods and \
 claims, do not hype, do not speculate beyond what you are given."""
 
-GENERAL_PROMPT = """You write the front page of the daily digest for an NLP research lab's \
-literature watch. The lab follows several selections, each a topic with tiers: 1 must read, 2 \
-recommended, 3 good to know. You are given, per selection, today's counts, the tier 1 papers \
-with their key claims, and the tier 2 titles with the screener's reasons.
+GENERAL_PROMPT = f"""You write the daily digest of an NLP research lab's literature watch: one \
+page a reader spends five to ten minutes on to get the hang of the day. The lab follows several \
+selections, each a topic with a subject and, for some, a tier 1 rubric. You are given, per \
+selection, today's papers placed there: tier 1 (must read) with a reading card written from the \
+full text, and tier 2 (recommended) with the abstract and the screener's reason.
 
 Return JSON. `overview`: three or four sentences across the whole feed on what stands out today \
-and where the volume is, naming no more than three papers. `must_read`: one entry per tier 1 \
-paper across all selections, one sentence each on what it contributes. Use each paper's arXiv \
-id as `id`, exactly as given, and never mention arXiv ids in prose; refer to a paper by a \
-short name from its title. Do not repeat titles inside the notes. Be concrete, do not hype."""
+and where the volume is, naming no more than three papers. `sections`: one per selection given, \
+in the order given, with its slug exactly as given. In each: `overview`, one or two sentences on \
+what today adds to that subject; `must_read`, one entry per tier 1 paper, all of them, one or \
+two sentences each on what it contributes and by what method; `recommended`, at most \
+{GENERAL_RECOMMENDED_CAP} tier 2 papers, the most notable first, one sentence each on what the \
+paper does. Use each paper's arXiv id as `id`, exactly as given, and never mention arXiv ids in \
+prose; refer to a paper by a short name from its title. Do not repeat titles inside the notes; \
+the reader sees the title next to each. Be concrete about methods and claims, do not hype, do \
+not speculate beyond what you are given."""
 
 
 @dataclass
@@ -96,6 +118,24 @@ def by_tier(selection: Selection, papers: list[dict[str, Any]]) -> dict[int, lis
     return grouped
 
 
+Groups = dict[str, dict[int, list[dict[str, Any]]]]  # slug -> tier -> rows
+
+
+def assign(selections: list[Selection], papers: list[dict[str, Any]]) -> Groups:
+    """Each paper under one selection only: where its tier is lowest, earlier selection on ties."""
+    owned: Groups = {s.slug: {1: [], 2: [], 3: []} for s in selections}
+    for row in papers:
+        verdicts = row.get("verdicts") or {}
+        best = None
+        for s in selections:
+            v = verdicts.get(s.slug)
+            if v and v["tier"] in (1, 2, 3) and (best is None or v["tier"] < best[1]):
+                best = (s.slug, v["tier"])
+        if best:
+            owned[best[0]][best[1]].append(row)
+    return owned
+
+
 def _card_lines(row: dict[str, Any]) -> list[str]:
     card = row.get("enrichment")
     if not card:
@@ -111,8 +151,11 @@ def _card_lines(row: dict[str, Any]) -> list[str]:
     return lines
 
 
-def render_selection_input(selection: Selection, groups: dict[int, list[dict[str, Any]]]) -> str:
-    lines = [f"# {selection.name}", f"Subject: {selection.subject}"]
+def render_selection_input(
+    selection: Selection, groups: dict[int, list[dict[str, Any]]], with_slug: bool = False
+) -> str:
+    head = f"# {selection.name} (slug: {selection.slug})" if with_slug else f"# {selection.name}"
+    lines = [head, f"Subject: {selection.subject}"]
     if selection.rubric:
         lines.append(f"Tier 1 rubric: {selection.rubric}")
     for tier in (1, 2):
@@ -126,26 +169,13 @@ def render_selection_input(selection: Selection, groups: dict[int, list[dict[str
     return "\n".join(lines)
 
 
-def render_general_input(
-    selections: list[Selection], groups: dict[str, dict[int, list[dict[str, Any]]]]
-) -> str:
-    blocks = []
-    for s in selections:
-        g = groups[s.slug]
-        if not any(g.values()):
-            continue
-        lines = [
-            f"# {s.name}",
-            f"Counts: {len(g[1])} tier 1, {len(g[2])} tier 2, {len(g[3])} tier 3",
-        ]
-        for row in g[1]:
-            card = row.get("enrichment") or {}
-            claim = card.get("key_claim") or (row.get("abstract") or "").strip()
-            lines += ["", f"## Tier 1: {row['title']} (arXiv {row['id']})", f"Key claim: {claim}"]
-        for row in g[2][:GENERAL_TIER2_CAP]:
-            reason = row["verdicts"][s.slug]["reason"]
-            lines.append(f"- Tier 2: {row['title']} (arXiv {row['id']}): {reason}")
-        blocks.append("\n".join(lines))
+def render_general_input(selections: list[Selection], owned: Groups) -> str:
+    """One block per selection that owns a tier 1 or 2 paper today."""
+    blocks = [
+        render_selection_input(s, owned[s.slug], with_slug=True)
+        for s in selections
+        if owned[s.slug][1] or owned[s.slug][2]
+    ]
     return "\n\n---\n\n".join(blocks)
 
 
@@ -211,36 +241,40 @@ def render_selection_digest(
     return "\n\n".join(parts) if parts else EMPTY_DIGEST
 
 
+def _also(selections: list[Selection], row: dict[str, Any], owner: str) -> str:
+    """Suffix naming the other selections where the paper is tier 1 or 2."""
+    verdicts = row.get("verdicts") or {}
+    others = [
+        s.name
+        for s in selections
+        if s.slug != owner and (verdicts.get(s.slug) or {}).get("tier", 4) <= 2
+    ]
+    return f" (also {', '.join(others)})" if others else ""
+
+
 def render_general_digest(
-    selections: list[Selection],
-    groups: dict[str, dict[int, list[dict[str, Any]]]],
-    out: GeneralOutput | None,
+    selections: list[Selection], owned: Groups, out: GeneralOutput | None
 ) -> str:
-    """The front page: overview, every must-read across the feed, counts per selection."""
-    names = {s.slug: s.name for s in selections}
-    tier1_rows, owner = [], {}
-    for s in selections:
-        for row in groups[s.slug][1]:
-            if row["id"] not in owner:
-                tier1_rows.append(row)
-            owner.setdefault(row["id"], []).append(names[s.slug])
+    """The whole day: overview, then per selection a header with counts, its overview, bullets."""
+    sections = {sec.slug: sec for sec in out.sections} if out is not None else {}
     parts: list[str] = []
     if out is not None:
         parts.append(" ".join(out.overview.split()))
-    if tier1_rows:
-        notes = out.must_read if out is not None else []
-        bullets = _all_bullets(notes, tier1_rows, lambda r: f" ({', '.join(owner[r['id']])})")
-        parts.append("**Must read**\n" + "\n".join(bullets))
-    counts = []
     for s in selections:
-        g = groups[s.slug]
-        if any(g.values()):
-            counts.append(
-                f"- {s.name}: {len(g[1])} must read, {len(g[2])} recommended, "
-                f"{len(g[3])} good to know"
-            )
-    if counts:
-        parts.append("**By selection**\n" + "\n".join(counts))
+        t1, t2, t3 = owned[s.slug][1], owned[s.slug][2], owned[s.slug][3]
+        if not (t1 or t2 or t3):
+            continue
+        sec = sections.get(s.slug)
+        head = f"**{s.name}** · {len(t1)} must read, {len(t2)} recommended, {len(t3)} good to know."
+        if sec is not None:
+            head += " " + " ".join(sec.overview.split())
+        lines = [head]
+        suffix = lambda r, owner=s.slug: _also(selections, r, owner)  # noqa: E731
+        if t1:
+            lines += _all_bullets(sec.must_read if sec else [], t1, suffix)
+        if t2 and sec is not None:
+            lines += _bullets(sec.recommended[:GENERAL_RECOMMENDED_CAP], t2, suffix)
+        parts.append("\n".join(lines))
     return "\n\n".join(parts) if parts else EMPTY_DIGEST
 
 
@@ -300,14 +334,13 @@ class Digester:
         body = render_selection_digest(selection, groups, out)
         return Digest(selection.slug, selection.name, body, usage.model, usage.cost)
 
-    async def write_general(
-        self, selections: list[Selection], groups: dict[str, dict[int, list[dict[str, Any]]]]
-    ) -> Digest:
-        rendered = render_general_input(selections, groups)
+    async def write_general(self, selections: list[Selection], owned: Groups) -> Digest:
+        """No model call when nothing above tier 3 was found anywhere."""
+        rendered = render_general_input(selections, owned)
         if not rendered:
-            return Digest(GENERAL, GENERAL_TITLE, EMPTY_DIGEST)
+            return Digest(GENERAL, GENERAL_TITLE, render_general_digest(selections, owned, None))
         out, usage = await self._ask(GENERAL_PROMPT, rendered, GeneralOutput)
-        body = render_general_digest(selections, groups, out)
+        body = render_general_digest(selections, owned, out)
         return Digest(GENERAL, GENERAL_TITLE, body, usage.model, usage.cost)
 
     async def write_all(
@@ -317,7 +350,7 @@ class Digester:
         groups = {s.slug: by_tier(s, papers) for s in selections}
         flagged = [s for s in selections if s.digest and any(groups[s.slug].values())]
         results = await asyncio.gather(
-            self.write_general(selections, groups),
+            self.write_general(selections, assign(selections, papers)),
             *(self.write_selection(s, groups[s.slug]) for s in flagged),
             return_exceptions=True,
         )

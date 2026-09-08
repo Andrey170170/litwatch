@@ -2,7 +2,7 @@ name: Reasoning and RL post-training
 slug: reasoning-and-rl
 owner: Andrei
 status: active
-digest: true
+digest: false
 subject: >-
   Training and using language models to reason: reinforcement learning from verifiable rewards
   and reward models, GRPO-style post-training, reasoning models and their thinking budgets,

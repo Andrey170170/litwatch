@@ -9,8 +9,11 @@ from litwatch.digest import (
     Digester,
     GeneralOutput,
     Note,
+    Section,
     SelectionOutput,
+    assign,
     by_tier,
+    render_general_input,
     render_selection_digest,
     render_selection_input,
 )
@@ -73,7 +76,17 @@ SEL_OUT = SelectionOutput(
     must_read=[Note(id="1", text="Plants hints and checks disclosure.")],
     recommended=[Note(id="2", text="A proxy study."), Note(id="999", text="Hallucinated id.")],
 )
-GEN_OUT = GeneralOutput(overview="A quiet day.", must_read=[Note(id="1", text="Hint test.")])
+GEN_OUT = GeneralOutput(
+    overview="A quiet day.",
+    sections=[
+        Section(
+            slug="cot-faithfulness",
+            overview="Hints again.",
+            must_read=[Note(id="1", text="Hint test.")],
+            recommended=[Note(id="2", text="Proxy.")],
+        )
+    ],
+)
 
 
 def test_selection_input_carries_cards_for_tier1_and_abstracts_for_tier2():
@@ -108,22 +121,39 @@ def test_selection_markdown_links_titles_and_counts_the_rest():
     assert "Other" not in body
 
 
+def test_assign_places_a_paper_under_the_selection_where_it_ranks_highest():
+    papers = [
+        member("1", "First", {"cot-faithfulness": 2, "mech-interp": 1}),
+        member("2", "Second", {"cot-faithfulness": 2, "mech-interp": 2}),  # tie: earlier wins
+        member("3", "Third", {"cot-faithfulness": 4}),
+    ]
+    owned = assign([FAITH, INTERP], papers)
+    assert [r["id"] for r in owned["mech-interp"][1]] == ["1"]
+    assert [r["id"] for r in owned["cot-faithfulness"][2]] == ["2"]
+    assert not owned["cot-faithfulness"][1] and not owned["mech-interp"][2]
+    text = render_general_input([FAITH, INTERP], owned)
+    assert "# Mechanistic interpretability (slug: mech-interp)\n" in text
+    assert "## Tier 1: First (arXiv 1)" in text and "Third" not in text
+
+
 async def test_write_all_makes_general_plus_flagged_selection_digests():
     client, completions = fake_client({SelectionOutput: SEL_OUT, GeneralOutput: GEN_OUT})
     papers = [
         member("1", "First", {"cot-faithfulness": 1, "mech-interp": 2}, CARD),
         member("2", "Second", {"cot-faithfulness": 2}),
+        member("3", "Third", {"mech-interp": 3}),
     ]
     digests = await Digester(client, "k").write_all([FAITH_D, INTERP], papers)
     assert [d.source for d in digests] == [GENERAL, "cot-faithfulness"]
     general, faith = digests
-    # The suffix names the selections where the paper is tier 1, not every membership.
     link = "[First](https://arxiv.org/abs/1)"
-    head = f"A quiet day.\n\n**Must read**\n- {link} (CoT faithfulness) — Hint test."
-    assert general.body.startswith(head)
-    assert "- CoT faithfulness: 1 must read, 1 recommended, 0 good to know" in general.body
-    assert (
-        "- Mechanistic interpretability: 0 must read, 1 recommended, 0 good to know" in general.body
+    # One section per selection with members; the suffix names other tier 1/2 memberships.
+    assert general.body == (
+        "A quiet day.\n\n"
+        "**CoT faithfulness** · 1 must read, 1 recommended, 0 good to know. Hints again.\n"
+        f"- {link} (also Mechanistic interpretability) — Hint test.\n"
+        "- [Second](https://arxiv.org/abs/2) — Proxy.\n\n"
+        "**Mechanistic interpretability** · 0 must read, 0 recommended, 1 good to know."
     )
     assert faith.body == (
         "Two omission tests today.\n\n"
@@ -135,15 +165,27 @@ async def test_write_all_makes_general_plus_flagged_selection_digests():
     assert completions.calls[0]["extra_body"]["usage"] == {"include": True}
 
 
+async def test_general_lists_tier1_even_when_the_model_skips_the_section():
+    out = GeneralOutput(overview="Quiet.", sections=[])
+    client, _ = fake_client({GeneralOutput: out})
+    papers = [member("1", "First", {"cot-faithfulness": 1}, CARD)]
+    (general,) = await Digester(client, "k").write_all([FAITH], papers)
+    assert general.body == (
+        "Quiet.\n\n**CoT faithfulness** · 1 must read, 0 recommended, 0 good to know.\n"
+        "- [First](https://arxiv.org/abs/1) — Probes predict unfaithful reasoning."
+    )
+
+
 async def test_only_tier3_members_need_no_model_call():
-    client, completions = fake_client({GeneralOutput: GEN_OUT})
+    client, completions = fake_client({})
     papers = [member("3", "Only", {"cot-faithfulness": 3})]
     general, faith = await Digester(client, "k").write_all([FAITH_D], papers)
+    assert general.body == "**CoT faithfulness** · 0 must read, 0 recommended, 1 good to know."
     assert (
         faith.body
         == "Plus 1 good to know in the Papers table (filter Selections = CoT faithfulness)."
     )
-    assert faith.cost is None and len(completions.calls) == 1  # the general digest still runs
+    assert faith.cost is None and general.cost is None and completions.calls == []
 
 
 async def test_empty_run_needs_no_model_call():

@@ -2,7 +2,7 @@ name: Agents and tool use
 slug: agents
 owner: Andrei
 status: active
-digest: true
+digest: false
 subject: >-
   Language models acting over multiple steps: agent architectures and frameworks, tool and
   function calling, computer and browser use, coding agents, multi-agent systems, planning and

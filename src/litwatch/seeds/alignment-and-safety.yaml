@@ -2,7 +2,7 @@ name: Alignment and safety
 slug: alignment-and-safety
 owner: Andrei
 status: active
-digest: true
+digest: false
 subject: >-
   Making language models behave as intended and knowing whether they do: preference and
   constitutional training, refusal and jailbreak robustness, reward hacking and specification

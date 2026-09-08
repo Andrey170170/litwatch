@@ -2,7 +2,7 @@ name: Efficiency and architecture
 slug: efficiency-and-architecture
 owner: Andrei
 status: active
-digest: true
+digest: false
 subject: >-
   How language models are built and run: architectures beyond the standard transformer, mixture
   of experts, long-context and memory mechanisms, KV-cache and attention efficiency,
