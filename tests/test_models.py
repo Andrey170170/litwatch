@@ -1,4 +1,4 @@
-from litwatch.models import Confidence, StageRole, best_tier
+from litwatch.models import Confidence, StageRole, Verdict, best_tier
 from tests.conftest import screen_result, verdict
 
 
@@ -29,3 +29,7 @@ def test_screen_result_merges_stages_per_selection():
     assert r.verdicts["cot-faithfulness"].tier == 2 and r.verdicts["mech-interp"].tier == 3
     assert r.verdicts_after(StageRole.SCREEN)["cot-faithfulness"].tier == 1
     assert r.confirmed and r.confirmed_slugs() == {"cot-faithfulness"} and r.cost == 0.01
+
+
+def test_verdict_reason_drops_nul_characters():
+    assert Verdict(tier=2, confidence="high", reason="Pok\x00emon").reason == "Pokemon"

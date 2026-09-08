@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Paper(BaseModel):
@@ -39,6 +39,12 @@ class Verdict(BaseModel):
     tier: int = Field(ge=1, le=4)
     confidence: Confidence
     reason: str = Field(description="One sentence")
+
+    @field_validator("reason")
+    @classmethod
+    def _no_nul(cls, value: str) -> str:
+        # PostgreSQL rejects \u0000 inside jsonb; models emit it now and then.
+        return value.replace("\x00", "")
 
 
 def best_tier(verdicts: dict[str, Verdict]) -> int:

@@ -132,7 +132,12 @@ async def _screen(
                     s.failed += 1
                 return
             async with lock:
-                await db.store_screen(conn, result)
+                try:
+                    await db.store_screen(conn, result)
+                except Exception as exc:  # noqa: BLE001 - a bad row must not end the run
+                    await db.store_screen_error(conn, paper.id, f"{type(exc).__name__}: {exc}")
+                    s.failed += 1
+                    return
                 s.screened += 1
                 s.rescreened += int(result.rescreened)
                 s.confirmed += int(result.confirmed)
