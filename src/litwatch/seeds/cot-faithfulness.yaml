@@ -27,7 +27,7 @@ rubric: >-
   reading traces for unsafe intent, on monitorability in general, or position papers are tier 3.
 keywords:
   - chain.of.thought
-  - \bCoT\b
+  - "[^a-z]CoT[^a-z]"
   - faithful
   - unfaithful
   - unverbalized
