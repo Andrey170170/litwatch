@@ -6,7 +6,7 @@ from __future__ import annotations
 from importlib import resources
 from typing import Protocol
 
-from openai import AsyncOpenAI
+from openai import NOT_GIVEN, AsyncOpenAI
 from pydantic import BaseModel, create_model
 
 from litwatch.models import (
@@ -64,10 +64,18 @@ class Screener(Protocol):
 class ModelScreener:
     """Screens with one OpenRouter model at a fixed reasoning effort."""
 
-    def __init__(self, client: AsyncOpenAI, model: str, effort: str = "low") -> None:
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        effort: str = "low",
+        *,
+        max_completion_tokens: int | None = None,
+    ) -> None:
         self.client = client
         self.model = model
         self.effort = effort
+        self.max_completion_tokens = max_completion_tokens
         self._prompts: dict[str, tuple[str, type[BaseModel]]] = {}
 
     def _prepared(self, selections: list[Selection]) -> tuple[str, type[BaseModel]]:
@@ -87,6 +95,10 @@ class ModelScreener:
                 {"role": "user", "content": render_user_prompt(paper)},
             ],
             response_format=schema,
+            # Bound reasoning plus answer tokens when a stage has an explicit cost budget.
+            max_completion_tokens=(
+                self.max_completion_tokens if self.max_completion_tokens is not None else NOT_GIVEN
+            ),
             # `usage.include` makes OpenRouter report the call's cost in the usage block.
             extra_body={"reasoning": {"effort": self.effort}, "usage": {"include": True}},
         )
@@ -119,6 +131,7 @@ class Cascade:
         primary: Screener,
         secondary: Screener | None = None,
         confirm: Screener | None = None,
+        rescreen_ignored_keywords: tuple[str, ...] = ("benchmark",),
     ) -> None:
         if not selections:
             raise ValueError("no active selections to screen against")
@@ -127,19 +140,26 @@ class Cascade:
         self.primary = primary
         self.secondary = secondary
         self.confirm = confirm
+        self.rescreen_ignored_keywords = rescreen_ignored_keywords
 
     @property
     def versions(self) -> dict[str, str]:
         return {s.slug: s.version for s in self.selections}
 
+    def rescreen_selections(self, paper: Paper, verdicts: dict[str, Verdict]) -> list[Selection]:
+        """Reconsider only uncertain judgments or keyword-backed rejections for each topic."""
+        return [
+            s
+            for s in self.selections
+            if verdicts[s.slug].confidence == Confidence.LOW
+            or (
+                verdicts[s.slug].tier == 4
+                and s.keyword_hit(paper, ignored_keywords=self.rescreen_ignored_keywords)
+            )
+        ]
+
     def needs_rescreen(self, paper: Paper, verdicts: dict[str, Verdict]) -> bool:
-        for s in self.selections:
-            v = verdicts[s.slug]
-            if v.confidence == Confidence.LOW:
-                return True
-            if v.tier == 4 and s.keyword_hit(paper):
-                return True
-        return False
+        return bool(self.rescreen_selections(paper, verdicts))
 
     async def _stage(
         self, role: StageRole, screener: Screener, paper: Paper, selections: list[Selection]
@@ -160,12 +180,14 @@ class Cascade:
 
     async def screen(self, paper: Paper) -> ScreenResult:
         stages = [await self._stage(StageRole.SCREEN, self.primary, paper, self.selections)]
-        if self.secondary and self.needs_rescreen(paper, stages[-1].output):
-            stages.append(
-                await self._stage(StageRole.RESCREEN, self.secondary, paper, self.selections)
-            )
+        verdicts = dict(stages[0].output)
+        reconsider = self.rescreen_selections(paper, verdicts) if self.secondary else []
+        if self.secondary and reconsider:
+            stage = await self._stage(StageRole.RESCREEN, self.secondary, paper, reconsider)
+            stages.append(stage)
+            verdicts.update(stage.output)
         if self.confirm:
-            stages.extend(await self._confirm_stages(paper, stages[-1].output))
+            stages.extend(await self._confirm_stages(paper, verdicts))
         return ScreenResult(
             paper_id=paper.id,
             prompt_version=PROMPT_VERSION,

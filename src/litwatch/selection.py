@@ -88,10 +88,13 @@ class Selection(BaseModel):
         )
         return hashlib.sha256(content.encode()).hexdigest()[:12]
 
-    def keyword_hit(self, paper: Paper) -> bool:
-        if not self.keywords:
+    def keyword_hit(self, paper: Paper, *, ignored_keywords: tuple[str, ...] = ()) -> bool:
+        """Match authored regexes, optionally excluding exact patterns for a caller's policy."""
+        ignored = {k.casefold() for k in ignored_keywords}
+        keywords = [k for k in self.keywords if k.casefold() not in ignored]
+        if not keywords:
             return False
-        pattern = re.compile("|".join(f"(?:{k})" for k in self.keywords), re.IGNORECASE)
+        pattern = re.compile("|".join(f"(?:{k})" for k in keywords), re.IGNORECASE)
         return bool(pattern.search(f"{paper.title}\n{paper.abstract}"))
 
 

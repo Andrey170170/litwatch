@@ -1,7 +1,17 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
+from openai import NOT_GIVEN
 
 from litwatch.models import Confidence, Paper, StageRole, Usage, Verdict
-from litwatch.screen import Cascade, output_model, render_system_prompt, render_user_prompt
+from litwatch.screen import (
+    Cascade,
+    ModelScreener,
+    output_model,
+    render_system_prompt,
+    render_user_prompt,
+)
 from litwatch.selection import Selection
 from tests.conftest import FAITH, INTERP, SELECTIONS, verdict
 
@@ -86,3 +96,87 @@ async def test_confirm_existing_skips_already_confirmed_selections():
 def test_cascade_needs_selections():
     with pytest.raises(ValueError):
         Cascade([], Fake("luna", 4))
+
+
+@pytest.mark.parametrize("secondary_tier", [1, 4])
+async def test_partial_rescreen_preserves_primary_and_confirms_all_remaining_positives(
+    secondary_tier,
+):
+    class MixedPrimary(Fake):
+        async def screen(self, paper, selections):
+            return {FAITH.slug: verdict(4), INTERP.slug: verdict(2)}, Usage(model=self.model)
+
+    secondary, confirm = Fake("glm", secondary_tier), Fake("muse", 3)
+    result = await Cascade(SELECTIONS, MixedPrimary("luna", 4), secondary, confirm).screen(COT)
+    assert secondary.calls == [[FAITH.slug]]
+    assert set(result.stages[1].output) == {FAITH.slug}
+    assert result.verdicts_after(StageRole.SCREEN) == {
+        FAITH.slug: verdict(4),
+        INTERP.slug: verdict(2),
+    }
+    assert result.verdicts_after(StageRole.RESCREEN) == {
+        FAITH.slug: verdict(secondary_tier),
+        INTERP.slug: verdict(2),
+    }
+    assert confirm.calls == ([[FAITH.slug]] if secondary_tier == 1 else []) + [[INTERP.slug]]
+    assert result.verdicts[INTERP.slug].tier == 3
+    assert result.verdicts[FAITH.slug].tier == (3 if secondary_tier == 1 else 4)
+    assert result.versions == {s.slug: s.version for s in SELECTIONS}
+
+
+@pytest.mark.parametrize(
+    ("title", "tier", "confidence", "escalates"),
+    [
+        ("A graph benchmark", 4, Confidence.HIGH, False),
+        ("A graph benchmark", 4, Confidence.LOW, True),
+        ("A graph benchmark", 2, Confidence.LOW, True),
+        ("A safety benchmark", 4, Confidence.HIGH, True),
+        ("A safety benchmark", 2, Confidence.HIGH, False),
+    ],
+)
+async def test_rescreen_ignores_generic_keyword_but_retains_specific_and_uncertain_cases(
+    title, tier, confidence, escalates
+):
+    selection = FAITH.model_copy(update={"keywords": ["BenchMark", "safety benchmark"]})
+    paper = Paper(id="3", title=title, abstract="We evaluate models.")
+    secondary = Fake("glm", 4)
+    result = await Cascade([selection], Fake("luna", tier, confidence), secondary).screen(paper)
+    assert result.rescreened is escalates
+    # The ingestion/audit matcher and authored spec remain unchanged by escalation policy.
+    assert selection.keyword_hit(paper)
+    assert selection.keywords == ["BenchMark", "safety benchmark"]
+    assert result.versions == {selection.slug: selection.version}
+
+
+async def test_rescreen_ignored_keywords_can_be_disabled():
+    selection = FAITH.model_copy(update={"keywords": ["benchmark"]})
+    paper = Paper(id="3", title="A graph benchmark", abstract="We evaluate models.")
+    result = await Cascade(
+        [selection], Fake("luna", 4), Fake("glm", 4), rescreen_ignored_keywords=()
+    ).screen(paper)
+    assert result.rescreened
+
+
+def test_only_uncertain_selection_is_rescreened_without_keyword_hits():
+    cascade = Cascade(SELECTIONS, Fake("luna", 4))
+    assert cascade.rescreen_selections(
+        PLAIN, {FAITH.slug: verdict(4), INTERP.slug: verdict(3, Confidence.LOW)}
+    ) == [INTERP]
+
+
+@pytest.mark.parametrize("token_cap", [None, 8192])
+async def test_model_screener_forwards_effort_and_optional_completion_budget(token_cap):
+    parsed = output_model([FAITH])(cot_faithfulness=verdict(1))
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))], usage=None
+    )
+    parse = AsyncMock(return_value=completion)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
+    screener = ModelScreener(client, "z-ai/glm-5.3", "high", max_completion_tokens=token_cap)
+    output, usage = await screener.screen(COT, [FAITH])
+    request = parse.call_args.kwargs
+    assert request["model"] == "z-ai/glm-5.3"
+    assert request["extra_body"]["reasoning"] == {"effort": "high"}
+    assert request["max_completion_tokens"] == (token_cap if token_cap else NOT_GIVEN)
+    assert output == {FAITH.slug: verdict(1)}
+    assert usage.model == "z-ai/glm-5.3"

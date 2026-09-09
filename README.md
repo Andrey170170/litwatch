@@ -55,7 +55,12 @@ Three stages, a later verdict replacing the earlier one per selection:
 
 1. `screen`: every paper, every selection in one call, Luna at low effort.
 2. `rescreen`: any low-confidence verdict, or a tier 4 verdict on a paper
-   that hits the selection's keywords. Sol at low effort. The recall step.
+   that hits the selection's keywords. GLM 5.3 at high effort rejudges only
+   the triggering selections; the broad `benchmark` pattern alone does not
+   trigger it. Low-confidence checks remain enabled across all topics.
+   `LITWATCH_RESCREEN_IGNORED_KEYWORDS` overrides that comma-separated exclusion
+   (empty restores every keyword). The output cap is 8192 tokens, including
+   reasoning (`LITWATCH_RESCREEN_MAX_COMPLETION_TOKENS`).
 3. `confirm`: every tier 1 or 2 verdict, one call per selection with only
    that selection's rubric in context. Muse Spark at high effort, a different
    model family so its errors are less correlated with the first two.

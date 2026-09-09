@@ -31,8 +31,10 @@ class Settings:
     openrouter_api_key: str
     screen_model: str = "openai/gpt-5.6-luna"
     screen_effort: str = "low"
-    rescreen_model: str = "openai/gpt-5.6-sol"
-    rescreen_effort: str = "low"
+    rescreen_model: str = "z-ai/glm-5.3"
+    rescreen_effort: str = "high"
+    rescreen_max_completion_tokens: int = 8192
+    rescreen_ignored_keywords: tuple[str, ...] = ("benchmark",)
     # A different model family on purpose: its errors are less correlated with Luna's.
     # The `-contributor` endpoint is far cheaper but needs OpenRouter's training opt-in.
     confirm_model: str = "meta/muse-spark-1.3"
@@ -76,6 +78,12 @@ class Settings:
             screen_effort=os.environ.get("LITWATCH_SCREEN_EFFORT", cls.screen_effort),
             rescreen_model=os.environ.get("LITWATCH_RESCREEN_MODEL", cls.rescreen_model),
             rescreen_effort=os.environ.get("LITWATCH_RESCREEN_EFFORT", cls.rescreen_effort),
+            rescreen_max_completion_tokens=int(
+                os.environ.get("LITWATCH_RESCREEN_MAX_COMPLETION_TOKENS", "8192")
+            ),
+            rescreen_ignored_keywords=_csv(
+                "LITWATCH_RESCREEN_IGNORED_KEYWORDS", cls.rescreen_ignored_keywords
+            ),
             confirm_model=os.environ.get("LITWATCH_CONFIRM_MODEL", cls.confirm_model),
             confirm_effort=os.environ.get("LITWATCH_CONFIRM_EFFORT", cls.confirm_effort),
             digest_model=os.environ.get("LITWATCH_DIGEST_MODEL", cls.digest_model),

@@ -57,10 +57,16 @@ def build_cascade(
     return Cascade(
         selections,
         ModelScreener(client, settings.screen_model, settings.screen_effort),
-        ModelScreener(client, settings.rescreen_model, settings.rescreen_effort)
+        ModelScreener(
+            client,
+            settings.rescreen_model,
+            settings.rescreen_effort,
+            max_completion_tokens=settings.rescreen_max_completion_tokens,
+        )
         if rescreen
         else None,
         ModelScreener(client, settings.confirm_model, settings.confirm_effort) if confirm else None,
+        rescreen_ignored_keywords=settings.rescreen_ignored_keywords,
     )
 
 
