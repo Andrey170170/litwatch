@@ -20,7 +20,10 @@ async def connect(dsn: str) -> psycopg.AsyncConnection[dict[str, Any]]:
 
 
 async def apply_schema(conn: psycopg.AsyncConnection) -> None:
+    from litwatch.digest_history import seed_history
+
     await conn.execute(resources.files("litwatch").joinpath("schema.sql").read_text())
+    await seed_history(conn)
 
 
 # -- papers ---------------------------------------------------------------------------------------
@@ -134,11 +137,15 @@ async def has_verdicts(conn: psycopg.AsyncConnection, slug: str) -> bool:
 
 async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> None:
     """The staged JSON on the paper, one verdict row per selection, and the paper's best tier."""
+    from litwatch.digest_history import DIGEST_LOCK
+
     verdicts = result.verdicts
     async with conn.transaction():
+        # Let a digest finish its snapshot/coverage before accepting concurrent new analysis.
+        await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (DIGEST_LOCK,))
         await conn.execute(
             """
-            UPDATE papers SET screened_at = now(), screen = %s, best_tier = %s,
+            UPDATE papers SET screened_at = clock_timestamp(), screen = %s, best_tier = %s,
                               prompt_version = %s, selections_version = %s, screen_error = NULL
             WHERE id = %s
             """,
@@ -405,17 +412,19 @@ async def store_digest(
     body: str,
     model: str | None,
     cost: float | None,
+    *,
+    tiers: dict[str, int] | None = None,
 ) -> None:
     """One digest per (run, source); rewriting replaces it."""
     await conn.execute(
         """
-        INSERT INTO digests (run_id, source, title, body, model, cost)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO digests (run_id, source, title, body, model, cost, tiers)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (run_id, source) DO UPDATE SET
             title = EXCLUDED.title, body = EXCLUDED.body, model = EXCLUDED.model,
-            cost = EXCLUDED.cost, created_at = now()
+            cost = EXCLUDED.cost, tiers = EXCLUDED.tiers, created_at = now()
         """,
-        (run_id, source, title, body, model, cost),
+        (run_id, source, title, body, model, cost, Jsonb(tiers) if tiers is not None else None),
     )
 
 
@@ -425,7 +434,8 @@ async def list_digests(conn: psycopg.AsyncConnection, limit: int = 40) -> list[d
         await conn.execute(
             """
             SELECT d.run_id, r.kind, r.started_at, r.finished_at, r.fetched, r.screened,
-                   r.cost AS run_cost, r.tiers, d.source, d.title, d.body, d.model, d.cost
+                   r.cost AS run_cost, r.tiers, d.tiers AS digest_tiers,
+                   d.source, d.title, d.body, d.model, d.cost
             FROM digests d JOIN runs r ON r.id = d.run_id
             ORDER BY d.run_id DESC, (d.source <> 'general'), d.title LIMIT %s
             """,

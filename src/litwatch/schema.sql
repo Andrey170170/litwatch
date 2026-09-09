@@ -125,3 +125,29 @@ CREATE TABLE IF NOT EXISTS digests (
     created_at  timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (run_id, source)
 );
+
+-- Inputs are frozen before generation; failed batches can be retried without re-screening.
+CREATE TABLE IF NOT EXISTS digest_batches (
+    run_id bigint NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+    source text NOT NULL,
+    snapshot jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (run_id, source)
+);
+
+-- A paper can be covered once in each digest stream, including count-only members.
+CREATE TABLE IF NOT EXISTS digest_coverage (
+    source text NOT NULL,
+    paper_id text NOT NULL REFERENCES papers (id) ON DELETE CASCADE,
+    run_id bigint NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+    PRIMARY KEY (source, paper_id)
+);
+CREATE INDEX IF NOT EXISTS digest_coverage_run_idx ON digest_coverage (run_id);
+CREATE INDEX IF NOT EXISTS digest_coverage_paper_idx ON digest_coverage (paper_id);
+CREATE TABLE IF NOT EXISTS digest_history_migrations (
+    name text PRIMARY KEY,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Digest counts describe its frozen membership, not every paper screened in the run.
+ALTER TABLE digests ADD COLUMN IF NOT EXISTS tiers jsonb;

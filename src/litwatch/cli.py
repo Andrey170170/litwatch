@@ -22,6 +22,7 @@ from litwatch.api import (
     sync_selections,
 )
 from litwatch.config import Settings
+from litwatch.digest_history import write_run_digests
 from litwatch.models import TIERS, StageRole
 from litwatch.selection import Selection, load_specs, seeds
 
@@ -452,6 +453,8 @@ def digest(
     """Write the digests for one run (or a recent window) and print them."""
     if (run_id is None) == (days is None):
         raise SystemExit("give exactly one of --run or --days")
+    if store and days is not None:
+        raise SystemExit("--store requires --run; --days is a retrospective preview")
     settings = Settings.from_env()
     digester = build_digester(settings, model)
 
@@ -459,21 +462,18 @@ def digest(
         async with await db.connect(settings.require_database()) as conn:
             selections = await active_selections(conn)
             if run_id is not None:
-                members = await db.run_members(conn, run_id)
+                digests = await write_run_digests(conn, digester, selections, run_id, store=store)
             else:
                 assert days is not None
                 members = await db.members_since(conn, datetime.now(UTC) - timedelta(days=days))
-            digests = await digester.write_all(selections, members)
-            if store and run_id is not None:
-                for d in digests:
-                    await db.store_digest(conn, run_id, d.source, d.title, d.body, d.model, d.cost)
-            return members, digests
+                digests = await digester.write_all(selections, members)
+            return digests
 
-    members, digests = asyncio.run(go())
+    digests = asyncio.run(go())
     for d in digests:
         print(f"===== {d.title} =====\n{d.body}\n")  # raw: the console printer would wrap
     cost = sum(d.cost or 0.0 for d in digests)
-    console.print(f"[dim]{len(members)} papers, {digester.model}, cost ${cost:.4f}[/dim]")
+    console.print(f"[dim]{digester.model}, cost ${cost:.4f}[/dim]")
 
 
 @app.command()

@@ -77,3 +77,34 @@ arXiv metadata is CC0, so abstracts are committed. Add papers with
 screener, sorted by draft tier. Reviewed entries move to `labeled.yaml`, with
 the `draft` note replaced or removed. `litwatch eval` on unreviewed drafts
 would only measure the screener against itself.
+
+## Daily digest coverage
+
+A digest includes newly analyzed member papers that have not appeared in an earlier
+issue of **that digest source** (`general` or a selection slug). Publication date is
+not an eligibility rule. Overlapping fetches, rubric edits, tier promotions, and
+later reading cards do not make covered papers new again. Tier 1/2 bullets and
+count-only tier 2/3 members all consume coverage when their issue is saved.
+
+`digest_batches` freezes each issue's papers, judgments, cards, selection specs,
+and analysis cutoff before generation. `digest_coverage` records the first saved
+issue per source and paper. A failed source remains pending independently of
+successful sources; body, tier counts, and coverage commit together. Analysis from
+an interrupted run also carries forward. Concurrent screening waits for digest
+generation so its results cannot fall behind the cutoff.
+
+`litwatch digest --run ID` previews without consuming coverage (model calls still
+cost money); add `--store` to save. Rewriting an issue uses its original snapshot,
+even if the current rubric or paper tier changed. `--days N` is an explicit
+retrospective preview and cannot be stored as a daily issue.
+
+Startup seeds historical coverage once from known paper links and unambiguous
+full titles in older prose. Legacy `Selection name:` sections seed that selection's
+coverage; the complete legacy issue seeds general coverage. Unidentifiable titles
+and aggregate-only counts are not guessed. Issues predating snapshots can only be
+reconstructed from the remaining current data, so review their previews before
+rewriting. This migration does not rewrite historical prose or Notion pages.
+
+Database regressions run in CI and the release gate against PostgreSQL. Locally,
+point `TEST_DATABASE_URL` at a disposable database and run `uv run pytest`; the tests
+create and remove isolated schemas there. Never point that variable at production.

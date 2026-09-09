@@ -200,3 +200,20 @@ async def test_a_bad_selection_digest_is_skipped_not_fatal():
     digests = await Digester(client, "k").write_all([FAITH_D], papers)
     assert [d.source for d in digests] == [GENERAL]
     assert len(completions.calls) == 3  # general once, the selection twice before giving up
+
+
+def test_historical_title_matching_is_exact_and_unambiguous():
+    from litwatch.digest_history import historical_ids
+
+    title = "Faithfulness Metrics Don't Measure Faithfulness: A Meta-Evaluation"
+    papers = [
+        {"id": "1", "title": title, "url": None},
+        {"id": "2", "title": "Short title", "url": None},
+        {"id": "3", "title": "A duplicated paper title that is ambiguous", "url": None},
+        {"id": "4", "title": "A duplicated paper title that is ambiguous", "url": None},
+    ]
+    prose = title.replace("Don't", "Don’t").replace(" ", "\n ")
+    prose += " Short title. A duplicated paper title that is ambiguous."
+    assert historical_ids(prose, papers) == {"1"}
+    assert historical_ids(title.replace("Meta-Evaluation", "Evaluation"), papers) == set()
+    assert historical_ids("[link](http://arxiv.org/abs/2v3)", papers) == {"2"}
