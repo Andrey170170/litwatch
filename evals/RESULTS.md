@@ -1,5 +1,12 @@
 # Screener eval results
 
+## 2026-09-09 · GLM high, targeted recall
+
+[Full frozen-feed evaluation](2026-09-09-glm-high.md): 140 targeted checks versus
+233 full-scope Sol calls; recall cost $0.44 versus $0.91. Comparable daily projection
+$1.30 at 677 new papers, including today's digest cost. Tier-1 assignments unchanged;
+two tier-2 additions and one loss. Evaluation cost $0.55.
+
 ## 2026-09-03 · prompt v2 · Luna low, Sol low re-screen
 
 Labeled set: 166 papers at run time. 14 gold (Andrei's verdicts), 152 silver (the
