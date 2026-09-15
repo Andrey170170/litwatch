@@ -56,16 +56,29 @@ def build_cascade(
     client = openrouter_client(settings.openrouter_api_key)
     return Cascade(
         selections,
-        ModelScreener(client, settings.screen_model, settings.screen_effort),
+        ModelScreener(
+            client,
+            settings.screen_model,
+            settings.screen_effort,
+            provider_order=(
+                settings.screen_provider_order
+                if settings.screen_model == "openai/gpt-5.6-luna"
+                else ()
+            ),
+            timeout_seconds=settings.screen_timeout_seconds,
+        ),
         ModelScreener(
             client,
             settings.rescreen_model,
             settings.rescreen_effort,
             max_completion_tokens=settings.rescreen_max_completion_tokens,
+            operation="rescreen",
         )
         if rescreen
         else None,
-        ModelScreener(client, settings.confirm_model, settings.confirm_effort) if confirm else None,
+        ModelScreener(client, settings.confirm_model, settings.confirm_effort, operation="confirm")
+        if confirm
+        else None,
         rescreen_ignored_keywords=settings.rescreen_ignored_keywords,
     )
 

@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 
 from litwatch import arxiv_source, db, intake
+from litwatch.calls import CallJournal, current_journal
 from litwatch.config import Settings
 from litwatch.deep import DeepProcessor
 from litwatch.digest import Digest, Digester
@@ -86,6 +87,8 @@ async def _run(
     since, until = window(days)
     run_id = await db.start_run(conn, kind, since, until)
     summary = RunSummary(run_id=run_id, kind=kind, window_from=since, window_to=until)
+    journal = CallJournal(conn, run_id)
+    journal_token = current_journal.set(journal)
     try:
         if fetch:
             await _fetch(conn, settings, summary)
@@ -104,6 +107,10 @@ async def _run(
         log.exception("run %s failed", run_id)
         raise
     finally:
+        current_journal.reset(journal_token)
+        # Costs belong to the run that made the request, including successful early
+        # stages of failed papers and rejected digest responses. Reuse is free.
+        summary.cost = await journal.total()
         await db.finish_run(
             conn,
             run_id,
@@ -160,7 +167,9 @@ async def _screen(
     todo = await db.pending(conn, cascade.selections, settings.rescreen_window_days)
     log.info("run %s screening %s papers", s.run_id, len(todo))
     sem = asyncio.Semaphore(settings.screen_concurrency)
-    lock = asyncio.Lock()  # one connection, so serialize the writes
+    journal = current_journal.get()
+    # Journal writes must not interleave with another paper's verdict transaction.
+    lock = journal.lock if journal else asyncio.Lock()
     best: dict[str, int] = {}
     by_selection: dict[str, dict[str, int]] = {}
 
@@ -193,6 +202,8 @@ async def _screen(
 
     await asyncio.gather(*(one(p) for p in todo))
     s.tiers = {**best, "by_selection": by_selection}
+    if journal:
+        s.cost = await journal.total()
     log.info(
         "run %s screened %s (%s re-screened, %s confirmed, %s failed) cost $%.4f tiers %s",
         s.run_id,

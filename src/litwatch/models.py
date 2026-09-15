@@ -58,6 +58,17 @@ class Usage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost: float | None = None
+    generation_id: str | None = None
+    provider: str | None = None
+    service_tier: str | None = None
+    cached_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    cache_discount: float | None = None
+    # A persisted response retains its original accounting; reuse charges this run zero.
+    reused: bool = False
+    original_cost: float | None = None
+    source_call_id: int | None = None
 
 
 class StageRole(StrEnum):

@@ -243,18 +243,31 @@ async def forget_verdicts(
     conn: psycopg.AsyncConnection, slug: str, window_days: int | None = None
 ) -> int:
     """Drop a selection's verdicts (in a window) so the next run judges them again."""
-    if window_days is None:
-        cur = await conn.execute("DELETE FROM verdicts WHERE selection = %s", (slug,))
-    else:
-        since = datetime.now(UTC) - timedelta(days=window_days)
-        cur = await conn.execute(
-            """
-            DELETE FROM verdicts v USING papers p
-            WHERE v.paper_id = p.id AND v.selection = %s AND p.published >= %s
+    since = datetime.now(UTC) - timedelta(days=window_days) if window_days is not None else None
+    async with conn.transaction():
+        locked = await (
+            await conn.execute("SELECT pg_try_advisory_xact_lock(7213902) AS locked")
+        ).fetchone()
+        if not locked["locked"]:
+            raise RuntimeError("cannot forget verdicts while a Litwatch run is in progress")
+        row = await (
+            await conn.execute(
+                """
+            WITH forgotten AS (
+                DELETE FROM verdicts v USING papers p
+                WHERE v.paper_id = p.id AND v.selection = %s
+                  AND (%s::timestamptz IS NULL OR p.published >= %s)
+                RETURNING v.paper_id
+            ), invalidated AS (
+                UPDATE inference_calls SET invalidated_at = clock_timestamp()
+                WHERE paper_id IN (SELECT paper_id FROM forgotten) AND invalidated_at IS NULL
+                RETURNING id
+            ) SELECT count(*) AS count FROM forgotten
             """,
-            (slug, since),
-        )
-    return cur.rowcount
+                (slug, since, since),
+            )
+        ).fetchone()
+    return row["count"]
 
 
 # -- selections -----------------------------------------------------------------------------------

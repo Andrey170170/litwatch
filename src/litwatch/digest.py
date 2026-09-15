@@ -20,8 +20,8 @@ from typing import Any
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
+from litwatch.calls import current_journal, recorded_completion
 from litwatch.models import Usage
-from litwatch.screen import usage_of
 from litwatch.selection import Selection
 
 log = logging.getLogger(__name__)
@@ -348,19 +348,28 @@ class Digester:
         }
         last: Exception | None = None
         for _attempt in range(2):
-            completion = await self.client.chat.completions.create(
+            completion, usage, call_id = await recorded_completion(
+                self.client,
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                response_format=response_format,
-                extra_body={"reasoning": {"effort": self.effort}, "usage": {"include": True}},
+                operation="digest",
+                request={
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "response_format": response_format,
+                    "extra_body": {
+                        "reasoning": {"effort": self.effort},
+                        "usage": {"include": True},
+                    },
+                },
             )
             text = completion.choices[0].message.content or ""
             try:
-                return schema.model_validate_json(unfence(text)), usage_of(completion, self.model)
+                return schema.model_validate_json(unfence(text)), usage
             except ValueError as exc:
+                if journal := current_journal.get():
+                    await journal.reject(call_id, type(exc).__name__)
                 last = exc
                 log.warning("%s digest output rejected, retrying: %s", self.model, exc)
         raise RuntimeError(f"{self.model} returned no parsable digest: {last}")

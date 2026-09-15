@@ -35,6 +35,9 @@ class Settings:
     openrouter_api_key: str
     screen_model: str = "openai/gpt-5.6-luna"
     screen_effort: str = "low"
+    # Applied only to Luna; an empty tuple leaves provider selection to OpenRouter.
+    screen_provider_order: tuple[str, ...] = ("openai/flex", "openai")
+    screen_timeout_seconds: float = 120.0
     rescreen_model: str = "z-ai/glm-5.3"
     rescreen_effort: str = "high"
     rescreen_max_completion_tokens: int = 8192
@@ -79,6 +82,8 @@ class Settings:
             openrouter_api_key=key,
             screen_model=os.environ.get("LITWATCH_SCREEN_MODEL", cls.screen_model),
             screen_effort=os.environ.get("LITWATCH_SCREEN_EFFORT", cls.screen_effort),
+            screen_provider_order=_csv("LITWATCH_SCREEN_PROVIDER_ORDER", cls.screen_provider_order),
+            screen_timeout_seconds=float(os.environ.get("LITWATCH_SCREEN_TIMEOUT_SECONDS", "120")),
             rescreen_model=os.environ.get("LITWATCH_RESCREEN_MODEL", cls.rescreen_model),
             rescreen_effort=os.environ.get("LITWATCH_RESCREEN_EFFORT", cls.rescreen_effort),
             rescreen_max_completion_tokens=int(

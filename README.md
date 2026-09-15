@@ -48,8 +48,9 @@ A paper's `best_tier` is its best verdict across active selections. Tier 1
 gets a Zotero item with the PDF and deep processing, tier 2 a Zotero item,
 tier 3 the database and Notion only. A selection's `version` is a hash of
 its screener-visible content; verdicts record it, so editing a rubric
-re-screens only that selection over the last 30 days (members and keyword
-hits), and a new selection screens the whole window.
+selects affected papers over the last 30 days (plus existing members), and
+a new selection selects the whole window. Selected papers go through the
+full cascade; unchanged exact stage requests can reuse validated results.
 
 Three stages, a later verdict replacing the earlier one per selection:
 
@@ -69,6 +70,61 @@ Three stages, a later verdict replacing the earlier one per selection:
 each stage plus tier 1 misses and tier 1+2 recall. `litwatch reconfirm`
 applies stage 3 to verdicts that predate it; `litwatch rescreen --selection
 SLUG [--days N]` forgets verdicts so the next run judges them again.
+
+### Inference cost and recovery
+
+Primary Luna screening prefers OpenRouter's `openai/flex` endpoint, then standard
+`openai`, with provider fallback enabled. The model, effort and prompts stay the same.
+Flex trades latency/availability for lower token prices; actual savings depend on the
+endpoint that serves each request. `LITWATCH_SCREEN_PROVIDER_ORDER` overrides the CSV
+order (empty disables it). This setting applies only to `openai/gpt-5.6-luna`, so model
+overrides do not inherit incompatible provider names. `LITWATCH_SCREEN_TIMEOUT_SECONDS`
+defaults to 120 and bounds the primary request including SDK retries. If that deadline
+expires, the paper stays pending; a client timeout cannot trigger server-side fallback.
+Batch submission remains deferred.
+
+Database-backed `litwatch run` and API runs keep an `inference_calls` journal. Each
+response's charge is saved before parsing; each validated screening stage is saved
+before the next stage starts. A failed recall/confirmation or later database write
+therefore does not require repeating successful stages on retry. Reuse requires the
+same paper ID, rendered inputs, ordered selection versions, model, effort, output
+schema, token cap and routing settings. Explicit `litwatch rescreen` invalidates the
+affected papers' reusable stages atomically with forgetting verdicts, preserving the
+billing history. It refuses to run concurrently with an active processing run.
+
+`Usage` and structured inference logs include generation ID, provider, served tier,
+cached input tokens, cache-write tokens, reasoning tokens and reported cache discount.
+Missing provider fields stay null. Reused stages have `reused=true`, zero new `cost`,
+their `original_cost`, and a `source_call_id` linking to the paid response. Their token
+counts describe that original response; exclude reused stages when summing new tokens.
+The journal contains only new requests, so its token totals need no reuse filtering.
+
+Run cost sums the originating run's journal, including billable responses rejected by
+validation and successful stages of failed papers. Digest retries are recorded too;
+explicit digest regeneration remains a fresh generation. Standalone screen/eval/digest
+commands log usage but do not install a run journal. Historical records are not backfilled.
+SDK-internal retries are not individually exposed, and calls interrupted before a usable
+response retain an unknown cost; these figures are not a reconciled provider invoice.
+There is also an unavoidable window between receiving a response and committing it:
+provider-side exactly-once execution is not guaranteed after a process/network failure.
+
+For a run's actual cache share and charge by operation/provider:
+
+```sql
+SELECT operation, usage->>'provider' AS provider, usage->>'service_tier' AS tier,
+       count(*) AS requests,
+       sum((usage->>'cost')::numeric) AS recorded_cost,
+       sum((usage->>'cached_tokens')::numeric)
+         / nullif(sum((usage->>'prompt_tokens')::numeric), 0) AS cached_input_share,
+       count(*) FILTER (WHERE usage->>'cost' IS NULL) AS unknown_cost_requests
+FROM inference_calls
+WHERE run_id = 123
+GROUP BY 1, 2, 3;
+```
+
+The schema additions are compatible with the previous application. Reverting the
+application preserves the journal but temporarily stops reuse/accounting through it;
+do not restore an old database over newly ingested papers.
 
 ## Labeled set
 

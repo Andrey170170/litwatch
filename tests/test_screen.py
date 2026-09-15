@@ -2,7 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from openai import NOT_GIVEN
 
 from litwatch.models import Confidence, Paper, StageRole, Usage, Verdict
 from litwatch.screen import (
@@ -168,15 +167,18 @@ def test_only_uncertain_selection_is_rescreened_without_keyword_hits():
 async def test_model_screener_forwards_effort_and_optional_completion_budget(token_cap):
     parsed = output_model([FAITH])(cot_faithfulness=verdict(1))
     completion = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))], usage=None
+        choices=[SimpleNamespace(message=SimpleNamespace(content=parsed.model_dump_json()))],
+        usage=None,
     )
-    parse = AsyncMock(return_value=completion)
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
+    create = AsyncMock(return_value=completion)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     screener = ModelScreener(client, "z-ai/glm-5.3", "high", max_completion_tokens=token_cap)
     output, usage = await screener.screen(COT, [FAITH])
-    request = parse.call_args.kwargs
+    request = create.call_args.kwargs
     assert request["model"] == "z-ai/glm-5.3"
     assert request["extra_body"]["reasoning"] == {"effort": "high"}
-    assert request["max_completion_tokens"] == (token_cap if token_cap else NOT_GIVEN)
+    assert request.get("max_completion_tokens") == token_cap
+    assert request["response_format"]["json_schema"]["strict"] is True
+    assert request["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
     assert output == {FAITH.slug: verdict(1)}
     assert usage.model == "z-ai/glm-5.3"

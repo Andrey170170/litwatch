@@ -3,12 +3,16 @@ recall and a per-selection confirm for precision."""
 
 from __future__ import annotations
 
+import logging
+import math
 from importlib import resources
 from typing import Protocol
 
-from openai import NOT_GIVEN, AsyncOpenAI
+from openai import AsyncOpenAI
+from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel, create_model
 
+from litwatch.calls import current_journal, recorded_completion, request_key, usage_of  # noqa: F401
 from litwatch.models import (
     Confidence,
     Paper,
@@ -18,11 +22,12 @@ from litwatch.models import (
     Usage,
     Verdict,
 )
-from litwatch.selection import Selection, render_selections, selections_version
+from litwatch.selection import Selection, render_selections
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 PROMPT_VERSION = "v3"
 CONFIRM_TIERS = (1, 2)
+log = logging.getLogger(__name__)
 
 
 def load_prompt_template(version: str = PROMPT_VERSION) -> str:
@@ -71,15 +76,25 @@ class ModelScreener:
         effort: str = "low",
         *,
         max_completion_tokens: int | None = None,
+        provider_order: tuple[str, ...] = (),
+        timeout_seconds: float | None = None,
+        operation: str = "screen",
     ) -> None:
         self.client = client
         self.model = model
         self.effort = effort
         self.max_completion_tokens = max_completion_tokens
-        self._prompts: dict[str, tuple[str, type[BaseModel]]] = {}
+        self.provider_order = provider_order
+        self.timeout_seconds = timeout_seconds
+        if timeout_seconds is not None and (
+            not math.isfinite(timeout_seconds) or timeout_seconds <= 0
+        ):
+            raise ValueError("timeout_seconds must be finite and positive")
+        self.operation = operation
+        self._prompts: dict[tuple, tuple[str, type[BaseModel]]] = {}
 
     def _prepared(self, selections: list[Selection]) -> tuple[str, type[BaseModel]]:
-        key = selections_version(selections)
+        key = tuple((s.slug, s.version) for s in selections)
         if key not in self._prompts:
             self._prompts[key] = (render_system_prompt(selections), output_model(selections))
         return self._prompts[key]
@@ -88,37 +103,80 @@ class ModelScreener:
         self, paper: Paper, selections: list[Selection]
     ) -> tuple[dict[str, Verdict], Usage]:
         system, schema = self._prepared(selections)
-        completion = await self.client.chat.completions.parse(
-            model=self.model,
-            messages=[
+        # Use the SDK's strict-schema conversion, as parse() does, but receive the
+        # completion first: parse() can raise before exposing a billable response.
+        request = {
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": render_user_prompt(paper)},
             ],
-            response_format=schema,
-            # Bound reasoning plus answer tokens when a stage has an explicit cost budget.
-            max_completion_tokens=(
-                self.max_completion_tokens if self.max_completion_tokens is not None else NOT_GIVEN
-            ),
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.__name__,
+                    "strict": True,
+                    "schema": to_strict_json_schema(schema),
+                },
+            },
             # `usage.include` makes OpenRouter report the call's cost in the usage block.
-            extra_body={"reasoning": {"effort": self.effort}, "usage": {"include": True}},
+            "extra_body": {"reasoning": {"effort": self.effort}, "usage": {"include": True}},
+        }
+        if self.max_completion_tokens is not None:
+            request["max_completion_tokens"] = self.max_completion_tokens
+        if self.provider_order:
+            request["extra_body"]["provider"] = {
+                "order": list(self.provider_order),
+                "allow_fallbacks": True,
+            }
+        key = request_key(
+            {
+                "validation_version": 1,
+                "paper_id": paper.id,
+                "operation": self.operation,
+                "model": self.model,
+                "request": request,
+                "versions": [(s.slug, s.version) for s in selections],
+            }
         )
-        parsed = completion.choices[0].message.parsed
-        if parsed is None:
-            raise RuntimeError(f"{self.model} returned no parsable output for {paper.id}")
-        return parse_output(parsed, selections), usage_of(completion, self.model)
-
-
-def usage_of(completion, model: str) -> Usage:
-    u = completion.usage
-    if u is None:
-        return Usage(model=model)
-    extra = getattr(u, "model_extra", None) or {}
-    return Usage(
-        model=model,
-        prompt_tokens=u.prompt_tokens or 0,
-        completion_tokens=u.completion_tokens or 0,
-        cost=extra.get("cost"),
-    )
+        journal = current_journal.get()
+        cached = await journal.cached(key) if journal else None
+        if cached:
+            parsed = schema.model_validate(cached["output"])
+            original = Usage.model_validate(cached["usage"])
+            usage = original.model_copy(
+                update={
+                    "cost": 0.0,
+                    "reused": True,
+                    "original_cost": original.cost,
+                    "source_call_id": cached["id"],
+                }
+            )
+            log.info("inference operation=%s reuse=%s", self.operation, usage.model_dump_json())
+            return parse_output(parsed, selections), usage
+        completion, usage, call_id = await recorded_completion(
+            self.client,
+            model=self.model,
+            operation=self.operation,
+            request=request,
+            key=key,
+            paper_id=paper.id,
+            timeout_seconds=self.timeout_seconds,
+        )
+        try:
+            choice = completion.choices[0]
+            if getattr(choice, "finish_reason", None) in ("length", "content_filter"):
+                raise ValueError(f"Incomplete output: {choice.finish_reason}")
+            if getattr(choice.message, "refusal", None):
+                raise ValueError("Model refused screening")
+            parsed = schema.model_validate_json(choice.message.content or "")
+            output = parse_output(parsed, selections)
+        except Exception as exc:
+            if journal:
+                await journal.reject(call_id, type(exc).__name__)
+            raise
+        if journal:
+            await journal.accept(call_id, parsed.model_dump(mode="json"))
+        return output, usage
 
 
 class Cascade:

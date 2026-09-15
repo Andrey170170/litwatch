@@ -171,3 +171,23 @@ CREATE TABLE IF NOT EXISTS intake_snapshots (
     fetched_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (category, sha256)
 );
+
+-- Each received response is charged to its originating run, even if parsing or a later
+-- stage fails. Only validated screening outputs are reusable. NULL cost means unknown.
+CREATE TABLE IF NOT EXISTS inference_calls (
+    id bigserial PRIMARY KEY,
+    run_id bigint NOT NULL REFERENCES runs(id),
+    operation text NOT NULL,
+    paper_id text,
+    request_key text,
+    usage jsonb NOT NULL,
+    output jsonb,
+    error text,
+    started_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    responded_at timestamptz,
+    invalidated_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS inference_calls_run_idx ON inference_calls(run_id);
+CREATE INDEX IF NOT EXISTS inference_calls_cache_idx ON inference_calls(request_key, id)
+    WHERE output IS NOT NULL AND invalidated_at IS NULL;
+CREATE INDEX IF NOT EXISTS inference_calls_paper_idx ON inference_calls(paper_id);
