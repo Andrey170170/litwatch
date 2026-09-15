@@ -1,5 +1,31 @@
 # Screener eval results
 
+## 2026-09-11 · DeepSeek V4.1 Flash retry
+
+[Retry report](2026-09-11-deepseek-primary.md): strict-schema canary succeeded,
+but three of eight V4.1 primary requests in the paired trial timed out at 90s.
+Four complete pairs retained the same labeled positives; V4.1's full cascade
+cost about 72% more on that tiny control subset. No random-feed comparison
+completed. Reported spend $0.037338 plus three unresolved timeout charges.
+Luna remains in production.
+
+## 2026-09-10 · GLM 5.3 Flash paired primary trial
+
+[Full comparison](2026-09-10-glm-flash-primary.md): 51 complete pairs, including
+32 random-feed papers. Flash's primary cost was 19% lower on the random feed,
+but the full cascade cost 16% more (eight recall calls versus two). Both primary
+models retained all 11 completed must-read controls at tier 1. Final tier-1
+differences were affected by Muse confirmation variability. One downstream
+timeout left a control pair incomplete. Reported spend $0.208127 plus one
+unresolved timed-out request charge. Luna remains in production.
+
+## 2026-09-10 · DeepSeek V4.1 Flash primary availability trial
+
+[Bounded trial](2026-09-10-deepseek-primary.md): strict-schema OpenRouter requests
+returned upstream overload errors on the initial attempt and retry; another
+request remained pending and was cancelled. Two Luna primary baselines succeeded.
+No quality or full-cascade cost comparison completed. Luna remains in production.
+
 ## 2026-09-09 · GLM high, targeted recall
 
 [Full frozen-feed evaluation](2026-09-09-glm-high.md): 140 targeted checks versus

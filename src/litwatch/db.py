@@ -29,10 +29,13 @@ async def apply_schema(conn: psycopg.AsyncConnection) -> None:
 # -- papers ---------------------------------------------------------------------------------------
 
 
-async def upsert_papers(conn: psycopg.AsyncConnection, papers: list[Paper]) -> tuple[int, int]:
+async def upsert_papers(
+    conn: psycopg.AsyncConnection, papers: list[Paper], *, source: str = "arxiv"
+) -> tuple[int, int]:
     """Insert new papers, refresh metadata on replacements. Returns (inserted, updated).
 
     Screening state is untouched on update: a replacement does not re-trigger routing.
+    Atom metadata can insert candidates but never replace canonical metadata.
     """
     inserted = updated = 0
     async with conn.cursor() as cur:
@@ -40,22 +43,29 @@ async def upsert_papers(conn: psycopg.AsyncConnection, papers: list[Paper]) -> t
             await cur.execute(
                 """
                 INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
-                                    published, updated, url)
+                                    published, updated, url, metadata_source)
                 VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
-                        %(primary_category)s, %(published)s, %(updated)s, %(url)s)
+                        %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s)
                 ON CONFLICT (id) DO UPDATE SET
                     title = EXCLUDED.title, abstract = EXCLUDED.abstract,
                     authors = EXCLUDED.authors, categories = EXCLUDED.categories,
-                    primary_category = EXCLUDED.primary_category,
-                    updated = EXCLUDED.updated, url = EXCLUDED.url
+                    primary_category = coalesce(EXCLUDED.primary_category, papers.primary_category),
+                    published = coalesce(papers.published, EXCLUDED.published),
+                    updated = CASE WHEN %(source)s = 'oai'
+                                   AND papers.updated::date = EXCLUDED.updated::date
+                                   THEN papers.updated ELSE EXCLUDED.updated END,
+                    url = EXCLUDED.url, metadata_source = EXCLUDED.metadata_source
+                WHERE %(source)s <> 'atom'
+                  AND (%(source)s <> 'oai' OR papers.updated IS NULL
+                       OR EXCLUDED.updated::date >= papers.updated::date)
                 RETURNING (xmax = 0) AS inserted
                 """,
-                {**p.model_dump(), "authors": Jsonb(p.authors)},
+                {**p.model_dump(), "authors": Jsonb(p.authors), "source": source},
             )
             row = await cur.fetchone()
             if row and row["inserted"]:
                 inserted += 1
-            else:
+            elif row:
                 updated += 1
     return inserted, updated
 
@@ -387,6 +397,8 @@ async def start_run(
 async def finish_run(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
     if "tiers" in fields:
         fields["tiers"] = Jsonb(fields["tiers"])
+    if "intake" in fields:
+        fields["intake"] = Jsonb(fields["intake"])
     assignments = ", ".join(f"{k} = %({k})s" for k in fields)
     await conn.execute(
         f"UPDATE runs SET finished_at = now(), {assignments} WHERE id = %(id)s",
@@ -434,7 +446,7 @@ async def list_digests(conn: psycopg.AsyncConnection, limit: int = 40) -> list[d
         await conn.execute(
             """
             SELECT d.run_id, r.kind, r.started_at, r.finished_at, r.fetched, r.screened,
-                   r.cost AS run_cost, r.tiers, d.tiers AS digest_tiers,
+                   r.cost AS run_cost, r.tiers, r.intake, d.tiers AS digest_tiers,
                    d.source, d.title, d.body, d.model, d.cost
             FROM digests d JOIN runs r ON r.id = d.run_id
             ORDER BY d.run_id DESC, (d.source <> 'general'), d.title LIMIT %s

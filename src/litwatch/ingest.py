@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from litwatch import arxiv_source, db
+from litwatch import arxiv_source, db, intake
 from litwatch.config import Settings
 from litwatch.deep import DeepProcessor
 from litwatch.digest import Digest, Digester
@@ -41,6 +41,7 @@ class RunSummary:
     cost: float = 0.0
     tiers: dict[str, object] = field(default_factory=dict)
     error: str | None = None
+    intake: dict[str, object] | None = None
 
 
 def window(days: int, now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -60,12 +61,36 @@ async def run(
     digester: Digester | None = None,
     deep: DeepProcessor | None = None,
 ) -> RunSummary:
+    # API and CLI share this lock, including analysis: checkpoints and pending
+    # screens must have one writer even if two entry points are triggered together.
+    locked = await (await conn.execute("SELECT pg_try_advisory_lock(7213902) AS locked")).fetchone()
+    if not locked or not locked["locked"]:
+        raise RuntimeError("another Litwatch run is already in progress")
+    try:
+        return await _run(conn, settings, cascade, kind, days, fetch, router, digester, deep)
+    finally:
+        await conn.execute("SELECT pg_advisory_unlock(7213902)")
+
+
+async def _run(
+    conn: psycopg.AsyncConnection,
+    settings: Settings,
+    cascade: Cascade,
+    kind: str,
+    days: int,
+    fetch: bool,
+    router: Router | None,
+    digester: Digester | None,
+    deep: DeepProcessor | None,
+) -> RunSummary:
     since, until = window(days)
     run_id = await db.start_run(conn, kind, since, until)
     summary = RunSummary(run_id=run_id, kind=kind, window_from=since, window_to=until)
     try:
         if fetch:
             await _fetch(conn, settings, summary)
+        else:
+            summary.intake = await intake.record_skipped(conn, run_id)
         await _screen(conn, settings, cascade, summary)
         if router is not None:
             await route_pending(conn, router, summary)
@@ -97,11 +122,27 @@ async def run(
             cost=round(summary.cost, 4),
             tiers=summary.tiers,
             error=summary.error,
+            intake=summary.intake,
         )
     return summary
 
 
 async def _fetch(conn: psycopg.AsyncConnection, settings: Settings, s: RunSummary) -> None:
+    if settings.intake_source == "oai":
+        result = await intake.collect(conn, settings.categories, s.window_from, s.run_id)
+        s.fetched, s.inserted, s.updated = result.fetched, result.inserted, result.updated
+        s.intake = result.details
+        log.info(
+            "run %s intake %s: %s papers (%s new, %s updated)",
+            s.run_id,
+            s.intake["status"],
+            s.fetched,
+            s.inserted,
+            s.updated,
+        )
+        return
+    if settings.intake_source != "search":
+        raise ValueError(f"Unknown intake source: {settings.intake_source}")
     # The arxiv client is synchronous and paces itself; run it off the event loop.
     papers = await asyncio.to_thread(
         lambda: list(

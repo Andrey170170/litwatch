@@ -14,6 +14,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch import db
 from litwatch.digest import GENERAL, Digest, Digester, assign, by_tier
+from litwatch.intake import coverage_notice
 from litwatch.selection import Selection
 
 log = logging.getLogger(__name__)
@@ -205,8 +206,10 @@ async def write_run_digests(
     if not locked or not locked["locked"]:
         raise RuntimeError("another digest generation is in progress; retry after it finishes")
     try:
-        if not await db.get_run(conn, run_id):
+        run = await db.get_run(conn, run_id)
+        if not run:
             raise ValueError(f"unknown run {run_id}")
+        notice = coverage_notice(run.get("intake"))
         sources = list(dict.fromkeys([GENERAL, *(s.slug for s in selections if s.digest)]))
         saved = await (
             await conn.execute(
@@ -248,6 +251,8 @@ async def write_run_digests(
             except Exception:
                 log.exception("digest %s failed; its papers remain pending", source)
                 continue
+            if notice:
+                digest.body = notice + "\n\n" + digest.body
             if store:
                 async with conn.transaction():
                     await db.store_digest(

@@ -151,3 +151,23 @@ CREATE TABLE IF NOT EXISTS digest_history_migrations (
 
 -- Digest counts describe its frozen membership, not every paper screened in the run.
 ALTER TABLE digests ADD COLUMN IF NOT EXISTS tiers jsonb;
+
+-- Intake completeness is independent of successful screening/digest production.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS intake jsonb;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS metadata_source text NOT NULL DEFAULT 'arxiv';
+CREATE TABLE IF NOT EXISTS intake_checkpoints (
+    category text PRIMARY KEY,
+    discovery_from date NOT NULL,
+    checkpoint date,
+    checked_at timestamptz,
+    run_id bigint REFERENCES runs(id)
+);
+-- Raw daily feeds survive processing failures and are included in the normal DB backup.
+CREATE TABLE IF NOT EXISTS intake_snapshots (
+    category text NOT NULL,
+    sha256 text NOT NULL,
+    body bytea NOT NULL,
+    generated_at timestamptz NOT NULL,
+    fetched_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (category, sha256)
+);
