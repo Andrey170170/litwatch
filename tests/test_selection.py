@@ -48,8 +48,8 @@ def test_render_and_seeds(tmp_path: Path):
     assert "## CoT faithfulness (`cot-faithfulness`)" in text
     assert "Tier 1 rubric: A method" in text and "No tier 1 rubric" in text
     packaged = seeds()
-    assert len(packaged) == 6 and all(s.has_rubric for s in packaged)
-    assert [s.slug for s in packaged if s.digest] == ["cot-faithfulness"]
+    assert len(packaged) == 7 and all(s.has_rubric for s in packaged)
+    assert [s.slug for s in packaged if s.digest] == ["cot-faithfulness", "cot-monitoring"]
     assert {s.slug for s in packaged} >= {"cot-faithfulness", "interpretability", "agents"}
     (tmp_path / "a.yaml").write_text(yaml.safe_dump(FAITH.model_dump(mode="json")))
     assert load_specs(tmp_path)[0].version == FAITH.version

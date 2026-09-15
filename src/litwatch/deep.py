@@ -274,7 +274,14 @@ def enrichment_tags(result: dict[str, Any]) -> list[str]:
             *(f"litwatch:mismatch:{_slug(x)}" for x in faith.get("mismatch", [])),
             f"litwatch:ground-truth:{_slug(faith['ground_truth'])}",
         ]
-    return tags
+    if mon := result.get("monitoring"):
+        tags += [
+            f"litwatch:monitor:{_slug(mon['monitor_type'])}",
+            *(f"litwatch:signal:{_slug(x)}" for x in mon.get("internals_signal", [])),
+            *(f"litwatch:target:{_slug(x)}" for x in mon.get("target", [])),
+            f"litwatch:pressure:{_slug(mon['pressure'])}",
+        ]
+    return sorted(set(tags), key=tags.index)
 
 
 def enrichment_note(
@@ -317,6 +324,18 @@ def enrichment_note(
             f"<p><b>Detection method.</b> {_esc(faith['detection_method'])}</p>",
             f"<p><b>Definition.</b> {_esc(faith['definition'])}</p>",
             f"<p><b>Generality.</b> {_esc(faith['generality'])}</p>",
+        ]
+    if mon := result.get("monitoring"):
+        parts += [
+            "<p><b>Monitoring.</b></p><table>",
+            _row("Target", ", ".join(mon.get("target", [])) or "none"),
+            _row("Monitor type", mon["monitor_type"]),
+            _row("Internals signal", ", ".join(mon.get("internals_signal", [])) or "none"),
+            _row("Pressure", mon["pressure"]),
+            "</table>",
+            f"<p><b>Monitor method.</b> {_esc(mon['monitor_method'])}</p>",
+            f"<p><b>Robustness.</b> {_esc(mon['robustness'])}</p>",
+            f"<p><b>Generality.</b> {_esc(mon['generality'])}</p>",
         ]
     parts += [
         "<p><b>Closest prior work.</b></p><ul>",

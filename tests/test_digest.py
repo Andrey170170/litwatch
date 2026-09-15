@@ -117,8 +117,29 @@ def test_selection_markdown_links_titles_and_counts_the_rest():
     body = render_selection_digest(FAITH, by_tier(FAITH, papers), out)
     assert "**Must read**\n- [First Paper](https://arxiv.org/abs/1) — Probes predict" in body
     assert body.count("\n- [P") == RECOMMENDED_CAP
-    assert "Plus 3 more recommended and 1 good to know" in body
+    assert body.endswith(
+        "Plus 3 more recommended and 1 good to know in the Papers table, view CoT faithfulness."
+    )
     assert "Other" not in body
+
+
+def test_selection_input_carries_monitoring_cards():
+    card = {
+        "key_claim": "Monitors catch reward hacking.",
+        "summary": "Summary text.",
+        "monitoring": {
+            "target": ["reward hacking"],
+            "monitor_type": "black-box",
+            "monitor_method": "A weaker model reads the trace.",
+            "pressure": "optimization against the monitor",
+            "robustness": "Obfuscation after RL.",
+            "generality": "Coding tasks only.",
+        },
+    }
+    papers = [member("1", "First", {"cot-faithfulness": 1}, card)]
+    text = render_selection_input(FAITH, by_tier(FAITH, papers))
+    assert "Monitor target: reward hacking" in text
+    assert "Pressure tested: optimization against the monitor" in text
 
 
 def test_assign_places_a_paper_under_the_selection_where_it_ranks_highest():
@@ -153,7 +174,7 @@ async def test_write_all_makes_general_plus_flagged_selection_digests():
         "**CoT faithfulness** · 1 must read, 1 recommended, 0 good to know. Hints again.\n"
         f"- {link} (also Mechanistic interpretability) — Hint test.\n"
         "- [Second](https://arxiv.org/abs/2) — Proxy.\n\n"
-        "**Mechanistic interpretability** · 0 must read, 0 recommended, 1 good to know."
+        "**Mechanistic interpretability** · nothing must read or recommended, 1 good to know."
     )
     assert faith.body == (
         "Two omission tests today.\n\n"
@@ -176,22 +197,34 @@ async def test_general_lists_tier1_even_when_the_model_skips_the_section():
     )
 
 
-async def test_only_tier3_members_need_no_model_call():
-    client, completions = fake_client({})
+async def test_tier3_only_day_gets_an_overview_but_no_general_call():
+    quiet = SelectionOutput(overview="Only proxies today.", must_read=[], recommended=[])
+    client, completions = fake_client({SelectionOutput: quiet})
     papers = [member("3", "Only", {"cot-faithfulness": 3})]
     general, faith = await Digester(client, "k").write_all([FAITH_D], papers)
-    assert general.body == "**CoT faithfulness** · 0 must read, 0 recommended, 1 good to know."
-    assert (
-        faith.body
-        == "Plus 1 good to know in the Papers table (filter Selections = CoT faithfulness)."
+    assert general.body == (
+        "**CoT faithfulness** · nothing must read or recommended, 1 good to know."
     )
-    assert faith.cost is None and general.cost is None and completions.calls == []
+    assert faith.body == (
+        "Only proxies today.\n\nNothing reached must read or recommended today; "
+        "the 1 good to know paper is in the Papers table, view CoT faithfulness."
+    )
+    # The tier 3 titles and reasons are what the model sees on such a day.
+    assert len(completions.calls) == 1
+    assert (
+        "## Tier 3 (1 papers)\n- Only (arXiv 3): Because."
+        in completions.calls[0]["messages"][1]["content"]
+    )
+    assert faith.cost == 0.002 and general.cost is None
 
 
-async def test_empty_run_needs_no_model_call():
+async def test_empty_run_needs_no_model_call_and_still_writes_the_pages():
     client, completions = fake_client({})
-    (general,) = await Digester(client, "k").write_all([FAITH_D], [])
+    general, faith = await Digester(client, "k").write_all([FAITH_D], [])
     assert general.body == EMPTY_DIGEST and completions.calls == []
+    assert faith.body == (
+        "Nothing new for CoT faithfulness in this run: no paper passed the screen for it."
+    )
 
 
 async def test_a_bad_selection_digest_is_skipped_not_fatal():

@@ -276,3 +276,35 @@ def test_note_and_tags_are_pure():
     assert "12 cells, 14 turns, 300s" in html
     assert "litwatch:code" in enrichment_tags(RESULT)
     assert "litwatch:code" not in enrichment_tags({**RESULT, "code_available": False})
+
+
+MONITORING = {
+    "target": ["reward hacking", "deception"],
+    "monitor_type": "hybrid",
+    "internals_signal": ["probes"],
+    "monitor_method": "A weaker model reads the trace; a probe on the residual flags the rest.",
+    "pressure": "optimization against the monitor",
+    "robustness": "Detection drops after RL against the monitor; obfuscated traces evade it.",
+    "generality": "Coding and agentic tasks, two model families.",
+}
+
+
+def test_monitoring_extension_in_note_and_tags():
+    paper = Paper(id="2601.00002", title="A Monitor", abstract="x")
+    result = {k: v for k, v in RESULT.items() if k != "faithfulness"} | {"monitoring": MONITORING}
+    html = enrichment_note(paper, result)
+    assert "<b>Monitoring.</b>" in html and "Faithfulness" not in html
+    assert "<b>Monitor method.</b> A weaker model" in html
+    assert enrichment_tags(result) == [
+        "litwatch:processed",
+        "litwatch:kind:method",
+        "litwatch:code",
+        "litwatch:monitor:hybrid",
+        "litwatch:signal:probes",
+        "litwatch:target:reward-hacking",
+        "litwatch:target:deception",
+        "litwatch:pressure:optimization-against-the-monitor",
+    ]
+    # A paper tier 1 in both selections carries both extensions; shared tags appear once.
+    both = enrichment_tags(RESULT | {"monitoring": MONITORING})
+    assert both.count("litwatch:signal:probes") == 1

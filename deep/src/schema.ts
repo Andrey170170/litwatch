@@ -30,6 +30,16 @@ export const INTERNALS_SIGNALS = [
 ] as const;
 export const MISMATCHES = ["omission", "commission"] as const;
 export const GROUND_TRUTHS = ["task construction", "internals", "meta-evaluation", "none"] as const;
+export const MONITOR_TARGETS = [
+  "reward hacking",
+  "sabotage",
+  "deception",
+  "sandbagging",
+  "unsafe intent",
+  "evaluation awareness",
+  "other",
+] as const;
+export const PRESSURES = ["none", "prompted evasion", "optimization against the monitor", "both"] as const;
 
 const CORE = {
   summary: Type.String({
@@ -135,20 +145,80 @@ export const FaithfulnessSchema = Type.Object(
 
 export type Faithfulness = Static<typeof FaithfulnessSchema>;
 
+/** Extension for the chain-of-thought monitoring selection: reading traces for oversight. */
+export const MonitoringSchema = Type.Object(
+  {
+    target: Type.Array(enumOf(MONITOR_TARGETS, "Misbehavior the monitor is meant to catch."), {
+      description:
+        "What the paper detects or studies detection of in the trace. Empty when the paper studies " +
+        "monitorability or legibility without a specific misbehavior.",
+    }),
+    monitor_type: enumOf(
+      MONITOR_TYPES,
+      "How the trace is read: from internals (white-box), from text only (black-box), both (hybrid), " +
+        "or not applicable when the paper monitors nothing (a position paper, a legibility study).",
+    ),
+    internals_signal: Type.Array(enumOf(INTERNALS_SIGNALS, "Model-internal signal used."), {
+      description: "Empty when the paper uses no model internals.",
+    }),
+    monitor_method: Type.String({
+      minLength: 80,
+      maxLength: 1500,
+      description:
+        "How the monitor works and how it was evaluated, concretely: the monitor model and what it " +
+        "sees, the probe, the labelling of ground-truth misbehavior, the metric (detection rate, false " +
+        "positives, catch rate at a budget).",
+    }),
+    pressure: enumOf(
+      PRESSURES,
+      "Whether the monitor was tested under pressure: none, prompted evasion (the model is told to hide " +
+        "its reasoning), optimization against the monitor (training or RL with the monitor in the reward), " +
+        "or both.",
+    ),
+    robustness: Type.String({
+      minLength: 40,
+      maxLength: 800,
+      description:
+        "What the paper finds erodes or preserves detection: obfuscation, training against the monitor, " +
+        "model scale, trace length, legibility, monitor strength. What was not tested.",
+    }),
+    generality: Type.String({
+      minLength: 40,
+      maxLength: 800,
+      description:
+        "Whether the monitor or evaluation is meant to transfer across tasks and models, or is a " +
+        "single-domain audit; what evidence of transfer exists.",
+    }),
+  },
+  { additionalProperties: false },
+);
+
+export type Monitoring = Static<typeof MonitoringSchema>;
+
 /** Every extension a job may request, by the key it occupies in the result. */
-export const EXTENSIONS: Record<string, TObject> = { faithfulness: FaithfulnessSchema };
+export const EXTENSIONS: Record<string, TObject> = {
+  faithfulness: FaithfulnessSchema,
+  monitoring: MonitoringSchema,
+};
+
+const needsSignal = (key: string, monitor_type: string, signals: unknown[]): string[] =>
+  monitor_type !== "black-box" && monitor_type !== "not applicable" && signals.length === 0
+    ? [`/${key}/internals_signal: must name the internal signal for a white-box or hybrid monitor`]
+    : [];
 
 /** Cross-field rules per extension; each returns error lines, empty when the value is consistent. */
 const EXTENSION_RULES: Record<string, (value: unknown) => string[]> = {
   faithfulness: (value) => {
     const f = value as Faithfulness;
-    if (f.monitor_type !== "black-box" && f.monitor_type !== "not applicable" && f.internals_signal.length === 0)
-      return ["/faithfulness/internals_signal: must name the internal signal for a white-box or hybrid monitor"];
-    return [];
+    return needsSignal("faithfulness", f.monitor_type, f.internals_signal);
+  },
+  monitoring: (value) => {
+    const m = value as Monitoring;
+    return needsSignal("monitoring", m.monitor_type, m.internals_signal);
   },
 };
 
-export type Result = Static<typeof CoreSchema> & { faithfulness?: Faithfulness };
+export type Result = Static<typeof CoreSchema> & { faithfulness?: Faithfulness; monitoring?: Monitoring };
 
 /** The core with each requested extension as a required property. Throws on an unknown name. */
 export function resultSchema(extensions: string[]): TObject {

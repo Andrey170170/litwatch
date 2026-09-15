@@ -24,6 +24,16 @@ const faithfulness = {
   generality: "g".repeat(50),
 };
 
+const monitoring = {
+  target: ["reward hacking"],
+  monitor_type: "black-box",
+  internals_signal: [],
+  monitor_method: "m".repeat(100),
+  pressure: "optimization against the monitor",
+  robustness: "r".repeat(50),
+  generality: "g".repeat(50),
+};
+
 const good = { ...core, faithfulness };
 
 test("a core result validates with no extensions", () => {
@@ -57,6 +67,18 @@ test("errors name the path once and list allowed values", () => {
   assert.ok(v.errors.some((e) => e.startsWith("/summary: must not have fewer than 300")), v.errors.join("\n"));
   assert.ok(v.errors.some((e) => e.includes("extra")), v.errors.join("\n"));
   assert.equal(v.errors.filter((e) => e.startsWith("/paper_kind")).length, 1);
+});
+
+test("the monitoring extension validates alone or next to faithfulness", () => {
+  const alone = { ...core, monitoring };
+  assert.deepEqual(validate(alone, ["monitoring"]), { ok: true, value: alone });
+  const both = { ...good, monitoring };
+  assert.deepEqual(validate(both, ["faithfulness", "monitoring"]), { ok: true, value: both });
+  const hidden = validate({ ...core, monitoring: { ...monitoring, monitor_type: "hybrid" } }, ["monitoring"]);
+  assert.equal(hidden.ok, false);
+  if (!hidden.ok) assert.ok(hidden.errors.some((e) => e.startsWith("/monitoring/internals_signal")), hidden.errors.join("\n"));
+  const badPressure = validate({ ...core, monitoring: { ...monitoring, pressure: "lots" } }, ["monitoring"]);
+  assert.equal(badPressure.ok, false);
 });
 
 test("cross-field rules", () => {

@@ -31,6 +31,7 @@ GENERAL_TITLE = "General"
 RECOMMENDED_CAP = 8  # tier 2 bullets per selection digest; the rest are counted
 GENERAL_RECOMMENDED_CAP = 5  # tier 2 bullets per section of the general digest
 EMPTY_DIGEST = "No new member papers in this run."
+TIER3_CAP = 40  # tier 3 titles shown to the model per selection digest
 
 
 class Note(BaseModel):
@@ -39,7 +40,10 @@ class Note(BaseModel):
 
 
 class SelectionOutput(BaseModel):
-    overview: str = Field(description="Two or three sentences on what today adds to the subject")
+    overview: str = Field(
+        description="Two or three sentences on what today adds to the subject; when nothing is "
+        "above tier 3, one or two sentences on what the tier 3 papers touch on"
+    )
     must_read: list[Note] = Field(description="Every tier 1 paper, two or three sentences each")
     recommended: list[Note] = Field(
         description=f"Up to {RECOMMENDED_CAP} tier 2 papers, one sentence each, most notable first"
@@ -66,10 +70,14 @@ class GeneralOutput(BaseModel):
 SELECTION_PROMPT = f"""You write the daily digest for one selection of an NLP research lab's \
 literature watch: a topic one member owns, with a subject and, for some, a tier 1 rubric. You \
 are given the selection and today's papers: tier 1 (must read) with a reading card written from \
-the full text, and tier 2 (recommended) with the abstract and the screener's reason.
+the full text, tier 2 (recommended) with the abstract and the screener's reason, and tier 3 \
+(good to know) as a title and the screener's reason each.
 
 Return JSON. `overview`: two or three sentences on what today adds to the subject, naming no \
-more than two papers. `must_read`: one entry per tier 1 paper, all of them, two or three \
+more than two papers; tier 3 papers inform the overview but are not listed. When nothing is \
+above tier 3, the overview is one or two sentences on what the tier 3 papers touch on and why \
+none of them meets the rubric, and `must_read` and `recommended` are empty. `must_read`: one \
+entry per tier 1 paper, all of them, two or three \
 sentences each: what it contributes, by what method, against what ground truth or evidence; \
 where the card names a detection method or ground truth, center on that. `recommended`: at most \
 {RECOMMENDED_CAP} tier 2 papers, the most notable first, one sentence each on what the paper \
@@ -148,6 +156,15 @@ def _card_lines(row: dict[str, Any]) -> list[str]:
             f"Detection method: {faith['detection_method']}",
             f"Generality: {faith['generality']}",
         ]
+    if mon := card.get("monitoring"):
+        lines += [
+            f"Monitor target: {', '.join(mon.get('target', [])) or 'none'}",
+            f"Monitor type: {mon['monitor_type']}",
+            f"Monitor method: {mon['monitor_method']}",
+            f"Pressure tested: {mon['pressure']}",
+            f"Robustness: {mon['robustness']}",
+            f"Generality: {mon['generality']}",
+        ]
     return lines
 
 
@@ -166,6 +183,14 @@ def render_selection_input(
                 lines += _card_lines(row)
             else:
                 lines.append(f"Abstract: {(row.get('abstract') or '').strip()}")
+    if with_slug or not groups[3]:
+        return "\n".join(lines)
+    lines += ["", f"## Tier 3 ({len(groups[3])} papers)"]
+    for row in groups[3][:TIER3_CAP]:
+        reason = row["verdicts"][selection.slug]["reason"]
+        lines.append(f"- {row['title']} (arXiv {row['id']}): {reason}")
+    if len(groups[3]) > TIER3_CAP:
+        lines.append(f"- and {len(groups[3]) - TIER3_CAP} more")
     return "\n".join(lines)
 
 
@@ -211,34 +236,48 @@ def _all_bullets(notes: list[Note], rows: list[dict[str, Any]], suffix=lambda r:
     return out
 
 
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def render_selection_digest(
     selection: Selection, groups: dict[int, list[dict[str, Any]]], out: SelectionOutput | None
 ) -> str:
-    """The selection's page: overview, must-read bullets, recommended bullets, the rest counted."""
+    """The selection's page: overview, must-read bullets, recommended bullets, the rest counted.
+
+    A day with nothing above tier 3 says so in words rather than showing an empty template; a day
+    with no members at all says that.
+    """
     t1, t2, t3 = groups[1], groups[2], groups[3]
+    if not (t1 or t2 or t3):
+        return f"Nothing new for {selection.name} in this run: no paper passed the screen for it."
+    where = f"in the Papers table, view {selection.name}"
     parts: list[str] = []
     if out is not None:
         parts.append(" ".join(out.overview.split()))
+    if not (t1 or t2):
+        parts.append(
+            f"Nothing reached must read or recommended today; "
+            f"the {_count(len(t3), 'good to know paper')} "
+            f"{'is' if len(t3) == 1 else 'are'} {where}."
+        )
+        return "\n\n".join(parts)
+    rest = len(t2)
+    if out is not None:
         if t1:
             parts.append("**Must read**\n" + "\n".join(_all_bullets(out.must_read, t1)))
         if t2:
             bullets = _bullets(out.recommended[:RECOMMENDED_CAP], t2)
             parts.append("**Recommended**\n" + "\n".join(bullets))
             rest = len(t2) - len(bullets)
-        else:
-            rest = 0
-    else:
-        rest = len(t2)
     tail = []
     if rest:
         tail.append(f"{rest} more recommended")
     if t3:
         tail.append(f"{len(t3)} good to know")
     if tail:
-        parts.append(
-            f"Plus {' and '.join(tail)} in the Papers table (filter Selections = {selection.name})."
-        )
-    return "\n\n".join(parts) if parts else EMPTY_DIGEST
+        parts.append(f"Plus {' and '.join(tail)} {where}.")
+    return "\n\n".join(parts)
 
 
 def _also(selections: list[Selection], row: dict[str, Any], owner: str) -> str:
@@ -265,7 +304,13 @@ def render_general_digest(
         if not (t1 or t2 or t3):
             continue
         sec = sections.get(s.slug)
-        head = f"**{s.name}** · {len(t1)} must read, {len(t2)} recommended, {len(t3)} good to know."
+        if t1 or t2:
+            head = (
+                f"**{s.name}** · {len(t1)} must read, {len(t2)} recommended, "
+                f"{len(t3)} good to know."
+            )
+        else:
+            head = f"**{s.name}** · nothing must read or recommended, {len(t3)} good to know."
         if sec is not None:
             head += " " + " ".join(sec.overview.split())
         lines = [head]
@@ -323,8 +368,8 @@ class Digester:
     async def write_selection(
         self, selection: Selection, groups: dict[int, list[dict[str, Any]]]
     ) -> Digest:
-        """No model call when there is nothing above tier 3."""
-        if not (groups[1] or groups[2]):
+        """A model call whenever the selection has members: a tier-3-only day gets an overview."""
+        if not any(groups.values()):
             return Digest(
                 selection.slug, selection.name, render_selection_digest(selection, groups, None)
             )
@@ -346,9 +391,9 @@ class Digester:
     async def write_all(
         self, selections: list[Selection], papers: list[dict[str, Any]]
     ) -> list[Digest]:
-        """General digest plus one per selection with `digest` set and at least one member."""
+        """General digest plus one per selection with `digest` set, members or not."""
         groups = {s.slug: by_tier(s, papers) for s in selections}
-        flagged = [s for s in selections if s.digest and any(groups[s.slug].values())]
+        flagged = [s for s in selections if s.digest]
         results = await asyncio.gather(
             self.write_general(selections, assign(selections, papers)),
             *(self.write_selection(s, groups[s.slug]) for s in flagged),

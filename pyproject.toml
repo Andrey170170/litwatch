@@ -4,12 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "litwatch"
-version = "0.8.2"
+version = "0.8.3"
 description = "Literature watch for CoT monitoring and faithfulness papers"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "arxiv>=2.1",
+    "requests>=2.32",
+    "urllib3>=2.0",
     "fastapi>=0.115",
     "httpx>=0.27",
     "openai>=1.50",

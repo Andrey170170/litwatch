@@ -26,6 +26,10 @@ def _secret(name: str) -> str | None:
     return None
 
 
+# Deep-card extension requested per selection slug; the names are litwatch-deep's EXTENSIONS.
+DEFAULT_DEEP_EXTENSIONS = {"cot-faithfulness": "faithfulness", "cot-monitoring": "monitoring"}
+
+
 @dataclass(frozen=True)
 class Settings:
     openrouter_api_key: str
@@ -57,14 +61,13 @@ class Settings:
     inbox_selections: tuple[str, ...] = ("cot-faithfulness",)
     # Deep card extensions per selection (`slug=extension,...`); a tier 1 in a selection without
     # an extension still gets the core card. The cap protects the subscription from a loose rubric.
-    deep_extensions: dict[str, str] = field(
-        default_factory=lambda: {"cot-faithfulness": "faithfulness"}
-    )
+    deep_extensions: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_DEEP_EXTENSIONS))
     deep_max_per_run: int = 10
     # An edited or new selection re-judges papers published within this many days.
     rescreen_window_days: int = 30
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     screen_concurrency: int = 8
+    intake_source: str = "oai"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -97,15 +100,14 @@ class Settings:
             deep_url=os.environ.get("LITWATCH_DEEP_URL"),
             inbox_collection=os.environ.get("LITWATCH_INBOX_COLLECTION"),
             inbox_selections=_csv("LITWATCH_INBOX_SELECTIONS", cls.inbox_selections),
-            deep_extensions=_mapping(
-                "LITWATCH_DEEP_EXTENSIONS", {"cot-faithfulness": "faithfulness"}
-            ),
+            deep_extensions=_mapping("LITWATCH_DEEP_EXTENSIONS", dict(DEFAULT_DEEP_EXTENSIONS)),
             deep_max_per_run=int(os.environ.get("LITWATCH_DEEP_MAX_PER_RUN", "10")),
             rescreen_window_days=int(os.environ.get("LITWATCH_RESCREEN_WINDOW_DAYS", "30")),
             categories=tuple(
                 os.environ.get("LITWATCH_CATEGORIES", ",".join(cls.categories)).split(",")
             ),
             screen_concurrency=int(os.environ.get("LITWATCH_SCREEN_CONCURRENCY", "8")),
+            intake_source=os.environ.get("LITWATCH_INTAKE_SOURCE", "oai"),
         )
 
     @property
