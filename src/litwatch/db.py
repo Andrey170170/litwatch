@@ -479,7 +479,7 @@ async def list_papers(
     since: datetime | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """Member papers (best tier 1..3), newest screening first, with verdicts and state inline.
+    """Member papers (best tier 1..3), newest screening first, with verdicts, abstract, and state.
 
     `selection` restricts to members of that selection; `tiers` then applies to its verdict,
     otherwise to the paper's best tier.
@@ -503,7 +503,7 @@ async def list_papers(
     return await (
         await conn.execute(
             f"""
-            SELECT {PAPER_COLUMNS}, {VERDICTS_JSON}
+            SELECT {PAPER_COLUMNS}, p.abstract, {VERDICTS_JSON}
             FROM papers p WHERE {" AND ".join(clauses)}
             ORDER BY p.screened_at DESC LIMIT %s
             """,
