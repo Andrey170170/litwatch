@@ -64,3 +64,31 @@ Litwatch image that does not share pacing. Never restore over a live database.
 Activation/pilot receipts are recorded below after live checks. Historical missing
 PDF recovery, August backfill, search and the optional revision sweep remain later
 stages in arxiv-archive/IMPLEMENTATION-PLAN.md.
+
+## Activation receipt — 2026-09-27
+
+- Litwatch implementation commits `054cece` and `d1dd9ea`; archive service `989f975`.
+  Built from clean committed source; unrelated model-evaluation working edits were
+  excluded. Production screen model remains `openai/gpt-5.6-luna`.
+- 218 tests passed on the clean initial release with isolated PostgreSQL; the
+  final delayed-version publication fix passed all 12 dispatcher tests. Archive
+  package: 38 tests passed. Migration succeeded on a restored production database
+  with 12,353 papers. No production restore or rescreen was performed.
+- Pilot `2609.29446v1` (tier 4) produced durable metadata/PDF/source intents and
+  complete archive jobs. Screening/Zotero fields stayed unchanged. API read-back
+  parsed a 3,714,093-byte, 15-page PDF and a 3,312,796-byte source tar containing
+  `spade_dfl_v1.tex` (93,035 bytes). Existing `2609.29266v1` also returned its normal
+  1,068,623-byte PDF through the Litwatch container.
+- Intake-only run 33 completed canonical and raw-history discovery for all three
+  categories, starting 2026-09-27. OAI response boundaries were 19:36:38 UTC (cs.CL),
+  19:36:48 (cs.AI), and 19:36:57 (cs.LG). This interval contained zero records;
+  checkpoints and run details were recorded, not inferred from process startup.
+  No paid screening, digest, Zotero, Nextcloud or Notion publication was invoked
+  by the pilot. Routing behavior and outage/revision handling were fixture tested.
+- Handoff: historical backfill must overlap September 27 and reconcile its own
+  results against the now-active daily intake. This receipt does not establish
+  archive coverage before that date; the historical campaign has not run.
+
+Receipts and rollback artifacts live under `/srv/arxiv-work/state/litwatch-stage2-*`
+and `/srv/arxiv-work/state/litwatch-pre-stage2.*`. The outbox progress endpoint may
+lag completed archive jobs by up to its background reconciliation interval.
