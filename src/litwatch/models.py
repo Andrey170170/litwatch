@@ -17,6 +17,12 @@ class Paper(BaseModel):
     published: str | None = None
     updated: str | None = None
     url: str | None = None
+    # Only explicit upstream version identifiers; absent does not mean v1.
+    version: int | None = Field(default=None, ge=1)
+    version_history: list[dict] = Field(default_factory=list)
+    doi: str | None = None
+    journal_ref: str | None = None
+    license: str | None = None
 
 
 class Confidence(StrEnum):

@@ -164,7 +164,9 @@ class FakeZotero:
 
 
 class FakeFetcher:
-    async def fetch(self, paper_id):
+    async def fetch(self, paper):
+        assert paper.id == "2601.00001"
+        assert paper.version == 2
         return "# Fetched body\n\nText.", "html"
 
 
@@ -175,6 +177,8 @@ def row() -> dict:
         "title": "A Paper",
         "abstract": "Abstract.",
         "authors": ["A B"],
+        "categories": ["cs.CL"],
+        "version": 2,
         "published": datetime(2026, 1, 1, tzinfo=UTC),
         "url": None,
         "zotero_key": "ZK1",

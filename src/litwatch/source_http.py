@@ -6,8 +6,11 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 import requests
+from arxiv_archive.pacing import PacingError
 from urllib3.exceptions import HTTPError as UrllibError
 from urllib3.exceptions import SSLError as UrllibSSLError
+
+from litwatch.arxiv_access import sync_response
 
 
 class SourceError(RuntimeError):
@@ -57,8 +60,10 @@ class XmlClient:
                 raise SourceError("XML request exceeded its time budget")
             self._last_request = time.monotonic()
             try:
-                with self._session.get(
+                with sync_response(
+                    self._session,
                     url,
+                    pacing_timeout=remaining,
                     params=params,
                     timeout=(min(10, remaining), min(30, remaining)),
                     stream=True,
@@ -97,6 +102,8 @@ class XmlClient:
                 if time.monotonic() + delay + 10 >= deadline:
                     raise SourceError("XML source retry would exceed its time budget") from exc
                 time.sleep(delay)
+            except PacingError as exc:
+                raise SourceError(f"Shared arXiv pacing unavailable: {exc}") from exc
             except requests.RequestException as exc:
                 raise SourceError(f"XML request failed: {exc}") from exc
         raise AssertionError("unreachable")

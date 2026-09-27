@@ -47,6 +47,25 @@ wheels = [
 ]
 
 [[package]]
+name = "arxiv-archive"
+version = "0.2.0"
+source = { path = "vendor/arxiv_archive-0.2.0-py3-none-any.whl" }
+dependencies = [
+    { name = "requests" },
+]
+wheels = [
+    { filename = "arxiv_archive-0.2.0-py3-none-any.whl", hash = "sha256:cea57c088259d6fbbe9ed0d88346d2bff88b5ed77ba2783554d4729ef80451d7" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyarrow", marker = "extra == 'server'", specifier = ">=25,<26" },
+    { name = "requests", specifier = ">=2.34,<3" },
+    { name = "zstandard", marker = "extra == 'server'", specifier = ">=0.25,<0.26" },
+]
+provides-extras = ["server"]
+
+[[package]]
 name = "beautifulsoup4"
 version = "4.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -370,10 +389,11 @@ wheels = [
 
 [[package]]
 name = "litwatch"
-version = "0.8.3"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "arxiv" },
+    { name = "arxiv-archive" },
     { name = "beautifulsoup4" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -401,6 +421,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arxiv", specifier = ">=2.1" },
+    { name = "arxiv-archive", path = "vendor/arxiv_archive-0.2.0-py3-none-any.whl" },
     { name = "beautifulsoup4", specifier = ">=4.15.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },

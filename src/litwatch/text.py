@@ -14,6 +14,15 @@ import httpx
 from bs4 import BeautifulSoup, NavigableString, Tag
 from markdownify import MarkdownConverter
 
+from litwatch.archive_client import (
+    ArchiveClient,
+    ArchiveError,
+    ArchiveUnavailable,
+    ArchiveVersionUnknown,
+)
+from litwatch.arxiv_access import async_get
+from litwatch.models import Paper
+
 log = logging.getLogger(__name__)
 
 ARXIV_PACING_SECONDS = 3.0
@@ -114,29 +123,70 @@ def pdf_to_markdown(pdf: bytes) -> str:
 
 
 class BodyFetcher:
-    """Fetches a paper's text from arXiv, HTML first. One request at a time, paced."""
+    """Reuse archived PDFs, otherwise prefer HTML while priority PDF acquisition runs."""
 
-    def __init__(self, http: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self, http: httpx.AsyncClient | None = None, archive: ArchiveClient | None = None,
+    ) -> None:
+        self.archive = archive
         self.http = http or httpx.AsyncClient(timeout=120.0, follow_redirects=True)
         self._lock = asyncio.Lock()
 
-    async def fetch(self, paper_id: str) -> tuple[str, str] | None:
-        """(markdown, source) with source `html` or `pdf`; None when neither is available."""
-        html = await self._get(f"https://arxiv.org/html/{paper_id}")
+    async def fetch(self, paper: str | Paper) -> tuple[str, str] | None:
+        """Return (markdown, html/pdf), without duplicating a pending archive download."""
+        paper_id = paper.id if isinstance(paper, Paper) else paper
+        identity = (
+            f"{paper.id}v{paper.version}"
+            if isinstance(paper, Paper) and paper.version else paper_id
+        )
+        prepared = None
+        direct_pdf = self.archive is None
+        if self.archive is not None:
+            try:
+                prepared = await self.archive.prepare_pdf(paper)
+                resolved, job = prepared
+                identity = f"{resolved.id}v{resolved.version}"
+                if job.get("status") == "complete":
+                    pdf = await self.archive.available_pdf(resolved.id, resolved.version)
+                    if pdf is not None:
+                        converted = await self._convert_pdf(pdf)
+                        if converted is not None:
+                            return converted
+            except (ArchiveUnavailable, ArchiveVersionUnknown) as exc:
+                log.warning("%s: %s; using paced text fallback", paper_id, type(exc).__name__)
+                direct_pdf = True
+            except ArchiveError:
+                log.warning("%s: archive preparation failed; trying HTML", paper_id)
+        html = await self._get(f"https://arxiv.org/html/{identity}")
         if html is not None:
             md = await asyncio.to_thread(html_to_markdown, html.decode("utf-8", "replace"))
             if len(md) >= MIN_BODY_CHARS:
                 return md, "html"
             log.warning("%s: HTML rendering too short (%d chars), trying PDF", paper_id, len(md))
-        pdf = await self._get(f"https://arxiv.org/pdf/{paper_id}")
+        if prepared is not None and self.archive is not None:
+            try:
+                pdf = await self.archive.wait_pdf(*prepared)
+                return await self._convert_pdf(pdf) if pdf is not None else None
+            except ArchiveUnavailable:
+                direct_pdf = True
+            except ArchiveError:
+                log.warning("%s: archive PDF failed; retrying on next processing run", paper_id)
+                return None
+        if not direct_pdf:
+            return None
+        pdf = await self._get(f"https://arxiv.org/pdf/{identity}")
         if pdf is None or not pdf.startswith(b"%PDF-"):
             return None
+        return await self._convert_pdf(pdf)
+
+    @staticmethod
+    async def _convert_pdf(pdf: bytes) -> tuple[str, str] | None:
         md = await asyncio.to_thread(pdf_to_markdown, pdf)
         return (md, "pdf") if len(md) >= MIN_BODY_CHARS else None
 
     async def _get(self, url: str) -> bytes | None:
         async with self._lock:
-            resp = await self.http.get(url)
+            resp = await async_get(self.http, url)
             await asyncio.sleep(ARXIV_PACING_SECONDS)
         if resp.status_code != 200:
             log.info("%s -> %s", url, resp.status_code)

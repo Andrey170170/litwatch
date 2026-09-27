@@ -99,3 +99,8 @@ def test_fetch_uses_shared_transport():
     client.get.return_value = feed(entry())
     assert fetch_category("cs.CL", client).papers[0].id == "2609.11934"
     client.get.assert_called_once_with("https://rss.arxiv.org/atom/cs.CL")
+
+
+def test_explicit_revision_is_preserved_and_unknown_is_not_assumed_v1():
+    assert parse_feed(feed(entry("2609.11934v3", "replace"))).papers[0].version == 3
+    assert parse_feed(feed(entry("2609.11934"))).papers[0].version is None

@@ -4,13 +4,18 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 
 from litwatch.models import Paper
 from litwatch.source_http import SourceError, XmlClient
 
 URL = "https://oaipmh.arxiv.org/oai"
-NS = {"o": "http://www.openarchives.org/OAI/2.0/", "a": "http://arxiv.org/OAI/arXiv/"}
+NS = {
+    "o": "http://www.openarchives.org/OAI/2.0/",
+    "a": "http://arxiv.org/OAI/arXiv/",
+    "r": "http://arxiv.org/OAI/arXivRaw/",
+}
 _ID = re.compile(r"(?:\d{4}\.\d{4,5}|[a-zA-Z][a-zA-Z.-]*/\d{7})(?:v\d+)?\Z")
 
 
@@ -18,6 +23,7 @@ _ID = re.compile(r"(?:\d{4}\.\d{4,5}|[a-zA-Z][a-zA-Z.-]*/\d{7})(?:v\d+)?\Z")
 class OaiBatch:
     papers: list[Paper]
     checkpoint: datetime
+    versions_error: str | None = None
 
 
 def _required(node: ET.Element, path: str) -> str:
@@ -60,6 +66,9 @@ def _paper(record: ET.Element) -> Paper | None:
     categories = _required(node, "a:categories").split()
     return Paper(
         id=paper_id,
+        doi=node.findtext("a:doi", None, NS),
+        journal_ref=node.findtext("a:journal-ref", None, NS),
+        license=node.findtext("a:license", None, NS),
         title=_required(node, "a:title"),
         abstract=_required(node, "a:abstract"),
         authors=authors,
@@ -72,7 +81,7 @@ def _paper(record: ET.Element) -> Paper | None:
     )
 
 
-def fetch_category(category: str, since: date, client: XmlClient) -> OaiBatch:
+def _harvest(category: str, since: date, client: XmlClient, *, raw: bool = False) -> OaiBatch:
     """Return only complete harvests; `since` addresses metadata modification dates.
 
     Reuse the checkpoint's UTC date inclusively on the next harvest. This overlaps
@@ -83,7 +92,7 @@ def fetch_category(category: str, since: date, client: XmlClient) -> OaiBatch:
     archive, subject = category.split(".", 1)
     original = {
         "verb": "ListRecords",
-        "metadataPrefix": "arXiv",
+        "metadataPrefix": "arXivRaw" if raw else "arXiv",
         "from": since.isoformat(),
         "set": f"{archive}:{archive}:{subject}",
     }
@@ -129,7 +138,7 @@ def fetch_category(category: str, since: date, client: XmlClient) -> OaiBatch:
         if not records:
             raise SourceError("OAI ListRecords has no records or explicit noRecordsMatch")
         for record in records:
-            paper = _paper(record)
+            paper = _raw_paper(record) if raw else _paper(record)
             if paper is not None:
                 papers[paper.id] = paper
         token = listing.findtext("o:resumptionToken", "", NS).strip()
@@ -140,3 +149,147 @@ def fetch_category(category: str, since: date, client: XmlClient) -> OaiBatch:
         seen_tokens.add(token)
         params = {"verb": "ListRecords", "resumptionToken": token}
     raise SourceError("OAI exceeded the 200-page harvest bound")
+
+
+def _raw_paper(record: ET.Element) -> Paper | None:
+    """Read explicit revision history; raw author credit is never used to split names.
+
+    Schema: https://arxiv.org/OAI/arXivRaw.xsd. OAI header datestamps are metadata
+    modification dates, not revision numbers or submission timestamps.
+    """
+    header = record.find("o:header", NS)
+    if header is None:
+        raise SourceError("OAI raw record missing header")
+    if header.get("status") == "deleted":
+        return None
+    node = record.find("o:metadata/r:arXivRaw", NS)
+    if node is None:
+        raise SourceError("OAI record missing arXivRaw metadata")
+    paper_id = _required(node, "r:id")
+    if not _ID.fullmatch(paper_id):
+        raise SourceError(f"Invalid arXiv raw ID: {paper_id}")
+    history = []
+    for entry in node.findall("r:version", NS):
+        match = re.fullmatch(r"v([1-9]\d*)", entry.get("version", ""))
+        if not match:
+            raise SourceError(f"Invalid arXiv version for {paper_id}")
+        value = _required(entry, "r:date")
+        try:
+            submitted = parsedate_to_datetime(value)
+            if submitted.tzinfo is None:
+                raise ValueError("timezone required")
+        except (TypeError, ValueError) as exc:
+            raise SourceError(f"Invalid arXiv version date: {value}") from exc
+        history.append(
+            {
+                "version": int(match[1]),
+                "date": submitted.astimezone(UTC).isoformat(),
+                "size": entry.findtext("r:size", None, NS),
+                "source_type": entry.findtext("r:source_type", None, NS),
+            }
+        )
+    if not history or len({v["version"] for v in history}) != len(history):
+        raise SourceError(f"Missing or duplicate arXiv versions for {paper_id}")
+    history.sort(key=lambda v: v["version"])
+    return Paper(
+        id=re.sub(r"v\d+$", "", paper_id),
+        title=node.findtext("r:title", "", NS),
+        abstract=node.findtext("r:abstract", "", NS),
+        version=history[-1]["version"],
+        version_history=history,
+    )
+
+
+def resolve_observed_version(
+    paper: Paper, history: dict, source: str, observed_at: str | None = None
+) -> Paper:
+    """Choose the latest explicit revision present at the metadata observation.
+
+    OAI canonical timestamps have day precision. Metadata-only edits after a
+    revision do not create a new revision; later raw history must not make an old
+    outbox observation claim a future revision either.
+    """
+    observed = paper.updated or paper.published or observed_at
+    if not observed:
+        raise SourceError("revision observation date unavailable")
+    boundary = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+    if boundary.tzinfo is None:
+        boundary = boundary.replace(tzinfo=UTC)
+    day_precision = (source == "oai" and bool(paper.updated or paper.published)) or len(
+        observed
+    ) == 10
+    if day_precision:
+        boundary = boundary.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    eligible = []
+    for entry in history.get("version_history", []):
+        submitted = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
+        if submitted.tzinfo is None:
+            submitted = submitted.replace(tzinfo=UTC)
+        if submitted < boundary if day_precision else submitted <= boundary:
+            eligible.append(entry)
+    if not eligible:
+        raise SourceError("no explicit revision at the metadata observation")
+    version = max(entry["version"] for entry in eligible)
+    if type(version) is not int or version < 1:
+        raise SourceError("invalid resolved revision")
+    return paper.model_copy(update={"version": version, "version_history": eligible})
+
+
+def fetch_versions(paper_id: str, client: XmlClient) -> dict:
+    """Resolve an unknown revision without guessing from a metadata update timestamp."""
+    if not _ID.fullmatch(paper_id):
+        raise SourceError(f"Invalid arXiv ID: {paper_id}")
+    try:
+        root = ET.fromstring(
+            client.get(
+                URL,
+                params={
+                    "verb": "GetRecord",
+                    "metadataPrefix": "arXivRaw",
+                    "identifier": f"oai:arXiv.org:{paper_id}",
+                },
+            )
+        )
+    except ET.ParseError as exc:
+        raise SourceError("Malformed OAI raw XML") from exc
+    record = root.find("o:GetRecord/o:record", NS)
+    if record is None:
+        raise SourceError(f"OAI revision record unavailable for {paper_id}")
+    paper = _raw_paper(record)
+    if paper is None or paper.id != re.sub(r"v\d+$", "", paper_id):
+        raise SourceError(f"OAI revision record deleted or mismatched for {paper_id}")
+    return {"version": paper.version, "version_history": paper.version_history}
+
+
+def fetch_category(
+    category: str, since: date, client: XmlClient, *, include_versions: bool = False
+) -> OaiBatch:
+    """Canonical author/date metadata plus optional raw revision history.
+
+    A raw endpoint failure leaves actionable unknown-version intents. It must not
+    prevent successful canonical intake or erase its durable category coverage.
+    """
+    batch = _harvest(category, since, client)
+    if not include_versions:
+        return batch
+    try:
+        raw = _harvest(category, since, client, raw=True)
+        histories = {p.id: p for p in raw.papers}
+        missing = []
+        for paper in batch.papers:
+            if paper.id in histories:
+                history = histories[paper.id]
+                resolved = resolve_observed_version(
+                    paper,
+                    {"version": history.version, "version_history": history.version_history},
+                    "oai",
+                )
+                paper.version = resolved.version
+                paper.version_history = resolved.version_history
+            else:
+                missing.append(paper.id)
+        if missing:
+            batch.versions_error = f"Raw history absent for {len(missing)} canonical records"
+    except SourceError as exc:
+        batch.versions_error = str(exc)
+    return batch

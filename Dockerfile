@@ -13,6 +13,7 @@ WORKDIR /app
 
 # Dependencies first so source edits do not invalidate the dependency layer.
 COPY pyproject.toml uv.lock README.md ./
+COPY vendor/ vendor/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 

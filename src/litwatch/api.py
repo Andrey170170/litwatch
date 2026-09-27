@@ -3,7 +3,7 @@ auth: it is reachable only on the stack network and never published on a host po
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from typing import Any
 
@@ -11,13 +11,15 @@ import psycopg
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
-from litwatch import db, ingest
+from litwatch import archive_delivery, archive_outbox, db, ingest
+from litwatch.archive_client import ArchiveClient
 from litwatch.config import Settings
 from litwatch.deep import DeepClient, DeepProcessor
 from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade, ModelScreener, openrouter_client
 from litwatch.selection import Selection, Status, from_spec
+from litwatch.text import BodyFetcher
 from litwatch.webdav import WebDAVWriter
 from litwatch.zotero import ZoteroClient
 
@@ -83,7 +85,17 @@ def build_cascade(
     )
 
 
-def build_router(settings: Settings, attach_pdf: bool = True) -> Router | None:
+def build_archive(settings: Settings) -> ArchiveClient | None:
+    if not settings.archive_enabled:
+        return None
+    assert settings.archive_url and settings.archive_token
+    return ArchiveClient(settings.archive_url, settings.archive_token,
+                         wait_seconds=settings.archive_wait_seconds)
+
+
+def build_router(
+    settings: Settings, attach_pdf: bool = True, *, use_archive: bool = True
+) -> Router | None:
     """None when Zotero is not configured: runs then screen only, routing waits."""
     if not settings.routing_enabled:
         return None
@@ -98,6 +110,7 @@ def build_router(settings: Settings, attach_pdf: bool = True) -> Router | None:
         ZoteroClient(settings.zotero_user_id, settings.zotero_api_key),
         webdav,
         attach_pdf=attach_pdf,
+        archive=build_archive(settings) if use_archive else None,
     )
 
 
@@ -111,7 +124,7 @@ def build_deep(settings: Settings, selections: list[Selection]) -> DeepProcessor
     if not settings.deep_enabled:
         return None
     assert settings.deep_url
-    router = build_router(settings)
+    router = build_router(settings, use_archive=False)
     return DeepProcessor(
         DeepClient(settings.deep_url),
         router.zotero if router else None,
@@ -119,6 +132,7 @@ def build_deep(settings: Settings, selections: list[Selection]) -> DeepProcessor
         extensions=settings.deep_extensions,
         inbox_collection=settings.inbox_collection,
         inbox_selections=settings.inbox_selections,
+        fetcher=BodyFetcher(archive=build_archive(settings)),
     )
 
 
@@ -181,7 +195,23 @@ def create_app(settings: Settings) -> FastAPI:
     async def lifespan(app: FastAPI):
         async with await db.connect(dsn) as conn:
             await db.apply_schema(conn)
-        yield
+        client = build_archive(settings)
+        stop = asyncio.Event()
+        delivery = None
+        if client is not None:
+            delivery = asyncio.create_task(archive_delivery.run_dispatcher(
+                dsn, client, stop, interval_seconds=settings.archive_dispatch_seconds
+            ))
+        try:
+            yield
+        finally:
+            stop.set()
+            if delivery is not None:
+                delivery.cancel()
+                with suppress(asyncio.CancelledError):
+                    await delivery
+            if client is not None:
+                await client.aclose()
 
     app = FastAPI(title="litwatch", lifespan=lifespan)
     app.state.runs = state  # exposes the in-flight task, for tests and diagnostics
@@ -208,6 +238,11 @@ def create_app(settings: Settings) -> FastAPI:
     async def healthz() -> dict[str, Any]:
         async with await db.connect(dsn) as conn:
             return {"ok": True, **await db.stats(conn)}
+
+    @app.get("/archive/status")
+    async def archive_status() -> dict[str, Any]:
+        async with await db.connect(dsn) as conn:
+            return {"enabled": settings.archive_enabled, **await archive_outbox.status(conn)}
 
     @app.get("/selections")
     async def selections() -> list[dict[str, Any]]:

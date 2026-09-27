@@ -11,6 +11,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from litwatch.archive_outbox import ArchivePolicy, enqueue
 from litwatch.models import NOT_MEMBER, Paper, ScreenResult, Verdict
 from litwatch.selection import Selection, Status, versions_hash
 
@@ -30,7 +31,12 @@ async def apply_schema(conn: psycopg.AsyncConnection) -> None:
 
 
 async def upsert_papers(
-    conn: psycopg.AsyncConnection, papers: list[Paper], *, source: str = "arxiv"
+    conn: psycopg.AsyncConnection,
+    papers: list[Paper],
+    *,
+    source: str = "arxiv",
+    archive_policy: ArchivePolicy | None = None,
+    archive_run_id: int | None = None,
 ) -> tuple[int, int]:
     """Insert new papers, refresh metadata on replacements. Returns (inserted, updated).
 
@@ -38,35 +44,63 @@ async def upsert_papers(
     Atom metadata can insert candidates but never replace canonical metadata.
     """
     inserted = updated = 0
-    async with conn.cursor() as cur:
-        for p in papers:
-            await cur.execute(
-                """
-                INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
-                                    published, updated, url, metadata_source)
-                VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
-                        %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s)
-                ON CONFLICT (id) DO UPDATE SET
-                    title = EXCLUDED.title, abstract = EXCLUDED.abstract,
-                    authors = EXCLUDED.authors, categories = EXCLUDED.categories,
-                    primary_category = coalesce(EXCLUDED.primary_category, papers.primary_category),
-                    published = coalesce(papers.published, EXCLUDED.published),
-                    updated = CASE WHEN %(source)s = 'oai'
-                                   AND papers.updated::date = EXCLUDED.updated::date
-                                   THEN papers.updated ELSE EXCLUDED.updated END,
-                    url = EXCLUDED.url, metadata_source = EXCLUDED.metadata_source
-                WHERE %(source)s <> 'atom'
-                  AND (%(source)s <> 'oai' OR papers.updated IS NULL
-                       OR EXCLUDED.updated::date >= papers.updated::date)
-                RETURNING (xmax = 0) AS inserted
-                """,
-                {**p.model_dump(), "authors": Jsonb(p.authors), "source": source},
-            )
-            row = await cur.fetchone()
-            if row and row["inserted"]:
-                inserted += 1
-            elif row:
-                updated += 1
+    async with conn.transaction():
+        async with conn.cursor() as cur:
+            for p in papers:
+                await cur.execute(
+                    """
+                    INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
+                                        published, updated, url, metadata_source,
+                                        version, version_history,
+                                        doi, journal_ref, license)
+                    VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
+                            %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
+                            %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        title = EXCLUDED.title, abstract = EXCLUDED.abstract,
+                        authors = EXCLUDED.authors, categories = EXCLUDED.categories,
+                        primary_category = coalesce(EXCLUDED.primary_category,
+                                                    papers.primary_category),
+                        published = coalesce(papers.published, EXCLUDED.published),
+                        updated = CASE WHEN %(source)s = 'oai'
+                                       AND papers.updated::date = EXCLUDED.updated::date
+                                       THEN papers.updated ELSE EXCLUDED.updated END,
+                        url = EXCLUDED.url, metadata_source = EXCLUDED.metadata_source,
+                        version = CASE WHEN EXCLUDED.version IS NOT NULL THEN EXCLUDED.version
+                            WHEN EXCLUDED.updated IS NOT NULL AND (papers.updated IS NULL
+                                 OR EXCLUDED.updated > papers.updated) THEN NULL
+                            ELSE papers.version END,
+                        version_history = CASE
+                            WHEN EXCLUDED.version_history <> '[]'::jsonb
+                                 THEN EXCLUDED.version_history
+                            WHEN EXCLUDED.version IS NULL AND EXCLUDED.updated IS NOT NULL
+                                 AND (papers.updated IS NULL OR EXCLUDED.updated > papers.updated)
+                                 THEN '[]'::jsonb
+                            ELSE papers.version_history END,
+                        doi = coalesce(EXCLUDED.doi,papers.doi),
+                        journal_ref = coalesce(EXCLUDED.journal_ref,papers.journal_ref),
+                        license = coalesce(EXCLUDED.license,papers.license)
+                    WHERE %(source)s <> 'atom'
+                      AND (papers.version IS NULL OR EXCLUDED.version IS NULL
+                           OR EXCLUDED.version >= papers.version)
+                      AND (%(source)s <> 'oai' OR papers.updated IS NULL
+                           OR EXCLUDED.updated::date >= papers.updated::date)
+                    RETURNING (xmax = 0) AS inserted
+                    """,
+                    {
+                        **p.model_dump(),
+                        "authors": Jsonb(p.authors),
+                        "version_history": Jsonb(p.version_history),
+                        "source": source,
+                    },
+                )
+                row = await cur.fetchone()
+                if row and row["inserted"]:
+                    inserted += 1
+                elif row:
+                    updated += 1
+        if archive_policy is not None:
+            await enqueue(conn, papers, archive_policy, source=source, run_id=archive_run_id)
     return inserted, updated
 
 
@@ -81,6 +115,11 @@ def row_to_paper(row: dict[str, Any]) -> Paper:
         published=_iso(row.get("published")),
         updated=_iso(row.get("updated")),
         url=row.get("url"),
+        version=row.get("version"),
+        version_history=row.get("version_history") or [],
+        doi=row.get("doi"),
+        journal_ref=row.get("journal_ref"),
+        license=row.get("license"),
     )
 
 

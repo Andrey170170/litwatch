@@ -99,3 +99,73 @@ def test_explicit_empty_and_deletions():
         ).papers
         == []
     )
+
+
+def raw_record(paper_id="2609.12345", version="v2", version_date="Sat, 12 Sep 2026 12:00:00 GMT"):
+    return f'''<record><header/><metadata><arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/">
+    <id>{paper_id}</id><submitter>Someone</submitter>
+    <version version="v1"><date>Thu, 10 Sep 2026 10:00:00 GMT</date></version>
+    <version version="{version}"><date>{version_date}</date><source_type>tex</source_type></version>
+    <title>A paper</title><authors>Alice Smith</authors><categories>cs.CL</categories>
+    </arXivRaw></metadata></record>'''
+
+
+def test_raw_enrichment_retains_canonical_authors_dates_and_explicit_history():
+    client = Client([page(record()), page(raw_record())])
+    batch = fetch_category("cs.CL", date(2026, 9, 12), client, include_versions=True)
+    paper = batch.papers[0]
+    assert paper.version == 2
+    assert paper.authors == ["Alice Smith"]
+    assert paper.published == "2026-09-10T00:00:00+00:00"
+    assert paper.updated == "2026-09-12T00:00:00+00:00"
+    assert paper.version_history[-1]["date"] == "2026-09-12T12:00:00+00:00"
+    assert client.calls[1]["metadataPrefix"] == "arXivRaw"
+
+
+@pytest.mark.parametrize(
+    "raw", [raw_record(version="v0"), raw_record(version_date="bad"), raw_record(version="v1"), ""]
+)
+def test_invalid_raw_history_leaves_canonical_intake_and_unknown_version(raw):
+    batch = fetch_category(
+        "cs.CL", date(2026, 9, 12), Client([page(record()), page(raw)]), include_versions=True
+    )
+    assert batch.papers[0].version is None
+    assert batch.versions_error
+
+
+def test_get_record_version_resolution_checks_identity():
+    from litwatch.oai_source import fetch_versions
+
+    raw = page(raw_record()).replace(b"ListRecords", b"GetRecord")
+    assert fetch_versions("2609.12345", Client([raw]))["version"] == 2
+    with pytest.raises(SourceError, match="mismatched"):
+        fetch_versions("2609.22222", Client([raw]))
+
+
+def test_raw_history_newer_than_canonical_snapshot_does_not_relabel_old_metadata():
+    raw = raw_record(version_date="Sun, 13 Sep 2026 12:00:00 GMT")
+    batch = fetch_category(
+        "cs.CL", date(2026, 9, 12), Client([page(record()), page(raw)]), include_versions=True
+    )
+    assert batch.papers[0].version == 1
+    assert [v["version"] for v in batch.papers[0].version_history] == [1]
+
+
+def test_versionless_feed_resolves_using_observation_not_submission_timestamp():
+    from litwatch.models import Paper
+    from litwatch.oai_source import resolve_observed_version
+
+    paper = Paper(id="2609.12345", title="T", abstract="A")
+    resolved = resolve_observed_version(
+        paper,
+        {
+            "version_history": [
+                {"version": 1, "date": "2026-09-10T12:00:00Z"},
+                {"version": 2, "date": "2026-09-12T12:00:00Z"},
+            ]
+        },
+        "atom",
+        "2026-09-11T12:00:00Z",
+    )
+    assert resolved.version == 1
+    assert resolved.published is None and resolved.updated is None

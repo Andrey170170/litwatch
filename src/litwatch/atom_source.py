@@ -70,7 +70,8 @@ def parse_feed(raw: bytes) -> AtomBatch:
     announcements: dict[str, str] = {}
     dates: dict[str, date] = {}
     for entry in entries:
-        paper_id = _id(_text(entry, _ATOM + "id"))
+        raw_id = _text(entry, _ATOM + "id")
+        paper_id = _id(raw_id)
         summary = _text(entry, _ATOM + "summary")
         preamble = _PREAMBLE.fullmatch(summary)
         if preamble is None or _id(preamble[1]) != paper_id:
@@ -87,6 +88,7 @@ def parse_feed(raw: bytes) -> AtomBatch:
             raise SourceError(f"Missing Atom categories for {paper_id}")
         paper = Paper(
             id=paper_id,
+            version=(int(m.group(1)) if (m := re.search(r"v([1-9]\d*)$", raw_id)) else None),
             title=_text(entry, _ATOM + "title"),
             abstract=abstract,
             authors=[_text(entry, _DC + "creator")],

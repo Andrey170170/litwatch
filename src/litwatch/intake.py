@@ -10,7 +10,8 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from litwatch import atom_source, db, oai_source
+from litwatch import archive_outbox, atom_source, db, oai_source
+from litwatch.archive_outbox import ArchivePolicy
 from litwatch.models import Paper
 from litwatch.source_http import SourceError, XmlClient
 
@@ -82,6 +83,8 @@ async def collect(
     categories: tuple[str, ...],
     since: datetime,
     run_id: int,
+    *,
+    archive_policy: ArchivePolicy | None = None,
 ) -> IntakeResult:
     """Commit each complete category and checkpoint together; keep failed categories open.
 
@@ -99,6 +102,20 @@ async def collect(
             state = await _state(conn, category, since.date(), run_id)
             states[category] = state
             start = min(state["checkpoint"] or state["discovery_from"], since.date())
+            if archive_policy is not None and category in archive_policy.categories:
+                await conn.execute(
+                    "INSERT INTO archive_intake_checkpoints(category,policy,discovery_from) "
+                    "VALUES(%s,%s,%s) ON CONFLICT(category) DO NOTHING",
+                    (category, archive_policy.name, start),
+                )
+                archival = await (
+                    await conn.execute(
+                        "SELECT * FROM archive_intake_checkpoints WHERE category=%s", (category,)
+                    )
+                ).fetchone()
+                if archival["policy"] != archive_policy.name:
+                    raise ValueError("Archive policy changed: establish new coverage explicitly")
+                start = min(start, archival["checkpoint"] or archival["discovery_from"])
             info = {"from": start.isoformat(), "complete": False, "errors": []}
             result.details["categories"][category] = info
             try:
@@ -126,7 +143,11 @@ async def collect(
             info = result.details["categories"][category]
             try:
                 batch = await asyncio.to_thread(
-                    oai_source.fetch_category, category, date.fromisoformat(info["from"]), client
+                    oai_source.fetch_category,
+                    category,
+                    date.fromisoformat(info["from"]),
+                    client,
+                    **({"include_versions": True} if archive_policy is not None else {}),
                 )
                 if batch.checkpoint.date() < date.fromisoformat(info["from"]):
                     raise SourceError("OAI response predates the requested coverage")
@@ -139,12 +160,29 @@ async def collect(
             papers = batch.papers
             unique = [p for p in papers if p.id not in seen_oai]
             async with conn.transaction():
-                inserted, updated = await db.upsert_papers(conn, unique, source="oai")
+                inserted, updated = await db.upsert_papers(
+                    conn,
+                    unique,
+                    source="oai",
+                    archive_policy=archive_policy,
+                    archive_run_id=run_id,
+                )
                 await conn.execute(
                     "UPDATE intake_checkpoints SET checkpoint=greatest(checkpoint,%s), "
                     "checked_at=now(),run_id=%s WHERE category=%s",
                     (batch.checkpoint.date(), run_id, category),
                 )
+                if archive_policy is not None and category in archive_policy.categories:
+                    await conn.execute(
+                        "UPDATE archive_intake_checkpoints SET checkpoint=greatest(checkpoint,%s), "
+                        "checked_at=now(),run_id=%s WHERE category=%s",
+                        (batch.checkpoint.date(), run_id, category),
+                    )
+                    info["archive_versions"] = {
+                        "status": "partial" if batch.versions_error else "complete",
+                        "error": batch.versions_error,
+                        "unknown": sum(p.version is None for p in papers),
+                    }
             result.inserted += inserted
             result.updated += updated
             seen_oai.update(p.id for p in papers)
@@ -159,10 +197,12 @@ async def collect(
 
         # Canonical records win over lower-fidelity feeds, including across categories.
         fallback: dict[str, Paper] = {}
+        archival_fallback: dict[tuple[str, int | None], tuple[Paper, str]] = {}
         for category, batches in feeds.items():
             info = result.details["categories"][category]
             for batch in batches:
                 for p in batch.papers:
+                    archival_fallback[(p.id, p.version)] = (p, batch.generated_at.isoformat())
                     if batch.announcements[p.id] in ("new", "cross"):
                         fallback[p.id] = p
             if not info["complete"]:
@@ -176,6 +216,16 @@ async def collect(
                 )
         async with conn.transaction():
             inserted, _ = await db.upsert_papers(conn, list(fallback.values()), source="atom")
+            if archive_policy is not None:
+                for paper, observed_at in archival_fallback.values():
+                    await archive_outbox.enqueue(
+                        conn,
+                        [paper],
+                        archive_policy,
+                        source="atom",
+                        run_id=run_id,
+                        observed_at=observed_at,
+                    )
         result.inserted += inserted
         seen.update(fallback)
     result.fetched = len(seen)

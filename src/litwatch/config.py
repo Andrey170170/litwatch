@@ -71,6 +71,10 @@ class Settings:
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     screen_concurrency: int = 8
     intake_source: str = "oai"
+    archive_url: str | None = None
+    archive_token: str | None = field(default=None, repr=False)
+    archive_wait_seconds: float = 60.0
+    archive_dispatch_seconds: float = 5.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -113,7 +117,17 @@ class Settings:
             ),
             screen_concurrency=int(os.environ.get("LITWATCH_SCREEN_CONCURRENCY", "8")),
             intake_source=os.environ.get("LITWATCH_INTAKE_SOURCE", "oai"),
+            archive_url=os.environ.get("LITWATCH_ARCHIVE_URL"),
+            archive_token=_secret("LITWATCH_ARCHIVE_TOKEN"),
+            archive_wait_seconds=float(os.environ.get("LITWATCH_ARCHIVE_WAIT_SECONDS", "60")),
+            archive_dispatch_seconds=float(
+                os.environ.get("LITWATCH_ARCHIVE_DISPATCH_SECONDS", "5")
+            ),
         )
+
+    @property
+    def archive_enabled(self) -> bool:
+        return bool(self.archive_url and self.archive_token)
 
     @property
     def routing_enabled(self) -> bool:
