@@ -102,6 +102,7 @@ async def test_unknown_revision_resolves_at_observation_and_persists_under_lease
     )
     await delivery.deliver_once(conn, client)
     assert client.request.call_args.args[0].version == 2
+    assert client.upsert_paper.call_args.args[0].version == 2
     query, params = conn.execute.call_args.args
     assert "lease_until>now()" in query and "lease_token=%s" in query
     assert params[0] == 2 and params[-1] == "lease"
@@ -170,4 +171,17 @@ async def test_versionless_rss_uses_snapshot_observation_time(setup, monkeypatch
     )
     await delivery.deliver_once(conn, client)
     assert client.request.call_args.args[0].version == 1
+    client.upsert_paper.assert_not_awaited()
     assert complete.call_args.kwargs["status"] == "delivered"
+
+
+async def test_resolved_canonical_metadata_outage_does_not_ack_resolution(setup):
+    row, client, conn, complete = setup
+    row["payload"]["paper"]["version"] = None
+    client.resolve.side_effect = None
+    client.resolve.return_value = Paper.model_validate({**row["payload"]["paper"], "version": 2})
+    client.upsert_paper.side_effect = ArchiveUnavailable("outage")
+    await delivery.deliver_once(conn, client)
+    conn.execute.assert_not_awaited()
+    client.request.assert_not_awaited()
+    assert complete.call_args.kwargs["status"] == "error"

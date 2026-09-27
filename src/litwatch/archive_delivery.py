@@ -51,6 +51,11 @@ async def _resolve(conn, client: ArchiveClient, row: dict, paper: Paper) -> Pape
         if observed_at is None and row.get("created_at") is not None:
             observed_at = row["created_at"].isoformat()
         paper = _observed_version(paper, history, row["payload"].get("source", ""), observed_at)
+    if row["payload"].get("source") != "atom":
+        # The earlier unknown-version metadata event may have been rejected as
+        # older than a known catalog revision. Publish its now-explicit revision
+        # before persisting resolution, so a failed publication remains retryable.
+        await client.upsert_paper(paper)
     payload = {**row["payload"], "paper": paper.model_dump(mode="json")}
     resolved = await (
         await conn.execute(
