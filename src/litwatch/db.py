@@ -621,9 +621,13 @@ def dumps(value: Any) -> str:
 
 
 async def routable(
-    conn: psycopg.AsyncConnection, paper_id: str | None = None, limit: int = 200
+    conn: psycopg.AsyncConnection, paper_id: str | None = None, limit: int | None = None
 ) -> list[tuple[Paper, ScreenResult]]:
-    """Tier 1/2 papers not yet routed, routed at a different tier, or with a PDF still due."""
+    """Snapshot of pending deliveries, tier 1 first; unlimited unless explicitly bounded.
+
+    Route each snapshot once so a failed delivery cannot spin within the same run.
+    PostgreSQL treats LIMIT NULL as unlimited.
+    """
     clauses = [
         "best_tier <= 2",
         """(routed_at IS NULL
@@ -637,7 +641,8 @@ async def routable(
     params.append(limit)
     rows = await (
         await conn.execute(
-            f"SELECT * FROM papers WHERE {' AND '.join(clauses)} ORDER BY published DESC LIMIT %s",
+            f"SELECT * FROM papers WHERE {' AND '.join(clauses)} "
+            "ORDER BY best_tier, published DESC NULLS LAST, id LIMIT %s",
             params,
         )
     ).fetchall()
