@@ -13,6 +13,13 @@ from dataclasses import dataclass
 
 import httpx
 
+from litwatch.archive_client import (
+    ArchiveClient,
+    ArchiveError,
+    ArchiveUnavailable,
+    ArchiveVersionUnknown,
+)
+from litwatch.arxiv_access import async_get
 from litwatch.models import ROUTED_TIERS, Paper, ScreenResult
 from litwatch.webdav import WebDAVWriter
 from litwatch.zotero import ZoteroClient, screen_note, selection_tags, webdav_payload
@@ -21,6 +28,10 @@ log = logging.getLogger(__name__)
 
 PDF_TIERS = (1,)
 ARXIV_PACING_SECONDS = 3.0
+
+
+class PDFUnavailableError(RuntimeError):
+    """Required tier-1 attachment is pending; keep routing eligible for retry."""
 
 
 @dataclass(frozen=True)
@@ -38,7 +49,9 @@ class Router:
         webdav: WebDAVWriter | None,
         http: httpx.AsyncClient | None = None,
         attach_pdf: bool = True,
+        archive: ArchiveClient | None = None,
     ) -> None:
+        self.archive = archive
         self.zotero = zotero
         self.webdav = webdav
         self.http = http or httpx.AsyncClient(timeout=120.0, follow_redirects=True)
@@ -54,6 +67,8 @@ class Router:
         attachment = None
         if self.attach_pdf and tier in PDF_TIERS:
             attachment = await self._ensure_pdf(key, paper)
+            if attachment is None:
+                raise PDFUnavailableError(f"{paper.id}: required PDF is not available yet")
         return Routed(paper_id=paper.id, tier=tier, item_key=key, attachment_key=attachment)
 
     async def release(self, item_key: str) -> None:
@@ -78,8 +93,17 @@ class Router:
         return key
 
     async def _download(self, paper: Paper) -> bytes | None:
+        if self.archive is not None:
+            try:
+                return await self.archive.pdf(paper)
+            except (ArchiveUnavailable, ArchiveVersionUnknown) as exc:
+                log.warning("%s: %s; using paced PDF fallback", paper.id, type(exc).__name__)
+            except ArchiveError:
+                log.warning("%s: archive PDF request failed; retrying on next route", paper.id)
+                return None
+        identity = f"{paper.id}v{paper.version}" if paper.version else paper.id
         async with self._pdf_lock:
-            resp = await self.http.get(f"https://arxiv.org/pdf/{paper.id}")
+            resp = await async_get(self.http, f"https://arxiv.org/pdf/{identity}")
             await asyncio.sleep(ARXIV_PACING_SECONDS)
         if resp.status_code != 200 or not resp.content.startswith(b"%PDF-"):
             log.warning("%s: PDF download failed (%s)", paper.id, resp.status_code)

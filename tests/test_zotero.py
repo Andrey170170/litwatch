@@ -286,3 +286,25 @@ async def test_router_refuses_non_members(router):
     r, _, _ = router
     with pytest.raises(ValueError, match="not routable"):
         await r.route(PAPER, result(3))
+
+
+async def test_pending_tier1_pdf_raises_and_retry_reuses_zotero_item(fake, router, monkeypatch):
+    r, dav, downloads = router
+    real_download = r._download
+
+    async def pending(_paper):
+        return None
+
+    monkeypatch.setattr(r, "_download", pending)
+    with pytest.raises(route_mod.PDFUnavailableError, match="not available yet"):
+        await r.route(PAPER, result(1))
+    items = [i for i in fake.items.values() if i["data"].get("itemType") == "preprint"]
+    assert len(items) == 1
+    item_key = items[0]["key"]
+    assert not dav.files and not downloads
+
+    monkeypatch.setattr(r, "_download", real_download)
+    routed = await r.route(PAPER, result(1))
+    assert routed.item_key == item_key and routed.attachment_key
+    assert sum(i["data"].get("itemType") == "preprint" for i in fake.items.values()) == 1
+    assert len(downloads) == 1

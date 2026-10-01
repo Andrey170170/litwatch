@@ -12,6 +12,7 @@ from email.utils import parsedate_to_datetime
 import arxiv
 import requests
 
+from litwatch.arxiv_access import shared_pacer
 from litwatch.models import Paper
 
 _VERSION_RE = re.compile(r"v\d+$")
@@ -41,7 +42,23 @@ class _ArxivSession(requests.Session):
     def get(self, url, **kwargs):
         self.retry_after = 0
         kwargs.setdefault("timeout", (10, 60))
-        response = super().get(url, **kwargs)
+        pacer = shared_pacer()
+        if pacer is None:
+            response = super().get(url, **kwargs)
+        else:
+            # arxiv consumes buffered content; close it before releasing the slot.
+            # The API endpoint does not need redirects. Reject instead of silently
+            # following one without provider pacing.
+            kwargs["allow_redirects"] = False
+            kwargs["stream"] = True
+            deadline = getattr(self, "pacing_deadline", time.monotonic() + _RETRY_BUDGET)
+            with pacer.slot(timeout=max(0, deadline - time.monotonic())):
+                response = super().get(url, **kwargs)
+                try:
+                    pacer.defer(response.headers.get("Retry-After"))
+                    _ = response.content
+                finally:
+                    response.close()
         self.retry_after = _retry_after(response.headers.get("Retry-After", ""))
         if response.status_code == 200:
             try:
@@ -74,6 +91,7 @@ class _ArxivClient(arxiv.Client):
     def _parse_feed(self, url: str, first_page: bool = True, _try_index: int = 0):
         # arxiv has no public transport/parser seam; real-parser tests cover this override.
         deadline = time.monotonic() + _RETRY_BUDGET
+        self._session.pacing_deadline = deadline
         for attempt in range(len(_BACKOFF) + 1):
             try:
                 feed = super()._parse_feed(url, first_page, _try_index=0)
@@ -127,6 +145,11 @@ def id_from_url(text: str) -> str:
 def to_paper(result: arxiv.Result) -> Paper:
     return Paper(
         id=strip_version(result.get_short_id()),
+        version=(
+            int(m.group(1)) if (m := re.search(r"v([1-9]\d*)$", result.get_short_id())) else None
+        ),
+        doi=getattr(result, "doi", None),
+        journal_ref=getattr(result, "journal_ref", None),
         title=" ".join(result.title.split()),
         abstract=" ".join(result.summary.split()),
         authors=[a.name for a in result.authors],

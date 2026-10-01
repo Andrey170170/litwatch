@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -79,6 +80,29 @@ async def test_confirm_runs_per_selection_on_tiers_1_and_2_and_wins():
     confirm.calls = []
     negative = await Cascade(SELECTIONS, Fake("luna", 4), None, confirm).screen(PLAIN)
     assert confirm.calls == [] and not negative.confirmed and negative.best_tier == 4
+
+
+async def test_confirms_run_concurrently_and_all_finish_before_a_failure_surfaces():
+    class Gated(Fake):
+        """Each call waits until both selections' confirms are in flight; mech-interp fails."""
+
+        def __init__(self) -> None:
+            super().__init__("muse", 3)
+            self.both, self.finished = asyncio.Barrier(2), []
+
+        async def screen(self, paper, selections):
+            await asyncio.wait_for(self.both.wait(), 1)
+            if selections[0].slug == INTERP.slug:
+                raise RuntimeError("upstream error")
+            await asyncio.sleep(0.01)
+            self.finished.append(selections[0].slug)
+            return await super().screen(paper, selections)
+
+    confirm = Gated()
+    with pytest.raises(RuntimeError, match="upstream error"):
+        await Cascade(SELECTIONS, Fake("luna", 1), None, confirm).screen(COT)
+    # The faithfulness confirm completed (and was journaled) despite its sibling failing.
+    assert confirm.finished == [FAITH.slug]
 
 
 async def test_confirm_existing_skips_already_confirmed_selections():

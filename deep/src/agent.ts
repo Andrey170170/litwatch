@@ -1,12 +1,12 @@
 /**
- * One paper through the agent: Sol at low effort, the single `run_code` tool, a validating
+ * One paper through the agent: the configured model and effort, the single `run_code` tool, a validating
  * `submit`, a cell budget, and a trace of everything that happened.
  */
 
 import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { Models, ThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { PROVIDER } from "./auth.ts";
+import { PROVIDER, requireSubscription } from "./auth.ts";
 import { buildHosts, type HostConfig } from "./hosts.ts";
 import { systemPrompt, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
 import { Repl, type HostFn } from "./repl.ts";
@@ -72,6 +72,8 @@ export async function processPaper(
 ): Promise<Outcome> {
   const model = models.getModel(PROVIDER, opts.model);
   if (!model) throw new Error(`model ${opts.model} is not available from ${PROVIDER}`);
+  // The provider would fall back to OPENAI_API_KEY without a stored subscription credential.
+  await requireSubscription(models);
 
   const started = Date.now();
   const trace: TraceEvent[] = [];
@@ -146,7 +148,8 @@ export async function processPaper(
     streamFn: models.streamSimple.bind(models),
     sessionId: `litwatch-${paper.id}-${started}`,
     toolExecution: "sequential",
-    shouldStopAfterTurn: async () => submitted !== null || stats.cells >= opts.maxCells || failure !== undefined,
+    // Error and aborted turns are hard exits; the loop ignores this decision for them.
+    finishTurn: () => (submitted !== null || stats.cells >= opts.maxCells || failure !== undefined ? { action: "end" } : undefined),
   });
 
   agent.subscribe((event: AgentEvent) => {

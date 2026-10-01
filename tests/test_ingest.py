@@ -1,7 +1,11 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from litwatch.arxiv_source import window_query
-from litwatch.ingest import window
+from litwatch.ingest import run, window
 
 
 def test_window_query_covers_categories_and_dates():
@@ -15,3 +19,18 @@ def test_window_ends_now_and_spans_days():
     now = datetime(2026, 9, 3, 6, 0, tzinfo=UTC)
     since, until = window(3, now)
     assert until == now and (until - since).days == 3
+
+
+async def test_busy_lock_still_closes_the_runs_archive_clients():
+    class Busy:
+        async def execute(self, sql):
+            assert "pg_try_advisory_lock" in sql  # never unlocks a lock it did not take
+            return SimpleNamespace(fetchone=AsyncMock(return_value={"locked": False}))
+
+    routing, fetching = AsyncMock(), AsyncMock()
+    router = SimpleNamespace(archive=routing)
+    deep = SimpleNamespace(fetcher=SimpleNamespace(archive=fetching))
+    with pytest.raises(RuntimeError, match="already in progress"):
+        await run(Busy(), None, None, "daily", 1, router=router, deep=deep)
+    routing.aclose.assert_awaited_once()
+    fetching.aclose.assert_awaited_once()

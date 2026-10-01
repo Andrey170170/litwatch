@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from litwatch.calls import current_journal, recorded_completion
 from litwatch.models import Usage
+from litwatch.routing import provider_preferences
 from litwatch.selection import Selection
 
 log = logging.getLogger(__name__)
@@ -337,8 +338,15 @@ def unfence(text: str) -> str:
 class Digester:
     """Writes the run's digests: general first in the result, then one per flagged selection."""
 
-    def __init__(self, client: AsyncOpenAI, model: str, effort: str = "low") -> None:
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        effort: str = "low",
+        provider_order: tuple[str, ...] = (),
+    ) -> None:
         self.client, self.model, self.effort = client, model, effort
+        self.provider_order = provider_order
 
     async def _ask(self, system: str, user: str, schema: type[BaseModel]) -> tuple[Any, Usage]:
         """Structured output the lenient way: writing models wrap JSON in fences now and then."""
@@ -361,6 +369,7 @@ class Digester:
                     "extra_body": {
                         "reasoning": {"effort": self.effort},
                         "usage": {"include": True},
+                        "provider": provider_preferences(self.provider_order),
                     },
                 },
             )

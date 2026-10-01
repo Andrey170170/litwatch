@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from litwatch import arxiv_source, db, intake
+from litwatch import archive_outbox, arxiv_source, db, intake
 from litwatch.calls import CallJournal, current_journal
 from litwatch.config import Settings
 from litwatch.deep import DeepProcessor
@@ -64,13 +64,25 @@ async def run(
 ) -> RunSummary:
     # API and CLI share this lock, including analysis: checkpoints and pending
     # screens must have one writer even if two entry points are triggered together.
-    locked = await (await conn.execute("SELECT pg_try_advisory_lock(7213902) AS locked")).fetchone()
-    if not locked or not locked["locked"]:
-        raise RuntimeError("another Litwatch run is already in progress")
+    # The run owns the archive clients either way, including when the lock is busy.
     try:
-        return await _run(conn, settings, cascade, kind, days, fetch, router, digester, deep)
+        locked = await (
+            await conn.execute("SELECT pg_try_advisory_lock(7213902) AS locked")
+        ).fetchone()
+        if not locked or not locked["locked"]:
+            raise RuntimeError("another Litwatch run is already in progress")
+        try:
+            return await _run(conn, settings, cascade, kind, days, fetch, router, digester, deep)
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock(7213902)")
     finally:
-        await conn.execute("SELECT pg_advisory_unlock(7213902)")
+        clients = [
+            getattr(router, "archive", None),
+            getattr(getattr(deep, "fetcher", None), "archive", None),
+        ]
+        for client in clients:
+            if client is not None:
+                await client.aclose()
 
 
 async def _run(
@@ -135,8 +147,11 @@ async def _run(
 
 
 async def _fetch(conn: psycopg.AsyncConnection, settings: Settings, s: RunSummary) -> None:
+    policy = archive_outbox.ArchivePolicy(settings.categories) if settings.archive_enabled else None
     if settings.intake_source == "oai":
-        result = await intake.collect(conn, settings.categories, s.window_from, s.run_id)
+        result = await intake.collect(
+            conn, settings.categories, s.window_from, s.run_id, archive_policy=policy
+        )
         s.fetched, s.inserted, s.updated = result.fetched, result.inserted, result.updated
         s.intake = result.details
         log.info(
@@ -157,7 +172,9 @@ async def _fetch(conn: psycopg.AsyncConnection, settings: Settings, s: RunSummar
         )
     )
     s.fetched = len(papers)
-    s.inserted, s.updated = await db.upsert_papers(conn, papers)
+    s.inserted, s.updated = await db.upsert_papers(
+        conn, papers, archive_policy=policy, archive_run_id=s.run_id
+    )
     log.info("run %s fetched %s (%s new, %s updated)", s.run_id, s.fetched, s.inserted, s.updated)
 
 
@@ -189,6 +206,12 @@ async def _screen(
                     await db.store_screen_error(conn, paper.id, f"{type(exc).__name__}: {exc}")
                     s.failed += 1
                     return
+                if settings.archive_enabled and result.best_tier == 1:
+                    try:
+                        async with conn.transaction():
+                            await archive_outbox.promote(conn, paper.id)
+                    except Exception:
+                        log.exception("%s: archive priority promotion deferred", paper.id)
                 s.screened += 1
                 s.rescreened += int(result.rescreened)
                 s.confirmed += int(result.confirmed)

@@ -73,15 +73,21 @@ SLUG [--days N]` forgets verdicts so the next run judges them again.
 
 ### Inference cost and recovery
 
-Primary Luna screening prefers OpenRouter's `openai/flex` endpoint, then standard
-`openai`, with provider fallback enabled. The model, effort and prompts stay the same.
-Flex trades latency/availability for lower token prices; actual savings depend on the
-endpoint that serves each request. `LITWATCH_SCREEN_PROVIDER_ORDER` overrides the CSV
-order (empty disables it). This setting applies only to `openai/gpt-5.6-luna`, so model
-overrides do not inherit incompatible provider names. `LITWATCH_SCREEN_TIMEOUT_SECONDS`
-defaults to 120 and bounds the primary request including SDK retries. If that deadline
-expires, the paper stays pending; a client timeout cannot trigger server-side fallback.
-Batch submission remains deferred.
+Every OpenRouter request names its providers (`src/litwatch/routing.py`). Lists belong
+to models, not stages, so an overridden model never inherits another model's list. A
+listed model is served only by its providers, tried in order with fallbacks between them;
+every request also sets `require_parameters`. Luna prefers the half-price `openai/flex` endpoint, then `openai`;
+GLM uses Baidu, Reka, then Wafer; Muse uses Meta; Kimi uses Wafer, Moonshot, then
+Fireworks. Unlisted models keep OpenRouter's routing. `LITWATCH_PROVIDERS` overrides
+lists as `model=a|b;model2=c`, and `model=` hands a model back to OpenRouter. The
+[2026-10-01 provider trial](evals/2026-10-01-providers.md) explains the choices.
+`LITWATCH_SCREEN_TIMEOUT_SECONDS` defaults to 120 and bounds the primary request
+including SDK retries. If that deadline expires, the paper stays pending; a client
+timeout cannot trigger server-side fallback. Batch submission remains deferred: Flex
+already gives Luna the batch discount without the 24-hour window.
+
+`LITWATCH_SCREEN_CONCURRENCY` (16) bounds papers in flight; a paper's confirm calls run
+concurrently, one per selection.
 
 Database-backed `litwatch run` and API runs keep an `inference_calls` journal. Each
 response's charge is saved before parsing; each validated screening stage is saved
@@ -169,3 +175,10 @@ rewriting. This migration does not rewrite historical prose or Notion pages.
 Database regressions run in CI and the release gate against PostgreSQL. Locally,
 point `TEST_DATABASE_URL` at a disposable database and run `uv run pytest`; the tests
 create and remove isolated schemas there. Never point that variable at production.
+
+## Shared archive
+
+Daily intake also registers every cs.CL/cs.AI/cs.LG paper with the shared arxiv-archive
+service, independent of screening tier; curated routing and deep processing reuse its
+PDFs. See [the 0.9.0 integration note](docs/ARCHIVE-STAGE2.md) for states, settings and
+rollback. Historical snapshot import and backfill belong to arxiv-archive.

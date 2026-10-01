@@ -192,7 +192,7 @@ class DeepProcessor:
     ) -> str | None:
         body, source = row.get("body"), row.get("body_source")
         if not body:
-            fetched = await self.fetcher.fetch(row["id"])
+            fetched = await self.fetcher.fetch(db.row_to_paper(row))
             if fetched is None:
                 await db.store_enrichment_error(conn, row["id"], "no paper text available")
                 return "no paper text available"

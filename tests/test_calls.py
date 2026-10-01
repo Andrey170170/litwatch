@@ -91,8 +91,9 @@ async def test_screener_preserves_strict_schema_and_flex_fallback_request():
     await screener.screen(Paper(id="x", title="x", abstract="x"), [FAITH])
     request = responses.calls[0]
     assert request["extra_body"]["provider"] == {
+        "require_parameters": True,
         "order": ["openai/flex", "openai"],
-        "allow_fallbacks": True,
+        "only": ["openai/flex", "openai"],
     }
     assert request["response_format"]["json_schema"]["strict"] is True
 

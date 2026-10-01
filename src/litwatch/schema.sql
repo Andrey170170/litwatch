@@ -191,3 +191,47 @@ CREATE INDEX IF NOT EXISTS inference_calls_run_idx ON inference_calls(run_id);
 CREATE INDEX IF NOT EXISTS inference_calls_cache_idx ON inference_calls(request_key, id)
     WHERE output IS NOT NULL AND invalidated_at IS NULL;
 CREATE INDEX IF NOT EXISTS inference_calls_paper_idx ON inference_calls(paper_id);
+
+-- Explicit arXiv revisions are independent of selection/prompt versions.
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS version integer CHECK (version>0);
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS version_history jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS doi text;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS journal_ref text;
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS license text;
+
+-- No paper FK: replacement-only feed observations must not create curated candidates.
+CREATE TABLE IF NOT EXISTS archive_outbox (
+    id bigserial PRIMARY KEY,
+    event_key text NOT NULL UNIQUE,
+    paper_id text NOT NULL,
+    version integer CHECK (version>0),
+    kind text NOT NULL CHECK(kind IN ('metadata','pdf','source')),
+    payload jsonb NOT NULL,
+    priority integer NOT NULL DEFAULT 100,
+    status text NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','delivered','available','unavailable','error')),
+    attempts integer NOT NULL DEFAULT 0,
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    lease_token text,
+    lease_until timestamptz,
+    remote_job_id text,
+    error text,
+    run_id bigint REFERENCES runs(id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    delivered_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS archive_outbox_due_idx ON archive_outbox(priority,next_attempt_at,id)
+    WHERE status IN ('pending','error','delivered');
+CREATE INDEX IF NOT EXISTS archive_outbox_paper_idx ON archive_outbox(paper_id);
+
+-- Coverage means observations + intents are durable, not that all files are downloaded.
+CREATE TABLE IF NOT EXISTS archive_intake_checkpoints (
+    category text PRIMARY KEY,
+    policy text NOT NULL,
+    activated_at timestamptz NOT NULL DEFAULT now(),
+    discovery_from date NOT NULL,
+    checkpoint date,
+    checked_at timestamptz,
+    run_id bigint REFERENCES runs(id)
+);
