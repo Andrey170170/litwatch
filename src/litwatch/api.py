@@ -92,8 +92,9 @@ def build_archive(settings: Settings) -> ArchiveClient | None:
     if not settings.archive_enabled:
         return None
     assert settings.archive_url and settings.archive_token
-    return ArchiveClient(settings.archive_url, settings.archive_token,
-                         wait_seconds=settings.archive_wait_seconds)
+    return ArchiveClient(
+        settings.archive_url, settings.archive_token, wait_seconds=settings.archive_wait_seconds
+    )
 
 
 def build_router(
@@ -203,9 +204,11 @@ def create_app(settings: Settings) -> FastAPI:
         stop = asyncio.Event()
         delivery = None
         if client is not None:
-            delivery = asyncio.create_task(archive_delivery.run_dispatcher(
-                dsn, client, stop, interval_seconds=settings.archive_dispatch_seconds
-            ))
+            delivery = asyncio.create_task(
+                archive_delivery.run_dispatcher(
+                    dsn, client, stop, interval_seconds=settings.archive_dispatch_seconds
+                )
+            )
         try:
             yield
         finally:

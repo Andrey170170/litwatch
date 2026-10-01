@@ -29,8 +29,12 @@ async def queue():
             await conn.execute(
                 """INSERT INTO papers (id, title, abstract, published, best_tier, screen)
                    VALUES (%s, 'Paper', 'Abstract', %s, %s, %s)""",
-                (str(i), "2026-09-01" if tier == 1 else "2026-09-28", tier,
-                 Jsonb(result.model_dump(mode="json"))),
+                (
+                    str(i),
+                    "2026-09-01" if tier == 1 else "2026-09-28",
+                    tier,
+                    Jsonb(result.model_dump(mode="json")),
+                ),
             )
         yield conn
 
@@ -42,8 +46,12 @@ async def test_routes_entire_queue_prioritizes_tier1_and_retries_failures_once(q
         attempted.append(paper.id)
         if paper.id == "205":
             raise RuntimeError("temporary Zotero failure")
-        return Routed(paper.id, result.best_tier, "item-" + paper.id,
-                      "pdf-" + paper.id if result.best_tier == 1 else None)
+        return Routed(
+            paper.id,
+            result.best_tier,
+            "item-" + paper.id,
+            "pdf-" + paper.id if result.best_tier == 1 else None,
+        )
 
     router = AsyncMock()
     router.route.side_effect = deliver

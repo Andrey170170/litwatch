@@ -71,8 +71,10 @@ async def run(
         return await _run(conn, settings, cascade, kind, days, fetch, router, digester, deep)
     finally:
         await conn.execute("SELECT pg_advisory_unlock(7213902)")
-        clients = [getattr(router, "archive", None),
-                   getattr(getattr(deep, "fetcher", None), "archive", None)]
+        clients = [
+            getattr(router, "archive", None),
+            getattr(getattr(deep, "fetcher", None), "archive", None),
+        ]
         for client in clients:
             if client is not None:
                 await client.aclose()
@@ -142,8 +144,9 @@ async def _run(
 async def _fetch(conn: psycopg.AsyncConnection, settings: Settings, s: RunSummary) -> None:
     policy = archive_outbox.ArchivePolicy(settings.categories) if settings.archive_enabled else None
     if settings.intake_source == "oai":
-        result = await intake.collect(conn, settings.categories, s.window_from, s.run_id,
-                                      archive_policy=policy)
+        result = await intake.collect(
+            conn, settings.categories, s.window_from, s.run_id, archive_policy=policy
+        )
         s.fetched, s.inserted, s.updated = result.fetched, result.inserted, result.updated
         s.intake = result.details
         log.info(

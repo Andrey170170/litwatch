@@ -38,8 +38,12 @@ def _same_timestamp(left: str | None, right: str | None) -> bool:
 
 class ArchiveClient:
     def __init__(
-        self, base_url: str, token: str, http: httpx.AsyncClient | None = None,
-        *, wait_seconds: float = 60.0,
+        self,
+        base_url: str,
+        token: str,
+        http: httpx.AsyncClient | None = None,
+        *,
+        wait_seconds: float = 60.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {token}"}
@@ -87,10 +91,14 @@ class ArchiveClient:
         return await self._json("GET", self._path(paper_id), missing=True)
 
     async def upsert_paper(self, paper: Paper) -> dict:
-        result = await self._json("PUT", self._path(paper.id), json={
-            "metadata": paper.model_dump(mode="json", exclude_none=True, exclude_unset=True),
-            "latest_version": paper.version,
-        })
+        result = await self._json(
+            "PUT",
+            self._path(paper.id),
+            json={
+                "metadata": paper.model_dump(mode="json", exclude_none=True, exclude_unset=True),
+                "latest_version": paper.version,
+            },
+        )
         assert result is not None
         return result
 
@@ -99,24 +107,37 @@ class ArchiveClient:
         if paper.version is not None:
             return paper
         record = await self.metadata(paper.id)
-        if record and record.get("latest_version") and _same_timestamp(
-            paper.updated, record.get("metadata", {}).get("updated")
+        if (
+            record
+            and record.get("latest_version")
+            and _same_timestamp(paper.updated, record.get("metadata", {}).get("updated"))
         ):
             return paper.model_copy(update={"version": record["latest_version"]})
         raise ArchiveVersionUnknown(f"{paper.id}: explicit revision unavailable")
 
     async def request(
-        self, paper: Paper, kind: str = "pdf", priority: int = 100,
-        *, publish_metadata: bool = True,
+        self,
+        paper: Paper,
+        kind: str = "pdf",
+        priority: int = 100,
+        *,
+        publish_metadata: bool = True,
     ) -> dict:
         """Enqueue an artifact; outbox callers publish canonical metadata separately."""
         paper = await self.resolve(paper)
         if publish_metadata:
             await self.upsert_paper(paper)
-        result = await self._json("POST", "/v1/jobs", json={
-            "paper_id": paper.id, "version": paper.version, "kind": kind,
-            "priority": priority, "provenance": {"client": "litwatch"},
-        })
+        result = await self._json(
+            "POST",
+            "/v1/jobs",
+            json={
+                "paper_id": paper.id,
+                "version": paper.version,
+                "kind": kind,
+                "priority": priority,
+                "provenance": {"client": "litwatch"},
+            },
+        )
         assert result is not None
         return result
 
@@ -129,8 +150,10 @@ class ArchiveClient:
         """Read an explicit revision, bounding decompressed transfer size."""
         try:
             async with self.http.stream(
-                "GET", self.base_url + self._path(paper_id) + "/pdf",
-                headers=self._headers, params={"version": version},
+                "GET",
+                self.base_url + self._path(paper_id) + "/pdf",
+                headers=self._headers,
+                params={"version": version},
             ) as response:
                 if response.status_code == 404:
                     return None
@@ -155,8 +178,12 @@ class ArchiveClient:
             # Imported historical author/date encodings need not match Litwatch's schema.
             # Only identity and explicit revision are needed for an ID-only read.
             data = record.get("metadata", {})
-            paper = Paper(id=paper, version=record["latest_version"],
-                          title=data.get("title") or "", abstract=data.get("abstract") or "")
+            paper = Paper(
+                id=paper,
+                version=record["latest_version"],
+                title=data.get("title") or "",
+                abstract=data.get("abstract") or "",
+            )
         paper = await self.resolve(paper)
         return paper, await self.request(paper, priority=0)
 

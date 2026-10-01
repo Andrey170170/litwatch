@@ -126,7 +126,9 @@ class BodyFetcher:
     """Reuse archived PDFs, otherwise prefer HTML while priority PDF acquisition runs."""
 
     def __init__(
-        self, http: httpx.AsyncClient | None = None, archive: ArchiveClient | None = None,
+        self,
+        http: httpx.AsyncClient | None = None,
+        archive: ArchiveClient | None = None,
     ) -> None:
         self.archive = archive
         self.http = http or httpx.AsyncClient(timeout=120.0, follow_redirects=True)
@@ -137,7 +139,8 @@ class BodyFetcher:
         paper_id = paper.id if isinstance(paper, Paper) else paper
         identity = (
             f"{paper.id}v{paper.version}"
-            if isinstance(paper, Paper) and paper.version else paper_id
+            if isinstance(paper, Paper) and paper.version
+            else paper_id
         )
         prepared = None
         direct_pdf = self.archive is None
