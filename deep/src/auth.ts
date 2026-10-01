@@ -142,3 +142,9 @@ export async function authState(models: Models): Promise<{ state: AuthState; det
     return { state: "error", detail: e instanceof Error ? e.message : String(e) };
   }
 }
+
+/** Refuse to run unless requests would bill the ChatGPT subscription; called before every paper. */
+export async function requireSubscription(models: Models): Promise<void> {
+  const { state, detail } = await authState(models);
+  if (state !== "ok") throw new Error(`not running on the ChatGPT subscription: ${detail ?? state}`);
+}

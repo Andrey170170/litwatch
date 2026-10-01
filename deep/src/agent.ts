@@ -6,7 +6,7 @@
 import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { Models, ThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { PROVIDER } from "./auth.ts";
+import { PROVIDER, requireSubscription } from "./auth.ts";
 import { buildHosts, type HostConfig } from "./hosts.ts";
 import { systemPrompt, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
 import { Repl, type HostFn } from "./repl.ts";
@@ -72,6 +72,8 @@ export async function processPaper(
 ): Promise<Outcome> {
   const model = models.getModel(PROVIDER, opts.model);
   if (!model) throw new Error(`model ${opts.model} is not available from ${PROVIDER}`);
+  // The provider would fall back to OPENAI_API_KEY without a stored subscription credential.
+  await requireSubscription(models);
 
   const started = Date.now();
   const trace: TraceEvent[] = [];
