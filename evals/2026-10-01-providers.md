@@ -17,27 +17,34 @@ Kimi digests landed on eight providers, several fp4, with no cache hits.
 
 40 production rescreen cases from runs 37 and 38 (41 selection verdicts), current
 selection specs, high effort, 8192-token cap, one provider per request with no fallback.
-Every request succeeded except one DeepInfra call. Reported spend: $0.2346.
+Every request returned a response; DeepInfra's one failure was a truncated output at the
+cap. Reported spend: $0.2346, plus that truncated response's uncounted charge (at most
+about $0.02 at DeepInfra's output price; the first script version missed rejected
+responses).
 
-| provider | agrees with majority of the other six | median reasoning tokens | cost/call | p50 / p90 s |
+Agreement is leave-one-out: each provider against the most common tier among the other
+providers, Together kept out of every reference.
+
+| provider | agrees with the others | median reasoning tokens | cost/call | p50 / p90 s |
 |---|---:|---:|---:|---:|
-| Wafer | 40/41 | 222 | $0.00170 | 3.0 / 15.6 |
+| Wafer | 39/41 | 222 | $0.00170 | 3.0 / 15.6 |
 | Baidu (fp8) | 39/41 | 25 | $0.00016 | 1.4 / 3.6 |
 | Reka | 39/41 | 29 | $0.00023 | 2.8 / 9.2 |
-| Sail Research | 38/41 | 28 | $0.00062 | 1.3 / 2.7 |
-| Fireworks | 38/41 | 29 | $0.00167 | 3.3 / 7.1 |
+| Sail Research | 37/41 | 28 | $0.00062 | 1.3 / 2.7 |
+| Fireworks | 37/41 | 29 | $0.00167 | 3.3 / 7.1 |
 | DeepInfra (fp4) | 37/40 | 27 | $0.00062 | 3.4 / 50.7 |
-| Together | 32/41 | 0 | $0.00089 | 0.5 / 1.3 |
+| Together | 31/40 (one tie) | 0 | $0.00089 | 0.5 / 1.3 |
 
 The six reasoning endpoints were unanimous on 33 of 41 verdicts; their differences are
-one to three verdicts, which this sample cannot separate from noise. Together is clearly
-worse. The majority is a consistency reference, not ground truth, and the sample is
-mostly easy cases. Wafer reasons longest and stays last as a fallback; if the 8 contested
-cases matter more than cost, `LITWATCH_PROVIDERS="z-ai/glm-5.3=wafer"` restores it.
+two to four verdicts, which this sample cannot separate from noise. Together is clearly
+worse. The reference is consistency, not ground truth, and the sample is mostly easy
+cases. Wafer reasons longest and stays last as a fallback; if hard cases matter more
+than cost, `LITWATCH_PROVIDERS="z-ai/glm-5.3=wafer"` restores it.
 
 Expected effect: rescreen cost per call drops from about $0.0014 to about $0.0002, and
 no rescreen is served without reasoning. A live smoke of all four stages through the new
 routing was served by OpenAI Flex, Baidu, Meta and Wafer.
 
-Reproduce: `scripts/eval_providers.py CASES.json OUT.jsonl --providers a,b,...`. The
+Reproduce: `scripts/eval_providers.py CASES.json OUT.jsonl --providers a,b,...
+--not-reference together`; `--report-only` recomputes the table from OUT.jsonl. The
 case file stays outside the repository because it contains selection text.

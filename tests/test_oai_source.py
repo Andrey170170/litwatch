@@ -133,6 +133,16 @@ def test_invalid_raw_history_leaves_canonical_intake_and_unknown_version(raw):
     assert batch.versions_error
 
 
+def test_one_unresolvable_history_keeps_resolving_the_rest_of_the_batch():
+    # Every raw revision of the first paper postdates its canonical observation day.
+    future = raw_record("2609.11111").replace("Thu, 10 Sep", "Mon, 14 Sep")
+    future = future.replace("Sat, 12 Sep", "Mon, 14 Sep")
+    client = Client([page(record("2609.11111") + record()), page(future + raw_record())])
+    batch = fetch_category("cs.CL", date(2026, 9, 12), client, include_versions=True)
+    assert [p.version for p in batch.papers] == [None, 2]
+    assert batch.versions_error == "Raw history absent for 0 and unresolved for 1 canonical records"
+
+
 def test_get_record_version_resolution_checks_identity():
     from litwatch.oai_source import fetch_versions
 

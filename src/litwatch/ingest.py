@@ -64,13 +64,18 @@ async def run(
 ) -> RunSummary:
     # API and CLI share this lock, including analysis: checkpoints and pending
     # screens must have one writer even if two entry points are triggered together.
-    locked = await (await conn.execute("SELECT pg_try_advisory_lock(7213902) AS locked")).fetchone()
-    if not locked or not locked["locked"]:
-        raise RuntimeError("another Litwatch run is already in progress")
+    # The run owns the archive clients either way, including when the lock is busy.
     try:
-        return await _run(conn, settings, cascade, kind, days, fetch, router, digester, deep)
+        locked = await (
+            await conn.execute("SELECT pg_try_advisory_lock(7213902) AS locked")
+        ).fetchone()
+        if not locked or not locked["locked"]:
+            raise RuntimeError("another Litwatch run is already in progress")
+        try:
+            return await _run(conn, settings, cascade, kind, days, fetch, router, digester, deep)
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock(7213902)")
     finally:
-        await conn.execute("SELECT pg_advisory_unlock(7213902)")
         clients = [
             getattr(router, "archive", None),
             getattr(getattr(deep, "fetcher", None), "archive", None),

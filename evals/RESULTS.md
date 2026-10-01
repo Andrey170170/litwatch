@@ -3,8 +3,8 @@
 ## 2026-10-01 · provider routing
 
 [Provider trial](2026-10-01-providers.md): 40 production rescreen cases on seven GLM 5.3
-endpoints. Together returned no reasoning and agreed with the others on 32/41 verdicts;
-the six reasoning endpoints differed by one to three verdicts. Baidu ($0.00016/call) and
+endpoints. Together returned no reasoning and agreed with the others on 31/40 verdicts;
+the six reasoning endpoints agreed on 37-39 of 41. Baidu ($0.00016/call) and
 Reka now precede Wafer ($0.0017/call). Every OpenRouter request now names its providers
 and requires its parameters. Spend $0.2346.
 

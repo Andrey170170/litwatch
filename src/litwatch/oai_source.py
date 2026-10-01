@@ -275,21 +275,29 @@ def fetch_category(
     try:
         raw = _harvest(category, since, client, raw=True)
         histories = {p.id: p for p in raw.papers}
-        missing = []
+        missing, unresolved = [], []
         for paper in batch.papers:
-            if paper.id in histories:
-                history = histories[paper.id]
+            if paper.id not in histories:
+                missing.append(paper.id)
+                continue
+            history = histories[paper.id]
+            # One unresolvable record keeps an unknown version; it must not stop the rest.
+            try:
                 resolved = resolve_observed_version(
                     paper,
                     {"version": history.version, "version_history": history.version_history},
                     "oai",
                 )
-                paper.version = resolved.version
-                paper.version_history = resolved.version_history
-            else:
-                missing.append(paper.id)
-        if missing:
-            batch.versions_error = f"Raw history absent for {len(missing)} canonical records"
+            except SourceError:
+                unresolved.append(paper.id)
+                continue
+            paper.version = resolved.version
+            paper.version_history = resolved.version_history
+        if missing or unresolved:
+            batch.versions_error = (
+                f"Raw history absent for {len(missing)} and unresolved for "
+                f"{len(unresolved)} canonical records"
+            )
     except SourceError as exc:
         batch.versions_error = str(exc)
     return batch
