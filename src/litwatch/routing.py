@@ -2,9 +2,11 @@
 
 Provider lists are per model, not per stage, because endpoints are model-specific: an
 overridden model never inherits another model's list. A listed model is served only by its
-providers, tried in order. Every request sets `require_parameters`, so an endpoint that does
-not support the schema or reasoning parameters is skipped. That check alone did not keep out
-endpoints that accept `reasoning` and return no reasoning tokens, which is why the lists exist.
+providers (`only`), tried in order with fallbacks between them, so one provider's outage
+falls through to the next instead of failing the stage. Every request sets
+`require_parameters`, so an endpoint that does not support the schema or reasoning
+parameters is skipped. That check alone did not keep out endpoints that accept `reasoning`
+and return no reasoning tokens, which is why the lists exist.
 """
 
 # Chosen from the inference journal and a provider trial; see evals/2026-10-01-providers.md.
@@ -24,7 +26,7 @@ def provider_preferences(providers: tuple[str, ...]) -> dict:
     """The request's `provider` object. No providers leaves the choice to OpenRouter."""
     preferences: dict = {"require_parameters": True}
     if providers:
-        preferences |= {"order": list(providers), "allow_fallbacks": False}
+        preferences |= {"order": list(providers), "only": list(providers)}
     return preferences
 
 

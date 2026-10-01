@@ -13,7 +13,7 @@ def test_preferences_restrict_listed_models_and_always_require_parameters():
     assert provider_preferences(("openai/flex", "openai")) == {
         "require_parameters": True,
         "order": ["openai/flex", "openai"],
-        "allow_fallbacks": False,
+        "only": ["openai/flex", "openai"],
     }
     assert provider_preferences(()) == {"require_parameters": True}
 

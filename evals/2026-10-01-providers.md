@@ -1,7 +1,7 @@
 # Provider routing for every OpenRouter request, October 1
 
-Decision: every request now names its providers per model, with fallbacks restricted to
-that list and `require_parameters` on. GLM 5.3 rescreen routes Baidu, Reka, then Wafer.
+Decision: every request now names its providers per model (`order` plus `only`), with
+fallbacks allowed only within that list and `require_parameters` on. GLM 5.3 rescreen routes Baidu, Reka, then Wafer.
 Models, efforts and prompts are unchanged. Kimi and Muse lists were chosen from endpoint
 facts, not a trial.
 

@@ -75,8 +75,8 @@ SLUG [--days N]` forgets verdicts so the next run judges them again.
 
 Every OpenRouter request names its providers (`src/litwatch/routing.py`). Lists belong
 to models, not stages, so an overridden model never inherits another model's list. A
-listed model is served only by its providers, tried in order; every request also sets
-`require_parameters`. Luna prefers the half-price `openai/flex` endpoint, then `openai`;
+listed model is served only by its providers, tried in order with fallbacks between them;
+every request also sets `require_parameters`. Luna prefers the half-price `openai/flex` endpoint, then `openai`;
 GLM uses Baidu, Reka, then Wafer; Muse uses Meta; Kimi uses Wafer, Moonshot, then
 Fireworks. Unlisted models keep OpenRouter's routing. `LITWATCH_PROVIDERS` overrides
 lists as `model=a|b;model2=c`, and `model=` hands a model back to OpenRouter. The
