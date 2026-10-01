@@ -1,14 +1,14 @@
 /**
  * litwatch-deep entry point.
  *   serve          run the HTTP service (default)
- *   login          device-code login to the Codex subscription
+ *   login          Sign in with ChatGPT (paste the final redirect URL back)
  *   run FILE.json  process one paper from a JSON file and print the outcome (development);
  *                  the file is a PaperInput, optionally with `extensions` and `selections` as in POST /process
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { processPaper, type RunOptions } from "./agent.ts";
-import { authState, buildModels, loginDeviceCode } from "./auth.ts";
+import { authState, buildModels, login } from "./auth.ts";
 import type { HostConfig } from "./hosts.ts";
 import { JobQueue } from "./jobs.ts";
 import type { PaperInput, SelectionContext } from "./prompt.ts";
@@ -30,7 +30,7 @@ const config = {
     maxFetchChars: Number(env("DEEP_MAX_FETCH_CHARS", "200000")),
   } satisfies HostConfig,
   run: {
-    model: env("DEEP_MODEL", "gpt-5.6-sol"),
+    model: env("DEEP_MODEL", "gpt-6.1-sol"),
     effort: env("DEEP_EFFORT", "low") as RunOptions["effort"],
     maxCells: Number(env("DEEP_MAX_CELLS", "40")),
     cellTimeoutMs: Number(env("DEEP_CELL_TIMEOUT_S", "90")) * 1000,
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   const models = buildModels(config.authFile);
 
   if (command === "login") {
-    await loginDeviceCode(models, console.log);
+    await login(models, config.authFile, console.log);
     return;
   }
 

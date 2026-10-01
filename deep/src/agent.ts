@@ -1,5 +1,5 @@
 /**
- * One paper through the agent: Sol at low effort, the single `run_code` tool, a validating
+ * One paper through the agent: the configured model and effort, the single `run_code` tool, a validating
  * `submit`, a cell budget, and a trace of everything that happened.
  */
 
@@ -146,7 +146,8 @@ export async function processPaper(
     streamFn: models.streamSimple.bind(models),
     sessionId: `litwatch-${paper.id}-${started}`,
     toolExecution: "sequential",
-    shouldStopAfterTurn: async () => submitted !== null || stats.cells >= opts.maxCells || failure !== undefined,
+    // Error and aborted turns are hard exits; the loop ignores this decision for them.
+    finishTurn: () => (submitted !== null || stats.cells >= opts.maxCells || failure !== undefined ? { action: "end" } : undefined),
   });
 
   agent.subscribe((event: AgentEvent) => {
