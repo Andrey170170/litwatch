@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from litwatch.routing import DEFAULT_PROVIDERS, parse_providers
+
 
 def _load_dotenv(path: Path = Path(".env")) -> None:
     """Minimal .env loader: KEY=VALUE lines, no export, no quoting rules beyond stripping."""
@@ -35,8 +37,6 @@ class Settings:
     openrouter_api_key: str
     screen_model: str = "openai/gpt-5.6-luna"
     screen_effort: str = "low"
-    # Applied only to Luna; an empty tuple leaves provider selection to OpenRouter.
-    screen_provider_order: tuple[str, ...] = ("openai/flex", "openai")
     screen_timeout_seconds: float = 120.0
     rescreen_model: str = "z-ai/glm-5.3"
     rescreen_effort: str = "high"
@@ -49,6 +49,8 @@ class Settings:
     # Digest prose. Kimi K3 won the blind three-way pick against GLM 5.3 and Sol (2026-09-03).
     digest_model: str = "moonshotai/kimi-k3"
     digest_effort: str = "low"
+    # OpenRouter providers per model, tried in order and exclusively; see routing.py.
+    providers: dict[str, tuple[str, ...]] = field(default_factory=lambda: dict(DEFAULT_PROVIDERS))
     database_url: str | None = None
     # Routing (phase 3). Unset Zotero credentials disable routing; unset WebDAV disables PDFs.
     zotero_user_id: str | None = None
@@ -69,7 +71,7 @@ class Settings:
     # An edited or new selection re-judges papers published within this many days.
     rescreen_window_days: int = 30
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
-    screen_concurrency: int = 8
+    screen_concurrency: int = 16
     intake_source: str = "oai"
     archive_url: str | None = None
     archive_token: str | None = field(default=None, repr=False)
@@ -86,7 +88,6 @@ class Settings:
             openrouter_api_key=key,
             screen_model=os.environ.get("LITWATCH_SCREEN_MODEL", cls.screen_model),
             screen_effort=os.environ.get("LITWATCH_SCREEN_EFFORT", cls.screen_effort),
-            screen_provider_order=_csv("LITWATCH_SCREEN_PROVIDER_ORDER", cls.screen_provider_order),
             screen_timeout_seconds=float(os.environ.get("LITWATCH_SCREEN_TIMEOUT_SECONDS", "120")),
             rescreen_model=os.environ.get("LITWATCH_RESCREEN_MODEL", cls.rescreen_model),
             rescreen_effort=os.environ.get("LITWATCH_RESCREEN_EFFORT", cls.rescreen_effort),
@@ -100,6 +101,7 @@ class Settings:
             confirm_effort=os.environ.get("LITWATCH_CONFIRM_EFFORT", cls.confirm_effort),
             digest_model=os.environ.get("LITWATCH_DIGEST_MODEL", cls.digest_model),
             digest_effort=os.environ.get("LITWATCH_DIGEST_EFFORT", cls.digest_effort),
+            providers=parse_providers(os.environ.get("LITWATCH_PROVIDERS", ""), DEFAULT_PROVIDERS),
             database_url=_database_url(),
             zotero_user_id=os.environ.get("LITWATCH_ZOTERO_USER_ID"),
             zotero_api_key=_secret("ZOTERO_API_KEY"),
@@ -115,7 +117,7 @@ class Settings:
             categories=tuple(
                 os.environ.get("LITWATCH_CATEGORIES", ",".join(cls.categories)).split(",")
             ),
-            screen_concurrency=int(os.environ.get("LITWATCH_SCREEN_CONCURRENCY", "8")),
+            screen_concurrency=int(os.environ.get("LITWATCH_SCREEN_CONCURRENCY", "16")),
             intake_source=os.environ.get("LITWATCH_INTAKE_SOURCE", "oai"),
             archive_url=os.environ.get("LITWATCH_ARCHIVE_URL"),
             archive_token=_secret("LITWATCH_ARCHIVE_TOKEN"),
@@ -124,6 +126,9 @@ class Settings:
                 os.environ.get("LITWATCH_ARCHIVE_DISPATCH_SECONDS", "5")
             ),
         )
+
+    def providers_for(self, model: str) -> tuple[str, ...]:
+        return self.providers.get(model, ())
 
     @property
     def archive_enabled(self) -> bool:

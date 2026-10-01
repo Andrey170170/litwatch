@@ -1,5 +1,18 @@
 # Screener eval results
 
+## 2026-10-01 · provider routing
+
+[Provider trial](2026-10-01-providers.md): 40 production rescreen cases on seven GLM 5.3
+endpoints. Together returned no reasoning and agreed with the others on 32/41 verdicts;
+the six reasoning endpoints differed by one to three verdicts. Baidu ($0.00016/call) and
+Reka now precede Wafer ($0.0017/call). Every OpenRouter request now names its providers
+and requires its parameters. Spend $0.2346.
+
+## 2026-09-22 · GPT-6 Luna primary
+
+[Trial](2026-09-22-gpt6-luna-primary.md): cheaper and faster, but kept 4/8 additional
+tier-1 controls at tier 1 versus 8/8 for GPT-5.6 Luna. Luna 5.6 remains the primary.
+
 ## 2026-09-11 · DeepSeek V4.1 Flash retry
 
 [Retry report](2026-09-11-deepseek-primary.md): strict-schema canary succeeded,

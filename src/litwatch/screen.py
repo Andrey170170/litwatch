@@ -3,6 +3,7 @@ recall and a per-selection confirm for precision."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from importlib import resources
@@ -22,6 +23,7 @@ from litwatch.models import (
     Usage,
     Verdict,
 )
+from litwatch.routing import provider_preferences
 from litwatch.selection import Selection, render_selections
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -119,15 +121,14 @@ class ModelScreener:
                 },
             },
             # `usage.include` makes OpenRouter report the call's cost in the usage block.
-            "extra_body": {"reasoning": {"effort": self.effort}, "usage": {"include": True}},
+            "extra_body": {
+                "reasoning": {"effort": self.effort},
+                "usage": {"include": True},
+                "provider": provider_preferences(self.provider_order),
+            },
         }
         if self.max_completion_tokens is not None:
             request["max_completion_tokens"] = self.max_completion_tokens
-        if self.provider_order:
-            request["extra_body"]["provider"] = {
-                "order": list(self.provider_order),
-                "allow_fallbacks": True,
-            }
         key = request_key(
             {
                 "validation_version": 1,
@@ -228,13 +229,22 @@ class Cascade:
     async def _confirm_stages(
         self, paper: Paper, verdicts: dict[str, Verdict], skip: set[str] = frozenset()
     ) -> list[Stage]:
+        """One concurrent call per selection. Every call finishes before a failure is raised,
+        so the journal keeps each completed stage for reuse when the paper is retried."""
         assert self.confirm is not None
-        stages = []
-        for s in self.selections:
-            if s.slug in skip or verdicts[s.slug].tier not in CONFIRM_TIERS:
-                continue
-            stages.append(await self._stage(StageRole.CONFIRM, self.confirm, paper, [s]))
-        return stages
+        todo = [
+            s
+            for s in self.selections
+            if s.slug not in skip and verdicts[s.slug].tier in CONFIRM_TIERS
+        ]
+        results = await asyncio.gather(
+            *(self._stage(StageRole.CONFIRM, self.confirm, paper, [s]) for s in todo),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return results
 
     async def screen(self, paper: Paper) -> ScreenResult:
         stages = [await self._stage(StageRole.SCREEN, self.primary, paper, self.selections)]

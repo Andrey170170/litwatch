@@ -62,11 +62,7 @@ def build_cascade(
             client,
             settings.screen_model,
             settings.screen_effort,
-            provider_order=(
-                settings.screen_provider_order
-                if settings.screen_model == "openai/gpt-5.6-luna"
-                else ()
-            ),
+            provider_order=settings.providers_for(settings.screen_model),
             timeout_seconds=settings.screen_timeout_seconds,
         ),
         ModelScreener(
@@ -74,11 +70,18 @@ def build_cascade(
             settings.rescreen_model,
             settings.rescreen_effort,
             max_completion_tokens=settings.rescreen_max_completion_tokens,
+            provider_order=settings.providers_for(settings.rescreen_model),
             operation="rescreen",
         )
         if rescreen
         else None,
-        ModelScreener(client, settings.confirm_model, settings.confirm_effort, operation="confirm")
+        ModelScreener(
+            client,
+            settings.confirm_model,
+            settings.confirm_effort,
+            provider_order=settings.providers_for(settings.confirm_model),
+            operation="confirm",
+        )
         if confirm
         else None,
         rescreen_ignored_keywords=settings.rescreen_ignored_keywords,
@@ -116,7 +119,8 @@ def build_router(
 
 def build_digester(settings: Settings, model: str | None = None) -> Digester:
     client = openrouter_client(settings.openrouter_api_key)
-    return Digester(client, model or settings.digest_model, settings.digest_effort)
+    model = model or settings.digest_model
+    return Digester(client, model, settings.digest_effort, settings.providers_for(model))
 
 
 def build_deep(settings: Settings, selections: list[Selection]) -> DeepProcessor | None:
