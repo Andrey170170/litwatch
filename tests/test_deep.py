@@ -365,3 +365,15 @@ async def test_nul_characters_are_replaced_before_text_and_jsonb_writes(papers_d
     clean = "before�after"
     assert row["body"] == clean and row["enrichment"] == {"summary": clean}
     assert row["enrichment_error"] == clean and row["deep_trace"] == [{"output": clean}]
+
+
+async def test_run_and_paper_errors_with_nul_still_persist(papers_db):
+    run_id = await deep_mod.db.start_run(papers_db, "daily", None, None)
+    await deep_mod.db.finish_run(papers_db, run_id, error="a\x00b", stage_errors="deep: c\x00d")
+    run = await deep_mod.db.get_run(papers_db, run_id)
+    assert (run["error"], run["stage_errors"]) == ("a\ufffdb", "deep: c\ufffdd")
+    await deep_mod.db.store_screen_error(papers_db, "x", "e\x00")
+    await deep_mod.db.store_route_error(papers_db, "x", "f\x00")
+    row = await (await papers_db.execute("SELECT * FROM papers WHERE id = 'x'")).fetchone()
+    assert (row["screen_error"], row["route_error"]) == ("e\ufffd", "f\ufffd")
+    await papers_db.execute("DELETE FROM runs WHERE id = %s", (run_id,))

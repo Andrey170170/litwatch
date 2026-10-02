@@ -253,7 +253,9 @@ def parse_screen(raw: dict[str, Any] | None) -> ScreenResult | None:
 
 async def store_screen_error(conn: psycopg.AsyncConnection, paper_id: str, error: str) -> None:
     """Leaves the paper pending so the next run retries it."""
-    await conn.execute("UPDATE papers SET screen_error = %s WHERE id = %s", (error, paper_id))
+    await conn.execute(
+        "UPDATE papers SET screen_error = %s WHERE id = %s", (nul_free(error), paper_id)
+    )
 
 
 async def verdicts_for(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Verdict]:
@@ -462,6 +464,8 @@ async def start_run(
 
 
 async def finish_run(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
+    # Error texts come from exceptions; one with a NUL must not leave the run unfinished.
+    fields = nul_free(fields)
     if "tiers" in fields:
         fields["tiers"] = Jsonb(fields["tiers"])
     if "intake" in fields:
@@ -699,7 +703,9 @@ async def store_route(
 
 
 async def store_route_error(conn: psycopg.AsyncConnection, paper_id: str, error: str) -> None:
-    await conn.execute("UPDATE papers SET route_error = %s WHERE id = %s", (error, paper_id))
+    await conn.execute(
+        "UPDATE papers SET route_error = %s WHERE id = %s", (nul_free(error), paper_id)
+    )
 
 
 async def get_paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
