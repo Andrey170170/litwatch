@@ -34,3 +34,49 @@ async def test_busy_lock_still_closes_the_runs_archive_clients():
         await run(Busy(), None, None, "daily", 1, router=router, deep=deep)
     routing.aclose.assert_awaited_once()
     fetching.aclose.assert_awaited_once()
+
+
+async def test_failed_enrichment_stage_still_writes_the_digest(monkeypatch):
+    from litwatch import ingest
+
+    finished, digested = {}, []
+
+    async def start_run(conn, kind, since, until):
+        return 7
+
+    async def finish_run(conn, run_id, **fields):
+        finished.update(fields)
+
+    async def fails(*args, **kwargs):
+        raise RuntimeError("Zotero is down")
+
+    async def noop(*args, **kwargs):
+        return None
+
+    async def digest(conn, digester, selections, summary):
+        digested.append(summary.stage_errors)
+
+    journal = SimpleNamespace(total=AsyncMock(return_value=0.0))
+    monkeypatch.setattr(ingest.db, "start_run", start_run)
+    monkeypatch.setattr(ingest.db, "finish_run", finish_run)
+    monkeypatch.setattr(ingest, "CallJournal", lambda conn, run_id: journal)
+    monkeypatch.setattr(ingest, "_fetch", noop)
+    monkeypatch.setattr(ingest, "_screen", noop)
+    monkeypatch.setattr(ingest, "route_pending", fails)
+    monkeypatch.setattr(ingest, "process_deep", noop)
+    monkeypatch.setattr(ingest, "write_run_digest", digest)
+    cascade = SimpleNamespace(selections=[])
+    summary = await ingest._run(
+        None,
+        SimpleNamespace(deep_max_per_run=10),
+        cascade,
+        "daily",
+        1,
+        True,
+        router=object(),
+        digester=object(),
+        deep=object(),
+    )
+    assert digested == ["routing: RuntimeError: Zotero is down"]
+    assert finished["error"] is None and finished["stage_errors"] == digested[0]
+    assert summary.error is None

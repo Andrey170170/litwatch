@@ -104,6 +104,21 @@ async def upsert_papers(
     return inserted, updated
 
 
+def nul_free(value: Any) -> Any:
+    """`value` with NUL characters replaced, recursively: PostgreSQL text and jsonb reject them.
+
+    Extracted paper text and agent cell output occasionally carry a stray NUL byte; one such
+    character must not make a whole write fail.
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "\ufffd")
+    if isinstance(value, dict):
+        return {nul_free(k): nul_free(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [nul_free(v) for v in value]
+    return value
+
+
 def row_to_paper(row: dict[str, Any]) -> Paper:
     return Paper(
         id=row["id"],
@@ -238,7 +253,9 @@ def parse_screen(raw: dict[str, Any] | None) -> ScreenResult | None:
 
 async def store_screen_error(conn: psycopg.AsyncConnection, paper_id: str, error: str) -> None:
     """Leaves the paper pending so the next run retries it."""
-    await conn.execute("UPDATE papers SET screen_error = %s WHERE id = %s", (error, paper_id))
+    await conn.execute(
+        "UPDATE papers SET screen_error = %s WHERE id = %s", (nul_free(error), paper_id)
+    )
 
 
 async def verdicts_for(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Verdict]:
@@ -447,6 +464,8 @@ async def start_run(
 
 
 async def finish_run(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
+    # Error texts come from exceptions; one with a NUL must not leave the run unfinished.
+    fields = nul_free(fields)
     if "tiers" in fields:
         fields["tiers"] = Jsonb(fields["tiers"])
     if "intake" in fields:
@@ -684,7 +703,9 @@ async def store_route(
 
 
 async def store_route_error(conn: psycopg.AsyncConnection, paper_id: str, error: str) -> None:
-    await conn.execute("UPDATE papers SET route_error = %s WHERE id = %s", (error, paper_id))
+    await conn.execute(
+        "UPDATE papers SET route_error = %s WHERE id = %s", (nul_free(error), paper_id)
+    )
 
 
 async def get_paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
@@ -697,7 +718,7 @@ async def get_paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, A
 async def store_body(conn: psycopg.AsyncConnection, paper_id: str, body: str, source: str) -> None:
     await conn.execute(
         "UPDATE papers SET body = %s, body_source = %s, body_fetched_at = now() WHERE id = %s",
-        (body, source, paper_id),
+        (nul_free(body), source, paper_id),
     )
 
 
@@ -761,7 +782,13 @@ async def store_enrichment(
                           deep_attempts = deep_attempts + 1, zotero_enriched_at = NULL
         WHERE id = %s
         """,
-        (Jsonb(result), model, Jsonb(trace), Jsonb(stats), paper_id),
+        (
+            Jsonb(nul_free(result)),
+            nul_free(model),
+            Jsonb(nul_free(trace)),
+            Jsonb(nul_free(stats)),
+            paper_id,
+        ),
     )
 
 
@@ -780,9 +807,9 @@ async def store_enrichment_error(
         WHERE id = %s
         """,
         (
-            error,
-            Jsonb(trace) if trace is not None else None,
-            Jsonb(stats) if stats else None,
+            nul_free(error),
+            Jsonb(nul_free(trace)) if trace is not None else None,
+            Jsonb(nul_free(stats)) if stats else None,
             paper_id,
         ),
     )

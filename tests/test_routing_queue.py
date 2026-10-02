@@ -1,6 +1,6 @@
 """Queue regression tests against a disposable PostgreSQL database.
 
-Set LITWATCH_TEST_DATABASE_URL to an empty test DB; never a production database.
+Set TEST_DATABASE_URL to an empty test DB; never a production database.
 """
 
 import os
@@ -16,9 +16,9 @@ from tests.conftest import screen_result
 
 @pytest.fixture
 async def queue():
-    dsn = os.environ.get("LITWATCH_TEST_DATABASE_URL")
+    dsn = os.environ.get("TEST_DATABASE_URL")
     if not dsn:
-        pytest.skip("requires disposable LITWATCH_TEST_DATABASE_URL")
+        pytest.skip("requires disposable TEST_DATABASE_URL")
     async with await db.connect(dsn) as conn:
         await db.apply_schema(conn)
         # All test writes go into a session-local table, including delivery receipts.

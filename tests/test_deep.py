@@ -1,6 +1,7 @@
 """Deep processing: the job protocol with litwatch-deep and what gets written to Zotero."""
 
 import json
+import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -312,3 +313,88 @@ def test_monitoring_extension_in_note_and_tags():
     # A paper tier 1 in both selections carries both extensions; shared tags appear once.
     both = enrichment_tags(RESULT | {"monitoring": MONITORING})
     assert both.count("litwatch:signal:probes") == 1
+
+
+async def test_one_papers_failed_write_does_not_end_the_batch(row, monkeypatch):
+    second = {**row, "id": "2601.00002", "body": "# Body", "body_source": "html"}
+    fake_db = FakeDb(row)
+    fake_db.deep_pending = lambda conn, paper_id=None, limit=20: _rows([row, second])
+    stored = []
+
+    async def store_enrichment(conn, paper_id, result, model, trace, stats):
+        if paper_id == row["id"]:
+            raise ValueError("unsupported Unicode escape sequence")
+        stored.append(paper_id)
+
+    fake_db.store_enrichment = store_enrichment
+    monkeypatch.setattr(deep_mod, "db", fake_db)
+    fake = FakeDeep({"result": RESULT, "trace": [], "stats": STATS, "model": "m"})
+    s = await DeepProcessor(client(fake), None, [FAITH], fetcher=FakeFetcher()).process_pending(
+        SimpleNamespace()
+    )
+    assert (s.processed, s.failed, stored) == (1, 1, ["2601.00002"])
+    assert fake_db.calls == [
+        ("store_enrichment_error", row["id"], "ValueError: unsupported Unicode escape sequence")
+    ]
+
+
+async def test_a_malformed_verdict_fails_only_its_paper(row, monkeypatch):
+    second = {**row, "id": "2601.00002", "body": "# Body", "body_source": "html"}
+    fake_db = FakeDb(row)
+    fake_db.deep_pending = lambda conn, paper_id=None, limit=20: _rows([row, second])
+    verdicts = fake_db.verdicts_for
+
+    async def verdicts_for(conn, paper_id):
+        if paper_id == row["id"]:
+            raise ValueError("invalid confidence")
+        return await verdicts(conn, paper_id)
+
+    fake_db.verdicts_for = verdicts_for
+    monkeypatch.setattr(deep_mod, "db", fake_db)
+    fake = FakeDeep({"result": RESULT, "trace": [], "stats": STATS, "model": "m"})
+    s = await DeepProcessor(client(fake), None, [FAITH], fetcher=FakeFetcher()).process_pending(
+        SimpleNamespace()
+    )
+    assert (s.processed, s.failed) == (1, 1)
+
+
+async def _rows(rows):
+    return rows
+
+
+@pytest.fixture
+async def papers_db():
+    dsn = os.environ.get("TEST_DATABASE_URL")
+    if not dsn:
+        pytest.skip("requires disposable TEST_DATABASE_URL")
+    async with await deep_mod.db.connect(dsn) as conn:
+        await deep_mod.db.apply_schema(conn)
+        await conn.execute("CREATE TEMP TABLE papers (LIKE public.papers INCLUDING ALL)")
+        await conn.execute("INSERT INTO papers (id, title, abstract) VALUES ('x', 'T', 'A')")
+        yield conn
+
+
+async def test_nul_characters_are_replaced_before_text_and_jsonb_writes(papers_db):
+    nul = "before\x00after"
+    await deep_mod.db.store_body(papers_db, "x", nul, "pdf")
+    await deep_mod.db.store_enrichment(
+        papers_db, "x", {"summary": nul}, nul, [{"output": nul, nul: 1}], {"seconds": 1}
+    )
+    await deep_mod.db.store_enrichment_error(papers_db, "x", nul, [{"output": nul}])
+    row = await (await papers_db.execute("SELECT * FROM papers WHERE id = 'x'")).fetchone()
+    clean = "before�after"
+    assert row["body"] == clean and row["enrichment"] == {"summary": clean}
+    assert row["enrichment_model"] == clean
+    assert row["enrichment_error"] == clean and row["deep_trace"] == [{"output": clean}]
+
+
+async def test_run_and_paper_errors_with_nul_still_persist(papers_db):
+    run_id = await deep_mod.db.start_run(papers_db, "daily", None, None)
+    await deep_mod.db.finish_run(papers_db, run_id, error="a\x00b", stage_errors="deep: c\x00d")
+    run = await deep_mod.db.get_run(papers_db, run_id)
+    assert (run["error"], run["stage_errors"]) == ("a\ufffdb", "deep: c\ufffdd")
+    await deep_mod.db.store_screen_error(papers_db, "x", "e\x00")
+    await deep_mod.db.store_route_error(papers_db, "x", "f\x00")
+    row = await (await papers_db.execute("SELECT * FROM papers WHERE id = 'x'")).fetchone()
+    assert (row["screen_error"], row["route_error"]) == ("e\ufffd", "f\ufffd")
+    await papers_db.execute("DELETE FROM runs WHERE id = %s", (run_id,))
