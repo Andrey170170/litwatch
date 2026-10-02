@@ -251,6 +251,24 @@ async def test_revision_keeps_the_first_posting_and_the_verdict_unless_rewritten
     assert await db.routable(conn) == [] and await db.deep_pending(conn) == []
 
 
+async def test_shown_metadata_changes_reach_the_projection_and_others_do_not(conn):
+    paper = canonical().model_copy(update={"version": 1})
+    await db.upsert_papers(conn, [paper], source="oai")
+    await conn.execute("UPDATE papers SET screened_at = now() - interval '3 days', best_tier = 2")
+    since = NOW - timedelta(days=1)
+
+    async def projected():
+        return [p["id"] for p in await db.list_papers(conn, None, [2], since, 10)]
+
+    await db.upsert_papers(conn, [paper.model_copy(update={"doi": "10.1/x"})], source="oai")
+    assert (await rows(conn, "papers"))[0]["metadata_changed_at"] is None
+    assert await projected() == []
+    earlier = (NOW - timedelta(days=90)).isoformat()
+    await db.upsert_papers(conn, [paper.model_copy(update={"published": earlier})], source="oai")
+    assert (await rows(conn, "papers"))[0]["metadata_changed_at"] is not None
+    assert await projected() == [paper.id]
+
+
 async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):
     calls = []
 

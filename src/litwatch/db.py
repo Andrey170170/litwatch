@@ -91,7 +91,13 @@ async def upsert_papers(
                             ELSE papers.version_history END,
                         doi = coalesce(EXCLUDED.doi,papers.doi),
                         journal_ref = coalesce(EXCLUDED.journal_ref,papers.journal_ref),
-                        license = coalesce(EXCLUDED.license,papers.license)
+                        license = coalesce(EXCLUDED.license,papers.license),
+                        -- What the lab sees (Notion) changed: the projection picks it up.
+                        metadata_changed_at = CASE
+                            WHEN (papers.title, papers.abstract, papers.authors, papers.published)
+                                 IS DISTINCT FROM (EXCLUDED.title, EXCLUDED.abstract,
+                                    EXCLUDED.authors, least(papers.published, EXCLUDED.published))
+                            THEN now() ELSE papers.metadata_changed_at END
                     WHERE %(source)s <> 'atom'
                       AND (papers.version IS NULL OR EXCLUDED.version IS NULL
                            OR EXCLUDED.version >= papers.version)
@@ -599,8 +605,11 @@ async def list_papers(
         clauses.append("p.best_tier = ANY(%s)")
         params.append(tiers)
     if since:
-        # "changed since": screening, routing, and deep processing all matter to the projection
-        clauses.append("greatest(p.screened_at, p.routed_at, p.enriched_at) >= %s")
+        # "changed since": screening, routing, deep processing and shown metadata all matter to
+        # the projection
+        clauses.append(
+            "greatest(p.screened_at, p.routed_at, p.enriched_at, p.metadata_changed_at) >= %s"
+        )
         params.append(since)
     params.append(limit)
     return await (

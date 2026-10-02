@@ -174,7 +174,11 @@ A revision of a paper we already stored keeps its verdicts, unless canonical
 metadata rewrote its title or abstract (similarity below 0.8; this also covers a
 screened Atom fallback whose canonical text differs), which clears `screened_at`
 so the next run screens it again. Intake always harvests raw version history,
-with or without archive delivery. Coverage records the version
+with or without archive delivery.
+
+`GET /papers?since=` means "changed since" for the Notion projection: screening,
+routing, deep processing, or a change to the shown metadata (title, abstract,
+authors, `published`), stamped in `papers.metadata_changed_at`. Coverage records the version
 each source covered; a newer version of a tier 1/2 paper gets one dated line under
 "Updated since we covered them", once per source and version (`digest_revisions`).
 
