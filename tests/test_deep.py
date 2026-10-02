@@ -338,6 +338,26 @@ async def test_one_papers_failed_write_does_not_end_the_batch(row, monkeypatch):
     ]
 
 
+async def test_a_malformed_verdict_fails_only_its_paper(row, monkeypatch):
+    second = {**row, "id": "2601.00002", "body": "# Body", "body_source": "html"}
+    fake_db = FakeDb(row)
+    fake_db.deep_pending = lambda conn, paper_id=None, limit=20: _rows([row, second])
+    verdicts = fake_db.verdicts_for
+
+    async def verdicts_for(conn, paper_id):
+        if paper_id == row["id"]:
+            raise ValueError("invalid confidence")
+        return await verdicts(conn, paper_id)
+
+    fake_db.verdicts_for = verdicts_for
+    monkeypatch.setattr(deep_mod, "db", fake_db)
+    fake = FakeDeep({"result": RESULT, "trace": [], "stats": STATS, "model": "m"})
+    s = await DeepProcessor(client(fake), None, [FAITH], fetcher=FakeFetcher()).process_pending(
+        SimpleNamespace()
+    )
+    assert (s.processed, s.failed) == (1, 1)
+
+
 async def _rows(rows):
     return rows
 

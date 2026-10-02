@@ -153,13 +153,13 @@ class DeepProcessor:
     ) -> ProcessSummary:
         s = ProcessSummary()
         for row in await db.deep_pending(conn, paper_id, limit):
-            verdicts = await db.verdicts_for(conn, row["id"])
-            tier1 = [
-                slug for slug, v in verdicts.items() if v.tier == 1 and slug in self.selections
-            ]
-            if paper_id and not tier1:
-                tier1 = [slug for slug in self.selections if self.selections[slug].has_rubric]
             try:
+                verdicts = await db.verdicts_for(conn, row["id"])
+                tier1 = [
+                    slug for slug, v in verdicts.items() if v.tier == 1 and slug in self.selections
+                ]
+                if paper_id and not tier1:
+                    tier1 = [slug for slug in self.selections if self.selections[slug].has_rubric]
                 error = await self._process_one(conn, row, s, tier1)
             except Exception as exc:  # noqa: BLE001 - one paper must not end the batch
                 error = f"{type(exc).__name__}: {exc}"
