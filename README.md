@@ -160,6 +160,24 @@ successful sources; body, tier counts, and coverage commit together. Analysis fr
 an interrupted run also carries forward. Concurrent screening waits for digest
 generation so its results cannot fall behind the cutoff.
 
+### Revisions and older papers
+
+OAI intake admits every changed record, so a revision or late cross-listing of an
+old paper we never stored arrives as a first sighting. `published` is the v1 date
+from the raw version history (arXiv's canonical `<created>` can be a later
+revision's date). A member first posted more than 7 days before we fetched it is
+screened, routed and deep-processed as usual, but labelled in the digest: tier 1
+keeps its place with a `vN, first posted …` badge, tier 2 goes to a separate
+"Older papers, newly updated" section.
+
+A revision of a paper we already stored keeps its verdicts, unless canonical
+metadata rewrote its title or abstract (similarity below 0.8; this also covers a
+screened Atom fallback whose canonical text differs), which clears `screened_at`
+so the next run screens it again. Intake always harvests raw version history,
+with or without archive delivery. Coverage records the version
+each source covered; a newer version of a tier 1/2 paper gets one dated line under
+"Updated since we covered them", once per source and version (`digest_revisions`).
+
 `litwatch digest --run ID` previews without consuming coverage (model calls still
 cost money); add `--store` to save. Rewriting an issue uses its original snapshot,
 even if the current rubric or paper tier changed. `--days N` is an explicit

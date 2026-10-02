@@ -13,7 +13,9 @@ from litwatch.digest import (
     SelectionOutput,
     assign,
     by_tier,
+    render_general_digest,
     render_general_input,
+    render_revisions,
     render_selection_digest,
     render_selection_input,
 )
@@ -233,6 +235,85 @@ async def test_a_bad_selection_digest_is_skipped_not_fatal():
     digests = await Digester(client, "k").write_all([FAITH_D], papers)
     assert [d.source for d in digests] == [GENERAL]
     assert len(completions.calls) == 3  # general once, the selection twice before giving up
+
+
+def older(row: dict, version: int = 3) -> dict:
+    return {**row, "version": version, "first_posted": "2026-05-27T03:26:03+00:00"}
+
+
+def test_older_papers_are_badged_at_tier1_and_grouped_at_tier2():
+    papers = [
+        older(member("1", "Old must", {"cot-faithfulness": 1}, CARD)),
+        member("2", "New rec", {"cot-faithfulness": 2}),
+        older(member("3", "Old rec", {"cot-faithfulness": 2})),
+        older(member("4", "Old interp", {"mech-interp": 2}), version=1),
+    ]
+    owned = assign([FAITH, INTERP], papers)
+    text = render_general_input([FAITH, INTERP], owned)
+    assert "(arXiv 1 · v3, first posted May 27, 2026)" in text
+    assert "## Tier 2: Old rec" not in text and "Mechanistic interpretability (slug" not in text
+    assert text.endswith(
+        "# Older papers, newly updated (2 tier 2 papers)\n"
+        "- Old rec (arXiv 3): CoT faithfulness: Because.\n"
+        "- Old interp (arXiv 4): Mechanistic interpretability: Because."
+    )
+    out = GeneralOutput(
+        overview="Day.",
+        sections=[Section(slug="cot-faithfulness", overview="O.", must_read=[], recommended=[])],
+        updated=[Note(id="4", text="Interp update.")],
+    )
+    body = render_general_digest([FAITH, INTERP], owned, out)
+    assert (
+        "**CoT faithfulness** · 1 must read, 1 recommended, 1 older newly updated, "
+        "0 good to know. O.\n"
+        "- [Old must](https://arxiv.org/abs/1) · v3, first posted May 27, 2026 — Probes predict"
+    ) in body
+    assert body.endswith(
+        "**Older papers, newly updated** · 2 recommended papers first posted weeks or months ago.\n"
+        "- [Old interp](https://arxiv.org/abs/4) · Mechanistic interpretability · "
+        "first posted May 27, 2026 — Interp update.\n"
+        "Plus 1 more in the Papers table."
+    )
+
+
+def test_selection_digest_lists_older_papers_apart_and_counts_the_rest():
+    papers = [
+        member("2", "New rec", {"cot-faithfulness": 2}),
+        older(member("3", "Old rec", {"cot-faithfulness": 2})),
+        older(member("4", "Old two", {"cot-faithfulness": 2})),
+    ]
+    groups = by_tier(FAITH, papers)
+    text = render_selection_input(FAITH, groups)
+    assert "Abstract" in text.split("## Older papers")[0]
+    assert "## Older papers, newly updated (2 tier 2 papers)\n- Old rec (arXiv 3)" in text
+    out = SelectionOutput(
+        overview="O.",
+        must_read=[],
+        recommended=[Note(id="2", text="New.")],
+        updated=[Note(id="3", text="Revised.")],
+    )
+    body = render_selection_digest(FAITH, groups, out)
+    assert (
+        "**Older papers, newly updated**\n- [Old rec](https://arxiv.org/abs/3) · v3, "
+        "first posted May 27, 2026 — Revised."
+    ) in body
+    assert body.endswith(
+        "Plus 1 older recommended paper newly updated in the Papers table, view CoT faithfulness."
+    )
+
+
+def test_revision_notes_name_version_tiers_and_first_coverage():
+    row = {
+        **member("1", "Paper", {"cot-faithfulness": 1, "mech-interp": 2}),
+        "version": 2,
+        "covered_at": "2026-09-12T08:00:00+00:00",
+    }
+    assert render_revisions([FAITH, INTERP], [row], GENERAL) == (
+        "**Updated since we covered them**\n- [Paper](https://arxiv.org/abs/1) · v2, "
+        "tier 1 in CoT faithfulness, tier 2 in Mechanistic interpretability · "
+        "first covered Sep 12, 2026"
+    )
+    assert "Mechanistic" not in render_revisions([FAITH, INTERP], [row], FAITH.slug)
 
 
 def test_historical_title_matching_is_exact_and_unambiguous():

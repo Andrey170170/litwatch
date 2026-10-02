@@ -4,6 +4,11 @@ The general digest is the whole day in one page: an overview, then a section per
 its must-read and top recommended papers; a paper in several selections is placed under the one
 where it ranks highest. A selection digest covers every member of that selection in more depth.
 
+A paper first posted well before we first fetched it (a revision or a late cross-listing of
+older work) still goes through screening and the curated pipeline, but is labelled as such: tier 1
+with a badge, tier 2 in a section of its own. Covered tier 1/2 papers with a newer version get a
+dated note, once per version.
+
 The model returns structured notes keyed by arXiv id; the markdown is rendered here, so titles
 and links are never the model's to get wrong. Markdown stays within the subset the Notion
 projection renders: `**bold**` lines, `- ` bullets, `[title](url)` links.
@@ -15,6 +20,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -33,6 +39,10 @@ RECOMMENDED_CAP = 8  # tier 2 bullets per selection digest; the rest are counted
 GENERAL_RECOMMENDED_CAP = 5  # tier 2 bullets per section of the general digest
 EMPTY_DIGEST = "No new member papers in this run."
 TIER3_CAP = 40  # tier 3 titles shown to the model per selection digest
+UPDATED_CAP = 5  # older tier 2 bullets per digest; the rest are counted
+OLDER_INPUT_CAP = 30  # older tier 2 titles shown to the model per digest
+OLDER_AFTER = timedelta(days=7)  # first posted this long before we first fetched it
+UPDATED_TITLE = "Older papers, newly updated"
 
 
 class Note(BaseModel):
@@ -48,6 +58,11 @@ class SelectionOutput(BaseModel):
     must_read: list[Note] = Field(description="Every tier 1 paper, two or three sentences each")
     recommended: list[Note] = Field(
         description=f"Up to {RECOMMENDED_CAP} tier 2 papers, one sentence each, most notable first"
+    )
+    updated: list[Note] = Field(
+        default_factory=list,
+        description=f"Up to {UPDATED_CAP} of the older papers newly updated, one sentence each, "
+        "most notable first",
     )
 
 
@@ -66,6 +81,11 @@ class Section(BaseModel):
 class GeneralOutput(BaseModel):
     overview: str = Field(description="Three or four sentences across the whole feed")
     sections: list[Section] = Field(description="One per selection given, in the order given")
+    updated: list[Note] = Field(
+        default_factory=list,
+        description=f"Up to {UPDATED_CAP} of the older papers newly updated, one sentence each, "
+        "most notable first",
+    )
 
 
 SELECTION_PROMPT = f"""You write the daily digest for one selection of an NLP research lab's \
@@ -82,6 +102,9 @@ entry per tier 1 paper, all of them, two or three \
 sentences each: what it contributes, by what method, against what ground truth or evidence; \
 where the card names a detection method or ground truth, center on that. `recommended`: at most \
 {RECOMMENDED_CAP} tier 2 papers, the most notable first, one sentence each on what the paper \
+does. A paper marked "first posted" on a date is older work revised or newly listed today: \
+describe it as an update, never as new work. `updated`: at most {UPDATED_CAP} of the papers \
+listed under {UPDATED_TITLE}, the most notable first, one sentence each on what the paper \
 does. Use each paper's arXiv id as `id`, exactly as given, and never mention arXiv ids in \
 prose; in the overview refer to a paper by a short name from its title. Do not repeat titles \
 inside the notes; the reader sees the title next to each. Be concrete about methods and \
@@ -99,7 +122,10 @@ in the order given, with its slug exactly as given. In each: `overview`, one or 
 what today adds to that subject; `must_read`, one entry per tier 1 paper, all of them, one or \
 two sentences each on what it contributes and by what method; `recommended`, at most \
 {GENERAL_RECOMMENDED_CAP} tier 2 papers, the most notable first, one sentence each on what the \
-paper does. Use each paper's arXiv id as `id`, exactly as given, and never mention arXiv ids in \
+paper does. A paper marked "first posted" on a date is older work revised or newly listed \
+today: describe it as an update, never as new work. `updated`: at most {UPDATED_CAP} of the papers \
+listed under {UPDATED_TITLE}, the most notable first, one sentence each on what the paper does. \
+Use each paper's arXiv id as `id`, exactly as given, and never mention arXiv ids in \
 prose; refer to a paper by a short name from its title. Do not repeat titles inside the notes; \
 the reader sees the title next to each. Be concrete about methods and claims, do not hype, do \
 not speculate beyond what you are given."""
@@ -112,6 +138,54 @@ class Digest:
     body: str  # markdown
     model: str | None = None
     cost: float | None = None
+
+
+# -- older papers and revisions --------------------------------------------------------------------
+
+
+def first_posted(row: dict[str, Any]) -> str | None:
+    """The v1 date of a paper first fetched well after it was posted, else None."""
+    published, fetched = row.get("published"), row.get("fetched_at")
+    if (
+        isinstance(published, datetime)
+        and isinstance(fetched, datetime)
+        and fetched - published > OLDER_AFTER
+    ):
+        return published.isoformat()
+    return None
+
+
+def is_older(row: dict[str, Any]) -> bool:
+    return bool(row.get("first_posted"))
+
+
+def _day(value: str | datetime) -> str:
+    day = value if isinstance(value, datetime) else datetime.fromisoformat(value)
+    return f"{day:%b} {day.day}, {day.year}"
+
+
+def _badge(row: dict[str, Any]) -> str:
+    """` · v3, first posted May 27, 2026` for an older paper; nothing for a new one."""
+    if not is_older(row):
+        return ""
+    version = f"v{row['version']}, " if (row.get("version") or 1) > 1 else ""
+    return f" · {version}first posted {_day(row['first_posted'])}"
+
+
+def render_revisions(selections: list[Selection], rows: list[dict[str, Any]], source: str) -> str:
+    """Covered papers with a newer version, one dated line each; no model call."""
+    names = {s.slug: s.name for s in selections}
+    lines = ["**Updated since we covered them**"]
+    for row in rows:
+        tiers = ", ".join(
+            f"tier {v['tier']} in {names[slug]}"
+            for slug, v in (row.get("verdicts") or {}).items()
+            if slug in names and v["tier"] <= 2 and source in (GENERAL, slug)
+        )
+        lines.append(
+            f"- {_link(row)} · v{row['version']}, {tiers} · first covered {_day(row['covered_at'])}"
+        )
+    return "\n".join(lines)
 
 
 # -- grouping and prompt inputs --------------------------------------------------------------------
@@ -169,22 +243,40 @@ def _card_lines(row: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _older_lines(rows: list[tuple[str, dict[str, Any]]], heading: str = "##") -> list[str]:
+    """(reason, row) pairs as a capped title list for the model."""
+    lines = [f"{heading} {UPDATED_TITLE} ({len(rows)} tier 2 papers)"]
+    for reason, row in rows[:OLDER_INPUT_CAP]:
+        lines.append(f"- {row['title']} (arXiv {row['id']}): {reason}")
+    if len(rows) > OLDER_INPUT_CAP:
+        lines.append(f"- and {len(rows) - OLDER_INPUT_CAP} more")
+    return lines
+
+
 def render_selection_input(
     selection: Selection, groups: dict[int, list[dict[str, Any]]], with_slug: bool = False
 ) -> str:
+    """Older tier 2 papers are listed separately here, and once for all sections in general."""
     head = f"# {selection.name} (slug: {selection.slug})" if with_slug else f"# {selection.name}"
     lines = [head, f"Subject: {selection.subject}"]
     if selection.rubric:
         lines.append(f"Tier 1 rubric: {selection.rubric}")
-    for tier in (1, 2):
-        for row in groups[tier]:
-            lines += ["", f"## Tier {tier}: {row['title']} (arXiv {row['id']})"]
-            lines.append(f"Reason: {row['verdicts'][selection.slug]['reason']}")
-            if tier == 1:
-                lines += _card_lines(row)
-            else:
-                lines.append(f"Abstract: {(row.get('abstract') or '').strip()}")
-    if with_slug or not groups[3]:
+    for row in groups[1]:
+        lines += ["", f"## Tier 1: {row['title']} (arXiv {row['id']}{_badge(row)})"]
+        lines.append(f"Reason: {row['verdicts'][selection.slug]['reason']}")
+        lines += _card_lines(row)
+    for row in groups[2]:
+        if is_older(row):
+            continue
+        lines += ["", f"## Tier 2: {row['title']} (arXiv {row['id']})"]
+        lines.append(f"Reason: {row['verdicts'][selection.slug]['reason']}")
+        lines.append(f"Abstract: {(row.get('abstract') or '').strip()}")
+    if with_slug:
+        return "\n".join(lines)
+    older = [(r["verdicts"][selection.slug]["reason"], r) for r in groups[2] if is_older(r)]
+    if older:
+        lines += ["", *_older_lines(older)]
+    if not groups[3]:
         return "\n".join(lines)
     lines += ["", f"## Tier 3 ({len(groups[3])} papers)"]
     for row in groups[3][:TIER3_CAP]:
@@ -196,12 +288,20 @@ def render_selection_input(
 
 
 def render_general_input(selections: list[Selection], owned: Groups) -> str:
-    """One block per selection that owns a tier 1 or 2 paper today."""
+    """One block per selection that owns a tier 1 or new tier 2 paper, then older tier 2 papers."""
     blocks = [
         render_selection_input(s, owned[s.slug], with_slug=True)
         for s in selections
-        if owned[s.slug][1] or owned[s.slug][2]
+        if owned[s.slug][1] or any(not is_older(r) for r in owned[s.slug][2])
     ]
+    older = [
+        (f"{s.name}: {r['verdicts'][s.slug]['reason']}", r)
+        for s in selections
+        for r in owned[s.slug][2]
+        if is_older(r)
+    ]
+    if older:
+        blocks.append("\n".join(_older_lines(older, heading="#")))
     return "\n\n---\n\n".join(blocks)
 
 
@@ -241,6 +341,10 @@ def _count(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
+def _join(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
 def render_selection_digest(
     selection: Selection, groups: dict[int, list[dict[str, Any]]], out: SelectionOutput | None
 ) -> str:
@@ -263,21 +367,30 @@ def render_selection_digest(
             f"{'is' if len(t3) == 1 else 'are'} {where}."
         )
         return "\n\n".join(parts)
-    rest = len(t2)
+    new = [r for r in t2 if not is_older(r)]
+    older = [r for r in t2 if is_older(r)]
+    rest, rest_older = len(new), len(older)
     if out is not None:
         if t1:
-            parts.append("**Must read**\n" + "\n".join(_all_bullets(out.must_read, t1)))
-        if t2:
-            bullets = _bullets(out.recommended[:RECOMMENDED_CAP], t2)
+            parts.append("**Must read**\n" + "\n".join(_all_bullets(out.must_read, t1, _badge)))
+        if new:
+            bullets = _bullets(out.recommended[:RECOMMENDED_CAP], new)
             parts.append("**Recommended**\n" + "\n".join(bullets))
-            rest = len(t2) - len(bullets)
+            rest = len(new) - len(bullets)
+        if older:
+            bullets = _bullets(out.updated[:UPDATED_CAP], older, _badge)
+            if bullets:
+                parts.append(f"**{UPDATED_TITLE}**\n" + "\n".join(bullets))
+            rest_older = len(older) - len(bullets)
     tail = []
     if rest:
         tail.append(f"{rest} more recommended")
+    if rest_older:
+        tail.append(f"{_count(rest_older, 'older recommended paper')} newly updated")
     if t3:
         tail.append(f"{len(t3)} good to know")
     if tail:
-        parts.append(f"Plus {' and '.join(tail)} {where}.")
+        parts.append(f"Plus {_join(tail)} {where}.")
     return "\n\n".join(parts)
 
 
@@ -305,21 +418,41 @@ def render_general_digest(
         if not (t1 or t2 or t3):
             continue
         sec = sections.get(s.slug)
-        if t1 or t2:
+        new = [r for r in t2 if not is_older(r)]
+        older = f", {len(t2) - len(new)} older newly updated" if len(t2) > len(new) else ""
+        if t1 or new:
             head = (
-                f"**{s.name}** · {len(t1)} must read, {len(t2)} recommended, "
+                f"**{s.name}** · {len(t1)} must read, {len(new)} recommended{older}, "
                 f"{len(t3)} good to know."
             )
         else:
-            head = f"**{s.name}** · nothing must read or recommended, {len(t3)} good to know."
+            head = (
+                f"**{s.name}** · nothing must read or recommended{older}, {len(t3)} good to know."
+            )
         if sec is not None:
             head += " " + " ".join(sec.overview.split())
         lines = [head]
-        suffix = lambda r, owner=s.slug: _also(selections, r, owner)  # noqa: E731
+        suffix = lambda r, owner=s.slug: _also(selections, r, owner) + _badge(r)  # noqa: E731
         if t1:
             lines += _all_bullets(sec.must_read if sec else [], t1, suffix)
-        if t2 and sec is not None:
-            lines += _bullets(sec.recommended[:GENERAL_RECOMMENDED_CAP], t2, suffix)
+        if new and sec is not None:
+            lines += _bullets(sec.recommended[:GENERAL_RECOMMENDED_CAP], new, suffix)
+        parts.append("\n".join(lines))
+    owner = {r["id"]: s.name for s in selections for r in owned[s.slug][2] if is_older(r)}
+    if owner:
+        older = [r for s in selections for r in owned[s.slug][2] if is_older(r)]
+        head = (
+            f"**{UPDATED_TITLE}** · {_count(len(older), 'recommended paper')} "
+            "first posted weeks or months ago."
+        )
+        bullets = _bullets(
+            out.updated[:UPDATED_CAP] if out else [],
+            older,
+            lambda r: f" · {owner[r['id']]}{_badge(r)}",
+        )
+        lines = [head, *bullets]
+        if len(older) > len(bullets):
+            lines.append(f"Plus {len(older) - len(bullets)} more in the Papers table.")
         parts.append("\n".join(lines))
     return "\n\n".join(parts) if parts else EMPTY_DIGEST
 

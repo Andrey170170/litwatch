@@ -293,6 +293,9 @@ def fetch_category(
                 continue
             paper.version = resolved.version
             paper.version_history = resolved.version_history
+            # Canonical <created> can be a later revision's date; v1 is the first posting.
+            if resolved.version_history[0]["version"] == 1:
+                paper.published = resolved.version_history[0]["date"]
         if missing or unresolved:
             batch.versions_error = (
                 f"Raw history absent for {len(missing)} and unresolved for "

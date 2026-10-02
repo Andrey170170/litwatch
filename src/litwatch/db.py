@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 from importlib import resources
 from typing import Any
 
@@ -40,11 +41,22 @@ async def upsert_papers(
 ) -> tuple[int, int]:
     """Insert new papers, refresh metadata on replacements. Returns (inserted, updated).
 
-    Screening state is untouched on update: a replacement does not re-trigger routing.
+    Screening state is kept on update unless canonical metadata rewrote the screened text
+    (`rewritten`): then the paper is screened again, since its verdicts judged other text.
     Atom metadata can insert candidates but never replace canonical metadata.
     """
     inserted = updated = 0
     async with conn.transaction():
+        screened = {
+            r["id"]: r
+            for r in await (
+                await conn.execute(
+                    "SELECT id, title, abstract FROM papers WHERE id = ANY(%s) "
+                    "AND screened_at IS NOT NULL",
+                    ([p.id for p in papers],),
+                )
+            ).fetchall()
+        }
         async with conn.cursor() as cur:
             for p in papers:
                 await cur.execute(
@@ -61,7 +73,7 @@ async def upsert_papers(
                         authors = EXCLUDED.authors, categories = EXCLUDED.categories,
                         primary_category = coalesce(EXCLUDED.primary_category,
                                                     papers.primary_category),
-                        published = coalesce(papers.published, EXCLUDED.published),
+                        published = least(papers.published, EXCLUDED.published),
                         updated = CASE WHEN %(source)s = 'oai'
                                        AND papers.updated::date = EXCLUDED.updated::date
                                        THEN papers.updated ELSE EXCLUDED.updated END,
@@ -99,9 +111,29 @@ async def upsert_papers(
                     inserted += 1
                 elif row:
                     updated += 1
+                    if (old := screened.get(p.id)) and rewritten(old["title"], old["abstract"], p):
+                        await cur.execute(
+                            "UPDATE papers SET screened_at = NULL WHERE id = %s", (p.id,)
+                        )
         if archive_policy is not None:
             await enqueue(conn, papers, archive_policy, source=source, run_id=archive_run_id)
     return inserted, updated
+
+
+REWRITE_SIMILARITY = 0.8  # texts less similar than this were rewritten, not touched up
+
+
+def rewritten(title: str, abstract: str, new: Paper) -> bool:
+    """A title or abstract changed beyond typo, wording and Atom-vs-canonical formatting."""
+
+    def differs(old: str, current: str) -> bool:
+        old, current = " ".join(old.split()).casefold(), " ".join(current.split()).casefold()
+        return (
+            old != current
+            and SequenceMatcher(None, old, current, autojunk=False).ratio() < REWRITE_SIMILARITY
+        )
+
+    return differs(title, new.title) or differs(abstract, new.abstract)
 
 
 def nul_free(value: Any) -> Any:
@@ -537,7 +569,7 @@ VERDICTS_JSON = """
 """
 PAPER_COLUMNS = """
     p.id, p.title, p.authors, p.categories, p.primary_category, p.published, p.url, p.fetched_at,
-    p.screened_at, p.best_tier, p.prompt_version, p.selections_version,
+    p.version, p.screened_at, p.best_tier, p.prompt_version, p.selections_version,
     p.zotero_key, p.zotero_attachment_key, p.routed_at, p.routed_tier, p.route_error,
     p.enrichment, p.enriched_at, p.enrichment_model, p.enrichment_error, p.deep_stats
 """
@@ -649,6 +681,7 @@ async def routable(
     """
     clauses = [
         "best_tier <= 2",
+        "screened_at IS NOT NULL",  # a rewritten revision waits for its new screen
         """(routed_at IS NULL
             OR routed_tier IS DISTINCT FROM best_tier::text
             OR (best_tier = 1 AND zotero_attachment_key IS NULL))""",
@@ -738,6 +771,7 @@ async def deep_pending(
             """
             SELECT * FROM papers
             WHERE best_tier = 1 AND zotero_key IS NOT NULL AND enrichment IS NULL
+              AND screened_at IS NOT NULL
               AND deep_attempts < %s
             ORDER BY published DESC LIMIT %s
             """,
