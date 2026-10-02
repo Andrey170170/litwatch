@@ -238,8 +238,12 @@ CREATE TABLE IF NOT EXISTS archive_intake_checkpoints (
     run_id bigint REFERENCES runs(id)
 );
 
+-- Set when title, abstract, authors or published change, so the projection re-syncs the row.
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS metadata_changed_at timestamptz;
+
 -- arXiv's canonical <created> can be a later revision's date; v1 is the first posting.
-UPDATE papers SET published = (version_history->0->>'date')::timestamptz
+UPDATE papers SET published = (version_history->0->>'date')::timestamptz,
+                  metadata_changed_at = now()
 WHERE version_history->0->>'version' = '1'
   AND (published IS NULL OR published > (version_history->0->>'date')::timestamptz);
 
