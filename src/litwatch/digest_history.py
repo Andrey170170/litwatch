@@ -76,7 +76,8 @@ async def seed_history(conn: psycopg.AsyncConnection) -> None:
             )
         ).fetchone():
             return
-        papers = await (await conn.execute("SELECT id,url,title FROM papers")).fetchall()
+        papers = await (await conn.execute("SELECT id,url,title,version FROM papers")).fetchall()
+        versions = {p["id"]: p["version"] for p in papers}
         selections = await db.list_selections(conn)
         labels = {s.name: s.slug for s in selections}
         section_pattern = (
@@ -100,9 +101,10 @@ async def seed_history(conn: psycopg.AsyncConnection) -> None:
             for source, text in sections:
                 for paper_id in historical_ids(text, papers):
                     await conn.execute(
-                        "INSERT INTO digest_coverage (source,paper_id,run_id) VALUES (%s,%s,%s) "
+                        "INSERT INTO digest_coverage (source,paper_id,run_id,version) "
+                        "VALUES (%s,%s,%s,%s) "
                         "ON CONFLICT (source,paper_id) DO NOTHING",
-                        (source, paper_id, row["run_id"]),
+                        (source, paper_id, row["run_id"], versions[paper_id]),
                     )
         await conn.execute(
             "INSERT INTO digest_history_migrations (name) VALUES ('paper-coverage-v1')"
@@ -222,6 +224,7 @@ async def _revisions(
                    r.started_at AS covered_at, {db.VERDICTS_JSON}
             FROM digest_coverage c JOIN papers p ON p.id = c.paper_id JOIN runs r ON r.id = c.run_id
             WHERE c.source = %(source)s AND c.run_id <> %(run)s AND p.version > c.version
+              AND p.screened_at IS NOT NULL  -- a rewritten revision waits for its new screen
               AND NOT EXISTS (SELECT 1 FROM digest_revisions d WHERE d.source = c.source
                               AND d.paper_id = c.paper_id AND d.version = p.version)
             ORDER BY p.best_tier, p.id

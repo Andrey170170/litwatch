@@ -333,3 +333,20 @@ async def test_a_new_version_of_a_covered_paper_is_noted_once_per_version(conn):
     await conn.execute("UPDATE papers SET version = 3")
     digests = await write_run_digests(conn, Writer(), [FAITH_D], await run(conn), store=False)
     assert all(" · v3, tier 1 in CoT faithfulness" in d.body for d in digests)
+
+
+async def test_a_revision_awaiting_its_rescreen_is_not_noted_yet(conn):
+    first = await run(conn)
+    await paper(conn, "p", tier=1)
+    await conn.execute("UPDATE papers SET version = 1")
+    await write_run_digests(conn, Writer(), [FAITH_D], first, store=True)
+    await db.finish_run(conn, first, error=None)
+    # A rewritten revision cleared its screen; the old verdict must not announce it.
+    await conn.execute("UPDATE papers SET version = 2, screened_at = NULL")
+    second = await run(conn)
+    digests = await write_run_digests(conn, Writer(), [FAITH_D], second, store=True)
+    assert all("Updated since" not in d.body for d in digests)
+    await db.finish_run(conn, second, error=None)
+    await paper(conn, "p", tier=1)
+    digests = await write_run_digests(conn, Writer(), [FAITH_D], await run(conn), store=True)
+    assert all(" · v2, tier 1 in CoT faithfulness" in d.body for d in digests)
