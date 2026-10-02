@@ -267,6 +267,14 @@ async def test_shown_metadata_changes_reach_the_projection_and_others_do_not(con
     await db.upsert_papers(conn, [paper.model_copy(update={"published": earlier})], source="oai")
     assert (await rows(conn, "papers"))[0]["metadata_changed_at"] is not None
     assert await projected() == [paper.id]
+    # Under the limit, the most recent change wins over the most recent screening.
+    await db.upsert_papers(conn, [canonical("2609.11935")], source="oai")
+    await conn.execute(
+        "UPDATE papers SET screened_at = now() - interval '2 hours', best_tier = 2, "
+        "metadata_changed_at = now() - interval '1 hour' WHERE id = '2609.11935'"
+    )
+    await conn.execute("UPDATE papers SET metadata_changed_at = now() WHERE id = %s", (paper.id,))
+    assert [p["id"] for p in await db.list_papers(conn, None, [2], since, 1)] == [paper.id]
 
 
 async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):
