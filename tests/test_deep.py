@@ -1,6 +1,7 @@
 """Deep processing: the job protocol with litwatch-deep and what gets written to Zotero."""
 
 import json
+import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -312,3 +313,55 @@ def test_monitoring_extension_in_note_and_tags():
     # A paper tier 1 in both selections carries both extensions; shared tags appear once.
     both = enrichment_tags(RESULT | {"monitoring": MONITORING})
     assert both.count("litwatch:signal:probes") == 1
+
+
+async def test_one_papers_failed_write_does_not_end_the_batch(row, monkeypatch):
+    second = {**row, "id": "2601.00002", "body": "# Body", "body_source": "html"}
+    fake_db = FakeDb(row)
+    fake_db.deep_pending = lambda conn, paper_id=None, limit=20: _rows([row, second])
+    stored = []
+
+    async def store_enrichment(conn, paper_id, result, model, trace, stats):
+        if paper_id == row["id"]:
+            raise ValueError("unsupported Unicode escape sequence")
+        stored.append(paper_id)
+
+    fake_db.store_enrichment = store_enrichment
+    monkeypatch.setattr(deep_mod, "db", fake_db)
+    fake = FakeDeep({"result": RESULT, "trace": [], "stats": STATS, "model": "m"})
+    s = await DeepProcessor(client(fake), None, [FAITH], fetcher=FakeFetcher()).process_pending(
+        SimpleNamespace()
+    )
+    assert (s.processed, s.failed, stored) == (1, 1, ["2601.00002"])
+    assert fake_db.calls == [
+        ("store_enrichment_error", row["id"], "ValueError: unsupported Unicode escape sequence")
+    ]
+
+
+async def _rows(rows):
+    return rows
+
+
+@pytest.fixture
+async def papers_db():
+    dsn = os.environ.get("TEST_DATABASE_URL")
+    if not dsn:
+        pytest.skip("requires disposable TEST_DATABASE_URL")
+    async with await deep_mod.db.connect(dsn) as conn:
+        await deep_mod.db.apply_schema(conn)
+        await conn.execute("CREATE TEMP TABLE papers (LIKE public.papers INCLUDING ALL)")
+        await conn.execute("INSERT INTO papers (id, title, abstract) VALUES ('x', 'T', 'A')")
+        yield conn
+
+
+async def test_nul_characters_are_replaced_before_text_and_jsonb_writes(papers_db):
+    nul = "before\x00after"
+    await deep_mod.db.store_body(papers_db, "x", nul, "pdf")
+    await deep_mod.db.store_enrichment(
+        papers_db, "x", {"summary": nul}, "m", [{"output": nul, nul: 1}], {"seconds": 1}
+    )
+    await deep_mod.db.store_enrichment_error(papers_db, "x", nul, [{"output": nul}])
+    row = await (await papers_db.execute("SELECT * FROM papers WHERE id = 'x'")).fetchone()
+    clean = "before�after"
+    assert row["body"] == clean and row["enrichment"] == {"summary": clean}
+    assert row["enrichment_error"] == clean and row["deep_trace"] == [{"output": clean}]

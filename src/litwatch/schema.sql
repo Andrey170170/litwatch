@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS confirmed integer NOT NULL DEFAULT 0;
+-- Routing/deep failures that did not stop the run; `error` stays reserved for a failed run.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS stage_errors text;
 
 -- Routing state (phase 3): which Zotero item carries the paper, and at which tier it was routed.
 ALTER TABLE papers ADD COLUMN IF NOT EXISTS zotero_key text;

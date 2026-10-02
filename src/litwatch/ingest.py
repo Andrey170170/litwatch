@@ -3,6 +3,7 @@ selections, route, deep-process, and write the digest; record the run."""
 
 import asyncio
 import logging
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -42,6 +43,8 @@ class RunSummary:
     cost: float = 0.0
     tiers: dict[str, object] = field(default_factory=dict)
     error: str | None = None
+    # Routing/deep failures that did not stop the run, so the digest was still written.
+    stage_errors: str | None = None
     intake: dict[str, object] | None = None
 
 
@@ -107,11 +110,19 @@ async def _run(
         else:
             summary.intake = await intake.record_skipped(conn, run_id)
         await _screen(conn, settings, cascade, summary)
+        # Routing and deep processing enrich the digest but must not cancel it: a failure
+        # is recorded on the run, its papers are retried next run, and the issue is written.
+        stage_errors: list[str] = []
         if router is not None:
-            await route_pending(conn, router, summary)
+            await _isolated(stage_errors, "routing", route_pending(conn, router, summary))
         # Deep before digest: tier 1 prose is written from the reading card.
         if deep is not None:
-            await process_deep(conn, deep, summary, settings.deep_max_per_run)
+            await _isolated(
+                stage_errors,
+                "deep",
+                process_deep(conn, deep, summary, settings.deep_max_per_run),
+            )
+        summary.stage_errors = "; ".join(stage_errors) or None
         if digester is not None:
             await write_run_digest(conn, digester, cascade.selections, summary)
     except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
@@ -141,9 +152,19 @@ async def _run(
             cost=round(summary.cost, 4),
             tiers=summary.tiers,
             error=summary.error,
+            stage_errors=summary.stage_errors,
             intake=summary.intake,
         )
     return summary
+
+
+async def _isolated(errors: list[str], name: str, stage: Awaitable[None]) -> None:
+    """Await an enrichment stage; record its failure instead of ending the run."""
+    try:
+        await stage
+    except Exception as exc:  # noqa: BLE001 - recorded on the run row as stage_errors
+        log.exception("%s stage failed", name)
+        errors.append(f"{name}: {type(exc).__name__}: {exc}")
 
 
 async def _fetch(conn: psycopg.AsyncConnection, settings: Settings, s: RunSummary) -> None:
