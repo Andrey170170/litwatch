@@ -378,12 +378,13 @@ async def test_nul_characters_are_replaced_before_text_and_jsonb_writes(papers_d
     nul = "before\x00after"
     await deep_mod.db.store_body(papers_db, "x", nul, "pdf")
     await deep_mod.db.store_enrichment(
-        papers_db, "x", {"summary": nul}, "m", [{"output": nul, nul: 1}], {"seconds": 1}
+        papers_db, "x", {"summary": nul}, nul, [{"output": nul, nul: 1}], {"seconds": 1}
     )
     await deep_mod.db.store_enrichment_error(papers_db, "x", nul, [{"output": nul}])
     row = await (await papers_db.execute("SELECT * FROM papers WHERE id = 'x'")).fetchone()
     clean = "before�after"
     assert row["body"] == clean and row["enrichment"] == {"summary": clean}
+    assert row["enrichment_model"] == clean
     assert row["enrichment_error"] == clean and row["deep_trace"] == [{"output": clean}]
 
 

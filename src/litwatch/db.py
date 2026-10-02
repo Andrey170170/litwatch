@@ -782,7 +782,13 @@ async def store_enrichment(
                           deep_attempts = deep_attempts + 1, zotero_enriched_at = NULL
         WHERE id = %s
         """,
-        (Jsonb(nul_free(result)), model, Jsonb(nul_free(trace)), Jsonb(nul_free(stats)), paper_id),
+        (
+            Jsonb(nul_free(result)),
+            nul_free(model),
+            Jsonb(nul_free(trace)),
+            Jsonb(nul_free(stats)),
+            paper_id,
+        ),
     )
 
 
