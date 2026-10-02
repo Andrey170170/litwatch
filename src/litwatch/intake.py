@@ -147,7 +147,8 @@ async def collect(
                     category,
                     date.fromisoformat(info["from"]),
                     client,
-                    **({"include_versions": True} if archive_policy is not None else {}),
+                    # Digests need versions and v1 dates whether or not the archive is on.
+                    include_versions=True,
                 )
                 if batch.checkpoint.date() < date.fromisoformat(info["from"]):
                     raise SourceError("OAI response predates the requested coverage")

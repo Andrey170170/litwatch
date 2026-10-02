@@ -94,7 +94,7 @@ async def test_fallback_archive_replay_then_canonical_reconciliation(conn, monke
 
     paper = canonical()
     monkeypatch.setattr(
-        oai_source, "fetch_category", lambda *args: oai_source.OaiBatch([paper], NOW)
+        oai_source, "fetch_category", lambda *args, **kwargs: oai_source.OaiBatch([paper], NOW)
     )
     _, recovered = await collect(conn)
     assert recovered.details["status"] == "complete"
@@ -114,7 +114,7 @@ async def test_fallback_archive_replay_then_canonical_reconciliation(conn, monke
 async def test_category_failure_does_not_discard_successful_category(conn, monkeypatch):
     monkeypatch.setattr(atom_source, "fetch_category", unavailable)
 
-    def harvest(category, *args):
+    def harvest(category, *args, **kwargs):
         if category == "cs.AI":
             raise SourceError("unavailable")
         return oai_source.OaiBatch([canonical()], NOW)
@@ -132,7 +132,9 @@ async def test_category_failure_does_not_discard_successful_category(conn, monke
 async def test_checkpoint_failure_rolls_back_category_papers_but_keeps_archive(conn, monkeypatch):
     monkeypatch.setattr(atom_source, "fetch_category", lambda *args: snapshot(entry()))
     monkeypatch.setattr(
-        oai_source, "fetch_category", lambda *args: oai_source.OaiBatch([canonical()], NOW)
+        oai_source,
+        "fetch_category",
+        lambda *args, **kwargs: oai_source.OaiBatch([canonical()], NOW),
     )
     await conn.execute(
         "ALTER TABLE intake_checkpoints ADD CONSTRAINT reject_advance CHECK (checkpoint IS NULL)"
@@ -149,7 +151,7 @@ async def test_paper_failure_rolls_back_other_papers_and_checkpoint(conn, monkey
     monkeypatch.setattr(
         oai_source,
         "fetch_category",
-        lambda *args: oai_source.OaiBatch([canonical(), canonical("2609.11935")], NOW),
+        lambda *args, **kwargs: oai_source.OaiBatch([canonical(), canonical("2609.11935")], NOW),
     )
     await conn.execute("ALTER TABLE papers ADD CONSTRAINT reject_paper CHECK (id <> '2609.11935')")
     with pytest.raises(Exception, match="reject_paper"):
@@ -195,7 +197,7 @@ async def test_old_unknown_changed_paper_is_admitted_without_daily_announcement(
     paper = canonical("2001.00001").model_copy(update={"published": "2020-01-01T00:00:00+00:00"})
     monkeypatch.setattr(atom_source, "fetch_category", unavailable)
     monkeypatch.setattr(
-        oai_source, "fetch_category", lambda *args: oai_source.OaiBatch([paper], NOW)
+        oai_source, "fetch_category", lambda *args, **kwargs: oai_source.OaiBatch([paper], NOW)
     )
     _, result = await collect(conn)
     assert result.details["status"] == "complete"
@@ -219,7 +221,7 @@ async def test_older_oai_metadata_cannot_downgrade_existing_paper(conn, monkeypa
     )
     monkeypatch.setattr(atom_source, "fetch_category", unavailable)
     monkeypatch.setattr(
-        oai_source, "fetch_category", lambda *args: oai_source.OaiBatch([stale], NOW)
+        oai_source, "fetch_category", lambda *args, **kwargs: oai_source.OaiBatch([stale], NOW)
     )
     _, result = await collect(conn)
     assert result.details["status"] == "complete"
@@ -246,6 +248,25 @@ async def test_revision_keeps_the_first_posting_and_the_verdict_unless_rewritten
     assert (await rows(conn, "papers"))[0]["screened_at"] is None
 
 
+async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):
+    calls = []
+
+    def harvest(*args, **kwargs):
+        calls.append(kwargs)
+        return oai_source.OaiBatch([canonical()], NOW)
+
+    fallback = canonical().model_copy(update={"abstract": "A short feed abstract."})
+    await db.upsert_papers(conn, [fallback], source="atom")
+    await conn.execute("UPDATE papers SET screened_at = now()")
+    monkeypatch.setattr(atom_source, "fetch_category", unavailable)
+    monkeypatch.setattr(oai_source, "fetch_category", harvest)
+    await collect(conn)
+    (stored,) = await rows(conn, "papers")
+    assert stored["metadata_source"] == "oai" and stored["screened_at"] is None
+    # Without archive delivery, version history is still harvested for the digest.
+    assert calls == [{"include_versions": True}]
+
+
 async def test_no_fetch_run_retains_previous_gap_in_stored_digest(conn, monkeypatch):
     monkeypatch.setattr(atom_source, "fetch_category", unavailable)
     monkeypatch.setattr(oai_source, "fetch_category", unavailable)
@@ -259,7 +280,7 @@ async def test_no_fetch_run_retains_previous_gap_in_stored_digest(conn, monkeypa
     )
 
     # These would be programmer errors, not swallowed SourceError, if fetch=False was ignored.
-    def unexpected_fetch(*args):
+    def unexpected_fetch(*args, **kwargs):
         raise AssertionError("no-fetch run contacted a source")
 
     monkeypatch.setattr(atom_source, "fetch_category", unexpected_fetch)

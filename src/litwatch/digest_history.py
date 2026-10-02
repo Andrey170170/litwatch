@@ -282,6 +282,11 @@ async def write_run_digests(
         if store:
             # All sources or none: a crash cannot leave a partial source list on retry.
             async with conn.transaction():
+                # Coverage of a then-unknown version adopts the first known one as baseline.
+                await conn.execute(
+                    "UPDATE digest_coverage c SET version = p.version FROM papers p "
+                    "WHERE p.id = c.paper_id AND c.version IS NULL AND p.version IS NOT NULL"
+                )
                 for source, batch in batches.items():
                     await conn.execute(
                         "INSERT INTO digest_batches (run_id,source,snapshot) VALUES (%s,%s,%s) "

@@ -52,7 +52,7 @@ async def upsert_papers(
             for r in await (
                 await conn.execute(
                     "SELECT id, title, abstract FROM papers WHERE id = ANY(%s) "
-                    "AND screened_at IS NOT NULL AND metadata_source <> 'atom'",
+                    "AND screened_at IS NOT NULL",
                     ([p.id for p in papers],),
                 )
             ).fetchall()
@@ -120,22 +120,20 @@ async def upsert_papers(
     return inserted, updated
 
 
-REWRITE_SIMILARITY = 0.8  # abstracts less similar than this were rewritten, not touched up
+REWRITE_SIMILARITY = 0.8  # texts less similar than this were rewritten, not touched up
 
 
 def rewritten(title: str, abstract: str, new: Paper) -> bool:
-    """A new title, or an abstract changed beyond typo and wording fixes."""
+    """A title or abstract changed beyond typo, wording and Atom-vs-canonical formatting."""
 
-    def norm(text: str) -> str:
-        return " ".join(text.split()).casefold()
+    def differs(old: str, current: str) -> bool:
+        old, current = " ".join(old.split()).casefold(), " ".join(current.split()).casefold()
+        return (
+            old != current
+            and SequenceMatcher(None, old, current, autojunk=False).ratio() < REWRITE_SIMILARITY
+        )
 
-    if norm(title) != norm(new.title):
-        return True
-    old, current = norm(abstract), norm(new.abstract)
-    return (
-        old != current
-        and SequenceMatcher(None, old, current, autojunk=False).ratio() < REWRITE_SIMILARITY
-    )
+    return differs(title, new.title) or differs(abstract, new.abstract)
 
 
 def nul_free(value: Any) -> Any:

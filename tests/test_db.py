@@ -23,5 +23,6 @@ def test_rewritten_ignores_touch_ups_but_not_new_titles_or_rewrites():
 
     assert not rewritten("A title", ABSTRACT, new(title="A  title", abstract=ABSTRACT + " "))
     assert not rewritten("A title", ABSTRACT, new(abstract=ABSTRACT.replace("ten", "twelve")))
+    assert not rewritten("A title", ABSTRACT, new(title="A title."))
     assert rewritten("A title", ABSTRACT, new(title="A better title"))
     assert rewritten("A title", ABSTRACT, new(abstract="We study sparse autoencoders at scale."))

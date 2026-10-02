@@ -350,3 +350,18 @@ async def test_a_revision_awaiting_its_rescreen_is_not_noted_yet(conn):
     await paper(conn, "p", tier=1)
     digests = await write_run_digests(conn, Writer(), [FAITH_D], await run(conn), store=True)
     assert all(" · v2, tier 1 in CoT faithfulness" in d.body for d in digests)
+
+
+async def test_coverage_of_an_unknown_version_adopts_the_first_known_one(conn):
+    first = await run(conn)
+    await paper(conn, "p", tier=1)
+    await write_run_digests(conn, Writer(), [FAITH_D], first, store=True)
+    await db.finish_run(conn, first, error=None)
+    await conn.execute("UPDATE papers SET version = 2")
+    second = await run(conn)
+    digests = await write_run_digests(conn, Writer(), [FAITH_D], second, store=True)
+    assert all("Updated since" not in d.body for d in digests)  # unknown -> known: baseline
+    await db.finish_run(conn, second, error=None)
+    await conn.execute("UPDATE papers SET version = 3")
+    digests = await write_run_digests(conn, Writer(), [FAITH_D], await run(conn), store=False)
+    assert all(" · v3, tier 1 in CoT faithfulness" in d.body for d in digests)

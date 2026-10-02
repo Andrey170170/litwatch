@@ -171,8 +171,10 @@ keeps its place with a `vN, first posted …` badge, tier 2 goes to a separate
 "Older papers, newly updated" section.
 
 A revision of a paper we already stored keeps its verdicts, unless canonical
-metadata changed the title or rewrote the abstract (similarity below 0.8), which
-clears `screened_at` so the next run screens it again. Coverage records the version
+metadata rewrote its title or abstract (similarity below 0.8; this also covers a
+screened Atom fallback whose canonical text differs), which clears `screened_at`
+so the next run screens it again. Intake always harvests raw version history,
+with or without archive delivery. Coverage records the version
 each source covered; a newer version of a tier 1/2 paper gets one dated line under
 "Updated since we covered them", once per source and version (`digest_revisions`).
 
