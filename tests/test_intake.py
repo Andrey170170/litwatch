@@ -228,6 +228,24 @@ async def test_older_oai_metadata_cannot_downgrade_existing_paper(conn, monkeypa
     assert (await rows(conn, "intake_checkpoints"))[0]["checkpoint"] == NOW.date()
 
 
+async def test_revision_keeps_the_first_posting_and_the_verdict_unless_rewritten(conn):
+    paper = canonical().model_copy(update={"version": 1})
+    await db.upsert_papers(conn, [paper], source="oai")
+    await conn.execute("UPDATE papers SET screened_at = now()")
+    first = (await rows(conn, "papers"))[0]["published"]
+    revised = paper.model_copy(
+        update={"version": 2, "published": NOW.isoformat(), "abstract": "Canonical abstract."}
+    )
+    await db.upsert_papers(conn, [revised], source="oai")
+    (stored,) = await rows(conn, "papers")
+    assert stored["published"] == first and stored["version"] == 2
+    assert stored["screened_at"] is not None
+    # Canonical text that the verdict never saw is screened again.
+    rewrite = revised.model_copy(update={"version": 3, "abstract": "Something else entirely."})
+    await db.upsert_papers(conn, [rewrite], source="oai")
+    assert (await rows(conn, "papers"))[0]["screened_at"] is None
+
+
 async def test_no_fetch_run_retains_previous_gap_in_stored_digest(conn, monkeypatch):
     monkeypatch.setattr(atom_source, "fetch_category", unavailable)
     monkeypatch.setattr(oai_source, "fetch_category", unavailable)

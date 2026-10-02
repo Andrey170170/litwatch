@@ -237,3 +237,30 @@ CREATE TABLE IF NOT EXISTS archive_intake_checkpoints (
     checked_at timestamptz,
     run_id bigint REFERENCES runs(id)
 );
+
+-- arXiv's canonical <created> can be a later revision's date; v1 is the first posting.
+UPDATE papers SET published = (version_history->0->>'date')::timestamptz
+WHERE version_history->0->>'version' = '1'
+  AND (published IS NULL OR published > (version_history->0->>'date')::timestamptz);
+
+-- The version a stream covered is the baseline for revision notes. Rows that predate the
+-- column take the current version once, so past revisions are not announced retroactively.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema() AND table_name = 'digest_coverage'
+                     AND column_name = 'version') THEN
+        ALTER TABLE digest_coverage ADD COLUMN version integer;
+        UPDATE digest_coverage c SET version = p.version FROM papers p WHERE p.id = c.paper_id;
+    END IF;
+END $$;
+
+-- A newer version of a covered tier 1/2 paper is noted once per stream and version.
+CREATE TABLE IF NOT EXISTS digest_revisions (
+    source text NOT NULL,
+    paper_id text NOT NULL REFERENCES papers (id) ON DELETE CASCADE,
+    version integer NOT NULL,
+    run_id bigint NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+    PRIMARY KEY (source, paper_id, version)
+);
+CREATE INDEX IF NOT EXISTS digest_revisions_run_idx ON digest_revisions (run_id);

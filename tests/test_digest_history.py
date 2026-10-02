@@ -295,3 +295,41 @@ async def test_concurrent_screening_waits_and_gets_timestamp_after_digest(conn):
             await asyncio.wait_for(task, 3)
         row = await (await conn.execute("SELECT screened_at FROM papers WHERE id='p'")).fetchone()
         assert row["screened_at"] > cutoff
+
+
+async def test_older_paper_is_marked_in_the_frozen_snapshot(conn):
+    first = await run(conn)
+    await paper(conn, "late")
+    await paper(conn, "fresh")
+    await conn.execute("UPDATE papers SET published = now() WHERE id = 'fresh'")
+    await write_run_digests(conn, Writer(), [FAITH_D], first, store=True)
+    (snapshot,) = await (
+        await conn.execute("SELECT snapshot FROM digest_batches WHERE source='general'")
+    ).fetchall()
+    marks = {p["id"]: p["first_posted"] for p in snapshot["snapshot"]["papers"]}
+    assert marks["fresh"] is None and marks["late"].startswith("2020-01-01")
+
+
+async def test_a_new_version_of_a_covered_paper_is_noted_once_per_version(conn):
+    first = await run(conn)
+    await paper(conn, "p", tier=1)
+    await paper(conn, "quiet", tier=3)
+    await conn.execute("UPDATE papers SET version = 1")
+    await write_run_digests(conn, Writer(), [FAITH_D], first, store=True)
+    await db.finish_run(conn, first, error=None)
+
+    await conn.execute("UPDATE papers SET version = 2")
+    second = await run(conn)
+    digests = await write_run_digests(conn, Writer(), [FAITH_D], second, store=True)
+    for d in digests:  # both streams, tier 3 silent, no new members
+        assert "**Updated since we covered them**\n- [p](https://arxiv.org/abs/p) · v2" in d.body
+        assert "quiet" not in d.body
+    await db.finish_run(conn, second, error=None)
+
+    third = await run(conn)
+    digests = await write_run_digests(conn, Writer(), [FAITH_D], third, store=True)
+    assert all("Updated since" not in d.body for d in digests)
+    await db.finish_run(conn, third, error=None)
+    await conn.execute("UPDATE papers SET version = 3")
+    digests = await write_run_digests(conn, Writer(), [FAITH_D], await run(conn), store=False)
+    assert all(" · v3, tier 1 in CoT faithfulness" in d.body for d in digests)

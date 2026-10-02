@@ -13,7 +13,15 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch import db
-from litwatch.digest import GENERAL, Digest, Digester, assign, by_tier
+from litwatch.digest import (
+    GENERAL,
+    Digest,
+    Digester,
+    assign,
+    by_tier,
+    first_posted,
+    render_revisions,
+)
 from litwatch.intake import coverage_notice
 from litwatch.selection import Selection
 
@@ -173,10 +181,13 @@ async def _batch(
             for id, p in papers.items()
             if any(slug in slugs and v["tier"] < 4 for slug, v in (p.get("verdicts") or {}).items())
         }
+        for p in papers.values():
+            p["first_posted"] = first_posted(p)
         snapshot = {
             "cutoff": cutoff.isoformat(),
             "selections": [s.model_dump(mode="json") for s in selections],
             "papers": list(papers.values()),
+            "revisions": await _revisions(conn, run_id, source, slugs),
         }
     covered = await (
         await conn.execute(
@@ -184,7 +195,45 @@ async def _batch(
         )
     ).fetchall()
     excluded = {r["paper_id"] for r in covered}
-    return {**snapshot, "papers": [p for p in snapshot["papers"] if p["id"] not in excluded]}
+    noted = await (
+        await conn.execute(
+            "SELECT paper_id, version FROM digest_revisions WHERE source=%s AND run_id<>%s",
+            (source, run_id),
+        )
+    ).fetchall()
+    taken = {(r["paper_id"], r["version"]) for r in noted}
+    return {
+        **snapshot,
+        "papers": [p for p in snapshot["papers"] if p["id"] not in excluded],
+        "revisions": [
+            r for r in snapshot.get("revisions", []) if (r["id"], r["version"]) not in taken
+        ],
+    }
+
+
+async def _revisions(
+    conn: psycopg.AsyncConnection, run_id: int, source: str, slugs: set[str]
+) -> list[dict[str, Any]]:
+    """Papers this stream covered at an older version, tier 1 or 2 here now, not yet noted."""
+    rows = await (
+        await conn.execute(
+            f"""
+            SELECT p.id, p.title, p.url, p.version, c.version AS covered_version,
+                   r.started_at AS covered_at, {db.VERDICTS_JSON}
+            FROM digest_coverage c JOIN papers p ON p.id = c.paper_id JOIN runs r ON r.id = c.run_id
+            WHERE c.source = %(source)s AND c.run_id <> %(run)s AND p.version > c.version
+              AND NOT EXISTS (SELECT 1 FROM digest_revisions d WHERE d.source = c.source
+                              AND d.paper_id = c.paper_id AND d.version = p.version)
+            ORDER BY p.best_tier, p.id
+            """,
+            {"source": source, "run": run_id},
+        )
+    ).fetchall()
+    return [
+        r
+        for r in rows
+        if any(slug in slugs and v["tier"] <= 2 for slug, v in (r["verdicts"] or {}).items())
+    ]
 
 
 async def write_run_digests(
@@ -199,6 +248,7 @@ async def write_run_digests(
 
     Successful bodies and coverage commit together. Membership includes count-only papers:
     a tier promotion or subsequent deep card is an update, not another new-paper announcement.
+    A newer arXiv version of a covered tier 1/2 paper gets one dated note per stream and version.
     """
     locked = await (
         await conn.execute("SELECT pg_try_advisory_lock(%s) AS locked", (DIGEST_LOCK,))
@@ -223,7 +273,7 @@ async def write_run_digests(
         batches = {}
         for source in sources:
             batch = await _batch(conn, run_id, source, selections)
-            if source != GENERAL and not batch["papers"]:
+            if source != GENERAL and not batch["papers"] and not batch["revisions"]:
                 continue
             batches[source] = batch
         if store:
@@ -251,6 +301,8 @@ async def write_run_digests(
             except Exception:
                 log.exception("digest %s failed; its papers remain pending", source)
                 continue
+            if batch["revisions"]:
+                digest.body += "\n\n" + render_revisions(specs, batch["revisions"], source)
             if notice:
                 digest.body = notice + "\n\n" + digest.body
             if store:
@@ -267,10 +319,16 @@ async def write_run_digests(
                     )
                     for p in batch["papers"]:
                         await conn.execute(
-                            "INSERT INTO digest_coverage (source,paper_id,run_id) "
-                            "VALUES (%s,%s,%s) "
+                            "INSERT INTO digest_coverage (source,paper_id,run_id,version) "
+                            "VALUES (%s,%s,%s,%s) "
                             "ON CONFLICT (source,paper_id) DO NOTHING",
-                            (source, p["id"], run_id),
+                            (source, p["id"], run_id, p.get("version")),
+                        )
+                    for r in batch["revisions"]:
+                        await conn.execute(
+                            "INSERT INTO digest_revisions (source,paper_id,version,run_id) "
+                            "VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                            (source, r["id"], r["version"], run_id),
                         )
             results.append(digest)
         return results

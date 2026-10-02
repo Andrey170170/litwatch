@@ -110,16 +110,26 @@ def raw_record(paper_id="2609.12345", version="v2", version_date="Sat, 12 Sep 20
     </arXivRaw></metadata></record>'''
 
 
-def test_raw_enrichment_retains_canonical_authors_dates_and_explicit_history():
+def test_raw_enrichment_retains_canonical_authors_and_explicit_history():
     client = Client([page(record()), page(raw_record())])
     batch = fetch_category("cs.CL", date(2026, 9, 12), client, include_versions=True)
     paper = batch.papers[0]
     assert paper.version == 2
     assert paper.authors == ["Alice Smith"]
-    assert paper.published == "2026-09-10T00:00:00+00:00"
+    assert paper.published == "2026-09-10T10:00:00+00:00"
     assert paper.updated == "2026-09-12T00:00:00+00:00"
     assert paper.version_history[-1]["date"] == "2026-09-12T12:00:00+00:00"
     assert client.calls[1]["metadataPrefix"] == "arXivRaw"
+
+
+def test_published_is_the_first_version_even_when_created_names_a_revision():
+    # arXiv reported <created> as v2's date for a paper first posted months earlier.
+    revised = record().replace("<created>2026-09-10", "<created>2026-09-12")
+    raw = raw_record().replace("Thu, 10 Sep 2026", "Wed, 27 May 2026")
+    batch = fetch_category(
+        "cs.CL", date(2026, 9, 12), Client([page(revised), page(raw)]), include_versions=True
+    )
+    assert batch.papers[0].published == "2026-05-27T10:00:00+00:00"
 
 
 @pytest.mark.parametrize(
