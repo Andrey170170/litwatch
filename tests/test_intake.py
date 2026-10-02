@@ -243,9 +243,12 @@ async def test_revision_keeps_the_first_posting_and_the_verdict_unless_rewritten
     assert stored["published"] == first and stored["version"] == 2
     assert stored["screened_at"] is not None
     # Canonical text that the verdict never saw is screened again.
+    await conn.execute("UPDATE papers SET best_tier = 1, zotero_key = 'K'")
     rewrite = revised.model_copy(update={"version": 3, "abstract": "Something else entirely."})
     await db.upsert_papers(conn, [rewrite], source="oai")
     assert (await rows(conn, "papers"))[0]["screened_at"] is None
+    # Routing and deep processing wait for the new screen instead of the stale verdict.
+    assert await db.routable(conn) == [] and await db.deep_pending(conn) == []
 
 
 async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):

@@ -681,6 +681,7 @@ async def routable(
     """
     clauses = [
         "best_tier <= 2",
+        "screened_at IS NOT NULL",  # a rewritten revision waits for its new screen
         """(routed_at IS NULL
             OR routed_tier IS DISTINCT FROM best_tier::text
             OR (best_tier = 1 AND zotero_attachment_key IS NULL))""",
@@ -770,6 +771,7 @@ async def deep_pending(
             """
             SELECT * FROM papers
             WHERE best_tier = 1 AND zotero_key IS NOT NULL AND enrichment IS NULL
+              AND screened_at IS NOT NULL
               AND deep_attempts < %s
             ORDER BY published DESC LIMIT %s
             """,

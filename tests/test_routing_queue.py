@@ -27,8 +27,9 @@ async def queue():
             tier = 1 if i >= 205 else 2
             result = screen_result(str(i), cot_faithfulness=tier)
             await conn.execute(
-                """INSERT INTO papers (id, title, abstract, published, best_tier, screen)
-                   VALUES (%s, 'Paper', 'Abstract', %s, %s, %s)""",
+                """INSERT INTO papers (id, title, abstract, published, best_tier, screen,
+                                       screened_at)
+                   VALUES (%s, 'Paper', 'Abstract', %s, %s, %s, now())""",
                 (
                     str(i),
                     "2026-09-01" if tier == 1 else "2026-09-28",
