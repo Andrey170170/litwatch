@@ -237,6 +237,12 @@ async def has_verdicts(conn: psycopg.AsyncConnection, slug: str) -> bool:
     return row is not None
 
 
+# Stamped when a member (best tier 1..3) stops being one, cleared when it is a member again:
+# the projection archives the page it made for the paper. `{new}` is the incoming best tier.
+DEMOTED_AT = """CASE WHEN {new} < 4 THEN NULL
+                     WHEN best_tier < 4 THEN clock_timestamp() ELSE demoted_at END"""
+
+
 async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> None:
     """The staged JSON on the paper, one verdict row per selection, and the paper's best tier."""
     from litwatch.digest_history import DIGEST_LOCK
@@ -247,12 +253,14 @@ async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> N
         await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (DIGEST_LOCK,))
         await conn.execute(
             """
-            UPDATE papers SET screened_at = clock_timestamp(), screen = %s, best_tier = %s,
+            UPDATE papers SET screened_at = clock_timestamp(), screen = %s,
+                              demoted_at = {demoted}, best_tier = %s,
                               prompt_version = %s, selections_version = %s, screen_error = NULL
             WHERE id = %s
-            """,
+            """.format(demoted=DEMOTED_AT.format(new="%s")),
             (
                 Jsonb(result.model_dump(mode="json")),
+                result.best_tier,
                 result.best_tier,
                 result.prompt_version,
                 versions_hash(result.versions),
@@ -458,14 +466,16 @@ async def recompute_best_tier(conn: psycopg.AsyncConnection, slugs: list[str]) -
             """
             WITH affected AS (SELECT DISTINCT paper_id FROM verdicts WHERE selection = ANY(%s)),
             updated AS (
-                UPDATE papers p SET best_tier = coalesce(
-                    (SELECT min(v.tier) FROM verdicts v
-                     JOIN selections s ON s.slug = v.selection AND s.status = 'active'
-                     WHERE v.paper_id = p.id), 4)
-                FROM affected a WHERE p.id = a.paper_id AND p.best_tier IS NOT NULL
+                UPDATE papers p SET best_tier = a.tier, demoted_at = {demoted}
+                FROM (SELECT af.paper_id, coalesce(
+                          (SELECT min(v.tier) FROM verdicts v
+                           JOIN selections s ON s.slug = v.selection AND s.status = 'active'
+                           WHERE v.paper_id = af.paper_id), 4) AS tier
+                      FROM affected af) a
+                WHERE p.id = a.paper_id AND p.best_tier IS NOT NULL
                 RETURNING 1)
             SELECT count(*) AS n FROM updated
-            """,
+            """.format(demoted=DEMOTED_AT.format(new="a.tier")),
             (slugs,),
         )
     ).fetchone()
@@ -621,6 +631,22 @@ async def list_papers(
             ORDER BY {order} DESC LIMIT %s
             """,
             params,
+        )
+    ).fetchall()
+
+
+async def list_demoted(
+    conn: psycopg.AsyncConnection, since: datetime, limit: int = 100
+) -> list[dict[str, Any]]:
+    """Papers that stopped being members since `since` and still are not, latest first."""
+    return await (
+        await conn.execute(
+            """
+            SELECT id, title, demoted_at FROM papers
+            WHERE demoted_at >= %s AND best_tier = 4
+            ORDER BY demoted_at DESC LIMIT %s
+            """,
+            (since, limit),
         )
     ).fetchall()
 

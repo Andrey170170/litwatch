@@ -306,6 +306,12 @@ def create_app(settings: Settings) -> FastAPI:
         async with await db.connect(dsn) as conn:
             return await db.list_papers(conn, selection, tiers, since, min(limit, 5000))
 
+    @app.get("/papers/demoted")
+    async def demoted(since: datetime, limit: int = 1000) -> list[dict[str, Any]]:
+        """Papers that left membership since `since`: the projection archives their pages."""
+        async with await db.connect(dsn) as conn:
+            return await db.list_demoted(conn, since, min(limit, 5000))
+
     @app.get("/papers/search")
     async def search(q: str, limit: int = 10) -> list[dict[str, Any]]:
         """Full-text search for the deep processor's `store.search`."""
