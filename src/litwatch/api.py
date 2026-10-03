@@ -148,7 +148,18 @@ async def active_selections(conn: psycopg.AsyncConnection) -> list[Selection]:
 async def sync_selections(
     conn: psycopg.AsyncConnection, sync: SelectionsSync
 ) -> list[dict[str, Any]]:
-    """Validate and upsert each row; report per row. Missing rows are paused when authoritative."""
+    """Validate and upsert each row; report per row. Missing rows are paused when authoritative.
+
+    One transaction: a status that changed without its members' best tier recomputed would
+    never be recomputed by a later sync, which sees no change.
+    """
+    async with conn.transaction():
+        return await _sync_selections(conn, sync)
+
+
+async def _sync_selections(
+    conn: psycopg.AsyncConnection, sync: SelectionsSync
+) -> list[dict[str, Any]]:
     report, kept = [], []
     counts = await db.selection_counts(conn)
     was_active = {s.slug for s in await db.list_selections(conn, Status.ACTIVE)}

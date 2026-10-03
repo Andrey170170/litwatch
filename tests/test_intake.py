@@ -301,11 +301,11 @@ async def test_a_member_that_drops_to_tier_4_is_listed_as_demoted_until_it_retur
     await db.store_screen(conn, screen_result(paper.id, cot_faithfulness=3))
     assert await demoted() == []
     # Pausing the only selection that holds the paper demotes it too.
-    await conn.execute("UPDATE selections SET status = 'paused' WHERE slug = 'cot-faithfulness'")
-    await db.recompute_best_tier(conn, ["cot-faithfulness"])
-    assert await demoted() == [paper.id]
-    # Reactivating it through a sync counts its kept verdict again.
     row = SelectionRow(**SELECTIONS[0].model_dump(mode="json"))
+    paused = row.model_copy(update={"status": "paused"})
+    await api.sync_selections(conn, SelectionsSync(selections=[paused], authoritative=False))
+    assert await demoted() == [paper.id]
+    # Reactivating it counts its kept verdict again.
     await api.sync_selections(conn, SelectionsSync(selections=[row], authoritative=False))
     assert await demoted() == [] and (await rows(conn, "papers"))[0]["best_tier"] == 3
     # No screening happened, yet the projection must see the paper to restore its page.
