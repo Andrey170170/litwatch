@@ -238,8 +238,14 @@ CREATE TABLE IF NOT EXISTS archive_intake_checkpoints (
     run_id bigint REFERENCES runs(id)
 );
 
--- Set when title, abstract, authors or published change, so the projection re-syncs the row.
+-- Set when title, abstract, authors or published change, or a selection's status moves the
+-- best tier without a screening, so the projection re-syncs the row.
 ALTER TABLE papers ADD COLUMN IF NOT EXISTS metadata_changed_at timestamptz;
+
+-- Set when a member paper drops to tier 4, cleared when it is a member again, so the
+-- projection can archive the page it made.
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS demoted_at timestamptz;
+CREATE INDEX IF NOT EXISTS papers_demoted_idx ON papers (demoted_at) WHERE demoted_at IS NOT NULL;
 
 -- arXiv's canonical <created> can be a later revision's date; v1 is the first posting.
 UPDATE papers SET published = (version_history->0->>'date')::timestamptz,

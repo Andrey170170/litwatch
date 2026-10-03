@@ -8,11 +8,12 @@ from uuid import uuid4
 
 import pytest
 
-from litwatch import atom_source, db, ingest, intake, oai_source
+from litwatch import api, atom_source, db, ingest, intake, oai_source
+from litwatch.api import SelectionRow, SelectionsSync
 from litwatch.config import Settings
 from litwatch.models import Paper
 from litwatch.source_http import SourceError
-from tests.conftest import screen_result
+from tests.conftest import SELECTIONS, screen_result
 from tests.test_atom_source import entry, feed
 from tests.test_digest_history import FAITH_D, Writer
 
@@ -275,6 +276,41 @@ async def test_shown_metadata_changes_reach_the_projection_and_others_do_not(con
     )
     await conn.execute("UPDATE papers SET metadata_changed_at = now() WHERE id = %s", (paper.id,))
     assert [p["id"] for p in await db.list_papers(conn, None, [2], since, 1)] == [paper.id]
+
+
+async def test_a_member_that_drops_to_tier_4_is_listed_as_demoted_until_it_returns(conn):
+    for selection in SELECTIONS:
+        await db.upsert_selection(conn, selection)
+    paper = canonical()
+    await db.upsert_papers(conn, [paper], source="oai")
+    start = datetime.now(UTC) - timedelta(minutes=1)
+
+    async def demoted():
+        return [p["id"] for p in await db.list_demoted(conn, start)]
+
+    # A paper that was never a member has no page to archive.
+    await db.store_screen(conn, screen_result(paper.id, cot_faithfulness=4))
+    assert await demoted() == []
+    await db.store_screen(conn, screen_result(paper.id, cot_faithfulness=2))
+    await db.store_screen(conn, screen_result(paper.id, cot_faithfulness=4))
+    assert await demoted() == [paper.id]
+    stamped = (await rows(conn, "papers"))[0]["demoted_at"]
+    # Another tier 4 screening is not a new demotion; membership clears it.
+    await db.store_screen(conn, screen_result(paper.id, cot_faithfulness=4))
+    assert (await rows(conn, "papers"))[0]["demoted_at"] == stamped
+    await db.store_screen(conn, screen_result(paper.id, cot_faithfulness=3))
+    assert await demoted() == []
+    # Pausing the only selection that holds the paper demotes it too.
+    row = SelectionRow(**SELECTIONS[0].model_dump(mode="json"))
+    paused = row.model_copy(update={"status": "paused"})
+    await api.sync_selections(conn, SelectionsSync(selections=[paused], authoritative=False))
+    assert await demoted() == [paper.id]
+    # Reactivating it counts its kept verdict again.
+    await api.sync_selections(conn, SelectionsSync(selections=[row], authoritative=False))
+    assert await demoted() == [] and (await rows(conn, "papers"))[0]["best_tier"] == 3
+    # No screening happened, yet the projection must see the paper to restore its page.
+    await conn.execute("UPDATE papers SET screened_at = %s", (start - timedelta(days=1),))
+    assert [p["id"] for p in await db.list_papers(conn, None, None, start, 10)] == [paper.id]
 
 
 async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):

@@ -148,9 +148,22 @@ async def active_selections(conn: psycopg.AsyncConnection) -> list[Selection]:
 async def sync_selections(
     conn: psycopg.AsyncConnection, sync: SelectionsSync
 ) -> list[dict[str, Any]]:
-    """Validate and upsert each row; report per row. Missing rows are paused when authoritative."""
+    """Validate and upsert each row; report per row. Missing rows are paused when authoritative.
+
+    One transaction: a status that changed without its members' best tier recomputed would
+    never be recomputed by a later sync, which sees no change.
+    """
+    async with conn.transaction():
+        return await _sync_selections(conn, sync)
+
+
+async def _sync_selections(
+    conn: psycopg.AsyncConnection, sync: SelectionsSync
+) -> list[dict[str, Any]]:
     report, kept = [], []
     counts = await db.selection_counts(conn)
+    was_active = {s.slug for s in await db.list_selections(conn, Status.ACTIVE)}
+    known = {s.slug for s in await db.list_selections(conn)}
     for row in sync.selections:
         try:
             spec = from_spec(row.model_dump())
@@ -179,10 +192,19 @@ async def sync_selections(
     if sync.authoritative:
         for slug in await db.pause_missing_selections(conn, kept):
             log.info("selection %s paused: absent from the sync", slug)
-    # A row set to draft or paused in Notion stops counting toward its members' best tier.
-    inactive = [r["slug"] for r in report if r.get("ok") and r["status"] != Status.ACTIVE.value]
-    if inactive:
-        await db.recompute_best_tier(conn, inactive)
+    # A row set to draft or paused in Notion stops counting toward its members' best tier, and
+    # one switched back to active counts again: its kept verdicts are not screened anew.
+    moved = [
+        r["slug"]
+        for r in report
+        if r.get("ok")
+        and (
+            r["status"] != Status.ACTIVE.value
+            or (r["slug"] in known and r["slug"] not in was_active)
+        )
+    ]
+    if moved:
+        await db.recompute_best_tier(conn, moved)
     return report
 
 
@@ -305,6 +327,14 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(422, "tier must be integers 1..3") from exc
         async with await db.connect(dsn) as conn:
             return await db.list_papers(conn, selection, tiers, since, min(limit, 5000))
+
+    @app.get("/papers/demoted")
+    async def demoted(since: datetime) -> list[dict[str, Any]]:
+        """Papers that left membership since `since`: the projection archives their pages.
+
+        Unpaged on purpose: the rows are small, and a cut page could never be asked for again."""
+        async with await db.connect(dsn) as conn:
+            return await db.list_demoted(conn, since)
 
     @app.get("/papers/search")
     async def search(q: str, limit: int = 10) -> list[dict[str, Any]]:
