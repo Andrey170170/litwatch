@@ -178,7 +178,8 @@ with or without archive delivery.
 
 `GET /papers?since=` means "changed since" for the Notion projection: screening,
 routing, deep processing, or a change to the shown metadata (title, abstract,
-authors, `published`), stamped in `papers.metadata_changed_at`. A member that drops to
+authors, `published`) or a best tier moved by pausing or reactivating a selection, both
+stamped in `papers.metadata_changed_at`. A member that drops to
 tier 4 leaves that feed; `papers.demoted_at` records it (cleared if the paper is a member
 again) and `GET /papers/demoted?since=` lists those papers so the projection can archive
 their pages. Coverage records the version

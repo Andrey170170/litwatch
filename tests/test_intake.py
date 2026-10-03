@@ -308,6 +308,9 @@ async def test_a_member_that_drops_to_tier_4_is_listed_as_demoted_until_it_retur
     row = SelectionRow(**SELECTIONS[0].model_dump(mode="json"))
     await api.sync_selections(conn, SelectionsSync(selections=[row], authoritative=False))
     assert await demoted() == [] and (await rows(conn, "papers"))[0]["best_tier"] == 3
+    # No screening happened, yet the projection must see the paper to restore its page.
+    await conn.execute("UPDATE papers SET screened_at = %s", (start - timedelta(days=1),))
+    assert [p["id"] for p in await db.list_papers(conn, None, None, start, 10)] == [paper.id]
 
 
 async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):

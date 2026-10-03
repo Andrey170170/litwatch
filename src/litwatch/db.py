@@ -466,7 +466,10 @@ async def recompute_best_tier(conn: psycopg.AsyncConnection, slugs: list[str]) -
             """
             WITH affected AS (SELECT DISTINCT paper_id FROM verdicts WHERE selection = ANY(%s)),
             updated AS (
-                UPDATE papers p SET best_tier = a.tier, demoted_at = {demoted}
+                UPDATE papers p SET best_tier = a.tier, demoted_at = {demoted},
+                    -- No screening happened, so only this tells the projection the tier moved.
+                    metadata_changed_at = CASE WHEN best_tier IS DISTINCT FROM a.tier
+                        THEN clock_timestamp() ELSE metadata_changed_at END
                 FROM (SELECT af.paper_id, coalesce(
                           (SELECT min(v.tier) FROM verdicts v
                            JOIN selections s ON s.slug = v.selection AND s.status = 'active'
