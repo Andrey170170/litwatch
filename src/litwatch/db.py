@@ -635,18 +635,16 @@ async def list_papers(
     ).fetchall()
 
 
-async def list_demoted(
-    conn: psycopg.AsyncConnection, since: datetime, limit: int = 100
-) -> list[dict[str, Any]]:
-    """Papers that stopped being members since `since` and still are not, latest first."""
+async def list_demoted(conn: psycopg.AsyncConnection, since: datetime) -> list[dict[str, Any]]:
+    """Every paper that stopped being a member since `since` and still is not, latest first."""
     return await (
         await conn.execute(
             """
             SELECT id, title, demoted_at FROM papers
             WHERE demoted_at >= %s AND best_tier = 4
-            ORDER BY demoted_at DESC LIMIT %s
+            ORDER BY demoted_at DESC, id
             """,
-            (since, limit),
+            (since,),
         )
     ).fetchall()
 

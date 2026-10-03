@@ -8,7 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from litwatch import atom_source, db, ingest, intake, oai_source
+from litwatch import api, atom_source, db, ingest, intake, oai_source
+from litwatch.api import SelectionRow, SelectionsSync
 from litwatch.config import Settings
 from litwatch.models import Paper
 from litwatch.source_http import SourceError
@@ -303,6 +304,10 @@ async def test_a_member_that_drops_to_tier_4_is_listed_as_demoted_until_it_retur
     await conn.execute("UPDATE selections SET status = 'paused' WHERE slug = 'cot-faithfulness'")
     await db.recompute_best_tier(conn, ["cot-faithfulness"])
     assert await demoted() == [paper.id]
+    # Reactivating it through a sync counts its kept verdict again.
+    row = SelectionRow(**SELECTIONS[0].model_dump(mode="json"))
+    await api.sync_selections(conn, SelectionsSync(selections=[row], authoritative=False))
+    assert await demoted() == [] and (await rows(conn, "papers"))[0]["best_tier"] == 3
 
 
 async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):
