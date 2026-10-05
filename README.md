@@ -190,8 +190,9 @@ The projection keeps its place in litwatch, not in a time window. `GET
 `since`, the time to give `/papers/demoted`. `PUT /projection/cursor` with `through`
 moves the cursor once the rows are written (`projection_cursor`, one row, never backwards),
 so a failed or skipped projection is asked for the same rows next time and a large
-re-screen goes out in pages. Rows changed in the last minute wait for the next call.
-Before the first acknowledgement the cursor is 26 hours back.
+re-screen goes out in pages. Rows stamped while another transaction is still open wait for
+the next call, since a change committing behind the cursor would never be projected. The
+first call fixes the starting point 26 hours back.
 
 Coverage records the version
 each source covered; a newer version of a tier 1/2 paper gets one dated line under

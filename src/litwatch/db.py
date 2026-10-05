@@ -642,18 +642,37 @@ async def list_papers(
 CHANGED_AT = "greatest(p.screened_at, p.routed_at, p.enriched_at, p.metadata_changed_at)"
 # A projection that has never acknowledged starts this far back, as the fixed window did.
 PROJECTION_FIRST_WINDOW = timedelta(hours=26)
-# Rows this fresh wait for the next call: a change is stamped when its transaction starts, so
-# one still committing could otherwise land behind the cursor and never be projected.
-PROJECTION_SETTLE = timedelta(seconds=60)
 
 
 async def projection_cursor(conn: psycopg.AsyncConnection) -> tuple[datetime, str]:
+    """The stored position; the first call fixes the starting point so a retry keeps it."""
+    await conn.execute(
+        "INSERT INTO projection_cursor (changed_at) VALUES (%s) ON CONFLICT (one) DO NOTHING",
+        (datetime.now(UTC) - PROJECTION_FIRST_WINDOW,),
+    )
     row = await (
         await conn.execute("SELECT changed_at, paper_id FROM projection_cursor")
     ).fetchone()
-    if row is None:
-        return datetime.now(UTC) - PROJECTION_FIRST_WINDOW, ""
     return row["changed_at"], row["paper_id"]
+
+
+async def _committed_before(conn: psycopg.AsyncConnection) -> datetime:
+    """A time before which every change stamp is committed and visible.
+
+    Stamps are never earlier than their transaction's start, so nothing invisible can be older
+    than the oldest transaction still open on this database. Read in its own statement: a
+    transaction that ended before this read is visible to the query that follows.
+    """
+    row = await (
+        await conn.execute(
+            """
+            SELECT least(now(), min(xact_start)) AS horizon FROM pg_stat_activity
+            WHERE datname = current_database() AND pid <> pg_backend_pid()
+              AND xact_start IS NOT NULL
+            """
+        )
+    ).fetchone()
+    return row["horizon"]
 
 
 async def projection_changes(conn: psycopg.AsyncConnection, limit: int) -> dict[str, Any]:
@@ -661,19 +680,21 @@ async def projection_changes(conn: psycopg.AsyncConnection, limit: int) -> dict[
 
     `through` is the cursor to acknowledge once the rows are written; `more` says another call
     is due straight after. Nothing moves until `ack_projection`, so a failed projection is
-    simply asked for the same rows again.
+    simply asked for the same rows again. Rows stamped while a writer is still open wait for
+    the next call: committing behind the cursor, they would never be projected.
     """
     cursor = await projection_cursor(conn)
+    horizon = await _committed_before(conn)
     rows = await (
         await conn.execute(
             f"""
             SELECT {PAPER_COLUMNS}, p.abstract, {VERDICTS_JSON}, {CHANGED_AT} AS changed_at
             FROM papers p
             WHERE p.screened_at IS NOT NULL AND p.best_tier < 4
-              AND ({CHANGED_AT}, p.id) > (%s, %s) AND {CHANGED_AT} <= %s
+              AND ({CHANGED_AT}, p.id) > (%s, %s) AND {CHANGED_AT} < %s
             ORDER BY {CHANGED_AT}, p.id LIMIT %s
             """,
-            (*cursor, datetime.now(UTC) - PROJECTION_SETTLE, limit + 1),
+            (*cursor, horizon, limit + 1),
         )
     ).fetchall()
     more, rows = len(rows) > limit, rows[:limit]

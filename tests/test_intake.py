@@ -316,19 +316,16 @@ async def test_a_member_that_drops_to_tier_4_is_listed_as_demoted_until_it_retur
 async def test_projection_pages_through_changes_and_moves_only_on_acknowledgement(conn):
     ids = ["2609.11931", "2609.11932", "2609.11933"]
     await db.upsert_papers(conn, [canonical(i) for i in ids], source="oai")
-    # Two rows share a change time, as a selection sync stamps many at once; one is too fresh.
+    # Two rows share a change time, as a selection sync stamps many at once.
     await conn.execute(
         "UPDATE papers SET best_tier = 2, screened_at = now() - interval '1 hour' WHERE id <> %s",
         (ids[2],),
     )
-    await conn.execute(
-        "UPDATE papers SET best_tier = 2, screened_at = now() WHERE id = %s", (ids[2],)
-    )
-
     first = await db.projection_changes(conn, 1)
     assert [p["id"] for p in first["papers"]] == ids[:1] and first["more"]
-    # Unacknowledged, the same page comes back.
-    assert (await db.projection_changes(conn, 1))["through"] == first["through"]
+    # Unacknowledged, the same page comes back, from the same starting point.
+    again = await db.projection_changes(conn, 1)
+    assert (again["since"], again["through"]) == (first["since"], first["through"])
     await db.ack_projection(conn, **first["through"])
     second = await db.projection_changes(conn, 1)
     assert [p["id"] for p in second["papers"]] == ids[1:2] and not second["more"]
@@ -340,11 +337,28 @@ async def test_projection_pages_through_changes_and_moves_only_on_acknowledgemen
         ids[1],
     )
     assert (await db.projection_changes(conn, 5))["papers"] == []
-    # The fresh row is handed out once it has settled.
-    await conn.execute(
-        "UPDATE papers SET screened_at = now() - interval '2 minutes' WHERE id = %s", (ids[2],)
-    )
-    assert [p["id"] for p in (await db.projection_changes(conn, 5))["papers"]] == ids[2:]
+
+
+async def test_projection_withholds_rows_stamped_while_a_writer_is_still_open(conn):
+    ids = ["2609.11931", "2609.11932"]
+    await db.upsert_papers(conn, [canonical(i) for i in ids], source="oai")
+    schema = (await (await conn.execute("SELECT current_schema() AS s")).fetchone())["s"]
+    async with await db.connect(os.environ["TEST_DATABASE_URL"]) as writer:
+        await writer.execute(f'SET search_path TO "{schema}"')
+        # Stamped at its start, committed later: visible only once the writer is done.
+        await writer.execute("BEGIN")
+        await writer.execute(
+            "UPDATE papers SET best_tier = 2, screened_at = now() WHERE id = %s", (ids[0],)
+        )
+        # Committed meanwhile with a later stamp; handing it out would move the cursor past
+        # the writer's row.
+        await conn.execute(
+            "UPDATE papers SET best_tier = 2, screened_at = clock_timestamp() WHERE id = %s",
+            (ids[1],),
+        )
+        assert (await db.projection_changes(conn, 5))["papers"] == []
+        await writer.execute("COMMIT")
+    assert [p["id"] for p in (await db.projection_changes(conn, 5))["papers"]] == ids
 
 
 async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):
