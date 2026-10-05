@@ -176,7 +176,8 @@ async def test_write_all_makes_general_plus_flagged_selection_digests():
         "**CoT faithfulness** · 1 must read, 1 recommended, 0 good to know. Hints again.\n"
         f"- {link} (also Mechanistic interpretability) — Hint test.\n"
         "- [Second](https://arxiv.org/abs/2) — Proxy.\n\n"
-        "**Mechanistic interpretability** · nothing must read or recommended, 1 good to know."
+        "**Mechanistic interpretability** · 1 must read or recommended listed under other "
+        "selections, 1 good to know."
     )
     assert faith.body == (
         "Two omission tests today.\n\n"
@@ -273,6 +274,19 @@ def test_older_papers_are_badged_at_tier1_and_grouped_at_tier2():
         "- [Old interp](https://arxiv.org/abs/4) · Mechanistic interpretability · "
         "first posted May 27, 2026 — Interp update.\n"
         "Plus 1 more in the Papers table."
+    )
+
+
+def test_shared_count_skips_older_papers_grouped_in_the_updated_section():
+    papers = [
+        older(member("1", "Old shared", {"cot-faithfulness": 2, "mech-interp": 2})),
+        member("2", "Third", {"mech-interp": 3}),
+    ]
+    body = render_general_digest([FAITH, INTERP], assign([FAITH, INTERP], papers), None)
+    # The shared paper is not under CoT faithfulness but in the updated section.
+    assert (
+        "**Mechanistic interpretability** · nothing must read or recommended, 1 good to know."
+        in body
     )
 
 

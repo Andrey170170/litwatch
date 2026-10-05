@@ -44,6 +44,8 @@ SpecOption = Annotated[
 
 def _log() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # One INFO line per request buries the run's own lines under archive job polling.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def _selections(settings: Settings, spec: Path | None) -> list[Selection]:

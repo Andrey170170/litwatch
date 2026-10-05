@@ -20,7 +20,7 @@ from litwatch.archive_client import (
     ArchiveUnavailable,
     ArchiveVersionUnknown,
 )
-from litwatch.arxiv_access import async_get
+from litwatch.arxiv_access import PacingError, async_get
 from litwatch.models import Paper
 
 log = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ def pdf_to_markdown(pdf: bytes) -> str:
 
 
 class BodyFetcher:
-    """Reuse archived PDFs, otherwise prefer HTML while priority PDF acquisition runs."""
+    """Prefer arXiv HTML (keeps structure, converts in milliseconds); else the archived PDF."""
 
     def __init__(
         self,
@@ -147,20 +147,18 @@ class BodyFetcher:
         if self.archive is not None:
             try:
                 prepared = await self.archive.prepare_pdf(paper)
-                resolved, job = prepared
-                identity = f"{resolved.id}v{resolved.version}"
-                if job.get("status") == "complete":
-                    pdf = await self.archive.available_pdf(resolved.id, resolved.version)
-                    if pdf is not None:
-                        converted = await self._convert_pdf(pdf)
-                        if converted is not None:
-                            return converted
+                identity = f"{prepared[0].id}v{prepared[0].version}"
             except (ArchiveUnavailable, ArchiveVersionUnknown) as exc:
                 log.warning("%s: %s; using paced text fallback", paper_id, type(exc).__name__)
                 direct_pdf = True
             except ArchiveError:
                 log.warning("%s: archive preparation failed; trying HTML", paper_id)
-        html = await self._get(f"https://arxiv.org/html/{identity}")
+        try:
+            html = await self._get(f"https://arxiv.org/html/{identity}")
+        except (httpx.HTTPError, PacingError) as exc:
+            # HTML is an optimisation; an arXiv fault must not hide a usable archived PDF.
+            log.warning("%s: HTML request failed (%s), trying PDF", paper_id, type(exc).__name__)
+            html = None
         if html is not None:
             md = await asyncio.to_thread(html_to_markdown, html.decode("utf-8", "replace"))
             if len(md) >= MIN_BODY_CHARS:

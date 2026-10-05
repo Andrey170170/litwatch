@@ -405,6 +405,22 @@ def _also(selections: list[Selection], row: dict[str, Any], owner: str) -> str:
     return f" (also {', '.join(others)})" if others else ""
 
 
+def _shared(owned: Groups, slug: str) -> int:
+    """Tier 1/2 members of a selection that the general digest lists under another one.
+
+    An older tier 2 paper is not listed under its owner but in the updated-papers section,
+    so it is not counted.
+    """
+    return sum(
+        ((row.get("verdicts") or {}).get(slug) or {}).get("tier", 4) <= 2
+        for other, tiers in owned.items()
+        if other != slug
+        for tier, rows in tiers.items()
+        for row in rows
+        if not (tier == 2 and is_older(row))
+    )
+
+
 def render_general_digest(
     selections: list[Selection], owned: Groups, out: GeneralOutput | None
 ) -> str:
@@ -415,15 +431,22 @@ def render_general_digest(
         parts.append(" ".join(out.overview.split()))
     for s in selections:
         t1, t2, t3 = owned[s.slug][1], owned[s.slug][2], owned[s.slug][3]
-        if not (t1 or t2 or t3):
+        shared = _shared(owned, s.slug)
+        if not (t1 or t2 or t3 or shared):
             continue
         sec = sections.get(s.slug)
         new = [r for r in t2 if not is_older(r)]
         older = f", {len(t2) - len(new)} older newly updated" if len(t2) > len(new) else ""
+        elsewhere = f", {shared} more listed under other selections" if shared else ""
         if t1 or new:
             head = (
-                f"**{s.name}** · {len(t1)} must read, {len(new)} recommended{older}, "
+                f"**{s.name}** · {len(t1)} must read, {len(new)} recommended{elsewhere}{older}, "
                 f"{len(t3)} good to know."
+            )
+        elif shared:
+            head = (
+                f"**{s.name}** · {shared} must read or recommended listed under other "
+                f"selections{older}, {len(t3)} good to know."
             )
         else:
             head = (
