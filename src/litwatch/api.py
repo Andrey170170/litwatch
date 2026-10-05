@@ -161,6 +161,9 @@ async def sync_selections(
     never be recomputed by a later sync, which sees no change.
     """
     async with conn.transaction():
+        # Screenings in flight commit a best tier over the active selections; wait them out
+        # so none stores one computed before this sync's statuses.
+        await conn.execute("SELECT pg_advisory_xact_lock(%s)", (db.SELECTIONS_LOCK,))
         return await _sync_selections(conn, sync)
 
 

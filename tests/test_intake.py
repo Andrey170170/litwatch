@@ -313,6 +313,22 @@ async def test_a_member_that_drops_to_tier_4_is_listed_as_demoted_until_it_retur
     assert [p["id"] for p in await db.list_papers(conn, None, None, start, 10)] == [paper.id]
 
 
+async def test_a_screening_stored_after_its_selection_was_paused_does_not_count_it(conn):
+    for selection in SELECTIONS:
+        await db.upsert_selection(conn, selection)
+    paper = canonical()
+    await db.upsert_papers(conn, [paper], source="oai")
+    # The screening began while the selection was active; the sync landed before it stored.
+    row = SelectionRow(**SELECTIONS[0].model_dump(mode="json"))
+    paused = row.model_copy(update={"status": "paused"})
+    await api.sync_selections(conn, SelectionsSync(selections=[paused], authoritative=False))
+    await db.store_screen(conn, screen_result(paper.id, cot_faithfulness=2, mech_interp=3))
+    assert (await rows(conn, "papers"))[0]["best_tier"] == 3
+    # The verdict is kept, so reactivating the selection counts it without a new screening.
+    await api.sync_selections(conn, SelectionsSync(selections=[row], authoritative=False))
+    assert (await rows(conn, "papers"))[0]["best_tier"] == 2
+
+
 async def test_projection_pages_through_changes_and_moves_only_on_acknowledgement(conn):
     ids = ["2609.11931", "2609.11932", "2609.11933"]
     await db.upsert_papers(conn, [canonical(i) for i in ids], source="oai")

@@ -276,6 +276,9 @@ async def has_verdicts(conn: psycopg.AsyncConnection, slug: str) -> bool:
 
 # Stamped when a member (best tier 1..3) stops being one, cleared when it is a member again:
 # the projection archives the page it made for the paper. `{new}` is the incoming best tier.
+# Shared by every screening that stores a best tier, exclusive for a selection sync.
+SELECTIONS_LOCK = 7213904
+
 DEMOTED_AT = """CASE WHEN {new} < 4 THEN NULL
                      WHEN best_tier < 4 THEN clock_timestamp() ELSE demoted_at END"""
 
@@ -290,29 +293,13 @@ async def store_screen(
     """
     from litwatch.digest_history import DIGEST_LOCK
 
-    verdicts = result.verdicts
     async with conn.transaction():
         # Let a digest finish its snapshot/coverage before accepting concurrent new analysis.
         await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (DIGEST_LOCK,))
-        await conn.execute(
-            """
-            UPDATE papers SET screened_at = clock_timestamp(), screen = %s,
-                              demoted_at = {demoted}, best_tier = %s,
-                              prompt_version = %s, selections_version = %s, screen_error = NULL,
-                              screened_quietly = %s
-            WHERE id = %s
-            """.format(demoted=DEMOTED_AT.format(new="%s")),
-            (
-                Jsonb(result.model_dump(mode="json")),
-                result.best_tier,
-                result.best_tier,
-                result.prompt_version,
-                versions_hash(result.versions),
-                quiet,
-                result.paper_id,
-            ),
-        )
-        for slug, v in verdicts.items():
+        # A sync that pauses or reactivates a selection recomputes best tiers; it must not
+        # interleave with this one, judged under the selections as they were when it began.
+        await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (SELECTIONS_LOCK,))
+        for slug, v in result.verdicts.items():
             await conn.execute(
                 """
                 INSERT INTO verdicts (paper_id, selection, tier, confidence, reason, version,
@@ -333,6 +320,39 @@ async def store_screen(
                     result.model,
                 ),
             )
+        # Best over the selections active now, not those the screening started with: a
+        # verdict for one paused meanwhile is kept but does not count. One the table does
+        # not know (a spec file) counts.
+        best = (
+            await (
+                await conn.execute(
+                    """
+                    SELECT coalesce(min(v.tier), 4) AS tier FROM verdicts v
+                    LEFT JOIN selections s ON s.slug = v.selection
+                    WHERE v.paper_id = %s AND (s.slug IS NULL OR s.status = 'active')
+                    """,
+                    (result.paper_id,),
+                )
+            ).fetchone()
+        )["tier"]
+        await conn.execute(
+            """
+            UPDATE papers SET screened_at = clock_timestamp(), screen = %s,
+                              demoted_at = {demoted}, best_tier = %s,
+                              prompt_version = %s, selections_version = %s, screen_error = NULL,
+                              screened_quietly = %s
+            WHERE id = %s
+            """.format(demoted=DEMOTED_AT.format(new="%s")),
+            (
+                Jsonb(result.model_dump(mode="json")),
+                best,
+                best,
+                result.prompt_version,
+                versions_hash(result.versions),
+                quiet,
+                result.paper_id,
+            ),
+        )
 
 
 def parse_screen(raw: dict[str, Any] | None) -> ScreenResult | None:

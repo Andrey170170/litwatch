@@ -226,7 +226,9 @@ async def _drain(
                 conn, settings, cascade, s, batch, settings.backlog_concurrency, quiet=True
             )
             if router is not None:
-                await _isolated(stage_errors, "routing", route_pending(conn, router, s))
+                # As much routing as one batch can add, so the wait a run sees stays a batch.
+                routing = route_pending(conn, router, s, limit=settings.backlog_batch)
+                await _isolated(stage_errors, "routing", routing)
         if not todo and not failed:
             await db.mark_window_screened(conn, versions)
         log.info("run %s backlog: %s re-screened, %s left", s.run_id, s.screened, len(todo))
@@ -441,14 +443,16 @@ async def route_pending(
     router: Router,
     s: RunSummary | None = None,
     paper_id: str | None = None,
+    limit: int | None = None,
 ) -> list[tuple[str, str]]:
     """Route every tier 1/2 paper that is new or changed tier, and release papers that dropped
-    below tier 2. Sequential: Zotero is one library.
+    below tier 2. Sequential: Zotero is one library. `limit` caps each of the two passes, for
+    a drain that must give way soon; what is left waits for the next pass.
 
     Returns (paper_id, error) for failures; each is retried on the next run.
     """
     failures: list[tuple[str, str]] = []
-    for paper, result in await db.routable(conn, paper_id):
+    for paper, result in await db.routable(conn, paper_id, limit):
         try:
             routed = await router.route(paper, result)
         except Exception as exc:  # noqa: BLE001 - per-paper failure, retried next run
@@ -463,7 +467,7 @@ async def route_pending(
         if s:
             s.routed += 1
     if paper_id is None:
-        for row in await db.demoted(conn):
+        for row in await db.demoted(conn, limit or 200):
             try:
                 await router.release(row["zotero_key"])
             except Exception as exc:  # noqa: BLE001
