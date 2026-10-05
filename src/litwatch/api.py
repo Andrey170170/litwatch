@@ -9,6 +9,7 @@ from typing import Any
 
 import psycopg
 from fastapi import FastAPI, HTTPException
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, ValidationError
 
 from litwatch import archive_delivery, archive_outbox, db, ingest
@@ -60,9 +61,14 @@ class SelectionsSync(BaseModel):
 
 
 def build_cascade(
-    settings: Settings, selections: list[Selection], rescreen: bool = True, confirm: bool = True
+    settings: Settings,
+    selections: list[Selection],
+    rescreen: bool = True,
+    confirm: bool = True,
+    client: AsyncOpenAI | None = None,
 ) -> Cascade:
-    client = openrouter_client(settings.openrouter_api_key)
+    """`client` lets a long-lived caller keep one model client across rebuilt cascades."""
+    client = client or openrouter_client(settings.openrouter_api_key)
     return Cascade(
         selections,
         ModelScreener(
@@ -262,12 +268,13 @@ def create_app(settings: Settings) -> FastAPI:
         failed: set[str] = set()  # not retried until the service restarts
         try:
             async with await db.connect(dsn) as conn:
-                await db.close_interrupted_backlog(conn)
+                await db.close_interrupted_backlog(conn, ingest.DRAIN_LOCK)
         except Exception:  # noqa: BLE001 - the loop below reports a database that stays down
             log.exception("backlog: could not close interrupted drains")
         # One router for the worker's life: a new one each round would abandon its clients.
         router = build_router(settings)
-        # Likewise the cascade and its model client, rebuilt only when the selections change.
+        # Likewise the model client; the cascade around it follows the selections.
+        models = openrouter_client(settings.openrouter_api_key)
         cascade, built_for = None, None
         try:
             while not stop.is_set():
@@ -275,7 +282,11 @@ def create_app(settings: Settings) -> FastAPI:
                     async with await db.connect(dsn) as conn:
                         selections = await active_selections(conn)
                         if selections_version(selections) != built_for:
-                            cascade = build_cascade(settings, selections) if selections else None
+                            cascade = (
+                                build_cascade(settings, selections, client=models)
+                                if selections
+                                else None
+                            )
                             built_for = selections_version(selections)
                         if cascade is not None:
                             await ingest.drain_backlog(
@@ -286,6 +297,7 @@ def create_app(settings: Settings) -> FastAPI:
                 with suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=settings.backlog_interval_seconds)
         finally:
+            await models.close()
             if router is not None:
                 await router.aclose()
 

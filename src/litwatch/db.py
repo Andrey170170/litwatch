@@ -285,8 +285,9 @@ DEMOTED_AT = """CASE WHEN {new} < 4 THEN NULL
 
 async def store_screen(
     conn: psycopg.AsyncConnection, result: ScreenResult, *, quiet: bool = False
-) -> None:
-    """The staged JSON on the paper, one verdict row per selection, and the paper's best tier.
+) -> int:
+    """The staged JSON on the paper, one verdict row per selection, and the paper's best tier,
+    which is returned: it can differ from the screening's own.
 
     `quiet` marks a backlog re-screen: the paper is judged again, not newly analyzed, so no
     digest announces it.
@@ -353,6 +354,7 @@ async def store_screen(
                 result.paper_id,
             ),
         )
+    return int(best)
 
 
 def parse_screen(raw: dict[str, Any] | None) -> ScreenResult | None:
@@ -610,11 +612,19 @@ async def list_runs(
     ).fetchall()
 
 
-async def close_interrupted_backlog(conn: psycopg.AsyncConnection) -> int:
-    """A backlog drain cut off by a restart left its run open; nothing is draining now."""
+async def close_interrupted_backlog(conn: psycopg.AsyncConnection, drain_lock: int) -> int:
+    """A backlog drain cut off by a restart left its run open. Not while some session holds
+    the drain lock: that drain is alive."""
     cur = await conn.execute(
-        "UPDATE runs SET finished_at = now(), error = 'interrupted' "
-        "WHERE kind = 'backlog' AND finished_at IS NULL"
+        """
+        UPDATE runs SET finished_at = now(), error = 'interrupted'
+        WHERE kind = 'backlog' AND finished_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_locks
+              WHERE locktype = 'advisory' AND granted AND classid = 0 AND objid = %s
+                AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))
+        """,
+        (drain_lock,),
     )
     return cur.rowcount
 

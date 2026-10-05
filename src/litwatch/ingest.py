@@ -421,13 +421,13 @@ async def _screen(
                 return
             async with lock:
                 try:
-                    await db.store_screen(conn, result, quiet=quiet)
+                    tier = await db.store_screen(conn, result, quiet=quiet)
                 except Exception as exc:  # noqa: BLE001 - a bad row must not end the run
                     await db.store_screen_error(conn, paper.id, f"{type(exc).__name__}: {exc}")
                     s.failed += 1
                     failed.add(paper.id)
                     return
-                if settings.archive_enabled and result.best_tier == 1:
+                if settings.archive_enabled and tier == 1:
                     try:
                         async with conn.transaction():
                             await archive_outbox.promote(conn, paper.id)
@@ -437,7 +437,7 @@ async def _screen(
                 s.rescreened += int(result.rescreened)
                 s.confirmed += int(result.confirmed)
                 s.cost += result.cost
-                key = str(result.best_tier)
+                key = str(tier)
                 best[key] = best.get(key, 0) + 1
                 for slug, v in result.verdicts.items():
                     if v.tier < 4:
