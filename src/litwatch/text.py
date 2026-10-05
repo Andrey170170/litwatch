@@ -20,7 +20,7 @@ from litwatch.archive_client import (
     ArchiveUnavailable,
     ArchiveVersionUnknown,
 )
-from litwatch.arxiv_access import async_get
+from litwatch.arxiv_access import PacingError, async_get
 from litwatch.models import Paper
 
 log = logging.getLogger(__name__)
@@ -155,7 +155,7 @@ class BodyFetcher:
                 log.warning("%s: archive preparation failed; trying HTML", paper_id)
         try:
             html = await self._get(f"https://arxiv.org/html/{identity}")
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, PacingError) as exc:
             # HTML is an optimisation; an arXiv fault must not hide a usable archived PDF.
             log.warning("%s: HTML request failed (%s), trying PDF", paper_id, type(exc).__name__)
             html = None

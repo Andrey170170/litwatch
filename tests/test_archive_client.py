@@ -171,13 +171,16 @@ async def test_body_falls_back_to_complete_archive_pdf_when_html_is_missing(monk
     assert [r.url.path for r in calls] == [f"/html/{PAPER.id}v2"]
 
 
-async def test_body_falls_back_to_archive_pdf_when_html_request_raises(monkeypatch):
+@pytest.mark.parametrize(
+    "fault", [httpx.ReadTimeout("slow"), text.PacingError("pacing mount unavailable")]
+)
+async def test_body_falls_back_to_archive_pdf_when_html_request_raises(monkeypatch, fault):
     fake = FakeArchive()
     monkeypatch.setattr(text, "ARXIV_PACING_SECONDS", 0)
     monkeypatch.setattr(text, "pdf_to_markdown", lambda pdf: "paper body " * 300)
 
     def timeout(req):
-        raise httpx.ReadTimeout("slow", request=req)
+        raise fault
 
     http = httpx.AsyncClient(transport=httpx.MockTransport(timeout))
     result = await text.BodyFetcher(http, archive=fake.client()).fetch(PAPER)
