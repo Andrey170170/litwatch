@@ -128,7 +128,8 @@ async def _lock(conn: psycopg.AsyncConnection, kind: str, days: int) -> int | No
             (DRAIN_LOCK, RUN_LOCK),
         )
     ).fetchone()
-    if not draining:
+    # One run waits for a drain; a second caller would only queue behind that run.
+    if not draining or await run_waiting(conn):
         raise RuntimeError("another Litwatch run is already in progress")
     run_id = await db.start_run(conn, kind, *window(days))
     log.info("run %s waiting for the backlog drain to give way", run_id)
