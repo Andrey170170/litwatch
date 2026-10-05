@@ -157,6 +157,14 @@ def nul_free(value: Any) -> Any:
     return value
 
 
+# What `row_to_paper` reads. A backlog scan can match most of the table, and the stored body,
+# screening record and deep trace of every match would be megabytes it never looks at.
+SCREENING_COLUMNS = """
+    p.id, p.title, p.abstract, p.authors, p.categories, p.primary_category, p.published,
+    p.updated, p.url, p.version, p.version_history, p.doi, p.journal_ref, p.license
+"""
+
+
 def row_to_paper(row: dict[str, Any]) -> Paper:
     return Paper(
         id=row["id"],
@@ -220,7 +228,7 @@ async def backlog(
         rows = await (
             await conn.execute(
                 """
-                SELECT p.*, coalesce((SELECT v.tier FROM verdicts v
+                SELECT {columns}, coalesce((SELECT v.tier FROM verdicts v
                                       WHERE v.paper_id = p.id AND v.selection = %(slug)s), 4) AS t
                 FROM papers p
                 WHERE p.screened_at IS NOT NULL
@@ -231,7 +239,7 @@ async def backlog(
                   AND NOT EXISTS (SELECT 1 FROM verdicts v
                                   WHERE v.paper_id = p.id AND v.selection = %(slug)s
                                     AND v.version = %(version)s)
-                """,
+                """.format(columns=SCREENING_COLUMNS),
                 {"slug": s.slug, "version": current[s.slug], "since": since},
             )
         ).fetchall()
