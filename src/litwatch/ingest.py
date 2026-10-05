@@ -5,6 +5,7 @@ version are a backlog, drained in the background between runs."""
 import asyncio
 import logging
 from collections.abc import Awaitable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -114,14 +115,17 @@ async def _lock(conn: psycopg.AsyncConnection, kind: str, days: int) -> int | No
     """
     if await _try_lock(conn):
         return None
+    # The same backend must hold both: a drain that only looked while a run holds the run
+    # lock is not the one to wait for.
     draining = await (
         await conn.execute(
             """
-            SELECT 1 FROM pg_locks
-            WHERE locktype = 'advisory' AND granted AND classid = 0 AND objid = %s
-              AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+            SELECT 1 FROM pg_locks d JOIN pg_locks r USING (pid, database, locktype, classid)
+            WHERE d.locktype = 'advisory' AND d.classid = 0 AND d.granted AND r.granted
+              AND d.objid = %s AND r.objid = %s
+              AND d.database = (SELECT oid FROM pg_database WHERE datname = current_database())
             """,
-            (DRAIN_LOCK,),
+            (DRAIN_LOCK, RUN_LOCK),
         )
     ).fetchone()
     if not draining:
@@ -132,10 +136,15 @@ async def _lock(conn: psycopg.AsyncConnection, kind: str, days: int) -> int | No
         await conn.execute(f"SET lock_timeout = '{RUN_LOCK_WAIT}'")
         await conn.execute("SELECT pg_advisory_lock(%s)", (RUN_LOCK,))
     except psycopg.errors.LockNotAvailable as exc:
+        await conn.execute("SET lock_timeout = 0")
         await db.finish_run(conn, run_id, error="the backlog drain did not give way")
         raise RuntimeError("another Litwatch run is already in progress") from exc
-    finally:
-        await conn.execute("SET lock_timeout = 0")
+    except BaseException:
+        # Cancelled while waiting: the row was opened for a caller that polls it.
+        with suppress(Exception):
+            await asyncio.shield(db.finish_run(conn, run_id, error="interrupted before it began"))
+        raise
+    await conn.execute("SET lock_timeout = 0")
     return run_id
 
 
@@ -196,13 +205,13 @@ async def _drain(
     stop: asyncio.Event,
     failed: set[str],
 ) -> RunSummary | None:
-    slugs = [sel.slug for sel in cascade.selections]
+    versions = {sel.slug: sel.version for sel in cascade.selections}
     todo = await db.backlog(
         conn, cascade.selections, settings.rescreen_window_days, frozenset(failed)
     )
     if not todo:
         if not failed:
-            await db.mark_window_screened(conn, slugs)
+            await db.mark_window_screened(conn, versions)
         return None
     now = datetime.now(UTC)
     s = RunSummary(await db.start_run(conn, "backlog", now, now), "backlog", now, now)
@@ -219,7 +228,7 @@ async def _drain(
             if router is not None:
                 await _isolated(stage_errors, "routing", route_pending(conn, router, s))
         if not todo and not failed:
-            await db.mark_window_screened(conn, slugs)
+            await db.mark_window_screened(conn, versions)
         log.info("run %s backlog: %s re-screened, %s left", s.run_id, s.screened, len(todo))
     except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
         s.error = f"{type(exc).__name__}: {exc}"

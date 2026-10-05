@@ -127,6 +127,8 @@ async def test_a_new_selection_keeps_its_whole_window_across_an_interrupted_drai
         await db.upsert_papers(conn, papers(3))
         await conn.execute("UPDATE papers SET screened_at = now(), best_tier = 4")
         await db.upsert_selection(conn, FAITH)
+        # A drain that finished an older version of the selection does not finish this one.
+        await db.mark_window_screened(conn, {FAITH.slug: EDITED.version})
         waiting = iter([False, True])
         monkeypatch.setattr(ingest, "run_waiting", lambda conn: _answer(next(waiting, False)))
         first = await ingest.drain_backlog(conn, settings, cascade(FAITH), None, asyncio.Event())

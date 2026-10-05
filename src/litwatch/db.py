@@ -246,12 +246,17 @@ async def backlog(
     return [row_to_paper(r) for r in newest]
 
 
-async def mark_window_screened(conn: psycopg.AsyncConnection, slugs: list[str]) -> None:
-    """Nothing is left for these selections: from here an edit selects members and keyword hits."""
-    await conn.execute(
-        "UPDATE selections SET window_screened = true WHERE slug = ANY(%s) AND NOT window_screened",
-        (slugs,),
-    )
+async def mark_window_screened(conn: psycopg.AsyncConnection, versions: dict[str, str]) -> None:
+    """Nothing is left for these selections: from here an edit selects members and keyword hits.
+
+    Only at the version that was drained; one edited meanwhile has not judged its window yet.
+    """
+    for slug, version in versions.items():
+        await conn.execute(
+            "UPDATE selections SET window_screened = true "
+            "WHERE slug = %s AND version = %s AND NOT window_screened",
+            (slug, version),
+        )
 
 
 async def has_verdicts(conn: psycopg.AsyncConnection, slug: str) -> bool:
