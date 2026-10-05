@@ -274,3 +274,12 @@ CREATE TABLE IF NOT EXISTS digest_revisions (
     PRIMARY KEY (source, paper_id, version)
 );
 CREATE INDEX IF NOT EXISTS digest_revisions_run_idx ON digest_revisions (run_id);
+
+-- How far the Notion projection has got: the (change time, paper id) of the last member row
+-- it wrote. One row; absent until the first acknowledgement.
+CREATE TABLE IF NOT EXISTS projection_cursor (
+    one boolean PRIMARY KEY DEFAULT true CHECK (one),
+    changed_at timestamptz NOT NULL,
+    paper_id text NOT NULL DEFAULT '',
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
