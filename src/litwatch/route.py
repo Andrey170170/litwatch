@@ -58,8 +58,17 @@ class Router:
         self.attach_pdf = attach_pdf and webdav is not None
         self._pdf_lock = asyncio.Lock()  # arXiv asks for one request at a time
 
-    async def route(self, paper: Paper, result: ScreenResult) -> Routed:
-        tier = result.best_tier
+    async def aclose(self) -> None:
+        """Close every client the router owns or was given."""
+        clients = [self.http, self.zotero.http, getattr(self.webdav, "http", None), self.archive]
+        for client in clients:
+            if client is not None:
+                await client.aclose()
+
+    async def route(self, paper: Paper, result: ScreenResult, tier: int | None = None) -> Routed:
+        """`tier` is the paper's committed best tier when the caller knows it; the screening's
+        own differs after a selection was paused or reactivated."""
+        tier = result.best_tier if tier is None else tier
         if tier not in ROUTED_TIERS:
             raise ValueError(f"{paper.id} is tier {tier}, not routable")
         key = await self.zotero.ensure_item(paper, tier, selection_tags(result))

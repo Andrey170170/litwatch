@@ -452,9 +452,9 @@ async def route_pending(
     Returns (paper_id, error) for failures; each is retried on the next run.
     """
     failures: list[tuple[str, str]] = []
-    for paper, result in await db.routable(conn, paper_id, limit):
+    for paper, result, tier in await db.routable(conn, paper_id, limit):
         try:
-            routed = await router.route(paper, result)
+            routed = await router.route(paper, result, tier)
         except Exception as exc:  # noqa: BLE001 - per-paper failure, retried next run
             error = f"{type(exc).__name__}: {exc}"
             log.warning("routing %s failed: %s", paper.id, error)

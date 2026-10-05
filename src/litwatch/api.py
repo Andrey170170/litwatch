@@ -18,7 +18,7 @@ from litwatch.deep import DeepClient, DeepProcessor
 from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade, ModelScreener, openrouter_client
-from litwatch.selection import Selection, Status, from_spec
+from litwatch.selection import Selection, Status, from_spec, selections_version
 from litwatch.text import BodyFetcher
 from litwatch.webdav import WebDAVWriter
 from litwatch.zotero import ZoteroClient
@@ -265,28 +265,29 @@ def create_app(settings: Settings) -> FastAPI:
                 await db.close_interrupted_backlog(conn)
         except Exception:  # noqa: BLE001 - the loop below reports a database that stays down
             log.exception("backlog: could not close interrupted drains")
-        while not stop.is_set():
-            router = None
-            try:
-                async with await db.connect(dsn) as conn:
-                    selections = await active_selections(conn)
-                    if selections:
-                        router = build_router(settings)
-                        await ingest.drain_backlog(
-                            conn,
-                            settings,
-                            build_cascade(settings, selections),
-                            router,
-                            stop,
-                            failed,
-                        )
-            except Exception:  # noqa: BLE001 - recorded on the run row; try again next round
-                log.exception("backlog drain failed")
-            finally:
-                if getattr(router, "archive", None) is not None:
-                    await router.archive.aclose()
-            with suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), timeout=settings.backlog_interval_seconds)
+        # One router for the worker's life: a new one each round would abandon its clients.
+        router = build_router(settings)
+        # Likewise the cascade and its model client, rebuilt only when the selections change.
+        cascade, built_for = None, None
+        try:
+            while not stop.is_set():
+                try:
+                    async with await db.connect(dsn) as conn:
+                        selections = await active_selections(conn)
+                        if selections_version(selections) != built_for:
+                            cascade = build_cascade(settings, selections) if selections else None
+                            built_for = selections_version(selections)
+                        if cascade is not None:
+                            await ingest.drain_backlog(
+                                conn, settings, cascade, router, stop, failed
+                            )
+                except Exception:  # noqa: BLE001 - recorded on the run row; try again next round
+                    log.exception("backlog drain failed")
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), timeout=settings.backlog_interval_seconds)
+        finally:
+            if router is not None:
+                await router.aclose()
 
     async def execute(req: RunRequest) -> None:
         try:

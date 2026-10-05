@@ -878,8 +878,11 @@ def dumps(value: Any) -> str:
 
 async def routable(
     conn: psycopg.AsyncConnection, paper_id: str | None = None, limit: int | None = None
-) -> list[tuple[Paper, ScreenResult]]:
+) -> list[tuple[Paper, ScreenResult, int]]:
     """Snapshot of pending deliveries, tier 1 first; unlimited unless explicitly bounded.
+
+    Each with the paper's committed best tier: the stored screening can differ from it when
+    a selection was paused or reactivated after the paper was judged.
 
     Route each snapshot once so a failed delivery cannot spin within the same run.
     PostgreSQL treats LIMIT NULL as unlimited.
@@ -903,7 +906,7 @@ async def routable(
             params,
         )
     ).fetchall()
-    return [(row_to_paper(r), s) for r in rows if (s := parse_screen(r["screen"]))]
+    return [(row_to_paper(r), s, r["best_tier"]) for r in rows if (s := parse_screen(r["screen"]))]
 
 
 async def demoted(conn: psycopg.AsyncConnection, limit: int = 200) -> list[dict[str, Any]]:

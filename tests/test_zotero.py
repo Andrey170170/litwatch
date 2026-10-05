@@ -288,6 +288,12 @@ async def test_router_refuses_non_members(router):
         await r.route(PAPER, result(3))
 
 
+async def test_router_follows_the_committed_tier_over_the_stored_screening(router):
+    # A selection reactivated after the screening makes the paper tier 2 without a new screen.
+    r, _, _ = router
+    assert (await r.route(PAPER, result(4), 2)).tier == 2
+
+
 async def test_pending_tier1_pdf_raises_and_retry_reuses_zotero_item(fake, router, monkeypatch):
     r, dav, downloads = router
     real_download = r._download
