@@ -59,8 +59,8 @@ nightly run by hours. The service drains the backlog between runs, newest papers
 first: `LITWATCH_BACKLOG_BATCH` (40) papers at a time with
 `LITWATCH_BACKLOG_CONCURRENCY` (4) calls in flight, routing each batch to Zotero as
 it goes, with no intake, deep processing or digest. A run that starts meanwhile is
-recorded at once and waits for the batch in hand; the drain then gives way and
-resumes afterwards. What is still stale is derived from the stored verdict versions,
+recorded at once and waits only for the calls in flight; the drain leaves the rest of
+its batch and the routing, gives way, and resumes afterwards. What is still stale is derived from the stored verdict versions,
 so a restart loses nothing; a new selection keeps its claim on the whole window until a
 drain has finished it (`selections.window_screened`). Each drain is a `runs` row of kind `backlog` with its own
 cost; `GET /runs?kind=daily` leaves those out, and `GET /backlog` says how many

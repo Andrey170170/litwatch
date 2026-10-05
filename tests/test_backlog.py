@@ -78,8 +78,9 @@ async def test_an_edited_selection_is_backlog_not_the_runs_work_and_is_not_news(
         assert writer.seen["general"] == []
 
 
-async def test_a_run_waits_for_a_drain_which_gives_way_after_the_batch_in_hand(schema):
-    settings = Settings("unused", backlog_batch=1, backlog_concurrency=1)
+async def test_a_run_waits_for_a_drain_which_gives_way_after_the_call_in_flight(schema):
+    # One batch holds all three papers: the drain must let go inside it.
+    settings = Settings("unused", backlog_batch=3, backlog_concurrency=1)
     gate, started = asyncio.Event(), asyncio.Event()
 
     class Slow(ModelScreener):
@@ -129,7 +130,8 @@ async def test_a_new_selection_keeps_its_whole_window_across_an_interrupted_drai
         await db.upsert_selection(conn, FAITH)
         # A drain that finished an older version of the selection does not finish this one.
         await db.mark_window_screened(conn, {FAITH.slug: EDITED.version})
-        waiting = iter([False, True])
+        # Asked before the batch, before its paper, and after it: a run arrives during it.
+        waiting = iter([False, False, True])
         monkeypatch.setattr(ingest, "run_waiting", lambda conn: _answer(next(waiting, False)))
         first = await ingest.drain_backlog(conn, settings, cascade(FAITH), None, asyncio.Event())
         assert first.screened == 1

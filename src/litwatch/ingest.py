@@ -4,7 +4,7 @@ version are a backlog, drained in the background between runs."""
 
 import asyncio
 import logging
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -175,9 +175,10 @@ async def drain_backlog(
     """Re-screen papers judged under an older selection version, until none are left or a run
     wants the lock. Returns None when there was nothing to do or a run is in progress.
 
-    Each batch is screened and then routed, so Zotero follows along and the wait a run sees
-    is one batch. Nothing here is news: no intake, no deep processing, no digest. Papers whose
-    screening fails join `failed` and are left alone by later drains that are handed the set.
+    Each batch is screened and then routed, so Zotero follows along. A run that asks waits
+    for the calls in flight only: the rest of the batch and its routing are left. Nothing
+    here is news: no intake, no deep processing, no digest. Papers whose screening fails
+    join `failed` and are left alone by later drains that are handed the set.
     """
     failed = failed if failed is not None else set()
     # The drain lock first and last: whoever finds the run lock busy sees it for the whole time.
@@ -220,11 +221,26 @@ async def _drain(
     token = current_journal.set(journal)
     stage_errors: list[str] = []
     try:
-        while todo and not stop.is_set() and not await run_waiting(conn):
+
+        async def give_way() -> bool:
+            return stop.is_set() or await run_waiting(conn)
+
+        while todo and not await give_way():
             batch, todo = todo[: settings.backlog_batch], todo[settings.backlog_batch :]
             failed |= await _screen(
-                conn, settings, cascade, s, batch, settings.backlog_concurrency, quiet=True
+                conn,
+                settings,
+                cascade,
+                s,
+                batch,
+                settings.backlog_concurrency,
+                quiet=True,
+                give_way=give_way,
             )
+            if await give_way():
+                # Papers of this batch may be unscreened; the run that waits routes the rest.
+                todo = batch + todo
+                break
             if router is not None:
                 # As much routing as one batch can add, so the wait a run sees stays a batch.
                 routing = route_pending(conn, router, s, limit=settings.backlog_batch)
@@ -370,10 +386,13 @@ async def _screen(
     concurrency: int | None = None,
     *,
     quiet: bool = False,
+    give_way: Callable[[], Awaitable[bool]] | None = None,
 ) -> set[str]:
     """Screen the papers nothing has judged yet, or the given backlog batch (`quiet`).
 
-    Returns the ids whose screening failed."""
+    Once `give_way` says so, papers not yet started are left for a later batch, so a waiting
+    run is held up by the calls in flight and no more. Returns the ids whose screening failed.
+    """
     if todo is None:
         todo = await db.pending(conn)
     log.info("run %s screening %s papers", s.run_id, len(todo))
@@ -388,6 +407,10 @@ async def _screen(
 
     async def one(paper):
         async with sem:
+            if give_way is not None:
+                async with lock:  # the check shares the connection with verdict transactions
+                    if await give_way():
+                        return
             try:
                 result = await cascade.screen(paper)
             except Exception as exc:  # noqa: BLE001 - per-paper failure, retried next run
