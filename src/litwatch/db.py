@@ -660,7 +660,8 @@ async def _committed_before(conn: psycopg.AsyncConnection) -> datetime:
     """A time before which every change stamp is committed and visible.
 
     Stamps are never earlier than their transaction's start, so nothing invisible can be older
-    than the oldest transaction still open on this database. Read in its own statement: a
+    than the oldest client transaction still open on this database (autovacuum and other
+    background workers write no stamps). Read in its own statement: a
     transaction that ended before this read is visible to the query that follows.
     """
     row = await (
@@ -668,7 +669,7 @@ async def _committed_before(conn: psycopg.AsyncConnection) -> datetime:
             """
             SELECT least(now(), min(xact_start)) AS horizon FROM pg_stat_activity
             WHERE datname = current_database() AND pid <> pg_backend_pid()
-              AND xact_start IS NOT NULL
+              AND xact_start IS NOT NULL AND backend_type = 'client backend'
             """
         )
     ).fetchone()
