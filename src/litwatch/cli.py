@@ -358,14 +358,17 @@ def rescreen(
         int | None, typer.Option(help="Only papers published in the last N days (default: all)")
     ] = None,
 ) -> None:
-    """Forget a selection's verdicts so the next run judges those papers again."""
+    """Forget a selection's verdicts so the backlog drain judges those papers again."""
     settings = Settings.from_env()
 
     async def go():
         async with await db.connect(settings.require_database()) as conn:
             return await db.forget_verdicts(conn, selection, days)
 
-    console.print(f"forgot {asyncio.run(go())} verdicts for {selection}; run `litwatch run` next")
+    console.print(
+        f"forgot {asyncio.run(go())} verdicts for {selection}; "
+        "the running service re-screens them in the background (`GET /backlog` counts them)"
+    )
 
 
 @selections_app.command("list")

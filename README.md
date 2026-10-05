@@ -52,6 +52,24 @@ selects affected papers over the last 30 days (plus existing members), and
 a new selection selects the whole window. Selected papers go through the
 full cascade; unchanged exact stage requests can reuse validated results.
 
+That re-screening is a **backlog**, kept out of the runs. A run screens only papers
+nothing has judged yet (new ones, and rewritten revisions), so new papers get the
+current rubric the same night and an edit to a broad selection cannot stretch the
+nightly run by hours. The service drains the backlog between runs, newest papers
+first: `LITWATCH_BACKLOG_BATCH` (40) papers at a time with
+`LITWATCH_BACKLOG_CONCURRENCY` (4) calls in flight, routing each batch to Zotero as
+it goes, with no intake, deep processing or digest. A run that starts meanwhile is
+recorded at once and waits only for the calls in flight; the drain leaves the rest of
+its batch and the routing, gives way, and resumes afterwards. What is still stale is derived from the stored verdict versions,
+so a restart loses nothing; a new selection keeps its claim on the whole window until a
+drain has finished it (`selections.window_screened`). Each drain is a `runs` row of kind `backlog` with its own
+cost; `GET /runs?kind=daily` leaves those out, and `GET /backlog` says how many
+papers are waiting. A backlog re-screen judges a paper again, it does not newly
+analyze it, so no digest announces it (`papers.screened_quietly`); the Papers table
+and Zotero follow the new tiers. Until a paper's turn comes it keeps its old tiers.
+A paper whose re-screen fails is left alone until the service restarts.
+`LITWATCH_BACKLOG_ENABLED=0` stops the drain.
+
 Three stages, a later verdict replacing the earlier one per selection:
 
 1. `screen`: every paper, every selection in one call, Luna at low effort.
@@ -69,7 +87,7 @@ Three stages, a later verdict replacing the earlier one per selection:
 `litwatch eval` reports precision and recall per selection and tier after
 each stage plus tier 1 misses and tier 1+2 recall. `litwatch reconfirm`
 applies stage 3 to verdicts that predate it; `litwatch rescreen --selection
-SLUG [--days N]` forgets verdicts so the next run judges them again.
+SLUG [--days N]` forgets verdicts so the backlog drain judges them again.
 
 ### Inference cost and recovery
 

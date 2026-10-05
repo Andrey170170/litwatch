@@ -240,7 +240,11 @@ async def test_explicit_rescreen_invalidates_successes_without_erasing_charge_hi
     first = await ingest.run(conn, Settings("unused"), cascade, "manual", 1, fetch=False)
     assert first.screened == 1
     assert await db.forget_verdicts(conn, FAITH.slug) == 1
-    second = await ingest.run(conn, Settings("unused"), cascade, "manual", 1, fetch=False)
+    # Forgotten verdicts are backlog: a run leaves them to the drain.
+    assert (
+        await ingest.run(conn, Settings("unused"), cascade, "manual", 1, fetch=False)
+    ).screened == 0
+    second = await ingest.drain_backlog(conn, Settings("unused"), cascade, None, asyncio.Event())
     assert second.screened == 1 and len(responses.calls) == 2
     assert first.cost == second.cost == 0.01
     rows = await (await conn.execute("SELECT * FROM inference_calls ORDER BY id")).fetchall()

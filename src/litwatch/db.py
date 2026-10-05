@@ -157,6 +157,14 @@ def nul_free(value: Any) -> Any:
     return value
 
 
+# What `row_to_paper` reads. A backlog scan can match most of the table, and the stored body,
+# screening record and deep trace of every match would be megabytes it never looks at.
+SCREENING_COLUMNS = """
+    p.id, p.title, p.abstract, p.authors, p.categories, p.primary_category, p.published,
+    p.updated, p.url, p.version, p.version_history, p.doi, p.journal_ref, p.license
+"""
+
+
 def row_to_paper(row: dict[str, Any]) -> Paper:
     return Paper(
         id=row["id"],
@@ -180,33 +188,47 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-async def pending(
-    conn: psycopg.AsyncConnection,
-    selections: list[Selection],
-    window_days: int = 30,
-    limit: int = 20000,
-) -> list[Paper]:
-    """Papers that need a screening call under the given selections.
-
-    New papers always. Papers whose stored judgement for some selection is missing or predates
-    its current version: for an edited selection its current members whatever their age plus
-    keyword hits in the window; a selection with no verdicts at all is new and takes the whole
-    window.
-    """
-    current = {s.slug: s.version for s in selections}
-    since = datetime.now(UTC) - timedelta(days=window_days)
-    new = await (
+async def pending(conn: psycopg.AsyncConnection, limit: int = 20000) -> list[Paper]:
+    """Papers no screening has judged yet, or whose rewritten revision waits for a new one."""
+    rows = await (
         await conn.execute(
             "SELECT * FROM papers WHERE screened_at IS NULL ORDER BY fetched_at LIMIT %s", (limit,)
         )
     ).fetchall()
-    chosen = {r["id"]: r for r in new}
-    fresh = {s.slug for s in selections if not await has_verdicts(conn, s.slug)}
+    return [row_to_paper(r) for r in rows]
+
+
+async def backlog(
+    conn: psycopg.AsyncConnection,
+    selections: list[Selection],
+    window_days: int = 30,
+    skip: frozenset[str] = frozenset(),
+) -> list[Paper]:
+    """Screened papers whose judgement for some selection is missing or predates its version.
+
+    For an edited selection its current members whatever their age plus keyword hits in the
+    window; a new selection takes the whole window, and stays new until a drain has finished
+    it (`window_screened`), since a drain can stop after any batch. Newest first, so recent
+    papers get the current rubric first. `skip` leaves out papers that already failed in
+    this drain.
+    """
+    current = {s.slug: s.version for s in selections}
+    since = datetime.now(UTC) - timedelta(days=window_days)
+    chosen: dict[str, dict[str, Any]] = {}
+    unfinished = {
+        r["slug"]
+        for r in await (
+            await conn.execute("SELECT slug FROM selections WHERE NOT window_screened")
+        ).fetchall()
+    }
+    fresh = {
+        s.slug for s in selections if s.slug in unfinished or not await has_verdicts(conn, s.slug)
+    }
     for s in selections:
         rows = await (
             await conn.execute(
-                """
-                SELECT p.*, coalesce((SELECT v.tier FROM verdicts v
+                f"""
+                SELECT {SCREENING_COLUMNS}, coalesce((SELECT v.tier FROM verdicts v
                                       WHERE v.paper_id = p.id AND v.selection = %(slug)s), 4) AS t
                 FROM papers p
                 WHERE p.screened_at IS NOT NULL
@@ -217,17 +239,32 @@ async def pending(
                   AND NOT EXISTS (SELECT 1 FROM verdicts v
                                   WHERE v.paper_id = p.id AND v.selection = %(slug)s
                                     AND v.version = %(version)s)
-                ORDER BY p.published DESC LIMIT %(limit)s
                 """,
-                {"slug": s.slug, "version": current[s.slug], "since": since, "limit": limit},
+                {"slug": s.slug, "version": current[s.slug], "since": since},
             )
         ).fetchall()
         for r in rows:
-            if r["id"] in chosen:
+            if r["id"] in chosen or r["id"] in skip:
                 continue
             if s.slug in fresh or r["t"] < NOT_MEMBER or s.keyword_hit(row_to_paper(r)):
                 chosen[r["id"]] = r
-    return [row_to_paper(r) for r in chosen.values()]
+    newest = sorted(
+        chosen.values(), key=lambda r: (r["published"] is not None, r["published"]), reverse=True
+    )
+    return [row_to_paper(r) for r in newest]
+
+
+async def mark_window_screened(conn: psycopg.AsyncConnection, versions: dict[str, str]) -> None:
+    """Nothing is left for these selections: from here an edit selects members and keyword hits.
+
+    Only at the version that was drained; one edited meanwhile has not judged its window yet.
+    """
+    for slug, version in versions.items():
+        await conn.execute(
+            "UPDATE selections SET window_screened = true "
+            "WHERE slug = %s AND version = %s AND NOT window_screened",
+            (slug, version),
+        )
 
 
 async def has_verdicts(conn: psycopg.AsyncConnection, slug: str) -> bool:
@@ -239,35 +276,31 @@ async def has_verdicts(conn: psycopg.AsyncConnection, slug: str) -> bool:
 
 # Stamped when a member (best tier 1..3) stops being one, cleared when it is a member again:
 # the projection archives the page it made for the paper. `{new}` is the incoming best tier.
+# Shared by every screening that stores a best tier, exclusive for a selection sync.
+SELECTIONS_LOCK = 7213904
+
 DEMOTED_AT = """CASE WHEN {new} < 4 THEN NULL
                      WHEN best_tier < 4 THEN clock_timestamp() ELSE demoted_at END"""
 
 
-async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> None:
-    """The staged JSON on the paper, one verdict row per selection, and the paper's best tier."""
+async def store_screen(
+    conn: psycopg.AsyncConnection, result: ScreenResult, *, quiet: bool = False
+) -> int:
+    """The staged JSON on the paper, one verdict row per selection, and the paper's best tier,
+    which is returned: it can differ from the screening's own.
+
+    `quiet` marks a backlog re-screen: the paper is judged again, not newly analyzed, so no
+    digest announces it.
+    """
     from litwatch.digest_history import DIGEST_LOCK
 
-    verdicts = result.verdicts
     async with conn.transaction():
         # Let a digest finish its snapshot/coverage before accepting concurrent new analysis.
         await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (DIGEST_LOCK,))
-        await conn.execute(
-            """
-            UPDATE papers SET screened_at = clock_timestamp(), screen = %s,
-                              demoted_at = {demoted}, best_tier = %s,
-                              prompt_version = %s, selections_version = %s, screen_error = NULL
-            WHERE id = %s
-            """.format(demoted=DEMOTED_AT.format(new="%s")),
-            (
-                Jsonb(result.model_dump(mode="json")),
-                result.best_tier,
-                result.best_tier,
-                result.prompt_version,
-                versions_hash(result.versions),
-                result.paper_id,
-            ),
-        )
-        for slug, v in verdicts.items():
+        # A sync that pauses or reactivates a selection recomputes best tiers; it must not
+        # interleave with this one, judged under the selections as they were when it began.
+        await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (SELECTIONS_LOCK,))
+        for slug, v in result.verdicts.items():
             await conn.execute(
                 """
                 INSERT INTO verdicts (paper_id, selection, tier, confidence, reason, version,
@@ -288,6 +321,40 @@ async def store_screen(conn: psycopg.AsyncConnection, result: ScreenResult) -> N
                     result.model,
                 ),
             )
+        # Best over the selections active now, not those the screening started with: a
+        # verdict for one paused meanwhile is kept but does not count. One the table does
+        # not know (a spec file) counts.
+        best = (
+            await (
+                await conn.execute(
+                    """
+                    SELECT coalesce(min(v.tier), 4) AS tier FROM verdicts v
+                    LEFT JOIN selections s ON s.slug = v.selection
+                    WHERE v.paper_id = %s AND (s.slug IS NULL OR s.status = 'active')
+                    """,
+                    (result.paper_id,),
+                )
+            ).fetchone()
+        )["tier"]
+        await conn.execute(
+            """
+            UPDATE papers SET screened_at = clock_timestamp(), screen = %s,
+                              demoted_at = {demoted}, best_tier = %s,
+                              prompt_version = %s, selections_version = %s, screen_error = NULL,
+                              screened_quietly = %s
+            WHERE id = %s
+            """.format(demoted=DEMOTED_AT.format(new="%s")),
+            (
+                Jsonb(result.model_dump(mode="json")),
+                best,
+                best,
+                result.prompt_version,
+                versions_hash(result.versions),
+                quiet,
+                result.paper_id,
+            ),
+        )
+    return int(best)
 
 
 def parse_screen(raw: dict[str, Any] | None) -> ScreenResult | None:
@@ -344,7 +411,7 @@ async def unconfirmed_positives(
 async def forget_verdicts(
     conn: psycopg.AsyncConnection, slug: str, window_days: int | None = None
 ) -> int:
-    """Drop a selection's verdicts (in a window) so the next run judges them again."""
+    """Drop a selection's verdicts (in a window) so the backlog drain judges them again."""
     since = datetime.now(UTC) - timedelta(days=window_days) if window_days is not None else None
     async with conn.transaction():
         locked = await (
@@ -369,6 +436,8 @@ async def forget_verdicts(
                 (slug, since, since),
             )
         ).fetchone()
+        # Judging the window again is what was asked for, wherever a drain stops on the way.
+        await conn.execute("UPDATE selections SET window_screened = false WHERE slug = %s", (slug,))
     return row["count"]
 
 
@@ -408,8 +477,8 @@ async def upsert_selection(conn: psycopg.AsyncConnection, s: Selection) -> bool:
         await conn.execute(
             """
             INSERT INTO selections (slug, name, owner, status, subject, rubric, keywords, version,
-                                    digest, notion_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    digest, notion_id, window_screened)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false)
             ON CONFLICT (slug) DO UPDATE SET
                 name = EXCLUDED.name, owner = EXCLUDED.owner, status = EXCLUDED.status,
                 subject = EXCLUDED.subject, rubric = EXCLUDED.rubric,
@@ -517,10 +586,10 @@ async def start_run(
 async def finish_run(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
     # Error texts come from exceptions; one with a NUL must not leave the run unfinished.
     fields = nul_free(fields)
-    if "tiers" in fields:
-        fields["tiers"] = Jsonb(fields["tiers"])
-    if "intake" in fields:
-        fields["intake"] = Jsonb(fields["intake"])
+    # A drain has no intake: SQL NULL, not a JSON null that reads as a recorded intake.
+    for name in ("tiers", "intake"):
+        if fields.get(name) is not None:
+            fields[name] = Jsonb(fields[name])
     assignments = ", ".join(f"{k} = %({k})s" for k in fields)
     await conn.execute(
         f"UPDATE runs SET finished_at = now(), {assignments} WHERE id = %(id)s",
@@ -532,10 +601,32 @@ async def get_run(conn: psycopg.AsyncConnection, run_id: int) -> dict[str, Any] 
     return await (await conn.execute("SELECT * FROM runs WHERE id = %s", (run_id,))).fetchone()
 
 
-async def list_runs(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict[str, Any]]:
+async def list_runs(
+    conn: psycopg.AsyncConnection, limit: int = 20, kind: str | None = None
+) -> list[dict[str, Any]]:
     return await (
-        await conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT %s", (limit,))
+        await conn.execute(
+            "SELECT * FROM runs WHERE %s::text IS NULL OR kind = %s ORDER BY id DESC LIMIT %s",
+            (kind, kind, limit),
+        )
     ).fetchall()
+
+
+async def close_interrupted_backlog(conn: psycopg.AsyncConnection, drain_lock: int) -> int:
+    """A backlog drain cut off by a restart left its run open. Not while some session holds
+    the drain lock: that drain is alive."""
+    cur = await conn.execute(
+        """
+        UPDATE runs SET finished_at = now(), error = 'interrupted'
+        WHERE kind = 'backlog' AND finished_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_locks
+              WHERE locktype = 'advisory' AND granted AND classid = 0 AND objid = %s
+                AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))
+        """,
+        (drain_lock,),
+    )
+    return cur.rowcount
 
 
 async def store_digest(
@@ -797,8 +888,11 @@ def dumps(value: Any) -> str:
 
 async def routable(
     conn: psycopg.AsyncConnection, paper_id: str | None = None, limit: int | None = None
-) -> list[tuple[Paper, ScreenResult]]:
+) -> list[tuple[Paper, ScreenResult, int]]:
     """Snapshot of pending deliveries, tier 1 first; unlimited unless explicitly bounded.
+
+    Each with the paper's committed best tier: the stored screening can differ from it when
+    a selection was paused or reactivated after the paper was judged.
 
     Route each snapshot once so a failed delivery cannot spin within the same run.
     PostgreSQL treats LIMIT NULL as unlimited.
@@ -822,7 +916,7 @@ async def routable(
             params,
         )
     ).fetchall()
-    return [(row_to_paper(r), s) for r in rows if (s := parse_screen(r["screen"]))]
+    return [(row_to_paper(r), s, r["best_tier"]) for r in rows if (s := parse_screen(r["screen"]))]
 
 
 async def demoted(conn: psycopg.AsyncConnection, limit: int = 200) -> list[dict[str, Any]]:

@@ -9,6 +9,7 @@ from typing import Any
 
 import psycopg
 from fastapi import FastAPI, HTTPException
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, ValidationError
 
 from litwatch import archive_delivery, archive_outbox, db, ingest
@@ -18,7 +19,7 @@ from litwatch.deep import DeepClient, DeepProcessor
 from litwatch.digest import Digester
 from litwatch.route import Router
 from litwatch.screen import Cascade, ModelScreener, openrouter_client
-from litwatch.selection import Selection, Status, from_spec
+from litwatch.selection import Selection, Status, from_spec, selections_version
 from litwatch.text import BodyFetcher
 from litwatch.webdav import WebDAVWriter
 from litwatch.zotero import ZoteroClient
@@ -60,9 +61,14 @@ class SelectionsSync(BaseModel):
 
 
 def build_cascade(
-    settings: Settings, selections: list[Selection], rescreen: bool = True, confirm: bool = True
+    settings: Settings,
+    selections: list[Selection],
+    rescreen: bool = True,
+    confirm: bool = True,
+    client: AsyncOpenAI | None = None,
 ) -> Cascade:
-    client = openrouter_client(settings.openrouter_api_key)
+    """`client` lets a long-lived caller keep one model client across rebuilt cascades."""
+    client = client or openrouter_client(settings.openrouter_api_key)
     return Cascade(
         selections,
         ModelScreener(
@@ -161,6 +167,9 @@ async def sync_selections(
     never be recomputed by a later sync, which sees no change.
     """
     async with conn.transaction():
+        # Screenings in flight commit a best tier over the active selections; wait them out
+        # so none stores one computed before this sync's statuses.
+        await conn.execute("SELECT pg_advisory_xact_lock(%s)", (db.SELECTIONS_LOCK,))
         return await _sync_selections(conn, sync)
 
 
@@ -238,19 +247,59 @@ def create_app(settings: Settings) -> FastAPI:
                     dsn, client, stop, interval_seconds=settings.archive_dispatch_seconds
                 )
             )
+        drain = asyncio.create_task(backlog_worker(stop)) if settings.backlog_enabled else None
         try:
             yield
         finally:
             stop.set()
-            if delivery is not None:
-                delivery.cancel()
-                with suppress(asyncio.CancelledError):
-                    await delivery
+            for task in (delivery, drain):
+                if task is not None:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
             if client is not None:
                 await client.aclose()
 
     app = FastAPI(title="litwatch", lifespan=lifespan)
     app.state.runs = state  # exposes the in-flight task, for tests and diagnostics
+
+    async def backlog_worker(stop: asyncio.Event) -> None:
+        """Between runs, re-screen papers judged under an older selection version."""
+        failed: set[str] = set()  # not retried until the service restarts
+        try:
+            async with await db.connect(dsn) as conn:
+                await db.close_interrupted_backlog(conn, ingest.DRAIN_LOCK)
+        except Exception:  # noqa: BLE001 - the loop below reports a database that stays down
+            log.exception("backlog: could not close interrupted drains")
+        # One router for the worker's life: a new one each round would abandon its clients.
+        router = build_router(settings)
+        # Likewise the model client; the cascade around it follows the selections.
+        models = openrouter_client(settings.openrouter_api_key)
+        cascade, built_for = None, None
+        try:
+            while not stop.is_set():
+                try:
+                    async with await db.connect(dsn) as conn:
+                        selections = await active_selections(conn)
+                        if selections_version(selections) != built_for:
+                            cascade = (
+                                build_cascade(settings, selections, client=models)
+                                if selections
+                                else None
+                            )
+                            built_for = selections_version(selections)
+                        if cascade is not None:
+                            await ingest.drain_backlog(
+                                conn, settings, cascade, router, stop, failed
+                            )
+                except Exception:  # noqa: BLE001 - recorded on the run row; try again next round
+                    log.exception("backlog drain failed")
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), timeout=settings.backlog_interval_seconds)
+        finally:
+            await models.close()
+            if router is not None:
+                await router.aclose()
 
     async def execute(req: RunRequest) -> None:
         try:
@@ -302,9 +351,18 @@ def create_app(settings: Settings) -> FastAPI:
         return {"started": True, "days": req.days, "kind": req.kind}
 
     @app.get("/runs")
-    async def runs(limit: int = 20) -> list[dict[str, Any]]:
+    async def runs(limit: int = 20, kind: str | None = None) -> list[dict[str, Any]]:
+        """Latest runs first. `kind=daily` leaves out backlog drains, which start on their own."""
         async with await db.connect(dsn) as conn:
-            return await db.list_runs(conn, limit)
+            return await db.list_runs(conn, limit, kind)
+
+    @app.get("/backlog")
+    async def backlog() -> dict[str, Any]:
+        """How many papers still wait for a re-screen under the current selection versions."""
+        async with await db.connect(dsn) as conn:
+            selections = await active_selections(conn)
+            pending = await db.backlog(conn, selections, settings.rescreen_window_days)
+        return {"pending": len(pending), "enabled": settings.backlog_enabled}
 
     @app.get("/runs/{run_id}")
     async def run(run_id: int) -> dict[str, Any]:
