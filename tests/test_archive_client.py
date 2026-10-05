@@ -157,18 +157,18 @@ async def test_pdf_read_is_bounded_and_rejects_non_pdf(monkeypatch):
         await client.available_pdf(PAPER.id, 2)
 
 
-async def test_body_reuses_complete_pdf_without_arxiv_html(monkeypatch):
+async def test_body_falls_back_to_complete_archive_pdf_when_html_is_missing(monkeypatch):
     fake = FakeArchive()
+    monkeypatch.setattr(text, "ARXIV_PACING_SECONDS", 0)
     monkeypatch.setattr(text, "pdf_to_markdown", lambda pdf: "paper body " * 300)
-
-    def no_network(req):
-        pytest.fail("available archive PDF must avoid upstream requests")
-
-    fetcher = text.BodyFetcher(
-        httpx.AsyncClient(transport=httpx.MockTransport(no_network)), archive=fake.client()
+    calls = []
+    http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: calls.append(req) or httpx.Response(404))
     )
-    result = await fetcher.fetch(PAPER)
+    result = await text.BodyFetcher(http, archive=fake.client()).fetch(PAPER)
     assert result[1] == "pdf"
+    # The archived copy serves the fallback; arXiv is asked for the HTML only.
+    assert [r.url.path for r in calls] == [f"/html/{PAPER.id}v2"]
 
 
 async def test_body_promotes_before_html_and_does_not_wait_for_pdf_if_html_sufficient(monkeypatch):

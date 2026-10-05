@@ -123,7 +123,7 @@ def pdf_to_markdown(pdf: bytes) -> str:
 
 
 class BodyFetcher:
-    """Reuse archived PDFs, otherwise prefer HTML while priority PDF acquisition runs."""
+    """Prefer arXiv HTML (keeps structure, converts in milliseconds); else the archived PDF."""
 
     def __init__(
         self,
@@ -147,14 +147,7 @@ class BodyFetcher:
         if self.archive is not None:
             try:
                 prepared = await self.archive.prepare_pdf(paper)
-                resolved, job = prepared
-                identity = f"{resolved.id}v{resolved.version}"
-                if job.get("status") == "complete":
-                    pdf = await self.archive.available_pdf(resolved.id, resolved.version)
-                    if pdf is not None:
-                        converted = await self._convert_pdf(pdf)
-                        if converted is not None:
-                            return converted
+                identity = f"{prepared[0].id}v{prepared[0].version}"
             except (ArchiveUnavailable, ArchiveVersionUnknown) as exc:
                 log.warning("%s: %s; using paced text fallback", paper_id, type(exc).__name__)
                 direct_pdf = True

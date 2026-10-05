@@ -176,7 +176,8 @@ async def test_write_all_makes_general_plus_flagged_selection_digests():
         "**CoT faithfulness** · 1 must read, 1 recommended, 0 good to know. Hints again.\n"
         f"- {link} (also Mechanistic interpretability) — Hint test.\n"
         "- [Second](https://arxiv.org/abs/2) — Proxy.\n\n"
-        "**Mechanistic interpretability** · nothing must read or recommended, 1 good to know."
+        "**Mechanistic interpretability** · 1 must read or recommended listed under other "
+        "selections, 1 good to know."
     )
     assert faith.body == (
         "Two omission tests today.\n\n"

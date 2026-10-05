@@ -205,6 +205,6 @@ create and remove isolated schemas there. Never point that variable at productio
 ## Shared archive
 
 Daily intake also registers every cs.CL/cs.AI/cs.LG paper with the shared arxiv-archive
-service, independent of screening tier; curated routing and deep processing reuse its
-PDFs. See [the 0.9.0 integration note](docs/ARCHIVE-STAGE2.md) for states, settings and
+service, independent of screening tier; curated routing reuses its PDFs. Deep processing
+reads a paper's arXiv HTML when there is one and falls back to the archived PDF. See [the 0.9.0 integration note](docs/ARCHIVE-STAGE2.md) for states, settings and
 rollback. Historical snapshot import and backfill belong to arxiv-archive.
