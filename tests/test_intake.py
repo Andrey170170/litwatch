@@ -313,6 +313,40 @@ async def test_a_member_that_drops_to_tier_4_is_listed_as_demoted_until_it_retur
     assert [p["id"] for p in await db.list_papers(conn, None, None, start, 10)] == [paper.id]
 
 
+async def test_projection_pages_through_changes_and_moves_only_on_acknowledgement(conn):
+    ids = ["2609.11931", "2609.11932", "2609.11933"]
+    await db.upsert_papers(conn, [canonical(i) for i in ids], source="oai")
+    # Two rows share a change time, as a selection sync stamps many at once; one is too fresh.
+    await conn.execute(
+        "UPDATE papers SET best_tier = 2, screened_at = now() - interval '1 hour' WHERE id <> %s",
+        (ids[2],),
+    )
+    await conn.execute(
+        "UPDATE papers SET best_tier = 2, screened_at = now() WHERE id = %s", (ids[2],)
+    )
+
+    first = await db.projection_changes(conn, 1)
+    assert [p["id"] for p in first["papers"]] == ids[:1] and first["more"]
+    # Unacknowledged, the same page comes back.
+    assert (await db.projection_changes(conn, 1))["through"] == first["through"]
+    await db.ack_projection(conn, **first["through"])
+    second = await db.projection_changes(conn, 1)
+    assert [p["id"] for p in second["papers"]] == ids[1:2] and not second["more"]
+    assert second["since"] == first["through"]["changed_at"]
+    await db.ack_projection(conn, **second["through"])
+    # An older acknowledgement arriving late does not move the cursor back.
+    assert await db.ack_projection(conn, **first["through"]) == (
+        second["through"]["changed_at"],
+        ids[1],
+    )
+    assert (await db.projection_changes(conn, 5))["papers"] == []
+    # The fresh row is handed out once it has settled.
+    await conn.execute(
+        "UPDATE papers SET screened_at = now() - interval '2 minutes' WHERE id = %s", (ids[2],)
+    )
+    assert [p["id"] for p in (await db.projection_changes(conn, 5))["papers"]] == ids[2:]
+
+
 async def test_screened_atom_fallback_is_rescreened_when_canonical_text_differs(conn, monkeypatch):
     calls = []
 

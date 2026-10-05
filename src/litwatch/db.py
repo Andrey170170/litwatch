@@ -638,6 +638,71 @@ async def list_papers(
     ).fetchall()
 
 
+# When a member row last changed in a way the projection shows.
+CHANGED_AT = "greatest(p.screened_at, p.routed_at, p.enriched_at, p.metadata_changed_at)"
+# A projection that has never acknowledged starts this far back, as the fixed window did.
+PROJECTION_FIRST_WINDOW = timedelta(hours=26)
+# Rows this fresh wait for the next call: a change is stamped when its transaction starts, so
+# one still committing could otherwise land behind the cursor and never be projected.
+PROJECTION_SETTLE = timedelta(seconds=60)
+
+
+async def projection_cursor(conn: psycopg.AsyncConnection) -> tuple[datetime, str]:
+    row = await (
+        await conn.execute("SELECT changed_at, paper_id FROM projection_cursor")
+    ).fetchone()
+    if row is None:
+        return datetime.now(UTC) - PROJECTION_FIRST_WINDOW, ""
+    return row["changed_at"], row["paper_id"]
+
+
+async def projection_changes(conn: psycopg.AsyncConnection, limit: int) -> dict[str, Any]:
+    """The next member rows the projection has not acknowledged, oldest change first.
+
+    `through` is the cursor to acknowledge once the rows are written; `more` says another call
+    is due straight after. Nothing moves until `ack_projection`, so a failed projection is
+    simply asked for the same rows again.
+    """
+    cursor = await projection_cursor(conn)
+    rows = await (
+        await conn.execute(
+            f"""
+            SELECT {PAPER_COLUMNS}, p.abstract, {VERDICTS_JSON}, {CHANGED_AT} AS changed_at
+            FROM papers p
+            WHERE p.screened_at IS NOT NULL AND p.best_tier < 4
+              AND ({CHANGED_AT}, p.id) > (%s, %s) AND {CHANGED_AT} <= %s
+            ORDER BY {CHANGED_AT}, p.id LIMIT %s
+            """,
+            (*cursor, datetime.now(UTC) - PROJECTION_SETTLE, limit + 1),
+        )
+    ).fetchall()
+    more, rows = len(rows) > limit, rows[:limit]
+    through = (rows[-1]["changed_at"], rows[-1]["id"]) if rows else cursor
+    return {
+        "since": cursor[0],
+        "papers": rows,
+        "through": {"changed_at": through[0], "paper_id": through[1]},
+        "more": more,
+    }
+
+
+async def ack_projection(
+    conn: psycopg.AsyncConnection, changed_at: datetime, paper_id: str
+) -> tuple[datetime, str]:
+    """Move the cursor forward to an acknowledged position; it never moves back."""
+    await conn.execute(
+        """
+        INSERT INTO projection_cursor (changed_at, paper_id) VALUES (%s, %s)
+        ON CONFLICT (one) DO UPDATE
+        SET changed_at = EXCLUDED.changed_at, paper_id = EXCLUDED.paper_id, updated_at = now()
+        WHERE (projection_cursor.changed_at, projection_cursor.paper_id)
+            < (EXCLUDED.changed_at, EXCLUDED.paper_id)
+        """,
+        (changed_at, paper_id),
+    )
+    return await projection_cursor(conn)
+
+
 async def list_demoted(conn: psycopg.AsyncConnection, since: datetime) -> list[dict[str, Any]]:
     """Every paper that stopped being a member since `since` and still is not, latest first."""
     return await (

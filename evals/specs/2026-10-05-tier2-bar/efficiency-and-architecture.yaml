@@ -1,0 +1,30 @@
+name: Efficiency and architecture
+slug: efficiency-and-architecture
+owner: null
+status: active
+digest: false
+subject: 'How language models are built and run: architectures beyond the standard transformer, mixture
+  of experts, long-context and memory mechanisms, KV-cache and attention efficiency, quantization, pruning,
+  distillation, speculative decoding, and training and inference systems. Hardware-specific kernels with
+  no modelling change are tier 3.'
+rubric: 'Tier 1 is rare, about one member in fifty. It requires evidence in the abstract that the field
+  will treat the paper as a reference: a new model family or training recipe with released weights, a
+  large margin on a widely used benchmark, a method shown to work across several domains, or strong evidence
+  overturning a common assumption. When in doubt between tier 1 and tier 2, tier 2. Tier 2 has a bar too,
+  and being about the subject is not enough: the abstract must show a contribution a researcher in this
+  area would read on its own merits: a new method with real evidence that it works, a benchmark, dataset
+  or released system that others are likely to reuse, or an analysis or negative result that changes how
+  results in the area should be read. Incremental variants of an established technique, applications of
+  existing methods to one domain or product, surveys, and position papers are tier 3 even when squarely
+  on the subject. When in doubt between tier 2 and tier 3, tier 3.'
+keywords:
+- mixture of experts
+- MoE
+- long context
+- KV cache
+- quantization
+- speculative decoding
+- state space
+- linear attention
+- distillation
+- memory

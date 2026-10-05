@@ -182,7 +182,18 @@ authors, `published`) or a best tier moved by pausing or reactivating a selectio
 stamped in `papers.metadata_changed_at`. A member that drops to
 tier 4 leaves that feed; `papers.demoted_at` records it (cleared if the paper is a member
 again) and `GET /papers/demoted?since=` lists those papers so the projection can archive
-their pages. Coverage records the version
+their pages.
+
+The projection keeps its place in litwatch, not in a time window. `GET
+/projection/changes?limit=N` returns the member rows changed after the cursor, oldest first:
+`papers`, the `through` position to acknowledge, `more` when another page is waiting, and
+`since`, the time to give `/papers/demoted`. `PUT /projection/cursor` with `through`
+moves the cursor once the rows are written (`projection_cursor`, one row, never backwards),
+so a failed or skipped projection is asked for the same rows next time and a large
+re-screen goes out in pages. Rows changed in the last minute wait for the next call.
+Before the first acknowledgement the cursor is 26 hours back.
+
+Coverage records the version
 each source covered; a newer version of a tier 1/2 paper gets one dated line under
 "Updated since we covered them", once per source and version (`digest_revisions`).
 

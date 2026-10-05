@@ -32,6 +32,13 @@ class RunRequest(BaseModel):
     fetch: bool = True
 
 
+class ProjectionCursor(BaseModel):
+    """A position in the changed-members feed, as `GET /projection/changes` hands it out."""
+
+    changed_at: datetime
+    paper_id: str = ""
+
+
 class SelectionRow(BaseModel):
     """One Notion row as n8n sends it. Validation errors go back per row, never as a 4xx."""
 
@@ -335,6 +342,21 @@ def create_app(settings: Settings) -> FastAPI:
         Unpaged on purpose: the rows are small, and a cut page could never be asked for again."""
         async with await db.connect(dsn) as conn:
             return await db.list_demoted(conn, since)
+
+    @app.get("/projection/changes")
+    async def projection_changes(limit: int = 3000) -> dict[str, Any]:
+        """Member papers changed since the projection's last acknowledgement, oldest first.
+
+        The caller writes the rows, then puts `through` to `/projection/cursor`. `since` is the
+        time to ask `/papers/demoted` for; `more` means another page is waiting."""
+        async with await db.connect(dsn) as conn:
+            return await db.projection_changes(conn, min(max(limit, 1), 5000))
+
+    @app.put("/projection/cursor")
+    async def put_projection_cursor(cursor: ProjectionCursor) -> dict[str, Any]:
+        async with await db.connect(dsn) as conn:
+            at, paper_id = await db.ack_projection(conn, cursor.changed_at, cursor.paper_id)
+        return {"changed_at": at, "paper_id": paper_id}
 
     @app.get("/papers/search")
     async def search(q: str, limit: int = 10) -> list[dict[str, Any]]:
