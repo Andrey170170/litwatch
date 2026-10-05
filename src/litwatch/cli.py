@@ -358,7 +358,7 @@ def rescreen(
         int | None, typer.Option(help="Only papers published in the last N days (default: all)")
     ] = None,
 ) -> None:
-    """Forget a selection's verdicts so the next run judges those papers again."""
+    """Forget a selection's verdicts so the backlog drain judges those papers again."""
     settings = Settings.from_env()
 
     async def go():

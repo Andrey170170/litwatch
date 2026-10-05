@@ -135,7 +135,7 @@ async def _batch(
                 f"""
             SELECT {db.PAPER_COLUMNS}, p.abstract, {db.VERDICTS_JSON}
             FROM papers p, runs r
-            WHERE r.id = %(run)s AND p.best_tier < 4
+            WHERE r.id = %(run)s AND p.best_tier < 4 AND NOT p.screened_quietly
               AND p.screened_at >= least(r.started_at, coalesce(
                   (SELECT max(coalesce((b.snapshot->>'cutoff')::timestamptz,
                                        previous.finished_at, previous.started_at))

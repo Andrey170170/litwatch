@@ -1,5 +1,6 @@
-"""One run: fetch the arXiv window, store, screen whatever is pending under the active
-selections, route, deep-process, and write the digest; record the run."""
+"""One run: fetch the arXiv window, store, screen the papers nothing has judged yet, route,
+deep-process, and write the digest; record the run. Papers judged under an older selection
+version are a backlog, drained in the background between runs."""
 
 import asyncio
 import logging
@@ -15,11 +16,17 @@ from litwatch.config import Settings
 from litwatch.deep import DeepProcessor
 from litwatch.digest import Digest, Digester
 from litwatch.digest_history import write_run_digests
+from litwatch.models import Paper
 from litwatch.route import Router
 from litwatch.screen import Cascade
 from litwatch.selection import Selection
 
 log = logging.getLogger(__name__)
+
+# One writer for checkpoints and screening, shared by the API, the CLI and the backlog drain.
+RUN_LOCK = 7213902
+# A drain lets go after the batch in hand; a run that waited this long has another cause.
+RUN_LOCK_WAIT = "15min"
 
 
 @dataclass
@@ -42,6 +49,9 @@ class RunSummary:
     deep_list_cost: float = 0.0
     cost: float = 0.0
     tiers: dict[str, object] = field(default_factory=dict)
+    # Running tier counts behind `tiers`.
+    best: dict[str, int] = field(default_factory=dict)
+    by_selection: dict[str, dict[str, int]] = field(default_factory=dict)
     error: str | None = None
     # Routing/deep failures that did not stop the run, so the digest was still written.
     stage_errors: str | None = None
@@ -65,19 +75,18 @@ async def run(
     digester: Digester | None = None,
     deep: DeepProcessor | None = None,
 ) -> RunSummary:
-    # API and CLI share this lock, including analysis: checkpoints and pending
-    # screens must have one writer even if two entry points are triggered together.
+    # API and CLI share this lock, including analysis: checkpoints and pending screens must
+    # have one writer even if two entry points are triggered together. A backlog drain is not
+    # another run: it gives way, so this run records itself and waits for the lock.
     # The run owns the archive clients either way, including when the lock is busy.
     try:
-        locked = await (
-            await conn.execute("SELECT pg_try_advisory_lock(7213902) AS locked")
-        ).fetchone()
-        if not locked or not locked["locked"]:
-            raise RuntimeError("another Litwatch run is already in progress")
+        run_id = await _lock(conn, kind, days)
         try:
-            return await _run(conn, settings, cascade, kind, days, fetch, router, digester, deep)
+            return await _run(
+                conn, settings, cascade, kind, days, fetch, router, digester, deep, run_id
+            )
         finally:
-            await conn.execute("SELECT pg_advisory_unlock(7213902)")
+            await conn.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
     finally:
         clients = [
             getattr(router, "archive", None),
@@ -86,6 +95,107 @@ async def run(
         for client in clients:
             if client is not None:
                 await client.aclose()
+
+
+async def _try_lock(conn: psycopg.AsyncConnection) -> bool:
+    row = await (
+        await conn.execute("SELECT pg_try_advisory_lock(%s) AS locked", (RUN_LOCK,))
+    ).fetchone()
+    return bool(row and row["locked"])
+
+
+async def _lock(conn: psycopg.AsyncConnection, kind: str, days: int) -> int | None:
+    """Take the run lock. Returns the id of a run row opened while waiting for a drain.
+
+    The row is opened before the wait so a caller polling for its run sees it at once.
+    """
+    if await _try_lock(conn):
+        return None
+    draining = await (
+        await conn.execute("SELECT 1 FROM runs WHERE kind = 'backlog' AND finished_at IS NULL")
+    ).fetchone()
+    if not draining:
+        raise RuntimeError("another Litwatch run is already in progress")
+    run_id = await db.start_run(conn, kind, *window(days))
+    log.info("run %s waiting for the backlog drain to give way", run_id)
+    try:
+        await conn.execute(f"SET lock_timeout = '{RUN_LOCK_WAIT}'")
+        await conn.execute("SELECT pg_advisory_lock(%s)", (RUN_LOCK,))
+    except psycopg.errors.LockNotAvailable as exc:
+        await db.finish_run(conn, run_id, error="the backlog drain did not give way")
+        raise RuntimeError("another Litwatch run is already in progress") from exc
+    finally:
+        await conn.execute("SET lock_timeout = 0")
+    return run_id
+
+
+async def run_waiting(conn: psycopg.AsyncConnection) -> bool:
+    """Whether some run is blocked on the run lock, which a drain must then release."""
+    row = await (
+        await conn.execute(
+            """
+            SELECT 1 FROM pg_locks
+            WHERE locktype = 'advisory' AND NOT granted AND classid = 0 AND objid = %s
+              AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+            LIMIT 1
+            """,
+            (RUN_LOCK,),
+        )
+    ).fetchone()
+    return row is not None
+
+
+async def drain_backlog(
+    conn: psycopg.AsyncConnection,
+    settings: Settings,
+    cascade: Cascade,
+    router: Router | None,
+    stop: asyncio.Event,
+    failed: set[str] | None = None,
+) -> RunSummary | None:
+    """Re-screen papers judged under an older selection version, until none are left or a run
+    wants the lock. Returns None when there was nothing to do or a run is in progress.
+
+    Each batch is screened and then routed, so Zotero follows along and the wait a run sees
+    is one batch. Nothing here is news: no intake, no deep processing, no digest. Papers whose
+    screening fails join `failed` and are left alone by later drains that are handed the set.
+    """
+    failed = failed if failed is not None else set()
+    if not await _try_lock(conn):
+        return None
+    try:
+        todo = await db.backlog(
+            conn, cascade.selections, settings.rescreen_window_days, frozenset(failed)
+        )
+        if not todo:
+            return None
+        now = datetime.now(UTC)
+        s = RunSummary(await db.start_run(conn, "backlog", now, now), "backlog", now, now)
+        log.info("run %s backlog: %s papers to re-screen", s.run_id, len(todo))
+        journal = CallJournal(conn, s.run_id)
+        token = current_journal.set(journal)
+        stage_errors: list[str] = []
+        try:
+            while todo and not stop.is_set() and not await run_waiting(conn):
+                batch, todo = todo[: settings.backlog_batch], todo[settings.backlog_batch :]
+                failed |= await _screen(
+                    conn, settings, cascade, s, batch, settings.backlog_concurrency, quiet=True
+                )
+                if router is not None:
+                    await _isolated(stage_errors, "routing", route_pending(conn, router, s))
+            log.info("run %s backlog: %s re-screened, %s left", s.run_id, s.screened, len(todo))
+        except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
+            s.error = f"{type(exc).__name__}: {exc}"
+            log.exception("run %s backlog failed", s.run_id)
+            raise
+        finally:
+            current_journal.reset(token)
+            s.cost = await journal.total()
+            s.stage_errors = "; ".join(dict.fromkeys(stage_errors)) or None
+            await _finish(conn, s)
+        return s
+    finally:
+        await conn.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
 
 
 async def _run(
@@ -98,9 +208,11 @@ async def _run(
     router: Router | None,
     digester: Digester | None,
     deep: DeepProcessor | None,
+    run_id: int | None = None,
 ) -> RunSummary:
     since, until = window(days)
-    run_id = await db.start_run(conn, kind, since, until)
+    if run_id is None:
+        run_id = await db.start_run(conn, kind, since, until)
     summary = RunSummary(run_id=run_id, kind=kind, window_from=since, window_to=until)
     journal = CallJournal(conn, run_id)
     journal_token = current_journal.set(journal)
@@ -134,28 +246,32 @@ async def _run(
         # Costs belong to the run that made the request, including successful early
         # stages of failed papers and rejected digest responses. Reuse is free.
         summary.cost = await journal.total()
-        await db.finish_run(
-            conn,
-            run_id,
-            fetched=summary.fetched,
-            inserted=summary.inserted,
-            updated=summary.updated,
-            screened=summary.screened,
-            rescreened=summary.rescreened,
-            confirmed=summary.confirmed,
-            failed=summary.failed,
-            routed=summary.routed,
-            route_failed=summary.route_failed,
-            processed=summary.processed,
-            process_failed=summary.process_failed,
-            deep_list_cost=round(summary.deep_list_cost, 4),
-            cost=round(summary.cost, 4),
-            tiers=summary.tiers,
-            error=summary.error,
-            stage_errors=summary.stage_errors,
-            intake=summary.intake,
-        )
+        await _finish(conn, summary)
     return summary
+
+
+async def _finish(conn: psycopg.AsyncConnection, s: RunSummary) -> None:
+    await db.finish_run(
+        conn,
+        s.run_id,
+        fetched=s.fetched,
+        inserted=s.inserted,
+        updated=s.updated,
+        screened=s.screened,
+        rescreened=s.rescreened,
+        confirmed=s.confirmed,
+        failed=s.failed,
+        routed=s.routed,
+        route_failed=s.route_failed,
+        processed=s.processed,
+        process_failed=s.process_failed,
+        deep_list_cost=round(s.deep_list_cost, 4),
+        cost=round(s.cost, 4),
+        tiers=s.tiers,
+        error=s.error,
+        stage_errors=s.stage_errors,
+        intake=s.intake,
+    )
 
 
 async def _isolated(errors: list[str], name: str, stage: Awaitable[None]) -> None:
@@ -200,16 +316,29 @@ async def _fetch(conn: psycopg.AsyncConnection, settings: Settings, s: RunSummar
 
 
 async def _screen(
-    conn: psycopg.AsyncConnection, settings: Settings, cascade: Cascade, s: RunSummary
-) -> None:
-    todo = await db.pending(conn, cascade.selections, settings.rescreen_window_days)
+    conn: psycopg.AsyncConnection,
+    settings: Settings,
+    cascade: Cascade,
+    s: RunSummary,
+    todo: list[Paper] | None = None,
+    concurrency: int | None = None,
+    *,
+    quiet: bool = False,
+) -> set[str]:
+    """Screen the papers nothing has judged yet, or the given backlog batch (`quiet`).
+
+    Returns the ids whose screening failed."""
+    if todo is None:
+        todo = await db.pending(conn)
     log.info("run %s screening %s papers", s.run_id, len(todo))
-    sem = asyncio.Semaphore(settings.screen_concurrency)
+    sem = asyncio.Semaphore(concurrency or settings.screen_concurrency)
     journal = current_journal.get()
     # Journal writes must not interleave with another paper's verdict transaction.
     lock = journal.lock if journal else asyncio.Lock()
-    best: dict[str, int] = {}
-    by_selection: dict[str, dict[str, int]] = {}
+    # A drain screens batch after batch into one summary, so the counts carry over.
+    best: dict[str, int] = s.best
+    by_selection: dict[str, dict[str, int]] = s.by_selection
+    failed: set[str] = set()
 
     async def one(paper):
         async with sem:
@@ -219,13 +348,15 @@ async def _screen(
                 async with lock:
                     await db.store_screen_error(conn, paper.id, f"{type(exc).__name__}: {exc}")
                     s.failed += 1
+                    failed.add(paper.id)
                 return
             async with lock:
                 try:
-                    await db.store_screen(conn, result)
+                    await db.store_screen(conn, result, quiet=quiet)
                 except Exception as exc:  # noqa: BLE001 - a bad row must not end the run
                     await db.store_screen_error(conn, paper.id, f"{type(exc).__name__}: {exc}")
                     s.failed += 1
+                    failed.add(paper.id)
                     return
                 if settings.archive_enabled and result.best_tier == 1:
                     try:
@@ -258,6 +389,7 @@ async def _screen(
         s.cost,
         s.tiers,
     )
+    return failed
 
 
 async def route_pending(

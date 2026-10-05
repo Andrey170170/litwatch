@@ -238,19 +238,52 @@ def create_app(settings: Settings) -> FastAPI:
                     dsn, client, stop, interval_seconds=settings.archive_dispatch_seconds
                 )
             )
+        drain = asyncio.create_task(backlog_worker(stop)) if settings.backlog_enabled else None
         try:
             yield
         finally:
             stop.set()
-            if delivery is not None:
-                delivery.cancel()
-                with suppress(asyncio.CancelledError):
-                    await delivery
+            for task in (delivery, drain):
+                if task is not None:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
             if client is not None:
                 await client.aclose()
 
     app = FastAPI(title="litwatch", lifespan=lifespan)
     app.state.runs = state  # exposes the in-flight task, for tests and diagnostics
+
+    async def backlog_worker(stop: asyncio.Event) -> None:
+        """Between runs, re-screen papers judged under an older selection version."""
+        failed: set[str] = set()  # not retried until the service restarts
+        try:
+            async with await db.connect(dsn) as conn:
+                await db.close_interrupted_backlog(conn)
+        except Exception:  # noqa: BLE001 - the loop below reports a database that stays down
+            log.exception("backlog: could not close interrupted drains")
+        while not stop.is_set():
+            router = None
+            try:
+                async with await db.connect(dsn) as conn:
+                    selections = await active_selections(conn)
+                    if selections:
+                        router = build_router(settings)
+                        await ingest.drain_backlog(
+                            conn,
+                            settings,
+                            build_cascade(settings, selections),
+                            router,
+                            stop,
+                            failed,
+                        )
+            except Exception:  # noqa: BLE001 - recorded on the run row; try again next round
+                log.exception("backlog drain failed")
+            finally:
+                if getattr(router, "archive", None) is not None:
+                    await router.archive.aclose()
+            with suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=settings.backlog_interval_seconds)
 
     async def execute(req: RunRequest) -> None:
         try:
@@ -302,9 +335,18 @@ def create_app(settings: Settings) -> FastAPI:
         return {"started": True, "days": req.days, "kind": req.kind}
 
     @app.get("/runs")
-    async def runs(limit: int = 20) -> list[dict[str, Any]]:
+    async def runs(limit: int = 20, kind: str | None = None) -> list[dict[str, Any]]:
+        """Latest runs first. `kind=daily` leaves out backlog drains, which start on their own."""
         async with await db.connect(dsn) as conn:
-            return await db.list_runs(conn, limit)
+            return await db.list_runs(conn, limit, kind)
+
+    @app.get("/backlog")
+    async def backlog() -> dict[str, Any]:
+        """How many papers still wait for a re-screen under the current selection versions."""
+        async with await db.connect(dsn) as conn:
+            selections = await active_selections(conn)
+            pending = await db.backlog(conn, selections, settings.rescreen_window_days)
+        return {"pending": len(pending), "enabled": settings.backlog_enabled}
 
     @app.get("/runs/{run_id}")
     async def run(run_id: int) -> dict[str, Any]:

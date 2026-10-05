@@ -283,3 +283,7 @@ CREATE TABLE IF NOT EXISTS projection_cursor (
     paper_id text NOT NULL DEFAULT '',
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- True when the latest screening was a backlog re-screen under an edited selection: the paper
+-- was judged again, not newly analyzed, so the digest does not announce it.
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS screened_quietly boolean NOT NULL DEFAULT false;

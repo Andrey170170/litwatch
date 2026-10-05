@@ -72,6 +72,12 @@ class Settings:
     rescreen_window_days: int = 30
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     screen_concurrency: int = 16
+    # Papers judged under an older selection version are re-screened in the background, a
+    # batch at a time and with few calls in flight, giving way to any run that asks.
+    backlog_enabled: bool = True
+    backlog_batch: int = 40
+    backlog_concurrency: int = 4
+    backlog_interval_seconds: float = 300.0
     intake_source: str = "oai"
     archive_url: str | None = None
     archive_token: str | None = field(default=None, repr=False)
@@ -118,6 +124,12 @@ class Settings:
                 os.environ.get("LITWATCH_CATEGORIES", ",".join(cls.categories)).split(",")
             ),
             screen_concurrency=int(os.environ.get("LITWATCH_SCREEN_CONCURRENCY", "16")),
+            backlog_enabled=os.environ.get("LITWATCH_BACKLOG_ENABLED", "1") not in ("0", "false"),
+            backlog_batch=int(os.environ.get("LITWATCH_BACKLOG_BATCH", "40")),
+            backlog_concurrency=int(os.environ.get("LITWATCH_BACKLOG_CONCURRENCY", "4")),
+            backlog_interval_seconds=float(
+                os.environ.get("LITWATCH_BACKLOG_INTERVAL_SECONDS", "300")
+            ),
             intake_source=os.environ.get("LITWATCH_INTAKE_SOURCE", "oai"),
             archive_url=os.environ.get("LITWATCH_ARCHIVE_URL"),
             archive_token=_secret("LITWATCH_ARCHIVE_TOKEN"),

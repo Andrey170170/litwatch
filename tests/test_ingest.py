@@ -23,7 +23,9 @@ def test_window_ends_now_and_spans_days():
 
 async def test_busy_lock_still_closes_the_runs_archive_clients():
     class Busy:
-        async def execute(self, sql):
+        async def execute(self, sql, params=None):
+            if "FROM runs" in sql:  # no backlog drain holds the lock, so there is no waiting
+                return SimpleNamespace(fetchone=AsyncMock(return_value=None))
             assert "pg_try_advisory_lock" in sql  # never unlocks a lock it did not take
             return SimpleNamespace(fetchone=AsyncMock(return_value={"locked": False}))
 
