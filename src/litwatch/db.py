@@ -227,8 +227,8 @@ async def backlog(
     for s in selections:
         rows = await (
             await conn.execute(
-                """
-                SELECT {columns}, coalesce((SELECT v.tier FROM verdicts v
+                f"""
+                SELECT {SCREENING_COLUMNS}, coalesce((SELECT v.tier FROM verdicts v
                                       WHERE v.paper_id = p.id AND v.selection = %(slug)s), 4) AS t
                 FROM papers p
                 WHERE p.screened_at IS NOT NULL
@@ -239,7 +239,7 @@ async def backlog(
                   AND NOT EXISTS (SELECT 1 FROM verdicts v
                                   WHERE v.paper_id = p.id AND v.selection = %(slug)s
                                     AND v.version = %(version)s)
-                """.format(columns=SCREENING_COLUMNS),
+                """,
                 {"slug": s.slug, "version": current[s.slug], "since": since},
             )
         ).fetchall()
