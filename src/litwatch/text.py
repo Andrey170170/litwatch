@@ -153,7 +153,12 @@ class BodyFetcher:
                 direct_pdf = True
             except ArchiveError:
                 log.warning("%s: archive preparation failed; trying HTML", paper_id)
-        html = await self._get(f"https://arxiv.org/html/{identity}")
+        try:
+            html = await self._get(f"https://arxiv.org/html/{identity}")
+        except httpx.HTTPError as exc:
+            # HTML is an optimisation; an arXiv fault must not hide a usable archived PDF.
+            log.warning("%s: HTML request failed (%s), trying PDF", paper_id, type(exc).__name__)
+            html = None
         if html is not None:
             md = await asyncio.to_thread(html_to_markdown, html.decode("utf-8", "replace"))
             if len(md) >= MIN_BODY_CHARS:
