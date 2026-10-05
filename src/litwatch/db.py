@@ -199,14 +199,23 @@ async def backlog(
     """Screened papers whose judgement for some selection is missing or predates its version.
 
     For an edited selection its current members whatever their age plus keyword hits in the
-    window; a selection with no verdicts at all is new and takes the whole window. Newest
-    first, so recent papers get the current rubric first. `skip` leaves out papers that
-    already failed in this drain.
+    window; a new selection takes the whole window, and stays new until a drain has finished
+    it (`window_screened`), since a drain can stop after any batch. Newest first, so recent
+    papers get the current rubric first. `skip` leaves out papers that already failed in
+    this drain.
     """
     current = {s.slug: s.version for s in selections}
     since = datetime.now(UTC) - timedelta(days=window_days)
     chosen: dict[str, dict[str, Any]] = {}
-    fresh = {s.slug for s in selections if not await has_verdicts(conn, s.slug)}
+    unfinished = {
+        r["slug"]
+        for r in await (
+            await conn.execute("SELECT slug FROM selections WHERE NOT window_screened")
+        ).fetchall()
+    }
+    fresh = {
+        s.slug for s in selections if s.slug in unfinished or not await has_verdicts(conn, s.slug)
+    }
     for s in selections:
         rows = await (
             await conn.execute(
@@ -235,6 +244,14 @@ async def backlog(
         chosen.values(), key=lambda r: (r["published"] is not None, r["published"]), reverse=True
     )
     return [row_to_paper(r) for r in newest]
+
+
+async def mark_window_screened(conn: psycopg.AsyncConnection, slugs: list[str]) -> None:
+    """Nothing is left for these selections: from here an edit selects members and keyword hits."""
+    await conn.execute(
+        "UPDATE selections SET window_screened = true WHERE slug = ANY(%s) AND NOT window_screened",
+        (slugs,),
+    )
 
 
 async def has_verdicts(conn: psycopg.AsyncConnection, slug: str) -> bool:
@@ -384,6 +401,8 @@ async def forget_verdicts(
                 (slug, since, since),
             )
         ).fetchone()
+        # Judging the window again is what was asked for, wherever a drain stops on the way.
+        await conn.execute("UPDATE selections SET window_screened = false WHERE slug = %s", (slug,))
     return row["count"]
 
 
@@ -423,8 +442,8 @@ async def upsert_selection(conn: psycopg.AsyncConnection, s: Selection) -> bool:
         await conn.execute(
             """
             INSERT INTO selections (slug, name, owner, status, subject, rubric, keywords, version,
-                                    digest, notion_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    digest, notion_id, window_screened)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false)
             ON CONFLICT (slug) DO UPDATE SET
                 name = EXCLUDED.name, owner = EXCLUDED.owner, status = EXCLUDED.status,
                 subject = EXCLUDED.subject, rubric = EXCLUDED.rubric,

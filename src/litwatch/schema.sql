@@ -287,3 +287,7 @@ CREATE TABLE IF NOT EXISTS projection_cursor (
 -- True when the latest screening was a backlog re-screen under an edited selection: the paper
 -- was judged again, not newly analyzed, so the digest does not announce it.
 ALTER TABLE papers ADD COLUMN IF NOT EXISTS screened_quietly boolean NOT NULL DEFAULT false;
+
+-- False until the backlog drain has taken a new selection through its whole window. Until
+-- then the selection is still new, however many of its papers already have a verdict.
+ALTER TABLE selections ADD COLUMN IF NOT EXISTS window_screened boolean NOT NULL DEFAULT true;

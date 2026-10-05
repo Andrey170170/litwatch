@@ -61,7 +61,8 @@ first: `LITWATCH_BACKLOG_BATCH` (40) papers at a time with
 it goes, with no intake, deep processing or digest. A run that starts meanwhile is
 recorded at once and waits for the batch in hand; the drain then gives way and
 resumes afterwards. What is still stale is derived from the stored verdict versions,
-so a restart loses nothing. Each drain is a `runs` row of kind `backlog` with its own
+so a restart loses nothing; a new selection keeps its claim on the whole window until a
+drain has finished it (`selections.window_screened`). Each drain is a `runs` row of kind `backlog` with its own
 cost; `GET /runs?kind=daily` leaves those out, and `GET /backlog` says how many
 papers are waiting. A backlog re-screen judges a paper again, it does not newly
 analyze it, so no digest announces it (`papers.screened_quietly`); the Papers table

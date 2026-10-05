@@ -116,3 +116,28 @@ async def test_without_a_drain_a_busy_lock_still_fails_at_once(schema):
         with pytest.raises(RuntimeError, match="already in progress"):
             await ingest.run(b, Settings("unused"), cascade(FAITH), "daily", 1, fetch=False)
         assert await db.list_runs(b) == []
+
+
+async def test_a_new_selection_keeps_its_whole_window_across_an_interrupted_drain(
+    schema, monkeypatch
+):
+    settings = Settings("unused", backlog_batch=1, backlog_concurrency=1)
+    async with connect(schema) as conn:
+        # No keyword of the new selection hits these papers: only its newness selects them.
+        await db.upsert_papers(conn, papers(3))
+        await conn.execute("UPDATE papers SET screened_at = now(), best_tier = 4")
+        await db.upsert_selection(conn, FAITH)
+        waiting = iter([False, True])
+        monkeypatch.setattr(ingest, "run_waiting", lambda conn: _answer(next(waiting, False)))
+        first = await ingest.drain_backlog(conn, settings, cascade(FAITH), None, asyncio.Event())
+        assert first.screened == 1
+        # One verdict exists now; the rest of the window is still the selection's to judge.
+        rest = await ingest.drain_backlog(conn, settings, cascade(FAITH), None, asyncio.Event())
+        assert rest.screened == 2
+        # Finished, the selection is an ordinary one: an edit takes members and keyword hits.
+        await conn.execute("UPDATE verdicts SET tier = 4")
+        assert await db.backlog(conn, [EDITED]) == []
+
+
+async def _answer(value):
+    return value

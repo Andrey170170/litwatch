@@ -25,6 +25,9 @@ log = logging.getLogger(__name__)
 
 # One writer for checkpoints and screening, shared by the API, the CLI and the backlog drain.
 RUN_LOCK = 7213902
+# Held by a backlog drain for as long as it may hold the run lock, so a run can tell a drain,
+# which gives way, from another run, which does not.
+DRAIN_LOCK = 7213903
 # A drain lets go after the batch in hand; a run that waited this long has another cause.
 RUN_LOCK_WAIT = "15min"
 
@@ -112,7 +115,14 @@ async def _lock(conn: psycopg.AsyncConnection, kind: str, days: int) -> int | No
     if await _try_lock(conn):
         return None
     draining = await (
-        await conn.execute("SELECT 1 FROM runs WHERE kind = 'backlog' AND finished_at IS NULL")
+        await conn.execute(
+            """
+            SELECT 1 FROM pg_locks
+            WHERE locktype = 'advisory' AND granted AND classid = 0 AND objid = %s
+              AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+            """,
+            (DRAIN_LOCK,),
+        )
     ).fetchone()
     if not draining:
         raise RuntimeError("another Litwatch run is already in progress")
@@ -161,41 +171,66 @@ async def drain_backlog(
     screening fails join `failed` and are left alone by later drains that are handed the set.
     """
     failed = failed if failed is not None else set()
-    if not await _try_lock(conn):
+    # The drain lock first and last: whoever finds the run lock busy sees it for the whole time.
+    drain = await (
+        await conn.execute("SELECT pg_try_advisory_lock(%s) AS locked", (DRAIN_LOCK,))
+    ).fetchone()
+    if not drain or not drain["locked"]:
         return None
     try:
-        todo = await db.backlog(
-            conn, cascade.selections, settings.rescreen_window_days, frozenset(failed)
-        )
-        if not todo:
+        if not await _try_lock(conn):
             return None
-        now = datetime.now(UTC)
-        s = RunSummary(await db.start_run(conn, "backlog", now, now), "backlog", now, now)
-        log.info("run %s backlog: %s papers to re-screen", s.run_id, len(todo))
-        journal = CallJournal(conn, s.run_id)
-        token = current_journal.set(journal)
-        stage_errors: list[str] = []
         try:
-            while todo and not stop.is_set() and not await run_waiting(conn):
-                batch, todo = todo[: settings.backlog_batch], todo[settings.backlog_batch :]
-                failed |= await _screen(
-                    conn, settings, cascade, s, batch, settings.backlog_concurrency, quiet=True
-                )
-                if router is not None:
-                    await _isolated(stage_errors, "routing", route_pending(conn, router, s))
-            log.info("run %s backlog: %s re-screened, %s left", s.run_id, s.screened, len(todo))
-        except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
-            s.error = f"{type(exc).__name__}: {exc}"
-            log.exception("run %s backlog failed", s.run_id)
-            raise
+            return await _drain(conn, settings, cascade, router, stop, failed)
         finally:
-            current_journal.reset(token)
-            s.cost = await journal.total()
-            s.stage_errors = "; ".join(dict.fromkeys(stage_errors)) or None
-            await _finish(conn, s)
-        return s
+            await conn.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
     finally:
-        await conn.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
+        await conn.execute("SELECT pg_advisory_unlock(%s)", (DRAIN_LOCK,))
+
+
+async def _drain(
+    conn: psycopg.AsyncConnection,
+    settings: Settings,
+    cascade: Cascade,
+    router: Router | None,
+    stop: asyncio.Event,
+    failed: set[str],
+) -> RunSummary | None:
+    slugs = [sel.slug for sel in cascade.selections]
+    todo = await db.backlog(
+        conn, cascade.selections, settings.rescreen_window_days, frozenset(failed)
+    )
+    if not todo:
+        if not failed:
+            await db.mark_window_screened(conn, slugs)
+        return None
+    now = datetime.now(UTC)
+    s = RunSummary(await db.start_run(conn, "backlog", now, now), "backlog", now, now)
+    log.info("run %s backlog: %s papers to re-screen", s.run_id, len(todo))
+    journal = CallJournal(conn, s.run_id)
+    token = current_journal.set(journal)
+    stage_errors: list[str] = []
+    try:
+        while todo and not stop.is_set() and not await run_waiting(conn):
+            batch, todo = todo[: settings.backlog_batch], todo[settings.backlog_batch :]
+            failed |= await _screen(
+                conn, settings, cascade, s, batch, settings.backlog_concurrency, quiet=True
+            )
+            if router is not None:
+                await _isolated(stage_errors, "routing", route_pending(conn, router, s))
+        if not todo and not failed:
+            await db.mark_window_screened(conn, slugs)
+        log.info("run %s backlog: %s re-screened, %s left", s.run_id, s.screened, len(todo))
+    except Exception as exc:  # noqa: BLE001 - recorded on the run row, then re-raised
+        s.error = f"{type(exc).__name__}: {exc}"
+        log.exception("run %s backlog failed", s.run_id)
+        raise
+    finally:
+        current_journal.reset(token)
+        s.cost = await journal.total()
+        s.stage_errors = "; ".join(dict.fromkeys(stage_errors)) or None
+        await _finish(conn, s)
+    return s
 
 
 async def _run(
