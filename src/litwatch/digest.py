@@ -406,13 +406,18 @@ def _also(selections: list[Selection], row: dict[str, Any], owner: str) -> str:
 
 
 def _shared(owned: Groups, slug: str) -> int:
-    """Tier 1/2 members of a selection that the general digest lists under another one."""
+    """Tier 1/2 members of a selection that the general digest lists under another one.
+
+    An older tier 2 paper is not listed under its owner but in the updated-papers section,
+    so it is not counted.
+    """
     return sum(
         ((row.get("verdicts") or {}).get(slug) or {}).get("tier", 4) <= 2
         for other, tiers in owned.items()
         if other != slug
-        for rows in tiers.values()
+        for tier, rows in tiers.items()
         for row in rows
+        if not (tier == 2 and is_older(row))
     )
 
 

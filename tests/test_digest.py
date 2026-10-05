@@ -277,6 +277,19 @@ def test_older_papers_are_badged_at_tier1_and_grouped_at_tier2():
     )
 
 
+def test_shared_count_skips_older_papers_grouped_in_the_updated_section():
+    papers = [
+        older(member("1", "Old shared", {"cot-faithfulness": 2, "mech-interp": 2})),
+        member("2", "Third", {"mech-interp": 3}),
+    ]
+    body = render_general_digest([FAITH, INTERP], assign([FAITH, INTERP], papers), None)
+    # The shared paper is not under CoT faithfulness but in the updated section.
+    assert (
+        "**Mechanistic interpretability** · nothing must read or recommended, 1 good to know."
+        in body
+    )
+
+
 def test_selection_digest_lists_older_papers_apart_and_counts_the_rest():
     papers = [
         member("2", "New rec", {"cot-faithfulness": 2}),
