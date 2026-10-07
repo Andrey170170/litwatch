@@ -6,10 +6,12 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
+import openai
 import pytest
 from openai.types.chat import ChatCompletion
 
-from litwatch import db, ingest
+from litwatch import calls, db, ingest
 from litwatch.calls import CallJournal, current_journal, usage_of
 from litwatch.config import Settings
 from litwatch.digest import Digester, SelectionOutput
@@ -272,3 +274,29 @@ async def test_digest_retry_keeps_both_response_charges(conn):
         assert all(row["output"] is None for row in rows)  # Explicit rewrites remain fresh.
     finally:
         current_journal.reset(token)
+
+
+async def test_a_provider_that_is_briefly_away_is_tried_again(monkeypatch):
+    monkeypatch.setattr(calls, "RETRY_DELAYS", (0, 0))
+    gone = openai.NotFoundError(
+        "No endpoints found",
+        response=httpx.Response(404, request=httpx.Request("POST", "http://openrouter")),
+        body=None,
+    )
+
+    class Flaky(Responses):
+        def __init__(self, failures):
+            super().__init__()
+            self.failures = failures
+
+        async def create(self, **request):
+            if self.failures:
+                self.failures -= 1
+                raise gone
+            return await super().create(**request)
+
+    recovering = Flaky(2)
+    await ModelScreener(recovering.client(), "model").screen(PAPER, [FAITH])
+    assert recovering.failures == 0 and len(recovering.calls) == 1
+    with pytest.raises(openai.NotFoundError):
+        await ModelScreener(Flaky(3).client(), "model").screen(PAPER, [FAITH])

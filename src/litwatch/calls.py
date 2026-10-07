@@ -9,12 +9,23 @@ import logging
 from contextvars import ContextVar
 from typing import Any
 
+import openai
 import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.models import Usage
 
 log = logging.getLogger(__name__)
+
+# A provider that is briefly away: OpenRouter answers 404 when a model's only provider has no
+# endpoint up, which the SDK never retries, and its own retries of the rest span about a second.
+TRANSIENT = (
+    openai.NotFoundError,
+    openai.InternalServerError,
+    openai.RateLimitError,
+    openai.APIConnectionError,
+)
+RETRY_DELAYS = (1.0, 5.0, 20.0)
 
 
 def usage_of(completion: Any, model: str) -> Usage:
@@ -130,12 +141,28 @@ async def recorded_completion(
     paper_id: str | None = None,
     timeout_seconds: float | None = None,
 ):
-    """Record the response before parsing, so rejected outputs still have a charge."""
+    """Record the response before parsing, so rejected outputs still have a charge.
+
+    A provider failure is tried again after each of `RETRY_DELAYS`; every attempt has the
+    whole timeout, and a timeout is not retried."""
     journal = current_journal.get()
     call_id = await journal.start(operation, model, key, paper_id) if journal else None
     try:
-        async with asyncio.timeout(timeout_seconds):
-            completion = await client.chat.completions.create(model=model, **request)
+        for delay in (*RETRY_DELAYS, None):
+            try:
+                async with asyncio.timeout(timeout_seconds):
+                    completion = await client.chat.completions.create(model=model, **request)
+                break
+            except TRANSIENT as exc:
+                if delay is None:
+                    raise
+                log.warning(
+                    "inference operation=%s %s, trying again in %ss",
+                    operation,
+                    type(exc).__name__,
+                    delay,
+                )
+                await asyncio.sleep(delay)
         usage = usage_of(completion, model)
         usage.source_call_id = call_id
         if journal:
