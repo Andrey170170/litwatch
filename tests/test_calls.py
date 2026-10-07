@@ -300,3 +300,8 @@ async def test_a_provider_that_is_briefly_away_is_tried_again(monkeypatch):
     assert recovering.failures == 0 and len(recovering.calls) == 1
     with pytest.raises(openai.NotFoundError):
         await ModelScreener(Flaky(3).client(), "model").screen(PAPER, [FAITH])
+    gone = openai.APITimeoutError(httpx.Request("POST", "http://openrouter"))
+    timed_out = Flaky(1)
+    with pytest.raises(openai.APITimeoutError):
+        await ModelScreener(timed_out.client(), "model").screen(PAPER, [FAITH])
+    assert timed_out.calls == []

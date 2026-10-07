@@ -154,7 +154,8 @@ async def recorded_completion(
                     completion = await client.chat.completions.create(model=model, **request)
                 break
             except TRANSIENT as exc:
-                if delay is None:
+                # The SDK's own timeout is a connection error by class, and still a timeout.
+                if delay is None or isinstance(exc, openai.APITimeoutError):
                     raise
                 log.warning(
                     "inference operation=%s %s, trying again in %ss",
