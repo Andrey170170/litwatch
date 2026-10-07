@@ -102,7 +102,9 @@ lists as `model=a|b;model2=c`, and `model=` hands a model back to OpenRouter. Th
 [2026-10-01 provider trial](evals/2026-10-01-providers.md) explains the choices.
 `LITWATCH_SCREEN_TIMEOUT_SECONDS` defaults to 120 and bounds the primary request
 including SDK retries. If that deadline expires, the paper stays pending; a client
-timeout cannot trigger server-side fallback. Batch submission remains deferred: Flex
+timeout cannot trigger server-side fallback. A provider failure (OpenRouter's 404 when a
+model's only provider has no endpoint up, a 5xx, a 429, a dropped connection) is tried
+again after 1, 5 and 20 seconds, each attempt with the whole deadline; a timeout is not. Batch submission remains deferred: Flex
 already gives Luna the batch discount without the 24-hour window.
 
 `LITWATCH_SCREEN_CONCURRENCY` (16) bounds papers in flight; a paper's confirm calls run
