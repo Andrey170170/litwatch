@@ -265,7 +265,11 @@ def create_app(settings: Settings) -> FastAPI:
 
     async def backlog_worker(stop: asyncio.Event) -> None:
         """Between runs, re-screen papers judged under an older selection version."""
-        failed: set[str] = set()  # not retried until the service restarts
+        # Papers whose re-screen failed sit out until the next retry round, so a provider
+        # outage heals without a restart and a paper that always fails cannot spin.
+        failed: set[str] = set()
+        clock = asyncio.get_running_loop().time
+        retry_at = clock() + settings.backlog_retry_seconds
         try:
             async with await db.connect(dsn) as conn:
                 await db.close_interrupted_backlog(conn, ingest.DRAIN_LOCK)
@@ -278,6 +282,9 @@ def create_app(settings: Settings) -> FastAPI:
         cascade, built_for = None, None
         try:
             while not stop.is_set():
+                if clock() >= retry_at:
+                    failed.clear()
+                    retry_at = clock() + settings.backlog_retry_seconds
                 try:
                     async with await db.connect(dsn) as conn:
                         selections = await active_selections(conn)

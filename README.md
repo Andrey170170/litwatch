@@ -67,7 +67,8 @@ cost; `GET /runs?kind=daily` leaves those out, and `GET /backlog` says how many
 papers are waiting. A backlog re-screen judges a paper again, it does not newly
 analyze it, so no digest announces it (`papers.screened_quietly`); the Papers table
 and Zotero follow the new tiers. Until a paper's turn comes it keeps its old tiers.
-A paper whose re-screen fails is left alone until the service restarts.
+A paper whose re-screen fails is left alone and tried again every
+`LITWATCH_BACKLOG_RETRY_SECONDS` (six hours), or when the service restarts.
 `LITWATCH_BACKLOG_ENABLED=0` stops the drain.
 
 Three stages, a later verdict replacing the earlier one per selection:

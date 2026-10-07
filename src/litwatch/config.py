@@ -78,6 +78,7 @@ class Settings:
     backlog_batch: int = 40
     backlog_concurrency: int = 4
     backlog_interval_seconds: float = 300.0
+    backlog_retry_seconds: float = 6 * 3600.0
     intake_source: str = "oai"
     archive_url: str | None = None
     archive_token: str | None = field(default=None, repr=False)
@@ -129,6 +130,9 @@ class Settings:
             backlog_concurrency=int(os.environ.get("LITWATCH_BACKLOG_CONCURRENCY", "4")),
             backlog_interval_seconds=float(
                 os.environ.get("LITWATCH_BACKLOG_INTERVAL_SECONDS", "300")
+            ),
+            backlog_retry_seconds=float(
+                os.environ.get("LITWATCH_BACKLOG_RETRY_SECONDS", str(6 * 3600))
             ),
             intake_source=os.environ.get("LITWATCH_INTAKE_SOURCE", "oai"),
             archive_url=os.environ.get("LITWATCH_ARCHIVE_URL"),
