@@ -120,11 +120,21 @@ Continuously: **publication lookup** for library papers, first when saved, then 
 years, and on demand when BibTeX is exported.
 
 On demand: the owner labels a paper, reports a miss, saves a pick, or edits a topic. Editing a
-Watch topic re-grades its existing candidates and re-triages a recent window in the background.
-Editing a Radar or Pulse topic's subject re-triages the current review window, so the next
-review reads memberships made from the new version; other edits affect the next review only.
-What an edit re-runs is under review (section 9, item 7); until that is decided this paragraph
-is the earlier proposal, not a settled rule.
+topic applies forward: the new version is used from the next run, and past papers keep the
+answer they got. Every membership, candidate and verdict records the topic version that
+produced it, so mixed history is visible. Nothing retroactive runs by itself. After an edit
+to a Watch topic the app offers re-runs over a chosen scope, each showing its paper count and
+estimated cost:
+
+- the owner's labels and reported misses, which shows whether the edit helped;
+- the topic's existing candidates, re-graded;
+- papers matching the topic's keyword patterns anywhere in the collection, picked without a
+  model and then triaged;
+- a date range.
+
+Editing a Radar or Pulse topic re-runs nothing; a mid-week edit gives one mixed week. The cost
+of this rule is that an old paper the previous wording excluded stays unfound unless a keyword
+or a paid date range reaches it.
 
 ### Volumes, from the 0.x journal
 
@@ -146,7 +156,7 @@ src/litwatch/
   intake/            arXiv sources → papers
   llm/               model gateway: one request shape, several providers, cost journal
   screening/         triage and the keyword audit
-  watch/             grading, reconciliation, re-grading after a topic edit
+  watch/             grading, reconciliation, re-grading a chosen set
   review/            weekly reviews and briefings
   publications/      published-version lookup, BibTeX
   feedback/          labels, misses, evaluation
@@ -195,7 +205,7 @@ functions of the papers and topic versions they are given.
 
 **watch.** The grading prompt, one topic and one paper per call, with the rubric in context.
 `grade(candidates)` asks `judge` and `check` concurrently and stores the reconciled verdict.
-`regrade(topic)` handles a topic edit.
+`regrade(papers, topic)` re-grades a chosen set after a topic edit.
 
 **review.** `weekly_review(topic, week)` for Radar and Pulse; a field too large for one call is
 shortlisted in chunks first. `daily_briefing(day)` and `weekly_briefing(week)` assemble stored
@@ -251,7 +261,7 @@ cost and errors.
 
 **api.** JSON over HTTP, described by an OpenAPI schema from which the web app's client types
 are generated. Resource groups: `/papers` (get, search, BibTeX), `/topics` (CRUD, preview
-against recent papers), `/inbox` (Watch verdicts needing attention), `/briefings`, `/feedback`
+against labelled papers, scoped re-runs), `/inbox` (Watch verdicts needing attention), `/briefings`, `/feedback`
 (labels, misses, evaluation), `/library`, `/runs`, `/integrations` (status, failures),
 `/events` (changes feed), `/settings` (read-only view of configuration). A single shared token
 protects it; there are no accounts.
@@ -265,7 +275,7 @@ components, which are copied into the repository and therefore restyled freely. 
 | Briefings | Daily and weekly, with history |
 | Paper | Abstract, verdicts with both opinions, links (arXiv, PDF, published version), BibTeX, deep card, save |
 | Search | The whole collection, filtered by topic, grade, date |
-| Topics | Create and edit; preview a draft against the last week before saving |
+| Topics | Create and edit; preview a draft against your labelled papers and misses; start a scoped re-run after saving |
 | Report a miss | Paste an arXiv link; see what each stage said |
 | Quality | Recall and precision per Watch topic over time; open misses |
 | System | Runs, cost by role and provider, integration health |
@@ -482,9 +492,10 @@ Decided on 2026-10-08:
    reported miss. Where a result comes from is an ordinary filter beside topic, grade and
    year, with no default restriction. Backfilling older archive papers through Watch triage
    and grading stays after v1; jobs already take explicit paper sets for that purpose.
+7. **What a topic edit re-runs.** Nothing, by itself: edits apply forward, and retroactive
+   runs are explicit and scoped (section 3). Re-triaging history on every edit would cost
+   several dollars each time at this collection size.
 
-Open:
-
-7. **What a topic edit re-runs.** Re-triaging history on every edit costs too much at this
-   scale. Under discussion: an edit applies forward only, and anything retroactive is an
-   explicit job that shows its paper count and estimated cost first.
+Nothing is open. Noted for later: the owner plans embeddings over the archive (abstracts,
+ideally full text) for semantic search, once a GPU server exists. That would also give a
+cheap way to pick candidates for backfill and for re-runs after a topic edit.

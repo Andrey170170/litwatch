@@ -185,6 +185,7 @@
 
 <section id="open" class="prose" hidden>
   <h2>Decisions</h2>
+  <p class="muted">Nothing is open.</p>
   <h3>Settled on 2026-10-08</h3>
   <ul>
     <li><b>Zotero items from broad selections</b> stay where they are. v1 stops adding to them and deletes nothing.</li>
@@ -192,14 +193,14 @@
     <li><b>Radar picks</b> are not saved automatically; you save the ones that matter.</li>
     <li><b>Misses from a phone:</b> the web app is an installable PWA that appears in Android's share sheet, so a shared arXiv link arrives as a miss report. Part of milestone 3.</li>
     <li><b>Search</b> is one box and one result list over litwatch and, when its integration is on, arxiv-archive. Results merge by arXiv id; a paper only the archive holds can be brought in with one action; the source is an ordinary filter.</li>
+    <li><b>Topic edits apply forward.</b> Nothing retroactive runs by itself; you can start a re-run over a chosen scope, which shows its paper count and estimated cost.</li>
     <li><b>Your PI's view:</b> the Notion export carries Watch topics only, until you have talked to her.</li>
   </ul>
-  <h3>Still open</h3>
-  <div class="q"><b>What a topic edit re-runs.</b> Re-triaging history on every edit costs too much at this scale. Under discussion: an edit applies forward only, and anything retroactive is an explicit job that shows its paper count and estimated cost first.</div>
   <h3>Risks worth knowing</h3>
   <ul>
     <li><b>Triage is the single point where a paper can vanish.</b> Behind it: the keyword audit, the miss channel, and a recall number on the Quality page. Milestone 2 does not pass if triage loses papers 0.14 found, and it includes a hand check of what triage rejects.</li>
     <li><b>DBLP access.</b> Its HTTP search API answered this server with a bot challenge on 2026-10-08; its SPARQL endpoint worked (exact-title lookup in about 50 ms). The lookup sits behind an interface, with a local data dump as fallback.</li>
+    <li><b>An edit does not reach back.</b> An old paper the previous wording excluded stays unfound unless a keyword or a date-range re-run reaches it. Embeddings over the archive, planned for later, would close this.</li>
     <li><b>Cost figures are estimates</b> from 0.x token counts and are re-measured in milestone 2.</li>
   </ul>
 </section>
@@ -342,11 +343,11 @@ const FLOWS = {
     ['It becomes a permanent test', ['feedback'], 'Every later evaluation replays it. A config or prompt change that still misses it shows on the Quality page.'],
   ],
   'You edit a Watch topic': [
-    ['Draft and preview', ['web', 'api', 'screening', 'watch'], 'The Topics page runs the draft against last week\'s papers without saving, and shows what would change.'],
-    ['Save', ['store'], 'The topic gets a new version, a hash of its subject, rubric and keywords.'],
-    ['Re-grade existing candidates', ['watch', 'llm', 'jobs'], 'Cheap: only papers that were already candidates.'],
-    ['Re-triage a recent window', ['screening', 'jobs'], 'In the background, newest first, as an ordinary job. New papers that night already use the new version.'],
-    ['Changes appear in the inbox', ['web', 'events'], 'Promotions and demotions are shown as such. Integrations follow through events.'],
+    ['Draft and preview', ['web', 'api', 'feedback', 'screening', 'watch'], 'The Topics page runs the draft against your labelled papers and reported misses, a few hundred at most, and shows what would change. Cheap enough to repeat while you tune the wording.'],
+    ['Save', ['store'], 'The topic gets a new version, a hash of its subject, rubric and keywords. Nothing else runs.'],
+    ['New papers use it', ['jobs', 'screening', 'watch'], 'From the next night on. Past papers keep the answer they got, and each records the version that produced it.'],
+    ['Optionally, re-run a scope', ['web', 'api', 'jobs', 'screening', 'watch', 'llm'], 'Your choice, with the paper count and estimated cost shown: existing candidates, keyword hits across the collection, or a date range. It runs as an ordinary job.'],
+    ['Changes appear in the inbox', ['web', 'events'], 'Promotions and demotions from a re-run are shown as such. Integrations follow through events.'],
   ],
 };
 const MS = [
