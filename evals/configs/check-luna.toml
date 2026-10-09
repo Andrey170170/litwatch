@@ -1,0 +1,5 @@
+# Trial: Luna as the check model instead of Muse.
+[models.check]
+provider = "openrouter"
+model = "openai/gpt-6-luna"
+effort = "medium"

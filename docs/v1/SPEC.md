@@ -1,6 +1,6 @@
 # litwatch v1 specification
 
-Status: draft for review, 2026-10-08. Nothing here is built. `docs/v1/plan.html` walks through
+Status: milestones 0 to 2 are built on branch `v1` (2026-10-09); the rest is not. `docs/v1/plan.html` walks through
 the same design interactively; where they differ, this file wins.
 
 ## 1. Why this exists
@@ -65,8 +65,11 @@ decides the service it gets:
 | Written by the owner | Subject, rubric, keywords | Subject, interests | Subject |
 
 **Triage.** One cheap model call per paper that answers, for every active topic at once: for a
-Watch topic, *could this plausibly belong* (generous, yes or no, one sentence why); for a Radar
-or Pulse topic, *is it in this field* (yes or no). No tiers and no confidence field.
+Watch topic, *could this plausibly belong* (generous, one sentence why); for a Radar
+or Pulse topic, *is it in this field* (yes or no). No tiers and no confidence field. For a
+Watch topic the model chooses between about, related and unrelated, and only unrelated stops
+the paper; what is stored is a yes or a no. Asked a plain yes or no, the triage model judged
+membership and dropped adjacent papers (`evals/2026-10-09-v1-watch.md`).
 
 **Verdict.** A Watch topic's judgement of one candidate paper, on a named grade:
 
@@ -251,12 +254,13 @@ chosen set after a topic edit.
 Candidates are graded independently, so one failure stops nothing else. A verdict needs two
 valid opinions. If either call still fails after its retries, or comes back truncated or
 refused, no verdict is made: the candidate stays pending with the failure recorded, and is
-tried again on the next run. After three failed runs it appears in the Inbox as an ungraded
-candidate, because on a Watch topic a paper must not disappear behind a provider error. The
+tried again on the next run. After three failed runs it is no longer retried by itself and
+appears in the Inbox as an ungraded candidate, because on a Watch topic a paper must not disappear behind a provider error. The
 candidate row itself carries this state (pending or graded, failed runs, last error), since
 the call journal knows only the paper. A pending candidate is dropped from the retry queue
 once a newer candidate exists for the same paper and topic, so a late retry of an old
-version cannot overtake a newer verdict.
+version cannot overtake a newer verdict. A candidate still pending when its topic is edited
+is graded under the topic as it then is, and its verdict records that revision.
 
 **review.** `weekly_review(topic, week)` for Radar and Pulse; a field too large for one call is
 shortlisted in chunks first. `daily_briefing(day)` and `weekly_briefing(week)` assemble stored
