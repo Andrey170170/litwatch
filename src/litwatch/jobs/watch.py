@@ -39,6 +39,11 @@ async def triage(
         run.add("triage_failed" if triaged.error else "triaged")
         run.add("candidates", len(made))
         run.add("candidates_keyword_only", sum(not c.by_triage for c in made))
+    if stuck := await triage_store.stuck(conn, config.limits.triage_stuck_after):
+        run.counts["triage_stuck"] = len(stuck)
+        log.warning(
+            "run %s: triage keeps failing on %s", run.run_id, [s["paper_id"] for s in stuck]
+        )
     log.info("run %s triage done: %s", run.run_id, run.counts)
 
 

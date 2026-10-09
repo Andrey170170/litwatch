@@ -12,15 +12,29 @@ from litwatch.store.papers import COLUMNS, row_to_paper
 
 
 async def untriaged(conn: psycopg.AsyncConnection, limit: int | None = None) -> list[Paper]:
-    """Papers no triage has answered for, oldest first; failed ones are tried again."""
+    """Papers no triage has answered for, oldest first. Failed ones are tried again every
+    run, after the new ones, so a paper that always fails never takes a new paper's place
+    under `limit`. A dropped paper is seen by no one, so triage does not give up."""
     rows = await (
         await conn.execute(
             f"SELECT {COLUMNS} FROM papers p LEFT JOIN triage t ON t.paper_id = p.id "
-            "WHERE t.paper_id IS NULL OR t.state = 'failed' ORDER BY p.fetched_at, p.id LIMIT %s",
+            "WHERE t.paper_id IS NULL OR t.state = 'failed' "
+            "ORDER BY coalesce(t.failed_runs, 0), p.fetched_at, p.id LIMIT %s",
             (limit,),
         )
     ).fetchall()
     return [row_to_paper(r) for r in rows]
+
+
+async def stuck(conn: psycopg.AsyncConnection, min_failed_runs: int) -> list[dict[str, Any]]:
+    """Papers triage has failed on this many runs in a row, with the last error."""
+    return await (
+        await conn.execute(
+            "SELECT paper_id, failed_runs, last_error FROM triage "
+            "WHERE state = 'failed' AND failed_runs >= %s ORDER BY failed_runs DESC, paper_id",
+            (min_failed_runs,),
+        )
+    ).fetchall()
 
 
 async def mark_migrated(conn: psycopg.AsyncConnection) -> int:
@@ -89,27 +103,36 @@ async def set_memberships(
 
 async def put_candidate(conn: psycopg.AsyncConnection, candidate: Candidate) -> None:
     """One row per paper, topic and topic revision. A paper found by both paths is one
-    candidate carrying both sources; a new paper version makes it pending again."""
+    candidate carrying both sources; rewritten text makes it pending again, and what was
+    said about the old text (sources, reason) is dropped."""
     await conn.execute(
         """
-        INSERT INTO candidates (paper_id, topic, topic_revision, paper_version,
+        INSERT INTO candidates (paper_id, topic, topic_revision, paper_version, paper_revision,
                                 by_triage, by_keyword, reason)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (paper_id, topic, topic_revision) DO UPDATE SET
-            by_triage = candidates.by_triage OR EXCLUDED.by_triage,
-            by_keyword = candidates.by_keyword OR EXCLUDED.by_keyword,
-            reason = coalesce(EXCLUDED.reason, candidates.reason),
-            state = CASE WHEN candidates.paper_version IS DISTINCT FROM EXCLUDED.paper_version
-                         THEN 'pending' ELSE candidates.state END,
-            failed_runs = CASE WHEN candidates.paper_version IS DISTINCT FROM EXCLUDED.paper_version
-                               THEN 0 ELSE candidates.failed_runs END,
-            paper_version = EXCLUDED.paper_version, updated_at = now()
+            by_triage = EXCLUDED.by_triage
+                OR (candidates.by_triage AND candidates.paper_revision = EXCLUDED.paper_revision),
+            by_keyword = EXCLUDED.by_keyword
+                OR (candidates.by_keyword AND candidates.paper_revision = EXCLUDED.paper_revision),
+            reason = CASE WHEN candidates.paper_revision = EXCLUDED.paper_revision
+                          THEN coalesce(EXCLUDED.reason, candidates.reason)
+                          ELSE EXCLUDED.reason END,
+            state = CASE WHEN candidates.paper_revision = EXCLUDED.paper_revision
+                         THEN candidates.state ELSE 'pending' END,
+            failed_runs = CASE WHEN candidates.paper_revision = EXCLUDED.paper_revision
+                               THEN candidates.failed_runs ELSE 0 END,
+            last_error = CASE WHEN candidates.paper_revision = EXCLUDED.paper_revision
+                              THEN candidates.last_error END,
+            paper_version = EXCLUDED.paper_version, paper_revision = EXCLUDED.paper_revision,
+            updated_at = now()
         """,
         (
             candidate.paper_id,
             candidate.topic,
             candidate.topic_revision,
             candidate.paper_version,
+            candidate.paper_revision,
             candidate.by_triage,
             candidate.by_keyword,
             candidate.reason,
@@ -133,7 +156,8 @@ async def pending_candidates(
     rows = await (
         await conn.execute(
             f"""
-            SELECT c.paper_id, c.topic, c.topic_revision, c.paper_version, c.by_triage,
+            SELECT c.paper_id, c.topic, c.topic_revision, c.paper_version, c.paper_revision,
+                   c.by_triage,
                    c.by_keyword, c.reason, c.state, c.failed_runs, c.last_error, {COLUMNS}
             FROM candidates c JOIN papers p ON p.id = c.paper_id
             WHERE c.state = 'pending' AND c.failed_runs < %s

@@ -107,7 +107,8 @@ class OpenRouterProvider:
     name = "openrouter"
 
     def __init__(self, api_key: str | None = None, client: Any = None) -> None:
-        self.client = client or AsyncOpenAI(base_url=BASE_URL, api_key=api_key)
+        # The gateway owns retries; the SDK's own would multiply them.
+        self.client = client or AsyncOpenAI(base_url=BASE_URL, api_key=api_key, max_retries=0)
 
     def routing(self, role: RoleConfig) -> tuple[str, ...]:
         return role.routing or DEFAULT_ROUTING.get(role.model, ())

@@ -68,7 +68,8 @@ class AnthropicProvider:
     name = "anthropic"
 
     def __init__(self, api_key: str | None = None, client: Any = None) -> None:
-        self.client = client or AsyncAnthropic(api_key=api_key)
+        # The gateway owns retries; the SDK's own would multiply them.
+        self.client = client or AsyncAnthropic(api_key=api_key, max_retries=0)
 
     def routing(self, role: RoleConfig) -> tuple[str, ...]:
         return ()

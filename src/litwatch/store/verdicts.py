@@ -17,6 +17,7 @@ def _verdict(row: dict[str, Any]) -> Verdict:
         topic=row["topic"],
         topic_revision=row["topic_revision"],
         paper_version=row["paper_version"],
+        paper_revision=row["paper_revision"],
         grade=row["grade"],
         split=row["split"],
         judge=Opinion.model_validate(row["judge"]) if row["judge"] else None,
@@ -35,15 +36,16 @@ async def add(conn: psycopg.AsyncConnection, verdict: Verdict) -> Verdict:
     row = await (
         await conn.execute(
             """
-            INSERT INTO verdicts (paper_id, topic, topic_revision, paper_version, grade, split,
-                                  judge, check_opinion, migrated)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
+            INSERT INTO verdicts (paper_id, topic, topic_revision, paper_version,
+                                  paper_revision, grade, split, judge, check_opinion, migrated)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
             """,
             (
                 verdict.paper_id,
                 verdict.topic,
                 verdict.topic_revision,
                 verdict.paper_version,
+                verdict.paper_revision,
                 verdict.grade.value,
                 verdict.split,
                 _json(verdict.judge),

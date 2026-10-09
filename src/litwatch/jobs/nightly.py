@@ -39,7 +39,7 @@ async def run(
     ):
         if fetch:
             result = await intake.collect(conn, config.intake.categories, since, run.run_id)
-            await runs.finish(
+            await runs.update(
                 conn,
                 run.run_id,
                 fetched=result.fetched,

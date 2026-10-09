@@ -23,14 +23,15 @@ def reconcile(judge: Opinion, check: Opinion) -> tuple[Grade, bool]:
 
 
 def current_verdict(verdicts: Iterable[Verdict]) -> Verdict | None:
-    """The verdict that counts for one paper and topic: version first, time second.
+    """The verdict that counts for one paper and topic: text first, time second.
 
-    Among the verdicts for the newest paper version and topic revision that have one, the
-    most recently recorded. A missing paper version sorts below any known one.
+    Among the verdicts for the newest paper revision and topic revision that have one, the
+    most recently recorded. The arXiv version plays no part: it is often unknown, and a new
+    version with the same text is the same paper to a grader.
     """
     return max(
         verdicts,
-        key=lambda v: (v.paper_version or 0, v.topic_revision, v.recorded_at, v.id or 0),
+        key=lambda v: (v.paper_revision, v.topic_revision, v.recorded_at, v.id or 0),
         default=None,
     )
 

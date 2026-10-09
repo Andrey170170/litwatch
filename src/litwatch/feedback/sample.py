@@ -56,10 +56,14 @@ async def sample_rejects(
         answers.setdefault(row["paper_id"], {})[row["topic"]] = row["triage_yes"]
 
     def said(paper_id: str, kind: TopicKind) -> list[bool | None]:
-        return [yes for slug, yes in answers[paper_id].items() if kinds[slug] == kind]
+        return [yes for slug, yes in answers.get(paper_id, {}).items() if kinds[slug] == kind]
 
-    # A paper whose triage call failed was not rejected; it has no answers at all.
-    rejects = [p for p in chosen if all(yes is False for yes in said(p, TopicKind.WATCH))]
+    # A paper whose triage call failed was not rejected: its answers are empty, or missing.
+    rejects = [
+        p
+        for p in chosen
+        if (watch := said(p, TopicKind.WATCH)) and all(yes is False for yes in watch)
+    ]
     in_field = [p for p in rejects if any(said(p, TopicKind.RADAR))]
     elsewhere = [p for p in rejects if not any(said(p, TopicKind.RADAR))]
     drawn = [(p, NEAR) for p in rng.sample(in_field, min(near, len(in_field)))]

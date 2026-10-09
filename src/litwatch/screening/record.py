@@ -45,6 +45,7 @@ async def record(
                 topic=topic.slug,
                 topic_revision=topic.revision,
                 paper_version=paper.version,
+                paper_revision=paper.revision,
                 by_triage=by_triage,
                 by_keyword=bool(pattern),
                 reason=why,

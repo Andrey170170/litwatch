@@ -124,9 +124,12 @@ papers, which is what backfill will use later.
 1. **Intake.** Fetch new and revised papers for the configured arXiv categories and store them.
 2. **Triage.** One call per untriaged paper. Stores field memberships and Watch candidates.
    A revision of a stored paper is untriaged again only when its title or abstract was
-   rewritten (similarity below 0.8, the 0.14 rule); otherwise it keeps what it has. Every
-   membership, candidate and verdict records the paper version it was made from, and a
-   re-screened paper's earlier verdict is kept as history, not overwritten.
+   rewritten (similarity below 0.8, the 0.14 rule); otherwise it keeps what it has. Each
+   rewrite raises the paper's own **revision** number. arXiv's version number cannot do this
+   job, because it is often unknown, both before and after a rewrite. Every candidate and
+   verdict records the paper revision it was made from (and the arXiv version, for
+   reference), a candidate whose paper was rewritten is graded again, and a re-screened
+   paper's earlier verdict is kept as history, not overwritten.
 3. **Keyword audit.** Every paper that triage did not make a candidate for a Watch topic is
    checked against that topic's keyword patterns, whether or not it joined a Radar or Pulse
    field, and becomes a candidate on a match. No model is involved, so no model's blind spot
@@ -138,8 +141,8 @@ papers, which is what backfill will use later.
    owner's label outranks the verdict. Saved state belongs to the paper, not the topic, so it
    is recomputed from every reason the paper has: on any Watch topic, a label of relevant, or,
    where there is no label, a current verdict of `relevant` or above; or a save by hand. The
-   current verdict for a paper and topic is chosen by version first and time second: among
-   the verdicts for the newest paper version and topic version that have one, the most
+   current verdict for a paper and topic is chosen by text first and time second: among
+   the verdicts for the newest paper revision and topic version that have one, the most
    recently recorded. Older rows are history and give no reason. A re-grade that is still pending, or that failed, replaces
    nothing: the previous verdict stays current, and the paper stays saved, until a new verdict
    is recorded or the owner labels it. `paper.unsaved` is emitted only when the last reason goes.
@@ -259,6 +262,12 @@ reconciled grade, writing nothing; `record(result)` stores the verdict in produc
 evaluation stores the same result in its own tables. `regrade(papers, topic)` re-grades a
 chosen set after a topic edit.
 
+A paper whose triage call fails is tried again on every run, after the new papers, so it
+never takes a new paper's place when a run is capped. Triage does not give up, because a
+paper it drops is seen by no one. A paper that has failed three runs in a row is counted as
+stuck in the run record (`triage_stuck`). Showing those papers to the owner, with a way to
+dismiss one, belongs to the System page (M4) and is not built yet.
+
 Candidates are graded independently, so one failure stops nothing else. A verdict needs two
 valid opinions. If either call still fails after its retries, or comes back truncated or
 refused, no verdict is made: the candidate stays pending with the failure recorded, and is
@@ -286,7 +295,9 @@ outbox, so running an evaluation cannot save a paper or wake an integration. The
 calls are journalled like any other. `replay(config)` runs every labelled or missed paper
 through the current triage and keyword audit, then grades all of them whether or not they
 became candidates, as the miss flow does. Per Watch topic it reports four numbers over the
-same denominator, all papers the owner labelled relevant: triage recall (the triage model
+papers the owner labelled relevant. The two that involve grading are over those sent to
+grading, which is all of them unless a run grades a subset; a paper whose grading failed
+stays in the count as a miss, so a provider outage cannot raise recall. The four are: triage recall (the triage model
 alone said yes, before the keyword audit), candidate recall (triage or the audit made it a
 candidate), grading recall (graded `relevant` or above when forced), and end-to-end recall
 (a candidate and graded `relevant` or above). Triage recall is the one that judges the
@@ -366,7 +377,7 @@ components, which are copied into the repository and therefore restyled freely. 
 | Topics | Create and edit; preview a draft against your labelled papers and misses; start a scoped re-run after saving |
 | Report a miss | Paste an arXiv link; see what each stage said |
 | Quality | Recall and precision per Watch topic over time; open misses |
-| System | Runs, cost by role and provider, integration health |
+| System | Runs, cost by role and provider, integration health, papers triage is stuck on |
 
 ### 4.2 Seams
 
@@ -388,14 +399,14 @@ The places a part can be replaced or tested alone:
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status),
 `topic_versions` (topic, revision, hash, the content at that revision, saved at),
 `memberships` (paper, topic, topic version, paper version), `candidates` (paper, topic,
-topic version, paper version, sources: triage, keyword or both, reason, state, failed runs,
+topic version, paper version, paper revision, sources: triage, keyword or both, reason, state, failed runs,
 last error), `verdicts` (paper, topic, topic version,
-paper version, grade, split, judge and check opinions, recorded at; each grading is its own
+paper version, paper revision, grade, split, judge and check opinions, recorded at; each grading is its own
 row with its own id, so a re-run over the same versions adds a row, and the latest recorded
 is current), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
 and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
-opinions, reconciled grade), which hold replays, previews and miss traces. Kept as they are: `papers`, `runs`, `inference_calls`, intake checkpoints.
+opinions, reconciled grade, grading error), which hold replays, previews and miss traces. `papers` gains `revision`. Kept as they are: `runs`, `inference_calls`, intake checkpoints.
 
 ### 4.4 Configuration
 
@@ -566,7 +577,7 @@ verdicts can be read, labelled and exported as BibTeX without touching Notion or
 reported miss shows what each stage said.
 
 **M4 · Reviews and briefings.** Radar and Pulse reviews at each topic's cadence, daily and weekly briefings, Briefings
-page, in-process scheduler, System page. *Check:* two consecutive weekly briefings generated on
+page, in-process scheduler, System page (including the papers triage is stuck on). *Check:* two consecutive weekly briefings generated on
 schedule; the owner prefers them to 0.14's digests or says what is missing.
 
 **M5 · Published versions.** `publications` with DBLP, monthly re-check, manual override,

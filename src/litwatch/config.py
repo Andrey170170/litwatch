@@ -7,6 +7,7 @@ import os
 import tomllib
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -76,6 +77,8 @@ class Limits(_Section):
     grading: int = Field(default=6, gt=0)
     # A candidate that failed grading this many runs is shown to the owner ungraded.
     grading_attempts: int = Field(default=3, gt=0)
+    # A paper whose triage failed this many runs is counted as stuck; it is still retried.
+    triage_stuck_after: int = Field(default=3, gt=0)
 
 
 class Schedule(_Section):
@@ -137,4 +140,6 @@ def database_url() -> str:
     name = os.environ.get("LITWATCH_DB_NAME", "litwatch")
     port = os.environ.get("LITWATCH_DB_PORT", "5432")
     password = secret("LITWATCH_DB_PASSWORD") or ""
+    # A generated password may hold `@`, `/` or `#`, which would change what the URL means.
+    user, password, name = (quote(part, safe="") for part in (user, password, name))
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"

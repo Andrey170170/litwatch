@@ -8,7 +8,7 @@ from litwatch import feedback
 from litwatch.config import Config
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue
 from litwatch.feedback import seed
-from litwatch.llm import Gateway
+from litwatch.llm import Gateway, ProviderError
 from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
@@ -223,3 +223,27 @@ papers:
     assert made["2501.00002"].value == LabelValue.NOT_RELEVANT
     assert [r["paper_id"] for r in await feedback_store.regression(conn)] == ["2501.00003"]
     assert await papers_store.get(conn, "2501.00003") is not None
+
+
+async def test_a_failed_grading_counts_as_a_miss_and_an_ungraded_run_reports_no_grading(seeded):
+    conn = seeded
+    papers, labelled = await feedback.replay_set(conn)
+
+    def check_down(config, journal):
+        def flaky(role, request):
+            if role.provider == "openrouter" and request.user.startswith("Title: found"):
+                raise ProviderError("InternalServerError", transient=False)
+            return respond(role, request)
+
+        providers = {n: ScriptedProvider(n, flaky) for n in ("anthropic", "openrouter")}
+        return Gateway(config.models, providers, journal, retry_delays=())
+
+    failed = await feedback.replay(conn, Config(), papers, grade=labelled, gateway=check_down)
+    recall = (await feedback.metrics(conn, failed))["topics"][FAITH.slug]["recall_firm"]
+    # `found` got no grade: it is a miss, not a paper left out of the count.
+    assert (recall["sent_to_grading"], recall["grading_failed"]) == (4, 1)
+    assert (recall["grading"], recall["end_to_end"]) == (0.5, 0.25)
+
+    triage_only = await feedback.replay(conn, Config(), papers, grade=set(), gateway=gateway)
+    recall = (await feedback.metrics(conn, triage_only))["topics"][FAITH.slug]["recall_firm"]
+    assert (recall["candidate"], recall["grading"], recall["end_to_end"]) == (0.75, None, None)

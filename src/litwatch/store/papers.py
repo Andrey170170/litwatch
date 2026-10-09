@@ -15,7 +15,7 @@ from litwatch.core import Paper, rewritten
 # What `row_to_paper` reads; the stored body of every match would be megabytes nobody looks at.
 COLUMNS = """
     p.id, p.title, p.abstract, p.authors, p.categories, p.primary_category, p.published,
-    p.updated, p.url, p.version, p.version_history, p.doi, p.journal_ref, p.license
+    p.updated, p.url, p.version, p.revision, p.version_history, p.doi, p.journal_ref, p.license
 """
 
 
@@ -39,6 +39,7 @@ def row_to_paper(row: dict[str, Any]) -> Paper:
         updated=_iso(row.get("updated")),
         url=row.get("url"),
         version=row.get("version"),
+        revision=row.get("revision") or 1,
         version_history=row.get("version_history") or [],
         doi=row.get("doi"),
         journal_ref=row.get("journal_ref"),
@@ -132,9 +133,12 @@ async def upsert(
                 changed = rewritten(old["title"], old["abstract"], p)
                 if changed:
                     # What triage said was about other text: the paper is untriaged again.
-                    # Its candidates and verdicts stay as history under the old version.
+                    # Its candidates and verdicts stay as history under the old revision.
                     result.rewritten.append(p.id)
                     await cur.execute("DELETE FROM triage WHERE paper_id = %s", (p.id,))
+                    await cur.execute(
+                        "UPDATE papers SET revision = revision + 1 WHERE id = %s", (p.id,)
+                    )
                 if changed or row["version"] != old["version"]:
                     await events.emit(
                         conn,

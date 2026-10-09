@@ -23,6 +23,17 @@ RETRY_DELAYS = (1.0, 5.0, 20.0)
 VALIDATION_VERSION = 1
 
 
+def _without_nul(value: Any) -> Any:
+    """Model text can carry a NUL, which Postgres stores in neither text nor jsonb."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_without_nul(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _without_nul(v) for k, v in value.items()}
+    return value
+
+
 class CallError(Exception):
     """A call produced no usable answer. `kind` is `truncated`, `refused`, `invalid`,
     `timeout` or `provider`; the message carries the detail."""
@@ -138,14 +149,16 @@ class Gateway:
             if reply.stop == Stop.TRUNCATED:
                 raise CallError("truncated")
             try:
-                value = request.output.model_validate_json(reply.text)
+                value = request.output.model_validate(_without_nul(json.loads(reply.text)))
+            except json.JSONDecodeError as exc:
+                raise CallError("invalid", "not JSON") from exc
             except ValidationError as exc:
                 raise CallError("invalid", f"{exc.error_count()} validation errors") from exc
         except CallError as exc:
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.
             if journal:
-                await journal.reject(call_id, str(exc))
+                await journal.reject(call_id, str(exc).replace("\x00", ""))
             raise
         if journal:
             await journal.accept(call_id, value.model_dump(mode="json"))

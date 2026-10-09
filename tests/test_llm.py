@@ -217,3 +217,20 @@ async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn, journal
     # No cost is invented for a call that never got an answer.
     last = (await calls(conn))[-1]
     assert last["error"] == "provider: APIConnectionError" and last["usage"]["cost"] is None
+
+
+async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, journal):
+    client = SdkClient(anthropic_message(json.dumps({"yes": True, "why": "it\x00 says so"})))
+    answer = await gateway(Models(), client, journal=journal).ask("triage", REQUEST)
+    assert answer.value.why == "it says so"
+    assert (await calls(conn))[0]["output"]["why"] == "it says so"
+
+    refused = SdkClient(anthropic_message("", stop_reason="refusal", category="bio\x00"))
+    with pytest.raises(CallError):
+        await gateway(Models(), refused, journal=journal).ask("judge", REQUEST)
+    assert (await calls(conn))[-1]["error"] == "refused: bio"
+
+
+def test_the_sdk_clients_leave_retrying_to_the_gateway():
+    assert AnthropicProvider(api_key="k").client.max_retries == 0
+    assert OpenRouterProvider(api_key="k").client.max_retries == 0

@@ -59,26 +59,43 @@ async def test_a_label_records_how_its_paper_was_chosen_and_can_be_taken_back(cl
     (item,) = (await client.get("/api/labelling/positives", headers=AUTH)).json()
     assert item["labels"][FAITH.slug]["provisional"] is True
 
-    url = f"/api/labels/2609.1/{FAITH.slug}"
+    url = f"/api/labels/{FAITH.slug}/2609.1"
     body = {"value": "not_relevant", "queue": "positives"}
     assert (await client.put(url, json=body, headers=AUTH)).json()["provisional"] is False
     (label,) = await feedback_store.labels(conn)
     assert (label.value, label.origin) == (LabelValue.NOT_RELEVANT, LabelOrigin.LEGACY_POSITIVE)
 
     other = {"value": "unsure", "queue": "rejects"}
-    await client.put(f"/api/labels/2609.2/{FAITH.slug}", json=other, headers=AUTH)
+    await client.put(f"/api/labels/{FAITH.slug}/2609.2", json=other, headers=AUTH)
     assert (await feedback_store.labels(conn))[1].origin == LabelOrigin.REJECT_SAMPLE
     (unsure,) = (await client.get("/api/labelling/unsure", headers=AUTH)).json()
     assert unsure["id"] == "2609.2"
     assert (
-        await client.delete(f"/api/labels/2609.2/{FAITH.slug}", headers=AUTH)
+        await client.delete(f"/api/labels/{FAITH.slug}/2609.2", headers=AUTH)
     ).status_code == 204
     assert len(await feedback_store.labels(conn)) == 1
 
     assert (
-        await client.put("/api/labels/2609.1/interpretability", json=body, headers=AUTH)
+        await client.put("/api/labels/interpretability/2609.1", json=body, headers=AUTH)
     ).status_code == 404
     assert (
-        await client.put(f"/api/labels/nope/{FAITH.slug}", json=body, headers=AUTH)
+        await client.put(f"/api/labels/{FAITH.slug}/nope", json=body, headers=AUTH)
     ).status_code == 404
     assert (await client.get("/api/labelling/other", headers=AUTH)).status_code == 404
+
+
+async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn):
+    await papers_store.upsert(conn, [paper("cs/9901001")])
+    url = f"/api/labels/{FAITH.slug}/cs/9901001"
+    assert (await client.put(url, json={"value": "relevant"}, headers=AUTH)).status_code == 200
+    assert [label.paper_id for label in await feedback_store.labels(conn)] == ["cs/9901001"]
+    assert (await client.delete(url, headers=AUTH)).status_code == 204
+    assert await feedback_store.labels(conn) == []
+
+
+async def test_a_good_bearer_header_works_beside_a_stale_cookie(client):
+    client.cookies.set("litwatch_token", "old")
+    assert (await client.get("/api/labelling", headers=AUTH)).status_code == 200
+    # The scheme is checked, not skipped over.
+    wrong_scheme = {"authorization": f"Basic  {TOKEN}"}
+    assert (await client.get("/api/labelling", headers=wrong_scheme)).status_code == 401

@@ -152,10 +152,10 @@ async function setLabel(item, slug, value) {
   const current = item.labels[slug];
   item.keep = true;  // stays on screen until the reader moves on
   if (current && !current.provisional && current.value === value) {
-    await api(`/api/labels/${item.id}/${slug}`, { method: "DELETE" });
+    await api(`/api/labels/${slug}/${item.id}`, { method: "DELETE" });
     delete item.labels[slug];
   } else {
-    item.labels[slug] = await api(`/api/labels/${item.id}/${slug}`, {
+    item.labels[slug] = await api(`/api/labels/${slug}/${item.id}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ value, queue: state.key, grade: current ? current.grade : null,
@@ -178,10 +178,11 @@ function move(step) {
 async function noneAndNext() {
   const item = visible()[state.at];
   if (!item) return;
+  item.keep = true;  // `move` works from this paper's place, so it must still be listed
   for (const topic of state.topics) {
     const label = item.labels[topic.slug];
     if (!label || label.provisional || label.value !== "not_relevant") {
-      item.labels[topic.slug] = await api(`/api/labels/${item.id}/${topic.slug}`, {
+      item.labels[topic.slug] = await api(`/api/labels/${topic.slug}/${item.id}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ value: "not_relevant", queue: state.key }),

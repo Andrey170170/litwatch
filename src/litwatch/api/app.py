@@ -40,8 +40,11 @@ async def _conn(request: Request) -> AsyncIterator[psycopg.AsyncConnection]:
 
 
 def _authorised(request: Request) -> None:
-    given = request.cookies.get(COOKIE) or request.headers.get("authorization", "")[7:]
-    if not hmac.compare_digest(given.encode(), request.app.state.token.encode()):
+    scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+    given = [request.cookies.get(COOKIE), bearer if scheme.lower() == "bearer" else None]
+    token = request.app.state.token.encode()
+    # Either credential is enough, so a stale cookie does not block a good header.
+    if not any(g and hmac.compare_digest(g.encode(), token) for g in given):
         raise HTTPException(status_code=401, detail="missing or wrong token")
 
 
@@ -82,8 +85,9 @@ def create_app(dsn: str, token: str) -> FastAPI:
             raise HTTPException(status_code=404, detail="no such queue")
         return await feedback_store.labelling_queue(c, key)
 
-    @app.put("/api/labels/{paper_id}/{topic}", dependencies=protected)
-    async def put_label(paper_id: str, topic: str, body: LabelIn, c: Conn) -> Label:
+    # The paper id comes last and may contain a slash (`cs/9901001`).
+    @app.put("/api/labels/{topic}/{paper_id:path}", dependencies=protected)
+    async def put_label(topic: str, paper_id: str, body: LabelIn, c: Conn) -> Label:
         if topic not in {t["slug"] for t in await watched(c)}:
             raise HTTPException(status_code=404, detail="not an active Watch topic")
         try:
@@ -101,8 +105,8 @@ def create_app(dsn: str, token: str) -> FastAPI:
         except psycopg.errors.ForeignKeyViolation as exc:
             raise HTTPException(status_code=404, detail="no such paper") from exc
 
-    @app.delete("/api/labels/{paper_id}/{topic}", dependencies=protected, status_code=204)
-    async def delete_label(paper_id: str, topic: str, c: Conn) -> None:
+    @app.delete("/api/labels/{topic}/{paper_id:path}", dependencies=protected, status_code=204)
+    async def delete_label(topic: str, paper_id: str, c: Conn) -> None:
         await feedback_store.delete_label(c, paper_id, topic)
 
     return app

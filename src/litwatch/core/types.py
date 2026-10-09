@@ -28,6 +28,9 @@ class Paper(BaseModel):
     url: str | None = None
     # Only explicit upstream version identifiers; absent does not mean v1.
     version: int | None = Field(default=None, ge=1)
+    # Counts rewrites of the title or abstract, set by the store. Unlike `version` it is
+    # always known, so it is what says which text a candidate or verdict was about.
+    revision: int = Field(default=1, ge=1)
     version_history: list[dict] = Field(default_factory=list)
     doi: str | None = None
     journal_ref: str | None = None
@@ -147,6 +150,7 @@ class Verdict(BaseModel):
     topic: str
     topic_revision: int
     paper_version: int | None = None
+    paper_revision: int = 1
     grade: Grade
     split: bool = False
     judge: Opinion | None = None
@@ -176,6 +180,7 @@ class Candidate(BaseModel):
     topic: str
     topic_revision: int
     paper_version: int | None = None
+    paper_revision: int = 1
     by_triage: bool = False
     by_keyword: bool = False
     reason: str | None = None

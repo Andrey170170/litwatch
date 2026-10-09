@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from litwatch import config
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import (
     Grade,
@@ -28,13 +29,14 @@ def opinion(grade: str) -> Opinion:
     return Opinion(grade=Grade(grade), reason="r")
 
 
-def verdict(grade: str, *, revision=1, version=1, at=T0, id=1) -> Verdict:
+def verdict(grade: str, *, revision=1, text=1, version=1, at=T0, id=1) -> Verdict:
     return Verdict(
         id=id,
         paper_id="p",
         topic="t",
         topic_revision=revision,
         paper_version=version,
+        paper_revision=text,
         grade=Grade(grade),
         recorded_at=at,
     )
@@ -56,14 +58,15 @@ def test_disagreement_takes_the_more_inclusive_grade_and_marks_the_verdict_split
     assert reconcile(opinion("relevant"), opinion("adjacent")) == (Grade.RELEVANT, True)
 
 
-def test_the_current_verdict_is_chosen_by_version_first_and_time_second():
-    old_text = verdict("must_read", version=1, at=T0 + timedelta(days=9), id=1)
-    new_text = verdict("none", version=2, at=T0, id=2)
-    # A late re-grade of an old paper version does not overtake the newer version's verdict.
+def test_the_current_verdict_is_chosen_by_text_first_and_time_second():
+    old_text = verdict("must_read", text=1, at=T0 + timedelta(days=9), id=1)
+    # The rewrite's arXiv version is unknown, which must not rank it below the old text.
+    new_text = verdict("none", text=2, version=None, at=T0, id=2)
+    # A late re-grade of the old text does not overtake the verdict on the rewrite.
     assert current_verdict([old_text, new_text]) is new_text
-    newer_topic = verdict("adjacent", version=2, revision=2, at=T0, id=3)
+    newer_topic = verdict("adjacent", text=2, revision=2, at=T0, id=3)
     assert current_verdict([old_text, new_text, newer_topic]) is newer_topic
-    again = verdict("relevant", version=2, revision=2, at=T0 + timedelta(hours=1), id=4)
+    again = verdict("relevant", text=2, revision=2, at=T0 + timedelta(hours=1), id=4)
     assert current_verdict([newer_topic, again]) is again
     assert current_verdict([]) is None
 
@@ -110,3 +113,10 @@ def test_judge_and_check_must_come_from_different_labs():
             check=opus,
         )
     assert Config().models.judge.lab != Config().models.check.lab
+
+
+def test_a_database_password_with_url_characters_is_quoted(monkeypatch):
+    monkeypatch.delenv("LITWATCH_DATABASE_URL", raising=False)
+    monkeypatch.setenv("LITWATCH_DB_HOST", "db")
+    monkeypatch.setenv("LITWATCH_DB_PASSWORD", "p@ss/w#rd")
+    assert config.database_url() == "postgresql://litwatch:p%40ss%2Fw%23rd@db:5432/litwatch"

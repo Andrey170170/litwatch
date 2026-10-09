@@ -172,7 +172,7 @@ async def put_grade_result(
     await conn.execute(
         """
         UPDATE eval_results SET judge = %s, check_opinion = %s, grade = %s, split = %s,
-               error = coalesce(%s, error)
+               grade_error = %s
         WHERE eval_run_id = %s AND paper_id = %s AND topic = %s
         """,
         (

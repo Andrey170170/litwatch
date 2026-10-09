@@ -28,11 +28,24 @@ async def start(
     return row["id"]
 
 
+async def update(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
+    """Set any of fetched, inserted, updated, cost, error, counts, intake on a run that is
+    still going."""
+    await _set(conn, run_id, [], fields)
+
+
 async def finish(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
-    """Close the run, setting any of fetched, inserted, updated, cost, error, counts, intake."""
+    """Close the run, setting any of the fields `update` takes."""
+    await _set(conn, run_id, [sql.SQL("finished_at = now()")], fields)
+
+
+async def _set(
+    conn: psycopg.AsyncConnection, run_id: int, sets: list[sql.Composable], fields: dict[str, Any]
+) -> None:
     if unknown := set(fields) - _FIELDS:
         raise ValueError(f"unknown run fields: {sorted(unknown)}")
-    sets = [sql.SQL("finished_at = now()")]
+    if not sets and not fields:
+        return
     values = []
     for name, value in fields.items():
         sets.append(sql.SQL("{} = %s").format(sql.Identifier(name)))

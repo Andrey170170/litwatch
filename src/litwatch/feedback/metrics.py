@@ -19,24 +19,32 @@ def _share(hits: int, total: int) -> float | None:
     return round(hits / total, 4) if total else None
 
 
+def _grading_failed(row: dict[str, Any]) -> bool:
+    return row["grade"] is None and row["grade_error"] is not None
+
+
 def _recall(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Four recalls over one denominator: the papers labelled relevant that were replayed."""
+    """Four recalls over the papers labelled relevant that were replayed.
+
+    The two that involve grading are over the papers sent to grading, which is all of them
+    unless the run graded a subset or none. A paper whose grading failed stays in that
+    denominator as a miss, so a provider outage cannot raise recall.
+    """
     n = len(rows)
-    graded = [r for r in rows if r["grade"] is not None]
+    sent = [r for r in rows if r["grade"] is not None or _grading_failed(r)]
     return {
         "n": n,
         # The triage model alone, before the keyword audit: the audit must not hide its misses.
         "triage": _share(sum(bool(r["triage_yes"]) for r in rows), n),
         "candidate": _share(sum(_candidate(r) for r in rows), n),
         # Graded relevant or above when forced, whether or not it became a candidate.
-        "grading": _share(sum(_surfaced(r["grade"]) for r in graded), len(graded)),
-        "end_to_end": _share(
-            sum(_candidate(r) and _surfaced(r["grade"]) for r in graded), len(graded)
-        ),
-        "ungraded": n - len(graded),
+        "grading": _share(sum(_surfaced(r["grade"]) for r in sent), len(sent)),
+        "end_to_end": _share(sum(_candidate(r) and _surfaced(r["grade"]) for r in sent), len(sent)),
+        "sent_to_grading": len(sent),
+        "grading_failed": sum(_grading_failed(r) for r in sent),
         "triage_misses": sorted(r["paper_id"] for r in rows if not r["triage_yes"]),
         "candidate_misses": sorted(r["paper_id"] for r in rows if not _candidate(r)),
-        "grading_misses": sorted(r["paper_id"] for r in graded if not _surfaced(r["grade"])),
+        "grading_misses": sorted(r["paper_id"] for r in sent if not _surfaced(r["grade"])),
     }
 
 
@@ -127,10 +135,7 @@ async def metrics(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str, 
             "graded": len(graded),
             "split": sum(bool(r["split"]) for r in graded),
             # Grading was forced for the paper and came back without two opinions.
-            "grading_failed": sum(
-                r["grade"] is None and bool(r["error"]) and r["triage_yes"] is not None
-                for r in topic_rows
-            ),
+            "grading_failed": sum(_grading_failed(r) for r in topic_rows),
             "grades": {
                 role: {
                     g.value: sum((r[column] or {}).get("grade") == g.value for r in topic_rows)

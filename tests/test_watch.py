@@ -1,6 +1,7 @@
 """Triage, the keyword audit and grading against disposable PostgreSQL, with scripted models."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,9 +13,9 @@ from litwatch.jobs import watch as watch_jobs
 from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import papers as papers_store
+from litwatch.store import runs, verdicts
 from litwatch.store import topics as topics_store
 from litwatch.store import triage as triage_store
-from litwatch.store import verdicts
 from tests.conftest import FAITH, TOPICS, paper
 from tests.fakes import ScriptedProvider
 
@@ -196,6 +197,42 @@ async def test_a_rewritten_paper_is_triaged_again_and_its_old_verdict_is_kept_as
     assert (await verdicts.current(conn, ON_TOPIC.id, FAITH.slug)).grade == Grade.NONE
 
 
+async def test_a_rewrite_is_graded_again_when_arxiv_gives_no_version_number(conn, models):
+    """The version is often unknown, before and after, so it cannot be what marks a rewrite."""
+    await papers_store.upsert(conn, [ON_TOPIC.model_copy(update={"version": 1})])
+    models.grades = {("judge", ON_TOPIC.id): "relevant", ("check", ON_TOPIC.id): "relevant"}
+    await nightly.run(conn, Config(), fetch=False, gateway=models.gateway)
+    for n, grade in ((2, "none"), (3, "adjacent")):
+        rewrite = ON_TOPIC.model_copy(
+            update={"updated": f"2026-10-0{n}T00:00:00+00:00", "abstract": f"{n} " * 40}
+        )
+        await papers_store.upsert(conn, [rewrite])
+        models.grades = {("judge", ON_TOPIC.id): grade, ("check", ON_TOPIC.id): grade}
+        await nightly.run(conn, Config(), fetch=False, gateway=models.gateway)
+        current = await verdicts.current(conn, ON_TOPIC.id, FAITH.slug)
+        assert (current.paper_version, current.paper_revision, current.grade) == (None, n, grade)
+    (candidate,) = await triage_store.candidates_for(conn, ON_TOPIC.id)
+    assert (candidate.state, candidate.paper_revision) == ("graded", 3)
+
+
+async def test_a_nightly_run_is_not_marked_finished_while_it_is_still_working(
+    conn, models, monkeypatch
+):
+    seen = {}
+
+    async def collect(conn, categories, since, run_id):
+        return SimpleNamespace(fetched=4, inserted=4, updated=0, details={}, rewritten=[])
+
+    async def triage(conn, config, run, **_):
+        seen.update(await runs.get(conn, run.run_id))
+
+    monkeypatch.setattr(nightly.intake, "collect", collect)
+    monkeypatch.setattr(nightly.watch_jobs, "triage", triage)
+    run_id = await nightly.run(conn, Config(), gateway=models.gateway)
+    assert (seen["fetched"], seen["finished_at"]) == (4, None)
+    assert (await runs.get(conn, run_id))["finished_at"] is not None
+
+
 async def test_topic_edits_apply_forward_and_only_a_content_change_makes_a_revision(conn, models):
     await nightly.run(conn, Config(), fetch=False, gateway=models.gateway)
     renamed = await topics_store.save(conn, FAITH.model_copy(update={"name": "Faithfulness"}))
@@ -237,3 +274,16 @@ async def test_a_pending_candidate_under_an_older_topic_revision_is_dropped_from
     # A candidate put forward under the old wording and never graded is graded under the new.
     assert [v.topic_revision for v in await verdicts.history(conn, KEYWORD.id, FAITH.slug)] == [2]
     assert await triage_store.pending_candidates(conn, 3) == []
+
+
+async def test_papers_triage_keeps_failing_on_are_retried_after_the_new_ones(conn, models):
+    models.down = {OFF.id}
+    for _ in range(3):
+        await nightly.run(conn, Config(), fetch=False, gateway=models.gateway)
+    (run, *_) = await table(conn, "runs", "id DESC")
+    assert run["counts"]["triage_stuck"] == 1
+    new = paper("2609.00009", title="Newer", abstract="Later.")
+    await papers_store.upsert(conn, [new])
+    # Under a limit the stuck paper does not take the new paper's place, yet stays queued.
+    assert [p.id for p in await triage_store.untriaged(conn, 1)] == [new.id]
+    assert [p.id for p in await triage_store.untriaged(conn)] == [new.id, OFF.id]

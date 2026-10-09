@@ -33,6 +33,7 @@ async def record(
                 topic=topic.slug,
                 topic_revision=topic.revision,
                 paper_version=paper.version,
+                paper_revision=paper.revision,
                 grade=graded.grade,
                 split=graded.split,
                 judge=graded.judge,
