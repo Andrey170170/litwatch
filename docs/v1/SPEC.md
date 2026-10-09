@@ -128,7 +128,9 @@ papers, which is what backfill will use later.
    where there is no label, a current verdict of `relevant` or above; or a save by hand. The
    current verdict is the latest one for the paper's latest screened version; older rows are
    history and give no reason. `paper.unsaved` is emitted only when the last reason goes.
-6. **Events.** `paper.saved`, `verdict.recorded` and similar are written to the outbox.
+6. **Events.** `paper.saved`, `verdict.recorded`, `grade.changed` and similar are written to
+   the outbox. `grade.changed` fires when a paper's effective grade for a topic changes,
+   whether a verdict or the owner's label caused it.
    Integrations consume them on their own schedule; a failing integration delays nothing.
 7. **Daily briefing.** Built when there are new verdicts at `relevant` or above.
 
@@ -252,9 +254,11 @@ alone said yes, before the keyword audit), candidate recall (triage or the audit
 candidate), grading recall (graded `relevant` or above when forced), and end-to-end recall
 (a candidate and graded `relevant` or above). Triage recall is the one that judges the
 triage model; the audit must not be allowed to hide its misses. It
-also reports precision at `relevant` over the labelled papers that became candidates, which
-is what production would have shown, grader-only precision over all labelled papers as a
-separate figure, and each miss still missed.
+also reports each miss still missed, and precision at `relevant`. Every label records how
+its paper was chosen (random candidate sample, reject sample, 0.14 positive, inbox, miss),
+and production precision is computed from the random candidate sample alone, since only
+that one was drawn the way production surfaces papers. Precision over the other groups is
+reported per group and never pooled.
 Grading the non-candidates is what keeps a triage miss from being counted as a grading error. This is the evaluation;
 there is no separate label file.
 
@@ -267,10 +271,10 @@ failures to the API.
 
 | Integration | Reacts to | Does |
 | --- | --- | --- |
-| `zotero` | `paper.saved`, `paper.unsaved`, `verdict.recorded`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step. On `paper.unsaved` it tags the item as dropped and never deletes it |
-| `webdav` | `verdict.recorded` at `must_read` | Stores the PDF for Zotero's file sync |
+| `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step. On `paper.unsaved` it tags the item as dropped and never deletes it |
+| `webdav` | `grade.changed` to `must_read` | Stores the PDF for Zotero's file sync |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive; serves PDFs, and answers searches over its titles and abstracts |
-| `deep` | `verdict.recorded` at `must_read` | Requests a deep card; emits `card.ready` |
+| `deep` | `grade.changed` to `must_read` | Requests a deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off this |
 
 An integration that acts on a grade checks the paper's effective current grade when it handles
