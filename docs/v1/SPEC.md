@@ -89,7 +89,9 @@ above. The weekly briefing carries each Radar and Pulse review and a Watch recap
 
 **Feedback.** The owner's corrections, and the only ground truth the system has:
 
-- a **label** on a paper for a Watch topic: relevant or not relevant, with an optional grade;
+- a **label** on a paper for a Watch topic: relevant or not relevant, with an optional grade.
+  Not relevant means an effective grade of `none`. Relevant without a grade keeps the
+  verdict's grade if that is `relevant` or above, and is `relevant` otherwise;
 - a **miss**: a paper the owner found elsewhere that litwatch did not surface. Reporting one
   takes only the arXiv link, so it works from a phone's share sheet. It stores the paper, runs
   triage, grades it against every Watch topic whatever triage said (there are few), and
@@ -225,13 +227,23 @@ revision handling carried over from 0.x. Emits `paper.added` and `paper.revised`
 
 Pipeline code names roles, never models. Moving a role between labs is a configuration change.
 
-**screening.** The triage prompt and its schema, built from the active topics. `triage(papers)`
-writes memberships and candidates. `audit(papers)` adds keyword candidates. Both are pure
-functions of the papers and topic versions they are given.
+**screening.** The triage prompt and its schema, built from the active topics. `triage(papers,
+topics)` returns each paper's memberships and Watch answers; `audit(papers, topics)` returns
+keyword matches. Both are pure functions that write nothing. `record(results)` is the separate
+step that turns results into memberships and candidates; the nightly job calls it, and
+evaluation never does.
 
 **watch.** The grading prompt, one topic and one paper per call, with the rubric in context.
-`grade(candidates)` asks `judge` and `check` concurrently and stores the reconciled verdict.
-`regrade(papers, topic)` re-grades a chosen set after a topic edit.
+`grade(paper, topic)` asks `judge` and `check` concurrently and returns both opinions and the
+reconciled grade, writing nothing; `record(result)` stores the verdict in production, and
+evaluation stores the same result in its own tables. `regrade(papers, topic)` re-grades a
+chosen set after a topic edit.
+
+Candidates are graded independently, so one failure stops nothing else. A verdict needs two
+valid opinions. If either call still fails after its retries, or comes back truncated or
+refused, no verdict is made: the candidate stays pending with the failure recorded, and is
+tried again on the next run. After three failed runs it appears in the Inbox as an ungraded
+candidate, because on a Watch topic a paper must not disappear behind a provider error.
 
 **review.** `weekly_review(topic, week)` for Radar and Pulse; a field too large for one call is
 shortlisted in chunks first. `daily_briefing(day)` and `weekly_briefing(week)` assemble stored
@@ -489,7 +501,8 @@ verdicts. Neither is ground truth: they are model output, and they contain none 
 
 Because that leaves almost no ground truth, the owner labels three sets in this milestone:
 
-- the papers 0.14 put at tier 1 or 2 on the two CoT selections, which gives the positives;
+- the papers 0.14 put at tier 1 or 2 on the two CoT selections, 77 on 2026-10-08, which gives
+  the positives;
 - 100 papers that triage rejected, drawn at random with a recorded seed, 70 from rejects that
   triage placed in the interpretability or safety fields (the nearest neighbours of the CoT
   topics) and 30 from all other rejects, which is the only look at what the gate drops;
