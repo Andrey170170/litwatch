@@ -92,9 +92,10 @@ above. The weekly briefing carries each Radar and Pulse review and a Watch recap
 
 **Feedback.** The owner's corrections, and the only ground truth the system has:
 
-- a **label** on a paper for a Watch topic: relevant, not relevant or unsure, with an optional
-  grade. Unsure changes nothing and is left out of every metric.
-  Not relevant means an effective grade of `none`. Relevant without a grade keeps the
+- a **label** on a paper for a Watch topic: relevant, adjacent, not relevant or unsure, with an
+  optional grade. Unsure changes nothing and is left out of every metric.
+  Not relevant means an effective grade of `none`. Adjacent means `adjacent`: a source of
+  ideas for the topic without being about it, which is not a positive for recall. Relevant without a grade keeps the
   verdict's grade if that is `relevant` or above, and is `relevant` otherwise;
 - a **miss**: a paper the owner found elsewhere that litwatch did not surface. Reporting one
   takes only the arXiv link, so it works from a phone's share sheet. It stores the paper, runs

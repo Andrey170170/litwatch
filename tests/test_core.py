@@ -72,6 +72,7 @@ def test_the_owners_label_outranks_the_verdict():
     assert effective_grade(None, verdict("adjacent")) == Grade.ADJACENT
     assert effective_grade(label("unsure"), verdict("adjacent")) == Grade.ADJACENT
     assert effective_grade(label("not_relevant"), verdict("must_read")) == Grade.NONE
+    assert effective_grade(label("adjacent"), verdict("must_read")) == Grade.ADJACENT
     # Relevant without a grade keeps a verdict that already says so, and lifts one that does not.
     assert effective_grade(label("relevant"), verdict("must_read")) == Grade.MUST_READ
     assert effective_grade(label("relevant"), verdict("none")) == Grade.RELEVANT

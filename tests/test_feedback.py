@@ -109,11 +109,13 @@ async def test_provisional_labels_are_reported_apart_and_unsure_counts_nowhere(s
     await feedback_store.delete_label(conn, PAPERS["dropped"].id, FAITH.slug)
     await label(conn, "dropped", "relevant", LabelOrigin.LEGACY_POSITIVE, provisional=True)
     await label(conn, "harsh", "unsure")
+    # Adjacent is a judgement, so the paper is replayed; it is not a positive for recall.
+    await label(conn, "found", "adjacent")
     papers, labelled = await feedback.replay_set(conn)
-    assert PAPERS["harsh"].id not in labelled
+    assert PAPERS["harsh"].id not in labelled and PAPERS["found"].id in labelled
     eval_run_id = await feedback.replay(conn, Config(), papers, grade=labelled, gateway=gateway)
     topic = (await feedback.metrics(conn, eval_run_id))["topics"][FAITH.slug]
-    assert (topic["recall_firm"]["n"], topic["recall_firm"]["triage"]) == (2, 0.5)
+    assert (topic["recall_firm"]["n"], topic["recall_firm"]["triage"]) == (1, 0.0)
     assert (topic["recall_provisional"]["n"], topic["recall_provisional"]["candidate"]) == (1, 0.0)
     # The owner's own label replaces a provisional one and keeps how the paper was chosen.
     await label(conn, "dropped", "not_relevant")

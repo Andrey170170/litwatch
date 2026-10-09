@@ -44,6 +44,7 @@
                         margin-left: 6px; }
   .choices button[aria-pressed="true"] { color: var(--bg); border-color: transparent; }
   .choices button[data-v="relevant"][aria-pressed="true"] { background: var(--yes); }
+  .choices button[data-v="adjacent"][aria-pressed="true"] { background: var(--accent); }
   .choices button[data-v="not_relevant"][aria-pressed="true"] { background: var(--no); }
   .choices button[data-v="unsure"][aria-pressed="true"] { background: var(--unsure); }
   .choices button[aria-pressed="true"] kbd { color: inherit; opacity: .8; }
@@ -74,8 +75,9 @@
   <button id="next" aria-label="Next paper"><kbd>j</kbd> →</button>
 </div></footer>
 <script>
-const KEYS = [["1", "2", "3"], ["q", "w", "e"], ["a", "s", "d"]];
-const VALUES = [["relevant", "Relevant"], ["not_relevant", "Not relevant"], ["unsure", "Unsure"]];
+const KEYS = [["1", "2", "3", "4"], ["q", "w", "e", "r"], ["a", "s", "d", "f"]];
+const VALUES = [["relevant", "Relevant"], ["adjacent", "Adjacent"],
+                ["not_relevant", "Not relevant"], ["unsure", "Unsure"]];
 const state = { topics: [], sets: [], key: null, items: [], at: 0 };
 const $ = (id) => document.getElementById(id);
 
@@ -142,7 +144,7 @@ function render() {
     ${topics}
   </article>
   <p class="hint">Keys: ${state.topics.map((t, i) => KEYS[i] ? `${KEYS[i].join(" ")} for ${escape(t.name)}` : "").join(" · ")}
-    (relevant, not relevant, unsure) · n marks every topic not relevant and moves on · j and k move.</p>`;
+    (relevant, adjacent, not relevant, unsure) · n marks every topic not relevant and moves on · j and k move.</p>`;
   window.scrollTo(0, 0);
 }
 

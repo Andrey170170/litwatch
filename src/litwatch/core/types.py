@@ -186,6 +186,8 @@ class Candidate(BaseModel):
 
 class LabelValue(StrEnum):
     RELEVANT = "relevant"
+    # A source of ideas for the topic without being about it. Not a positive for recall.
+    ADJACENT = "adjacent"
     NOT_RELEVANT = "not_relevant"
     UNSURE = "unsure"  # changes nothing and is left out of every metric
 

@@ -253,6 +253,13 @@ async def labelling_sets(conn: psycopg.AsyncConnection, watched: list[str]) -> l
         )
     ).fetchone()
     sets.append({"key": "unsure", "name": "Marked unsure", **row})
+    row = await (
+        await conn.execute(
+            "SELECT count(DISTINCT paper_id) AS total, 0 AS done FROM labels "
+            "WHERE value = 'adjacent'"
+        )
+    ).fetchone()
+    sets.append({"key": "adjacent", "name": "Marked adjacent", **row})
     return sets
 
 
@@ -264,8 +271,8 @@ async def labelling_queue(conn: psycopg.AsyncConnection, key: str) -> list[dict[
         source = "eval_samples s JOIN papers p ON p.id = s.paper_id"
         where, params = "s.eval_run_id = %s", (drawn["id"] if drawn else -1,)
         extra = "s.stratum"
-    elif key in ("positives", "unsure"):
-        condition = "origin = 'legacy_positive'" if key == "positives" else "value = 'unsure'"
+    elif key in ("positives", "unsure", "adjacent"):
+        condition = "origin = 'legacy_positive'" if key == "positives" else f"value = '{key}'"
         order, extra = "p.published DESC NULLS LAST, p.id", "NULL::text AS stratum"
         source = "papers p"
         where = f"p.id IN (SELECT paper_id FROM labels WHERE {condition})"

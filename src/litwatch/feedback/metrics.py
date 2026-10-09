@@ -166,6 +166,9 @@ def _sample_summary(sample, labels, kinds) -> dict[str, Any]:
             # Finished means a label, unsure included, for every Watch topic.
             "labelled": sum(len(by_paper.get(p, [])) >= len(watched) for p in ids),
             "relevant": found,
+            "adjacent": sum(
+                label.value == LabelValue.ADJACENT for p in ids for label in by_paper.get(p, [])
+            ),
             "unsure": sum(
                 label.value == LabelValue.UNSURE for p in ids for label in by_paper.get(p, [])
             ),

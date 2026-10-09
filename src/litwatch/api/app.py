@@ -23,6 +23,7 @@ ORIGINS = {
     "rejects": LabelOrigin.REJECT_SAMPLE,
     "positives": LabelOrigin.LEGACY_POSITIVE,
     "unsure": LabelOrigin.INBOX,
+    "adjacent": LabelOrigin.INBOX,
 }
 
 

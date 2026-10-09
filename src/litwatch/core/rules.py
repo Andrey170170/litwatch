@@ -38,14 +38,17 @@ def current_verdict(verdicts: Iterable[Verdict]) -> Verdict | None:
 def effective_grade(label: Label | None, verdict: Verdict | None) -> Grade | None:
     """What every reader-facing surface shows: the owner's label, otherwise the verdict.
 
-    Not relevant is `none`. Relevant without a grade keeps the verdict's grade when that is
-    `relevant` or above, and is `relevant` otherwise. Unsure changes nothing.
+    Not relevant is `none` and adjacent is `adjacent`. Relevant without a grade keeps the
+    verdict's grade when that is `relevant` or above, and is `relevant` otherwise. Unsure
+    changes nothing.
     """
     graded = verdict.grade if verdict else None
     if label is None or label.value == LabelValue.UNSURE:
         return graded
     if label.value == LabelValue.NOT_RELEVANT:
         return Grade.NONE
+    if label.value == LabelValue.ADJACENT:
+        return Grade.ADJACENT
     if label.grade is not None:
         return label.grade
     return graded if graded and graded.at_least(Grade.RELEVANT) else Grade.RELEVANT
