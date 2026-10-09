@@ -62,6 +62,7 @@ decides the service it gets:
 | Question asked | Is this paper about my question, and how central? | What happened this week that I would care about? | What is going on? |
 | Unit of output | A graded verdict per paper | About 8 picks and themes per week | A paragraph and up to 3 picks per week |
 | Optimised for | Recall, then precision | Ranking | Low cost |
+| Review cadence | None; verdicts arrive nightly | Weekly, or daily if the topic says so | Weekly |
 | Written by the owner | Subject, rubric, keywords | Subject, interests | Subject |
 
 **Triage.** One cheap model call per paper that answers, for every active topic at once: for a
@@ -84,11 +85,15 @@ Two models from different labs grade every candidate independently. The verdict 
 When they agree, that is the grade. When they differ, the more inclusive grade stands and the
 verdict is marked **split**, so the inbox shows it as something a person should settle.
 
-**Review.** A weekly piece of writing for one Radar or Pulse topic: themes, and picks with a
-sentence each on why. Produced by one strong model reading that week's member papers together.
+**Review.** A piece of writing for one Radar or Pulse topic: themes, and picks with a
+sentence each on why. Produced by one strong model reading the period's member papers together.
+The period is a week unless the topic's `cadence` is `daily`, which is meant for a Radar field
+the owner follows closely (interpretability today). A daily review is shorter: up to 5 picks
+and a line on anything that stands out, with no themes forced onto one day's papers.
 
 **Briefing.** What the owner reads. The daily briefing lists papers newly at an effective grade of `relevant` or
-above. The weekly briefing carries each Radar and Pulse review and a Watch recap.
+above, followed by the review of every daily topic. The weekly briefing carries each weekly
+Radar and Pulse review and a Watch recap.
 
 **Feedback.** The owner's corrections, and the only ground truth the system has:
 
@@ -147,13 +152,15 @@ papers, which is what backfill will use later.
    is what every reader-facing surface uses: briefings, the Inbox, the library, exports and
    integrations. A paper the owner rejected does not come back because a re-grade liked it.
 
-Weekly: one **review** per Radar and Pulse topic over the week's members, then the weekly
-briefing.
+Weekly: one **review** per weekly Radar and Pulse topic over the week's members, then the weekly
+briefing. A topic with a daily cadence is reviewed after each nightly run instead, over that
+night's members, before the daily briefing is built.
 
 Continuously: **publication lookup** for library papers, first when saved, then monthly for two
 years, and on demand when BibTeX is exported.
 
-On demand: the owner labels a paper, reports a miss, saves a pick, or edits a topic. Editing a
+On demand: the owner labels a paper, reports a miss, saves a pick, asks for a deep card, or
+edits a topic. Editing a
 topic applies forward: the new version is used from the next run, and past papers keep the
 answer they got. Every membership, candidate and verdict records the topic version that
 produced it, so mixed history is visible. Nothing retroactive runs by itself. After an edit
@@ -263,7 +270,7 @@ once a newer candidate exists for the same paper and topic, so a late retry of a
 version cannot overtake a newer verdict. A candidate still pending when its topic is edited
 is graded under the topic as it then is, and its verdict records that revision.
 
-**review.** `weekly_review(topic, week)` for Radar and Pulse; a field too large for one call is
+**review.** `review(topic, period)` for Radar and Pulse, where the period is a week or a day; a field too large for one call is
 shortlisted in chunks first. `daily_briefing(day)` and `weekly_briefing(week)` assemble stored
 verdicts and reviews into structured briefings; the web app and exports render them.
 
@@ -304,13 +311,18 @@ failures to the API.
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step. On `paper.unsaved` it tags the item as dropped and never deletes it |
 | `webdav` | `grade.changed` to `must_read` | Stores the PDF for Zotero's file sync |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive; serves PDFs, and answers searches over its titles and abstracts |
-| `deep` | `grade.changed` to `must_read` | Requests a deep card; emits `card.ready` |
+| `deep` | `grade.changed` to `must_read`, `card.requested` | Requests a deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off this |
 
 An integration that acts on a grade checks the paper's effective current grade when it handles
 the event: the owner's label where there is one, otherwise the current verdict. A `must_read`
 verdict the owner has overruled, or one a later version superseded, fetches no PDF and
 requests no card.
+
+`card.requested` is the owner asking for a deep card by hand, and it is honoured whatever the
+paper's grade or topic: a `relevant` Watch paper, a Radar or Pulse pick, or a paper found by
+search. Only `must_read` gets a card without being asked. The request is one button wherever a
+paper is shown, and one API call.
 
 Notion is not a built-in integration: a documented n8n workflow, shipped as a file under
 `integrations/n8n/`, subscribes by webhook and reads the API.
@@ -349,7 +361,7 @@ components, which are copied into the repository and therefore restyled freely. 
 | --- | --- |
 | Inbox | New Watch verdicts and splits; label with one keystroke |
 | Briefings | Daily and weekly, with history |
-| Paper | Abstract, verdicts with both opinions, links (arXiv, PDF, published version), BibTeX, deep card, save |
+| Paper | Abstract, verdicts with both opinions, links (arXiv, PDF, published version), BibTeX, deep card or a button to request one, save |
 | Search | The whole collection, filtered by topic, grade, date |
 | Topics | Create and edit; preview a draft against your labelled papers and misses; start a scoped re-run after saving |
 | Report a miss | Paste an arXiv link; see what each stage said |
@@ -443,7 +455,8 @@ Reviews are ranking and prose, read by a person, with no second model.
 
 Expected spend with the proposed defaults, at about 650 papers a night: triage on credits, about
 $0.25–0.40 a night; grading about 30 candidates twice, a few cents on each side; four or five
-weekly reviews at roughly $0.50–1 each on credits. Real-dollar spend is the check model alone,
+weekly reviews at roughly $0.50–1 each on credits, and a daily review for each topic that asks
+for one, not yet measured and also on credits. Real-dollar spend is the check model alone,
 on the order of $1 a month, against about $30 a month in 0.x. These are estimates from 0.x token
 counts and must be re-measured in milestone 2.
 
@@ -552,7 +565,7 @@ Report a miss, Quality. Labels and misses flow into the evaluation. *Check:* a d
 verdicts can be read, labelled and exported as BibTeX without touching Notion or Zotero; a
 reported miss shows what each stage said.
 
-**M4 · Reviews and briefings.** Radar and Pulse reviews, daily and weekly briefings, Briefings
+**M4 · Reviews and briefings.** Radar and Pulse reviews at each topic's cadence, daily and weekly briefings, Briefings
 page, in-process scheduler, System page. *Check:* two consecutive weekly briefings generated on
 schedule; the owner prefers them to 0.14's digests or says what is missing.
 
