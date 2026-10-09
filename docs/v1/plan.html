@@ -318,7 +318,7 @@ const PAPER = { label: 'The path of one paper', w: 720, h: 664, nodes: [
 const FLOWS = {
   'A normal night': [
     ['Scheduler fires', ['jobs'], 'The nightly cron line starts the run and takes the lock. A run record is opened.'],
-    ['Intake', ['intake', 'store', 'events'], 'New and revised papers are fetched and stored. About 600–700. Each emits paper.added.'],
+    ['Intake', ['intake', 'store', 'events'], 'New and revised papers are fetched and stored. About 600–700. A new one emits paper.added, a revision paper.revised.'],
     ['Triage', ['screening', 'llm', 'store'], 'One call per paper for all topics. Writes field memberships and Watch candidates with a one-line reason.'],
     ['Keyword audit', ['screening', 'store'], 'A paper matching a Watch topic\'s keyword patterns becomes a candidate even if triage said no. No model involved.'],
     ['Grading', ['watch', 'llm', 'store'], 'Each candidate goes to two models from different labs. About 20–40 candidates. Verdicts stored with both opinions; disagreements marked split.'],
@@ -338,8 +338,8 @@ const FLOWS = {
     ['Paste an arXiv link', ['web', 'api', 'feedback'], 'The miss is stored first, so it exists even if what follows fails.'],
     ['Fetch if absent', ['intake', 'store'], 'If the paper is outside the collection (other category, older date), it is fetched and stored.'],
     ['Triage, recorded', ['screening', 'llm'], 'Triage runs as it would have. Its answer is stored on the miss: this tells you whether the paper was dropped at the gate.'],
-    ['Grading, forced', ['watch', 'llm'], 'The paper is graded for the topic regardless of triage, so you see what the graders would have said.'],
-    ['You see the trace', ['web', 'api'], 'Each stage\'s answer and reason, side by side. You mark which topic it belonged to.'],
+    ['Grading, forced', ['watch', 'llm'], 'The paper is graded against every Watch topic regardless of triage (there are few), so you see what the graders would have said for each.'],
+    ['You see the trace', ['web', 'api'], 'Each stage\'s answer and reason, side by side. You mark which topic it belonged to, and the evaluation replays it for that topic.'],
     ['It becomes a permanent test', ['feedback'], 'Every later evaluation replays it. A config or prompt change that still misses it shows on the Quality page.'],
   ],
   'You edit a Watch topic': [

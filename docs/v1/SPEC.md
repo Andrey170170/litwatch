@@ -89,7 +89,10 @@ above. The weekly briefing carries each Radar and Pulse review and a Watch recap
 
 - a **label** on a paper for a Watch topic: relevant or not relevant, with an optional grade;
 - a **miss**: a paper the owner found elsewhere that litwatch did not surface. Reporting one
-  stores it, runs it through triage and grading, and records what each stage said and why.
+  takes only the arXiv link, so it works from a phone's share sheet. It stores the paper, runs
+  triage, grades it against every Watch topic whatever triage said (there are few), and
+  records what each stage said and why. The owner then marks which topic it belonged to, and
+  the evaluation replays it for that topic.
 
 **Library.** Papers marked saved: every Watch paper at `relevant` or above unless the owner
 labelled it not relevant, every paper the owner labelled relevant, and anything the owner
@@ -257,7 +260,7 @@ failures to the API.
 | Integration | Reacts to | Does |
 | --- | --- | --- |
 | `zotero` | `paper.saved`, `paper.unsaved`, `verdict.recorded`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step. On `paper.unsaved` it tags the item as dropped and never deletes it |
-| `webdav` | `paper.saved` at `must_read` | Stores the PDF for Zotero's file sync |
+| `webdav` | `verdict.recorded` at `must_read` | Stores the PDF for Zotero's file sync |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive; serves PDFs, and answers searches over its titles and abstracts |
 | `deep` | `verdict.recorded` at `must_read` | Requests a deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off this |
@@ -437,7 +440,7 @@ the Paper page lets the owner paste a DOI or DBLP key instead.
   `migrated` marker and a single opinion. For Radar and Pulse topics, tier 3 or better becomes
   a membership and the tier is dropped.
 - **Zotero.** Watch items stay. The several thousand items that exist only because of a broad
-  selection's tier 2 are the open question in section 9.
+  selection's tier 2 also stay; v1 stops adding to them and deletes nothing (section 9).
 - **Notion and n8n.** The current workflows keep working against 0.14 until cutover, then are
   replaced by the webhook workflow.
 - **Cutover.** v1 runs beside 0.14 on a copy of the database for at least a week. The switch
