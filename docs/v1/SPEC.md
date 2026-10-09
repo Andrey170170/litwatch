@@ -208,7 +208,9 @@ used by pipeline packages and know nothing about them. `integrations` depend on 
 `Briefing`, `Label`, `Miss`, `Publication`, `Event`. Pure functions: `reconcile(judge, check)`,
 topic content hashing, grade ordering. A topic's version is the SHA-256 of its kind, subject,
 rubric, interests and keywords as canonical JSON (sorted keys, keywords sorted); status and
-name are not part of it. Imports nothing from the rest.
+name are not part of it. A hash says whether two versions differ, not which is newer, so each
+saved edit also gets the topic's next revision number, kept in `topic_versions`. Records
+refer to the revision, and "newest topic version" always means the highest revision. Imports nothing from the rest.
 
 **store.** Numbered SQL migrations applied at start-up, replacing 0.x's single idempotent
 `schema.sql`. Repositories: `papers`, `topics`, `triage`, `verdicts`, `reviews`, `briefings`,
@@ -366,6 +368,7 @@ The places a part can be replaced or tested alone:
 ### 4.3 Data
 
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status),
+`topic_versions` (topic, revision, hash, the content at that revision, saved at),
 `memberships` (paper, topic, topic version, paper version), `candidates` (paper, topic,
 topic version, paper version, sources: triage, keyword or both, reason, state, failed runs,
 last error), `verdicts` (paper, topic, topic version,
