@@ -35,7 +35,10 @@ def respond(role, request):
     if "sort arXiv papers" in request.system:
         return json.dumps(
             {
-                "cot_faithfulness": {"why": "w", "yes": title in ("found", "harsh", "noise")},
+                "cot_faithfulness": {
+                    "why": "w",
+                    "relation": "about" if title in ("found", "harsh", "noise") else "unrelated",
+                },
                 "interpretability": {"yes": title == "dropped"},
                 "agents": {"yes": False},
             }

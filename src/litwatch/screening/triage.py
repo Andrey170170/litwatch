@@ -1,10 +1,15 @@
-"""Triage: one cheap call per paper that answers for every active topic at once."""
+"""Triage: one cheap call per paper that answers for every active topic at once.
+
+For a Watch topic the model picks one of three relations and only `unrelated` stops the
+paper. Asked a plain yes or no, a cheap model judges membership and drops what is adjacent;
+given a middle answer it uses it, and what is recorded stays a yes or a no."""
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from typing import Literal
 
 from pydantic import BaseModel, Field, create_model
 
@@ -15,17 +20,25 @@ SYSTEM = """\
 You sort arXiv papers for a researcher. You see only a paper's title, abstract and categories. \
 Answer with the structured output only.
 
-The researcher follows the topics listed below. For each topic, answer one yes-or-no question \
-about the paper. Judge each topic on its own: a paper can be yes for several topics or for none, \
-and most papers are no for most topics.
+The researcher follows the topics listed below. Answer for each topic on its own: a paper can \
+belong to several topics or to none, and most papers have nothing to do with most topics.
 
-Watch topics are the researcher's own research questions. Missing a paper on one of them is \
-costly, while a wrong yes costs only a second look by a stronger model. Answer yes if the paper \
-could plausibly belong: it is about the topic, overlaps with it in part, or is close enough that \
-a careful reader would want to check. Answer no when the paper is clearly about something else. \
-Shared vocabulary alone is not enough: "faithful", "trace", "monitor" and "reasoning" are used \
-in many unrelated senses. When you are genuinely unsure, answer yes. Give one sentence naming \
-the evidence in the abstract that decided it; for a clear no a few words suffice.
+Watch topics are the researcher's own research questions. For these you are a coarse filter, \
+not the judge: a stronger model reads every paper you pass and decides, with the full rubric, \
+whether it belongs. Missing a paper is costly, while passing one too many costs only that \
+second look. Place the paper in one of three relations to the topic:
+
+about: the paper is on the topic's subject.
+related: the paper is not squarely on the subject but touches it. It studies the same object \
+or phenomenon from another angle, asks a neighbouring question, or offers a method, dataset or \
+finding that a researcher on the topic would want to know about. Work that the description \
+calls out of scope, or assigns to another topic, is related, not unrelated.
+unrelated: the paper is about something else. Sharing vocabulary is not a relation: \
+"faithful", "trace", "monitor" and "reasoning" are used in many unrelated senses.
+
+Papers that are about or related are passed on. When you hesitate between related and \
+unrelated, choose related. Give one sentence naming the evidence in the abstract that decided \
+it; for a clearly unrelated paper a few words suffice.
 
 Field topics are broad areas the researcher keeps an eye on. Answer yes if the paper is a \
 contribution to that field, and no if it only uses the field's tools or mentions it in passing.
@@ -35,7 +48,12 @@ contribution to that field, and no if it only uses the field's tools or mentions
 
 class WatchAnswer(BaseModel):
     why: str = Field(description="One sentence")
-    yes: bool
+    relation: Literal["about", "related", "unrelated"]
+
+    @property
+    def yes(self) -> bool:
+        """Whether the paper goes on to grading. Only `unrelated` stops it."""
+        return self.relation != "unrelated"
 
 
 class FieldAnswer(BaseModel):

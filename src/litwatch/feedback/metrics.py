@@ -30,7 +30,9 @@ def _recall(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "candidate": _share(sum(_candidate(r) for r in rows), n),
         # Graded relevant or above when forced, whether or not it became a candidate.
         "grading": _share(sum(_surfaced(r["grade"]) for r in graded), len(graded)),
-        "end_to_end": _share(sum(_candidate(r) and _surfaced(r["grade"]) for r in rows), n),
+        "end_to_end": _share(
+            sum(_candidate(r) and _surfaced(r["grade"]) for r in graded), len(graded)
+        ),
         "ungraded": n - len(graded),
         "triage_misses": sorted(r["paper_id"] for r in rows if not r["triage_yes"]),
         "candidate_misses": sorted(r["paper_id"] for r in rows if not _candidate(r)),

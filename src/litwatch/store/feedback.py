@@ -217,3 +217,72 @@ async def sample(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[dict[s
             (eval_run_id,),
         )
     ).fetchall()
+
+
+# -- labelling queues ------------------------------------------------------------------------------
+
+
+async def labelling_sets(conn: psycopg.AsyncConnection, watched: list[str]) -> list[dict[str, Any]]:
+    """The queues the owner can work through, with how far each has got."""
+    sets = []
+    drawn = await latest_eval(conn, "sample")
+    if drawn:
+        row = await (
+            await conn.execute(
+                """
+                SELECT count(*) AS total, count(*) FILTER (WHERE (
+                    SELECT count(*) FROM labels l
+                    WHERE l.paper_id = s.paper_id AND l.topic = ANY(%s)) >= %s) AS done
+                FROM eval_samples s WHERE s.eval_run_id = %s
+                """,
+                (watched, len(watched), drawn["id"]),
+            )
+        ).fetchone()
+        sets.append({"key": "rejects", "name": "Papers triage rejected", **row})
+    row = await (
+        await conn.execute(
+            "SELECT count(DISTINCT paper_id) AS total, "
+            "count(DISTINCT paper_id) FILTER (WHERE NOT provisional) AS done "
+            "FROM labels WHERE origin = 'legacy_positive'"
+        )
+    ).fetchone()
+    sets.append({"key": "positives", "name": "0.14 tier 1 and 2 (accepted in bulk)", **row})
+    row = await (
+        await conn.execute(
+            "SELECT count(DISTINCT paper_id) AS total, 0 AS done FROM labels WHERE value = 'unsure'"
+        )
+    ).fetchone()
+    sets.append({"key": "unsure", "name": "Marked unsure", **row})
+    return sets
+
+
+async def labelling_queue(conn: psycopg.AsyncConnection, key: str) -> list[dict[str, Any]]:
+    """The papers of one queue, in order, each with its labels by topic."""
+    if key == "rejects":
+        drawn = await latest_eval(conn, "sample")
+        order = "s.position"
+        source = "eval_samples s JOIN papers p ON p.id = s.paper_id"
+        where, params = "s.eval_run_id = %s", (drawn["id"] if drawn else -1,)
+        extra = "s.stratum"
+    elif key in ("positives", "unsure"):
+        condition = "origin = 'legacy_positive'" if key == "positives" else "value = 'unsure'"
+        order, extra = "p.published DESC NULLS LAST, p.id", "NULL::text AS stratum"
+        source = "papers p"
+        where = f"p.id IN (SELECT paper_id FROM labels WHERE {condition})"
+        params = ()
+    else:
+        raise KeyError(key)
+    rows = await (
+        await conn.execute(
+            f"""
+            SELECT p.id, p.title, p.abstract, p.authors, p.categories, p.published, {extra},
+                   coalesce((SELECT jsonb_object_agg(l.topic, jsonb_build_object(
+                                 'value', l.value, 'grade', l.grade, 'origin', l.origin,
+                                 'provisional', l.provisional, 'note', l.note))
+                             FROM labels l WHERE l.paper_id = p.id), '{{}}') AS labels
+            FROM {source} WHERE {where} ORDER BY {order}
+            """,
+            params,
+        )
+    ).fetchall()
+    return rows

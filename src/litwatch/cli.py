@@ -230,6 +230,24 @@ def eval_report(eval_run_id: int) -> None:
 
 
 @app.command()
+def serve(
+    host: Annotated[str, typer.Option(help="Address to listen on.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8080,
+) -> None:
+    """Serve the API and the labelling page. Needs LITWATCH_API_TOKEN."""
+    import uvicorn  # noqa: PLC0415
+
+    from litwatch.api import create_app  # noqa: PLC0415
+
+    configuration.load_dotenv()
+    token = configuration.secret("LITWATCH_API_TOKEN")
+    if not token:
+        raise SystemExit("LITWATCH_API_TOKEN (or LITWATCH_API_TOKEN_FILE) is not set")
+    _run(store.migrate, migrate=False)
+    uvicorn.run(create_app(configuration.database_url(), token), host=host, port=port)
+
+
+@app.command()
 def ping(
     role: Annotated[str, typer.Argument(help="triage, judge, check or review")],
     config: ConfigPath = None,

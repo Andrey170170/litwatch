@@ -45,7 +45,10 @@ class Models:
         if who == "triage":
             return json.dumps(
                 {
-                    "cot_faithfulness": {"why": "w", "yes": paper_id == ON_TOPIC.id},
+                    "cot_faithfulness": {
+                        "why": "w",
+                        "relation": "related" if paper_id == ON_TOPIC.id else "unrelated",
+                    },
                     "interpretability": {"yes": paper_id in (ON_TOPIC.id, INTERP_ONLY.id)},
                     "agents": {"yes": False},
                 }

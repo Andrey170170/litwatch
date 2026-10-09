@@ -1,0 +1,84 @@
+"""The labelling API: the token, the queues, and what a label given there records."""
+
+import httpx
+import pytest
+
+from litwatch.api import create_app
+from litwatch.core import Label, LabelOrigin, LabelValue
+from litwatch.store import feedback as feedback_store
+from litwatch.store import papers as papers_store
+from litwatch.store import topics as topics_store
+from tests.conftest import FAITH, TOPICS, paper
+
+TOKEN = "s3cret"
+
+
+@pytest.fixture
+async def client(conn):
+    for topic in TOPICS:
+        await topics_store.save(conn, topic)
+    await papers_store.upsert(conn, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
+    # The app opens its own connections; point them at the test schema.
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+AUTH = {"authorization": f"Bearer {TOKEN}"}
+
+
+async def test_everything_but_the_health_check_needs_the_token(client):
+    assert (await client.get("/healthz")).status_code == 200
+    assert (await client.get("/api/labelling")).status_code == 401
+    assert (
+        await client.get("/api/labelling", headers={"authorization": "Bearer no"})
+    ).status_code == 401
+    # Opening the page once with the token sets a cookie that then serves as the token.
+    page = await client.get("/", params={"token": TOKEN})
+    assert "litwatch_token" in page.headers["set-cookie"]
+    assert (await client.get("/api/labelling")).json()["topics"] == [
+        {"slug": FAITH.slug, "name": FAITH.name}
+    ]
+    assert "set-cookie" not in (await client.get("/", params={"token": "wrong"})).headers
+
+
+async def test_a_label_records_how_its_paper_was_chosen_and_can_be_taken_back(client, conn):
+    await feedback_store.add_provisional(
+        conn,
+        Label(
+            paper_id="2609.1",
+            topic=FAITH.slug,
+            value=LabelValue.RELEVANT,
+            origin=LabelOrigin.LEGACY_POSITIVE,
+            note="0.14 tier 2",
+        ),
+    )
+    sets = {s["key"]: s for s in (await client.get("/api/labelling", headers=AUTH)).json()["sets"]}
+    assert (sets["positives"]["total"], sets["positives"]["done"]) == (1, 0)
+    (item,) = (await client.get("/api/labelling/positives", headers=AUTH)).json()
+    assert item["labels"][FAITH.slug]["provisional"] is True
+
+    url = f"/api/labels/2609.1/{FAITH.slug}"
+    body = {"value": "not_relevant", "queue": "positives"}
+    assert (await client.put(url, json=body, headers=AUTH)).json()["provisional"] is False
+    (label,) = await feedback_store.labels(conn)
+    assert (label.value, label.origin) == (LabelValue.NOT_RELEVANT, LabelOrigin.LEGACY_POSITIVE)
+
+    other = {"value": "unsure", "queue": "rejects"}
+    await client.put(f"/api/labels/2609.2/{FAITH.slug}", json=other, headers=AUTH)
+    assert (await feedback_store.labels(conn))[1].origin == LabelOrigin.REJECT_SAMPLE
+    (unsure,) = (await client.get("/api/labelling/unsure", headers=AUTH)).json()
+    assert unsure["id"] == "2609.2"
+    assert (
+        await client.delete(f"/api/labels/2609.2/{FAITH.slug}", headers=AUTH)
+    ).status_code == 204
+    assert len(await feedback_store.labels(conn)) == 1
+
+    assert (
+        await client.put("/api/labels/2609.1/interpretability", json=body, headers=AUTH)
+    ).status_code == 404
+    assert (
+        await client.put(f"/api/labels/nope/{FAITH.slug}", json=body, headers=AUTH)
+    ).status_code == 404
+    assert (await client.get("/api/labelling/other", headers=AUTH)).status_code == 404
