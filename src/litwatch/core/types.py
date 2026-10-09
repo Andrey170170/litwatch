@@ -81,6 +81,15 @@ class Topic(BaseModel):
     status: Status = Status.ACTIVE
     revision: int | None = None
 
+    @field_validator("slug")
+    @classmethod
+    def _usable_as_a_field(cls, value: str) -> str:
+        # The slug names a field of the triage reply, and pydantic keeps some names for itself
+        # (`model-dump`, `copy`). Such a topic would stop triage for every paper.
+        if hasattr(BaseModel, value.replace("-", "_")):
+            raise ValueError(f"{value!r} is a reserved name; choose another slug")
+        return value
+
     @field_validator("rubric", "interests", mode="before")
     @classmethod
     def _blank_is_none(cls, value: Any) -> Any:

@@ -124,3 +124,9 @@ def test_a_database_password_with_url_characters_is_quoted(monkeypatch):
     url = urlsplit(config.database_url())
     assert (url.hostname, url.port, url.path) == ("db", 5432, "/litwatch")
     assert unquote(url.password) == odd
+
+
+@pytest.mark.parametrize("slug", ["model-dump", "copy", "model-fields"])
+def test_a_slug_that_pydantic_reserves_as_a_field_name_is_refused(slug):
+    with pytest.raises(ValueError, match="reserved"):
+        type(FAITH).model_validate(FAITH.model_dump() | {"slug": slug})
