@@ -2,8 +2,9 @@
 
 Decision: keep `openai/gpt-5.6-luna` as the primary for now. At low effort Haiku 5.5 is
 stricter than Luna around the tier 2 bar and loses papers production placed at tier 1 or 2.
-Medium and high effort recover most of that at the primary stage, but have not been run
-through the full cascade. No production settings or data changed.
+Medium and high effort, each also run through the full cascade, recover most of that (41 and
+44 of 50 against Luna's 46) but re-screen far more papers and so spend more on OpenRouter,
+not less. No production settings or data changed.
 
 ## What was tested
 

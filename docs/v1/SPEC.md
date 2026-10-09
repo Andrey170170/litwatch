@@ -116,10 +116,10 @@ papers, which is what backfill will use later.
    paths is one candidate carrying both sources, and is graded once.
 4. **Grading.** For every (paper, Watch topic) candidate, the judge and the check model each
    return a grade and reason. The two are reconciled into a verdict.
-5. **Library.** Verdicts at `relevant` or above mark the paper saved. The owner's label
-   outranks the verdict: labelling a paper relevant saves it, and labelling it not relevant
-   removes it from the library and emits `paper.unsaved`. A paper the owner saved by hand
-   stays until the owner removes it.
+5. **Library.** Verdicts at `relevant` or above mark the paper saved. For one topic the
+   owner's label outranks the verdict. Saved state belongs to the paper, not the topic, so it
+   is recomputed from every reason the paper has: a `relevant` verdict or label on any Watch
+   topic, or a save by hand. `paper.unsaved` is emitted only when the last reason goes.
 6. **Events.** `paper.saved`, `verdict.recorded` and similar are written to the outbox.
    Integrations consume them on their own schedule; a failing integration delays nothing.
 7. **Daily briefing.** Built when there are new verdicts at `relevant` or above.
@@ -236,7 +236,9 @@ through the current triage and keyword audit, then grades all of them whether or
 became candidates, as the miss flow does. Per Watch topic it reports three numbers over the
 same denominator, all papers the owner labelled relevant: triage recall (became a candidate),
 grading recall (graded `relevant` or above when forced), and end-to-end recall (both). It
-also reports precision at `relevant` over all labelled papers, and each miss still missed.
+also reports precision at `relevant` over the labelled papers that became candidates, which
+is what production would have shown, grader-only precision over all labelled papers as a
+separate figure, and each miss still missed.
 Grading the non-candidates is what keeps a triage miss from being counted as a grading error. This is the evaluation;
 there is no separate label file.
 
@@ -251,7 +253,7 @@ failures to the API.
 | --- | --- | --- |
 | `zotero` | `paper.saved`, `paper.unsaved`, `verdict.recorded`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step. On `paper.unsaved` it tags the item as dropped and never deletes it |
 | `webdav` | `paper.saved` at `must_read` | Stores the PDF for Zotero's file sync |
-| `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive; serves PDFs and full-text search |
+| `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive; serves PDFs, and answers searches over its titles and abstracts |
 | `deep` | `verdict.recorded` at `must_read` | Requests a deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off this |
 
@@ -513,8 +515,8 @@ Decided on 2026-10-08:
    may also answer searches, and `archive` does, which adds the papers litwatch never ingested
    (the archive searches titles and abstracts too; full-text search arrives if the archive
    gains it). Results are merged by arXiv id. A paper only the archive holds is shown as
-   outside the collection, with one action that brings it in through the same path as a
-   reported miss. Where a result comes from is an ordinary filter beside topic, grade and
+   outside the collection, with one action that fetches and stores it like any new paper. It
+   becomes a reported miss only if the owner marks it as one for a Watch topic. Where a result comes from is an ordinary filter beside topic, grade and
    year, with no default restriction. Backfilling older archive papers through Watch triage
    and grading stays after v1; jobs already take explicit paper sets for that purpose.
 7. **What a topic edit re-runs.** Nothing, by itself: edits apply forward, and retroactive
