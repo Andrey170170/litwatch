@@ -37,7 +37,7 @@ All 238 cascades completed. Selection-level verdicts: 833 per arm.
 | Papers sent to re-screen | 24/119 | 58/119 |
 | Confirm calls on the 60 other papers | 18 | 5 |
 | Primary cost, 119 papers | $0.0359 | $0.0385 |
-| Rest of the cascade (GLM and Muse) | $0.1075 | $0.1429 |
+| Rest of the cascade (GLM and Muse) | $0.1075 | $0.1428 |
 
 Primary tiers disagreed on 143 of 833 verdicts: Haiku was stricter on 117 and more generous
 on 26. The bulk is one step down: 21 of Luna's 38 tier 1 verdicts became tier 2, and 43 of

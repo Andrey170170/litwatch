@@ -104,8 +104,15 @@ papers, which is what backfill will use later.
 
 1. **Intake.** Fetch new and revised papers for the configured arXiv categories and store them.
 2. **Triage.** One call per untriaged paper. Stores field memberships and Watch candidates.
-3. **Keyword audit.** A paper matching a Watch topic's keyword patterns becomes a candidate even
-   if triage said no. No model is involved, so no model's blind spot applies.
+   A revision of a stored paper is untriaged again only when its title or abstract was
+   rewritten (similarity below 0.8, the 0.14 rule); otherwise it keeps what it has. Every
+   membership, candidate and verdict records the paper version it was made from, and a
+   re-screened paper's earlier verdict is kept as history, not overwritten.
+3. **Keyword audit.** Every paper that triage did not make a candidate for a Watch topic is
+   checked against that topic's keyword patterns, whether or not it joined a Radar or Pulse
+   field, and becomes a candidate on a match. No model is involved, so no model's blind spot
+   applies. A candidate is one row per paper, topic and topic version; a paper found by both
+   paths is one candidate carrying both sources, and is graded once.
 4. **Grading.** For every (paper, Watch topic) candidate, the judge and the check model each
    return a grade and reason. The two are reconciled into a verdict.
 5. **Library.** Verdicts at `relevant` or above mark the paper saved.
@@ -177,7 +184,9 @@ used by pipeline packages and know nothing about them. `integrations` depend on 
 
 **core.** `Paper`, `Topic`, `TopicKind`, `Grade`, `Opinion`, `Verdict`, `Membership`, `Review`,
 `Briefing`, `Label`, `Miss`, `Publication`, `Event`. Pure functions: `reconcile(judge, check)`,
-topic content hashing, grade ordering. Imports nothing from the rest.
+topic content hashing, grade ordering. A topic's version is the SHA-256 of its kind, subject,
+rubric, interests and keywords as canonical JSON (sorted keys, keywords sorted); status and
+name are not part of it. Imports nothing from the rest.
 
 **store.** Numbered SQL migrations applied at start-up, replacing 0.x's single idempotent
 `schema.sql`. Repositories: `papers`, `topics`, `triage`, `verdicts`, `reviews`, `briefings`,
@@ -219,8 +228,12 @@ and prefer the one that is not CoRR. `bibtex(paper)` renders either record. A wr
 match can be corrected by hand and is then never overwritten.
 
 **feedback.** Stores labels and misses. `replay(config)` runs every labelled or missed paper
-through the current triage and grading and reports, per Watch topic: triage recall, grading
-recall and precision at `relevant`, and each miss that is still missed. This is the evaluation;
+through the current triage and keyword audit, then grades all of them whether or not they
+became candidates, as the miss flow does. Per Watch topic it reports three numbers over the
+same denominator, all papers the owner labelled relevant: triage recall (became a candidate),
+grading recall (graded `relevant` or above when forced), and end-to-end recall (both). It
+also reports precision at `relevant` over all labelled papers, and each miss still missed.
+Grading the non-candidates is what keeps a triage miss from being counted as a grading error. This is the evaluation;
 there is no separate label file.
 
 **events.** A transactional outbox: a pipeline step writes its event in the same transaction as
@@ -300,8 +313,8 @@ The places a part can be replaced or tested alone:
 ### 4.3 Data
 
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status),
-`memberships` (paper, topic, topic version), `candidates` (paper, topic, topic version,
-source: triage or keyword, reason), `verdicts` (paper, topic, grade, split, judge and check opinions, topic
+`memberships` (paper, topic, topic version, paper version), `candidates` (paper, topic,
+topic version, paper version, sources: triage, keyword or both, reason), `verdicts` (paper, topic, grade, split, judge and check opinions, topic
 version), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
 `integration_cursors`. Kept as they are: `papers`, `runs`, `inference_calls`, intake checkpoints.
 

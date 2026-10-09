@@ -44,7 +44,7 @@
   .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border, #ccc); margin-bottom: 14px; }
   .tabs button { all: unset; cursor: pointer; padding: 7px 12px; border-radius: 6px 6px 0 0; color: var(--muted-foreground, #666); font-weight: 500; }
   .tabs button[aria-selected=true] { color: var(--foreground, #111); box-shadow: inset 0 -2px 0 var(--primary, #555); }
-  .tabs button:focus-visible, .box:focus-visible, .chip:focus-visible { outline: 2px solid var(--ring, #888); outline-offset: 1px; }
+  .tabs button:focus-visible, .box:focus-visible, .chip:focus-visible, .steps li:focus-visible { outline: 2px solid var(--ring, #888); outline-offset: 1px; }
   section[hidden] { display: none; }
   .card { background: var(--card, rgba(127,127,127,.08)); border: 1px solid var(--border, #ccc); border-radius: var(--radius, 8px); padding: 16px; }
   .grid { display: grid; gap: var(--gap); }
@@ -234,7 +234,7 @@ const M = {
 const col = (i) => 6 + 120 * i;
 const mnode = (id, x, y, w, sub, h = 44) => ({ id, mod: id, x, y, w, h, t: id, s: sub, c: C[M[id].layer], mono: true });
 // Module map. An arrow from a to b means a calls b. Edges into store and core are left out: everything has one.
-const MAP = { w: 720, h: 506, nodes: [
+const MAP = { label: 'Modules and the calls between them', w: 720, h: 506, nodes: [
   mnode('cli', col(0), 8, 108, 'terminal'), mnode('web', col(2), 8, 108, 'React app'), mnode('api', col(3), 8, 108, 'HTTP, OpenAPI'),
   mnode('jobs', 6, 92, 476, 'scheduler, job definitions, run records'), mnode('feedback', col(5), 92, 108, 'labels, misses'),
   mnode('intake', col(0), 206, 108, 'arXiv → papers'), mnode('screening', col(1), 206, 108, 'triage, kw audit'), mnode('watch', col(2), 206, 108, 'two-lab grading'),
@@ -254,7 +254,7 @@ const MAP = { w: 720, h: 506, nodes: [
   { a: 'integrations', b: 'events', m: 'h' }, { a: 'store', b: 'core' },
 ] };
 // What runs where. Arrows follow requests and data.
-const SYS = { w: 720, h: 520, groups: [
+const SYS = { label: 'What runs where', w: 720, h: 520, groups: [
   { id: 'svc', x: 200, y: 84, w: 360, h: 262, t: 'litwatch service: one Python process, one container' },
   { id: 'opt', x: 354, y: 392, w: 360, h: 120, t: 'optional integrations: each off unless configured', dash: true },
 ], nodes: [
@@ -285,14 +285,14 @@ const SYS = { w: 720, h: 520, groups: [
   { a: 'store', b: 'pg' }, { a: 'events', b: 'opt', bo: -83, label: 'events', lx: 26 },
 ] };
 // What happens to one paper. Rounded boxes are states of a paper, square ones are steps.
-const PAPER = { w: 720, h: 664, nodes: [
+const PAPER = { label: 'The path of one paper', w: 720, h: 664, nodes: [
   { id: 'arxiv', x: 240, y: 6, w: 200, h: 40, t: 'arXiv', s: 'cs.CL, cs.AI, cs.LG, nightly', c: C.ext, mod: 'intake' },
   { id: 'intake', x: 240, y: 72, w: 200, t: 'intake', s: 'stores every paper', c: C.pipe, mod: 'intake', mono: true },
   { id: 'triage', x: 240, y: 150, w: 200, h: 50, t: 'triage', s: 'one cheap call per paper, all topics', c: C.pipe, mod: 'screening', mono: true },
   { id: 'field', x: 10, y: 250, w: 200, t: 'field member', s: 'in a Radar or Pulse topic', data: true, mod: 'screening' },
   { id: 'cand', x: 240, y: 250, w: 200, t: 'Watch candidate', s: 'about 20–40 a night', data: true, mod: 'screening' },
   { id: 'none', x: 500, y: 250, w: 210, t: 'no topic', s: 'stays in the collection', data: true, mod: 'store' },
-  { id: 'audit', x: 500, y: 340, w: 210, t: 'keyword audit', s: 'no model; catches triage misses', c: C.pipe, mod: 'screening', mono: true },
+  { id: 'audit', x: 500, y: 340, w: 210, t: 'keyword audit', s: 'every non-candidate; no model', c: C.pipe, mod: 'screening', mono: true },
   { id: 'review', x: 10, y: 340, w: 200, t: 'weekly review', s: 'one strong model reads the week', c: C.pipe, mod: 'review', mono: true },
   { id: 'judge', x: 240, y: 340, w: 94, t: 'judge', s: 'lab 1', c: C.pipe, mod: 'watch', mono: true },
   { id: 'check', x: 346, y: 340, w: 94, t: 'check', s: 'lab 2', c: C.pipe, mod: 'watch', mono: true },
@@ -379,7 +379,7 @@ function diagram(spec, st = {}) {
   const anchor = (n, side, off = 0) => side === 't' ? [n.x + n.w / 2 + off, n.y] : side === 'b' ? [n.x + n.w / 2 + off, n.y + n.h]
     : side === 'l' ? [n.x, n.y + n.h / 2 + off] : [n.x + n.w, n.y + n.h / 2 + off];
   const anyHot = st.hot && spec.edges.some(st.hot);
-  let out = `<svg class="dg" viewBox="0 0 ${spec.w} ${spec.h}" role="img"><defs>` + ['ah', 'ahh'].map((k) =>
+  let out = `<svg class="dg" viewBox="0 0 ${spec.w} ${spec.h}" role="group" aria-label="${spec.label}"><defs>` + ['ah', 'ahh'].map((k) =>
     `<marker id="${uid}${k}" viewBox="0 0 8 8" refX="7.5" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse"><path class="${k}" d="M0,0.5 L8,4 L0,7.5z"/></marker>`).join('') + '</defs>';
   for (const g of spec.groups || []) out += `<rect class="grp${g.dash ? ' dash' : ''}" x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="10"/><text class="gl" x="${g.x + 12}" y="${g.y + 18}">${g.t}</text>`;
   for (const e of spec.edges) {
@@ -409,8 +409,8 @@ function diagram(spec, st = {}) {
   }
   for (const n of spec.nodes.map((x) => N[x.id])) {
     const cls = ['n', n.mono && 'mono', st.on && st.on(n) && 'on', st.dim && st.dim(n) && 'dim'].filter(Boolean).join(' ');
-    const click = n.mod || n.go, ty = n.s ? n.y + n.h / 2 - 3 : n.y + n.h / 2 + 4, tx = n.x + (n.data ? 14 : 11);
-    out += `<g class="${cls}"${click ? ` data-id="${n.id}" tabindex="0" role="button"` : ''}${n.c ? ` style="--c:${n.c}"` : ''}>
+    const click = st.click && (n.mod || n.go), ty = n.s ? n.y + n.h / 2 - 3 : n.y + n.h / 2 + 4, tx = n.x + (n.data ? 14 : 11);
+    out += `<g class="${cls}"${click ? ` data-id="${n.id}" tabindex="0" role="button" aria-label="${n.t}: ${n.s || ''}"` : ''}${n.c ? ` style="--c:${n.c}"` : ''}>
       <rect class="bg" x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${n.data ? n.h / 2 : 6}"/>
       ${n.c && !n.data ? `<rect x="${n.x + 1}" y="${n.y + 5}" width="3" height="${n.h - 10}" rx="1.5" fill="${n.c}"/>` : ''}
       <text class="t" x="${tx}" y="${ty}">${n.t}</text>${n.s ? `<text class="s" x="${tx}" y="${ty + 14}">${n.s}</text>` : ''}</g>`;
@@ -421,7 +421,7 @@ const related = (a, b) => a === b || M[a].uses.includes(b) || M[b].uses.includes
 
 const VIEWS = {
   system: { name: '1 · What runs where', spec: SYS, intro: '<b>One deployment.</b> A single Python service, with its web app, and a Postgres database are the whole core. arXiv and model access are the only things it needs from outside (one OpenRouter key is enough, since the two graders must be different labs, not different accounts); DBLP adds published versions. Everything in the dashed frame can be absent.<p>Arrows follow requests and data. The API also reads the database directly through <code>store</code>; that arrow is left out to keep the picture readable.</p><p>Click <b>pipeline</b> to follow a paper through it.</p>' },
-  paper: { name: '2 · A paper’s path', spec: PAPER, intro: '<b>Read it top to bottom.</b> Every paper is stored, then triage sorts it three ways. The middle column is Watch: two labs grade each candidate and you label the result. The left column is Radar and Pulse: papers are only read together, once a week. The right column is the collection and what leaves the system.<p>Rounded boxes are states of a paper; square ones are steps. The dashed line is the evaluation loop: your labels and reported misses are replayed through triage and grading whenever a prompt or model changes.</p>' },
+  paper: { name: '2 · A paper’s path', spec: PAPER, intro: '<b>Read it top to bottom.</b> Every paper is stored, then triage sorts it three ways. The keyword audit checks every paper triage did not make a Watch candidate, field members included; the picture draws that once, from “no topic”. The middle column is Watch: two labs grade each candidate and you label the result. The left column is Radar and Pulse: papers are only read together, once a week. The right column is the collection and what leaves the system.<p>Rounded boxes are states of a paper; square ones are steps. The dashed line is the evaluation loop: your labels and reported misses are replayed through triage and grading whenever a prompt or model changes.</p>' },
   modules: { name: '3 · Modules and who calls whom', spec: MAP, intro: '<b>An arrow from a to b means a calls b.</b> Calls only go downward or sideways: surfaces at the top, then <code>jobs</code> deciding when things run, then the pipeline steps, then the two shared services. Nothing calls <code>api</code> or <code>jobs</code> from below.<p>Arrows into <code>store</code> and <code>core</code> are not drawn, since almost every module has one.</p><p>Click a module to light up its connections and see what is inside it.</p>' },
 };
 let view = 'system', current = null;
@@ -430,8 +430,8 @@ function renderArch() {
   for (const [id, v] of Object.entries(VIEWS)) { const c = el('button', 'chip' + (id === view ? ' sel' : ''), v.name); c.onclick = () => { view = id; current = null; renderArch(); }; pick.append(c); }
   const spec = VIEWS[view].spec, host = $('#archview');
   host.innerHTML = diagram(spec, view === 'modules'
-    ? { on: (n) => n.id === current, dim: (n) => current && !related(current, n.id), hot: (e) => e.a === current || e.b === current }
-    : { on: (n) => current && n.mod === current });
+    ? { click: true, on: (n) => n.id === current, dim: (n) => current && !related(current, n.id), hot: (e) => e.a === current || e.b === current }
+    : { click: true, on: (n) => current && n.mod === current });
   const hit = (ev) => { const g = ev.target.closest('[data-id]'); if (!g) return; const n = spec.nodes.find((x) => x.id === g.dataset.id);
     if (n.go) { view = n.go; current = null; } else current = current === n.mod ? null : n.mod; renderArch(); };
   host.onclick = hit; host.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); hit(ev); } };
@@ -455,7 +455,7 @@ function renderFlow() {
   const pick = $('#flowpick'); pick.innerHTML = '';
   for (const name of Object.keys(FLOWS)) { const c = el('button', 'chip' + (name === flow ? ' sel' : ''), name); c.style.fontFamily = 'inherit'; c.onclick = () => { flow = name; step = 0; renderFlow(); }; pick.append(c); }
   const ol = $('#steps'); ol.innerHTML = '';
-  FLOWS[flow].forEach(([title, , text], i) => { const li = el('li', i === step ? 'on' : '', `<div class="n">${i + 1}</div><div><b>${title}</b><div class="more">${text}</div></div>`); li.onclick = () => { step = i; renderFlow(); }; ol.append(li); });
+  FLOWS[flow].forEach(([title, , text], i) => { const li = el('li', i === step ? 'on' : '', `<div class="n">${i + 1}</div><div><b>${title}</b><div class="more">${text}</div></div>`); li.tabIndex = 0; li.setAttribute('role', 'button'); li.setAttribute('aria-pressed', i === step); const go = () => { step = i; renderFlow(); $('#steps').children[i].focus(); }; li.onclick = go; li.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } }; ol.append(li); });
   const active = FLOWS[flow][step][1];
   $('#flowmods').innerHTML = diagram(MAP, { on: (n) => active.includes(n.id), dim: (n) => !active.includes(n.id), hot: (e) => active.includes(e.a) && active.includes(e.b), cold: true });
 }
