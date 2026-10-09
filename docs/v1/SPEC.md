@@ -84,7 +84,7 @@ verdict is marked **split**, so the inbox shows it as something a person should 
 **Review.** A weekly piece of writing for one Radar or Pulse topic: themes, and picks with a
 sentence each on why. Produced by one strong model reading that week's member papers together.
 
-**Briefing.** What the owner reads. The daily briefing lists new Watch verdicts at `relevant` or
+**Briefing.** What the owner reads. The daily briefing lists papers newly at an effective grade of `relevant` or
 above. The weekly briefing carries each Radar and Pulse review and a Watch recap.
 
 **Feedback.** The owner's corrections, and the only ground truth the system has:
@@ -134,7 +134,10 @@ papers, which is what backfill will use later.
    the outbox. `grade.changed` fires when a paper's effective grade for a topic changes,
    whether a verdict or the owner's label caused it.
    Integrations consume them on their own schedule; a failing integration delays nothing.
-7. **Daily briefing.** Built when there are new verdicts at `relevant` or above.
+7. **Daily briefing.** Built when a paper's effective grade newly reaches `relevant` or above.
+   The effective grade (the owner's label where there is one, otherwise the current verdict)
+   is what every reader-facing surface uses: briefings, the Inbox, the library, exports and
+   integrations. A paper the owner rejected does not come back because a re-grade liked it.
 
 Weekly: one **review** per Radar and Pulse topic over the week's members, then the weekly
 briefing.
@@ -508,7 +511,9 @@ Because that leaves almost no ground truth, the owner labels three sets in this 
   topics) and 30 from all other rejects, which is the only look at what the gate drops;
 - 50 papers the new pipeline made candidates over a recent window, drawn at random with a
   recorded seed, without which a false positive the new pipeline introduces would never
-  reach the precision figure.
+  reach the precision figure. Each triage configuration that is trialled gets its own 50,
+  drawn from its own candidates; a paper in several samples is labelled once. Comparing two
+  triage models therefore costs up to 50 more labels.
 
 The triage and grading defaults are trialled on these. *Check:* every regression-set paper
 that 0.14 placed at tier 1 or 2 becomes a candidate, or each loss has been looked at (the
