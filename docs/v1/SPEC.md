@@ -118,8 +118,10 @@ papers, which is what backfill will use later.
    return a grade and reason. The two are reconciled into a verdict.
 5. **Library.** Verdicts at `relevant` or above mark the paper saved. For one topic the
    owner's label outranks the verdict. Saved state belongs to the paper, not the topic, so it
-   is recomputed from every reason the paper has: a `relevant` verdict or label on any Watch
-   topic, or a save by hand. `paper.unsaved` is emitted only when the last reason goes.
+   is recomputed from every reason the paper has: on any Watch topic, a label of relevant, or,
+   where there is no label, a current verdict of `relevant` or above; or a save by hand. The
+   current verdict is the latest one for the paper's latest screened version; older rows are
+   history and give no reason. `paper.unsaved` is emitted only when the last reason goes.
 6. **Events.** `paper.saved`, `verdict.recorded` and similar are written to the outbox.
    Integrations consume them on their own schedule; a failing integration delays nothing.
 7. **Daily briefing.** Built when there are new verdicts at `relevant` or above.
@@ -233,9 +235,12 @@ match can be corrected by hand and is then never overwritten.
 
 **feedback.** Stores labels and misses. `replay(config)` runs every labelled or missed paper
 through the current triage and keyword audit, then grades all of them whether or not they
-became candidates, as the miss flow does. Per Watch topic it reports three numbers over the
-same denominator, all papers the owner labelled relevant: triage recall (became a candidate),
-grading recall (graded `relevant` or above when forced), and end-to-end recall (both). It
+became candidates, as the miss flow does. Per Watch topic it reports four numbers over the
+same denominator, all papers the owner labelled relevant: triage recall (the triage model
+alone said yes, before the keyword audit), candidate recall (triage or the audit made it a
+candidate), grading recall (graded `relevant` or above when forced), and end-to-end recall
+(a candidate and graded `relevant` or above). Triage recall is the one that judges the
+triage model; the audit must not be allowed to hide its misses. It
 also reports precision at `relevant` over the labelled papers that became candidates, which
 is what production would have shown, grader-only precision over all labelled papers as a
 separate figure, and each miss still missed.
@@ -462,8 +467,9 @@ about those. Because that leaves almost no ground truth, the owner labels two se
 papers 0.14 put at tier 1 or 2 on the two CoT selections, which gives the positives, and a
 sample of about 100 papers that triage rejected, drawn from those closest to the Watch
 topics, which is the only look at what the gate drops. Trial
-the triage and grading defaults. *Check:* triage keeps every paper in the regression set or
-each loss has been looked at; triage recall on owner labels, and the number of Watch papers
+the triage and grading defaults. *Check:* every regression-set paper that 0.14 placed at tier 1 or 2 becomes a candidate, or
+each loss has been looked at (the set's negatives carry no requirement; how many become
+candidates is reported); triage and candidate recall on owner labels, and the number of Watch papers
 found in the rejected sample, are written to `evals/`; the model defaults in section 4.4 are
 confirmed or changed.
 
