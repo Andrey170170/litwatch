@@ -91,8 +91,9 @@ above. The weekly briefing carries each Radar and Pulse review and a Watch recap
 - a **miss**: a paper the owner found elsewhere that litwatch did not surface. Reporting one
   stores it, runs it through triage and grading, and records what each stage said and why.
 
-**Library.** Papers marked saved: every Watch paper at `relevant` or above, and anything the
-owner saves by hand, such as a Radar pick. The library is what exports and integrations act on.
+**Library.** Papers marked saved: every Watch paper at `relevant` or above unless the owner
+labelled it not relevant, every paper the owner labelled relevant, and anything the owner
+saves by hand, such as a Radar pick. The library is what exports and integrations act on.
 
 **Publication.** The published record of a paper, when one exists: venue, year, DOI, DBLP key.
 BibTeX is generated from it, or from arXiv metadata when there is none.
@@ -115,7 +116,10 @@ papers, which is what backfill will use later.
    paths is one candidate carrying both sources, and is graded once.
 4. **Grading.** For every (paper, Watch topic) candidate, the judge and the check model each
    return a grade and reason. The two are reconciled into a verdict.
-5. **Library.** Verdicts at `relevant` or above mark the paper saved.
+5. **Library.** Verdicts at `relevant` or above mark the paper saved. The owner's label
+   outranks the verdict: labelling a paper relevant saves it, and labelling it not relevant
+   removes it from the library and emits `paper.unsaved`. A paper the owner saved by hand
+   stays until the owner removes it.
 6. **Events.** `paper.saved`, `verdict.recorded` and similar are written to the outbox.
    Integrations consume them on their own schedule; a failing integration delays nothing.
 7. **Daily briefing.** Built when there are new verdicts at `relevant` or above.
@@ -245,7 +249,7 @@ failures to the API.
 
 | Integration | Reacts to | Does |
 | --- | --- | --- |
-| `zotero` | `paper.saved`, `verdict.recorded`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step |
+| `zotero` | `paper.saved`, `paper.unsaved`, `verdict.recorded`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step. On `paper.unsaved` it tags the item as dropped and never deletes it |
 | `webdav` | `paper.saved` at `must_read` | Stores the PDF for Zotero's file sync |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive; serves PDFs and full-text search |
 | `deep` | `verdict.recorded` at `must_read` | Requests a deep card; emits `card.ready` |
@@ -314,8 +318,9 @@ The places a part can be replaced or tested alone:
 
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status),
 `memberships` (paper, topic, topic version, paper version), `candidates` (paper, topic,
-topic version, paper version, sources: triage, keyword or both, reason), `verdicts` (paper, topic, grade, split, judge and check opinions, topic
-version), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
+topic version, paper version, sources: triage, keyword or both, reason), `verdicts` (paper, topic, topic version,
+paper version, grade, split, judge and check opinions; one row per combination, earlier ones
+kept), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
 `integration_cursors`. Kept as they are: `papers`, `runs`, `inference_calls`, intake checkpoints.
 
 ### 4.4 Configuration
@@ -445,11 +450,16 @@ price table. *Check:* the same request runs through either provider by changing 
 configuration; journal cost matches hand calculation on recorded responses.
 
 **M2 · Watch pipeline and its evaluation.** Topics with kinds, triage, keyword audit, grading
-with two labs, reconciliation, `feedback.replay`. Seed labels from the hand-labelled `evals/labeled.yaml` only. 0.14's CoT
-verdicts are imported as a separate regression set, not as labels: they are model output, and
+with two labs, reconciliation, `feedback.replay`. Seed labels only from the entries of
+`evals/labeled.yaml` whose provenance is `gold: Andrei`, which is about a dozen papers; the
+rest of that file is silver (model agreement, or a hand pass still awaiting him) and joins
+the regression set. 0.14's CoT
+verdicts are imported into that regression set too, not as labels: they are model output, and
 they contain none of the papers 0.14 itself missed, so recall measured on them says nothing
-about those. The owner also labels a sample of about 100 papers that triage rejected, drawn
-from those closest to the Watch topics, which is the only look at what the gate drops. Trial
+about those. Because that leaves almost no ground truth, the owner labels two sets in this milestone: the
+papers 0.14 put at tier 1 or 2 on the two CoT selections, which gives the positives, and a
+sample of about 100 papers that triage rejected, drawn from those closest to the Watch
+topics, which is the only look at what the gate drops. Trial
 the triage and grading defaults. *Check:* triage keeps every paper in the regression set or
 each loss has been looked at; triage recall on owner labels, and the number of Watch papers
 found in the rejected sample, are written to `evals/`; the model defaults in section 4.4 are
