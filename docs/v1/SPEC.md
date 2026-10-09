@@ -128,8 +128,9 @@ papers, which is what backfill will use later.
    owner's label outranks the verdict. Saved state belongs to the paper, not the topic, so it
    is recomputed from every reason the paper has: on any Watch topic, a label of relevant, or,
    where there is no label, a current verdict of `relevant` or above; or a save by hand. The
-   current verdict is the most recently recorded one for the paper and topic; older rows are
-   history and give no reason. A re-grade that is still pending, or that failed, replaces
+   current verdict for a paper and topic is chosen by version first and time second: among
+   the verdicts for the newest paper version and topic version that have one, the most
+   recently recorded. Older rows are history and give no reason. A re-grade that is still pending, or that failed, replaces
    nothing: the previous verdict stays current, and the paper stays saved, until a new verdict
    is recorded or the owner labels it. `paper.unsaved` is emitted only when the last reason goes.
 6. **Events.** `paper.saved`, `verdict.recorded`, `grade.changed` and similar are written to
@@ -248,7 +249,11 @@ Candidates are graded independently, so one failure stops nothing else. A verdic
 valid opinions. If either call still fails after its retries, or comes back truncated or
 refused, no verdict is made: the candidate stays pending with the failure recorded, and is
 tried again on the next run. After three failed runs it appears in the Inbox as an ungraded
-candidate, because on a Watch topic a paper must not disappear behind a provider error.
+candidate, because on a Watch topic a paper must not disappear behind a provider error. The
+candidate row itself carries this state (pending or graded, failed runs, last error), since
+the call journal knows only the paper. A pending candidate is dropped from the retry queue
+once a newer candidate exists for the same paper and topic, so a late retry of an old
+version cannot overtake a newer verdict.
 
 **review.** `weekly_review(topic, week)` for Radar and Pulse; a field too large for one call is
 shortlisted in chunks first. `daily_briefing(day)` and `weekly_briefing(week)` assemble stored
@@ -362,7 +367,8 @@ The places a part can be replaced or tested alone:
 
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status),
 `memberships` (paper, topic, topic version, paper version), `candidates` (paper, topic,
-topic version, paper version, sources: triage, keyword or both, reason), `verdicts` (paper, topic, topic version,
+topic version, paper version, sources: triage, keyword or both, reason, state, failed runs,
+last error), `verdicts` (paper, topic, topic version,
 paper version, grade, split, judge and check opinions, recorded at; each grading is its own
 row with its own id, so a re-run over the same versions adds a row, and the latest recorded
 is current), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
