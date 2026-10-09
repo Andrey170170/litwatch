@@ -460,20 +460,23 @@ Decided on 2026-10-08:
    the thing to watch.
 3. **Radar picks** are not saved automatically; the owner saves the ones that matter.
 4. **Reporting a miss from a phone** is the usual case. The web app is an installable PWA and
-   takes a shared arXiv link as a miss report. This is part of M3.
+   registers as a share target, so on the owner's Android phone an arXiv link shared from any
+   app arrives as a miss report. This is part of M3.
 5. **The PI's view.** The Notion export carries Watch topics only, until the owner has talked
    to her.
 
+6. **Search across litwatch and arxiv-archive** is one box and one result list, with no
+   switch. litwatch always searches titles and abstracts in its own database. An integration
+   may also answer searches, and `archive` does, which adds the papers litwatch never ingested
+   (the archive searches titles and abstracts too; full-text search arrives if the archive
+   gains it). Results are merged by arXiv id. A paper only the archive holds is shown as
+   outside the collection, with one action that brings it in through the same path as a
+   reported miss. Where a result comes from is an ordinary filter beside topic, grade and
+   year, with no default restriction. Backfilling older archive papers through Watch triage
+   and grading stays after v1; jobs already take explicit paper sets for that purpose.
+
 Open:
 
-6. **Search across litwatch and arxiv-archive.** The owner wants one search over both and no
-   "search the archive too" switch. Proposed: one box and one result list. litwatch always
-   searches titles and abstracts in its own database. An integration may also answer searches,
-   and `archive` does, with full-text hits and papers litwatch never ingested. Results are
-   merged by arXiv id, so a paper found by both appears once, with its verdicts and the
-   full-text snippet. A paper only the archive holds is shown as outside the collection, with
-   one action that brings it in through the same path as a reported miss. Where a result comes
-   from is an ordinary filter beside topic, grade and year, with no default restriction.
-   Backfilling older archive papers through Watch triage and grading stays after v1; jobs
-   already take explicit paper sets for that purpose, and each backfilled paper joins the
-   collection, so the "outside the collection" group shrinks as it runs.
+7. **What a topic edit re-runs.** Re-triaging history on every edit costs too much at this
+   scale. Under discussion: an edit applies forward only, and anything retroactive is an
+   explicit job that shows its paper count and estimated cost first.
