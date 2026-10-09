@@ -82,5 +82,34 @@ def intake(
     )
 
 
+@app.command()
+def ping(
+    role: Annotated[str, typer.Argument(help="triage, judge, check or review")],
+    config: ConfigPath = None,
+) -> None:
+    """Send one small request through a role, to check its key, model and price."""
+    from pydantic import BaseModel  # noqa: PLC0415
+
+    from litwatch import llm  # noqa: PLC0415
+
+    class Sum(BaseModel):
+        total: int
+
+    configuration.load_dotenv()
+    cfg = configuration.load(config)
+    request = llm.Request(
+        system="You answer arithmetic questions with the structured output only.",
+        user="What is 17 + 25?",
+        output=Sum,
+    )
+    answer = asyncio.run(llm.build(cfg.models).ask(role, request))
+    usage = answer.usage
+    console.print(
+        f"{answer.model} -> {answer.value.total}  "
+        f"({usage.prompt_tokens} in, {usage.completion_tokens} out, cost {usage.cost}, "
+        f"served by {usage.provider})"
+    )
+
+
 if __name__ == "__main__":
     app()
