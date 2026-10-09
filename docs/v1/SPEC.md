@@ -93,8 +93,9 @@ above. The weekly briefing carries each Radar and Pulse review and a Watch recap
 - a **miss**: a paper the owner found elsewhere that litwatch did not surface. Reporting one
   takes only the arXiv link, so it works from a phone's share sheet. It stores the paper, runs
   triage, grades it against every Watch topic whatever triage said (there are few), and
-  records what each stage said and why. The owner then marks which topic it belonged to, and
-  the evaluation replays it for that topic.
+  records what each stage said and why. The owner then marks which topic it belonged to. That mark
+  is a label of relevant for the topic, so it saves the paper like any other label, and the
+  evaluation replays it for that topic.
 
 **Library.** Papers marked saved: every Watch paper at `relevant` or above unless the owner
 labelled it not relevant, every paper the owner labelled relevant, and anything the owner
