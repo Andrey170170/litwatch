@@ -1,5 +1,14 @@
 # Screener eval results
 
+## 2026-10-08 · Claude Haiku 5.5 primary
+
+[Paired trial](2026-10-08-haiku-primary.md): 119 papers through the full cascade with each
+primary. Haiku 5.5 low kept 37/50 of production's tier 1-2 verdicts against 46/50 for Luna's
+rerun, and sent 58 papers to re-screen against 24, so OpenRouter spend did not fall. At high
+effort it kept 44/50 and sent 86 to re-screen, costing more on OpenRouter than Luna: Haiku
+uses low confidence, which Luna never does. Luna remains the primary. Spend $1.05, of which
+$0.29 Anthropic credits.
+
 ## 2026-10-01 · provider routing
 
 [Provider trial](2026-10-01-providers.md): 40 production rescreen cases on seven GLM 5.3
