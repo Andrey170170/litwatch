@@ -127,7 +127,7 @@
   <button role="tab" data-tab="arch">Architecture</button>
   <button role="tab" data-tab="flow">Flows</button>
   <button role="tab" data-tab="plan">Milestones</button>
-  <button role="tab" data-tab="open">Open questions</button>
+  <button role="tab" data-tab="open">Decisions</button>
 </div>
 
 <section id="why" class="prose">
@@ -184,13 +184,17 @@
 </section>
 
 <section id="open" class="prose" hidden>
-  <h2>Decisions still needed</h2>
-  <div class="q"><b>Zotero items from broad selections.</b> Leave the existing few thousand in place, or remove the ones litwatch created and nothing else touched? Removal is destructive and waits for an explicit yes.</div>
-  <div class="q"><b>Second grader.</b> Luna at medium effort is proposed (cheap, already measured). Muse would add a third lab. Milestone 2 can test both.</div>
-  <div class="q"><b>Radar picks and the library.</b> Proposed: not saved automatically; you save the ones that matter.</div>
-  <div class="q"><b>Search.</b> Proposed: titles and abstracts in litwatch's own database; full text and PDFs from arxiv-archive when that integration is on.</div>
-  <div class="q"><b>Reporting a miss from a phone.</b> If that is where you see them, a share-sheet shortcut posting to the API joins milestone 3.</div>
-  <div class="q"><b>Your PI's view.</b> Should the Notion export carry only Watch topics?</div>
+  <h2>Decisions</h2>
+  <h3>Settled on 2026-10-08</h3>
+  <ul>
+    <li><b>Zotero items from broad selections</b> stay where they are. v1 stops adding to them and deletes nothing.</li>
+    <li><b>Second grader:</b> Muse preferred, for the third lab. Milestone 2 measures it against Luna before the default is fixed.</li>
+    <li><b>Radar picks</b> are not saved automatically; you save the ones that matter.</li>
+    <li><b>Misses from a phone:</b> the web app is an installable PWA that takes a shared arXiv link as a miss report. Part of milestone 3.</li>
+    <li><b>Your PI's view:</b> the Notion export carries Watch topics only, until you have talked to her.</li>
+  </ul>
+  <h3>Still open</h3>
+  <div class="q"><b>Search across litwatch and arxiv-archive.</b> Proposed: one box, one result list, no switch. litwatch always searches its own titles and abstracts; the archive integration adds full-text hits and papers litwatch never ingested. Results merge by arXiv id. A paper only the archive holds is shown as outside the collection, with one action to bring it in. Where a result comes from is an ordinary filter beside topic, grade and year.</div>
   <h3>Risks worth knowing</h3>
   <ul>
     <li><b>Triage is the single point where a paper can vanish.</b> Behind it: the keyword audit, the miss channel, and a recall number on the Quality page. Milestone 2 does not pass if triage loses papers 0.14 found, and it includes a hand check of what triage rejects.</li>

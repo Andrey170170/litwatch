@@ -307,8 +307,8 @@ effort = "medium"
 
 [models.check]
 provider = "openrouter"
-model = "openai/gpt-5.6-luna"
-effort = "medium"
+model = "meta/muse-spark-1.3-contributor"
+effort = "high"
 
 [models.review]
 provider = "anthropic"
@@ -449,18 +449,31 @@ licence, `v1.0.0`.
 
 After v1: backfill sweeps over the collection for Watch topics; citation counts; other sources.
 
-## 9. Open questions
+## 9. Decisions and open questions
 
-1. **Zotero items from broad selections.** Leave the existing few thousand in place, or remove
-   the ones litwatch created and nothing else touched? Removal is destructive and needs an
-   explicit yes.
-2. **Check model.** Luna at medium effort is proposed because it is cheap and already measured;
-   Muse is the alternative with a third lab. Milestone 2 can test both.
-3. **Radar picks and the library.** Proposed: picks are not saved automatically; the owner saves
-   the ones that matter.
-4. **Search.** Proposed: litwatch searches titles and abstracts in its own database; full-text
-   search and PDFs come from arxiv-archive when that integration is on. The archive's existing
-   web interface would then be redundant for this purpose.
-5. **Reporting a miss from a phone.** If most misses are seen on a phone, a share-sheet
-   shortcut that posts to the API is worth adding in M3.
-6. **The PI's view.** Whether the Notion export should carry only Watch topics.
+Decided on 2026-10-08:
+
+1. **Zotero items from broad selections** stay where they are. v1 stops adding to them and
+   deletes nothing.
+2. **Check model.** Muse is the preferred default, for the third lab. Milestone 2 measures it
+   against Luna at medium effort before the default is fixed; its latency tail (section 5) is
+   the thing to watch.
+3. **Radar picks** are not saved automatically; the owner saves the ones that matter.
+4. **Reporting a miss from a phone** is the usual case. The web app is an installable PWA and
+   takes a shared arXiv link as a miss report. This is part of M3.
+5. **The PI's view.** The Notion export carries Watch topics only, until the owner has talked
+   to her.
+
+Open:
+
+6. **Search across litwatch and arxiv-archive.** The owner wants one search over both and no
+   "search the archive too" switch. Proposed: one box and one result list. litwatch always
+   searches titles and abstracts in its own database. An integration may also answer searches,
+   and `archive` does, with full-text hits and papers litwatch never ingested. Results are
+   merged by arXiv id, so a paper found by both appears once, with its verdicts and the
+   full-text snippet. A paper only the archive holds is shown as outside the collection, with
+   one action that brings it in through the same path as a reported miss. Where a result comes
+   from is an ordinary filter beside topic, grade and year, with no default restriction.
+   Backfilling older archive papers through Watch triage and grading stays after v1; jobs
+   already take explicit paper sets for that purpose, and each backfilled paper joins the
+   collection, so the "outside the collection" group shrinks as it runs.
