@@ -32,6 +32,7 @@ class Models:
     def __init__(self):
         self.grades: dict[tuple[str, str], str] = {}
         self.down: set[str] = set()
+        self.unrelated: set[str] = set()  # papers triage turns away
         self.calls: list[tuple[str, str]] = []
 
     def respond(self, role, request):
@@ -48,7 +49,9 @@ class Models:
                 {
                     "cot_faithfulness": {
                         "why": "w",
-                        "relation": "related" if paper_id == ON_TOPIC.id else "unrelated",
+                        "relation": "related"
+                        if paper_id == ON_TOPIC.id and paper_id not in self.unrelated
+                        else "unrelated",
                     },
                     "interpretability": {"yes": paper_id in (ON_TOPIC.id, INTERP_ONLY.id)},
                     "agents": {"yes": False},
@@ -287,3 +290,25 @@ async def test_papers_triage_keeps_failing_on_are_retried_after_the_new_ones(con
     # Under a limit the stuck paper does not take the new paper's place, yet stays queued.
     assert [p.id for p in await triage_store.untriaged(conn, 1)] == [new.id]
     assert [p.id for p in await triage_store.untriaged(conn)] == [new.id, OFF.id]
+
+
+async def test_a_rewrite_that_triage_turns_away_is_still_graded_if_the_old_text_had_a_verdict(
+    conn, models
+):
+    """Otherwise the verdict on text that no longer exists would stay current for ever."""
+    models.grades = {("judge", ON_TOPIC.id): "relevant", ("check", ON_TOPIC.id): "relevant"}
+    await nightly.run(conn, Config(), fetch=False, gateway=models.gateway)
+    rewrite = ON_TOPIC.model_copy(update={"abstract": "Something else entirely. " * 10})
+    await papers_store.upsert(conn, [rewrite])
+    models.unrelated = {ON_TOPIC.id}
+    models.grades = {("judge", ON_TOPIC.id): "none", ("check", ON_TOPIC.id): "none"}
+    await nightly.run(conn, Config(), fetch=False, gateway=models.gateway)
+    (candidate,) = await triage_store.candidates_for(conn, ON_TOPIC.id)
+    assert (candidate.by_triage, candidate.by_keyword) == (False, False)
+    assert candidate.reason == "rewritten: was relevant"
+    current = await verdicts.current(conn, ON_TOPIC.id, FAITH.slug)
+    assert (current.paper_revision, current.grade) == (2, Grade.NONE)
+    # A paper never graded above `none` gives triage nothing to overrule.
+    await papers_store.upsert(conn, [OFF.model_copy(update={"abstract": "Other. " * 30})])
+    await nightly.run(conn, Config(), fetch=False, gateway=models.gateway)
+    assert await triage_store.candidates_for(conn, OFF.id) == []

@@ -4,9 +4,20 @@ from __future__ import annotations
 
 import psycopg
 
-from litwatch.core import Candidate, Topic, TopicKind
+from litwatch.core import Candidate, Grade, Paper, Topic, TopicKind
 from litwatch.screening.triage import Triaged
 from litwatch.store import triage as triage_store
+from litwatch.store import verdicts
+
+
+async def _graded_before_rewrite(
+    conn: psycopg.AsyncConnection, paper: Paper, topic: str
+) -> Grade | None:
+    """The grade the paper's earlier text holds for the topic, when it is above `none`."""
+    verdict = await verdicts.current(conn, paper.id, topic)
+    if verdict and verdict.paper_revision < paper.revision and verdict.grade != Grade.NONE:
+        return verdict.grade
+    return None
 
 
 async def record(
@@ -37,9 +48,18 @@ async def record(
             if topic.kind != TopicKind.WATCH:
                 continue
             by_triage, pattern = triaged.yes(topic.slug), keywords.get(topic.slug)
-            if not by_triage and not pattern:
+            if by_triage:
+                why = triaged.answers[topic.slug][1]
+            elif pattern:
+                why = f"keyword: {pattern}"
+            elif triaged.error is None and (
+                was := await _graded_before_rewrite(conn, paper, topic.slug)
+            ):
+                # Nothing puts the new text forward, but the old text has a verdict that
+                # would stay current for ever. The graders decide, not triage alone.
+                why = f"rewritten: was {was.value}"
+            else:
                 continue
-            why = triaged.answers[topic.slug][1] if by_triage else f"keyword: {pattern}"
             candidate = Candidate(
                 paper_id=paper.id,
                 topic=topic.slug,

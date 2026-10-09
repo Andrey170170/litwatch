@@ -129,7 +129,10 @@ papers, which is what backfill will use later.
    job, because it is often unknown, both before and after a rewrite. Every candidate and
    verdict records the paper revision it was made from (and the arXiv version, for
    reference), a candidate whose paper was rewritten is graded again, and a re-screened
-   paper's earlier verdict is kept as history, not overwritten.
+   paper's earlier verdict is kept as history, not overwritten. A rewrite whose earlier
+   text holds a verdict above `none` is graded again even when neither triage nor a keyword
+   puts the new text forward, so that a verdict on text that no longer exists cannot stay
+   current.
 3. **Keyword audit.** Every paper that triage did not make a candidate for a Watch topic is
    checked against that topic's keyword patterns, whether or not it joined a Radar or Pulse
    field, and becomes a candidate on a match. No model is involved, so no model's blind spot

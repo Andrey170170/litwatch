@@ -38,7 +38,7 @@ async def triage(
         made = await screening.record(conn, triaged, keywords.get(triaged.paper.id, {}), topics)
         run.add("triage_failed" if triaged.error else "triaged")
         run.add("candidates", len(made))
-        run.add("candidates_keyword_only", sum(not c.by_triage for c in made))
+        run.add("candidates_keyword_only", sum(c.by_keyword and not c.by_triage for c in made))
     if stuck := await triage_store.stuck(conn, config.limits.triage_stuck_after):
         run.counts["triage_stuck"] = len(stuck)
         log.warning(

@@ -229,6 +229,8 @@ async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, jou
     with pytest.raises(CallError):
         await gateway(Models(), refused, journal=journal).ask("judge", REQUEST)
     assert (await calls(conn))[-1]["error"] == "refused: bio"
+    # The raised error is clean too: its text becomes a paper's stored last error.
+    assert str(CallError("provider", "bad\x00 gateway")) == "provider: bad gateway"
 
 
 def test_the_sdk_clients_leave_retrying_to_the_gateway():

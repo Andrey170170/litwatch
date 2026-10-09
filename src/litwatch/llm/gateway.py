@@ -39,6 +39,9 @@ class CallError(Exception):
     `timeout` or `provider`; the message carries the detail."""
 
     def __init__(self, kind: str, detail: str | None = None) -> None:
+        # Provider text can carry a NUL, which Postgres text cannot hold; the message is
+        # stored as a paper's last error.
+        detail = detail.replace("\x00", "") if detail else detail
         self.kind, self.detail = kind, detail
         super().__init__(f"{kind}: {detail}" if detail else kind)
 
@@ -158,7 +161,7 @@ class Gateway:
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.
             if journal:
-                await journal.reject(call_id, str(exc).replace("\x00", ""))
+                await journal.reject(call_id, str(exc))
             raise
         if journal:
             await journal.accept(call_id, value.model_dump(mode="json"))
