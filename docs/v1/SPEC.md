@@ -121,7 +121,8 @@ years, and on demand when BibTeX is exported.
 
 On demand: the owner labels a paper, reports a miss, saves a pick, or edits a topic. Editing a
 Watch topic re-grades its existing candidates and re-triages a recent window in the background.
-Editing a Radar or Pulse topic affects the next review only.
+Editing a Radar or Pulse topic's subject re-triages the current review window, so the next
+review reads memberships made from the new version; other edits affect the next review only.
 
 ### Volumes, from the 0.x journal
 
@@ -329,8 +330,11 @@ milestone 2.
 
 Different labs matter where one model's error would be final. That is true in two places:
 
-- **Grading.** `judge` and `check` must come from different providers; start-up refuses a
-  configuration where they do not.
+- **Grading.** `judge` and `check` must come from different labs; start-up refuses a
+  configuration where they do not. The lab is the organisation that trained the model, not the
+  account it is reached through: it is read from the OpenRouter model prefix (`openai/`,
+  `z-ai/`, …) and is `anthropic` for the direct API. One OpenRouter key therefore satisfies
+  the rule on its own.
 - **Triage.** A paper triage drops is seen by no one. Three things stand behind it: the keyword
   audit, the miss channel, and the triage recall number on the Quality page. Triage is asked a
   generous yes-or-no question precisely so that a cheap model can be trusted with it.
@@ -408,10 +412,15 @@ price table. *Check:* the same request runs through either provider by changing 
 configuration; journal cost matches hand calculation on recorded responses.
 
 **M2 · Watch pipeline and its evaluation.** Topics with kinds, triage, keyword audit, grading
-with two labs, reconciliation, `feedback.replay`. Seed labels from `evals/labeled.yaml` and from
-0.14's CoT verdicts. Trial the triage and grading defaults. *Check:* triage recall on labelled
-Watch positives is at least 0.14's; the model defaults in section 4.4 are confirmed or changed,
-with the numbers written to `evals/`.
+with two labs, reconciliation, `feedback.replay`. Seed labels from the hand-labelled `evals/labeled.yaml` only. 0.14's CoT
+verdicts are imported as a separate regression set, not as labels: they are model output, and
+they contain none of the papers 0.14 itself missed, so recall measured on them says nothing
+about those. The owner also labels a sample of about 100 papers that triage rejected, drawn
+from those closest to the Watch topics, which is the only look at what the gate drops. Trial
+the triage and grading defaults. *Check:* triage keeps every paper in the regression set or
+each loss has been looked at; triage recall on owner labels, and the number of Watch papers
+found in the rejected sample, are written to `evals/`; the model defaults in section 4.4 are
+confirmed or changed.
 
 **M3 · API and web app, Watch first.** Starts with a design pass: the screens are discussed
 and a few sketches compared before any of them is built. Then the API with generated client; Inbox, Paper, Search, Topics,
