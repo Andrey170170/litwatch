@@ -8,3 +8,4 @@ dist/
 evals/runs/
 deep/node_modules/
 *.outcome.json
+.env.*
