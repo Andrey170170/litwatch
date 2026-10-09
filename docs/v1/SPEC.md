@@ -128,8 +128,10 @@ papers, which is what backfill will use later.
    owner's label outranks the verdict. Saved state belongs to the paper, not the topic, so it
    is recomputed from every reason the paper has: on any Watch topic, a label of relevant, or,
    where there is no label, a current verdict of `relevant` or above; or a save by hand. The
-   current verdict is the latest one for the paper's latest screened version; older rows are
-   history and give no reason. `paper.unsaved` is emitted only when the last reason goes.
+   current verdict is the most recently recorded one for the paper and topic; older rows are
+   history and give no reason. A re-grade that is still pending, or that failed, replaces
+   nothing: the previous verdict stays current, and the paper stays saved, until a new verdict
+   is recorded or the owner labels it. `paper.unsaved` is emitted only when the last reason goes.
 6. **Events.** `paper.saved`, `verdict.recorded`, `grade.changed` and similar are written to
    the outbox. `grade.changed` fires when a paper's effective grade for a topic changes,
    whether a verdict or the owner's label caused it.
@@ -361,8 +363,9 @@ The places a part can be replaced or tested alone:
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status),
 `memberships` (paper, topic, topic version, paper version), `candidates` (paper, topic,
 topic version, paper version, sources: triage, keyword or both, reason), `verdicts` (paper, topic, topic version,
-paper version, grade, split, judge and check opinions; one row per combination, earlier ones
-kept), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
+paper version, grade, split, judge and check opinions, recorded at; each grading is its own
+row with its own id, so a re-run over the same versions adds a row, and the latest recorded
+is current), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
 and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
 opinions, reconciled grade), which hold replays, previews and miss traces. Kept as they are: `papers`, `runs`, `inference_calls`, intake checkpoints.
