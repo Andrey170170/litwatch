@@ -123,6 +123,8 @@ On demand: the owner labels a paper, reports a miss, saves a pick, or edits a to
 Watch topic re-grades its existing candidates and re-triages a recent window in the background.
 Editing a Radar or Pulse topic's subject re-triages the current review window, so the next
 review reads memberships made from the new version; other edits affect the next review only.
+What an edit re-runs is under review (section 9, item 7); until that is decided this paragraph
+is the earlier proposal, not a settled rule.
 
 ### Volumes, from the 0.x journal
 
@@ -234,7 +236,12 @@ own table, and may emit events of its own (`deep` emits `card.ready`). Deep card
 the archive are therefore removable, and a new target (Notion directly, Slack, a reading-list
 app) is one new module with no change to the pipeline. The config names which integrations to
 load, by short name for the built-in ones or by dotted Python path for one kept outside the
-repository. `docs/integrations.md` documents the contract, the event payloads and a worked
+repository. An integration may also implement `SearchProvider`, a second, optional protocol defined in
+`core`: a synchronous `search(query, filters)` returning hits keyed by arXiv id. `archive`
+does. The API never imports `integrations`; the service's start-up wiring hands it the list of
+loaded providers, it queries them beside its own repository with a short timeout each, and a
+provider that fails or is slow is left out of that response and reported on the System page.
+`docs/integrations.md` documents both contracts, the event payloads and a worked
 example, written so that a person or a coding agent can add one from that page alone.
 
 **jobs.** One definition per job in section 3, each taking an explicit set of papers or a time
@@ -273,6 +280,7 @@ The places a part can be replaced or tested alone:
 | `Provider` / `Gateway` | `Request` → `Reply` | Models and labs change; every stage is tested with a fake |
 | `PublicationSource` | arXiv id → publication or none | DBLP access is the least stable dependency |
 | `Integration` | handles an event idempotently | Everything outside the core lives behind it |
+| `SearchProvider` | query and filters → hits keyed by arXiv id | Lets an integration add results to search without the API knowing which one |
 | Repositories | `core` types in and out | The only code that knows SQL |
 | HTTP API | OpenAPI schema | The web app, the CLI's remote mode and n8n are equal clients |
 | Job | paper set or window in, run record out | The scheduler, the CLI and backfill call the same thing |

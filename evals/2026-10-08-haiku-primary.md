@@ -92,8 +92,11 @@ Completed trial $0.3247 as reported or computed, of which $0.0385 was Anthropic 
 Two aborted starts cost $0.0701: the script's $0.15-per-call allowance exceeded the cap at
 eight papers in flight, then a 90-second Muse timeout stopped the run. The effort passes cost
 $0.1236 in credits. The two higher-effort cascades cost $0.5356, of which $0.1244 credits.
-`scripts/eval_primary.py` now takes `--reserve`, `--timeout`,
-`--keep-going`, `--feed-sample`, `--candidate-effort` and `--candidate-only`, and reads a `positives` group from the snapshot.
+The trial used a modified `scripts/eval_primary.py` that takes `--reserve`, `--timeout`,
+`--keep-going`, `--feed-sample`, `--candidate-effort` and `--candidate-only`, and reads a
+`positives` group from the snapshot. That version is not on this branch: it lives in commit
+`7911f79` on the unmerged `feat/anthropic-backend` branch, together with the Anthropic client
+it needs. The command below runs only from that commit.
 
 Inputs and outputs: `/srv/appdata/litwatch/evals/20261008-haiku-primary/` (snapshot sha256
 `2951e062…7ea39`), outside the repository because it holds selection text.
