@@ -9,6 +9,7 @@ from typing import Any
 
 import psycopg
 from psycopg import sql
+from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,15 @@ async def connect(dsn: str, schema: str | None = None) -> psycopg.AsyncConnectio
     if schema:
         await conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
     return conn
+
+
+async def sibling(conn: psycopg.AsyncConnection) -> psycopg.AsyncConnection[dict[str, Any]]:
+    """A second connection to the same database and schema, for work that runs alongside."""
+    dsn = make_conninfo(conn.info.dsn, password=conn.info.password)
+    other = await psycopg.AsyncConnection.connect(dsn, row_factory=dict_row, autocommit=True)
+    path = (await (await conn.execute("SHOW search_path")).fetchone())["search_path"]
+    await other.execute(sql.SQL("SET search_path TO " + path))
+    return other
 
 
 async def _exists(conn: psycopg.AsyncConnection, table: str) -> bool:

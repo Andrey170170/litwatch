@@ -57,7 +57,8 @@ async def upsert(
     `paper.revised`.
 
     A revision counts as rewritten only when its title or abstract changed beyond a touch-up
-    (`core.rewritten`). Atom metadata can insert a paper but never replace canonical metadata.
+    (`core.rewritten`); only then is the paper triaged again. Atom metadata can insert a paper
+    but never replace canonical metadata.
     """
     result = Upserted()
     async with conn.transaction():
@@ -130,7 +131,10 @@ async def upsert(
                 old = before[p.id]
                 changed = rewritten(old["title"], old["abstract"], p)
                 if changed:
+                    # What triage said was about other text: the paper is untriaged again.
+                    # Its candidates and verdicts stay as history under the old version.
                     result.rewritten.append(p.id)
+                    await cur.execute("DELETE FROM triage WHERE paper_id = %s", (p.id,))
                 if changed or row["version"] != old["version"]:
                     await events.emit(
                         conn,

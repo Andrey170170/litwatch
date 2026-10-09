@@ -1,35 +1,31 @@
 name: CoT monitoring
 slug: cot-monitoring
-owner: Ana
-status: active
-digest: true
+kind: watch
 subject: >-
-  Reading a language model's reasoning trace (chain of thought, thinking tokens, scratchpad) for
-  oversight: monitors that detect misbehavior such as reward hacking, sabotage, deception,
-  sandbagging, unsafe intent, or evaluation awareness from the trace; monitorability, what erodes
-  it, and the effect of training or optimization pressure on traces; evasion of monitors through
-  hidden, encoded, or obfuscated reasoning; legibility of traces for humans or weaker models; and
-  evaluations or benchmarks for any of these. Whether a trace matches the computation the model
-  performed is the subject of the CoT faithfulness selection; such papers are members here only
-  when they also say something about monitoring.
+  Reading a language model's reasoning trace (chain of thought, thinking tokens, scratchpad) for oversight:
+  monitors that detect misbehavior such as reward hacking, sabotage, deception, sandbagging, unsafe
+  intent, or evaluation awareness from the trace; monitorability, what erodes it, and the effect of
+  training or optimization pressure on traces; evasion of monitors through hidden, encoded, or obfuscated
+  reasoning; legibility of traces for humans or weaker models; and evaluations or benchmarks for any
+  of these. Whether a trace matches the computation the model performed is the subject of the CoT
+  faithfulness selection; such papers are members here only when they also say something about monitoring.
 rubric: >-
-  A method that reads a model's reasoning trace to detect misbehavior (reward hacking, sabotage,
-  deception, sandbagging, unsafe intent, evaluation awareness), an evaluation of how well such
-  monitors work or of what makes traces monitorable, a study of how training or optimization
-  pressure erodes monitorability, or a demonstration of evasion (hidden, encoded, or obfuscated
-  reasoning). Must be intended to transfer across tasks and models. Single-domain audits, position
-  papers, and legibility studies without a detection result are tier 2. Papers on whether the
-  trace matches the model's computation belong to CoT faithfulness and are tier 3 here unless
-  they also measure a monitor.
+  A method that reads a model's reasoning trace to detect misbehavior (reward hacking, sabotage, deception,
+  sandbagging, unsafe intent, evaluation awareness), an evaluation of how well such monitors work
+  or of what makes traces monitorable, a study of how training or optimization pressure erodes monitorability,
+  or a demonstration of evasion (hidden, encoded, or obfuscated reasoning). Must be intended to transfer
+  across tasks and models. Single-domain audits, position papers, and legibility studies without a
+  detection result are tier 2. Papers on whether the trace matches the model's computation belong
+  to CoT faithfulness and are tier 3 here unless they also measure a monitor.
 keywords:
-  - chain.of.thought monitor
-  - CoT monitor
-  - monitorab
-  - hidden reasoning
-  - encoded reasoning
-  - steganograph
-  - reward hacking
-  - sandbag
-  - obfuscat
-  - scheming
-  - evaluation.aware
+- chain.of.thought monitor
+- CoT monitor
+- monitorab
+- hidden reasoning
+- encoded reasoning
+- steganograph
+- reward hacking
+- sandbag
+- obfuscat
+- scheming
+- evaluation.aware

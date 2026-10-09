@@ -1,26 +1,7 @@
 name: Interpretability
 slug: interpretability
-owner: Andrei
-status: active
-digest: false
+kind: radar
 subject: >-
-  Understanding the internal mechanisms, representations, or circuits of neural language models:
-  probes, sparse autoencoders, attention and attribution analysis, activation patching and
-  ablation, steering vectors, logit lens, feature and circuit discovery, and the methods and
-  evaluations for these tools. Work that merely uses a probe or an ablation as an auxiliary
-  measurement inside another study is tier 3.
-rubric: >-
-  Tier 1 is rare, about one member in fifty. It requires evidence in the abstract that the field
-  will treat the paper as a reference: a new model family or training recipe with released
-  weights, a large margin on a widely used benchmark, a method shown to work across several
-  domains, or strong evidence overturning a common assumption. Incremental gains, single-domain
-  applications, surveys, and position papers are at most tier 2. When in doubt, tier 2.
-keywords:
-  - mechanistic interpretab
-  - sparse autoencoder
-  - activation patching
-  - steering vector
-  - logit lens
-  - residual stream
-  - probing classifier
-  - circuit
+  Understanding the internal mechanisms, representations, or circuits of neural language models: probes,
+  sparse autoencoders, attention and attribution analysis, activation patching and ablation, steering
+  vectors, logit lens, feature and circuit discovery, and the methods and evaluations for these tools.
