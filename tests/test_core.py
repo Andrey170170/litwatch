@@ -1,6 +1,7 @@
 """The pure rules: reconciliation, which verdict counts, and what the owner's label does."""
 
 from datetime import UTC, datetime, timedelta
+from urllib.parse import unquote, urlsplit
 
 import pytest
 
@@ -116,7 +117,10 @@ def test_judge_and_check_must_come_from_different_labs():
 
 
 def test_a_database_password_with_url_characters_is_quoted(monkeypatch):
+    odd = "@/#:%"  # not a real credential; these are the characters that would break a URL
     monkeypatch.delenv("LITWATCH_DATABASE_URL", raising=False)
     monkeypatch.setenv("LITWATCH_DB_HOST", "db")
-    monkeypatch.setenv("LITWATCH_DB_PASSWORD", "p@ss/w#rd")
-    assert config.database_url() == "postgresql://litwatch:p%40ss%2Fw%23rd@db:5432/litwatch"
+    monkeypatch.setenv("LITWATCH_DB_PASSWORD", odd)
+    url = urlsplit(config.database_url())
+    assert (url.hostname, url.port, url.path) == ("db", 5432, "/litwatch")
+    assert unquote(url.password) == odd
