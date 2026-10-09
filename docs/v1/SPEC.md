@@ -89,7 +89,8 @@ above. The weekly briefing carries each Radar and Pulse review and a Watch recap
 
 **Feedback.** The owner's corrections, and the only ground truth the system has:
 
-- a **label** on a paper for a Watch topic: relevant or not relevant, with an optional grade.
+- a **label** on a paper for a Watch topic: relevant, not relevant or unsure, with an optional
+  grade. Unsure changes nothing and is left out of every metric.
   Not relevant means an effective grade of `none`. Relevant without a grade keeps the
   verdict's grade if that is `relevant` or above, and is `relevant` otherwise;
 - a **miss**: a paper the owner found elsewhere that litwatch did not surface. Reporting one
@@ -514,25 +515,31 @@ hand pass still awaiting him) and joins a separate regression set, together with
 verdicts. Neither is ground truth: they are model output, and they contain none of the papers
 0.14 itself missed.
 
-Because that leaves almost no ground truth, the owner labels three sets in this milestone:
+That leaves almost no ground truth, and labelling a few hundred papers up front is more than
+the owner will do, so the milestone asks for little and lets the rest accumulate:
 
-- the papers 0.14 put at tier 1 or 2 on the two CoT selections, 77 on 2026-10-08, which gives
-  the positives;
-- 100 papers that triage rejected, drawn at random with a recorded seed, 70 from rejects that
-  triage placed in the interpretability or safety fields (the nearest neighbours of the CoT
-  topics) and 30 from all other rejects, which is the only look at what the gate drops;
-- 50 papers the new pipeline made candidates over a recent window, drawn at random with a
-  recorded seed, without which a false positive the new pipeline introduces would never
-  reach the precision figure. Each triage configuration that is trialled gets its own 50,
-  drawn from its own candidates; a paper in several samples is labelled once. Comparing two
-  triage models therefore costs up to 50 more labels.
+- The papers 0.14 put at tier 1 or 2 on the two CoT selections, 77 on 2026-10-08, are accepted
+  in bulk as provisional positives. The owner broadly agrees with them and corrects any he
+  notices; nobody reads them one by one.
+- The owner skims 100 papers that triage rejected, drawn at random with a recorded seed, 70
+  from rejects that triage placed in the interpretability or safety fields (the nearest
+  neighbours of the CoT topics) and 30 from all other rejects. Most are an obvious no from
+  the title. This is the only look at what the gate drops.
+- Candidates the new pipeline surfaces are labelled as they arrive in the Inbox, in normal
+  use. Production precision is therefore not known at the end of this milestone; it is read
+  from the first few weeks of Inbox labels, and the model defaults are re-checked then.
+
+A label may be yes, no or unsure. Unsure is excluded from every metric and kept as a list of
+borderline cases. The owner has not yet pinned down exactly what counts as relevant to each
+CoT topic, and that list is the material for sharpening the rubrics, which matters more than
+any number computed on shaky labels.
 
 The triage and grading defaults are trialled on these. *Check:* every regression-set paper
 that 0.14 placed at tier 1 or 2 becomes a candidate, or each loss has been looked at (the
 set's negatives carry no requirement; how many become candidates is reported); triage and
-candidate recall and precision on owner labels, and the number of Watch papers found in the
-rejected sample, are written to `evals/`; the model defaults in section 4.4 are confirmed or
-changed.
+candidate recall on the provisional positives, and the number of Watch papers found in the
+rejected sample, are written to `evals/`; the model defaults in section 4.4 are chosen
+provisionally, to be confirmed against Inbox labels.
 
 **M3 · API and web app, Watch first.** Starts with a design pass: the screens are discussed
 and a few sketches compared before any of them is built. Then the API with generated client; Inbox, Paper, Search, Topics,
