@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "litwatch"
-version = "0.14.2"
-description = "Literature watch for CoT monitoring and faithfulness papers"
+version = "1.0.0.dev0"
+description = "Insurance against missing a paper on a watched research question"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
     "arxiv>=2.1",
     "requests>=2.32",
     "urllib3>=2.0",
+    "anthropic>=1.12.1",
     "fastapi>=0.115",
     "httpx>=0.27",
     "openai>=1.50",
@@ -22,10 +23,6 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.0",
     "uvicorn>=0.30",
-    "markdownify>=1.2.3",
-    "beautifulsoup4>=4.15.0",
-    "lxml>=6.1.3",
-    "pymupdf4llm>=1.28.2",
 ]
 
 [project.optional-dependencies]
@@ -44,9 +41,6 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/test_text.py" = ["E501"]  # HTML fixture mirrors LaTeXML's long lines
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

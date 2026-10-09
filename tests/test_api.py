@@ -1,71 +1,103 @@
-"""API contract without a database: the run-in-progress guard and request validation."""
+"""The labelling API: the token, the queues, and what a label given there records."""
 
-import asyncio
-
+import httpx
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from litwatch import api
-from litwatch.config import Settings
+from litwatch.api import create_app
+from litwatch.core import Label, LabelOrigin, LabelValue
+from litwatch.store import feedback as feedback_store
+from litwatch.store import papers as papers_store
+from litwatch.store import topics as topics_store
+from tests.conftest import FAITH, TOPICS, paper
+
+TOKEN = "s3cret"
 
 
 @pytest.fixture
-def app(monkeypatch):
-    settings = Settings(openrouter_api_key="x", database_url="postgresql://unused")
-    application = api.create_app(settings)
-
-    async def fake_run(*args, **kwargs):
-        await asyncio.sleep(0.05)
-
-    monkeypatch.setattr(api.ingest, "run", fake_run)
-    monkeypatch.setattr(api.db, "connect", _fake_connect)
-    return application
-
-
-async def _fake_connect(dsn):
-    class Conn:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            return False
-
-    return Conn()
+async def client(conn):
+    for topic in TOPICS:
+        await topics_store.save(conn, topic)
+    await papers_store.upsert(conn, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
+    # The app opens its own connections; point them at the test schema.
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
 
 
-async def test_second_run_is_rejected_while_first_is_active(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        first = await c.post("/runs", json={"days": 2})
-        assert first.status_code == 202 and first.json()["days"] == 2
-        second = await c.post("/runs", json={"days": 2})
-        assert second.status_code == 409
-        await app.state.runs["task"]
-        third = await c.post("/runs", json={"days": 1, "kind": "backfill"})
-        assert third.status_code == 202
+AUTH = {"authorization": f"Bearer {TOKEN}"}
 
 
-async def test_run_request_validation(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        assert (await c.post("/runs", json={"days": 0})).status_code == 422
-        assert (await c.post("/runs", json={"kind": "weird"})).status_code == 422
+async def test_everything_but_the_health_check_needs_the_token(client):
+    assert (await client.get("/healthz")).status_code == 200
+    assert (await client.get("/api/labelling")).status_code == 401
+    assert (
+        await client.get("/api/labelling", headers={"authorization": "Bearer no"})
+    ).status_code == 401
+    # Opening the page once with the token sets a cookie that then serves as the token.
+    page = await client.get("/", params={"token": TOKEN})
+    assert "litwatch_token" in page.headers["set-cookie"]
+    # It sends the browser on to the bare address, so the token does not stay in the URL.
+    assert (page.status_code, page.headers["location"]) == (303, "/")
+    assert (await client.get("/api/labelling")).json()["topics"] == [
+        {"slug": FAITH.slug, "name": FAITH.name}
+    ]
+    assert "set-cookie" not in (await client.get("/", params={"token": "wrong"})).headers
 
 
-async def test_papers_tier_filter_must_be_integers(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        assert (await c.get("/papers", params={"tier": "must_read"})).status_code == 422
-
-
-def test_selection_rows_report_validation_errors_per_row():
-    from pydantic import ValidationError
-
-    from litwatch.api import SelectionRow, _brief
-    from litwatch.selection import from_spec
-
-    row = SelectionRow(name="Agents", subject="too short")
-    with pytest.raises(ValidationError) as exc:
-        from_spec(row.model_dump())
-    assert "subject" in _brief(exc.value)
-    ok = from_spec(
-        SelectionRow(name="Agents and tools", subject="s" * 30, keywords="a, b").model_dump()
+async def test_a_label_records_how_its_paper_was_chosen_and_can_be_taken_back(client, conn):
+    await feedback_store.add_provisional(
+        conn,
+        Label(
+            paper_id="2609.1",
+            topic=FAITH.slug,
+            value=LabelValue.RELEVANT,
+            origin=LabelOrigin.LEGACY_POSITIVE,
+            note="0.14 tier 2",
+        ),
     )
-    assert ok.slug == "agents-and-tools" and ok.keywords == ["a", "b"]
+    sets = {s["key"]: s for s in (await client.get("/api/labelling", headers=AUTH)).json()["sets"]}
+    assert (sets["positives"]["total"], sets["positives"]["done"]) == (1, 0)
+    (item,) = (await client.get("/api/labelling/positives", headers=AUTH)).json()
+    assert item["labels"][FAITH.slug]["provisional"] is True
+
+    url = f"/api/labels/{FAITH.slug}/2609.1"
+    body = {"value": "not_relevant", "queue": "positives"}
+    assert (await client.put(url, json=body, headers=AUTH)).json()["provisional"] is False
+    (label,) = await feedback_store.labels(conn)
+    assert (label.value, label.origin) == (LabelValue.NOT_RELEVANT, LabelOrigin.LEGACY_POSITIVE)
+
+    other = {"value": "unsure", "queue": "rejects"}
+    await client.put(f"/api/labels/{FAITH.slug}/2609.2", json=other, headers=AUTH)
+    assert (await feedback_store.labels(conn))[1].origin == LabelOrigin.REJECT_SAMPLE
+    (unsure,) = (await client.get("/api/labelling/unsure", headers=AUTH)).json()
+    assert unsure["id"] == "2609.2"
+    assert (
+        await client.delete(f"/api/labels/{FAITH.slug}/2609.2", headers=AUTH)
+    ).status_code == 204
+    assert len(await feedback_store.labels(conn)) == 1
+
+    assert (
+        await client.put("/api/labels/interpretability/2609.1", json=body, headers=AUTH)
+    ).status_code == 404
+    assert (
+        await client.put(f"/api/labels/{FAITH.slug}/nope", json=body, headers=AUTH)
+    ).status_code == 404
+    assert (await client.get("/api/labelling/other", headers=AUTH)).status_code == 404
+
+
+async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn):
+    await papers_store.upsert(conn, [paper("cs/9901001")])
+    url = f"/api/labels/{FAITH.slug}/cs/9901001"
+    assert (await client.put(url, json={"value": "relevant"}, headers=AUTH)).status_code == 200
+    assert [label.paper_id for label in await feedback_store.labels(conn)] == ["cs/9901001"]
+    assert (await client.delete(url, headers=AUTH)).status_code == 204
+    assert await feedback_store.labels(conn) == []
+
+
+async def test_a_good_bearer_header_works_beside_a_stale_cookie(client):
+    client.cookies.set("litwatch_token", "old")
+    assert (await client.get("/api/labelling", headers=AUTH)).status_code == 200
+    # The scheme is checked, not skipped over.
+    wrong_scheme = {"authorization": f"Basic  {TOKEN}"}
+    assert (await client.get("/api/labelling", headers=wrong_scheme)).status_code == 401

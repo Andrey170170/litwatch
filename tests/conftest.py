@@ -1,44 +1,63 @@
-"""Shared fixtures: a small selection set and screening results built from verdict tiers."""
+"""Shared fixtures: a migrated database in a throwaway schema, and a few topics and papers."""
+
+import os
+from uuid import uuid4
 
 import pytest
 
-from litwatch.models import Confidence, ScreenResult, Stage, StageRole, Usage, Verdict
-from litwatch.selection import Selection
+from litwatch import store
+from litwatch.core import Paper, Topic, TopicKind
 
-FAITH = Selection(
+FAITH = Topic(
     slug="cot-faithfulness",
     name="CoT faithfulness",
+    kind=TopicKind.WATCH,
     subject="Whether a reasoning trace omits or contradicts a computation the model performed.",
     rubric="A method or benchmark for detecting such mismatch, meant to transfer across tasks.",
     keywords=[r"chain.of.thought", r"\bCoT\b", "faithful"],
 )
-INTERP = Selection(
-    slug="mech-interp",
-    name="Mechanistic interpretability",
+INTERP = Topic(
+    slug="interpretability",
+    name="Interpretability",
+    kind=TopicKind.RADAR,
     subject="Understanding the internal mechanisms and representations of neural networks.",
-    keywords=["sparse autoencoder", "activation patching"],
+    interests="Methods that could verify what a reasoning trace claims.",
 )
-SELECTIONS = [FAITH, INTERP]
+AGENTS = Topic(
+    slug="agents",
+    name="Agents",
+    kind=TopicKind.PULSE,
+    subject="Language models acting over multiple steps with tools and memory.",
+)
+TOPICS = [FAITH, INTERP, AGENTS]
 
 
-def verdict(tier: int, confidence: Confidence = Confidence.HIGH, reason: str = "r") -> Verdict:
-    return Verdict(tier=tier, confidence=confidence, reason=reason)
-
-
-def screen_result(
-    paper_id: str = "1", reason: str = "Defines faithfulness & a benchmark.", **tiers: int
-) -> ScreenResult:
-    """A one-stage result; `tiers` maps field-style slugs (`cot_faithfulness=1`) to tiers."""
-    output = {k.replace("_", "-"): verdict(t, reason=reason) for k, t in tiers.items()}
-    stage = Stage(role=StageRole.SCREEN, model="m", output=output, usage=Usage(model="m"))
-    return ScreenResult(
-        paper_id=paper_id,
-        prompt_version="v3",
-        versions={s.slug: s.version for s in SELECTIONS},
-        stages=[stage],
-    )
+def paper(id: str = "2609.11934", **fields) -> Paper:
+    defaults = {
+        "title": "Canonical title",
+        "abstract": "Canonical abstract",
+        "authors": ["Alice Smith", "Bob Jones"],
+        "categories": ["cs.CL"],
+        "primary_category": "cs.CL",
+        "url": f"https://arxiv.org/abs/{id}",
+    }
+    return Paper(id=id, **{**defaults, **fields})
 
 
 @pytest.fixture
-def selections() -> list[Selection]:
-    return list(SELECTIONS)
+async def conn():
+    """A connection to an empty, migrated schema. Skips without `TEST_DATABASE_URL`, which
+    must name a disposable database, never a production one."""
+    dsn = os.environ.get("TEST_DATABASE_URL")
+    if not dsn:
+        pytest.skip("needs a disposable TEST_DATABASE_URL")
+    schema = "test_" + uuid4().hex
+    async with await store.connect(dsn) as admin:
+        await admin.execute(f'CREATE SCHEMA "{schema}"')
+        try:
+            async with await store.connect(dsn, schema) as c:
+                await store.migrate(c)
+                c.test_dsn, c.test_schema = dsn, schema
+                yield c
+        finally:
+            await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')

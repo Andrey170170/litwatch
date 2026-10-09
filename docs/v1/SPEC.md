@@ -1,6 +1,6 @@
 # litwatch v1 specification
 
-Status: draft for review, 2026-10-08. Nothing here is built. `docs/v1/plan.html` walks through
+Status: milestones 0 to 2 are built on branch `v1` (2026-10-09); the rest is not. `docs/v1/plan.html` walks through
 the same design interactively; where they differ, this file wins.
 
 ## 1. Why this exists
@@ -62,11 +62,15 @@ decides the service it gets:
 | Question asked | Is this paper about my question, and how central? | What happened this week that I would care about? | What is going on? |
 | Unit of output | A graded verdict per paper | About 8 picks and themes per week | A paragraph and up to 3 picks per week |
 | Optimised for | Recall, then precision | Ranking | Low cost |
+| Review cadence | None; verdicts arrive nightly | Weekly, or daily if the topic says so | Weekly |
 | Written by the owner | Subject, rubric, keywords | Subject, interests | Subject |
 
 **Triage.** One cheap model call per paper that answers, for every active topic at once: for a
-Watch topic, *could this plausibly belong* (generous, yes or no, one sentence why); for a Radar
-or Pulse topic, *is it in this field* (yes or no). No tiers and no confidence field.
+Watch topic, *could this plausibly belong* (generous, one sentence why); for a Radar
+or Pulse topic, *is it in this field* (yes or no). No tiers and no confidence field. For a
+Watch topic the model chooses between about, related and unrelated, and only unrelated stops
+the paper; what is stored is a yes or a no. Asked a plain yes or no, the triage model judged
+membership and dropped adjacent papers (`evals/2026-10-09-v1-watch.md`).
 
 **Verdict.** A Watch topic's judgement of one candidate paper, on a named grade:
 
@@ -81,17 +85,22 @@ Two models from different labs grade every candidate independently. The verdict 
 When they agree, that is the grade. When they differ, the more inclusive grade stands and the
 verdict is marked **split**, so the inbox shows it as something a person should settle.
 
-**Review.** A weekly piece of writing for one Radar or Pulse topic: themes, and picks with a
-sentence each on why. Produced by one strong model reading that week's member papers together.
+**Review.** A piece of writing for one Radar or Pulse topic: themes, and picks with a
+sentence each on why. Produced by one strong model reading the period's member papers together.
+The period is a week unless the topic's `cadence` is `daily`, which is meant for a Radar field
+the owner follows closely (interpretability today). A daily review is shorter: up to 5 picks
+and a line on anything that stands out, with no themes forced onto one day's papers.
 
 **Briefing.** What the owner reads. The daily briefing lists papers newly at an effective grade of `relevant` or
-above. The weekly briefing carries each Radar and Pulse review and a Watch recap.
+above, followed by the review of every daily topic. The weekly briefing carries each weekly
+Radar and Pulse review and a Watch recap.
 
 **Feedback.** The owner's corrections, and the only ground truth the system has:
 
-- a **label** on a paper for a Watch topic: relevant, not relevant or unsure, with an optional
-  grade. Unsure changes nothing and is left out of every metric.
-  Not relevant means an effective grade of `none`. Relevant without a grade keeps the
+- a **label** on a paper for a Watch topic: relevant, adjacent, not relevant or unsure, with an
+  optional grade. Unsure changes nothing and is left out of every metric.
+  Not relevant means an effective grade of `none`. Adjacent means `adjacent`: a source of
+  ideas for the topic without being about it, which is not a positive for recall. Relevant without a grade keeps the
   verdict's grade if that is `relevant` or above, and is `relevant` otherwise;
 - a **miss**: a paper the owner found elsewhere that litwatch did not surface. Reporting one
   takes only the arXiv link, so it works from a phone's share sheet. It stores the paper, runs
@@ -115,9 +124,15 @@ papers, which is what backfill will use later.
 1. **Intake.** Fetch new and revised papers for the configured arXiv categories and store them.
 2. **Triage.** One call per untriaged paper. Stores field memberships and Watch candidates.
    A revision of a stored paper is untriaged again only when its title or abstract was
-   rewritten (similarity below 0.8, the 0.14 rule); otherwise it keeps what it has. Every
-   membership, candidate and verdict records the paper version it was made from, and a
-   re-screened paper's earlier verdict is kept as history, not overwritten.
+   rewritten (similarity below 0.8, the 0.14 rule); otherwise it keeps what it has. Each
+   rewrite raises the paper's own **revision** number. arXiv's version number cannot do this
+   job, because it is often unknown, both before and after a rewrite. Every candidate and
+   verdict records the paper revision it was made from (and the arXiv version, for
+   reference), a candidate whose paper was rewritten is graded again, and a re-screened
+   paper's earlier verdict is kept as history, not overwritten. A rewrite whose earlier
+   text holds a verdict above `none` is graded again even when neither triage nor a keyword
+   puts the new text forward, so that a verdict on text that no longer exists cannot stay
+   current.
 3. **Keyword audit.** Every paper that triage did not make a candidate for a Watch topic is
    checked against that topic's keyword patterns, whether or not it joined a Radar or Pulse
    field, and becomes a candidate on a match. No model is involved, so no model's blind spot
@@ -129,8 +144,8 @@ papers, which is what backfill will use later.
    owner's label outranks the verdict. Saved state belongs to the paper, not the topic, so it
    is recomputed from every reason the paper has: on any Watch topic, a label of relevant, or,
    where there is no label, a current verdict of `relevant` or above; or a save by hand. The
-   current verdict for a paper and topic is chosen by version first and time second: among
-   the verdicts for the newest paper version and topic version that have one, the most
+   current verdict for a paper and topic is chosen by text first and time second: among
+   the verdicts for the newest paper revision and topic version that have one, the most
    recently recorded. Older rows are history and give no reason. A re-grade that is still pending, or that failed, replaces
    nothing: the previous verdict stays current, and the paper stays saved, until a new verdict
    is recorded or the owner labels it. `paper.unsaved` is emitted only when the last reason goes.
@@ -143,13 +158,15 @@ papers, which is what backfill will use later.
    is what every reader-facing surface uses: briefings, the Inbox, the library, exports and
    integrations. A paper the owner rejected does not come back because a re-grade liked it.
 
-Weekly: one **review** per Radar and Pulse topic over the week's members, then the weekly
-briefing.
+Weekly: one **review** per weekly Radar and Pulse topic over the week's members, then the weekly
+briefing. A topic with a daily cadence is reviewed after each nightly run instead, over that
+night's members, before the daily briefing is built.
 
 Continuously: **publication lookup** for library papers, first when saved, then monthly for two
 years, and on demand when BibTeX is exported.
 
-On demand: the owner labels a paper, reports a miss, saves a pick, or edits a topic. Editing a
+On demand: the owner labels a paper, reports a miss, saves a pick, asks for a deep card, or
+edits a topic. Editing a
 topic applies forward: the new version is used from the next run, and past papers keep the
 answer they got. Every membership, candidate and verdict records the topic version that
 produced it, so mixed history is visible. Nothing retroactive runs by itself. After an edit
@@ -248,17 +265,24 @@ reconciled grade, writing nothing; `record(result)` stores the verdict in produc
 evaluation stores the same result in its own tables. `regrade(papers, topic)` re-grades a
 chosen set after a topic edit.
 
+A paper whose triage call fails is tried again on every run, after the new papers, so it
+never takes a new paper's place when a run is capped. Triage does not give up, because a
+paper it drops is seen by no one. A paper that has failed three runs in a row is counted as
+stuck in the run record (`triage_stuck`). Showing those papers to the owner, with a way to
+dismiss one, belongs to the System page (M4) and is not built yet.
+
 Candidates are graded independently, so one failure stops nothing else. A verdict needs two
 valid opinions. If either call still fails after its retries, or comes back truncated or
 refused, no verdict is made: the candidate stays pending with the failure recorded, and is
-tried again on the next run. After three failed runs it appears in the Inbox as an ungraded
-candidate, because on a Watch topic a paper must not disappear behind a provider error. The
+tried again on the next run. After three failed runs it is no longer retried by itself and
+appears in the Inbox as an ungraded candidate, because on a Watch topic a paper must not disappear behind a provider error. The
 candidate row itself carries this state (pending or graded, failed runs, last error), since
 the call journal knows only the paper. A pending candidate is dropped from the retry queue
 once a newer candidate exists for the same paper and topic, so a late retry of an old
-version cannot overtake a newer verdict.
+version cannot overtake a newer verdict. A candidate still pending when its topic is edited
+is graded under the topic as it then is, and its verdict records that revision.
 
-**review.** `weekly_review(topic, week)` for Radar and Pulse; a field too large for one call is
+**review.** `review(topic, period)` for Radar and Pulse, where the period is a week or a day; a field too large for one call is
 shortlisted in chunks first. `daily_briefing(day)` and `weekly_briefing(week)` assemble stored
 verdicts and reviews into structured briefings; the web app and exports render them.
 
@@ -274,7 +298,9 @@ outbox, so running an evaluation cannot save a paper or wake an integration. The
 calls are journalled like any other. `replay(config)` runs every labelled or missed paper
 through the current triage and keyword audit, then grades all of them whether or not they
 became candidates, as the miss flow does. Per Watch topic it reports four numbers over the
-same denominator, all papers the owner labelled relevant: triage recall (the triage model
+papers the owner labelled relevant. The two that involve grading are over those sent to
+grading, which is all of them unless a run grades a subset; a paper whose grading failed
+stays in the count as a miss, so a provider outage cannot raise recall. The four are: triage recall (the triage model
 alone said yes, before the keyword audit), candidate recall (triage or the audit made it a
 candidate), grading recall (graded `relevant` or above when forced), and end-to-end recall
 (a candidate and graded `relevant` or above). Triage recall is the one that judges the
@@ -299,13 +325,18 @@ failures to the API.
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step. On `paper.unsaved` it tags the item as dropped and never deletes it |
 | `webdav` | `grade.changed` to `must_read` | Stores the PDF for Zotero's file sync |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive; serves PDFs, and answers searches over its titles and abstracts |
-| `deep` | `grade.changed` to `must_read` | Requests a deep card; emits `card.ready` |
+| `deep` | `grade.changed` to `must_read`, `card.requested` | Requests a deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off this |
 
 An integration that acts on a grade checks the paper's effective current grade when it handles
 the event: the owner's label where there is one, otherwise the current verdict. A `must_read`
 verdict the owner has overruled, or one a later version superseded, fetches no PDF and
 requests no card.
+
+`card.requested` is the owner asking for a deep card by hand, and it is honoured whatever the
+paper's grade or topic: a `relevant` Watch paper, a Radar or Pulse pick, or a paper found by
+search. Only `must_read` gets a card without being asked. The request is one button wherever a
+paper is shown, and one API call.
 
 Notion is not a built-in integration: a documented n8n workflow, shipped as a file under
 `integrations/n8n/`, subscribes by webhook and reads the API.
@@ -344,12 +375,12 @@ components, which are copied into the repository and therefore restyled freely. 
 | --- | --- |
 | Inbox | New Watch verdicts and splits; label with one keystroke |
 | Briefings | Daily and weekly, with history |
-| Paper | Abstract, verdicts with both opinions, links (arXiv, PDF, published version), BibTeX, deep card, save |
+| Paper | Abstract, verdicts with both opinions, links (arXiv, PDF, published version), BibTeX, deep card or a button to request one, save |
 | Search | The whole collection, filtered by topic, grade, date |
 | Topics | Create and edit; preview a draft against your labelled papers and misses; start a scoped re-run after saving |
 | Report a miss | Paste an arXiv link; see what each stage said |
 | Quality | Recall and precision per Watch topic over time; open misses |
-| System | Runs, cost by role and provider, integration health |
+| System | Runs, cost by role and provider, integration health, papers triage is stuck on |
 
 ### 4.2 Seams
 
@@ -371,14 +402,14 @@ The places a part can be replaced or tested alone:
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status),
 `topic_versions` (topic, revision, hash, the content at that revision, saved at),
 `memberships` (paper, topic, topic version, paper version), `candidates` (paper, topic,
-topic version, paper version, sources: triage, keyword or both, reason, state, failed runs,
+topic version, paper version, paper revision, sources: triage, keyword or both, reason, state, failed runs,
 last error), `verdicts` (paper, topic, topic version,
-paper version, grade, split, judge and check opinions, recorded at; each grading is its own
+paper version, paper revision, grade, split, judge and check opinions, recorded at; each grading is its own
 row with its own id, so a re-run over the same versions adds a row, and the latest recorded
 is current), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
 and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
-opinions, reconciled grade), which hold replays, previews and miss traces. Kept as they are: `papers`, `runs`, `inference_calls`, intake checkpoints.
+opinions, reconciled grade, grading error), which hold replays, previews and miss traces. `papers` gains `revision`. Kept as they are: `runs`, `inference_calls`, intake checkpoints.
 
 ### 4.4 Configuration
 
@@ -438,7 +469,8 @@ Reviews are ranking and prose, read by a person, with no second model.
 
 Expected spend with the proposed defaults, at about 650 papers a night: triage on credits, about
 $0.25–0.40 a night; grading about 30 candidates twice, a few cents on each side; four or five
-weekly reviews at roughly $0.50–1 each on credits. Real-dollar spend is the check model alone,
+weekly reviews at roughly $0.50–1 each on credits, and a daily review for each topic that asks
+for one, not yet measured and also on credits. Real-dollar spend is the check model alone,
 on the order of $1 a month, against about $30 a month in 0.x. These are estimates from 0.x token
 counts and must be re-measured in milestone 2.
 
@@ -547,8 +579,8 @@ Report a miss, Quality. Labels and misses flow into the evaluation. *Check:* a d
 verdicts can be read, labelled and exported as BibTeX without touching Notion or Zotero; a
 reported miss shows what each stage said.
 
-**M4 · Reviews and briefings.** Radar and Pulse reviews, daily and weekly briefings, Briefings
-page, in-process scheduler, System page. *Check:* two consecutive weekly briefings generated on
+**M4 · Reviews and briefings.** Radar and Pulse reviews at each topic's cadence, daily and weekly briefings, Briefings
+page, in-process scheduler, System page (including the papers triage is stuck on). *Check:* two consecutive weekly briefings generated on
 schedule; the owner prefers them to 0.14's digests or says what is missing.
 
 **M5 · Published versions.** `publications` with DBLP, monthly re-check, manual override,

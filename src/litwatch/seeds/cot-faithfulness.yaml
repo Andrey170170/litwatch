@@ -1,38 +1,35 @@
 name: CoT faithfulness
 slug: cot-faithfulness
-owner: Ana
-status: active
-digest: true
+kind: watch
 subject: >-
-  Whether a language model's reasoning trace (chain of thought, thinking tokens, scratchpad)
-  omits or contradicts a computation the model actually performed. A step is faithful iff it
-  accurately describes a process that took place at some point in the model, regardless of when
-  it is verbalized; a trace is faithful iff it contains the complete path the model followed and
-  no unfaithful steps (BonaFide, 2605.25052). Unfaithfulness is omission (the trace lacks a
-  computation that happened, such as following a hint without saying so) or commission (a step
-  describes a process that did not happen). Not in scope: correctness or validity of reasoning
-  steps, grounding of answers in evidence, plausibility or quality of rationales, unsafe content
-  inside traces, executable trace validity for agents, and plan-to-output fidelity in generation
-  models.
+  Whether a language model's reasoning trace (chain of thought, thinking tokens, scratchpad) omits
+  or contradicts a computation the model actually performed. A step is faithful iff it accurately
+  describes a process that took place at some point in the model, regardless of when it is verbalized;
+  a trace is faithful iff it contains the complete path the model followed and no unfaithful steps
+  (BonaFide, 2605.25052). Unfaithfulness is omission (the trace lacks a computation that happened,
+  such as following a hint without saying so) or commission (a step describes a process that did not
+  happen). Not in scope: correctness or validity of reasoning steps, grounding of answers in evidence,
+  plausibility or quality of rationales, unsafe content inside traces, executable trace validity for
+  agents, and plan-to-output fidelity in generation models.
 rubric: >-
-  A method for detecting such omission or commission, a benchmark or ground-truth construction
-  for it, a definition of it, or a meta-evaluation of such methods, intended to transfer across
-  tasks and models. The knowledge of what the model actually computed must come from task
-  construction (hints, cues, or hidden directives whose use is revealed by the output), from
-  model internals read against the trace, or from a meta-evaluation of such methods. Whether
-  a hint, cue, or hidden directive the model demonstrably followed is disclosed in its trace is
-  such an omission test, whatever the paper calls it. Interventions that only measure whether the trace matters to the answer (paraphrasing,
-  truncation, perturbation, step importance) are proxies for importance, not faithfulness, and
-  belong in tier 2, as do single-domain audits that apply a sound method to one task. Papers on
-  reading traces for unsafe intent, on monitorability in general, or position papers are tier 3.
+  A method for detecting such omission or commission, a benchmark or ground-truth construction for
+  it, a definition of it, or a meta-evaluation of such methods, intended to transfer across tasks
+  and models. The knowledge of what the model actually computed must come from task construction (hints,
+  cues, or hidden directives whose use is revealed by the output), from model internals read against
+  the trace, or from a meta-evaluation of such methods. Whether a hint, cue, or hidden directive the
+  model demonstrably followed is disclosed in its trace is such an omission test, whatever the paper
+  calls it. Interventions that only measure whether the trace matters to the answer (paraphrasing,
+  truncation, perturbation, step importance) are proxies for importance, not faithfulness, and belong
+  in tier 2, as do single-domain audits that apply a sound method to one task. Papers on reading traces
+  for unsafe intent, on monitorability in general, or position papers are tier 3.
 keywords:
-  - chain.of.thought
-  - "[^a-z]CoT[^a-z]"
-  - faithful
-  - unfaithful
-  - unverbalized
-  - hidden reasoning
-  - reasoning trace
-  - steganograph
-  - scratchpad
-  - thinking tokens
+- chain.of.thought
+- '[^a-z]CoT[^a-z]'
+- faithful
+- unfaithful
+- unverbalized
+- hidden reasoning
+- reasoning trace
+- steganograph
+- scratchpad
+- thinking tokens

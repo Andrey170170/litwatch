@@ -1,28 +1,9 @@
 name: Alignment and safety
 slug: alignment-and-safety
-owner: Andrei
-status: active
-digest: false
+kind: radar
 subject: >-
-  Making language models behave as intended and knowing whether they do: preference and
-  constitutional training, refusal and jailbreak robustness, reward hacking and specification
-  gaming, deception and sandbagging, chain-of-thought and action monitoring, scalable oversight,
-  and evaluation methodology and benchmarks for capabilities and safety. Narrow domain benchmarks
-  without a methodological contribution are tier 3.
-rubric: >-
-  Tier 1 is rare, about one member in fifty. It requires evidence in the abstract that the field
-  will treat the paper as a reference: a new model family or training recipe with released
-  weights, a large margin on a widely used benchmark, a method shown to work across several
-  domains, or strong evidence overturning a common assumption. Incremental gains, single-domain
-  applications, surveys, and position papers are at most tier 2. When in doubt, tier 2.
-keywords:
-  - alignment
-  - RLHF
-  - jailbreak
-  - red team
-  - safety
-  - reward hacking
-  - sycophancy
-  - monitoring
-  - oversight
-  - benchmark
+  Making language models behave as intended and knowing whether they do: preference and constitutional
+  training, refusal and jailbreak robustness, reward hacking and specification gaming, deception and
+  sandbagging, chain-of-thought and action monitoring, scalable oversight, and evaluation methodology
+  and benchmarks for capabilities and safety. Narrow domain benchmarks without a methodological contribution
+  are not part of the field.

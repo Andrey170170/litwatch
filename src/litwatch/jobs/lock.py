@@ -1,0 +1,28 @@
+"""One writer at a time. Jobs that change pipeline state hold this database lock, so two
+instances, or the scheduler and a terminal, never overlap."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+import psycopg
+
+RUN_LOCK = 7213911
+
+
+class BusyError(RuntimeError):
+    """Another litwatch job holds the run lock."""
+
+
+@asynccontextmanager
+async def run_lock(conn: psycopg.AsyncConnection) -> AsyncIterator[None]:
+    row = await (
+        await conn.execute("SELECT pg_try_advisory_lock(%s) AS locked", (RUN_LOCK,))
+    ).fetchone()
+    if not row["locked"]:
+        raise BusyError("another litwatch job is already running")
+    try:
+        yield
+    finally:
+        await conn.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
