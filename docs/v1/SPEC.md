@@ -273,6 +273,11 @@ failures to the API.
 | `deep` | `verdict.recorded` at `must_read` | Requests a deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off this |
 
+An integration that acts on a grade checks the paper's effective current grade when it handles
+the event: the owner's label where there is one, otherwise the current verdict. A `must_read`
+verdict the owner has overruled, or one a later version superseded, fetches no PDF and
+requests no card.
+
 Notion is not a built-in integration: a documented n8n workflow, shipped as a file under
 `integrations/n8n/`, subscribes by webhook and reads the API.
 
@@ -339,7 +344,9 @@ New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, ve
 topic version, paper version, sources: triage, keyword or both, reason), `verdicts` (paper, topic, topic version,
 paper version, grade, split, judge and check opinions; one row per combination, earlier ones
 kept), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
-`integration_cursors`. Kept as they are: `papers`, `runs`, `inference_calls`, intake checkpoints.
+`integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
+and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
+opinions, reconciled grade), which hold replays, previews and miss traces. Kept as they are: `papers`, `runs`, `inference_calls`, intake checkpoints.
 
 ### 4.4 Configuration
 
@@ -468,22 +475,30 @@ price table. *Check:* the same request runs through either provider by changing 
 configuration; journal cost matches hand calculation on recorded responses.
 
 **M2 · Watch pipeline and its evaluation.** Topics with kinds, triage, keyword audit, grading
-with two labs, reconciliation, `feedback.replay`. Seed labels only from the entries of
-`evals/labeled.yaml` whose provenance is `gold: Andrei`, which is about a dozen papers; the
-rest of that file is silver (model agreement, or a hand pass still awaiting him) and joins
-the regression set. 0.14's CoT
-verdicts are imported into that regression set too, not as labels: they are model output, and
-they contain none of the papers 0.14 itself missed, so recall measured on them says nothing
-about those. Because that leaves almost no ground truth, the owner labels two sets in this milestone: the
-papers 0.14 put at tier 1 or 2 on the two CoT selections, which gives the positives, and a
-sample of 100 papers that triage rejected, drawn at random with a recorded seed: 70 from
-rejects that triage placed in the interpretability or safety fields, which are the nearest
-neighbours of the CoT topics, and 30 from all other rejects, which is the only look at what the gate drops. Trial
-the triage and grading defaults. *Check:* every regression-set paper that 0.14 placed at tier 1 or 2 becomes a candidate, or
-each loss has been looked at (the set's negatives carry no requirement; how many become
-candidates is reported); triage and candidate recall on owner labels, and the number of Watch papers
-found in the rejected sample, are written to `evals/`; the model defaults in section 4.4 are
-confirmed or changed.
+with two labs, reconciliation, `feedback.replay`.
+
+Labels are seeded only from the entries of `evals/labeled.yaml` whose provenance is
+`gold: Andrei`, about a dozen papers. The rest of that file is silver (model agreement, or a
+hand pass still awaiting him) and joins a separate regression set, together with 0.14's CoT
+verdicts. Neither is ground truth: they are model output, and they contain none of the papers
+0.14 itself missed.
+
+Because that leaves almost no ground truth, the owner labels three sets in this milestone:
+
+- the papers 0.14 put at tier 1 or 2 on the two CoT selections, which gives the positives;
+- 100 papers that triage rejected, drawn at random with a recorded seed, 70 from rejects that
+  triage placed in the interpretability or safety fields (the nearest neighbours of the CoT
+  topics) and 30 from all other rejects, which is the only look at what the gate drops;
+- 50 papers the new pipeline made candidates over a recent window, drawn at random with a
+  recorded seed, without which a false positive the new pipeline introduces would never
+  reach the precision figure.
+
+The triage and grading defaults are trialled on these. *Check:* every regression-set paper
+that 0.14 placed at tier 1 or 2 becomes a candidate, or each loss has been looked at (the
+set's negatives carry no requirement; how many become candidates is reported); triage and
+candidate recall and precision on owner labels, and the number of Watch papers found in the
+rejected sample, are written to `evals/`; the model defaults in section 4.4 are confirmed or
+changed.
 
 **M3 · API and web app, Watch first.** Starts with a design pass: the screens are discussed
 and a few sketches compared before any of them is built. Then the API with generated client; Inbox, Paper, Search, Topics,
