@@ -42,7 +42,9 @@ writes the pages, Zotero and Nextcloud hold the output. v1 is a system someone e
 
 ### Not in v1
 
-Multiple users or accounts. Backfill sweeps over the stored collection. Citation counts and
+Multiple users or accounts. Backfilling papers litwatch never ingested, such as the archive's older years, and anything
+built to make bulk re-runs cheap (embedding preselection, batch pricing). A re-run over a
+date range of stored papers is in v1, because it is only the ordinary job with a window. Citation counts and
 citation graphs. Sources other than arXiv. Mobile apps.
 
 ## 2. Concepts
@@ -207,7 +209,8 @@ revision handling carried over from 0.x. Emits `paper.added` and `paper.revised`
 
 **llm.** The seam between litwatch and model providers.
 
-- `Request`: system text, user text, output schema, effort, output-token cap.
+- `Request`: system text, user text, output schema, output-token cap. Effort is not part of
+  it; it comes only from the role's configuration.
 - `Reply`: text, stop reason (`complete`, `truncated`, `refused` with a category), `Usage`.
 - `Provider` protocol: `complete(model, request) -> Reply`. Two implementations: `openrouter`
   (with per-model provider lists) and `anthropic` (prompt caching, cost from a price table).
@@ -236,7 +239,11 @@ endpoint: find the preprint record by arXiv DOI, then records sharing its title 
 and prefer the one that is not CoRR. `bibtex(paper)` renders either record. A wrong or missing
 match can be corrected by hand and is then never overwritten.
 
-**feedback.** Stores labels and misses. `replay(config)` runs every labelled or missed paper
+**feedback.** Stores labels and misses. Replay, topic previews and the grading of a reported
+miss are dry runs: they call the same pure triage, audit and grading functions but write
+their answers to evaluation tables only, never to candidates, verdicts, the library or the
+outbox, so running an evaluation cannot save a paper or wake an integration. Their model
+calls are journalled like any other. `replay(config)` runs every labelled or missed paper
 through the current triage and keyword audit, then grades all of them whether or not they
 became candidates, as the miss flow does. Per Watch topic it reports four numbers over the
 same denominator, all papers the owner labelled relevant: triage recall (the triage model
@@ -468,8 +475,9 @@ verdicts are imported into that regression set too, not as labels: they are mode
 they contain none of the papers 0.14 itself missed, so recall measured on them says nothing
 about those. Because that leaves almost no ground truth, the owner labels two sets in this milestone: the
 papers 0.14 put at tier 1 or 2 on the two CoT selections, which gives the positives, and a
-sample of about 100 papers that triage rejected, drawn from those closest to the Watch
-topics, which is the only look at what the gate drops. Trial
+sample of 100 papers that triage rejected, drawn at random with a recorded seed: 70 from
+rejects that triage placed in the interpretability or safety fields, which are the nearest
+neighbours of the CoT topics, and 30 from all other rejects, which is the only look at what the gate drops. Trial
 the triage and grading defaults. *Check:* every regression-set paper that 0.14 placed at tier 1 or 2 becomes a candidate, or
 each loss has been looked at (the set's negatives carry no requirement; how many become
 candidates is reported); triage and candidate recall on owner labels, and the number of Watch papers
@@ -501,7 +509,7 @@ written from `docs/integrations.md` without editing any other package.
 **M8 · Release.** Compose file, install and configuration docs, repository clean-up, MIT
 licence, `v1.0.0`.
 
-After v1: backfill sweeps over the collection for Watch topics; citation counts; other sources.
+After v1: backfill of papers outside the collection for Watch topics; citation counts; other sources.
 
 ## 9. Decisions and open questions
 
