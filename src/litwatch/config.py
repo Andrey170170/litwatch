@@ -71,9 +71,11 @@ class Intake(_Section):
 
 
 class Limits(_Section):
-    """Model calls in flight at once, per step."""
+    """Work in flight at once, per step."""
 
-    triage: int = Field(default=16, gt=0)
+    triage: int = Field(default=16, gt=0)  # calls
+    # Candidates graded at once. Each asks the judge and the check together, which are
+    # different labs, so this is also the most calls any one lab sees at a time.
     grading: int = Field(default=6, gt=0)
     # A candidate that failed grading this many runs is shown to the owner ungraded.
     grading_attempts: int = Field(default=3, gt=0)

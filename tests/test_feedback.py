@@ -6,7 +6,7 @@ import pytest
 
 from litwatch import feedback
 from litwatch.config import Config
-from litwatch.core import Grade, Label, LabelOrigin, LabelValue
+from litwatch.core import Grade, Label, LabelOrigin, LabelValue, TopicKind
 from litwatch.feedback import seed
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import feedback as feedback_store
@@ -91,6 +91,10 @@ async def test_replay_reports_four_recalls_over_the_papers_labelled_relevant(see
     }
     assert report["models"]["check"] == "openrouter:meta/muse-spark-1.3-contributor@high"
     assert report["calls"]["judge"]["calls"] == 5
+    # A run is read with the topics as it saw them, whatever they have become since.
+    as_field = FAITH.model_copy(update={"kind": TopicKind.RADAR, "rubric": None, "keywords": []})
+    await topics_store.save(conn, as_field)
+    assert (await feedback.metrics(conn, eval_run_id))["topics"].keys() == {FAITH.slug}
 
 
 async def test_replay_writes_to_evaluation_tables_and_nothing_else(seeded):

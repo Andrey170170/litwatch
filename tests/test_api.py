@@ -37,6 +37,8 @@ async def test_everything_but_the_health_check_needs_the_token(client):
     # Opening the page once with the token sets a cookie that then serves as the token.
     page = await client.get("/", params={"token": TOKEN})
     assert "litwatch_token" in page.headers["set-cookie"]
+    # It sends the browser on to the bare address, so the token does not stay in the URL.
+    assert (page.status_code, page.headers["location"]) == (303, "/")
     assert (await client.get("/api/labelling")).json()["topics"] == [
         {"slug": FAITH.slug, "name": FAITH.name}
     ]

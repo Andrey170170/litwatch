@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from litwatch import store
@@ -63,11 +63,17 @@ def create_app(dsn: str, token: str) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/", response_class=HTMLResponse)
-    async def page(request: Request, response: Response) -> str:
+    async def page(request: Request) -> Response:
         given = request.query_params.get("token")
         if given and hmac.compare_digest(given.encode(), token.encode()):
+            # Straight on to the bare address, so the token does not stay in the address bar,
+            # the history or a later referrer.
+            response = RedirectResponse("/", status_code=303)
             response.set_cookie(COOKIE, given, httponly=True, samesite="strict", max_age=90 * 86400)
-        return resources.files("litwatch.api").joinpath("static/label.html").read_text()
+            return response
+        return HTMLResponse(
+            resources.files("litwatch.api").joinpath("static/label.html").read_text()
+        )
 
     async def watched(c: psycopg.AsyncConnection) -> list[dict[str, str]]:
         topics = await topics_store.all(c, Status.ACTIVE)

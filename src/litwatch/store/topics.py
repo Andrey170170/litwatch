@@ -7,7 +7,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from litwatch.core import Status, Topic
+from litwatch.core import Status, Topic, TopicKind
 
 
 def _topic(row: dict[str, Any]) -> Topic:
@@ -87,3 +87,20 @@ async def all(conn: psycopg.AsyncConnection, status: Status | None = Status.ACTI
 async def get(conn: psycopg.AsyncConnection, slug: str) -> Topic | None:
     row = await (await conn.execute("SELECT * FROM topics WHERE slug = %s", (slug,))).fetchone()
     return _topic(row) if row else None
+
+
+async def kinds_at(
+    conn: psycopg.AsyncConnection, revisions: dict[str, int]
+) -> dict[str, TopicKind]:
+    """Each topic's kind at the given revision: what it was when a run used it, whatever it
+    has been changed to since."""
+    rows = await (
+        await conn.execute(
+            "SELECT topic, revision, content->>'kind' AS kind FROM topic_versions "
+            "WHERE topic = ANY(%s)",
+            (list(revisions),),
+        )
+    ).fetchall()
+    return {
+        r["topic"]: TopicKind(r["kind"]) for r in rows if revisions[r["topic"]] == r["revision"]
+    }

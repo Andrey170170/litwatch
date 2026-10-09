@@ -63,7 +63,8 @@ async def metrics(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str, 
     run = await feedback_store.get_eval(conn, eval_run_id)
     if run is None:
         raise ValueError(f"no evaluation run {eval_run_id}")
-    kinds = {t.slug: t.kind for t in await topics_store.all(conn, None)}
+    # As the run saw them: a topic may have changed kind since.
+    kinds = await topics_store.kinds_at(conn, run["topics"])
     results = {
         (r["paper_id"], r["topic"]): r for r in await feedback_store.results(conn, eval_run_id)
     }
