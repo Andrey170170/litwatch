@@ -195,7 +195,9 @@ revision handling carried over from 0.x. Emits `paper.added` and `paper.revised`
   (with per-model provider lists) and `anthropic` (prompt caching, cost from a price table).
 - `Gateway.complete(role, request, *, paper_id)` resolves a **role** to a provider, model and
   effort from configuration, applies retries and the timeout, journals the call with its cost,
-  and reuses an identical earlier request. Roles: `triage`, `judge`, `check`, `review`.
+  and reuses an identical earlier call. Identical means the same resolved provider, model,
+  effort and routing as well as the same `Request`, so `judge` and `check` never share a reply
+  and a replay after a model change calls the new model. Roles: `triage`, `judge`, `check`, `review`.
 
 Pipeline code names roles, never models. Moving a role between labs is a configuration change.
 
@@ -298,8 +300,8 @@ The places a part can be replaced or tested alone:
 ### 4.3 Data
 
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status),
-`memberships` (paper, topic, triage version), `candidates` (paper, topic, source: triage or
-keyword, reason), `verdicts` (paper, topic, grade, split, judge and check opinions, topic
+`memberships` (paper, topic, topic version), `candidates` (paper, topic, topic version,
+source: triage or keyword, reason), `verdicts` (paper, topic, grade, split, judge and check opinions, topic
 version), `reviews`, `briefings`, `labels`, `misses`, `publications`, `library`, `outbox`,
 `integration_cursors`. Kept as they are: `papers`, `runs`, `inference_calls`, intake checkpoints.
 
