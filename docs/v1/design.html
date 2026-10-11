@@ -1,0 +1,923 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>litwatch v1 · web app design pass</title>
+<style>
+  /* ---- the document's own chrome, kept close to plan.html ---- */
+  :root {
+    color-scheme: light dark;
+    --background: #fbfaf8; --foreground: #1c1b19; --muted: #efede8; --muted-foreground: #6b675f;
+    --card: #ffffff; --border: #dcd8cf; --ring: #8a8578; --primary: #2f5d50; --primary-foreground: #ffffff;
+    --accent-surface: #e6efe9; --code-background: #efede8; --warning: #b7791f;
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-serif: Charter, "Iowan Old Style", "Source Serif 4", Georgia, serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --background: #14171a; --foreground: #e8e6e1; --muted: #1f2428; --muted-foreground: #9aa0a6;
+      --card: #1a1e22; --border: #2e353b; --ring: #6f7a84; --primary: #7fc4ae; --primary-foreground: #10201b;
+      --accent-surface: #1f2f2b; --code-background: #232a30; --warning: #e0a94a; }
+  }
+  html { background: var(--background); }
+  body { margin: 0 auto; max-width: 1180px; padding: 28px 24px 80px; font-family: var(--font-sans);
+         color: var(--foreground); line-height: 1.55; font-size: 15px; }
+  header.top { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  header.top h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+  .tabs { position: sticky; top: 0; background: var(--background); z-index: 5; display: flex; gap: 4px; flex-wrap: wrap;
+          border-bottom: 1px solid var(--border); margin-bottom: 18px; padding-top: 6px; }
+  .tabs button { all: unset; cursor: pointer; padding: 7px 12px; border-radius: 6px 6px 0 0; color: var(--muted-foreground); font-weight: 500; }
+  .tabs button[aria-selected=true] { color: var(--foreground); box-shadow: inset 0 -2px 0 var(--primary); }
+  .tabs button:focus-visible, .frame a:focus-visible, button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+  section[hidden] { display: none; }
+  .prose { max-width: 740px; }
+  .prose h2 { font-size: 18px; margin: 22px 0 6px; }
+  .prose h3 { font-size: 15px; margin: 18px 0 4px; }
+  .prose p, .prose li { margin: 6px 0; }
+  .prose table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 8px 0 12px; }
+  .prose th, .prose td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .prose th { font-weight: 600; }
+  .prose td.n, .prose th.n { text-align: right; }
+  .muted { color: var(--muted-foreground); }
+  .small { font-size: 12.5px; }
+  code { font-family: var(--font-mono); font-size: 12.5px; background: var(--code-background); padding: 1px 5px; border-radius: 4px; }
+  pre { font-family: var(--font-mono); font-size: 12px; line-height: 1.4; background: var(--code-background); padding: 10px 12px;
+        border-radius: 6px; overflow-x: auto; }
+  .callout { border-left: 3px solid var(--primary); background: var(--accent-surface); padding: 8px 12px; border-radius: 0 6px 6px 0; margin: 10px 0; }
+  .swatches { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+  .swatches span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-family: var(--font-mono); }
+  .swatches i { width: 18px; height: 18px; border-radius: 4px; border: 1px solid rgba(0,0,0,.15); display: inline-block; }
+  .sketch-head { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 20px; align-items: start; margin-bottom: 14px; }
+  @media (max-width: 800px) { .sketch-head { grid-template-columns: 1fr; } }
+  .sketch-head h2 { font-size: 20px; margin: 0 0 4px; }
+  .sketch-head dl { margin: 0; font-size: 13.5px; display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; }
+  .sketch-head dt { color: var(--muted-foreground); }
+  .sketch-head dd { margin: 0; }
+  .frame-label { font-size: 12.5px; color: var(--muted-foreground); margin: 18px 0 6px; }
+  .frame { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; color: #1b1c1a; color-scheme: light; }
+  .frame * { box-sizing: border-box; }
+  .frame a { color: inherit; text-decoration: none; }
+  .frame kbd { font: 11px var(--font-mono); border: 1px solid rgba(0,0,0,.18); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 20px; align-items: start; }
+  @media (max-width: 1000px) { .pair { grid-template-columns: 1fr; } }
+  .phone { width: 372px; max-width: 100%; border: 6px solid #2b2b2b; border-radius: 34px; overflow: hidden; background: #fff; color: #1b1c1a; color-scheme: light; }
+  .phone * { box-sizing: border-box; }
+  .phone a { color: inherit; text-decoration: none; }
+  .switcher { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; align-items: center; gap: 10px;
+              background: #1c1b19; color: #fff; border-radius: 999px; padding: 8px 10px 8px 14px; font-size: 13px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+  .switcher button { all: unset; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,.12); text-align: center; line-height: 28px; }
+  .switcher[hidden] { display: none; }
+  .grade-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; margin: 6px 0 12px; }
+  .grade-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>litwatch v1: web app design pass</h1>
+  <span class="muted small">Draft for discussion, 2026-10-11. Nothing here is built. Sketch tabs cycle with ← →.</span>
+</header>
+
+<div class="tabs" role="tablist">
+  <button role="tab" aria-selected="true" data-tab="brief">Brief</button>
+  <button role="tab" data-tab="decisions">Decisions to settle</button>
+  <button role="tab" data-tab="a">Sketch A: Ledger</button>
+  <button role="tab" data-tab="b">Sketch B: Desk</button>
+  <button role="tab" data-tab="c">Sketch C: Day</button>
+  <button role="tab" data-tab="other">Other screens</button>
+  <button role="tab" data-tab="rec">Recommendation</button>
+</div>
+
+<!-- ======================================================================= BRIEF -->
+<section id="tab-brief" class="prose">
+<h2>What the web app is for</h2>
+<p>One person runs litwatch for one research question. The app is where that person reads what the pipeline found
+overnight, settles the few cases two models disagree on, corrects the system when it is wrong, and looks things up in
+a collection of 23,000 papers. Everything else (Notion, Zotero, n8n) is an optional export. The spec (section 4.1,
+<em>web</em>) lists eight pages; this pass decides how they fit together and what they look like before any is built.</p>
+
+<h3>The daily job, with real volumes</h3>
+<p>The numbers are from the M2 trial (<code>evals/2026-10-09-v1-watch.md</code>) scaled to one night of about 530 to
+650 papers. They are what the home screen has to carry.</p>
+<table>
+  <tr><th>Each night</th><th class="n">About</th><th>What the owner does with it</th></tr>
+  <tr><td>Papers ingested and triaged</td><td class="n">530–650</td><td>Nothing. A count is reassurance that the run happened.</td></tr>
+  <tr><td>Watch candidates graded (two calls each)</td><td class="n">40–60</td><td>Nothing, unless graded <code>relevant</code> or above.</td></tr>
+  <tr><td>Graded <code>relevant</code> or <code>must_read</code></td><td class="n">1–5</td><td>Read the title and both reasons; save or correct; one keystroke.</td></tr>
+  <tr><td>Split verdicts among those</td><td class="n">0–2</td><td>Decide which model was right. This is the one thing only a person can do.</td></tr>
+  <tr><td>Candidates still ungraded after three failed runs</td><td class="n">rare</td><td>Look at it by hand; it must not disappear.</td></tr>
+  <tr><td>Graded <code>adjacent</code></td><td class="n">10–20</td><td>Skim the titles if there is time. Labelling them is optional evidence.</td></tr>
+  <tr><td>Graded <code>none</code></td><td class="n">25–40</td><td>Never shown by default. Reachable through search.</td></tr>
+</table>
+<p>So the thing that needs a person is small: five to ten items on a normal morning, a couple of them splits. The screen
+that carries it should read in two minutes on a phone, and the phone is a real client: the reject sample was labelled
+on one, and reporting a miss by sharing an arXiv link from a phone is the usual case (spec, decision 4).</p>
+
+<h3>The other jobs</h3>
+<ul>
+  <li><strong>Weekly reading</strong> (M4): one Radar and Pulse review per topic, a Watch recap. Read once, maybe save a pick.</li>
+  <li><strong>Reporting a miss</strong>: paste or share a link, then see what each stage said and mark which topic it belonged to.</li>
+  <li><strong>Looking a paper up</strong>: its abstract, both opinions, the label, links, BibTeX, a deep card.</li>
+  <li><strong>Searching the collection</strong>: 23,000 papers plus the archive, filtered by topic, grade, year, source.</li>
+  <li><strong>Editing a topic</strong>: rubric and keywords, with a preview against labelled papers before saving and a scoped re-run after.</li>
+  <li><strong>Checking quality and health</strong>: the four recalls per Watch topic over time, open misses, runs, cost, integrations, stuck papers.</li>
+</ul>
+
+<h2>Design plan</h2>
+<p>The three sketches disagree about structure, which is what this pass is for. They share what should not be in
+question: the semantic colours for grades, the typography principle, and the token system that makes the app
+re-skinnable for anyone who self-hosts it.</p>
+
+<h3>Grades are the one colour code</h3>
+<div class="grade-legend">
+  <span><i style="background:#1b1c1a"></i>must read</span>
+  <span><i style="background:#2e7d4f"></i>relevant</span>
+  <span><i style="background:#6b7a88"></i>adjacent</span>
+  <span><i style="background:#c9c7c0"></i>none</span>
+  <span><i style="background:#b7791f"></i>split, or ungraded</span>
+</div>
+<p>Must read is ink, not a loud colour: the strongest thing on the page is the paper itself. Relevant is green.
+Adjacent is a cool grey, visibly not a positive. Amber marks what needs the owner: a split verdict or a candidate
+grading could not finish. Nothing else on the page is coloured, so a glance down a list answers "is there anything for me".
+The two Watch topics are told apart by name, not colour; a third topic should not need a new hue.</p>
+
+<h3>Typography carries the content</h3>
+<p>The content is paper titles and two models' reasons about them. Titles are set in a serif in two of the three
+sketches (Charter, Iowan Old Style, then Georgia; no web font to load), because a serif title reads as a paper, not a
+notification, and a column of them scans like a reading list. The interface itself (filters, buttons, counts, the
+reasons) is in the system sans. Sketch B is the deliberate exception: all sans, dense, an instrument.</p>
+
+<h3>Tokens, so it can be re-skinned</h3>
+<p>Each sketch is written against the same CSS variable names, which are shadcn/ui's: <code>--background</code>,
+<code>--foreground</code>, <code>--muted</code>, <code>--border</code>, <code>--primary</code>, plus four grade
+colours and one attention colour that litwatch adds. Whoever self-hosts changes one file. The look of a sketch is
+therefore separable from its structure: pick a layout from one and a palette from another if that is what you want.</p>
+<div class="swatches">
+  <span><i style="background:#f3f4f1"></i>A background</span><span><i style="background:#2f5d50"></i>A primary</span>
+  <span><i style="background:#eef0f3"></i>B background</span><span><i style="background:#2d5fb3"></i>B primary</span>
+  <span><i style="background:#ffffff"></i>C background</span><span><i style="background:#2f5d50"></i>C primary</span>
+</div>
+
+<h3>Principles the sketches are held to</h3>
+<ul>
+  <li>The home screen ends with "nothing else needs you". The recall promise is made visible, not implied.</li>
+  <li>A verdict is never shown without its reasons. Two models graded; the owner sees both sentences, always.</li>
+  <li>One keystroke labels. Keys are the same everywhere: <kbd>1</kbd> relevant, <kbd>2</kbd> adjacent, <kbd>3</kbd> not relevant, <kbd>4</kbd> unsure, <kbd>j</kbd> <kbd>k</kbd> move, <kbd>o</kbd> open. The phone gets buttons in the same order.</li>
+  <li>Every paper has a URL. A miss trace, a deep card, a split: all of them are one shareable page.</li>
+  <li>Why a paper is here is on the paper: triage's sentence, the keyword that matched, which topic version judged it.</li>
+  <li>No decoration. Rules, colours and marks each encode something listed above or they go.</li>
+</ul>
+
+<h3>Material</h3>
+<p>Every paper in the sketches is real and every grade and reason is what the models actually said in eval run 7
+(a dry run over the labelled set on 2026-10-09). They are shown as if they were one night's results. Counts on the
+pages ("530 papers") are the real 7 October intake.</p>
+</section>
+
+<!-- ======================================================================= DECISIONS -->
+<section id="tab-decisions" class="prose" hidden>
+<h2>Decisions to settle before building</h2>
+<p>Each has the options the sketches embody and a recommendation. The recommendation tab collects them; mark up here.</p>
+
+<h3>1. What is the home screen, and how is the app organised?</h3>
+<p><strong>A and B</strong> open on an <em>Inbox</em>: a queue of verdicts that need the owner, with Briefings as a
+separate page, as the spec lists them. <strong>C</strong> opens on <em>Today</em>: the night's results written as a
+dated page, where the verdicts that need attention, the ones that do not, and (from M4) the daily review of
+interpretability are sections of one document, and the "briefing" is not a separate thing. Yesterday is one page back.</p>
+<p>The spec's eight pages were a list of capabilities, not a navigation decision. C spends two pages fewer (Inbox and
+Briefings become Today and its history) and matches how the thing is actually used: once a day, top to bottom. A and B
+match how most apps work and keep the Inbox meaningful across several days away. The question is whether litwatch is
+something you <em>read</em> or something you <em>operate</em>.</p>
+
+<h3>2. What does the home screen show by default?</h3>
+<p>All three agree on the proposal, which differs from "every new verdict": verdicts at <code>relevant</code> or above,
+every split, every candidate that is ungraded after three failed runs, and nothing at <code>none</code>. Adjacent
+verdicts are present but folded, as a count that expands to titles. The folded list is where recall insurance gets
+checked by eye when there is time, and labelling an adjacent paper from there is evidence like any other.</p>
+<p>Open point: whether an agreed <code>relevant</code> verdict needs any action to leave the screen. Proposal: no.
+Items leave when labelled or when the owner marks the day read. Labelling a must-read or relevant paper is one key
+and is what production precision is measured from, so the screen should make it the easy default without forcing it.</p>
+
+<h3>3. How does the owner work through items?</h3>
+<p><strong>A</strong>: a single column, one item expanded at a time, keyboard moves down the list. The current
+labelling page, grown up. Identical on phone and desktop. <strong>B</strong>: list on the left, the selected paper
+on the right, so the abstract and both opinions are always visible while scanning. On a phone it becomes two screens.
+<strong>C</strong>: a document; every item that needs a decision is fully expanded already, with its decision row
+underneath, because there are only a few of them. Nothing to click to see the reasons.</p>
+
+<h3>4. How is a split shown and settled?</h3>
+<p>The reconciliation rule (the more inclusive grade stands, marked split) is fixed by the spec. The design question
+is presentation. All three sketches put the two opinions side by side, each with its model's name and grade, and make
+the owner's label the thing that settles it. In A and C the label row sits directly under the two reasons so the
+choice reads as "who was right"; in B it is in the detail pane's header. A split does not get a separate screen.</p>
+
+<h3>5. The phone</h3>
+<p>What must work well on a phone: the home screen, the paper page, reporting a miss (share target). What must be
+usable but may be plain: search, labelling from search. Desktop only: the topic editor, Quality, System.
+Sketch B's three panes are the only structure that needs a second layout for phones; A and C are one layout.</p>
+
+<h3>6. The paper page</h3>
+<p>A full page with its own URL in all three sketches, not a drawer. It is where a miss trace, the deep card, the
+BibTeX and the history of verdicts across paper revisions and topic versions live, and it has to be linkable from a
+Notion export or a chat. In B the same component is the right-hand pane; opening it in full is the same URL.</p>
+
+<h3>7. Look</h3>
+<p>Three looks are shown, one per sketch, and are separable from structure. A: cool off-white paper, serif titles,
+a dark green primary carried over from the plan document. B: cool grey workspace, white panes, all sans, blue
+primary, thirteen-point type. C: white page, serif prose, the date as the only large thing. Dark mode follows the
+system in all three through the same tokens.</p>
+
+<h3>8. Topic editor and preview</h3>
+<p>Not contested; one proposal in "Other screens". The one decision inside it: preview cost is shown before the run,
+not after, and the preview's result is the four recalls over labelled papers next to the current version's numbers.</p>
+
+<h3>9. Search</h3>
+<p>One box, filter chips for topic, grade, year and source, results as a list; a result only the archive holds is
+marked "outside the collection" with one action. Not contested; B's list and detail is the natural desktop layout
+for it whichever sketch wins the home screen.</p>
+</section>
+
+<!-- ======================================================================= SKETCH A -->
+<section id="tab-a" hidden>
+<style>
+  .ska { --background: #f3f4f1; --foreground: #1b1c1a; --muted: #e7e8e3; --muted-foreground: #6a6c68; --border: #d8dad3;
+         --primary: #2f5d50; --primary-foreground: #fff; --g-must: #1b1c1a; --g-rel: #2e7d4f; --g-adj: #6b7a88; --g-none: #c9c7c0; --attn: #b7791f;
+         background: var(--background); color: var(--foreground); font: 14px/1.5 var(--font-sans); }
+  .ska .nav { display: flex; align-items: center; gap: 22px; padding: 12px 22px; border-bottom: 1px solid var(--border); background: var(--background); }
+  .ska .nav .brand { font-family: var(--font-serif); font-size: 17px; font-weight: 600; margin-right: 8px; }
+  .ska .nav a { color: var(--muted-foreground); } .ska .nav a.on { color: var(--foreground); box-shadow: inset 0 -2px 0 var(--primary); padding-bottom: 2px; }
+  .ska .nav a.on b, .ska .nav a b { font-weight: 500; color: var(--foreground); margin-left: 4px; }
+  .ska .nav .miss { margin-left: auto; border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; background: #fff; }
+  .ska main { max-width: 760px; margin: 0 auto; padding: 22px 20px 48px; }
+  .ska h1 { font-family: var(--font-serif); font-size: 26px; font-weight: 600; margin: 0 0 2px; letter-spacing: -.01em; }
+  .ska .sub { color: var(--muted-foreground); margin: 0 0 14px; }
+  .ska .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .ska .chips span { border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; background: #fff; color: var(--muted-foreground); }
+  .ska .chips span.on { background: var(--foreground); color: #fff; border-color: var(--foreground); }
+  .ska .group { color: var(--muted-foreground); font-size: 12.5px; margin: 18px 0 6px; }
+  .ska .item { background: #fff; border: 1px solid var(--border); border-left: 4px solid var(--g, var(--border)); border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+  .ska .item.must { --g: var(--g-must); } .ska .item.rel { --g: var(--g-rel); } .ska .item.adj { --g: var(--g-adj); } .ska .item.attn { --g: var(--attn); }
+  .ska .item.open { border-color: var(--foreground); border-left-color: var(--g); }
+  .ska .t { font-family: var(--font-serif); font-size: 17px; line-height: 1.3; margin: 0; }
+  .ska .m { color: var(--muted-foreground); font-size: 12.5px; margin: 4px 0 0; display: flex; gap: 12px; flex-wrap: wrap; }
+  .ska .m .grade { color: var(--g); font-weight: 600; } .ska .m .split { color: var(--attn); font-weight: 600; }
+  .ska .abs { font-size: 14px; color: #333; margin: 12px 0 10px; }
+  .ska .why { font-size: 12.5px; color: var(--muted-foreground); margin: 0 0 12px; }
+  .ska .ops { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .ska .op { border-top: 2px solid var(--og, var(--border)); padding-top: 6px; font-size: 13px; }
+  .ska .op.adj { --og: var(--g-adj); } .ska .op.must { --og: var(--g-must); } .ska .op.rel { --og: var(--g-rel); }
+  .ska .op b { display: block; font-weight: 600; color: var(--og); } .ska .op small { color: var(--muted-foreground); display: block; margin-bottom: 3px; }
+  .ska .lab { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .ska .lab button { font: inherit; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 6px 11px; cursor: pointer; }
+  .ska .lab button.pri { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .ska .lab kbd { margin-left: 6px; color: var(--muted-foreground); } .ska .lab .o { margin-left: auto; color: var(--muted-foreground); font-size: 12.5px; }
+  .ska .fold { color: var(--muted-foreground); font-size: 13px; padding: 10px 2px; }
+  .ska .fold a { text-decoration: underline; }
+  .ska .done { margin-top: 26px; text-align: center; color: var(--muted-foreground); font-family: var(--font-serif); font-style: italic; }
+  /* paper page */
+  .ska .paper h1 { font-size: 24px; }
+  .ska .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 18px; }
+  .ska .actions a { border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 5px 11px; font-size: 13px; }
+  .ska .actions a.pri { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .ska h2 { font-family: var(--font-serif); font-size: 17px; margin: 22px 0 8px; }
+  .ska .vt { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+  .ska .vt .hd { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 8px; }
+  .ska .vt .hd b { font-size: 15px; } .ska .vt .hd .grade { font-weight: 600; } .ska .vt .hd small { color: var(--muted-foreground); }
+  .ska .hist { font-size: 12.5px; color: var(--muted-foreground); margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+  .ska .pub { font-size: 13.5px; } .ska .pub code { font-size: 12px; }
+  /* phone */
+  .ska.ph { font-size: 15px; }
+  .ska.ph .nav { padding: 10px 14px; gap: 14px; } .ska.ph .nav a:not(.on):not(.miss) { display: none; } .ska.ph .nav .miss { font-size: 13px; }
+  .ska.ph main { padding: 14px 12px 90px; } .ska.ph h1 { font-size: 22px; }
+  .ska.ph .ops { grid-template-columns: 1fr; gap: 8px; }
+  .ska.ph .foot { position: sticky; bottom: 0; background: var(--background); border-top: 1px solid var(--border); padding: 10px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .ska.ph .foot button { font: inherit; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+  .ska.ph .foot button.pri { background: var(--primary); color: #fff; border-color: var(--primary); }
+</style>
+
+<div class="sketch-head">
+  <div>
+    <h2>Sketch A: Ledger</h2>
+    <p class="muted">One column that is the same on every screen size. The Inbox is a list of papers; one is open at a time,
+    the keyboard walks down it. It is the current labelling page with the rest of the app around it, and nothing to learn
+    twice. Titles in serif, interface in sans, off-white paper.</p>
+  </div>
+  <dl>
+    <dt>Home</dt><dd>Inbox, filtered to what needs you</dd>
+    <dt>Navigation</dt><dd>Inbox, Briefings, Search, Topics, Quality, System; Report a miss as a button</dd>
+    <dt>Primary action</dt><dd>Label the open item; <kbd>j</kbd> to the next</dd>
+    <dt>Phone</dt><dd>Same column; label buttons pinned at the bottom</dd>
+    <dt>Weakness</dt><dd>Scanning twenty adjacent titles means twenty expansions; no view of two papers at once</dd>
+  </dl>
+</div>
+
+<p class="frame-label">Desktop, Inbox, the morning of Wednesday 8 October</p>
+<div class="frame ska">
+  <nav class="nav"><span class="brand">litwatch</span>
+    <a class="on" href="#">Inbox <b>5</b></a><a href="#">Briefings</a><a href="#">Search</a><a href="#">Topics</a><a href="#">Quality</a><a href="#">System</a>
+    <a class="miss" href="#">Report a miss</a></nav>
+  <main>
+    <h1>Inbox</h1>
+    <p class="sub">Last night's run read 530 papers and graded 47 for two topics. 5 need you.</p>
+    <div class="chips"><span class="on">Needs you</span><span>Relevant and above</span><span>Everything graded</span><span style="margin-left:auto">Both topics</span></div>
+
+    <div class="group">Must read, 2</div>
+    <article class="item must">
+      <h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3>
+      <p class="m"><span class="grade">must read</span><span>CoT monitoring</span><span>Wang, Jia, Ou and 6 more</span><span>30 Sep 2026</span><span>2609.39533</span></p>
+    </article>
+    <article class="item must open">
+      <h3 class="t">Towards Mitigating Deceptive Safety Alignment in Large Reasoning Models</h3>
+      <p class="m"><span class="grade">must read</span><span class="split">split</span><span>CoT monitoring</span><span>Zhou, Zare Zade, Ibn Sultan, Kotov, Zhu</span><span>28 Sep 2026</span><span>2609.36254</span></p>
+      <p class="abs">Large Reasoning Models (LRMs) are commonly trained with reinforcement learning (RL) to improve their generation of chain-of-thought (CoT) reasoning before producing final answers. However, RL rewards are typically assigned based on final answers, providing little or no direct supervision over intermediate reasoning. This can lead to deceptive safety alignment, where the reasoning trace and final answer convey inconsistent safety signals. To systematically investigate this phenomenon, we introduce DSAR (Deceptive Safety Alignment Rate), a metric that jointly assesses reasoning traces and final answers to quantify their safety inconsistency…</p>
+      <p class="why">Candidate because triage said it concerns whether reasoning traces reveal harmful intent early. No keyword matched. Judged under CoT monitoring revision 1.</p>
+      <div class="ops">
+        <div class="op adj"><small>Opus 5.5, judge</small><b>adjacent</b>Measures safety inconsistency between reasoning traces and final answers (the DSAR metric) and trains reasoning–answer consistency. This touches trace-based safety assessment, but it is mainly a safety-alignment training method rather than a monitor for detecting misbehavior or a study of monitorability.</div>
+        <div class="op must"><small>Muse Spark, check</small><b>must read</b>Introduces DSAR to jointly assess reasoning traces and final answers for deceptive safety inconsistency across multiple LRMs and shows final-answer RL causes it, matching the training-pressure-erodes-monitorability rubric.</div>
+      </div>
+      <div class="lab">
+        <button class="pri">Relevant<kbd>1</kbd></button><button>Adjacent<kbd>2</kbd></button><button>Not relevant<kbd>3</kbd></button><button>Unsure<kbd>4</kbd></button>
+        <span class="o">Open paper <kbd>o</kbd></span>
+      </div>
+    </article>
+
+    <div class="group">Relevant, 2</div>
+    <article class="item rel">
+      <h3 class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies</h3>
+      <p class="m"><span class="grade">relevant</span><span>CoT faithfulness</span><span>Mendi, Bent</span><span>21 Aug 2026</span><span>2608.20670</span></p>
+    </article>
+    <article class="item rel">
+      <h3 class="t">Beyond External Monitors: Enhancing Transparency of Large Language Models for Easier Monitoring</h3>
+      <p class="m"><span class="grade">relevant</span><span class="split">split</span><span>CoT monitoring</span><span>Chen, Shao, Luo and 3 more</span><span>7 Feb 2025, revised</span><span>2502.05242</span></p>
+    </article>
+
+    <div class="group">Could not be graded, 1</div>
+    <article class="item attn">
+      <h3 class="t">Where Did the Repair First Go Wrong? Localizing the Origins of Silent Failures in Agentic Vulnerability Repair</h3>
+      <p class="m"><span class="grade">ungraded after 3 runs</span><span>CoT faithfulness</span><span>Bai, Waseem, Rasheed, Peltonen, Abrahamsson</span><span>5 Oct 2026</span><span>2610.06163</span></p>
+    </article>
+
+    <div class="fold">Also graded: <a href="#">7 adjacent</a> for CoT faithfulness, <a href="#">4 adjacent</a> for CoT monitoring. 33 papers graded none are in search.</div>
+    <p class="done">Nothing else needs you.</p>
+  </main>
+</div>
+
+<div class="pair" style="margin-top:22px">
+  <div>
+    <p class="frame-label">Desktop, a paper page</p>
+    <div class="frame ska">
+      <nav class="nav"><span class="brand">litwatch</span><a href="#">Inbox <b>5</b></a><a href="#">Briefings</a><a href="#">Search</a><a href="#">Topics</a><a href="#">Quality</a><a href="#">System</a><a class="miss" href="#">Report a miss</a></nav>
+      <main class="paper">
+        <h1>CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h1>
+        <p class="sub">Shouli Wang, Yanfeng Jia, Zhihao Ou, Zitao Su, Ruize He, Haotong Xie, Hao Peng, Juanzi Li, Xiaozhi Wang. arXiv 2609.39533, version 3, 30 September 2026. cs.CL, cs.LG. Saved.</p>
+        <div class="actions"><a class="pri" href="#">Open on arXiv</a><a href="#">PDF</a><a href="#">BibTeX</a><a href="#">Request a deep card</a><a href="#">Unsave</a></div>
+        <p class="abs">During reinforcement learning with verifiable rewards (RLVR), large language models (LLMs) can exploit loopholes in their environments to obtain high rewards without improving the intended capabilities, i.e., reward hacking. Despite its risks to training efficiency and safety, monitoring and mitigating reward hacking during training remain challenging, which is limited by a lack of testbeds that reproduce hacking and reliably identify it. We introduce CATCH, a controllable testbed for studying reward hacking in coding RL. CATCH deliberately exposes environmental loopholes and provides execution-based gold labels by comparing success under a vulnerable evaluator with task correctness under an independent audit…</p>
+        <h2>Verdicts</h2>
+        <div class="vt">
+          <div class="hd"><b>CoT monitoring</b><span class="grade" style="color:var(--g-must)">must read</span><small>both models agree. Your label: none yet.</small></div>
+          <p class="why">Candidate by triage ("a chain-of-thought monitor that suppresses hacking early but erodes as the policy learns to mislead it") and by the keyword <code>chain.of.thought monitor</code>. Topic revision 1, paper revision 1.</p>
+          <div class="ops">
+            <div class="op must"><small>Opus 5.5, judge</small><b>must read</b>Testbed evaluating reward-hacking detection that finds a CoT monitor's protection erodes under training as the policy learns to mislead it, a direct study of monitorability erosion and evasion, though confined to the coding-RL domain.</div>
+            <div class="op must"><small>Muse Spark, check</small><b>must read</b>The paper evaluates a chain-of-thought monitor for reward hacking and finds its protection erodes during RL as the policy learns to mislead the monitor with code comments.</div>
+          </div>
+          <div class="lab"><button>Relevant<kbd>1</kbd></button><button>Adjacent<kbd>2</kbd></button><button>Not relevant<kbd>3</kbd></button><button>Unsure<kbd>4</kbd></button></div>
+          <p class="hist">History: graded 8 Oct 2026 on paper revision 1 (arXiv v3). No earlier grading.</p>
+        </div>
+        <div class="vt">
+          <div class="hd"><b>CoT faithfulness</b><span class="grade" style="color:var(--g-none)">not a candidate</span><small>triage: "a reward-hacking testbed; it does not test whether traces match computation". No keyword matched.</small></div>
+          <div class="lab"><button>Grade it anyway</button><button>Label relevant</button></div>
+        </div>
+        <h2>Published version</h2>
+        <p class="pub">None found yet. Looked up 8 Oct 2026 on DBLP; checked again monthly. <a href="#" style="text-decoration:underline">Enter one by hand</a>.</p>
+      </main>
+    </div>
+  </div>
+  <div>
+    <p class="frame-label">Phone, the same Inbox</p>
+    <div class="phone ska ph">
+      <nav class="nav"><span class="brand">litwatch</span><a class="on" href="#">Inbox <b>5</b></a><a class="miss" href="#">Report a miss</a></nav>
+      <main>
+        <h1>Inbox</h1>
+        <p class="sub">530 papers read, 47 graded. 5 need you.</p>
+        <div class="chips"><span class="on">Needs you</span><span>Relevant+</span><span>All graded</span></div>
+        <div class="group">Must read, 2</div>
+        <article class="item must"><h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3><p class="m"><span class="grade">must read</span><span>CoT monitoring</span></p></article>
+        <article class="item must open">
+          <h3 class="t">Towards Mitigating Deceptive Safety Alignment in Large Reasoning Models</h3>
+          <p class="m"><span class="grade">must read</span><span class="split">split</span><span>CoT monitoring</span></p>
+          <p class="abs">Large Reasoning Models are commonly trained with RL to improve their chain-of-thought before producing final answers. However, RL rewards are typically assigned on final answers… This can lead to deceptive safety alignment, where the reasoning trace and final answer convey inconsistent safety signals. We introduce DSAR…</p>
+          <div class="ops">
+            <div class="op adj"><small>Opus 5.5, judge</small><b>adjacent</b>Mainly a safety-alignment training method rather than a monitor for detecting misbehavior or a study of monitorability.</div>
+            <div class="op must"><small>Muse Spark, check</small><b>must read</b>Shows final-answer RL causes trace–answer inconsistency, matching the training-pressure-erodes-monitorability rubric.</div>
+          </div>
+        </article>
+        <div class="group">Relevant, 2</div>
+        <article class="item rel"><h3 class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies</h3><p class="m"><span class="grade">relevant</span><span>CoT faithfulness</span></p></article>
+      </main>
+      <div class="foot"><button class="pri">Relevant</button><button>Adjacent</button><button>Not relevant</button><button>Unsure</button></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ======================================================================= SKETCH B -->
+<section id="tab-b" hidden>
+<style>
+  .skb { --background: #eef0f3; --foreground: #1a1d21; --muted: #e3e6ea; --muted-foreground: #667080; --border: #d5d9df;
+         --primary: #2d5fb3; --primary-foreground: #fff; --g-must: #1a1d21; --g-rel: #2e7d4f; --g-adj: #6b7a88; --g-none: #c9c7c0; --attn: #b7791f;
+         background: var(--background); color: var(--foreground); font: 13px/1.45 var(--font-sans); display: grid; grid-template-columns: 168px minmax(0, 1.05fr) minmax(0, 1.5fr); min-height: 560px; }
+  .skb .rail { border-right: 1px solid var(--border); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .skb .rail .brand { font-weight: 700; font-size: 15px; padding: 2px 8px 12px; }
+  .skb .rail a { display: flex; justify-content: space-between; padding: 6px 8px; border-radius: 6px; color: var(--muted-foreground); }
+  .skb .rail a.on { background: #fff; color: var(--foreground); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+  .skb .rail a b { font-weight: 600; color: var(--primary); }
+  .skb .rail .miss { margin-top: auto; background: var(--primary); color: #fff; justify-content: center; }
+  .skb .list { border-right: 1px solid var(--border); background: #fff; display: flex; flex-direction: column; }
+  .skb .lh { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .skb .lh b { font-size: 14px; } .skb .lh .f { color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; font-size: 12px; }
+  .skb .lh .f.on { color: var(--foreground); background: var(--muted); }
+  .skb .sec { padding: 8px 12px 3px; font-size: 12px; color: var(--muted-foreground); font-weight: 600; }
+  .skb .row { display: grid; grid-template-columns: 14px 1fr; gap: 8px; padding: 7px 12px; border-bottom: 1px solid #eef0f3; cursor: pointer; }
+  .skb .row.sel { background: #e8eef9; box-shadow: inset 3px 0 0 var(--primary); }
+  .skb .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; background: var(--d, var(--g-none)); position: relative; }
+  .skb .dot.split::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--attn); }
+  .skb .row.must .dot { --d: var(--g-must); } .skb .row.rel .dot { --d: var(--g-rel); } .skb .row.adj .dot { --d: var(--g-adj); } .skb .row.attn .dot { --d: var(--attn); }
+  .skb .row .t { font-weight: 500; line-height: 1.3; } .skb .row .m { color: var(--muted-foreground); font-size: 11.5px; margin-top: 2px; }
+  .skb .row.adj .t { color: #444; font-weight: 400; }
+  .skb .detail { padding: 16px 20px 24px; overflow: hidden; }
+  .skb .dh { display: flex; gap: 8px; align-items: flex-start; }
+  .skb .detail h1 { font-size: 17px; line-height: 1.3; margin: 0 0 4px; font-weight: 600; }
+  .skb .meta { color: var(--muted-foreground); font-size: 12px; margin: 0 0 10px; }
+  .skb .verdict { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px; background: #fff; border: 1px solid var(--border); border-radius: 7px; margin-bottom: 10px; }
+  .skb .verdict .g { font-weight: 700; } .skb .verdict .s { color: var(--attn); font-weight: 600; }
+  .skb .verdict .lab { margin-left: auto; display: flex; gap: 4px; }
+  .skb .verdict .lab button { font: inherit; font-size: 12px; background: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; cursor: pointer; }
+  .skb .verdict .lab button.pri { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .skb .tabs2 { display: flex; gap: 14px; border-bottom: 1px solid var(--border); margin: 6px 0 10px; font-size: 12.5px; color: var(--muted-foreground); }
+  .skb .tabs2 span.on { color: var(--foreground); font-weight: 600; box-shadow: inset 0 -2px 0 var(--primary); padding-bottom: 4px; }
+  .skb .ops { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0; }
+  .skb .op { background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; font-size: 12.5px; }
+  .skb .op small { color: var(--muted-foreground); display: block; } .skb .op b { display: block; margin-bottom: 2px; }
+  .skb .op.adj b { color: var(--g-adj); } .skb .op.must b { color: var(--g-must); }
+  .skb .abs { font-size: 12.5px; color: #333; margin: 8px 0; }
+  .skb .kv { font-size: 12px; color: var(--muted-foreground); margin: 4px 0; }
+  .skb .acts { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
+  .skb .acts a { border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 4px 9px; font-size: 12px; }
+  /* phone: list screen and detail screen */
+  .skb.ph { display: block; font-size: 14px; min-height: 0; }
+  .skb.ph .top { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: #fff; border-bottom: 1px solid var(--border); }
+  .skb.ph .top b { font-size: 16px; } .skb.ph .top a { color: var(--primary); font-weight: 600; }
+  .skb.ph .list { border-right: 0; } .skb.ph .row { padding: 10px 14px; } .skb.ph .row .m { font-size: 12px; }
+  .skb.ph .bottom { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--border); background: #fff; padding: 8px 0 10px; font-size: 11px; text-align: center; color: var(--muted-foreground); }
+  .skb.ph .bottom span.on { color: var(--primary); font-weight: 600; }
+  @media (max-width: 900px) {
+    .skb { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
+    .skb .rail { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px 10px; }
+    .skb .rail .brand { padding: 4px 8px; } .skb .rail .miss { margin-top: 0; margin-left: auto; }
+  }
+</style>
+
+<div class="sketch-head">
+  <div>
+    <h2>Sketch B: Desk</h2>
+    <p class="muted">Three panes: a rail of pages, the list, and the selected paper. You scan the list with the arrow keys
+    while the abstract and both opinions stay in view, and label from the detail header. Search and the Library are the
+    same list-and-detail with other filters. Dense, all sans, an instrument you sit at.</p>
+  </div>
+  <dl>
+    <dt>Home</dt><dd>Inbox, with the first item selected</dd>
+    <dt>Navigation</dt><dd>Left rail: Inbox, Library, Search, Briefings, Topics, Quality, System; Report a miss at the bottom</dd>
+    <dt>Primary action</dt><dd>Label the selected paper; <kbd>↓</kbd> to the next</dd>
+    <dt>Phone</dt><dd>Two screens: the list, then the paper; a tab bar</dd>
+    <dt>Weakness</dt><dd>The structure is built for volume litwatch does not have; two layouts to maintain; the phone version is an afterthought by construction</dd>
+  </dl>
+</div>
+
+<p class="frame-label">Desktop, Inbox with a split selected</p>
+<div class="frame skb">
+  <nav class="rail"><div class="brand">litwatch</div>
+    <a class="on" href="#">Inbox <b>5</b></a><a href="#">Library</a><a href="#">Search</a><a href="#">Briefings</a><a href="#">Topics</a><a href="#">Quality</a><a href="#">System</a>
+    <a class="miss" href="#">Report a miss</a></nav>
+  <div class="list">
+    <div class="lh"><b>Inbox</b><span class="f on">Needs you</span><span class="f">Relevant+</span><span class="f">All</span><span class="f" style="margin-left:auto">Both topics</span></div>
+    <div class="sec">Needs a decision, 3</div>
+    <div class="row must sel"><i class="dot split"></i><div><div class="t">Towards Mitigating Deceptive Safety Alignment in Large Reasoning Models</div><div class="m">must read, split. CoT monitoring. 28 Sep</div></div></div>
+    <div class="row rel"><i class="dot split"></i><div><div class="t">Beyond External Monitors: Enhancing Transparency of Large Language Models for Easier Monitoring</div><div class="m">relevant, split. CoT monitoring. revised</div></div></div>
+    <div class="row attn"><i class="dot"></i><div><div class="t">Where Did the Repair First Go Wrong? Localizing the Origins of Silent Failures in Agentic Vulnerability Repair</div><div class="m">ungraded after 3 runs. CoT faithfulness. 5 Oct</div></div></div>
+    <div class="sec">New, agreed, 2</div>
+    <div class="row must"><i class="dot"></i><div><div class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</div><div class="m">must read. CoT monitoring. 30 Sep</div></div></div>
+    <div class="row rel"><i class="dot"></i><div><div class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies</div><div class="m">relevant. CoT faithfulness. 21 Aug</div></div></div>
+    <div class="sec">Adjacent, 11</div>
+    <div class="row adj"><i class="dot"></i><div><div class="t">Frozen Judges, Moving Agents: Version-Dependent LLM-Judge Error and the Limits of Judge-Assisted Agent Evaluation</div><div class="m">adjacent, split. CoT monitoring</div></div></div>
+    <div class="row adj"><i class="dot"></i><div><div class="t">Beyond Accuracy: How Procedural Traces Shift the Decision Criterion of LLM Overseers</div><div class="m">adjacent, split. CoT faithfulness</div></div></div>
+    <div class="row adj"><i class="dot"></i><div><div class="t">Every Token Leaves a Ripple in the Stream of Thought: Eliciting Model-Internal Token Saliency for Chain-of-Thought Compression</div><div class="m">adjacent, split. CoT monitoring</div></div></div>
+    <div class="row adj"><i class="dot"></i><div><div class="t">Do Reasoning Representations Help Humans Evaluate LLM Outputs?</div><div class="m">adjacent, split. CoT faithfulness</div></div></div>
+    <div class="row adj"><i class="dot"></i><div><div class="t">Enhancing Assessment of Self-Consistency in LLM Explanations using Perturbation Strength</div><div class="m">adjacent. CoT monitoring</div></div></div>
+  </div>
+  <div class="detail">
+    <h1>Towards Mitigating Deceptive Safety Alignment in Large Reasoning Models</h1>
+    <p class="meta">Xiangyu Zhou, Saleh Zare Zade, Rafi Ibn Sultan, Alexander Kotov, Dongxiao Zhu. arXiv 2609.36254 v1, 28 Sep 2026, cs.AI.</p>
+    <div class="verdict"><span>CoT monitoring</span><span class="g">must read</span><span class="s">split</span><span class="kv">judge adjacent, check must read</span>
+      <span class="lab"><button class="pri">Relevant</button><button>Adjacent</button><button>Not relevant</button><button>Unsure</button></span></div>
+    <div class="tabs2"><span class="on">Opinions</span><span>Abstract</span><span>History</span><span>BibTeX</span></div>
+    <div class="ops">
+      <div class="op adj"><small>Opus 5.5, judge</small><b>adjacent</b>Measures safety inconsistency between reasoning traces and final answers (the DSAR metric) and trains reasoning–answer consistency. This touches trace-based safety assessment, but it is mainly a safety-alignment training method rather than a monitor for detecting misbehavior or a study of monitorability.</div>
+      <div class="op must"><small>Muse Spark, check</small><b>must read</b>Introduces DSAR to jointly assess reasoning traces and final answers for deceptive safety inconsistency across multiple LRMs and shows final-answer RL causes it, matching the training-pressure-erodes-monitorability rubric.</div>
+    </div>
+    <p class="kv">Candidate by triage: "concerns whether reasoning traces reveal harmful intent early". No keyword. Topic revision 1, paper revision 1. Not a candidate for CoT faithfulness.</p>
+    <p class="abs">Large Reasoning Models (LRMs) are commonly trained with reinforcement learning (RL) to improve their generation of chain-of-thought (CoT) reasoning before producing final answers. However, RL rewards are typically assigned based on final answers, providing little or no direct supervision over intermediate reasoning. This can lead to deceptive safety alignment, where the reasoning trace and final answer convey inconsistent safety signals…</p>
+    <div class="acts"><a href="#">Open on arXiv</a><a href="#">PDF</a><a href="#">BibTeX</a><a href="#">Deep card</a><a href="#">Open as a page</a></div>
+  </div>
+</div>
+
+<div class="pair" style="margin-top:22px">
+  <div class="prose">
+    <p class="frame-label">What the other pages look like in this structure</p>
+    <ul class="small">
+      <li><strong>Search</strong>: the same three panes; the list header holds the query box and the chips (topic, grade, year, source). A result only the archive holds has a hollow dot and "outside the collection" in its meta line.</li>
+      <li><strong>Library</strong>: the list of saved papers with export (BibTeX for the selection, or all) in the list header.</li>
+      <li><strong>Paper page</strong>: the detail pane at full width, same component, own URL.</li>
+      <li><strong>Briefings, Topics, Quality, System</strong>: list on the left (days, topics, topics, runs), the selected thing on the right. The rail never changes, which is this sketch's whole argument: one way to move, everywhere.</li>
+    </ul>
+    <p class="small muted">On the phone the middle pane becomes the screen and the detail opens on top of it. The split's two
+    opinions stack. The bottom tab bar carries Inbox, Library, Search, Miss, More.</p>
+  </div>
+  <div>
+    <p class="frame-label">Phone, the list screen</p>
+    <div class="phone skb ph">
+      <div class="top"><b>Inbox</b><a href="#">Needs you</a></div>
+      <div class="list">
+        <div class="sec">Needs a decision, 3</div>
+        <div class="row must"><i class="dot split"></i><div><div class="t">Towards Mitigating Deceptive Safety Alignment in Large Reasoning Models</div><div class="m">must read, split. CoT monitoring</div></div></div>
+        <div class="row rel"><i class="dot split"></i><div><div class="t">Beyond External Monitors: Enhancing Transparency of Large Language Models for Easier Monitoring</div><div class="m">relevant, split. CoT monitoring</div></div></div>
+        <div class="row attn"><i class="dot"></i><div><div class="t">Where Did the Repair First Go Wrong? Localizing the Origins of Silent Failures in Agentic Vulnerability Repair</div><div class="m">ungraded after 3 runs. CoT faithfulness</div></div></div>
+        <div class="sec">New, agreed, 2</div>
+        <div class="row must"><i class="dot"></i><div><div class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</div><div class="m">must read. CoT monitoring</div></div></div>
+        <div class="row rel"><i class="dot"></i><div><div class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies</div><div class="m">relevant. CoT faithfulness</div></div></div>
+        <div class="sec">Adjacent, 11</div>
+        <div class="row adj"><i class="dot"></i><div><div class="t">Frozen Judges, Moving Agents: Version-Dependent LLM-Judge Error…</div><div class="m">adjacent, split. CoT monitoring</div></div></div>
+      </div>
+      <div class="bottom"><span class="on">Inbox</span><span>Library</span><span>Search</span><span>Miss</span><span>More</span></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ======================================================================= SKETCH C -->
+<section id="tab-c" hidden>
+<style>
+  .skc { --background: #ffffff; --foreground: #171717; --muted: #f2f2f0; --muted-foreground: #6b6b68; --border: #e2e2de;
+         --primary: #2f5d50; --primary-foreground: #fff; --g-must: #171717; --g-rel: #2e7d4f; --g-adj: #6b7a88; --g-none: #c9c7c0; --attn: #b7791f;
+         background: var(--background); color: var(--foreground); font: 15px/1.55 var(--font-sans); }
+  .skc .nav { display: flex; gap: 20px; align-items: baseline; padding: 14px 28px; font-size: 13.5px; color: var(--muted-foreground); border-bottom: 1px solid var(--border); }
+  .skc .nav .brand { font-family: var(--font-serif); font-weight: 600; font-size: 16px; color: var(--foreground); margin-right: 6px; }
+  .skc .nav a.on { color: var(--foreground); font-weight: 600; }
+  .skc .nav .miss { margin-left: auto; color: var(--primary); font-weight: 600; }
+  .skc main { max-width: 720px; margin: 0 auto; padding: 34px 24px 56px; }
+  .skc .date { font-family: var(--font-serif); font-size: 38px; line-height: 1.1; font-weight: 600; letter-spacing: -.015em; margin: 0; }
+  .skc .lede { font-family: var(--font-serif); font-size: 18px; line-height: 1.45; color: #333; margin: 10px 0 0; }
+  .skc .pager { display: flex; justify-content: space-between; font-size: 13.5px; color: var(--muted-foreground); margin: 14px 0 28px; }
+  .skc h2 { font-family: var(--font-serif); font-size: 20px; font-weight: 600; margin: 30px 0 10px; display: flex; gap: 10px; align-items: baseline; }
+  .skc h2 small { font-family: var(--font-sans); font-size: 13px; color: var(--muted-foreground); font-weight: 400; }
+  .skc .entry { border-top: 1px solid var(--border); padding: 14px 0 12px; display: grid; grid-template-columns: 12px 1fr; gap: 14px; }
+  .skc .entry .mark { width: 10px; height: 10px; border-radius: 50%; background: var(--g, var(--g-none)); margin-top: 8px; }
+  .skc .entry.must { --g: var(--g-must); } .skc .entry.rel { --g: var(--g-rel); } .skc .entry.adj { --g: var(--g-adj); } .skc .entry.attn { --g: var(--attn); }
+  .skc .t { font-family: var(--font-serif); font-size: 19px; line-height: 1.3; margin: 0; font-weight: 600; }
+  .skc .m { color: var(--muted-foreground); font-size: 13px; margin: 3px 0 8px; }
+  .skc .m .split { color: var(--attn); font-weight: 600; }
+  .skc .ab { font-size: 14.5px; color: #333; margin: 0 0 10px; }
+  .skc .ops { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 0 0 10px; }
+  .skc .op { font-size: 13.5px; } .skc .op small { color: var(--muted-foreground); display: block; } .skc .op b { color: var(--og); }
+  .skc .op.adj { --og: var(--g-adj); } .skc .op.must { --og: var(--g-must); } .skc .op.rel { --og: var(--g-rel); }
+  .skc .why { font-size: 13px; color: var(--muted-foreground); margin: 0 0 10px; }
+  .skc .lab { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13.5px; }
+  .skc .lab button { font: inherit; font-size: 13.5px; background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 5px 13px; cursor: pointer; }
+  .skc .lab button.pri { background: var(--foreground); color: #fff; border-color: var(--foreground); }
+  .skc .lab .q { color: var(--muted-foreground); margin-right: 4px; }
+  .skc .lab .o { margin-left: auto; color: var(--muted-foreground); font-size: 13px; }
+  .skc .fold { border-top: 1px solid var(--border); padding: 12px 0 0; font-size: 14px; color: var(--muted-foreground); }
+  .skc .fold a { text-decoration: underline; color: var(--foreground); }
+  .skc .m4 { border: 1px dashed var(--border); border-radius: 8px; padding: 12px 16px; color: var(--muted-foreground); font-size: 14px; }
+  .skc .end { margin: 40px 0 0; text-align: center; font-family: var(--font-serif); font-style: italic; color: var(--muted-foreground); }
+  .skc .end button { font: inherit; font-style: normal; font-family: var(--font-sans); font-size: 13.5px; display: block; margin: 10px auto 0; background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; }
+  .skc.ph { font-size: 15px; } .skc.ph .nav { padding: 12px 16px; gap: 14px; } .skc.ph .nav a:not(.on):not(.miss) { display: none; }
+  .skc.ph main { padding: 22px 16px 40px; } .skc.ph .date { font-size: 30px; } .skc.ph .lede { font-size: 16px; }
+  .skc.ph .ops { grid-template-columns: 1fr; gap: 8px; } .skc.ph .t { font-size: 17px; } .skc.ph .lab button { min-height: 40px; }
+</style>
+
+<div class="sketch-head">
+  <div>
+    <h2>Sketch C: Day</h2>
+    <p class="muted">The night's run written up as a dated page. What needs you comes first and is already open, with its
+    decision row; what does not need you is counted and folded; the daily review of a Radar topic (M4) is a section of the
+    same page. There is no Inbox and no separate Briefings page: Today is both, and the week is the same page at a larger
+    grain. You read it top to bottom, once, and it ends by telling you so.</p>
+  </div>
+  <dl>
+    <dt>Home</dt><dd>Today</dd>
+    <dt>Navigation</dt><dd>Today, This week, Search, Topics, Quality, System; Report a miss</dd>
+    <dt>Primary action</dt><dd>Read down; decide the splits where they stand</dd>
+    <dt>Phone</dt><dd>The same page, one column</dd>
+    <dt>Weakness</dt><dd>After a week away there are seven pages; needs a "since you last read" roll-up. Departs from the spec's page list</dd>
+  </dl>
+</div>
+
+<p class="frame-label">Desktop, Today</p>
+<div class="frame skc">
+  <nav class="nav"><span class="brand">litwatch</span><a class="on" href="#">Today</a><a href="#">This week</a><a href="#">Search</a><a href="#">Topics</a><a href="#">Quality</a><a href="#">System</a><a class="miss" href="#">Report a miss</a></nav>
+  <main>
+    <h1 class="date">Wednesday 8 October</h1>
+    <p class="lede">530 new papers overnight, 47 graded for the two CoT topics. Two must-reads, two relevant, and two splits for you to settle. One paper could not be graded.</p>
+    <div class="pager"><span>← Tuesday 7 October</span><span>Finished 06:14, cost $0.47</span></div>
+
+    <h2>Must read <small>CoT monitoring</small></h2>
+    <div class="entry must"><i class="mark"></i><div>
+      <h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3>
+      <p class="m">Wang, Jia, Ou and 6 more. 30 September, arXiv 2609.39533. Both models: must read. Saved.</p>
+      <p class="ab">A testbed that exposes environmental loopholes in coding RL and labels hacking with an independent audit. Its chain-of-thought monitor suppresses hacking early, then erodes as the policy learns to mislead it with code comments.</p>
+      <div class="lab"><button class="pri">Keep as relevant</button><button>Adjacent</button><button>Not relevant</button><span class="o">Open paper</span></div>
+    </div></div>
+    <div class="entry must"><i class="mark"></i><div>
+      <h3 class="t">Towards Mitigating Deceptive Safety Alignment in Large Reasoning Models</h3>
+      <p class="m">Zhou, Zare Zade, Ibn Sultan, Kotov, Zhu. 28 September, arXiv 2609.36254. <span class="split">Split:</span> the check model says must read, the judge says adjacent.</p>
+      <p class="ab">Introduces DSAR, a metric that jointly assesses reasoning traces and final answers for safety inconsistency, finds it pervasive across LRMs and amplified under prefilling attacks, and trains for consistency.</p>
+      <div class="ops">
+        <div class="op adj"><small>Opus 5.5, judge</small><b>adjacent.</b> Mainly a safety-alignment training method rather than a monitor for detecting misbehavior or a study of monitorability.</div>
+        <div class="op must"><small>Muse Spark, check</small><b>must read.</b> Shows final-answer RL causes trace–answer inconsistency, matching the training-pressure-erodes-monitorability rubric.</div>
+      </div>
+      <div class="lab"><span class="q">Who is right?</span><button class="pri">Relevant</button><button>Adjacent</button><button>Not relevant</button><button>Unsure</button><span class="o">Open paper</span></div>
+    </div></div>
+
+    <h2>Relevant</h2>
+    <div class="entry rel"><i class="mark"></i><div>
+      <h3 class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies</h3>
+      <p class="m">Mendi, Bent. 21 August, arXiv 2608.20670. CoT faithfulness. Both models: relevant. Saved.</p>
+      <p class="ab">Tests whether exposed reasoning reflects the speak-or-stay-silent decision with activation probes and reasoning ablations on one model, and argues standard faithfulness methods overstate how far traces reflect the decision.</p>
+      <div class="lab"><button class="pri">Keep as relevant</button><button>Adjacent</button><button>Not relevant</button><span class="o">Open paper</span></div>
+    </div></div>
+    <div class="entry rel"><i class="mark"></i><div>
+      <h3 class="t">Beyond External Monitors: Enhancing Transparency of Large Language Models for Easier Monitoring</h3>
+      <p class="m">Chen, Shao, Luo and 3 more. Revised; first seen February 2025, arXiv 2502.05242. CoT monitoring. <span class="split">Split:</span> check relevant, judge adjacent.</p>
+      <div class="ops">
+        <div class="op adj"><small>Opus 5.5, judge</small><b>adjacent.</b> TELLME makes hidden representations easier to monitor and sets CoT aside as unfaithful rather than reading traces, so a neighbouring monitorability approach, not CoT monitoring.</div>
+        <div class="op rel"><small>Muse Spark, check</small><b>relevant.</b> Improves transparency to help monitors identify unsuitable behaviors, but demonstrated only on detoxification rather than general detection of misbehavior from traces.</div>
+      </div>
+      <div class="lab"><span class="q">Who is right?</span><button class="pri">Relevant</button><button>Adjacent</button><button>Not relevant</button><button>Unsure</button><span class="o">Open paper</span></div>
+    </div></div>
+
+    <h2>Could not be graded</h2>
+    <div class="entry attn"><i class="mark"></i><div>
+      <h3 class="t">Where Did the Repair First Go Wrong? Localizing the Origins of Silent Failures in Agentic Vulnerability Repair</h3>
+      <p class="m">Bai, Waseem, Rasheed, Peltonen, Abrahamsson. 5 October, arXiv 2610.06163. CoT faithfulness candidate by triage. The check model timed out on three runs.</p>
+      <div class="lab"><button>Grade it now</button><button>Relevant</button><button>Adjacent</button><button class="pri">Not relevant</button></div>
+    </div></div>
+
+    <h2>Also graded <small>nothing here needs you</small></h2>
+    <p class="fold"><a href="#">7 adjacent</a> for CoT faithfulness, among them <em>Beyond Accuracy: How Procedural Traces Shift the Decision Criterion of LLM Overseers</em> and <em>Do Reasoning Representations Help Humans Evaluate LLM Outputs?</em> <a href="#">4 adjacent</a> for CoT monitoring. 33 graded none.</p>
+
+    <h2>Interpretability <small>daily review, arrives with M4</small></h2>
+    <div class="m4">The day's review of a Radar topic with a daily cadence sits here: up to five picks with a sentence each, and a line on anything that stands out. On Mondays the weekly reviews of alignment and safety, agents, efficiency and reasoning follow, or live on "This week".</div>
+
+    <p class="end">That is everything from the night of 7 October.<button>Mark the day read</button></p>
+  </main>
+</div>
+
+<div class="pair" style="margin-top:22px">
+  <div class="prose">
+    <p class="frame-label">How the rest follows from this structure</p>
+    <ul class="small">
+      <li><strong>This week</strong> is the same page at week grain: the Watch recap (what was saved, what you overruled), then one review per weekly topic. It is the spec's weekly briefing with the labels on it.</li>
+      <li><strong>Days back</strong> are the pager at the top. After time away, Today opens as "Since Thursday" and merges the days, each section still grouped by grade; the per-day pages stay reachable.</li>
+      <li><strong>Paper</strong> is a full page in the same type: title, abstract, verdicts per topic with both opinions, history, label, links, BibTeX, publication record, deep card. The entries above are a condensed form of it.</li>
+      <li><strong>Search</strong> borrows B's list and detail on the desktop and is a plain list on the phone.</li>
+      <li><strong>Mark the day read</strong> is what clears the page; labels are optional on agreed verdicts and required by nothing, but the "Keep as relevant" button is one tap and feeds precision.</li>
+    </ul>
+  </div>
+  <div>
+    <p class="frame-label">Phone, Today</p>
+    <div class="phone skc ph">
+      <nav class="nav"><span class="brand">litwatch</span><a class="on" href="#">Today</a><a class="miss" href="#">Report a miss</a></nav>
+      <main>
+        <h1 class="date">Wednesday 8 October</h1>
+        <p class="lede">530 new papers, 47 graded. Two must-reads, two relevant, two splits to settle.</p>
+        <h2>Must read <small>CoT monitoring</small></h2>
+        <div class="entry must"><i class="mark"></i><div>
+          <h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3>
+          <p class="m">Wang, Jia, Ou and 6 more. Both models: must read. Saved.</p>
+          <div class="lab"><button class="pri">Keep</button><button>Adjacent</button><button>Not relevant</button></div>
+        </div></div>
+        <div class="entry must"><i class="mark"></i><div>
+          <h3 class="t">Towards Mitigating Deceptive Safety Alignment in Large Reasoning Models</h3>
+          <p class="m">Zhou, Zare Zade and 3 more. <span class="split">Split.</span></p>
+          <div class="ops">
+            <div class="op adj"><small>Opus 5.5, judge</small><b>adjacent.</b> Mainly a safety-alignment training method rather than a monitor or a study of monitorability.</div>
+            <div class="op must"><small>Muse Spark, check</small><b>must read.</b> Final-answer RL causes trace–answer inconsistency: training pressure erodes monitorability.</div>
+          </div>
+          <div class="lab"><button class="pri">Relevant</button><button>Adjacent</button><button>Not relevant</button><button>Unsure</button></div>
+        </div></div>
+      </main>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ======================================================================= OTHER SCREENS -->
+<section id="tab-other" hidden>
+<style>
+  .sko { --border: #d8dad3; --muted-foreground: #6a6c68; --primary: #2f5d50; --attn: #b7791f; --g-rel: #2e7d4f; --g-adj: #6b7a88;
+         background: #f3f4f1; color: #1b1c1a; font: 13.5px/1.5 var(--font-sans); padding: 22px 24px 28px; }
+  .sko h1 { font-family: var(--font-serif); font-size: 22px; margin: 0 0 14px; font-weight: 600; }
+  .sko .two { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+  @media (max-width: 800px) { .sko .two { grid-template-columns: 1fr; } }
+  .sko label { display: block; font-size: 12.5px; color: var(--muted-foreground); margin: 12px 0 3px; }
+  .sko .field { background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; font-size: 13.5px; }
+  .sko .field.ta { min-height: 72px; color: #333; }
+  .sko .kws { display: flex; gap: 5px; flex-wrap: wrap; }
+  .sko .kws span { font-family: var(--font-mono); font-size: 12px; background: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 1px 7px; }
+  .sko .kws span.hot { border-color: var(--attn); }
+  .sko .side { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .sko .side h2 { font-size: 15px; margin: 0 0 6px; }
+  .sko .side p { margin: 6px 0; }
+  .sko table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+  .sko th, .sko td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); } .sko td.n, .sko th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .sko .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .sko .btns button { font: inherit; background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+  .sko .btns button.pri { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .sko .reruns li { margin: 4px 0; } .sko .reruns small { color: var(--muted-foreground); }
+  /* miss trace */
+  .sko .trace { display: grid; grid-template-columns: 150px 1fr; gap: 0; border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden; }
+  .sko .trace > div { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .sko .trace > div:nth-child(odd) { font-weight: 600; background: #fafaf8; }
+  .sko .trace > div:nth-last-child(-n+2) { border-bottom: 0; }
+  .sko .trace small { color: var(--muted-foreground); display: block; }
+  .sko .trace b.adj { color: var(--g-adj); } .sko .trace b.none { color: #888; } .sko .trace b.no { color: var(--attn); }
+</style>
+
+<div class="prose">
+<h2>Screens that are not contested</h2>
+<p>One proposal each. They take the look of whichever sketch wins; here they are drawn in A's.</p>
+</div>
+
+<p class="frame-label">Topic editor with preview, CoT monitoring</p>
+<div class="frame sko">
+  <h1>CoT monitoring <span style="font-family:var(--font-sans);font-size:13px;color:var(--muted-foreground);font-weight:400">Watch topic, revision 2, active</span></h1>
+  <div class="two">
+    <div>
+      <label>Subject: what the triage model is told the topic is</label>
+      <div class="field ta">Reading a language model's reasoning trace (chain of thought, thinking tokens, scratchpad) for oversight: monitors that detect misbehavior such as reward hacking, sabotage, deception, sandbagging, unsafe intent, or evaluation awareness from the trace; monitorability, what erodes it, and the effect of training or optimization pressure on traces; evasion of monitors through hidden, encoded, or obfuscated reasoning; legibility of traces for humans or weaker models; and evaluations or benchmarks for any of these…</div>
+      <label>Rubric: what makes a paper must read, relevant, adjacent</label>
+      <div class="field ta">A method that reads a model's reasoning trace to detect misbehavior (reward hacking, sabotage, deception, sandbagging, unsafe intent, evaluation awareness), an evaluation of how well such monitors work or of what makes traces monitorable, a study of how training or optimization pressure erodes monitorability, or a demonstration of evasion. Must be intended to transfer across tasks and models. Single-domain audits, position papers, and legibility studies without a detection result are relevant. Papers on whether the trace matches the model's computation belong to CoT faithfulness and are adjacent here unless they also measure a monitor.</div>
+      <label>Keywords: regular expressions the audit runs when triage says no. Each shows how many stored papers it matches.</label>
+      <div class="kws"><span>chain.of.thought monitor <small>31</small></span><span>CoT monitor <small>27</small></span><span>monitorab <small>44</small></span><span>hidden reasoning <small>58</small></span><span>encoded reasoning <small>12</small></span><span>steganograph <small>19</small></span><span class="hot">reward hacking <small>212</small></span><span>sandbag <small>23</small></span><span>obfuscat <small>97</small></span><span>scheming <small>40</small></span><span>evaluation.aware <small>15</small></span><span style="border-style:dashed">add</span></div>
+      <div class="btns"><button class="pri">Save as revision 3</button><button>Discard changes</button><button>Export YAML</button><button>Pause topic</button></div>
+    </div>
+    <div class="side">
+      <h2>Preview the draft against your labels</h2>
+      <p class="muted" style="font-size:12.5px">Runs triage, the keyword audit and both graders over 97 labelled papers and 2 reported misses as a dry run. Nothing is saved or exported. Estimated cost $0.63, about four minutes.</p>
+      <div class="btns" style="margin-top:6px"><button class="pri">Run preview</button></div>
+      <table>
+        <tr><th>Over the 9 papers you labelled relevant</th><th class="n">Now</th><th class="n">Draft</th></tr>
+        <tr><td>Triage alone passed</td><td class="n">7</td><td class="n">8</td></tr>
+        <tr><td>Became a candidate (triage or keyword)</td><td class="n">9</td><td class="n">9</td></tr>
+        <tr><td>Graded relevant or above when forced</td><td class="n">9</td><td class="n">9</td></tr>
+        <tr><td>Found and graded relevant end to end</td><td class="n">9</td><td class="n">9</td></tr>
+        <tr><td>Precision at relevant, over the random candidate sample</td><td class="n">—</td><td class="n">—</td></tr>
+      </table>
+      <p class="muted" style="font-size:12.5px">The two misses: 2609.15517 still graded adjacent by both; 2512.01222 must read by both. Precision has no random candidate sample yet; it appears after the first weeks of Inbox labels.</p>
+      <h2 style="margin-top:16px">After saving, re-run over</h2>
+      <ul class="reruns" style="padding-left:18px;margin:4px 0">
+        <li>Your labels and misses <small>99 papers, about $0.63</small></li>
+        <li>This topic's existing candidates <small>84 papers, re-graded, about $0.45</small></li>
+        <li>Papers matching the keywords anywhere <small>578 papers, triaged then graded, about $1.90</small></li>
+        <li>A date range <small>pick dates to see the count</small></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<p class="frame-label" style="margin-top:26px">Report a miss: what each stage said</p>
+<div class="frame sko">
+  <h1 style="margin-bottom:4px">Beyond Safe Answers: Segment-Aware Listwise Alignment for Reasoning Safety in Large Reasoning Models</h1>
+  <p style="margin:0 0 14px;color:var(--muted-foreground)">Yun, Kwon, Ryu, Lim, Kwon, Kim. arXiv 2609.15517, 14 September 2026. Reported by you on 10 October from a shared link. Already in the collection since 15 September.</p>
+  <div class="two">
+    <div class="trace">
+      <div>Triage<small>Haiku 5.5</small></div><div><b class="no">unrelated</b> to both topics. "The paper addresses safety of reasoning traces and answers, not whether the trace faithfully reflects the computation performed."</div>
+      <div>Keyword audit</div><div>CoT faithfulness: <b>reasoning trace</b> matched, so it became a candidate there. CoT monitoring: no keyword matched.</div>
+      <div>Grading<small>as it happened</small></div><div>CoT faithfulness: <b class="adj">adjacent</b>, split (judge none, check adjacent). CoT monitoring: not graded, never a candidate.</div>
+      <div>Grading<small>forced, for this report</small></div><div>CoT monitoring: <b class="adj">adjacent</b>, both models. Judge: "aligns models to remove unsafe content in reasoning traces, which the topic excludes". Check: "out-of-scope unsafe-trace content rather than omission or commission."</div>
+      <div>What this says</div><div>Triage, the audit and both graders all read this paper the same way; if it is relevant, the rubric does not say so yet. Marking it below labels it relevant for that topic and adds it to the evaluation, so a rubric edit can be checked against it in the editor's preview.</div>
+    </div>
+    <div class="side">
+      <h2>Which topic did it belong to?</h2>
+      <div class="btns" style="margin-top:4px"><button class="pri">CoT monitoring</button><button>CoT faithfulness</button><button>Neither, dismiss</button></div>
+      <label>Note, optional</label>
+      <div class="field ta" style="min-height:52px;color:var(--muted-foreground)">Why it should have been found</div>
+      <p class="muted" style="font-size:12.5px;margin-top:14px">On a phone this page is what opens after sharing an arXiv link to litwatch. The trace fills in as the stages finish, about a minute.</p>
+    </div>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Quality and System, in words</h3>
+<p><strong>Quality</strong> is one table per Watch topic: the four recalls and precision as they stand, each a link to the
+papers behind the number, and a sparkline of each across evaluation runs. Below it, the open misses with their traces,
+and the unsure list as the material for rubric work. <strong>System</strong> is runs (a row per night with counts, cost,
+errors), cost by role and provider for the month, integrations with their last success and open failures, and the papers
+triage is stuck on with a dismiss button. Both are tables; neither needs a sketch to decide.</p>
+</div>
+</section>
+
+<!-- ======================================================================= RECOMMENDATION -->
+<section id="tab-rec" class="prose" hidden>
+<h2>Recommendation</h2>
+<div class="callout">Build <strong>C's structure</strong> with <strong>A's item anatomy</strong>, and use <strong>B's list and detail</strong>
+only where there is volume: Search and the Library on a desktop.</div>
+
+<h3>Why C for the home screen</h3>
+<ul>
+  <li>The real quantity is five to ten items a morning, two of them decisions. A queue (A) or a desk (B) is built for a backlog
+  that does not exist and makes the small quantity look like work. A page written for the day shows it as what it is: a short read
+  that ends.</li>
+  <li>Litwatch's promise is recall. C's last line, "that is everything from the night of 7 October", is that promise stated every
+  day. Neither Inbox sketch has a natural place to say it.</li>
+  <li>The split is the one decision only a person can make, and C puts the two sentences and the "who is right?" row in the
+  reading flow, not behind a selection or an expansion.</li>
+  <li>M4 lands for free. A daily review of interpretability is a section; the weekly reviews are "This week". There is no
+  separate Briefings page to design, and the spec's Inbox and Briefings become one surface over the same API resources
+  (<code>/inbox</code> and <code>/briefings</code> stay as they are).</li>
+  <li>One layout for phone and desktop. The phone is a first-class client here, and C does not need a second structure.</li>
+</ul>
+
+<h3>What is taken from the others</h3>
+<ul>
+  <li>From A: the item anatomy (serif title, meta line, the two opinions as two short columns, the label row with keys), the
+  keyboard set, the folded "also graded" line, and the paper page with verdict blocks per topic including "not a candidate"
+  with its triage sentence.</li>
+  <li>From B: list and detail for Search and the Library, where you do move through many rows and want the abstract
+  beside them; the grade dot with an amber ring for a split, which is the most compact mark of the three.</li>
+</ul>
+
+<h3>What is lost, and what to do about it</h3>
+<ul>
+  <li><strong>Time away.</strong> A dated page is wrong after a week offline. Today opens as "Since Thursday", merging the unread
+  days by grade, with the per-day pages behind the pager. "Mark read" applies to the merged page.</li>
+  <li><strong>Nothing to do with adjacent papers.</strong> They are folded. A person who wants to skim them opens the fold and gets
+  A's compact rows with label buttons. Labelling from there is evidence; the fold is also where the Inbox labels that
+  measure production precision would thin out, so Quality should say how many adjacent verdicts were ever looked at.</li>
+  <li><strong>The spec's page list changes.</strong> Inbox and Briefings become Today, This week and their history. Section 4.1's
+  table should be updated when this is decided; the API resource groups do not change.</li>
+</ul>
+
+<h3>Look</h3>
+<p>C's: white, serif for titles and the lede, system sans for everything that is interface, the plan document's dark green
+as the single primary, grades in the fixed semantic colours above. It is the quietest of the three and the one whose
+re-skin is least work. If you prefer A's warmer paper or B's density, both are a token file away and neither changes the
+structure.</p>
+
+<h3>What happens next, if you agree</h3>
+<ol>
+  <li>You mark up this page: pick a structure, a look, and answer decisions 2 and 5 (what is folded, what the phone must do).</li>
+  <li>I fold the decisions into <code>SPEC.md</code> section 4.1 and a short <code>docs/v1/DESIGN.md</code> (tokens, type scale, the
+  item anatomy, keyboard set), get one Astra review round on the pair, and open the PR into <code>v1</code>.</li>
+  <li>M3 proper begins: the API with generated client, then Today and the paper page first, since they are the M3 check.</li>
+</ol>
+</section>
+
+<div class="switcher" id="switcher" hidden>
+  <button id="prev" aria-label="Previous sketch">‹</button><span id="cur">A: Ledger</span><button id="next" aria-label="Next sketch">›</button>
+</div>
+
+<script>
+  const tabs = [...document.querySelectorAll('.tabs [role=tab]')];
+  const sketches = ['a', 'b', 'c'];
+  const names = { a: 'A: Ledger', b: 'B: Desk', c: 'C: Day' };
+  function show(key) {
+    tabs.forEach(t => t.setAttribute('aria-selected', t.dataset.tab === key));
+    document.querySelectorAll('section[id^=tab-]').forEach(s => s.hidden = s.id !== 'tab-' + key);
+    const i = sketches.indexOf(key);
+    document.getElementById('switcher').hidden = i < 0;
+    if (i >= 0) document.getElementById('cur').textContent = names[key];
+    if (location.hash !== '#' + key) history.replaceState(null, '', '#' + key);
+    window.scrollTo(0, 0);
+  }
+  function step(d) {
+    const key = tabs.find(t => t.getAttribute('aria-selected') === 'true').dataset.tab;
+    const i = sketches.indexOf(key);
+    if (i >= 0) show(sketches[(i + d + 3) % 3]);
+  }
+  tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab)));
+  document.getElementById('prev').addEventListener('click', () => step(-1));
+  document.getElementById('next').addEventListener('click', () => step(1));
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input, textarea, [contenteditable]')) return;
+    if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'ArrowRight') step(1);
+  });
+  function fromHash() {
+    const key = location.hash.slice(1);
+    show(tabs.some(t => t.dataset.tab === key) ? key : 'brief');
+  }
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+</script>
+</body>
+</html>
