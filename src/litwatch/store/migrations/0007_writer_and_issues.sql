@@ -47,6 +47,7 @@ CREATE TABLE issues (
     kind      text NOT NULL CHECK (kind IN ('daily', 'weekly')),
     day       date NOT NULL,
     lede      text,
+    lede_stale boolean NOT NULL DEFAULT false,    -- entries came after the lede was written
     folds     jsonb NOT NULL DEFAULT '{}',        -- topic slug -> adjacent arrivals
     built_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (kind, day)

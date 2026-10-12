@@ -191,6 +191,8 @@ async def add_entry(
         """,
         (issue_id, paper_id, topic, grade.value, take_id, issue_id),
     )
+    if cur.rowcount == 1:
+        await conn.execute("UPDATE issues SET lede_stale = true WHERE id = %s", (issue_id,))
     return cur.rowcount == 1
 
 
@@ -205,7 +207,21 @@ async def add_folds(conn: psycopg.AsyncConnection, issue_id: int, counts: dict[s
 
 
 async def set_lede(conn: psycopg.AsyncConnection, issue_id: int, lede: str) -> None:
-    await conn.execute("UPDATE issues SET lede = %s WHERE id = %s", (lede, issue_id))
+    await conn.execute(
+        "UPDATE issues SET lede = %s, lede_stale = false WHERE id = %s", (lede, issue_id)
+    )
+
+
+async def lede_owed(conn: psycopg.AsyncConnection, since: date) -> list[int]:
+    """Issues since `since` whose lede is missing or older than their entries."""
+    rows = await (
+        await conn.execute(
+            "SELECT id FROM issues i WHERE day >= %s AND (lede IS NULL OR lede_stale) "
+            "AND EXISTS (SELECT 1 FROM issue_entries e WHERE e.issue_id = i.id) ORDER BY day",
+            (since,),
+        )
+    ).fetchall()
+    return [r["id"] for r in rows]
 
 
 async def entries(conn: psycopg.AsyncConnection, issue_id: int) -> list[dict[str, Any]]:

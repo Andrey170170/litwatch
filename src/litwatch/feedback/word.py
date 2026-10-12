@@ -18,6 +18,7 @@ from litwatch.core import (
     Hand,
     Label,
     Reaction,
+    Take,
     Topic,
     TopicKind,
     current_verdict,
@@ -51,6 +52,29 @@ def _shown(grade: Grade | None) -> bool:
     return grade is not None and grade.at_least(Grade.RELEVANT)
 
 
+def fits(take: Take | None, grade: Grade, binding: tuple[int, int]) -> bool:
+    """Whether a take was written for this text and rubric (the binding) and this length."""
+    return take is not None and (
+        take.paper_revision,
+        take.topic_revision,
+        take.grade == Grade.MUST_READ,
+    ) == (*binding, grade == Grade.MUST_READ)
+
+
+async def wanted(
+    conn: psycopg.AsyncConnection, paper_id: str, topic: Topic
+) -> tuple[Grade, tuple[int, int]] | None:
+    """The grade and binding a take for the pair must have now, or None when the pair is not
+    shown. Read under the paper's lock to act on it."""
+    grade = (await word_store.effective_for(conn, paper_id)).get(topic.slug)
+    if topic.kind != TopicKind.WATCH or not _shown(grade):
+        return None
+    verdict = await verdicts_store.current(conn, paper_id, topic.slug)
+    if verdict:
+        return grade, (verdict.paper_revision, verdict.topic_revision)
+    return grade, (await papers_store.revision(conn, paper_id), topic.revision or 1)
+
+
 async def _owe(
     conn: psycopg.AsyncConnection,
     paper_id: str,
@@ -68,22 +92,14 @@ async def _owe(
     is counted in the next issue's fold line.
     """
     if _shown(new):
-        latest = await digest_store.latest_take(conn, paper_id, topic)
-        wanted = (*binding, new == Grade.MUST_READ)
-        stale = (
-            latest is None
-            or (
-                latest.paper_revision,
-                latest.topic_revision,
-                latest.grade == Grade.MUST_READ,
-            )
-            != wanted
-        )
+        stale = not fits(await digest_store.latest_take(conn, paper_id, topic), new, binding)
         crossed = (
             announce and not _shown(old) and not await digest_store.announced(conn, paper_id, topic)
         )
         if stale or crossed:
             await digest_store.mark_due(conn, paper_id, topic, take=stale, issue=crossed)
+        if not stale:  # back to what the newest take was written for: no rewrite owed
+            await digest_store.settle_due(conn, paper_id, topic, take=False)
         if not _shown(old):
             await digest_store.settle_due(conn, paper_id, topic, fold=False)
     elif new != old:

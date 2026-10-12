@@ -152,3 +152,18 @@ async def kinds_at(
     return {
         r["topic"]: TopicKind(r["kind"]) for r in rows if revisions[r["topic"]] == r["revision"]
     }
+
+
+async def at_revision(conn: psycopg.AsyncConnection, slug: str, revision: int) -> Topic | None:
+    """The topic as a model saw it at that revision: its content then, its name now."""
+    current = await get(conn, slug)
+    row = await (
+        await conn.execute(
+            "SELECT content FROM topic_versions WHERE topic = %s AND revision = %s",
+            (slug, revision),
+        )
+    ).fetchone()
+    if current is None or row is None:
+        return current
+    content = {k: v for k, v in row["content"].items() if k in Topic.model_fields}
+    return Topic.model_validate(current.model_dump() | content | {"revision": revision})

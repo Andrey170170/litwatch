@@ -6,13 +6,14 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import psycopg
 
 from litwatch import events
 from litwatch.config import Config
 from litwatch.core import Grade, Opinion, Paper, Take, TakeSource, Topic, TopicKind
+from litwatch.feedback import word
 from litwatch.jobs.context import ModelRun
 from litwatch.llm import CallError, Gateway
 from litwatch.review import writer
@@ -23,6 +24,9 @@ from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
 
 log = logging.getLogger(__name__)
+
+# A lede that failed is tried again on later builds for this many days.
+LEDE_RETRY_DAYS = 7
 
 
 @dataclass
@@ -54,9 +58,18 @@ async def _owed(conn: psycopg.AsyncConnection) -> list[Owed]:
             source, opinions = TakeSource.OWNER, []
             binding = (paper.revision, topic.revision or 1)
         else:
+            if verdict.paper_revision != paper.revision:
+                # Only the current text is stored; the take waits for the rewrite's re-grade,
+                # and after enough runs the pair enters its issue without one.
+                await digest_store.take_failed(
+                    conn, paper.id, topic.slug, "the text was rewritten; waiting for its re-grade"
+                )
+                continue
             source = TakeSource.MIGRATED if verdict.migrated else TakeSource.VERDICT
             opinions = [o for o in (verdict.judge, verdict.check) if o]
             binding = (verdict.paper_revision, verdict.topic_revision)
+            # The rubric the verdict was given under, which the take is bound to.
+            topic = await topics_store.at_revision(conn, topic.slug, verdict.topic_revision)
         owed.append(Owed(paper, topic, grade, source, opinions, binding))
     return owed
 
@@ -90,27 +103,37 @@ async def write_takes(conn: psycopg.AsyncConnection, config: Config, run: ModelR
         return
     log.info("run %s writer: %s takes", run.run_id, len(owed))
     async for item in _write_many(owed, run.gateway, config.limits.writing):
-        paper_id, slug = item.paper.id, item.topic.slug
-        if item.text is None:
-            await digest_store.take_failed(conn, paper_id, slug, item.error or "no text")
-            run.add("takes_failed")
-            continue
-        async with conn.transaction():
-            take = await digest_store.add_take(
-                conn,
-                Take(
-                    paper_id=paper_id,
-                    topic=slug,
-                    paper_revision=item.binding[0],
-                    topic_revision=item.binding[1],
-                    grade=item.grade,
-                    source=item.source,
-                    text=item.text,
-                ),
-            )
+        await _record(conn, item, run)
+
+
+async def _record(conn: psycopg.AsyncConnection, item: Owed, run: ModelRun) -> None:
+    """Store a written take, or count the failure. The take is kept whatever happened
+    meanwhile; the pair stops being owed one only if it still fits what the pair needs."""
+    paper_id, slug = item.paper.id, item.topic.slug
+    if item.text is None:
+        await digest_store.take_failed(conn, paper_id, slug, item.error or "no text")
+        run.add("takes_failed")
+        return
+    async with conn.transaction():
+        # Under the paper's lock: the pair may have moved while the model was writing.
+        await word.lock(conn, paper_id)
+        take = await digest_store.add_take(
+            conn,
+            Take(
+                paper_id=paper_id,
+                topic=slug,
+                paper_revision=item.binding[0],
+                topic_revision=item.binding[1],
+                grade=item.grade,
+                source=item.source,
+                text=item.text,
+            ),
+        )
+        now = await word.wanted(conn, paper_id, item.topic)
+        if now is None or word.fits(take, *now):
             await digest_store.settle_due(conn, paper_id, slug, take=False)
-            await events.emit(conn, events.TAKE_WRITTEN, paper_id, topic=slug, take_id=take.id)
-        run.add("takes")
+        await events.emit(conn, events.TAKE_WRITTEN, paper_id, topic=slug, take_id=take.id)
+    run.add("takes")
 
 
 async def build_daily(
@@ -120,34 +143,46 @@ async def build_daily(
     and write the lede. Running again the same day amends the issue and never repeats an
     entry. Returns the issue id, or None when the day has no issue."""
     day = day or config.schedule.today()
-    ready = await digest_store.due_for_issue(conn, config.limits.take_attempts)
+    attempts = config.limits.take_attempts
+    ready = await digest_store.due_for_issue(conn, attempts)
     folds = await digest_store.due_folds(conn)
     existing = await digest_store.issue(conn, "daily", day)
-    if not ready and existing is None:
-        return None  # adjacent arrivals alone make no issue; they wait for one
+    watched = {t.slug: t for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
+    added = 0
     async with conn.transaction():
-        issue = await digest_store.open_issue(conn, "daily", day)
-        added = 0
+        issue = existing  # opened with its first entry: adjacent arrivals alone make none
         for row in ready:
-            grade = (await word_store.effective_for(conn, row["paper_id"])).get(row["topic"])
-            if grade is None or not grade.at_least(Grade.RELEVANT):
-                await digest_store.clear_due(conn, row["paper_id"], row["topic"])
+            paper_id, slug = row["paper_id"], row["topic"]
+            # Read again under the paper's lock: the owner may have just rejected it.
+            await word.lock(conn, paper_id)
+            due = await digest_store.due_row(conn, paper_id, slug)
+            now = await word.wanted(conn, paper_id, watched[slug]) if slug in watched else None
+            if now is None:
+                await digest_store.clear_due(conn, paper_id, slug)
                 continue
-            take = await digest_store.latest_take(conn, row["paper_id"], row["topic"])
+            if not (due and due["for_issue"]):
+                continue
+            if due["for_take"] and due["failed_runs"] < attempts:
+                continue  # a take became due since; it waits for the next issue
+            take = await digest_store.latest_take(conn, paper_id, slug)
+            take_id = take.id if word.fits(take, *now) else None
+            issue = issue or await digest_store.open_issue(conn, "daily", day)
             added += await digest_store.add_entry(
-                conn, issue["id"], row["paper_id"], row["topic"], grade, take.id if take else None
+                conn, issue["id"], paper_id, slug, now[0], take_id
             )
-            await digest_store.settle_due(conn, row["paper_id"], row["topic"], issue=False)
+            await digest_store.settle_due(conn, paper_id, slug, issue=False)
         counts: dict[str, int] = {}
-        for row in folds:
+        for row in folds if issue else []:
             counts[row["topic"]] = counts.get(row["topic"], 0) + 1
             await digest_store.settle_due(conn, row["paper_id"], row["topic"], fold=False)
         if counts:
             await digest_store.add_folds(conn, issue["id"], counts)
     run.add("issue_entries", added)
-    if added or issue["lede"] is None:
-        await _write_lede(conn, run, issue["id"])
-    return issue["id"]
+    # Ledes missing or older than their entries, this issue's and any recent one's.
+    for issue_id in await digest_store.lede_owed(conn, day - timedelta(days=LEDE_RETRY_DAYS)):
+        await _write_lede(conn, run, issue_id)
+    found = await digest_store.issue(conn, "daily", day)
+    return found["id"] if found else None
 
 
 async def _write_lede(conn: psycopg.AsyncConnection, run: ModelRun, issue_id: int) -> None:
