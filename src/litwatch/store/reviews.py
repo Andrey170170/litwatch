@@ -10,13 +10,16 @@ import psycopg
 from litwatch.core import Paper
 from litwatch.store.papers import COLUMNS, row_to_paper
 
-# A review's picks as a JSON list, in order, with what the reading side shows of each paper.
+# A review's picks as a JSON list, in order, with what the reading side shows of each paper,
+# including the owner's thumb on it for the review's topic (spec decision 17).
 PICKS = """coalesce((SELECT jsonb_agg(jsonb_build_object(
                 'paper_id', k.paper_id, 'why', k.why, 'title', p.title,
                 'authors', CASE WHEN jsonb_typeof(p.authors) = 'array' THEN p.authors ELSE '[]' END,
-                'published', p.published, 'saved', coalesce(l.saved, false)) ORDER BY k.position)
+                'published', p.published, 'saved', coalesce(l.saved, false),
+                'reaction', x.value, 'reaction_reason', x.reason) ORDER BY k.position)
             FROM review_picks k JOIN papers p ON p.id = k.paper_id
             LEFT JOIN library l ON l.paper_id = k.paper_id
+            LEFT JOIN reactions x ON x.paper_id = k.paper_id AND x.topic = r.topic
             WHERE k.review_id = r.id), '[]') AS picks"""
 
 

@@ -6,6 +6,7 @@
 import { Link } from "@tanstack/react-router";
 import type { Listed, Pick as PickT, Recap, Review, TopicRef } from "@/api/client";
 import { SaveToggle } from "@/components/paper-bits";
+import { Thumbs } from "@/components/Thumbs";
 import { useDesktop } from "@/hooks/useDesktop";
 import { authorsLine, fmt, plural } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -71,7 +72,10 @@ export function ReviewView({ review, topic, surface }: { review: Review; topic: 
   );
 }
 
-/** One pick: title, meta line, why it was picked, and Save (decision 3: picks are saved by hand). */
+/**
+ * One pick: title, meta line, why it was picked, then Save (decision 3: picks are saved by
+ * hand) and the thumbs for the field it was picked for (decision 17).
+ */
 function PickView({ pick, topic, surface }: { pick: PickT; topic: string; surface: Surface }) {
   const meta = [authorsLine(pick.authors ?? []), fmt.published(pick.published)].filter(Boolean).join(" · ");
   return (
@@ -79,11 +83,19 @@ function PickView({ pick, topic, surface }: { pick: PickT; topic: string; surfac
       <h4 className="font-serif text-[15.5px] leading-[1.3] font-semibold desk:text-[16.5px]">
         <PaperLink id={pick.paper_id} title={pick.title} topic={topic} surface={surface} />
       </h4>
-      <p className="meta mt-[2px] flex flex-wrap items-baseline gap-x-3">
-        <span>{meta}</span>
-        <SaveToggle paperId={pick.paper_id} saved={!!pick.saved} />
-      </p>
+      <p className="meta mt-[2px]">{meta}</p>
       <p className="mt-1 font-serif text-[15px] leading-[1.5] text-body">{pick.why}</p>
+      <div className="flex flex-wrap items-center gap-x-3.5 text-[13px] text-muted-foreground">
+        <SaveToggle paperId={pick.paper_id} saved={!!pick.saved} />
+        <Thumbs
+          key={`${pick.paper_id}:${topic}`}
+          className="ml-auto"
+          paperId={pick.paper_id}
+          topic={topic}
+          value={pick.reaction}
+          reason={pick.reaction_reason}
+        />
+      </div>
     </li>
   );
 }

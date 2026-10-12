@@ -1162,6 +1162,8 @@ export interface components {
              * @default false
              */
             saved: boolean;
+            reaction?: components["schemas"]["ReactionValue"] | null;
+            reaction_reason?: components["schemas"]["ReactionReason"] | null;
         };
         /** ReactionIn */
         ReactionIn: {

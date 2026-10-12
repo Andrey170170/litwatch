@@ -3158,6 +3158,26 @@
             "type": "boolean",
             "title": "Saved",
             "default": false
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reaction_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

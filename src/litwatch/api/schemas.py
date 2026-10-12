@@ -75,6 +75,8 @@ class Pick(BaseModel):
     published: datetime | None = None
     why: str
     saved: bool = False
+    reaction: ReactionValue | None = None  # the owner's thumb, for the review's topic
+    reaction_reason: ReactionReason | None = None
 
 
 class Review(BaseModel):
