@@ -858,7 +858,7 @@
     "/api/settings/topics/{slug}": {
       "put": {
         "summary": "Save Topic",
-        "description": "Create or edit a topic. Edits apply forward; a change of kind settles the topic's\npapers again, so a topic that stops being Watch takes its grades with it.",
+        "description": "Create or edit a topic. Edits apply forward; a change of kind or content settles the\ntopic's papers again (see feedback.word.settle_topic).",
         "operationId": "save_topic_api_settings_topics__slug__put",
         "parameters": [
           {
@@ -3020,6 +3020,17 @@
               }
             ],
             "title": "Take"
+          },
+          "take_topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Topic"
           },
           "saved": {
             "type": "boolean",
