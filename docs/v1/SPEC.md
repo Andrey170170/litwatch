@@ -103,8 +103,9 @@ line, not a recap.
 question, written for the owner by the writer (section 3) from the abstract, the topic's subject, and whatever opinions
 exist for that paper and topic: both graders' for a production verdict, the evaluation's for a miss the owner marked
 relevant, the single migrated opinion for a 0.14 positive, none for a paper the owner labelled relevant out of nowhere.
-Two or three sentences for `must_read`, one for `relevant`. A take is its own row, keyed by paper, topic, paper
-revision and topic version, so it is bound to the text and rubric it was written from. It is the only text about a
+Two or three sentences for `must_read`, one for `relevant`. Every take written is its own row with its own id, recording the paper, topic, paper
+revision, topic version and grade it was written for, so it is bound to the text and rubric it was written from, and a
+rewrite adds a row rather than changing one an issue or a take rating points at. It is the only text about a
 paper the reading surfaces show besides the abstract and a deep card; grade names, model names and the graders' reasons
 appear in two places only, the status line's split count and the folded "how this was chosen" on a paper page, and
 otherwise stay behind Settings.
@@ -150,7 +151,9 @@ asks, because the owner opens it to answer (decision 20).
 - an **appraisal**: the owner's view of a paper regardless of topic (matters, fine, not for me) with an optional
   note, and an **accurate or off** on a take. Both are given in a Calibrate session only. A paper that matters
   to the owner but fits no Watch topic is the signal that a topic is missing or a rubric is drawn too narrowly;
-  Quality lists those papers with their notes, for the owner or an agent to read.
+  Quality lists those papers with their notes, for the owner or an agent to read. A paper is on that list when its
+  newest appraisal is matters and its effective grade is below `relevant` for every Watch topic; a topic the owner
+  did not answer for counts by its verdict, and one with no verdict as not fitting.
 
 **The owner's word** on a paper for a Watch topic is the newer of its label and its word-carrying reaction; an
 unsure label is no word, and a provisional label (accepted in bulk, section 8, M2) is older than either. The
@@ -204,14 +207,18 @@ papers, which is what backfill will use later.
 6. **Writer.** When a paper's effective grade for a Watch topic crosses from below `relevant` to `relevant` or above,
    whether a verdict or the owner's word moved it, the pair becomes **due**: due for a take, and due for an issue,
    unless the pair has already appeared in an issue, in which case it is due for a take only. A paper the owner set
-   aside and then took back is therefore not announced again; its old entry stops being struck through. The writer
+   aside and then took back is therefore not announced again; its old entry stops being struck through. A pair whose
+   effective grade falls below `relevant` while it is still due is no longer due for anything, so a paper the owner
+   rejected before its issue was built is never announced; if it rises again before any issue has carried it, it is
+   due again. The writer
    takes every pair due for a take and writes it in litwatch's voice, addressed to the owner, from the abstract at the
    verdict's paper revision, the topic's subject at its topic version, and the opinions that exist (see *Take*); where
    no verdict exists (the owner's word alone moved the paper), the current paper revision and topic version are used. A
    failed call leaves the pair due and is retried next run; after three failed runs the pair enters the issue with its
    title and abstract and no take, and the writer keeps trying. A take is written again when the pair gets a new
-   current verdict with a different paper revision, topic version or grade (a move between `relevant` and `must_read`
-   changes its length); a re-grade that lands on the same grade from the same text keeps the take. Rewriting a take
+   current verdict with a different paper revision or topic version, or when its effective grade moves between
+   `relevant` and `must_read` (which changes its length), whether a verdict or the owner's word moved it; a re-grade
+   that lands on the same grade from the same text keeps the take. Rewriting a take
    makes nothing due for an issue again. Once a night the writer also produces the issue's lede from that night's
    entries, and on Monday a recap per Watch topic. An issue whose lede failed opens without one, and the next run
    writes it, as a failed review section is filled in. One gateway role, `writer` (section 4.4), Opus 5.5 on the
@@ -237,7 +244,12 @@ papers, which is what backfill will use later.
 
 Weekly: one **review** per Radar and Pulse topic over the week's members, whatever its cadence, and one recap per
 Watch topic, then the weekly issue. A Radar topic with a daily cadence is also reviewed after each nightly run, over
-that night's members, before the daily issue is built.
+that night's members, before the daily issue is built. The week is Monday to Sunday in the configured timezone, and
+the weekly issue is keyed by the week's Monday and built the Monday after it. A review covers the papers that became
+members during the week; a Watch recap covers the entries of that week's daily issues (by issue date, so a paper
+announced on a Tuesday belongs to that Tuesday's week whenever it was published), the papers the owner set aside
+during the week, and the misses reported during it. Running the weekly jobs again amends the same issue; a section
+whose review or recap failed says so in one line and is filled in when it is re-run.
 
 Continuously: **publication lookup** for library papers, first when saved, then monthly for two
 years, and on demand when BibTeX is copied for a single paper. An export of many papers (a filter, a selection, the
@@ -357,9 +369,10 @@ the ungraded candidates and counted on the status line. Three actions:
 - **Triage by hand**: the owner gives triage's answers (for each Watch topic whether it could
   belong, for each field whether it is in it), and the paper goes on through the keyword audit,
   grading and the rest as usual. Its candidates carry source `owner`.
-- **Fix the text**: the owner corrects the title or abstract and triage runs again on the
-  correction. The correction is kept on the paper and used for every model call until arXiv
-  publishes a new revision, which replaces it.
+- **Fix the text**: the owner corrects the title or abstract. The correction counts as a rewrite
+  (it raises the paper's revision, whatever the similarity), clears the failure count, and triage
+  runs again on it. It is kept on the paper and used for every model call until intake records a
+  new arXiv version of the paper, whose text replaces it; refetching the same version keeps it.
 
 M2 built the retries and the `triage_stuck` count in the run record; the stop after three runs and
 the three actions are M4.
@@ -403,8 +416,10 @@ candidate), grading recall (graded `relevant` or above when forced), and end-to-
 triage model; the audit must not be allowed to hide its misses. It
 also reports each miss still missed, and precision at `relevant`. Every label records how
 its paper was chosen: calibration sample (`sample`, the random candidate sample), reject sample, 0.14 positive,
-reader (the paper page's label row, a paper taken into Calibrate because of a split or a reaction, and the M2
-labelling page's labels, which migrate to it), or miss. Production precision is computed from the calibration
+gold (hand-labelled before v1), reader (the paper page's label row, and any Calibrate answer that is not for a drawn
+paper's own topic), or miss. M2's origins map as follows: `inbox` becomes `reader`; `gold`, `reject_sample`,
+`legacy_positive` and `miss` keep their meaning; M2's `candidate_sample`, if any exist, stays a separate historical
+group and is never pooled with `sample`. Production precision is computed from the calibration
 sample alone, since only
 that one was drawn the way production surfaces papers. Precision over the other groups is
 reported per group and never pooled.
@@ -421,15 +436,15 @@ failures to the API.
 | Integration | Reacts to | Does |
 | --- | --- | --- |
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `take.written`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step. On `paper.unsaved` it tags the item as dropped and never deletes it |
-| `webdav` | `grade.changed` to `must_read` | Stores the PDF for Zotero's file sync |
+| `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF for Zotero's file sync |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive; serves PDFs, and answers searches over its titles and abstracts |
-| `deep` | `grade.changed` to `must_read`, `card.requested` | Requests a deep card; emits `card.ready` |
+| `deep` | `grade.changed` to `must_read`, `paper.saved`, `card.requested` | Requests a deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off this |
 
-An integration that acts on a grade checks the paper's effective grade (section 2) when it handles
-the event. A `must_read`
-verdict the owner has overruled, or one a later version superseded, fetches no PDF and
-requests no card.
+An integration that acts on a grade checks the paper's effective grade (section 2), and that the paper is in the
+library, when it handles the event. A `must_read`
+verdict the owner has overruled, or one a later version superseded, or a paper the owner unsaved, fetches no PDF and
+requests no card. When an unsaved paper is saved again, `paper.saved` lets such an integration do what it skipped.
 
 `card.requested` is the owner asking for a deep card by hand, and it is honoured whatever the
 paper's grade or topic: a `relevant` Watch paper, a Radar or Pulse pick, or a paper found by
@@ -478,7 +493,7 @@ three places and a gear: Digest, Topics, Papers, as a footer on the phone and th
 
 | Page | Purpose |
 | --- | --- |
-| Digest | A feed of issues, newest open, earlier ones folded to date and lede. A masthead with the **status line**, which reads the latest nightly run: red when that run failed or none finished in the last 36 hours ("last night's run failed · showing Tuesday"); amber when it finished but left something for Quality, with a count: split verdicts among the papers shown (section 9, decision 14), candidates still ungraded, papers awaiting triage, a review that failed; green otherwise ("530 read · all quiet", the count being papers triaged in that run); "running since 06:02" while it runs; "no run yet" on a fresh install. It opens Quality, whose top shows the night's splits, ungraded candidates, papers awaiting triage and a failure summary linking to the run. Opening an old issue does not change it. The most recent weekly issue is pinned as a row above the feed, labelled with its week, absent until one exists. On a day with no issue the last one is shown with "nothing new since"; before any issue exists the Digest says when the first run is |
+| Digest | A feed of issues, newest open, earlier ones folded to date and lede. A masthead with the **status line**, which reads the latest nightly run: red when that run failed or none finished in the last 36 hours ("last night's run failed · showing Tuesday"); amber when it finished but left something for Quality, with a count: split verdicts among the papers shown (section 9, decision 14) on which the owner has not since given their word, candidates still ungraded and papers awaiting triage (all that are waiting now, whichever night they stopped), a review that failed; green otherwise ("530 read · all quiet", the count being papers triaged in that run); "running since 06:02" while it runs; "no run yet" on a fresh install. It opens Quality, whose top shows the night's splits, ungraded candidates, papers awaiting triage and a failure summary linking to the run. Opening an old issue does not change it. The most recent weekly issue is pinned as a row above the feed, labelled with its week, absent until one exists. On a day with no issue the last one is shown with "nothing new since"; before any issue exists the Digest says when the first run is |
 | Paper | Take, abstract, deep card when one is stored, else a request button while a deep-card integration is loaded, else nothing; links (arXiv, PDF, published version), BibTeX, save or unsave, history (versions seen, and when the paper became a candidate or was graded for each Watch topic); thumbs; "how this was chosen" folded at the end with the triage answer, both opinions by model name, the reconciled grade and an optional label row (origin `reader`) |
 | Topics | One screen of topic cards grouped Watch, Radar, Pulse, each with its colour, kind, one line of what is new (entries in issues since the topic was last opened, kept server-side in `topic_visits`) and counts; on a desktop a rail with the chosen topic open beside it. A topic page is the papers table with the topic fixed: by default the papers at an effective grade of `relevant` or above, adjacent on a toggle, nothing below that; for Radar and Pulse the picks, with the reviews above the table. The gear opens the editor in Settings |
 | Papers | The whole collection as one sortable table (title with authors, published, added, take of the first Watch topic by the owner's order, saved, links; a grade dot per row, an empty ring for a paper that is no topic's candidate, "grading" for a pending one, the take column empty where there is none) with a search box and filters for topic, saved, year and source; the archive's hits merged when it is connected; fetch an archive-only paper; report a miss from a row or by arXiv id; export BibTeX for the filter or selection. Saved is the filter that makes it the library |
@@ -728,21 +743,23 @@ night's splits, reported misses not yet marked, and papers carrying a word-carry
 | Each take it has | accurate, off | no |
 | Note | free text | no |
 
-Fit is a label: about it is relevant at the chosen grade, near it is adjacent, not is not relevant. A drawn paper's
-label carries origin `sample`, any other `reader`. Value and note are an appraisal, and accurate or off a take rating
-(section 2). Precision at `relevant` is the share of the drawn papers graded `relevant` or above that the owner
-labelled relevant, unsure excluded, and the papers drawn from below report how often grading dropped a paper the owner
-wanted. Both pool every drawn paper from the trailing 90 days, since one session's five per group say little.
+Fit is a label: about it is relevant at the chosen grade, near it is adjacent, not is not relevant. A paper is drawn
+for one Watch topic and one group (at or above `relevant`, or below); the session records that, the verdict current
+at the draw, and the draw's date. The fit answer for that topic carries origin `sample`; fit answers for other topics
+carry `reader`. Value and note are an appraisal, and accurate or off a take rating (section 2). Precision at
+`relevant` is, over the drawn papers of the upper group that were answered and not unsure, the share labelled
+relevant; the lower group reports how often grading dropped a paper the owner wanted. Both judge the verdict recorded
+at the draw, not a later re-grade or replay, and pool every draw from the trailing 90 days, since one session's five
+per group say little. A drawn paper left unanswered counts nowhere.
 
 The writer's model is chosen once, outside the app: takes from Opus 5.5 and one or two OpenRouter models on about 20
 recent papers, read blind by the owner.
 
-*Check:* the daily issue reads as prose with no grade, model or pipeline term on it, the status line's
-split count and the folded "how this was chosen" being the two allowed exceptions; earlier
+*Check:* the daily issue reads as prose with no grade, model or pipeline term on it; earlier
 issues are reachable by scrolling; a paper can be opened, saved and exported as BibTeX in one tap each; a topic's
 papers can be sorted and filtered as a table; the status line reflects a failed run and a split; a reported miss shows
-what each stage said, under Settings; with no integration connected every page works; nothing about the pipeline is
-visible without opening Settings; Unsave takes a verdict-saved paper out of the library and a later re-grade does not
+what each stage said, under Settings; with no integration connected every page works; outside Settings the pipeline shows only in the status line, the
+grade dots and the word "grading" in tables, and the folded "how this was chosen"; Unsave takes a verdict-saved paper out of the library and a later re-grade does not
 put it back; a Calibrate session of about twenty papers adds to the precision number, and a paper marked
 as mattering with no topic fit appears on the "matters, no topic" list.
 

@@ -156,9 +156,11 @@ title is the link and Read is dropped. Lead and brief entries differ in title si
 of that surface or for none on a plain search result; only a Watch-topic reaction counts as the owner's word. A
 thumb down opens the reasons as chips: Not for me, Unrelated to the topic, Already knew it, Overrated; the first tap on
 a reason closes it. The acknowledgement says what happened: "Remembered for <topic>" (or "Remembered") for the reasons
-that carry no word, "Marked not relevant for <topic>; it leaves the library" for Unrelated. A thumb up stands alone; a second tap on
-an active thumb up offers Great find, a third clears it, so every state is reachable by tap and by keyboard. Tapping an
-active thumb clears the reaction and the word it carried, and nothing else.
+that carry no word, "Marked not relevant for <topic>" for Unrelated, followed by "; it leaves the library" only when
+it does (another topic or a save by hand can keep it). A thumb up: the first tap sets it, a second offers Great find
+as a chip beside it, a third clears it. A thumb down: the first tap sets it and opens the reasons, a second clears it.
+So every state is reachable by tap and by keyboard, and clearing a thumb takes back the reaction and the word it
+carried, and nothing else.
 
 **Row** (one paper in a table): grade dot (ink must read, green relevant, pale adjacent, an empty ring for a paper
 that is no topic's candidate; the word "grading" in the muted colour for a pending candidate; Radar and Pulse picks
