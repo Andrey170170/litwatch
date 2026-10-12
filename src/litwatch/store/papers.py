@@ -198,6 +198,18 @@ async def revision(conn: psycopg.AsyncConnection, paper_id: str) -> int:
     return row["revision"] if row else 1
 
 
+async def still_current(conn: psycopg.AsyncConnection, paper: Paper) -> bool:
+    """Whether a result about `paper` may still be recorded: the stored paper has the same
+    text (revision) and has not been dismissed. Call it inside the recording transaction: the
+    share lock waits for a correction or dismissal in progress, which update the row."""
+    row = await (
+        await conn.execute(
+            "SELECT revision, dismissed_at FROM papers WHERE id = %s FOR SHARE", (paper.id,)
+        )
+    ).fetchone()
+    return row is not None and row["dismissed_at"] is None and row["revision"] == paper.revision
+
+
 async def correct(
     conn: psycopg.AsyncConnection, paper_id: str, title: str | None, abstract: str | None
 ) -> bool:

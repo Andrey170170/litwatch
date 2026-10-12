@@ -4,10 +4,12 @@ triages by hand, or fixes the text (spec decision 24)."""
 import httpx
 import pytest
 
+from litwatch import screening
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Candidate, Grade, Opinion, Take, TakeSource, Verdict
 from litwatch.feedback import word
+from litwatch.screening.triage import Triaged
 from litwatch.store import digest as digest_store
 from litwatch.store import papers as papers_store
 from litwatch.store import quality, verdicts
@@ -168,3 +170,20 @@ async def test_a_correction_of_only_whitespace_is_refused(client, conn):
     blank = await client.post(f"/api/settings/triage/{STUCK.id}/correction", json={"title": "  "})
     assert blank.status_code == 422
     assert (await papers_store.get(conn, STUCK.id)).title == "Broken title"
+
+
+async def test_results_about_text_since_corrected_or_a_paper_since_dismissed_are_dropped(
+    client, conn
+):
+    old = await papers_store.get(conn, STUCK.id)  # what a run read before the owner acted
+    opinion = Opinion(grade=Grade.RELEVANT, reason="r")
+    await client.post(f"/api/settings/triage/{STUCK.id}/correction", json={"title": "Fixed"})
+    # A grading of the old text, finishing after the correction, records no verdict.
+    assert await record(conn, Graded(paper=old, topic=FAITH, judge=opinion, check=opinion)) is None
+    # A triage that finishes after the paper is dismissed records nothing either.
+    fresh = await papers_store.get(conn, STUCK.id)
+    await triage_store.dismiss(conn, STUCK.id)
+    triaged = Triaged(paper=fresh, answers={INTERP.slug: (True, None)}, model="m")
+    assert await screening.record(conn, triaged, {}, TOPICS) == []
+    assert await (await conn.execute("SELECT * FROM memberships")).fetchall() == []
+    assert await (await conn.execute("SELECT * FROM verdicts")).fetchall() == []

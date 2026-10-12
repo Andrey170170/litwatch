@@ -7,6 +7,7 @@ import psycopg
 from litwatch.core import Candidate, Grade, Paper, Topic, TopicKind
 from litwatch.screening.audit import audit
 from litwatch.screening.triage import Triaged
+from litwatch.store import papers as papers_store
 from litwatch.store import triage as triage_store
 from litwatch.store import verdicts
 
@@ -39,6 +40,10 @@ async def record(
     revisions = {t.slug: t.revision for t in topics}
     candidates = []
     async with conn.transaction():
+        # Triage of text the owner has since corrected, or of a paper since dismissed,
+        # records nothing.
+        if not await papers_store.still_current(conn, paper):
+            return []
         if triaged.error is None:
             answers = {s: {"yes": yes, "why": why} for s, (yes, why) in triaged.answers.items()}
             await triage_store.store_done(conn, paper, answers, revisions, triaged.model)
