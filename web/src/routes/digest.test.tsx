@@ -102,6 +102,9 @@ describe("the weekly issue", () => {
     renderApp("/");
     expect(await screen.findByText("Two papers were announced this week.")).toBeInTheDocument();
     expect(screen.queryByText(/No issue yet/)).not.toBeInTheDocument();
+    // Headed by its week, not as a stale day: the masthead and the pinned row both say so.
+    expect(screen.queryByText(/nothing new since/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Week of 5 October/).length).toBeGreaterThanOrEqual(2);
   });
 
   it("pins the latest weekly issue above the feed", async () => {

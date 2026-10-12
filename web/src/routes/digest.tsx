@@ -45,8 +45,9 @@ export function DigestPage() {
   const openDay = open.data?.day ?? [weekly, ...issues].find((i) => i?.id === openId)?.day;
 
   const today = localDay(new Date());
-  // "nothing new since" when the newest issue is older than today and no older one was asked for.
-  const stale = newest && !search.issue && newest.day < today ? newest.day : null;
+  // "nothing new since" when the newest daily issue is older than today and no older one was
+  // asked for. A weekly issue opened for want of a daily one keeps its week as its heading.
+  const stale = newest && newest.kind !== "weekly" && !search.issue && newest.day < today ? newest.day : null;
   const mastDate = stale ? today : openDay;
   // A weekly issue is headed by its week, not the Monday it was built on.
   const openWeekly = !stale && (open.data?.kind ?? [weekly, ...issues].find((i) => i?.id === openId)?.kind) === "weekly";
