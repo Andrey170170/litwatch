@@ -693,9 +693,10 @@ feed the correction rate.
 
 **Calibrate**, on the Quality page, is where the owner gives their word on purpose, and it replaces the labelling page
 built in M2. The reading side offers feedback and never asks; Calibrate asks, because the owner went there to answer.
-A session shows one paper per screen (title, abstract, its takes) and is meant to take minutes. It draws, per Watch
-topic, ten papers uniformly with a recorded seed from those graded `relevant` or above in the trailing 30 days and
-without a label, plus ten from those graded below. On request it continues with the papers waiting for a word: last
+A session shows one paper per screen (title, abstract, its takes) and holds about 20 papers, which is as many as the
+owner will read with care in one sitting. They are split evenly across the Watch topics and, within each topic, half
+are drawn uniformly with a recorded seed from the papers graded `relevant` or above in the trailing 30 days and
+without a label, half from those graded below (5 and 5 per topic with two Watch topics). On request it continues with the papers waiting for a word: last
 night's splits, reported misses not yet marked, and papers carrying a word-carrying reaction. Each paper asks:
 
 | Question | Answers | Required |
@@ -707,8 +708,9 @@ night's splits, reported misses not yet marked, and papers carrying a word-carry
 
 Fit is a label: about it is relevant at the chosen grade, near it is adjacent, not is not relevant. A drawn paper's
 label carries origin `sample`, any other `reader`. Value and note are an appraisal, and accurate or off a take rating
-(section 2). Precision at `relevant` is the share of the first drawn group labelled relevant, unsure excluded, and
-the second group reports how often grading dropped a paper the owner wanted.
+(section 2). Precision at `relevant` is the share of the drawn papers graded `relevant` or above that the owner
+labelled relevant, unsure excluded, and the papers drawn from below report how often grading dropped a paper the owner
+wanted. Both pool every drawn paper from the trailing 90 days, since one session's five per group say little.
 
 The writer's model is chosen once, outside the app: takes from Opus 5.5 and one or two OpenRouter models on about 20
 recent papers, read blind by the owner.
@@ -719,7 +721,7 @@ issues are reachable by scrolling; a paper can be opened, saved and exported as 
 papers can be sorted and filtered as a table; the status line reflects a failed run and a split; a reported miss shows
 what each stage said, under Settings; with no integration connected every page works; nothing about the pipeline is
 visible without opening Settings; Unsave takes a verdict-saved paper out of the library and a later re-grade does not
-put it back; a Calibrate session of twenty papers takes minutes and gives the precision number, and a paper marked
+put it back; a Calibrate session of about twenty papers adds to the precision number, and a paper marked
 as mattering with no topic fit appears on the "matters, no topic" list.
 
 **M4 · Reviews and the weekly issue.** Weekly reviews for every Radar and Pulse topic and daily ones where the cadence
