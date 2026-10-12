@@ -182,7 +182,11 @@ function DesktopRow({ row: r, picks, selected, onSelect, miss }: RowProps) {
       <td className="tabular py-[11px] pr-2.5 whitespace-nowrap text-muted-foreground">{fmt.cell(r.published)}</td>
       <td className="tabular py-[11px] pr-2.5 whitespace-nowrap text-muted-foreground">{fmt.cell(r.added)}</td>
       <td className="max-w-[360px] py-[11px] pr-2.5 text-body">
-        {r.take}
+        {r.take && (
+          <span className="line-clamp-3" title={r.take}>
+            {r.take}
+          </span>
+        )}
         {r.also_in && r.also_in.length > 0 && <span className="meta"> also in {r.also_in.join(", ")}</span>}
         {miss && <div>{miss}</div>}
       </td>
@@ -207,7 +211,7 @@ function PhoneRow({ row: r, picks, selected, onSelect, miss }: RowProps) {
           </Link>
         </h3>
         <p className="meta mt-0.5">{adjacent ? "near the topic" : authorsLine(r.authors)}</p>
-        {r.take && <p className="mt-1 text-[13.5px] text-body">{r.take}</p>}
+        {r.take && <p className="mt-1 line-clamp-3 text-[13.5px] text-body">{r.take}</p>}
         {r.also_in && r.also_in.length > 0 && <p className="meta">also in {r.also_in.join(", ")}</p>}
         {miss}
         <p className="meta tabular mt-1 flex flex-wrap items-center gap-x-3 text-[12.5px]">
