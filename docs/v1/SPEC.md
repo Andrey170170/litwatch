@@ -620,9 +620,14 @@ Branch `feat/anthropic-backend` (commit 7911f79) is reference, not for merging. 
 DBLP is the source. Its HTTP search API answered this server with a bot challenge on
 2026-10-08, on all three mirrors; its SPARQL endpoint (`sparql.dblp.org`) did not, and an
 exact-title query returned in about 50 ms with both the CoRR record and the conference record.
-v1 uses SPARQL, behind `PublicationSource`, batched and paced, with the usage terms checked
-before release. If that access closes, the fallback is a local index built from DBLP's monthly
-data dump.
+v1 uses SPARQL, behind `PublicationSource`, batched and paced. Terms, checked 2026-10-12: the endpoint is public and
+needs no account or key; the data is CC0; each query has a fixed timeout; dblp asks clients not to overwhelm it and
+runs an unpublished rate limit against aggressive scripting, and asks anyone needing a high query rate to host their
+own instance ([announcement](https://blog.dblp.org/2024/09/09/introducing-our-public-sparql-query-service/),
+[rate limit discussion](https://github.com/dblp/kg/discussions/7)). Litwatch's volume is small (library papers when
+saved and monthly after, a single paper on Copy BibTeX), so it sends one query at a time with a pause between them and
+a User-Agent naming litwatch. If that access closes or the volume grows, the fallback is a local index built from
+DBLP's dump, or a self-hosted dblp SPARQL instance as dblp suggests.
 
 Matching: locate the preprint record by its arXiv DOI; take DBLP's own title and author list
 from it; find other records with that title and at least one shared author; choose the
@@ -758,7 +763,16 @@ written from `docs/integrations.md` without editing any other package.
 *Check:* the cutover rule in section 7.
 
 **M8 · Release.** Compose file, install and configuration docs, repository clean-up, MIT
-licence, `v1.0.0`.
+licence, `v1.0.0`. The clean-up, decided 2026-10-12:
+
+- `evals/` (the owner's labels, trial reports, paper lists) moves out of the repository to private storage.
+- Homelab specifics go: the 0.x `docs/ARCHIVE-*.md` notes, server paths, internal host names and addresses, and any
+  mention of the owner's machines in docs and defaults. Integrations for Zotero, WebDAV, the archive, deep cards and
+  n8n stay, as examples of what an integration can be, each documented without the owner's setup.
+- `deep/` stays as an optional integration, with a README on plugging in another model or subscription.
+- The git history is kept, provided a full secret and host scan (gitleaks or similar) finds nothing worth hiding;
+  anything it finds is rewritten out first. A first grep on 2026-10-12 over all 450 commits found no keys or
+  passwords, only a Docker bridge address, `archive.lan`, and `/srv/...` paths in old eval notes.
 
 After v1: backfill of papers outside the collection for Watch topics; citation counts; other sources.
 
@@ -860,6 +874,9 @@ Decided on 2026-10-12, reviewing the spec for the remaining milestones:
     it stays in the collection and the archive), triages it by hand, or fixes its text and lets triage run again.
 25. **Bulk BibTeX does not wait.** Only copying one paper's BibTeX looks it up on DBLP first; an export of many
     papers uses what is stored, since library papers are looked up when saved and monthly after.
+26. **Releasing.** DBLP's SPARQL endpoint needs no account; litwatch queries it politely (section 6). At release,
+    evals and homelab specifics leave the repository, every integration stays as an example, and the history is kept
+    unless the secret scan finds something (M8).
 
 Nothing is open. Noted for later: the owner plans embeddings over the archive (abstracts,
 ideally full text) for semantic search, once a GPU server exists. That would also give a
