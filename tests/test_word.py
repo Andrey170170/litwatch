@@ -14,6 +14,7 @@ from litwatch.core import (
     Reaction,
     ReactionReason,
     ReactionValue,
+    TopicKind,
     Verdict,
     in_library,
     owners_word,
@@ -164,3 +165,26 @@ async def test_sync_settles_what_was_written_around_it(db):
     )
     assert await word.sync(db) == {"papers": 1, "grades_changed": 1, "saved": 1, "unsaved": 0}
     assert await word.sync(db) == {"papers": 1, "grades_changed": 0, "saved": 0, "unsaved": 0}
+
+
+async def test_the_later_word_wins_inside_one_transaction(db):
+    relevant = Label(
+        paper_id=P.id, topic=FAITH.slug, value=LabelValue.RELEVANT, origin=LabelOrigin.READER
+    )
+    async with db.transaction():
+        await word.react(db, thumb("unrelated"))
+        _, settled = await word.label(db, relevant)
+    assert settled.saved is True
+    async with db.transaction():
+        await word.label(db, relevant)
+        _, settled = await word.react(db, thumb("unrelated"))
+    assert settled.saved is False
+
+
+async def test_a_topic_that_stops_being_watch_takes_its_grade_with_it(db):
+    await grade(db, "relevant")
+    await topics_store.save(db, FAITH.model_copy(update={"kind": TopicKind.RADAR}))
+    settled = await word.settle(db, P.id)
+    assert settled.grades == {FAITH.slug: (Grade.RELEVANT, None)} and settled.saved is False
+    rows = await (await db.execute("SELECT * FROM effective_grades")).fetchall()
+    assert rows == []

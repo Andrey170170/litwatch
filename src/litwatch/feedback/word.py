@@ -44,9 +44,20 @@ async def _watch_topics(conn: psycopg.AsyncConnection) -> set[str]:
     return {t.slug for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
 
 
+# Advisory lock namespace for settling one paper; the second key is the paper id's hash.
+SETTLE_LOCK = 7213911
+
+
 async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
-    """Recompute and store the paper's effective grades and library state, with their events."""
+    """Recompute and store the paper's effective grades and library state, with their events.
+
+    Settles of one paper are serialized and read only after the lock is held, so the last to
+    run sees every committed change and leaves the stored state right.
+    """
     async with conn.transaction():
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (SETTLE_LOCK, paper_id)
+        )
         watched = await _watch_topics(conn)
         labels = {x.topic: x for x in await feedback_store.labels_for(conn, paper_id)}
         reactions = {r.topic: r for r in await word_store.reactions_for(conn, paper_id)}
@@ -57,10 +68,14 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
 
         result = Settled(paper_id)
         after: dict[str, Grade | None] = {}
-        for topic in sorted(watched & (set(labels) | set(reactions) | set(by_topic) | set(before))):
+        # A stored grade for a topic that is no longer Watch is removed, with its event.
+        involved = (watched & (set(labels) | set(reactions) | set(by_topic))) | set(before)
+        for topic in sorted(involved):
             word = owners_word(labels.get(topic), reactions.get(topic))
             old = before.get(topic)
-            new = after[topic] = effective_grade(word, current_verdict(by_topic.get(topic, [])))
+            verdict = current_verdict(by_topic.get(topic, []))
+            new = effective_grade(word, verdict) if topic in watched else None
+            after[topic] = new
             if new != old:
                 result.grades[topic] = (old, new)
                 await word_store.set_effective(conn, paper_id, topic, new)

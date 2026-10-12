@@ -16,15 +16,17 @@ def _label(row: dict[str, Any]) -> Label:
 
 async def set_label(conn: psycopg.AsyncConnection, label: Label) -> Label:
     """Store the owner's label. A paper keeps the origin it was first labelled under, since
-    that says how it was chosen; the value, grade and note are replaced."""
+    that says how it was chosen; the value, grade and note are replaced. The time is the
+    wall clock, as a reaction's is, so the newer word wins even inside one transaction."""
     row = await (
         await conn.execute(
             """
-            INSERT INTO labels (paper_id, topic, value, grade, origin, provisional, note)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO labels (paper_id, topic, value, grade, origin, provisional, note,
+                                labelled_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, clock_timestamp())
             ON CONFLICT (paper_id, topic) DO UPDATE SET
                 value = EXCLUDED.value, grade = EXCLUDED.grade, note = EXCLUDED.note,
-                provisional = EXCLUDED.provisional, labelled_at = now()
+                provisional = EXCLUDED.provisional, labelled_at = EXCLUDED.labelled_at
             RETURNING *
             """,
             (
