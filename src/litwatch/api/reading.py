@@ -207,7 +207,7 @@ async def bibtex_filter(
 ) -> str:
     """BibTeX for every paper the table's filter matches."""
     rows, _ = await reading.papers(
-        c, q=q, topic=topic, adjacent=adjacent, saved=saved, year=year, limit=100_000
+        c, q=q, topic=topic, adjacent=adjacent, saved=saved, year=year, limit=None
     )
     return await _bibtex(c, [r["id"] for r in rows])
 

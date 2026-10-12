@@ -97,9 +97,11 @@ async def _open_splits(conn: psycopg.AsyncConnection) -> int:
         FROM current c
         WHERE c.split
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = c.paper_id
-                          AND l.topic = c.topic AND l.value <> 'unsure' AND NOT l.provisional)
+                          AND l.topic = c.topic AND l.value <> 'unsure' AND NOT l.provisional
+                          AND l.labelled_at > c.recorded_at)
           AND NOT EXISTS (SELECT 1 FROM reactions r WHERE r.paper_id = c.paper_id
-                          AND r.topic = c.topic AND r.reason IN ('unrelated', 'great_find'))
+                          AND r.topic = c.topic AND r.reason IN ('unrelated', 'great_find')
+                          AND r.reacted_at > c.recorded_at)
         """,
     )
     return sum((r["judge"] in SHOWN) != (r["check"] in SHOWN) for r in rows)
@@ -251,7 +253,7 @@ async def papers(
     saved: bool | None = None,
     year: int | None = None,
     sort: str | None = None,
-    limit: int = 50,
+    limit: int | None = 50,
     offset: int = 0,
     ids: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:

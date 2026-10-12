@@ -68,7 +68,7 @@ async def report(
                 )
             ).fetchone()
             settled = await word.settle(conn, paper_id)
-            return existing["id"], settled, False, existing["trace"] != "done"
+            return existing["id"], settled, False, await _traceable(conn, existing["id"])
         _, settled = await word.label(
             conn,
             Label(
@@ -87,14 +87,17 @@ async def trace(
     """Run the missed paper through triage, the keyword audit and both graders for every
     Watch topic, as a dry run, and attach the evaluation run to the miss. A failure is
     recorded on the miss, which Settings can trace again; the owner's word is untouched."""
+    # Claim the trace: a second request while one runs (a double click, a retry) does nothing.
+    row = await (
+        await conn.execute(
+            f"UPDATE misses SET trace = 'pending', trace_started = now() "
+            f"WHERE id = %s AND {_CLAIMABLE} RETURNING paper_id",
+            (miss_id, TRACE_PATIENCE),
+        )
+    ).fetchone()
+    if row is None:
+        return None
     try:
-        row = await (
-            await conn.execute(
-                "UPDATE misses SET trace = 'pending', trace_started = now() WHERE id = %s "
-                "RETURNING paper_id",
-                (miss_id,),
-            )
-        ).fetchone()
         paper = await papers_store.get(conn, row["paper_id"])
         eval_run_id = await replay(
             conn, config, [paper], kind="miss", params={"miss": miss_id}, gateway=gateway
@@ -122,6 +125,23 @@ async def trace(
         if take is not None and take.source == TakeSource.OWNER:
             await digest_store.mark_due(conn, miss["paper_id"], miss["topic"], take=True)
     return eval_run_id
+
+
+# A trace can start when none has, when the last one failed or finished, or when one left
+# pending has outlived TRACE_PATIENCE.
+_CLAIMABLE = "(trace_started IS NULL OR trace <> 'pending' OR trace_started < now() - %s)"
+
+
+async def _traceable(conn: psycopg.AsyncConnection, miss_id: int) -> bool:
+    """Whether reporting the miss again should start a trace: never once one finished, nor
+    while one is running."""
+    row = await (
+        await conn.execute(
+            f"SELECT trace <> 'done' AND {_CLAIMABLE} AS ok FROM misses WHERE id = %s",
+            (TRACE_PATIENCE, miss_id),
+        )
+    ).fetchone()
+    return bool(row and row["ok"])
 
 
 class Pending:

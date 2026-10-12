@@ -354,3 +354,41 @@ async def test_a_trace_cut_off_long_ago_stops_holding_the_take_back(conn):
     await conn.execute("UPDATE misses SET reported_at = now() - interval '2 hours'")
     (item,) = await digest._owed(conn)
     assert item.source == "owner"
+
+
+async def test_a_trace_already_running_is_not_started_twice(conn):
+    from litwatch.feedback import misses
+
+    for topic in TOPICS:
+        await topics_store.save(conn, topic)
+    await papers_store.upsert(conn, [Q])
+    miss_id, *_ = await misses.report(conn, Q.id, FAITH.slug)
+    await conn.execute("UPDATE misses SET trace_started = now()")  # one is running
+    assert await misses.trace(conn, Config(), miss_id, gateway=gateway) is None
+    *_, needs_trace = await misses.report(conn, Q.id, FAITH.slug)
+    assert needs_trace is False
+
+
+async def test_a_word_given_before_a_new_split_does_not_silence_it(client, conn):
+    await client.put(f"/api/word/{FAITH.slug}/{P.id}", json={"value": "relevant"})
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=P.id,
+            topic=FAITH.slug,
+            topic_revision=1,
+            grade=Grade.RELEVANT,
+            split=True,
+            judge=Opinion(grade=Grade.RELEVANT, reason="r"),
+            check=Opinion(grade=Grade.NONE, reason="r"),
+        ),
+    )
+    await word.settle(conn, P.id)
+    await conn.execute("INSERT INTO issues (kind, day) VALUES ('daily', current_date)")
+    await conn.execute(
+        "INSERT INTO issue_entries (issue_id, paper_id, topic, grade, position) "
+        "SELECT id, %s, %s, 'relevant', 1 FROM issues",
+        (P.id, FAITH.slug),
+    )
+    await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
+    assert (await client.get("/api/status")).json()["splits"] == 1
