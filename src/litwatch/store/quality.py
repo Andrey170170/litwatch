@@ -50,7 +50,7 @@ async def ungraded(conn: psycopg.AsyncConnection, attempts: int) -> list[dict[st
         """
         SELECT c.paper_id, c.topic, c.failed_runs, c.last_error, c.updated_at, p.title
         FROM candidates c JOIN papers p ON p.id = c.paper_id
-        WHERE c.state = 'pending' AND c.failed_runs >= %s
+        WHERE c.state = 'pending' AND c.failed_runs >= %s AND p.dismissed_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM candidates n WHERE n.paper_id = c.paper_id
                           AND n.topic = c.topic AND n.topic_revision > c.topic_revision)
         ORDER BY c.updated_at DESC
@@ -63,7 +63,8 @@ async def awaiting_triage(conn: psycopg.AsyncConnection, attempts: int) -> list[
     return await _all(
         conn,
         "SELECT t.paper_id, t.failed_runs, t.last_error, p.title FROM triage t "
-        "JOIN papers p ON p.id = t.paper_id WHERE t.state = 'failed' AND t.failed_runs >= %s "
+        "JOIN papers p ON p.id = t.paper_id AND p.dismissed_at IS NULL "
+        "WHERE t.state = 'failed' AND t.failed_runs >= %s "
         "ORDER BY t.failed_runs DESC, t.paper_id",
         (attempts,),
     )
@@ -166,7 +167,8 @@ async def keyword_papers(conn: psycopg.AsyncConnection, patterns: list[str]) -> 
 async def papers_between(conn: psycopg.AsyncConnection, since: Any, until: Any) -> list[str]:
     rows = await _all(
         conn,
-        "SELECT id FROM papers WHERE published >= %s AND published < %s ORDER BY id",
+        "SELECT id FROM papers WHERE published >= %s AND published < %s "
+        "AND dismissed_at IS NULL ORDER BY id",
         (since, until),
     )
     return [r["id"] for r in rows]

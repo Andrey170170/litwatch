@@ -14,7 +14,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 from croniter import croniter
@@ -29,6 +29,8 @@ log = logging.getLogger(__name__)
 
 CATCH_UP = timedelta(hours=6)
 TICK_SECONDS = 30
+# Held per job kind while deciding and running, so two schedulers never run one fire twice.
+SCHEDULE_LOCK = 7213913
 
 
 @dataclass(frozen=True)
@@ -39,15 +41,18 @@ class Job:
 
 
 def last_fire(cron: str, now: datetime) -> datetime:
-    """The most recent time at or before `now` the expression fired."""
-    return croniter(cron, now + timedelta(microseconds=1)).get_prev(datetime)
+    """The most recent time at or before `now` (an aware time in the configured zone) the
+    expression fired. The step past `now` is taken in UTC: wall-clock arithmetic would lose
+    which of a fall-back's two hours `now` is in."""
+    after = (now.astimezone(UTC) + timedelta(microseconds=1)).astimezone(now.tzinfo)
+    return croniter(cron, after).get_prev(datetime)
 
 
 def is_due(cron: str, now: datetime, last_run: datetime | None) -> bool:
-    fired = last_fire(cron, now)
-    if now - fired > CATCH_UP:
+    fired = last_fire(cron, now).astimezone(UTC)
+    if now.astimezone(UTC) - fired > CATCH_UP:
         return False
-    return last_run is None or last_run < fired
+    return last_run is None or last_run.astimezone(UTC) < fired
 
 
 def jobs(config: Config, gateway: GatewayFactory = default_gateway) -> list[Job]:
@@ -75,18 +80,27 @@ async def tick(conn: psycopg.AsyncConnection, todo: list[Job], now: datetime) ->
     """Run every job that is due at `now`, in order. Returns the kinds that ran."""
     ran = []
     for job in todo:
-        if not is_due(job.cron, now, await _last_run(conn, job.kind)):
-            continue
-        log.info("scheduler: %s is due", job.kind)
+        key = (SCHEDULE_LOCK, job.kind)
+        row = await (
+            await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS locked", key)
+        ).fetchone()
+        if not row["locked"]:
+            continue  # another scheduler is deciding or running it
         try:
-            await job.run(conn)
-        except BusyError:
-            log.info("scheduler: %s waits, another job holds the run lock", job.kind)
-            continue
-        except Exception:
-            # The run record keeps the error; the status line shows it.
-            log.exception("scheduler: %s failed", job.kind)
-        ran.append(job.kind)
+            if not is_due(job.cron, now, await _last_run(conn, job.kind)):
+                continue
+            log.info("scheduler: %s is due", job.kind)
+            try:
+                await job.run(conn)
+            except BusyError:
+                log.info("scheduler: %s waits, another job holds the run lock", job.kind)
+                continue
+            except Exception:
+                # The run record keeps the error; the status line shows it.
+                log.exception("scheduler: %s failed", job.kind)
+            ran.append(job.kind)
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", key)
     return ran
 
 

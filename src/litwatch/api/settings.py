@@ -383,7 +383,11 @@ async def correct(paper_id: str, body: CorrectionIn, request: Request, c: Conn) 
     await _awaiting(request, c, paper_id)
     if not (body.title or body.abstract):
         raise HTTPException(status_code=422, detail="give a title or an abstract")
-    await papers_store.correct(c, paper_id, body.title or None, body.abstract or None)
+    async with c.transaction():
+        await word.lock(c, paper_id)
+        await papers_store.correct(c, paper_id, body.title or None, body.abstract or None)
+        # Its takes were written from the old text: stale now, as after any rewrite.
+        await word.settle(c, paper_id, announce=False)
 
 
 # -- misses, runs, configuration -------------------------------------------------------------------

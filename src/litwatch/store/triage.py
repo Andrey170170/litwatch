@@ -21,8 +21,8 @@ async def untriaged(
     rows = await (
         await conn.execute(
             f"SELECT {COLUMNS} FROM papers p LEFT JOIN triage t ON t.paper_id = p.id "
-            "WHERE t.paper_id IS NULL "
-            "   OR (t.state = 'failed' AND (%s::int IS NULL OR t.failed_runs < %s)) "
+            "WHERE p.dismissed_at IS NULL AND (t.paper_id IS NULL "
+            "   OR (t.state = 'failed' AND (%s::int IS NULL OR t.failed_runs < %s))) "
             "ORDER BY coalesce(t.failed_runs, 0), p.fetched_at, p.id LIMIT %s",
             (attempts, attempts, limit),
         )
@@ -31,9 +31,10 @@ async def untriaged(
 
 
 async def dismiss(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
-    """Stop triaging the paper. It stays in the collection, and in the archive."""
+    """Drop the paper from litwatch: never triaged or graded again, even after a rewrite. It
+    stays in the collection, and in the archive."""
     cur = await conn.execute(
-        "UPDATE triage SET state = 'dismissed' WHERE paper_id = %s AND state = 'failed'",
+        "UPDATE papers SET dismissed_at = now() WHERE id = %s AND dismissed_at IS NULL",
         (paper_id,),
     )
     return cur.rowcount == 1
@@ -43,7 +44,8 @@ async def stuck(conn: psycopg.AsyncConnection, min_failed_runs: int) -> list[dic
     """Papers triage has failed on this many runs in a row, with the last error."""
     return await (
         await conn.execute(
-            "SELECT paper_id, failed_runs, last_error FROM triage "
+            "SELECT paper_id, failed_runs, last_error FROM triage t "
+            "JOIN papers p ON p.id = t.paper_id AND p.dismissed_at IS NULL "
             "WHERE state = 'failed' AND failed_runs >= %s ORDER BY failed_runs DESC, paper_id",
             (min_failed_runs,),
         )
@@ -176,7 +178,7 @@ async def pending_candidates(
                    c.by_triage, c.by_keyword, c.by_owner, c.reason, c.state, c.failed_runs,
                    c.last_error, {COLUMNS}
             FROM candidates c JOIN papers p ON p.id = c.paper_id
-            WHERE c.state = 'pending' AND c.failed_runs < %s
+            WHERE c.state = 'pending' AND c.failed_runs < %s AND p.dismissed_at IS NULL
               AND NOT EXISTS (SELECT 1 FROM candidates n
                               WHERE n.paper_id = c.paper_id AND n.topic = c.topic
                                 AND n.topic_revision > c.topic_revision)

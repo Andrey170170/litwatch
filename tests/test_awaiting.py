@@ -6,9 +6,13 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
+from litwatch.core import Candidate, Grade, Take, TakeSource, Verdict
+from litwatch.feedback import word
+from litwatch.store import digest as digest_store
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
 from litwatch.store import triage as triage_store
+from litwatch.store import verdicts
 from tests.conftest import FAITH, INTERP, TOPICS, paper
 
 TOKEN = "s3cret"
@@ -51,6 +55,22 @@ async def test_a_dismissed_paper_is_never_triaged_and_stops_waiting(client, conn
     assert (await client.post(f"/api/settings/triage/{FINE.id}/dismiss")).status_code == 404
 
 
+async def test_a_dismissed_paper_is_not_graded_or_triaged_after_a_rewrite(client, conn):
+    # The keyword audit had made it a candidate before triage gave up.
+    await triage_store.put_candidate(
+        conn,
+        Candidate(
+            paper_id=STUCK.id, topic=FAITH.slug, topic_revision=1, paper_revision=1, by_keyword=True
+        ),
+    )
+    assert [p.id for _, p in await triage_store.pending_candidates(conn, 3)] == [STUCK.id]
+    await client.post(f"/api/settings/triage/{STUCK.id}/dismiss")
+    assert await triage_store.pending_candidates(conn, 3) == []
+    rewritten = STUCK.model_copy(update={"abstract": "An entirely new abstract.", "version": 2})
+    assert (await papers_store.upsert(conn, [rewritten])).rewritten == [STUCK.id]
+    assert await untriaged(conn) == {FINE.id}
+
+
 async def test_triage_by_hand_puts_the_paper_forward_as_the_owners(client, conn):
     answers = {FAITH.slug: True, INTERP.slug: True}
     made = await client.put(f"/api/settings/triage/{STUCK.id}", json={"answers": answers})
@@ -82,3 +102,45 @@ async def test_a_fixed_text_is_triaged_again_and_kept_until_a_newer_version(clie
     # A newer version replaces it.
     await papers_store.upsert(conn, [STUCK.model_copy(update={"title": "New title", "version": 2})])
     assert (await papers_store.get(conn, STUCK.id)).title == "New title"
+
+
+async def test_a_correction_is_keyed_on_the_text_not_the_version(client, conn):
+    unknown = STUCK.model_copy(update={"version": None})
+    await conn.execute("UPDATE papers SET version = NULL WHERE id = %s", (STUCK.id,))
+    await client.post(f"/api/settings/triage/{STUCK.id}/correction", json={"title": "Fixed"})
+    # The same text again, still with no version known: the correction stands.
+    await papers_store.upsert(
+        conn, [unknown.model_copy(update={"abstract": " Garbled  abstract."})]
+    )
+    assert (await papers_store.get(conn, STUCK.id)).title == "Fixed"
+    # New text from arXiv, version or not, replaces it.
+    await papers_store.upsert(conn, [unknown.model_copy(update={"title": "Retitled"})])
+    assert (await papers_store.get(conn, STUCK.id)).title == "Retitled"
+
+
+async def test_a_correction_makes_the_papers_takes_stale(client, conn):
+    verdict = Verdict(paper_id=STUCK.id, topic=FAITH.slug, topic_revision=1, grade=Grade.RELEVANT)
+    await verdicts.add(conn, verdict)
+    await digest_store.add_take(
+        conn,
+        Take(
+            paper_id=STUCK.id,
+            topic=FAITH.slug,
+            paper_revision=1,
+            topic_revision=1,
+            grade=Grade.RELEVANT,
+            source=TakeSource.VERDICT,
+            text="On the broken text.",
+        ),
+    )
+    await word.settle(conn, STUCK.id)
+
+    async def owed():
+        row = await (
+            await conn.execute("SELECT for_take FROM due WHERE paper_id = %s", (STUCK.id,))
+        ).fetchone()
+        return row["for_take"]
+
+    assert not await owed()
+    await client.post(f"/api/settings/triage/{STUCK.id}/correction", json={"title": "Fixed"})
+    assert await owed()  # written from the old text

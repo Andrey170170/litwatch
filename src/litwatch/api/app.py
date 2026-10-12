@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib import resources
@@ -56,7 +57,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         if task:
+            # Wait for the job in progress to record how it ended.
             task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 def create_app(

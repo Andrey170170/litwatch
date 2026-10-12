@@ -47,6 +47,16 @@ def row_to_paper(row: dict[str, Any]) -> Paper:
     )
 
 
+def fingerprint(table: str) -> str:
+    """SQL for a fingerprint of a row's title and abstract, blind to whitespace: what an owner's
+    correction is keyed on (the text arXiv sent when it was made)."""
+    return f"md5(regexp_replace({table}.title || ' ' || {table}.abstract, '\\s+', ' ', 'g'))"
+
+
+# The owner's correction stands: arXiv sent the very text it fixed.
+_KEPT = f"papers.corrected_from = {fingerprint('EXCLUDED')}"
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -75,7 +85,7 @@ async def upsert(
         async with conn.cursor() as cur:
             for p in papers:
                 await cur.execute(
-                    """
+                    f"""
                     INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
                                         published, updated, url, metadata_source,
                                         version, version_history,
@@ -84,15 +94,15 @@ async def upsert(
                             %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
                             %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s)
                     ON CONFLICT (id) DO UPDATE SET
-                        -- The owner's correction stands until a newer arXiv version arrives.
-                        title = CASE WHEN papers.corrected_at IS NOT NULL
-                                      AND NOT coalesce(EXCLUDED.version > papers.version, false)
+                        -- The owner's correction stands while arXiv sends the text it fixed.
+                        title = CASE WHEN {_KEPT}
                                      THEN papers.title ELSE EXCLUDED.title END,
-                        abstract = CASE WHEN papers.corrected_at IS NOT NULL
-                                         AND NOT coalesce(EXCLUDED.version > papers.version, false)
+                        abstract = CASE WHEN {_KEPT}
                                         THEN papers.abstract ELSE EXCLUDED.abstract END,
-                        corrected_at = CASE WHEN coalesce(EXCLUDED.version > papers.version, false)
-                                            THEN NULL ELSE papers.corrected_at END,
+                        corrected_at = CASE WHEN {_KEPT}
+                                            THEN papers.corrected_at END,
+                        corrected_from = CASE WHEN {_KEPT}
+                                              THEN papers.corrected_from END,
                         authors = EXCLUDED.authors, categories = EXCLUDED.categories,
                         primary_category = coalesce(EXCLUDED.primary_category,
                                                     papers.primary_category),
@@ -193,11 +203,12 @@ async def correct(
 ) -> bool:
     """The owner's fix of a title or abstract (a broken character, a garbled abstract). It
     counts as a rewrite: the revision goes up and the paper is triaged again, its failures
-    forgotten."""
+    forgotten. The caller settles the paper, so its takes are known to be stale."""
     async with conn.transaction():
         cur = await conn.execute(
             "UPDATE papers SET title = coalesce(%s, title), abstract = coalesce(%s, abstract), "
-            "corrected_at = now(), revision = revision + 1 WHERE id = %s",
+            "corrected_at = now(), revision = revision + 1, "
+            f"corrected_from = coalesce(corrected_from, {fingerprint('papers')}) WHERE id = %s",
             (title, abstract, paper_id),
         )
         if cur.rowcount == 0:
