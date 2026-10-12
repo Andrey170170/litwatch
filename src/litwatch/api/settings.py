@@ -268,12 +268,15 @@ async def grade_now(body: Pair, request: Request, c: Conn) -> dict[str, Any]:
     if newest[body.paper_id].state != "pending":
         raise HTTPException(status_code=409, detail="already graded")
     try:
-        async with (
-            run_lock(c),
-            model_run(c, state.config, "grade-now", gateway=state.gateway) as run,
-        ):
-            graded = await watch.grade(paper, topic, run.gateway)
-            verdict = await watch.record(c, graded, newest[body.paper_id].topic_revision)
+        async with run_lock(c):
+            # Read again under the lock: another request may have graded it meanwhile.
+            again = {x.paper_id: x for x in await quality.newest_candidates(c, body.topic)}
+            candidate = again.get(body.paper_id)
+            if candidate is None or candidate.state != "pending":
+                raise HTTPException(status_code=409, detail="already graded")
+            async with model_run(c, state.config, "grade-now", gateway=state.gateway) as run:
+                graded = await watch.grade(paper, topic, run.gateway)
+                verdict = await watch.record(c, graded, candidate.topic_revision)
     except BusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"graded": verdict is not None, "error": graded.error}
