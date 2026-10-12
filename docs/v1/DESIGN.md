@@ -32,7 +32,9 @@ the gear appears in front of it.
 
 ## Pages
 
-**Digest.** A feed of issues, newest open, earlier ones folded to date and lede. The masthead carries the open issue's
+**Digest.** A feed of issues, newest open, earlier ones folded to date and lede. An issue is a record: an entry whose
+paper was later set aside is kept, struck through, with "set aside". A paper relevant to two Watch topics has an entry
+in each section, each with that topic's take and "also in <other topic>" in the meta line. The masthead carries the open issue's
 date and the status line. The most recent weekly issue is pinned as a compact row above the feed, labelled with its
 week, and absent until one exists. Before any issue exists the Digest says when the first run is. A
 daily issue is: lede; one section per Watch topic, in the owner's order, with lead entries (must read, a two or three
@@ -56,7 +58,7 @@ above the table, which holds the picks.
 
 **Papers.** The whole collection as the same table with a search box and filters for topic, saved, year and source.
 Saved is the filter that makes it the library. Export BibTeX acts on the filter or selection and covers collection rows,
-counting the archive-only rows it skipped. Without a query the table sorts by added date; a search sorts by published
+including archive-only rows as arXiv entries built from the hit's metadata. Without a query the table sorts by added date; a search sorts by published
 date, newest first, or by the provider's score under "best match" when every hit in the band has one. The archive's hits
 merge in when it is connected; an archive-only row is marked outside the collection with Fetch as its action and no
 added date; archive-only hits sit in their own band under the collection rows, and the year filter is the only one
@@ -149,17 +151,19 @@ does not change it.
 so); take; action row: Read, arXiv, PDF, Save or Saved, BibTeX, then the thumbs at the right edge. On a desktop the
 title is the link and Read is dropped. Lead and brief entries differ in title size and take length only.
 
-**Thumbs**: two 16 px glyphs in 40 px hit areas, quiet until used, one pair per Watch topic the paper is shown for. A
+**Thumbs**: two 16 px glyphs in 40 px hit areas, quiet until used, on every paper wherever it is shown, for the topic
+of that surface or for none on a plain search result; only a Watch-topic reaction writes a label. A
 thumb down opens the reasons as chips: Not for me, Unrelated to the topic, Already knew it, Overrated; the first tap on
-a reason closes it. The acknowledgement says what happened: "Remembered for <topic>" for the reasons that write no
-label, "Marked not relevant for <topic>; it leaves the library" for Unrelated. A thumb up stands alone; a second tap on
+a reason closes it. The acknowledgement says what happened: "Remembered for <topic>" (or "Remembered") for the reasons
+that write no label, "Marked not relevant for <topic>; it leaves the library" for Unrelated. A thumb up stands alone; a second tap on
 an active thumb up offers Great find, a third clears it, so every state is reachable by tap and by keyboard. Tapping an
 active thumb clears the reaction and the label it wrote, and only that one.
 
 **Row** (one paper in a table): grade dot (ink must read, green relevant, pale adjacent, an empty ring for a paper
 that is no topic's candidate; the word "grading" in the muted colour for a pending candidate; Radar and Pulse picks
 carry no dot); title with authors under it in the meta style, or "near the topic" for an adjacent row; published; added
-(empty for an archive-only row); take, empty where there is none; Saved; link icons (arXiv, PDF, code when present).
+(empty for an archive-only row); take, that topic's on a topic page and the first Watch topic's on Papers, empty
+where there is none, with "also in <other topic>" where the paper has more than one; Saved; link icons (arXiv, PDF, code when present).
 Sort by any column; default Added descending. A topic table shows relevant and above, adjacent rows until "Also
 adjacent" is on in the muted colour, and nothing below; the Papers table shows every paper.
 

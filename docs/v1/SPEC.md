@@ -122,10 +122,11 @@ for it: there is no queue of papers to label.
   records what each stage said and why. The owner then marks which topic it belonged to. That mark
   is a label of relevant for the topic, so it saves the paper like any other label, and the
   evaluation replays it for that topic;
-- a **reaction**: a thumb up or down on a paper for a topic, one per paper and topic, replaced on change and
-  removable. On a thumb down a reason: not for me, unrelated to the topic, already knew it, overrated; on a thumb up,
+- a **reaction**: a thumb up or down on a paper for the topic it was shown under, or for no topic, one per paper and
+  topic, replaced on change and removable. On a thumb down a reason: not for me, unrelated to the topic, already knew it, overrated; on a thumb up,
   optionally, great find. "Unrelated to the topic" also writes a label of not relevant and "great find" a label of
-  relevant, both with origin `reaction`; the other reasons touch no label. Clearing or changing the reaction removes the
+  relevant, both with origin `reaction`, when the topic is a Watch topic; the other reasons, and every reaction on a
+  Radar or Pulse field or on no topic, touch no label (decision 17). Clearing or changing the reaction removes the
   label it wrote and no other: a label the owner set on the paper page (origin `reader`) outranks a reaction's and is
   never touched by one. The acknowledgement says what happened ("Marked not relevant for CoT monitoring; it leaves the
   library"), since that label has every effect a label has. Reactions feed the Quality page as a **correction rate**:
@@ -427,7 +428,7 @@ three places and a gear: Digest, Topics, Papers, as a footer on the phone and th
 | Digest | A feed of issues, newest open, earlier ones folded to date and lede. A masthead with the **status line**, which reads the latest nightly run: red when that run failed or none finished in the last 36 hours ("last night's run failed · showing Tuesday"); amber when it finished but left something for Quality, with a count: split verdicts among the papers shown (section 9, decision 14), candidates still ungraded, a review that failed; green otherwise ("530 read · all quiet", the count being papers triaged in that run); "running since 06:02" while it runs; "no run yet" on a fresh install. It opens Quality, whose top shows the night's splits, ungraded candidates and a failure summary linking to the run. Opening an old issue does not change it. The most recent weekly issue is pinned as a row above the feed, labelled with its week, absent until one exists. On a day with no issue the last one is shown with "nothing new since"; before any issue exists the Digest says when the first run is |
 | Paper | Take, abstract, deep card when one is stored, else a request button while a deep-card integration is loaded, else nothing; links (arXiv, PDF, published version), BibTeX, save, history; thumbs; "how this was chosen" folded at the end with the triage answer, both opinions by model name, the reconciled grade and an optional label row (origin `reader`) |
 | Topics | One screen of topic cards grouped Watch, Radar, Pulse, each with its colour, kind, one line of what is new (entries in issues since the topic was last opened, kept server-side in `topic_visits`) and counts; on a desktop a rail with the chosen topic open beside it. A topic page is the papers table with the topic fixed: by default the papers at an effective grade of `relevant` or above, adjacent on a toggle, nothing below that; for Radar and Pulse the picks, with the reviews above the table. The gear opens the editor in Settings |
-| Papers | The whole collection as one sortable table (title with authors, published, added, take, saved, links; a grade dot per row, an empty ring for a paper that is no topic's candidate, "grading" for a pending one, the take column empty where there is none) with a search box and filters for topic, saved, year and source; the archive's hits merged when it is connected; fetch an archive-only paper; report a miss from a row or by arXiv id; export BibTeX for the filter or selection. Saved is the filter that makes it the library |
+| Papers | The whole collection as one sortable table (title with authors, published, added, take of the first Watch topic by the owner's order, saved, links; a grade dot per row, an empty ring for a paper that is no topic's candidate, "grading" for a pending one, the take column empty where there is none) with a search box and filters for topic, saved, year and source; the archive's hits merged when it is connected; fetch an archive-only paper; report a miss from a row or by arXiv id; export BibTeX for the filter or selection. Saved is the filter that makes it the library |
 | Settings | Topics (create, edit, order, pause; preview a draft against labelled papers and misses; scoped re-runs after saving), Quality (last night's splits with both opinions and the label row; recall and precision per Watch topic over evaluation runs; correction rate; draw a calibration sample), Misses (reported misses with what each stage said), Runs and cost, Integrations (one card per module), Configuration (read-only) |
 
 Phone first, desktop whole: one column on the phone; on a desktop the Digest gets a reading pane beside the feed and
@@ -709,8 +710,9 @@ Decided on 2026-10-08:
    score; when every hit in a band carries one, a "best match" sort orders that band by it, and litwatch's own
    unscored hits keep the date order. The year filter applies to both bands by published date; topic and saved apply
    to the collection band only. Semantic search is the archive's job, since it holds every paper, and is not built
-   into litwatch. BibTeX export over a filter or selection covers collection rows; archive-only rows are skipped and
-   counted ("3 not in the collection"), since they must be fetched before litwatch has their record.
+   into litwatch. BibTeX export over a filter or selection covers archive-only rows too: a hit carries arXiv id, title, authors
+   and published date, which is what litwatch builds an arXiv entry from for its own unpublished papers; a published
+   record is looked up only for papers in the collection.
 7. **What a topic edit re-runs.** Nothing, by itself: edits apply forward, and retroactive
    runs are explicit and scoped (section 3). Re-triaging history on every edit would cost
    several dollars each time at this collection size.
@@ -733,6 +735,18 @@ Decided on 2026-10-11, in the M3 design pass (`docs/v1/design.html`):
     that one; a label set on the paper page is the owner's word and nothing automatic moves it.
 13. **Takes are bound to text and rubric.** A take is keyed by paper revision and topic version and rewritten when
     either changes under a new verdict, so a take never describes an abstract or a rubric that no longer exists.
+14. **Which splits the status line counts.** A split where the two graders straddle the `relevant` line (one says
+    `relevant` or above, the other `adjacent` or `none`): that disagreement decides whether the paper was shown at all.
+    A split between `relevant` and `must_read` keeps its stored flag but is not counted on the line.
+15. **An issue is a record.** Its entries stay as they were the day it was built. An entry whose paper the owner later
+    set to `adjacent` or not relevant is kept and rendered struck through with "set aside", not removed.
+16. **A paper in two Watch topics** appears in both of its sections of the issue and in both topic tables, each entry
+    with that topic's take and a line "also in <other topic>". The paper page carries one take per topic, each under
+    its chip. The Papers table shows the take of the first such topic by the owner's order.
+17. **Reactions on every paper.** Thumbs are on every paper wherever it is shown, with the topic of the surface it is
+    shown on (a Watch topic, a Radar or Pulse field, or none for a plain search result). Only a Watch-topic reaction
+    writes a label (decision 12); the rest are collected and shown on Quality with no automatic effect. The owner
+    corrects by hand from the collected feedback, or has an agent read it and adjust rubrics and settings.
 
 Nothing is open. Noted for later: the owner plans embeddings over the archive (abstracts,
 ideally full text) for semantic search, once a GPU server exists. That would also give a
