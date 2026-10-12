@@ -229,3 +229,16 @@ async def test_a_preview_that_fails_finishes_with_its_error(client, conn, monkey
     (run,) = (await client.get("/api/settings/evaluations", params={"kind": "preview"})).json()
     report = (await client.get(f"/api/settings/evaluations/{run['id']}")).json()
     assert report["finished"] and "triage exploded" in report["error"]
+
+
+async def test_settings_refuse_what_no_longer_applies(client, conn):
+    await conn.execute(
+        "INSERT INTO candidates (paper_id, topic, topic_revision, by_triage, failed_runs) "
+        "VALUES (%s, %s, 1, true, 3)",
+        (P.id, FAITH.slug),
+    )
+    body = FAITH.model_dump(mode="json") | {"kind": "radar"}
+    await client.put(f"/api/settings/topics/{FAITH.slug}", json=body)
+    pair = {"paper_id": P.id, "topic": FAITH.slug}
+    assert (await client.post("/api/settings/quality/grade-now", json=pair)).status_code == 409
+    assert (await client.post("/api/settings/calibrate/999/more")).status_code == 404

@@ -265,6 +265,8 @@ async def grade_now(body: Pair, request: Request, c: Conn) -> dict[str, Any]:
     newest = {x.paper_id: x for x in await quality.newest_candidates(c, body.topic)}
     if paper is None or topic is None or body.paper_id not in newest:
         raise HTTPException(status_code=404, detail="no such candidate")
+    if topic.kind != TopicKind.WATCH:
+        raise HTTPException(status_code=409, detail="the topic is no longer a Watch topic")
     if newest[body.paper_id].state != "pending":
         raise HTTPException(status_code=409, detail="already graded")
     try:
@@ -318,7 +320,9 @@ async def session(session_id: int, c: Conn) -> dict[str, Any]:
 
 @router.post("/calibrate/{session_id}/more")
 async def more(session_id: int, c: Conn) -> dict[str, int]:
-    """Continue with the papers waiting for a word: splits and thumbed papers."""
+    """Continue with the papers waiting for a word: splits, misses and thumbed papers."""
+    if await calibrate.session(c, session_id) is None:
+        raise HTTPException(status_code=404, detail="no such session")
     return {"added": await calibrate.more(c, session_id)}
 
 
