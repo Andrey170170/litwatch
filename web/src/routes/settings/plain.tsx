@@ -165,14 +165,15 @@ function took(a: string, b: string | null): string {
   return s < 90 ? `${s}s` : `${Math.round(s / 60)} min`;
 }
 
-const COUNT_ORDER = ["triaged", "candidates", "graded", "split", "takes", "issue_entries", "reviews", "rewritten", "triage_failed", "grading_failed"];
+const COUNT_ORDER = ["triaged", "candidates", "graded", "split", "takes", "issue_entries", "reviews", "reviews_failed", "rewritten", "triage_failed", "grading_failed"];
+const ONE: Record<string, string> = { candidates: "candidate", takes: "take", issue_entries: "issue entry", reviews: "review", reviews_failed: "review failed" };
 
 function countsLine(counts: Record<string, unknown> | null, fetched: number | null): string {
   const parts: string[] = [];
   if (fetched) parts.push(`${fetched} fetched`);
   for (const k of COUNT_ORDER) {
     const v = counts?.[k];
-    if (typeof v === "number" && v > 0) parts.push(`${v} ${k.replace("_", " ")}`);
+    if (typeof v === "number" && v > 0) parts.push(`${v} ${v === 1 && ONE[k] ? ONE[k] : k.replaceAll("_", " ")}`);
   }
   if (!parts.length && counts && typeof counts.topic === "string") parts.push(String(counts.topic));
   return parts.join(" · ");

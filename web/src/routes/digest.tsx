@@ -47,17 +47,18 @@ export function DigestPage() {
   // "nothing new since" when the newest issue is older than today and no older one was asked for.
   const stale = newest && !search.issue && newest.day < today ? newest.day : null;
   const mastDate = stale ? today : openDay;
+  // A weekly issue is headed by its week, not the Monday it was built on.
+  const openWeekly = !stale && (open.data?.kind ?? [weekly, ...issues].find((i) => i?.id === openId)?.kind) === "weekly";
+  const mastText = mastDate ? (openWeekly ? fmt.week(mastDate) : fmt.issueDay(mastDate)) : "";
 
   return (
     <div className={cn(desktop && "grid min-h-[calc(100dvh-49px)] grid-cols-2")}>
       <div className={cn(desktop && "border-r border-border")}>
-        {!desktop && (
-          <Masthead date={mastDate} stale={stale} />
-        )}
+        {!desktop && <Masthead text={mastText} stale={stale} />}
         <div className="mx-auto max-w-[700px] px-4 pt-4 pb-10 desk:px-7 desk:pt-6">
           {desktop && mastDate && (
             <h1 className="font-serif text-[30px] leading-[1.1] font-semibold tracking-[-.015em]">
-              {fmt.issueDay(mastDate)}
+              {mastText}
               {stale && <span className="ml-3 font-sans text-[13px] font-normal text-muted-foreground">nothing new since {fmt.weekday(stale)}</span>}
             </h1>
           )}
@@ -118,14 +119,14 @@ function paperTopic(issue: Issue | undefined, paperId: string): string | undefin
 }
 
 /** The masthead on the phone: brand, a double rule, and the printer's line. */
-function Masthead({ date, stale }: { date: string | undefined; stale: string | null }) {
+function Masthead({ text, stale }: { text: string; stale: string | null }) {
   return (
     <div className="relative border-b-[3px] border-double border-foreground px-4 pt-[18px] pb-2.5 text-center">
       <span className="block font-serif text-[28px] leading-none font-bold tracking-[.06em]">Litwatch</span>
       <GearLink className="absolute top-2 right-2" />
       <div className="mt-2 flex flex-wrap justify-between gap-x-2.5 text-[11px] tracking-[.07em] text-muted-foreground uppercase">
         <span className="whitespace-nowrap">
-          {date ? fmt.issueDay(date) : ""}
+          {text}
           {stale && ` · nothing new since ${fmt.weekday(stale)}`}
         </span>
         <StatusText uppercase />
