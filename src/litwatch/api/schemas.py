@@ -156,8 +156,9 @@ class Row(BaseModel):
     grade: Grade | None = None
     grading: bool = False
     take: str | None = None
+    take_topic: str | None = None  # whose take it is
     saved: bool = False
-    also_in: list[str] = Field(default_factory=list)
+    also_in: list[str] = Field(default_factory=list)  # other topics it is relevant to
 
 
 class Papers(BaseModel):

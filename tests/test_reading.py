@@ -392,3 +392,10 @@ async def test_a_word_given_before_a_new_split_does_not_silence_it(client, conn)
     )
     await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
     assert (await client.get("/api/status")).json()["splits"] == 1
+
+
+async def test_a_row_says_whose_take_it_shows_and_leaves_that_topic_out_of_also_in(client, conn):
+    await grade(conn, P, "relevant")
+    await night(conn)
+    (row,) = (await client.get("/api/papers", params={"q": "hidden computation"})).json()["rows"]
+    assert (row["take"], row["take_topic"], row["also_in"]) == ("A take.", FAITH.slug, [])

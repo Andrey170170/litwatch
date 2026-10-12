@@ -262,7 +262,8 @@ async def papers(
     With a Watch topic the table is that topic's papers at relevant or above (adjacent too
     when asked) with that topic's grade and take; with a field topic, its members; otherwise
     the whole collection, each row with its best Watch grade and the take of the first Watch
-    topic, by the owner's order, that has one. A search sorts by published date.
+    topic, by the owner's order, that has one. `also_in` names the other topics the paper is
+    relevant to, leaving out the one whose take is shown. A search sorts by published date.
     """
     kind = None
     if topic:
@@ -289,7 +290,7 @@ async def papers(
         scope_params = [topic, grades]
         grade = sql.SQL("g.grade")
         take = sql.SQL(
-            "(SELECT text FROM takes k WHERE k.paper_id = p.id AND k.topic = %s "
+            "(SELECT k.text, k.topic FROM takes k WHERE k.paper_id = p.id AND k.topic = %s "
             f"{FRESH} ORDER BY id DESC LIMIT 1)"
         )
         take_params = [topic]
@@ -304,7 +305,7 @@ async def papers(
             f"ORDER BY array_position({GRADE_ORDER}, g.grade) LIMIT 1)"
         )
         take = sql.SQL(
-            "(SELECT k.text FROM takes k JOIN topics t ON t.slug = k.topic "
+            "(SELECT k.text, k.topic FROM takes k JOIN topics t ON t.slug = k.topic "
             "JOIN effective_grades g ON g.paper_id = k.paper_id AND g.topic = k.topic "
             "WHERE k.paper_id = p.id AND g.grade IN ('must_read', 'relevant') "
             f"{FRESH} ORDER BY t.position, k.id DESC LIMIT 1)"
@@ -315,15 +316,17 @@ async def papers(
         """
         SELECT p.id, p.title, {authors}, p.published,
                p.fetched_at AS added,
-               {grade} AS grade, {take} AS take, coalesce(l.saved, false) AS saved,
+               {grade} AS grade, tk.text AS take, tk.topic AS take_topic,
+               coalesce(l.saved, false) AS saved,
                EXISTS (SELECT 1 FROM candidates c WHERE c.paper_id = p.id
                        AND c.state = 'pending') AS grading,
                (SELECT coalesce(array_agg(t2.name ORDER BY t2.position), '{{}}')
                 FROM effective_grades g2 JOIN topics t2 ON t2.slug = g2.topic
                 WHERE g2.paper_id = p.id AND g2.grade IN ('must_read', 'relevant')
-                  AND g2.topic IS DISTINCT FROM %s) AS also_in,
+                  AND g2.topic IS DISTINCT FROM coalesce(%s::text, tk.topic)) AS also_in,
                count(*) OVER () AS total
         FROM papers p {scope}
+        LEFT JOIN LATERAL {take} tk ON true
         LEFT JOIN library l ON l.paper_id = p.id
         WHERE {where}
         ORDER BY {order} LIMIT %s OFFSET %s
@@ -336,7 +339,9 @@ async def papers(
         where=sql.SQL(" AND ").join(where),
         order=order,
     )
-    rows = await _all(conn, query, [*take_params, topic, *scope_params, *params, limit, offset])
+    # The topic a row's take belongs to: the Watch topic of the page, else the take's own.
+    shown = topic if kind == "watch" else None
+    rows = await _all(conn, query, [shown, *scope_params, *take_params, *params, limit, offset])
     if rows:
         total = rows[0]["total"]
     elif offset:  # past the last page: count the filter on its own

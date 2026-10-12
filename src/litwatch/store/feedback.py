@@ -26,7 +26,10 @@ async def set_label(conn: psycopg.AsyncConnection, label: Label) -> Label:
             VALUES (%s, %s, %s, %s, %s, %s, %s, clock_timestamp())
             ON CONFLICT (paper_id, topic) DO UPDATE SET
                 value = EXCLUDED.value, grade = EXCLUDED.grade, note = EXCLUDED.note,
-                provisional = EXCLUDED.provisional, labelled_at = EXCLUDED.labelled_at
+                provisional = EXCLUDED.provisional, labelled_at = EXCLUDED.labelled_at,
+                -- A bulk-accepted label was never read; a Calibrate draw of it is the sample.
+                origin = CASE WHEN labels.provisional AND EXCLUDED.origin = 'sample'
+                              THEN EXCLUDED.origin ELSE labels.origin END
             RETURNING *
             """,
             (
@@ -129,7 +132,8 @@ async def finish_eval(conn: psycopg.AsyncConnection, eval_run_id: int) -> None:
 async def get_eval(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str, Any] | None:
     return await (
         await conn.execute(
-            "SELECT e.*, r.cost, r.counts FROM eval_runs e LEFT JOIN runs r ON r.id = e.run_id "
+            "SELECT e.*, r.cost, r.counts, r.error FROM eval_runs e "
+            "LEFT JOIN runs r ON r.id = e.run_id "
             "WHERE e.id = %s",
             (eval_run_id,),
         )
@@ -137,10 +141,12 @@ async def get_eval(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str,
 
 
 async def latest_eval(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
+    """The newest evaluation of the kind that finished without an error."""
     return await (
         await conn.execute(
-            "SELECT * FROM eval_runs WHERE kind = %s AND finished_at IS NOT NULL "
-            "ORDER BY id DESC LIMIT 1",
+            "SELECT e.* FROM eval_runs e LEFT JOIN runs r ON r.id = e.run_id "
+            "WHERE e.kind = %s AND e.finished_at IS NOT NULL AND r.error IS NULL "
+            "ORDER BY e.id DESC LIMIT 1",
             (kind,),
         )
     ).fetchone()

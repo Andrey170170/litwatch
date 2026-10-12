@@ -8,7 +8,7 @@ import psycopg
 
 from litwatch import screening, watch
 from litwatch.config import Config
-from litwatch.core import Paper, Status, TopicKind
+from litwatch.core import Candidate, Paper, Status, TopicKind
 from litwatch.jobs.context import ModelRun
 from litwatch.store import topics as topics_store
 from litwatch.store import triage as triage_store
@@ -22,20 +22,23 @@ async def triage(
     run: ModelRun,
     papers: list[Paper] | None = None,
     limit: int | None = None,
-) -> None:
+) -> list[Candidate]:
     """Triage the given papers, or every untriaged one, and run the keyword audit on them.
+    Returns the candidates this pass put forward.
 
     Each paper's outcome is stored as it arrives, so an interrupted run keeps what it paid for.
     """
     topics = await topics_store.all(conn, Status.ACTIVE)
     if papers is None:
         papers = await triage_store.untriaged(conn, limit)
+    put_forward: list[Candidate] = []
     if not topics or not papers:
-        return
+        return put_forward
     keywords = screening.audit(papers, topics)
     log.info("run %s triage: %s papers, %s topics", run.run_id, len(papers), len(topics))
     async for triaged in screening.triage(papers, topics, run.gateway, config.limits.triage):
         made = await screening.record(conn, triaged, keywords.get(triaged.paper.id, {}), topics)
+        put_forward.extend(made)
         run.add("triage_failed" if triaged.error else "triaged")
         run.add("candidates", len(made))
         run.add("candidates_keyword_only", sum(c.by_keyword and not c.by_triage for c in made))
@@ -45,6 +48,7 @@ async def triage(
             "run %s: triage keeps failing on %s", run.run_id, [s["paper_id"] for s in stuck]
         )
     log.info("run %s triage done: %s", run.run_id, run.counts)
+    return put_forward
 
 
 async def grade(conn: psycopg.AsyncConnection, config: Config, run: ModelRun) -> None:
