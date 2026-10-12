@@ -140,7 +140,9 @@ async def test_the_schedule_says_when_each_job_next_fires_in_its_zone(conn):
 
     from litwatch.config import Schedule
 
-    cfg = Config(schedule=Schedule(nightly="0 6 * * *", weekly="0 7 * * 1", timezone="America/Denver"))
+    cfg = Config(
+        schedule=Schedule(nightly="0 6 * * *", weekly="0 7 * * 1", timezone="America/Denver")
+    )
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     transport = httpx.ASGITransport(app=create_app(dsn, TOKEN, cfg))
     headers = {"authorization": f"Bearer {TOKEN}"}
