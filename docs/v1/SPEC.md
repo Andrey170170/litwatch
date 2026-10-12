@@ -63,7 +63,7 @@ decides the service it gets:
 | Question asked | Is this paper about my question, and how central? | What happened this week that I would care about? | What is going on? |
 | Unit of output | A graded verdict per paper | About 8 picks and themes per week | A paragraph and up to 3 picks per week |
 | Optimised for | Recall, then precision | Ranking | Low cost |
-| Review cadence | None; verdicts arrive nightly | Weekly, or daily if the topic says so | Weekly |
+| Review cadence | Verdicts nightly; a written recap weekly | Weekly, and also daily if the topic says so | Weekly |
 | Written by the owner | Subject, rubric, keywords | Subject, interests | Subject |
 
 **Triage.** One cheap model call per paper that answers, for every active topic at once: for a
@@ -89,9 +89,15 @@ owner may settle it; the reading surfaces show the paper at the standing grade w
 
 **Review.** A piece of writing for one Radar or Pulse topic: themes, and picks with a
 sentence each on why. Produced by one strong model reading the period's member papers together.
-The period is a week unless the topic's `cadence` is `daily`, which is meant for a Radar field
-the owner follows closely (interpretability today). A daily review is shorter: up to 5 picks
-and a line on anything that stands out, with no themes forced onto one day's papers.
+Every Radar and Pulse topic is reviewed weekly. A Radar topic whose `cadence` is `daily`, meant for a field the owner
+follows closely (interpretability today), is also reviewed after each nightly run. A daily review is shorter: up to 5
+picks and a line on anything that stands out, with no themes forced onto one day's papers. The weekly review of a
+daily topic sums up the week rather than repeating its nights.
+
+**Recap.** The weekly piece of writing for one Watch topic: what the week's new papers were about and any thread
+running through them, written by the writer from those papers' takes, followed by the week's papers as one-liners,
+the papers the owner set aside, and the misses reported that week. A week with nothing new for the topic gets one
+line, not a recap.
 
 **Take.** Litwatch's own words on one paper for one Watch topic: what the paper does and why it matters for the
 question, written for the owner by the writer (section 3) from the abstract, the topic's subject, and whatever opinions
@@ -105,8 +111,10 @@ otherwise stay behind Settings.
 
 **Issue.** What the owner reads, written like a newspaper. The daily issue opens with a lede, then one section per
 Watch topic with the papers newly at an effective grade of `relevant` or above and their takes, then the review of
-every daily topic. The weekly issue, on Monday, carries each weekly Radar and Pulse review and a Watch recap: per
-Watch topic the week's papers newly in the library, those the owner set aside, and the misses reported that week. (These were
+every daily topic. The weekly issue, on Monday, is "what happened last week": one section per topic of every kind,
+in the owner's order, holding the Watch topic's recap or the Radar or Pulse topic's weekly review. The two kinds of
+issue are separate: the daily issue never carries a weekly review, and the weekly issue never repeats a night's
+entries. (These were
 called briefings in earlier drafts; the API keeps the shape, the name follows the page.)
 
 **Feedback.** The owner's corrections, and the only ground truth the system has. Every reading surface offers it and
@@ -205,7 +213,7 @@ papers, which is what backfill will use later.
    current verdict with a different paper revision, topic version or grade (a move between `relevant` and `must_read`
    changes its length); a re-grade that lands on the same grade from the same text keeps the take. Rewriting a take
    makes nothing due for an issue again. Once a night the writer also produces the issue's lede from that night's
-   entries, and on Monday the weekly issue's Watch recap. One gateway role, `writer` (section 4.4), Opus 5.5 on the
+   entries, and on Monday a recap per Watch topic. One gateway role, `writer` (section 4.4), Opus 5.5 on the
    Anthropic API by default (credits), compared in M3 with one or two OpenRouter models on a small set of papers; at
    one to five papers a night the cost is cents. The review writer of Radar and Pulse topics shares its prompt
    scaffolding.
@@ -226,9 +234,9 @@ papers, which is what backfill will use later.
    grade (section 2), as every reader-facing surface does. A paper the owner rejected does not come back because a
    re-grade liked it. A night with no issue leaves the Digest on the last one, which says since when.
 
-Weekly: one **review** per weekly Radar and Pulse topic over the week's members, then the weekly
-issue. A topic with a daily cadence is reviewed after each nightly run instead, over that
-night's members, before the daily issue is built.
+Weekly: one **review** per Radar and Pulse topic over the week's members, whatever its cadence, and one recap per
+Watch topic, then the weekly issue. A Radar topic with a daily cadence is also reviewed after each nightly run, over
+that night's members, before the daily issue is built.
 
 Continuously: **publication lookup** for library papers, first when saved, then monthly for two
 years, and on demand when BibTeX is exported.
@@ -353,7 +361,7 @@ is graded under the topic as it then is, and its verdict records that revision.
 **review.** `review(topic, period)` for Radar and Pulse, where the period is a week or a day; a field too large for one call is
 shortlisted in chunks first. `take(paper, topic, source)` writes a paper's take, where the source is the current verdict, an evaluation
 result (a miss), a migrated opinion, or the owner's word alone, and `lede(day)` the issue's opening
-(section 3, writer). `daily_issue(day)` and `weekly_issue(week)` assemble stored takes, verdicts and reviews into
+(section 3, writer), and `recap(topic, week)` a Watch topic's recap. `daily_issue(day)` and `weekly_issue(week)` assemble stored takes, verdicts and reviews into
 structured issues; the web app and exports render them.
 
 **publications.** `PublicationSource` protocol with a DBLP implementation over its SPARQL
@@ -566,7 +574,7 @@ Reviews are ranking and prose, read by a person, with no second model.
 Expected spend with the proposed defaults, at about 650 papers a night: triage on credits, about
 $0.25–0.40 a night; grading about 30 candidates twice, a few cents on each side; four or five
 weekly reviews at roughly $0.50–1 each on credits, and a daily review for each topic that asks
-for one, not yet measured and also on credits; takes, ledes and recaps for one to five papers a
+for one, not yet measured and also on credits; a weekly recap per Watch topic, cents; takes, ledes and recaps for one to five papers a
 night, cents, on credits. Real-dollar spend is the check model alone,
 on the order of $1 a month, against about $30 a month in 0.x. These are estimates from 0.x token
 counts and must be re-measured in milestone 2.
@@ -714,8 +722,8 @@ visible without opening Settings; Unsave takes a verdict-saved paper out of the 
 put it back; a Calibrate session of twenty papers takes minutes and gives the precision number, and a paper marked
 as mattering with no topic fit appears on the "matters, no topic" list.
 
-**M4 · Reviews and the weekly issue.** Radar and Pulse reviews at each topic's cadence, their sections in the daily
-issue, the weekly issue with the Watch recap and the pinned row, the reviews on topic pages, in-process scheduler, Runs
+**M4 · Reviews and the weekly issue.** Weekly reviews for every Radar and Pulse topic and daily ones where the cadence
+asks, the daily reviews' sections in the daily issue, the Watch recaps, the weekly issue and the pinned row, the reviews on topic pages, in-process scheduler, Runs
 and cost under Settings (including the papers triage is stuck on). *Check:* the weekly job, run by hand over two past
 weeks, produces two weekly issues, and the owner prefers them to 0.14's digests or says what is missing; the scheduler
 starts each job at its cron time, shown with a test schedule rather than overnight.
@@ -827,6 +835,10 @@ Decided on 2026-10-12, reviewing the spec for the remaining milestones:
 21. **Writer model.** Opus 5.5 on the Anthropic API, on credits, compared once in M3 with one or two OpenRouter models.
 22. **No scheduled runs before cutover.** Jobs run by hand until the side-by-side week of M7; checks that mention a
     schedule are shown with a test schedule.
+23. **Daily and weekly issues are separate.** The daily issue carries the night: Watch entries and daily Radar
+    reviews. The weekly issue on Monday is "what happened last week" for every topic: a written recap per Watch topic
+    and a weekly review per Radar and Pulse topic, daily ones included. Cadence `daily` adds daily reviews; it never
+    replaces the weekly one.
 
 Nothing is open. Noted for later: the owner plans embeddings over the archive (abstracts,
 ideally full text) for semantic search, once a GPU server exists. That would also give a
