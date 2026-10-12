@@ -1320,6 +1320,206 @@
         }
       }
     },
+    "/api/settings/calibrate": {
+      "get": {
+        "summary": "Sessions",
+        "operationId": "sessions_api_settings_calibrate_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Sessions Api Settings Calibrate Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Draw",
+        "description": "Draw a session of about twenty papers. The seed is recorded with it.",
+        "operationId": "draw_api_settings_calibrate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DrawIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object",
+                  "title": "Response Draw Api Settings Calibrate Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/calibrate/{session_id}": {
+      "get": {
+        "summary": "Session",
+        "operationId": "session_api_settings_calibrate__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Session Api Settings Calibrate  Session Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/calibrate/{session_id}/more": {
+      "post": {
+        "summary": "More",
+        "description": "Continue with the papers waiting for a word: splits and thumbed papers.",
+        "operationId": "more_api_settings_calibrate__session_id__more_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response More Api Settings Calibrate  Session Id  More Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/calibrate/{session_id}/items/{position}": {
+      "put": {
+        "summary": "Answer",
+        "operationId": "answer_api_settings_calibrate__session_id__items__position__put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "position",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Position"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Answer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/misses": {
       "get": {
         "summary": "Reported",
@@ -1616,6 +1816,57 @@
         "title": "Ack",
         "description": "What happened, in the words the reader sees."
       },
+      "Answer": {
+        "properties": {
+          "fit": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Fit"
+            },
+            "type": "object",
+            "title": "Fit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "matters",
+                  "fine",
+                  "not_for_me"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "takes": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Takes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fit"
+        ],
+        "title": "Answer",
+        "description": "One paper's answers. Fit for the topic it was drawn or taken for is required."
+      },
       "BibtexIn": {
         "properties": {
           "ids": {
@@ -1723,6 +1974,23 @@
         "title": "Digest",
         "description": "The feed: daily issues newest first, and the week's weekly issue pinned above them."
       },
+      "DrawIn": {
+        "properties": {
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          }
+        },
+        "type": "object",
+        "title": "DrawIn"
+      },
       "Entry": {
         "properties": {
           "paper_id": {
@@ -1824,6 +2092,28 @@
         ],
         "title": "Entry",
         "description": "One paper in an issue, for one Watch topic."
+      },
+      "Fit": {
+        "properties": {
+          "value": {
+            "$ref": "#/components/schemas/LabelValue"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "Fit"
       },
       "Grade": {
         "type": "string",

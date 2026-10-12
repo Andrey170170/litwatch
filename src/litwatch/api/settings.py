@@ -3,6 +3,7 @@ configuration (read-only, spec decision 11)."""
 
 from __future__ import annotations
 
+import secrets
 from datetime import date, timedelta
 from typing import Any
 
@@ -12,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 from litwatch import store, watch
 from litwatch.api.deps import Conn
 from litwatch.core import Topic, TopicKind
-from litwatch.feedback import metrics, misses, replay, word
+from litwatch.feedback import calibrate, metrics, misses, replay, word
 from litwatch.jobs import reruns
 from litwatch.jobs.context import model_run
 from litwatch.store import feedback as feedback_store
@@ -177,6 +178,8 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
             "awaiting_triage": await quality.awaiting_triage(c, limits.triage_stuck_after),
         },
         "evaluation": await metrics(c, latest_replay["id"]) if latest_replay else None,
+        "calibration": await calibrate.precision(c),
+        "matters_no_topic": await calibrate.matters_no_topic(c),
         "correction_rate": await quality.correction_rate(c),
         "collected": await quality.collected_reactions(c),
     }
@@ -203,6 +206,56 @@ async def _grade_now(state: Any, pair: Pair) -> None:
         async with model_run(conn, state.config, "grade-now", gateway=state.gateway) as run:
             graded = await watch.grade(paper, topic, run.gateway)
             await watch.record(conn, graded)
+
+
+# -- calibrate -------------------------------------------------------------------------------------
+
+
+class DrawIn(BaseModel):
+    seed: int | None = None
+
+
+@router.post("/calibrate")
+async def draw(body: DrawIn, c: Conn) -> dict[str, int]:
+    """Draw a session of about twenty papers. The seed is recorded with it."""
+    seed = body.seed if body.seed is not None else secrets.randbelow(2**31)
+    return {"id": await calibrate.draw(c, seed)}
+
+
+@router.get("/calibrate")
+async def sessions(c: Conn) -> list[dict[str, Any]]:
+    return await (
+        await c.execute(
+            "SELECT s.id, s.seed, s.drawn_at, count(i.*) AS papers, "
+            "count(i.answered_at) AS answered FROM calibration_sessions s "
+            "LEFT JOIN calibration_items i ON i.session_id = s.id "
+            "GROUP BY s.id ORDER BY s.id DESC LIMIT 20"
+        )
+    ).fetchall()
+
+
+@router.get("/calibrate/{session_id}")
+async def session(session_id: int, c: Conn) -> dict[str, Any]:
+    found = await calibrate.session(c, session_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such session")
+    return found
+
+
+@router.post("/calibrate/{session_id}/more")
+async def more(session_id: int, c: Conn) -> dict[str, int]:
+    """Continue with the papers waiting for a word: splits and thumbed papers."""
+    return {"added": await calibrate.more(c, session_id)}
+
+
+@router.put("/calibrate/{session_id}/items/{position}", status_code=204)
+async def answer(session_id: int, position: int, body: calibrate.Answer, c: Conn) -> None:
+    try:
+        await calibrate.answer(c, session_id, position, body)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # -- misses, runs, configuration -------------------------------------------------------------------

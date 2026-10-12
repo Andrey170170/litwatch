@@ -26,7 +26,10 @@ async def set_label(conn: psycopg.AsyncConnection, label: Label) -> Label:
             VALUES (%s, %s, %s, %s, %s, %s, %s, clock_timestamp())
             ON CONFLICT (paper_id, topic) DO UPDATE SET
                 value = EXCLUDED.value, grade = EXCLUDED.grade, note = EXCLUDED.note,
-                provisional = EXCLUDED.provisional, labelled_at = EXCLUDED.labelled_at
+                provisional = EXCLUDED.provisional, labelled_at = EXCLUDED.labelled_at,
+                -- A bulk-accepted label was never read; a Calibrate draw of it is the sample.
+                origin = CASE WHEN labels.provisional AND EXCLUDED.origin = 'sample'
+                              THEN EXCLUDED.origin ELSE labels.origin END
             RETURNING *
             """,
             (
