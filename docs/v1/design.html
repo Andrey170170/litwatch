@@ -472,8 +472,8 @@ no new issue, so the feed opens on Friday's and the masthead says "nothing new s
       <div class="pop"><span class="on">Not for me</span><span>Unrelated to the topic</span><span>Already knew it</span><span>Overrated</span><small>Remembered for CoT monitoring. Changes nothing today.</small></div>
     </div>
     <ul>
-      <li>A thumb down opens the reasons; the first tap on a reason closes it. A thumb up stands alone, with "Great find" on a long press.</li>
-      <li>"Unrelated to the topic" is the one reason that speaks to the pipeline's job and becomes a label (not relevant, origin reaction, so clearing the thumb takes back that label and no other). The others are stored as reactions and feed Quality as a correction rate. Opening and saving are recorded as implicit signals.</li>
+      <li>A thumb down opens the reasons; the first tap on a reason closes it. A thumb up: the first tap sets it, a second offers "Great find", a third clears it.</li>
+      <li>On a Watch topic, "Unrelated to the topic" and "Great find" are the owner's word on the paper (not relevant, relevant) without writing a label, and clearing the thumb takes that word back (spec decision 12). The others are stored as reactions and feed Quality as a correction rate.</li>
     </ul>
   </div>
 </div>
@@ -787,7 +787,7 @@ they are what the owner comes here to look at. The chip on the front links to Qu
   <p class="frame-label">The other Settings pages, in words</p>
   <ul>
     <li><strong>Topics</strong>: the list of topics with kind, cadence, revision and status, and the editor from the first draft (subject, rubric, keywords with match counts; preview a draft against labelled papers and misses; scoped re-runs after saving; pause).</li>
-    <li><strong>Quality</strong> is what the chip opens. At the top, last night: the disagreements with both opinions and the label row, so a person who wants to settle them can. Below, per Watch topic: the four recalls and precision over evaluation runs, each number a link to its papers; the correction rate from thumbs; and a "draw a calibration sample" button that puts ten random candidates on the existing labelling page for a precision figure that is not biased by what the owner chose to react to.</li>
+    <li><strong>Quality</strong> is what the chip opens. At the top, last night: the disagreements with both opinions and the label row, so a person who wants to settle them can. Below, per Watch topic: the four recalls and precision over evaluation runs, each number a link to its papers; the correction rate from thumbs; and Calibrate, a session of about twenty papers asking fit, value and whether the take is accurate, which gives a precision figure not biased by what the owner chose to react to (spec decision 20).</li>
     <li><strong>Misses</strong>: reported misses with their stage traces (the first draft's trace page), open and resolved.</li>
     <li><strong>Runs and cost</strong>: a row per night with counts, duration, cost by role and provider, errors; the month's total; papers triage is stuck on, with a dismiss.</li>
     <li><strong>Configuration</strong>: the loaded <code>litwatch.toml</code> as read, secrets masked, with the models in use per role and the lab rule's verdict. Read-only in v1; the file stays the source of truth, which keeps the API free of a config-write path and the token's power bounded.</li>
@@ -816,18 +816,17 @@ document is agreed.</p>
 <p>The Digest needs written takes, so the pipeline gains one step after reconciliation: for each paper graded relevant or
 above, a <strong>writer</strong> produces the take (two or three sentences for must read, one for relevant) from the abstract,
 the two graders' reasons and the topic's subject, in litwatch's voice and addressed to the owner. Once a night it also
-writes the lede from the day's verdicts. A mid-sized model (Sonnet 5.5 as the proposal, settled by evaluation like the
-other roles); at one to five papers a night the cost is cents. The take is stored on the verdict and regenerated only
-when the verdict changes. This belongs in M3, since the page has nothing to say without it, and it is the same shape as
+writes the lede from the day's verdicts. Opus 5.5 on the Anthropic API (spec decision 21); at one to five papers a night the cost is cents. Each take is its
+own record, bound to the paper's text and the topic's rubric it was written from (spec decision 13). This belongs in M3, since the page has nothing to say without it, and it is the same shape as
 the M4 review writer, which can share its prompt scaffolding. The weekly issue's Watch recap is also the writer's.</p>
 
 <h3>Feedback model</h3>
-<p>Thumbs are stored as <strong>reactions</strong> (paper, topic, value up or down, reason, time). The reason "unrelated to
-the topic" also writes a label (not relevant, origin reaction) and "great find" writes relevant, origin reaction; a label set on the paper page has origin reader and outranks them; the other reasons do not
-touch labels. Opening a paper page and saving are recorded as events already (<code>paper.saved</code> exists;
+<p>Thumbs are stored as <strong>reactions</strong> (paper, topic, value up or down, reason, time). A reaction never writes a label; on a Watch topic "unrelated to
+the topic" and "great find" are the owner's word, and the newer of that and a label decides (spec section 2); the
+other reasons are collected only. Opening a paper page and saving are recorded as events already (<code>paper.saved</code> exists;
 <code>paper.opened</code> is new and local). Quality reports the correction rate from reactions and keeps precision honest
-with the calibration sample rather than from reactions, which are biased by construction. The existing labelling page
-stays as the evaluation tool.</p>
+with the calibration sample rather than from reactions, which are biased by construction. Calibrate, on the Quality page,
+replaces the M2 labelling page (spec decision 20).</p>
 
 <h3>Search</h3>
 <p>Decision 6 stands. Two additions: the <code>SearchProvider</code> hit gains an optional score, and the merged list is

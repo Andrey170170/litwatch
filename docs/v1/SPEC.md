@@ -102,7 +102,7 @@ line, not a recap.
 **Take.** Litwatch's own words on one paper for one Watch topic: what the paper does and why it matters for the
 question, written for the owner by the writer (section 3) from the abstract, the topic's subject, and whatever opinions
 exist for that paper and topic: both graders' for a production verdict, the evaluation's for a miss the owner marked
-relevant, the single migrated opinion for a 0.14 positive, none for a paper the owner labelled relevant out of nowhere.
+relevant, the single migrated opinion for a 0.14 positive, none for a paper the owner's word alone made relevant (a label or a great find; take source `owner`).
 Two or three sentences for `must_read`, one for `relevant`. Every take written is its own row with its own id, recording the paper, topic, paper
 revision, topic version and grade it was written for, so it is bound to the text and rubric it was written from, and a
 rewrite adds a row rather than changing one an issue or a take rating points at. It is the only text about a
@@ -152,8 +152,8 @@ asks, because the owner opens it to answer (decision 20).
   note, and an **accurate or off** on a take. Both are given in a Calibrate session only. A paper that matters
   to the owner but fits no Watch topic is the signal that a topic is missing or a rubric is drawn too narrowly;
   Quality lists those papers with their notes, for the owner or an agent to read. A paper is on that list when its
-  newest appraisal is matters and its effective grade is below `relevant` for every Watch topic; a topic the owner
-  did not answer for counts by its verdict, and one with no verdict as not fitting.
+  newest appraisal is matters and its effective grade is below `relevant` for every Watch topic, the owner's
+  earlier labels and reactions included; a topic with neither the owner's word nor a verdict counts as not fitting.
 
 **The owner's word** on a paper for a Watch topic is the newer of its label and its word-carrying reaction; an
 unsure label is no word, and a provisional label (accepted in bulk, section 8, M2) is older than either. The
@@ -529,7 +529,7 @@ topic version, paper version, paper revision, sources: any of triage, keyword an
 last error), `verdicts` (paper, topic, topic version,
 paper version, paper revision, grade, split, judge and check opinions, recorded at; each grading is its own
 row with its own id, so a re-run over the same versions adds a row, and the latest recorded
-is current), `takes` (id, paper, topic, paper revision, topic version, grade, source: verdict, evaluation, migrated or label,
+is current), `takes` (id, paper, topic, paper revision, topic version, grade, source: verdict, evaluation, migrated or owner,
 text, written at, failed runs), `due` (paper, topic, due for take, due for issue), `reviews`, `issues` (date, kind
 daily or weekly, lede, entries as paper, topic and take id in section order, so a rewritten take never replaces the
 one an old issue showed; review references), `labels` (paper, topic, value, grade, origin, provisional, at),
@@ -734,7 +734,8 @@ A session shows one paper per screen (title, abstract, its takes) and holds abou
 owner will read with care in one sitting. They are split evenly across the Watch topics and, within each topic, half
 are drawn uniformly with a recorded seed from the papers graded `relevant` or above in the trailing 30 days and
 without a label, half from those graded below (5 and 5 per topic with two Watch topics). On request it continues with the papers waiting for a word: last
-night's splits, reported misses not yet marked, and papers carrying a word-carrying reaction. Each paper asks:
+night's splits, reported misses not yet marked, and papers carrying a word-carrying reaction. A paper appears at
+most once in a session: one already drawn is not taken again, and its fit answer for the drawn topic is the sample's. Each paper asks:
 
 | Question | Answers | Required |
 | --- | --- | --- |
