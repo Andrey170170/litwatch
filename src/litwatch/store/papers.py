@@ -84,7 +84,15 @@ async def upsert(
                             %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
                             %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s)
                     ON CONFLICT (id) DO UPDATE SET
-                        title = EXCLUDED.title, abstract = EXCLUDED.abstract,
+                        -- The owner's correction stands until a newer arXiv version arrives.
+                        title = CASE WHEN papers.corrected_at IS NOT NULL
+                                      AND NOT coalesce(EXCLUDED.version > papers.version, false)
+                                     THEN papers.title ELSE EXCLUDED.title END,
+                        abstract = CASE WHEN papers.corrected_at IS NOT NULL
+                                         AND NOT coalesce(EXCLUDED.version > papers.version, false)
+                                        THEN papers.abstract ELSE EXCLUDED.abstract END,
+                        corrected_at = CASE WHEN coalesce(EXCLUDED.version > papers.version, false)
+                                            THEN NULL ELSE papers.corrected_at END,
                         authors = EXCLUDED.authors, categories = EXCLUDED.categories,
                         primary_category = coalesce(EXCLUDED.primary_category,
                                                     papers.primary_category),
@@ -112,7 +120,7 @@ async def upsert(
                            OR EXCLUDED.version >= papers.version)
                       AND (%(source)s <> 'oai' OR papers.updated IS NULL
                            OR EXCLUDED.updated::date >= papers.updated::date)
-                    RETURNING (xmax = 0) AS inserted, version
+                    RETURNING (xmax = 0) AS inserted, version, title, abstract
                     """,
                     {
                         **p.model_dump(),
@@ -130,7 +138,9 @@ async def upsert(
                     continue
                 result.updated += 1
                 old = before[p.id]
-                changed = rewritten(old["title"], old["abstract"], p)
+                # Compared with what was stored, so a kept correction is no rewrite.
+                stored = p.model_copy(update={"title": row["title"], "abstract": row["abstract"]})
+                changed = rewritten(old["title"], old["abstract"], stored)
                 if changed:
                     # What triage said was about other text: the paper is untriaged again.
                     # Its candidates and verdicts stay as history under the old revision.
@@ -176,3 +186,22 @@ async def revision(conn: psycopg.AsyncConnection, paper_id: str) -> int:
         await conn.execute("SELECT revision FROM papers WHERE id = %s", (paper_id,))
     ).fetchone()
     return row["revision"] if row else 1
+
+
+async def correct(
+    conn: psycopg.AsyncConnection, paper_id: str, title: str | None, abstract: str | None
+) -> bool:
+    """The owner's fix of a title or abstract (a broken character, a garbled abstract). It
+    counts as a rewrite: the revision goes up and the paper is triaged again, its failures
+    forgotten."""
+    async with conn.transaction():
+        cur = await conn.execute(
+            "UPDATE papers SET title = coalesce(%s, title), abstract = coalesce(%s, abstract), "
+            "corrected_at = now(), revision = revision + 1 WHERE id = %s",
+            (title, abstract, paper_id),
+        )
+        if cur.rowcount == 0:
+            return False
+        await conn.execute("DELETE FROM triage WHERE paper_id = %s", (paper_id,))
+        await events.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
+    return True

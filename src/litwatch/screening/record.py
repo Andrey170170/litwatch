@@ -5,6 +5,7 @@ from __future__ import annotations
 import psycopg
 
 from litwatch.core import Candidate, Grade, Paper, Topic, TopicKind
+from litwatch.screening.audit import audit
 from litwatch.screening.triage import Triaged
 from litwatch.store import triage as triage_store
 from litwatch.store import verdicts
@@ -25,12 +26,14 @@ async def record(
     triaged: Triaged,
     keywords: dict[str, str],
     topics: list[Topic],
+    *,
+    by_owner: bool = False,
 ) -> list[Candidate]:
     """Store one paper's triage outcome. Returns the candidates it became.
 
     `keywords` maps Watch topic slugs to the pattern the audit matched for this paper. A
     keyword match makes a candidate even when the triage call failed; the paper itself
-    stays untriaged and is tried again.
+    stays untriaged and is tried again. `by_owner` marks answers the owner gave by hand.
     """
     paper = triaged.paper
     revisions = {t.slug: t.revision for t in topics}
@@ -66,10 +69,26 @@ async def record(
                 topic_revision=topic.revision,
                 paper_version=paper.version,
                 paper_revision=paper.revision,
-                by_triage=by_triage,
+                by_triage=by_triage and not by_owner,
                 by_keyword=bool(pattern),
+                by_owner=by_triage and by_owner,
                 reason=why,
             )
             await triage_store.put_candidate(conn, candidate)
             candidates.append(candidate)
     return candidates
+
+
+async def by_hand(
+    conn: psycopg.AsyncConnection, paper: Paper, answers: dict[str, bool], topics: list[Topic]
+) -> list[Candidate]:
+    """The owner gives triage's answers for a paper triage kept failing on: yes or no for
+    every active topic, a missing one counting as no. The keyword audit runs as usual, and
+    grading follows on the next run. Returns the candidates it made."""
+    triaged = Triaged(
+        paper,
+        {t.slug: (answers.get(t.slug, False), "the owner's call") for t in topics},
+        model="owner",
+    )
+    keywords = audit([paper], topics).get(paper.id, {})
+    return await record(conn, triaged, keywords, topics, by_owner=True)

@@ -14,9 +14,9 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel, ValidationError
 
-from litwatch import store, watch
+from litwatch import screening, store, watch
 from litwatch.api.deps import Conn
-from litwatch.core import Topic, TopicKind
+from litwatch.core import Status, Topic, TopicKind
 from litwatch.feedback import calibrate, metrics, misses, replay, word
 from litwatch.jobs import reruns
 from litwatch.jobs.context import model_run
@@ -26,6 +26,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import quality
 from litwatch.store import runs as runs_store
 from litwatch.store import topics as topics_store
+from litwatch.store import triage as triage_store
 
 router = APIRouter(prefix="/api/settings")
 log = logging.getLogger(__name__)
@@ -334,6 +335,55 @@ async def answer(session_id: int, position: int, body: calibrate.Answer, c: Conn
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# -- papers triage kept failing on (spec decision 24) ----------------------------------------------
+
+
+async def _awaiting(request: Request, c: Any, paper_id: str) -> None:
+    attempts = request.app.state.config.limits.triage_stuck_after
+    waiting = {r["paper_id"] for r in await quality.awaiting_triage(c, attempts)}
+    if paper_id not in waiting:
+        raise HTTPException(status_code=404, detail="not a paper awaiting triage")
+
+
+@router.post("/triage/{paper_id:path}/dismiss", status_code=204)
+async def dismiss(paper_id: str, request: Request, c: Conn) -> None:
+    """Litwatch drops the paper; it stays in the collection and the archive."""
+    await _awaiting(request, c, paper_id)
+    await triage_store.dismiss(c, paper_id)
+
+
+class AnswersIn(BaseModel):
+    answers: dict[str, bool]  # topic slug -> could it belong / is it in the field
+
+
+@router.put("/triage/{paper_id:path}")
+async def triage_by_hand(
+    paper_id: str, body: AnswersIn, request: Request, c: Conn
+) -> dict[str, Any]:
+    """The owner's own triage answers; the paper goes on to the keyword audit and grading."""
+    await _awaiting(request, c, paper_id)
+    topics = await topics_store.all(c, Status.ACTIVE)
+    if unknown := sorted(set(body.answers) - {t.slug for t in topics}):
+        raise HTTPException(status_code=422, detail=f"not active topics: {', '.join(unknown)}")
+    paper = await papers_store.get(c, paper_id)
+    made = await screening.by_hand(c, paper, body.answers, topics)
+    return {"candidates": [m.topic for m in made]}
+
+
+class CorrectionIn(BaseModel):
+    title: str | None = None
+    abstract: str | None = None
+
+
+@router.post("/triage/{paper_id:path}/correction", status_code=204)
+async def correct(paper_id: str, body: CorrectionIn, request: Request, c: Conn) -> None:
+    """Fix the text triage choked on; the next run triages the corrected paper."""
+    await _awaiting(request, c, paper_id)
+    if not (body.title or body.abstract):
+        raise HTTPException(status_code=422, detail="give a title or an abstract")
+    await papers_store.correct(c, paper_id, body.title or None, body.abstract or None)
 
 
 # -- misses, runs, configuration -------------------------------------------------------------------

@@ -30,7 +30,7 @@ async def triage(
     """
     topics = await topics_store.all(conn, Status.ACTIVE)
     if papers is None:
-        papers = await triage_store.untriaged(conn, limit)
+        papers = await triage_store.untriaged(conn, limit, config.limits.triage_stuck_after)
     put_forward: list[Candidate] = []
     if not topics or not papers:
         return put_forward

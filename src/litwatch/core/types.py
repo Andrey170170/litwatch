@@ -210,6 +210,7 @@ class Candidate(BaseModel):
     paper_revision: int = 1
     by_triage: bool = False
     by_keyword: bool = False
+    by_owner: bool = False  # triaged by hand, after triage kept failing on the paper
     reason: str | None = None
     state: CandidateState = CandidateState.PENDING
     failed_runs: int = 0
