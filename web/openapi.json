@@ -124,6 +124,7 @@
     "/api/papers": {
       "get": {
         "summary": "Papers",
+        "description": "The table. A search also asks the search providers, on its first page, for papers the\ncollection lacks: the `outside` band. Topic and saved belong to the collection, so with\neither filter set there is no outside band; `source` keeps one band only.",
         "operationId": "papers_api_papers_get",
         "parameters": [
           {
@@ -214,6 +215,26 @@
                 }
               ],
               "title": "Sort"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "collection",
+                    "outside"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
             }
           },
           {
@@ -1927,6 +1948,142 @@
         }
       }
     },
+    "/api/settings/integrations": {
+      "get": {
+        "summary": "Status",
+        "description": "One card per loaded integration, then one per configured section that is turned off\n(its cursor kept, so its lag shows what turning it on again would hand it).",
+        "operationId": "status_api_settings_integrations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IntegrationCard"
+                  },
+                  "type": "array",
+                  "title": "Response Status Api Settings Integrations Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/integrations/{name}/retry": {
+      "post": {
+        "summary": "Retry",
+        "description": "Try the failing event again now, without waiting out its backoff.",
+        "operationId": "retry_api_settings_integrations__name__retry_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/integrations/{name}/skip": {
+      "post": {
+        "summary": "Skip",
+        "description": "Give up on the failing event; the integration goes on with the next. Returns the\nevent skipped.",
+        "operationId": "skip_api_settings_integrations__name__skip_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failing"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/papers/{paper_id}/card": {
+      "post": {
+        "summary": "Request Card",
+        "description": "Ask for a deep card on this paper, whatever its grade. Honoured by whichever loaded\nintegration answers `card.requested`; the card shows on the paper once it is stored.",
+        "operationId": "request_card_api_papers__paper_id__card_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardRequested"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/session": {
       "post": {
         "summary": "Sign In",
@@ -2248,6 +2405,19 @@
         "title": "Cadence",
         "description": "How often a Radar or Pulse topic is reviewed. Weekly always; daily adds a review after\neach nightly run, for a Radar field followed closely."
       },
+      "CardRequested": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id"
+        ],
+        "title": "CardRequested"
+      },
       "Chosen": {
         "properties": {
           "topic": {
@@ -2335,6 +2505,44 @@
         },
         "type": "object",
         "title": "CorrectionIn"
+      },
+      "DeepCard": {
+        "properties": {
+          "card": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Card"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "written_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Written At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "card"
+        ],
+        "title": "DeepCard",
+        "description": "A deep card: the reading card the deep service wrote, as it wrote it."
       },
       "Digest": {
         "properties": {
@@ -2486,6 +2694,70 @@
         "title": "Entry",
         "description": "One paper in an issue, for one Watch topic."
       },
+      "Failing": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "paper_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paper Id"
+          },
+          "failures": {
+            "type": "integer",
+            "title": "Failures"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "failures"
+        ],
+        "title": "Failing",
+        "description": "The event an integration is stuck on; its later events wait behind it."
+      },
       "Fit": {
         "properties": {
           "value": {
@@ -2579,6 +2851,94 @@
           "at"
         ],
         "title": "HistoryItem"
+      },
+      "IntegrationCard": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "lag": {
+            "type": "integer",
+            "title": "Lag",
+            "default": 0
+          },
+          "failing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Failing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "failed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped",
+            "default": 0
+          },
+          "answers_card_requests": {
+            "type": "boolean",
+            "title": "Answers Card Requests",
+            "default": false
+          },
+          "search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchStats"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "enabled"
+        ],
+        "title": "IntegrationCard",
+        "description": "One integration under Settings \u2192 Integrations."
       },
       "Issue": {
         "properties": {
@@ -3154,6 +3514,21 @@
             "type": "boolean",
             "title": "Publication By Owner",
             "default": false
+          },
+          "card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeepCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card_requestable": {
+            "type": "boolean",
+            "title": "Card Requestable",
+            "default": false
           }
         },
         "type": "object",
@@ -3279,6 +3654,20 @@
           "total": {
             "type": "integer",
             "title": "Total"
+          },
+          "outside": {
+            "items": {
+              "$ref": "#/components/schemas/Row"
+            },
+            "type": "array",
+            "title": "Outside"
+          },
+          "left_out": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Left Out"
           }
         },
         "type": "object",
@@ -3286,7 +3675,8 @@
           "rows",
           "total"
         ],
-        "title": "Papers"
+        "title": "Papers",
+        "description": "A page of the table. A search also brings the papers search providers found that the\ncollection lacks, as a second band under the first; a provider that failed or was too\nslow is named in `left_out`."
       },
       "Pick": {
         "properties": {
@@ -3821,6 +4211,22 @@
             },
             "type": "array",
             "title": "Also In"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "collection"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
           }
         },
         "type": "object",
@@ -3871,6 +4277,46 @@
         ],
         "title": "ScheduleOut",
         "description": "The schedule as the Runs page shows it: whether it is on, the zone the cron times are\nread in, and when each job next fires (or would, if it were on)."
+      },
+      "SearchStats": {
+        "properties": {
+          "queries": {
+            "type": "integer",
+            "title": "Queries",
+            "default": 0
+          },
+          "left_out": {
+            "type": "integer",
+            "title": "Left Out",
+            "default": 0
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_error_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          }
+        },
+        "type": "object",
+        "title": "SearchStats",
+        "description": "How a search provider has answered since the service started."
       },
       "Section": {
         "properties": {
