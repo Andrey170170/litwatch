@@ -178,7 +178,8 @@ papers, which is what backfill will use later.
 6. **Writer.** When a paper's effective grade for a Watch topic crosses from below `relevant` to `relevant` or above,
    whether a verdict or a label moved it, the pair becomes **due**: due for a take, and due for an issue. The writer
    takes every pair due for a take and writes it in litwatch's voice, addressed to the owner, from the abstract at the
-   verdict's paper revision, the topic's subject at its topic version, and the opinions that exist (see *Take*). A
+   verdict's paper revision, the topic's subject at its topic version, and the opinions that exist (see *Take*); where
+   no verdict exists (a label alone moved the paper), the current paper revision and topic version are used. A
    failed call leaves the pair due and is retried next run; after three failed runs the pair enters the issue with its
    title and abstract and no take, and the writer keeps trying. A take is written again when the pair gets a new
    current verdict with a different paper revision, topic version or grade (a move between `relevant` and `must_read`
@@ -296,7 +297,7 @@ revision handling carried over from 0.x. Emits `paper.added` and `paper.revised`
   effort from configuration, applies retries and the timeout, journals the call with its cost,
   and reuses an identical earlier call. Identical means the same resolved provider, model,
   effort and routing as well as the same `Request`, so `judge` and `check` never share a reply
-  and a replay after a model change calls the new model. Roles: `triage`, `judge`, `check`, `review`.
+  and a replay after a model change calls the new model. Roles: `triage`, `judge`, `check`, `review`, `writer`.
 
 Pipeline code names roles, never models. Moving a role between labs is a configuration change.
 
@@ -466,7 +467,8 @@ paper version, paper revision, grade, split, judge and check opinions, recorded 
 row with its own id, so a re-run over the same versions adds a row, and the latest recorded
 is current), `takes` (paper, topic, paper revision, topic version, source: verdict, evaluation, migrated or label,
 text, written at, failed runs), `due` (paper, topic, due for take, due for issue), `reviews`, `issues` (date, kind
-daily or weekly, lede, entries as paper and topic pairs in section order, review references), `labels`, `reactions`
+daily or weekly, lede, entries as paper, topic and take id in section order, so a rewritten take never replaces the
+one an old issue showed; review references), `labels`, `reactions`
 (paper, topic, value, reason, at), `topic_visits` (topic, last opened at), `misses`, `publications`, `library`, `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
 and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
