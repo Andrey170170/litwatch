@@ -111,9 +111,13 @@ async def run(
         # Grading stays inside the scope: this topic's candidates among these papers. What
         # triage put forward for other topics waits for the nightly run.
         chosen = set(ids)
-        made_under = {
-            c.paper_id: c.topic_revision for c in await quality.newest_candidates(conn, slug)
-        }
+        newest = await quality.newest_candidates(conn, slug)
+        if scope != "candidates":
+            # Only what this pass put forward: pending under the topic as it is now.
+            newest = [
+                c for c in newest if c.state == "pending" and c.topic_revision == topic.revision
+            ]
+        made_under = {c.paper_id: c.topic_revision for c in newest}
         pairs = [(p, topic) for p in papers if p.id in chosen and p.id in made_under]
         async for graded in watch.grade_many(pairs, r.gateway, config.limits.grading):
             made = await watch.record(conn, graded, made_under[graded.paper.id])

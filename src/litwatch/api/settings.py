@@ -3,8 +3,11 @@ configuration (read-only, spec decision 11)."""
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Annotated, Any
 
@@ -25,6 +28,7 @@ from litwatch.store import runs as runs_store
 from litwatch.store import topics as topics_store
 
 router = APIRouter(prefix="/api/settings")
+log = logging.getLogger(__name__)
 
 SECRET_WORDS = ("key", "token", "password", "secret")
 
@@ -32,6 +36,16 @@ SECRET_WORDS = ("key", "token", "password", "secret")
 def _errors(exc: ValidationError) -> list[Any]:
     """Validation errors as JSON: a custom validator's exception object is left out."""
     return exc.errors(include_url=False, include_context=False)
+
+
+@asynccontextmanager
+async def _logged(what: str) -> AsyncIterator[None]:
+    """Background work logs its failure rather than raising into the server: the failure is
+    already on its run record, where Settings shows it."""
+    try:
+        yield
+    except Exception:
+        log.exception("%s failed", what)
 
 
 # -- topics ----------------------------------------------------------------------------------------
@@ -120,7 +134,7 @@ async def preview(
 
 
 async def _preview(state: Any, draft: Topic) -> None:
-    async with await store.connect(state.dsn) as conn:
+    async with _logged("preview"), await store.connect(state.dsn) as conn:
         ids = await quality.evidence_papers(conn, draft.slug)
         papers = await papers_store.get_many(conn, ids)
         await replay(
@@ -177,7 +191,7 @@ async def _busy(c: Any) -> bool:
 
 
 async def _rerun(state: Any, slug: str, body: RerunIn) -> None:
-    async with await store.connect(state.dsn) as conn:
+    async with _logged("re-run"), await store.connect(state.dsn) as conn:
         try:
             await reruns.run(
                 conn, state.config, slug, body.scope, body.since, body.until, gateway=state.gateway
@@ -206,6 +220,8 @@ async def evaluation(eval_run_id: int, c: Conn) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="no such evaluation")
     if run["finished_at"] is None:
         return {"eval_run": eval_run_id, "finished": False}
+    if run["error"]:
+        return {"eval_run": eval_run_id, "finished": True, "error": run["error"]}
     return {"finished": True, **await metrics(c, eval_run_id)}
 
 

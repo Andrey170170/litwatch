@@ -150,3 +150,49 @@ async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(d
     )
     (row,) = await calibrate.precision(db)
     assert (row["precision"], row["precision_n"]) == (1.0, 1)
+
+
+def test_a_grade_goes_only_with_relevant():
+    with pytest.raises(ValueError, match="a grade goes only"):
+        Fit(value="relevant", grade="none")
+    with pytest.raises(ValueError, match="a grade goes only"):
+        Fit(value="not_relevant", grade="relevant")
+    assert Fit(value="relevant", grade="must_read").grade == Grade.MUST_READ
+
+
+async def test_a_take_rating_must_belong_to_the_paper(db):
+    from litwatch.core import Take, TakeSource
+    from litwatch.store import digest as digest_store
+
+    other = await digest_store.add_take(
+        db,
+        Take(
+            paper_id=BELOW[2].id,
+            topic=FAITH.slug,
+            paper_revision=1,
+            topic_revision=1,
+            grade=Grade.RELEVANT,
+            source=TakeSource.OWNER,
+            text="t",
+        ),
+    )
+    session_id = await calibrate.draw(db, seed=1, size=2)
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    with pytest.raises(ValueError, match="not one of this paper's"):
+        await calibrate.answer(
+            db,
+            session_id,
+            item["position"],
+            Answer(fit={FAITH.slug: Fit(value="relevant")}, takes={other.id: True}),
+        )
+
+
+async def test_more_takes_in_an_unmarked_miss(db):
+    missed = paper("2610.00400")
+    await papers_store.upsert(db, [missed])
+    await db.execute(
+        "INSERT INTO misses (paper_id, topic) VALUES (%s, %s)", (missed.id, FAITH.slug)
+    )
+    session_id = await calibrate.draw(db, seed=5, size=0)
+    await calibrate.more(db, session_id)
+    assert (missed.id, "miss") in {(i["paper_id"], i["why"]) for i in await items(db, session_id)}

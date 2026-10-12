@@ -15,7 +15,7 @@ CREATE TABLE calibration_items (
     position    integer NOT NULL,
     paper_id    text NOT NULL REFERENCES papers (id) ON DELETE CASCADE,
     topic       text NOT NULL,
-    why         text NOT NULL CHECK (why IN ('above', 'below', 'split', 'reaction')),
+    why         text NOT NULL CHECK (why IN ('above', 'below', 'split', 'miss', 'reaction')),
     verdict_id  bigint REFERENCES verdicts (id) ON DELETE SET NULL,
     -- The fit given here for the drawn topic: precision reads it, whatever label the paper
     -- had before or gets after.

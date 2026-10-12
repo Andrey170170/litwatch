@@ -211,3 +211,21 @@ async def test_keyword_counts_for_an_unsaved_draft(client):
         params=[("pattern", "omits"), ("pattern", "[")],
     )
     assert counts.json() == {"omits": 1, "[": -1}
+
+
+async def test_a_preview_that_fails_finishes_with_its_error(client, conn, monkeypatch):
+    from litwatch import screening
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("triage exploded")
+
+    monkeypatch.setattr(screening, "triage", broken)
+    await conn.execute(
+        "INSERT INTO labels (paper_id, topic, value, origin) VALUES (%s, %s, 'relevant', 'reader')",
+        (P.id, FAITH.slug),
+    )
+    draft = FAITH.model_dump(mode="json")
+    await client.post(f"/api/settings/topics/{FAITH.slug}/preview", json=draft)
+    (run,) = (await client.get("/api/settings/evaluations", params={"kind": "preview"})).json()
+    report = (await client.get(f"/api/settings/evaluations/{run['id']}")).json()
+    assert report["finished"] and "triage exploded" in report["error"]

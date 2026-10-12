@@ -339,7 +339,9 @@ async def papers(
         where=sql.SQL(" AND ").join(where),
         order=order,
     )
-    rows = await _all(conn, query, [topic, *scope_params, *take_params, *params, limit, offset])
+    # The topic a row's take belongs to: the Watch topic of the page, else the take's own.
+    shown = topic if kind == "watch" else None
+    rows = await _all(conn, query, [shown, *scope_params, *take_params, *params, limit, offset])
     if rows:
         total = rows[0]["total"]
     elif offset:  # past the last page: count the filter on its own

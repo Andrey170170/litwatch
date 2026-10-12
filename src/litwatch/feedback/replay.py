@@ -76,40 +76,44 @@ async def replay(
             params or {},
             note,
         )
-        keywords = screening.audit(papers, topics)
-        log.info("eval %s: triage of %s papers", eval_run_id, len(papers))
-        async for triaged in screening.triage(papers, topics, run.gateway, config.limits.triage):
-            paper = triaged.paper
-            run.add("triage_failed" if triaged.error else "triaged")
-            async with conn.transaction():
-                for topic in topics:
-                    yes, why = triaged.answers.get(topic.slug, (None, None))
-                    await feedback_store.put_triage_result(
-                        conn,
-                        eval_run_id,
-                        paper.id,
-                        paper.version,
-                        topic.slug,
-                        yes,
-                        why,
-                        keywords.get(paper.id, {}).get(topic.slug),
-                        triaged.error,
-                        paper.revision,
-                    )
-        pairs = [(p, t) for p in papers if grade is None or p.id in grade for t in watched]
-        log.info("eval %s: grading %s paper-topic pairs", eval_run_id, len(pairs))
-        async for graded in watch.grade_many(pairs, run.gateway, config.limits.grading):
-            run.add("graded" if graded.complete else "grading_failed")
-            await feedback_store.put_grade_result(
-                conn,
-                eval_run_id,
-                graded.paper.id,
-                graded.topic.slug,
-                graded.judge,
-                graded.check,
-                graded.grade.value if graded.grade else None,
-                graded.split,
-                graded.error,
-            )
-        await feedback_store.finish_eval(conn, eval_run_id)
+        try:
+            keywords = screening.audit(papers, topics)
+            log.info("eval %s: triage of %s papers", eval_run_id, len(papers))
+            async for triaged in screening.triage(
+                papers, topics, run.gateway, config.limits.triage
+            ):
+                paper = triaged.paper
+                run.add("triage_failed" if triaged.error else "triaged")
+                async with conn.transaction():
+                    for topic in topics:
+                        yes, why = triaged.answers.get(topic.slug, (None, None))
+                        await feedback_store.put_triage_result(
+                            conn,
+                            eval_run_id,
+                            paper.id,
+                            paper.version,
+                            topic.slug,
+                            yes,
+                            why,
+                            keywords.get(paper.id, {}).get(topic.slug),
+                            triaged.error,
+                            paper.revision,
+                        )
+            pairs = [(p, t) for p in papers if grade is None or p.id in grade for t in watched]
+            log.info("eval %s: grading %s paper-topic pairs", eval_run_id, len(pairs))
+            async for graded in watch.grade_many(pairs, run.gateway, config.limits.grading):
+                run.add("graded" if graded.complete else "grading_failed")
+                await feedback_store.put_grade_result(
+                    conn,
+                    eval_run_id,
+                    graded.paper.id,
+                    graded.topic.slug,
+                    graded.judge,
+                    graded.check,
+                    graded.grade.value if graded.grade else None,
+                    graded.split,
+                    graded.error,
+                )
+        finally:  # a run that failed is finished too; its error is on the run record
+            await feedback_store.finish_eval(conn, eval_run_id)
     return eval_run_id

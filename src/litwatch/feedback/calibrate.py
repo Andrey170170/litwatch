@@ -13,7 +13,7 @@ import random
 from typing import Any, Literal
 
 import psycopg
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue, TopicKind
 from litwatch.feedback import word
@@ -92,7 +92,8 @@ async def _add(
 
 async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
     """Add the papers waiting for a word that are not in the session yet: splits that
-    straddle the line, and papers with a word-carrying thumb but no label. Returns how many."""
+    straddle the line, reported misses not yet marked, and papers with a word-carrying thumb
+    but no label. Returns how many."""
     rows = await _all(
         conn,
         """
@@ -105,6 +106,10 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
         WHERE (a IN ('must_read', 'relevant')) <> (b IN ('must_read', 'relevant'))
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = s.paper_id
                           AND l.topic = s.topic AND NOT l.provisional)
+        UNION ALL
+        SELECT m.paper_id, m.topic, 'miss', NULL, NULL, NULL FROM misses m
+        WHERE NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = m.paper_id
+                          AND l.topic = m.topic AND NOT l.provisional)
         UNION ALL
         SELECT r.paper_id, r.topic, 'reaction', NULL, NULL, NULL FROM reactions r
         JOIN topics t ON t.slug = r.topic AND t.kind = 'watch'
@@ -144,6 +149,14 @@ class Fit(BaseModel):
     value: LabelValue
     grade: Grade | None = None  # with relevant: must read or worth reading
 
+    @model_validator(mode="after")
+    def _grade_fits_value(self) -> Fit:
+        if self.grade is not None and not (
+            self.value == LabelValue.RELEVANT and self.grade.at_least(Grade.RELEVANT)
+        ):
+            raise ValueError("a grade goes only with relevant, and is must_read or relevant")
+        return self
+
 
 class Answer(BaseModel):
     """One paper's answers. Fit for the topic it was drawn or taken for is required."""
@@ -167,6 +180,14 @@ async def answer(
         raise LookupError("no such item")
     if item["topic"] not in given.fit:
         raise ValueError(f"fit for {item['topic']} is required")
+    if given.takes:
+        mine = await _all(
+            conn,
+            "SELECT id FROM takes WHERE paper_id = %s AND id = ANY(%s)",
+            (item["paper_id"], list(given.takes)),
+        )
+        if len(mine) != len(given.takes):
+            raise ValueError("a rated take is not one of this paper's")
     async with conn.transaction():
         for topic, fit in given.fit.items():
             # The drawn topic's answer is the sample; any other is the owner's own choice.

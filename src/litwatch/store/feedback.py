@@ -132,7 +132,8 @@ async def finish_eval(conn: psycopg.AsyncConnection, eval_run_id: int) -> None:
 async def get_eval(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str, Any] | None:
     return await (
         await conn.execute(
-            "SELECT e.*, r.cost, r.counts FROM eval_runs e LEFT JOIN runs r ON r.id = e.run_id "
+            "SELECT e.*, r.cost, r.counts, r.error FROM eval_runs e "
+            "LEFT JOIN runs r ON r.id = e.run_id "
             "WHERE e.id = %s",
             (eval_run_id,),
         )
