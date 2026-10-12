@@ -66,10 +66,10 @@ export function TopicsSettings() {
             {list.map((t, i) => (
               <tr key={t.slug} className={cn(t.status !== "active" && "text-muted-foreground")}>
                 <td className="whitespace-nowrap">
-                  <button type="button" className="hit text-muted-foreground disabled:opacity-30" aria-label="Move up" disabled={i === 0 || order.isPending} onClick={() => move(i, -1)}>
+                  <button type="button" className="hit text-muted-foreground disabled:opacity-30" aria-label="Move up" disabled={i === 0 || order.isPending || topics.isFetching} onClick={() => move(i, -1)}>
                     <ArrowUp className="size-4" />
                   </button>
-                  <button type="button" className="hit text-muted-foreground disabled:opacity-30" aria-label="Move down" disabled={i === list.length - 1 || order.isPending} onClick={() => move(i, 1)}>
+                  <button type="button" className="hit text-muted-foreground disabled:opacity-30" aria-label="Move down" disabled={i === list.length - 1 || order.isPending || topics.isFetching} onClick={() => move(i, 1)}>
                     <ArrowDown className="size-4" />
                   </button>
                 </td>
@@ -289,7 +289,7 @@ function Keywords({ value, counts, onChange }: { value: string[]; counts: Record
 function Preview({ draft }: { draft: Topic }) {
   const preview = usePreview();
   const qc = useQueryClient();
-  const [run, setRun] = useState<{ at: number; estimate: RerunEstimate; evalId: number | null } | null>(null);
+  const [run, setRun] = useState<{ at: number; before: Set<number>; estimate: RerunEstimate; evalId: number | null } | null>(null);
   const list = useQuery({ ...evaluationsQuery("preview"), enabled: !!run && run.evalId === null, refetchInterval: 3000 });
   const result = useQuery({
     ...evaluationQuery(run?.evalId ?? 0),
@@ -299,38 +299,49 @@ function Preview({ draft }: { draft: Topic }) {
 
   useEffect(() => {
     if (!run || run.evalId !== null || !list.data) return;
-    // Two seconds of slack for the server's clock against this one's.
-    const mine = list.data.find((e) => e.params?.topic === draft.slug && new Date(e.started_at).getTime() >= run.at - 2000);
+    // A run that existed before the request is never ours, however close its start time;
+    // two seconds of slack cover the server's clock against this one's.
+    const mine = list.data.find(
+      (e) => !run.before.has(e.id) && e.params?.topic === draft.slug && new Date(e.started_at).getTime() >= run.at - 2000,
+    );
     if (mine) setRun((r) => (r && r.at === run.at ? { ...r, evalId: mine.id } : r));
   }, [list.data, run, draft.slug]);
 
-  function start() {
-    const at = Date.now();
+  async function start() {
     setRun(null);
+    const before = new Set((await qc.fetchQuery(evaluationsQuery("preview"))).map((e) => e.id));
+    const at = Date.now();
     preview.mutate(draft, {
       onSuccess: (estimate) => {
-        setRun({ at, estimate, evalId: null });
+        setRun({ at, before, estimate, evalId: null });
         void qc.invalidateQueries({ queryKey: ["settings", "evaluations", "preview"] });
       },
     });
   }
 
-  const metrics = run?.evalId !== null && result.data?.finished ? result.data.topics?.[draft.slug] : undefined;
+  const finished = run?.evalId !== null && result.data?.finished ? result.data : undefined;
+  const metrics = finished && !finished.error ? finished.topics?.[draft.slug] : undefined;
   return (
     <div className="border-t border-border pt-4">
       <H2 note="a dry run of this draft over the papers you have labelled and the misses you reported; nothing is stored">Preview</H2>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={BTN} disabled={preview.isPending} onClick={start}>
+        <button type="button" className={BTN} disabled={preview.isPending} onClick={() => void start()}>
           {preview.isPending ? "Starting…" : "Preview this draft"}
         </button>
         {run && (
           <span className="text-[12.5px] text-muted-foreground">
             {run.estimate.papers} {run.estimate.papers === 1 ? "paper" : "papers"}, about {money(run.estimate.cost)}
-            {!metrics && " · running…"}
+            {!finished && " · running…"}
           </span>
         )}
       </div>
-      {metrics && result.data && <MetricsView m={metrics} evaluation={result.data} />}
+      {finished?.error && (
+        <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 px-3.5 py-2.5">
+          <div className="text-[13px] font-medium text-destructive">The preview failed.</div>
+          <pre className="mt-1 whitespace-pre-wrap font-mono text-[12px] text-body">{finished.error}</pre>
+        </div>
+      )}
+      {metrics && finished && <MetricsView m={metrics} evaluation={finished} />}
     </div>
   );
 }

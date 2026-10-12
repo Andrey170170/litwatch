@@ -51,6 +51,8 @@ export type Evaluation = {
   papers?: number;
   topics: Record<string, TopicMetrics>;
   finished?: boolean;
+  /** Set when the run failed; `finished` is then true and there are no metrics. */
+  error?: string | null;
 };
 export type Quality = {
   night: { run: number | null; error: string | null; splits: Split[]; ungraded: Ungraded[]; awaiting_triage: Awaiting[] };
