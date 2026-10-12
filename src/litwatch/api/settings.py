@@ -381,11 +381,13 @@ class CorrectionIn(BaseModel):
 async def correct(paper_id: str, body: CorrectionIn, request: Request, c: Conn) -> None:
     """Fix the text triage choked on; the next run triages the corrected paper."""
     await _awaiting(request, c, paper_id)
-    if not (body.title or body.abstract):
+    title = (body.title or "").strip() or None
+    abstract = (body.abstract or "").strip() or None
+    if not (title or abstract):
         raise HTTPException(status_code=422, detail="give a title or an abstract")
     async with c.transaction():
         await word.lock(c, paper_id)
-        await papers_store.correct(c, paper_id, body.title or None, body.abstract or None)
+        await papers_store.correct(c, paper_id, title, abstract)
         # Its takes were written from the old text: stale now, as after any rewrite.
         await word.settle(c, paper_id, announce=False)
 

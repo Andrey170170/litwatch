@@ -10,9 +10,9 @@ from litwatch.core import Candidate, Grade, Take, TakeSource, Verdict
 from litwatch.feedback import word
 from litwatch.store import digest as digest_store
 from litwatch.store import papers as papers_store
+from litwatch.store import quality, verdicts
 from litwatch.store import topics as topics_store
 from litwatch.store import triage as triage_store
-from litwatch.store import verdicts
 from tests.conftest import FAITH, INTERP, TOPICS, paper
 
 TOKEN = "s3cret"
@@ -69,6 +69,10 @@ async def test_a_dismissed_paper_is_not_graded_or_triaged_after_a_rewrite(client
     rewritten = STUCK.model_copy(update={"abstract": "An entirely new abstract.", "version": 2})
     assert (await papers_store.upsert(conn, [rewritten])).rewritten == [STUCK.id]
     assert await untriaged(conn) == {FINE.id}
+    # Nor does a re-run or grade-now reach it.
+    assert await quality.candidate_papers(conn, FAITH.slug) == []
+    assert await quality.newest_candidates(conn, FAITH.slug) == []
+    assert STUCK.id not in await quality.keyword_papers(conn, ["abstract"])
 
 
 async def test_triage_by_hand_puts_the_paper_forward_as_the_owners(client, conn):
@@ -144,3 +148,9 @@ async def test_a_correction_makes_the_papers_takes_stale(client, conn):
     assert not await owed()
     await client.post(f"/api/settings/triage/{STUCK.id}/correction", json={"title": "Fixed"})
     assert await owed()  # written from the old text
+
+
+async def test_a_correction_of_only_whitespace_is_refused(client, conn):
+    blank = await client.post(f"/api/settings/triage/{STUCK.id}/correction", json={"title": "  "})
+    assert blank.status_code == 422
+    assert (await papers_store.get(conn, STUCK.id)).title == "Broken title"

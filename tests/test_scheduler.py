@@ -4,6 +4,9 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+from pydantic import ValidationError
+
 from litwatch import store
 from litwatch.api import create_app
 from litwatch.config import Config, Schedule
@@ -92,3 +95,8 @@ async def test_shutdown_waits_for_the_job_in_progress_to_finish_its_record(monke
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
     assert recorded == ["finished"]
+
+
+def test_a_bad_cron_expression_is_refused_at_load():
+    with pytest.raises(ValidationError, match="not a cron expression"):
+        Schedule(nightly="every night")

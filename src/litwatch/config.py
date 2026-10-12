@@ -12,7 +12,8 @@ from typing import Literal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from croniter import croniter
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ROLES = ("triage", "judge", "check", "review", "writer")
 
@@ -118,6 +119,14 @@ class Schedule(_Section):
     weekly: str = "0 7 * * 1"
     # Decides which calendar date an issue belongs to. None is the server's own zone.
     timezone: str | None = None
+
+    @field_validator("nightly", "weekly")
+    @classmethod
+    def _cron(cls, value: str) -> str:
+        # Checked at load, so one bad expression stops the start rather than one job.
+        if not croniter.is_valid(value):
+            raise ValueError(f"not a cron expression: {value!r}")
+        return value
 
     @property
     def zone(self) -> tzinfo:

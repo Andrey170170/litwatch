@@ -135,7 +135,10 @@ async def cost_per_call(conn: psycopg.AsyncConnection, days: int = 30) -> dict[s
 async def _texts(conn: psycopg.AsyncConnection) -> AsyncIterator[tuple[str, str]]:
     """Every stored paper's id and title with abstract, streamed."""
     async with conn.cursor(name="keyword_scan") as cur:
-        await cur.execute("SELECT id, title, abstract FROM papers ORDER BY id")
+        # A paper the owner dismissed is never triaged or graded again (decision 24).
+        await cur.execute(
+            "SELECT id, title, abstract FROM papers WHERE dismissed_at IS NULL ORDER BY id"
+        )
         async for row in cur:
             yield row["id"], f"{row['title']}\n{row['abstract']}"
 
@@ -179,6 +182,7 @@ async def newest_candidates(conn: psycopg.AsyncConnection, topic: str) -> list[C
     rows = await _all(
         conn,
         "SELECT DISTINCT ON (paper_id) * FROM candidates WHERE topic = %s "
+        "AND paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) "
         "ORDER BY paper_id, topic_revision DESC",
         (topic,),
     )
@@ -187,7 +191,10 @@ async def newest_candidates(conn: psycopg.AsyncConnection, topic: str) -> list[C
 
 async def candidate_papers(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
     rows = await _all(
-        conn, "SELECT DISTINCT paper_id FROM candidates WHERE topic = %s ORDER BY 1", (topic,)
+        conn,
+        "SELECT DISTINCT paper_id FROM candidates WHERE topic = %s "
+        "AND paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) ORDER BY 1",
+        (topic,),
     )
     return [r["paper_id"] for r in rows]
 
@@ -196,8 +203,10 @@ async def evidence_papers(conn: psycopg.AsyncConnection, topic: str) -> list[str
     """The topic's labelled papers (unsure aside) and reported misses."""
     rows = await _all(
         conn,
-        "SELECT paper_id FROM labels WHERE topic = %(t)s AND value <> 'unsure' "
-        "UNION SELECT paper_id FROM misses WHERE topic = %(t)s ORDER BY 1",
+        "SELECT paper_id FROM (SELECT paper_id FROM labels WHERE topic = %(t)s "
+        "AND value <> 'unsure' UNION SELECT paper_id FROM misses WHERE topic = %(t)s) e "
+        "WHERE paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) "
+        "ORDER BY 1",
         {"t": topic},
     )
     return [r["paper_id"] for r in rows]
