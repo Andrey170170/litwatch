@@ -850,12 +850,12 @@ Decided on 2026-10-12, reviewing the spec for the remaining milestones:
 21. **Writer model.** Opus 5.5 on the Anthropic API, on credits, compared once in M3 with one or two OpenRouter models.
 22. **No scheduled runs before cutover.** Jobs run by hand until the side-by-side week of M7; checks that mention a
     schedule are shown with a test schedule.
-24. **Triage stops after three failed nights.** The paper then awaits the owner, who dismisses it (litwatch drops it;
-    it stays in the collection and the archive), triages it by hand, or fixes its text and lets triage run again.
 23. **Daily and weekly issues are separate.** The daily issue carries the night: Watch entries and daily Radar
     reviews. The weekly issue on Monday is "what happened last week" for every topic: a written recap per Watch topic
     and a weekly review per Radar and Pulse topic, daily ones included. Cadence `daily` adds daily reviews; it never
     replaces the weekly one.
+24. **Triage stops after three failed nights.** The paper then awaits the owner, who dismisses it (litwatch drops it;
+    it stays in the collection and the archive), triages it by hand, or fixes its text and lets triage run again.
 
 Nothing is open. Noted for later: the owner plans embeddings over the archive (abstracts,
 ideally full text) for semantic search, once a GPU server exists. That would also give a
