@@ -228,3 +228,18 @@ async def correct(
         await conn.execute("DELETE FROM triage WHERE paper_id = %s", (paper_id,))
         await events.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
     return True
+
+
+async def body(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str, str | None] | None:
+    """The fetched full text and where it came from (`html` or `pdf`), when there is one."""
+    row = await (
+        await conn.execute("SELECT body, body_source FROM papers WHERE id = %s", (paper_id,))
+    ).fetchone()
+    return (row["body"], row["body_source"]) if row and row["body"] else None
+
+
+async def set_body(conn: psycopg.AsyncConnection, paper_id: str, text: str, source: str) -> None:
+    await conn.execute(
+        "UPDATE papers SET body = %s, body_source = %s, body_fetched_at = now() WHERE id = %s",
+        (text, source, paper_id),
+    )
