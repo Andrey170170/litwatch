@@ -2,7 +2,7 @@
 
 import json
 import re
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -41,6 +41,7 @@ class Models:
     def __init__(self):
         self.down = False
         self.lede_down = False
+        self.shortlist_empty = False
         self.calls: list[str] = []
         self.reviewed: list[int] = []  # how many papers each final review call saw
 
@@ -50,7 +51,7 @@ class Models:
         ids = re.findall(r"^\[([^\]]+)\]", request.user, re.MULTILINE)
         if "choose up to" in request.system:
             self.calls.append("shortlist")
-            return json.dumps({"ids": ids[:2]})
+            return json.dumps({"ids": [] if self.shortlist_empty else ids[:2]})
         if "You review the new arXiv papers" in request.system:
             self.calls.append("review")
             self.reviewed.append(len(ids))
@@ -317,3 +318,62 @@ async def test_a_field_card_counts_a_paper_new_only_when_first_picked(db):
     await job(db, models, lambda run: reviews.weekly(db, Config(), run, monday))
     cards = {c["slug"]: c for c in await reading_store.topic_cards(db)}
     assert cards[DAILY.slug]["papers"] == 7 and cards[DAILY.slug]["new"] == 2
+
+
+async def test_a_review_that_failed_on_an_earlier_day_is_tried_again(db):
+    models = Models()
+    yesterday = Config().schedule.today() - timedelta(days=1)
+    await db.execute(
+        "UPDATE memberships SET created_at = %s WHERE topic = %s",
+        (Config().schedule.window(yesterday)[0] + timedelta(hours=1), DAILY.slug),
+    )
+    models.down = True
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run, yesterday))
+    models.down = False
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))  # today's run
+    row = await (
+        await db.execute("SELECT state FROM reviews WHERE day = %s", (yesterday,))
+    ).fetchone()
+    assert row["state"] == "written"
+
+
+async def test_the_default_weekly_run_retries_the_week_before(db):
+    models = Models()
+    last = Config().schedule.week_of(Config().schedule.today()) - timedelta(days=7)
+    await db.execute(
+        "INSERT INTO reviews (topic, kind, period, day, state) "
+        "VALUES (%s, 'pulse', 'week', %s, 'failed')",
+        (AGENTS.slug, last - timedelta(days=7)),
+    )
+    await job(db, models, lambda run: reviews.weekly(db, Config(), run))
+    rows = await (
+        await db.execute(
+            "SELECT topic, state FROM reviews WHERE day = %s", (last - timedelta(days=7),)
+        )
+    ).fetchall()
+    # Only the failed review is tried again; the week's other topics are left as they were.
+    assert [(r["topic"], r["state"]) for r in rows] == [(AGENTS.slug, "quiet")]
+
+
+async def test_an_empty_shortlist_still_reviews_a_sample_of_the_field(db, monkeypatch):
+    monkeypatch.setattr(review_calls, "FULL_REVIEW_LIMIT", 3)
+    monkeypatch.setattr(review_calls, "CHUNK", 3)
+    models = Models()
+    models.shortlist_empty = True
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
+    assert models.reviewed == [3]  # every third of the seven, not nothing
+
+
+def test_a_posix_tz_rule_is_honoured_as_the_process_honours_it(monkeypatch):
+    import time
+
+    from litwatch.config import system_zone
+
+    monkeypatch.setenv("TZ", "EST5EDT,M3.2.0,M11.1.0")
+    time.tzset()
+    try:
+        offset = datetime.now(system_zone()).utcoffset()
+        assert offset in (timedelta(hours=-5), timedelta(hours=-4))
+    finally:
+        monkeypatch.undo()
+        time.tzset()

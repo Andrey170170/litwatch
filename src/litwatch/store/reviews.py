@@ -112,11 +112,25 @@ async def for_topic(conn: psycopg.AsyncConnection, topic: str, limit: int = 20) 
             SELECT r.*,
                    {PICKS}
             FROM reviews r WHERE r.topic = %s AND r.kind <> 'watch'
-            ORDER BY r.day DESC, r.period LIMIT %s
+            ORDER BY r.written_at DESC LIMIT %s
             """,
             (topic, limit),
         )
     ).fetchall()
+
+
+async def failed_days(
+    conn: psycopg.AsyncConnection, period: str, since: date, until: date
+) -> list[date]:
+    """The days (or weeks, by their Monday) in [since, until) with a review that failed."""
+    rows = await (
+        await conn.execute(
+            "SELECT DISTINCT day FROM reviews WHERE period = %s AND state = 'failed' "
+            "AND day >= %s AND day < %s ORDER BY day",
+            (period, since, until),
+        )
+    ).fetchall()
+    return [r["day"] for r in rows]
 
 
 async def week_entries(

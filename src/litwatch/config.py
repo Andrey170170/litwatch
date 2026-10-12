@@ -3,6 +3,7 @@ secret files for keys. Topics are not configuration; they live in the database."
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tomllib
 from datetime import date, datetime, time, timedelta, tzinfo
@@ -90,21 +91,24 @@ class Limits(_Section):
 
 
 def system_zone() -> tzinfo:
-    """The server's own zone with its daylight-saving rules: `TZ`, else the zone
-    `/etc/localtime` links to, else the one `/etc/timezone` names. Only when none names one,
-    the current fixed offset."""
-    name = os.environ.get("TZ", "").lstrip(":")
-    if not name:
-        _, _, name = os.path.realpath("/etc/localtime").partition("zoneinfo/")
-    if not name:
+    """The server's own zone with its daylight-saving rules. `TZ` decides when set, as it
+    does for the process: a zone name gives that zone, anything else (a POSIX rule) the
+    process's local time, which follows it. Unset, the zone `/etc/localtime` links to, else
+    the one `/etc/timezone` names; when neither names one, the current fixed offset."""
+    if tz := os.environ.get("TZ", "").lstrip(":"):
         try:
-            name = Path("/etc/timezone").read_text().strip()
-        except OSError:
-            name = ""
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return datetime.now().astimezone().tzinfo
+            return ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError):
+            return datetime.now().astimezone().tzinfo
+    names = [os.path.realpath("/etc/localtime").partition("zoneinfo/")[2]]
+    with contextlib.suppress(OSError):
+        names.append(Path("/etc/timezone").read_text().strip())
+    for name in filter(None, names):
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError):
+            continue
+    return datetime.now().astimezone().tzinfo
 
 
 class Schedule(_Section):
