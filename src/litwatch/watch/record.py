@@ -7,6 +7,7 @@ import psycopg
 from litwatch import events
 from litwatch.core import Verdict
 from litwatch.feedback import word
+from litwatch.store import papers as papers_store
 from litwatch.store import verdicts
 from litwatch.watch.grade import Graded
 
@@ -24,6 +25,10 @@ async def record(
     paper, topic = graded.paper, graded.topic
     made_under = candidate_revision or topic.revision
     async with conn.transaction():
+        # Grading of text the owner has since corrected, or of a paper since dismissed,
+        # records nothing; the candidate waits for the next run.
+        if not await papers_store.still_current(conn, paper):
+            return None
         if not graded.complete:
             await verdicts.mark_failed(conn, paper.id, topic.slug, made_under, graded.error)
             return None

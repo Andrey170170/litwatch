@@ -47,6 +47,16 @@ def row_to_paper(row: dict[str, Any]) -> Paper:
     )
 
 
+def fingerprint(table: str) -> str:
+    """SQL for a fingerprint of a row's title and abstract, blind to whitespace: what an owner's
+    correction is keyed on (the text arXiv sent when it was made)."""
+    return f"md5(regexp_replace({table}.title || ' ' || {table}.abstract, '\\s+', ' ', 'g'))"
+
+
+# The owner's correction stands: arXiv sent the very text it fixed.
+_KEPT = f"papers.corrected_from = {fingerprint('EXCLUDED')}"
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -75,7 +85,7 @@ async def upsert(
         async with conn.cursor() as cur:
             for p in papers:
                 await cur.execute(
-                    """
+                    f"""
                     INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
                                         published, updated, url, metadata_source,
                                         version, version_history,
@@ -84,7 +94,15 @@ async def upsert(
                             %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
                             %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s)
                     ON CONFLICT (id) DO UPDATE SET
-                        title = EXCLUDED.title, abstract = EXCLUDED.abstract,
+                        -- The owner's correction stands while arXiv sends the text it fixed.
+                        title = CASE WHEN {_KEPT}
+                                     THEN papers.title ELSE EXCLUDED.title END,
+                        abstract = CASE WHEN {_KEPT}
+                                        THEN papers.abstract ELSE EXCLUDED.abstract END,
+                        corrected_at = CASE WHEN {_KEPT}
+                                            THEN papers.corrected_at END,
+                        corrected_from = CASE WHEN {_KEPT}
+                                              THEN papers.corrected_from END,
                         authors = EXCLUDED.authors, categories = EXCLUDED.categories,
                         primary_category = coalesce(EXCLUDED.primary_category,
                                                     papers.primary_category),
@@ -112,7 +130,7 @@ async def upsert(
                            OR EXCLUDED.version >= papers.version)
                       AND (%(source)s <> 'oai' OR papers.updated IS NULL
                            OR EXCLUDED.updated::date >= papers.updated::date)
-                    RETURNING (xmax = 0) AS inserted, version
+                    RETURNING (xmax = 0) AS inserted, version, title, abstract
                     """,
                     {
                         **p.model_dump(),
@@ -130,7 +148,9 @@ async def upsert(
                     continue
                 result.updated += 1
                 old = before[p.id]
-                changed = rewritten(old["title"], old["abstract"], p)
+                # Compared with what was stored, so a kept correction is no rewrite.
+                stored = p.model_copy(update={"title": row["title"], "abstract": row["abstract"]})
+                changed = rewritten(old["title"], old["abstract"], stored)
                 if changed:
                     # What triage said was about other text: the paper is untriaged again.
                     # Its candidates and verdicts stay as history under the old revision.
@@ -176,3 +196,35 @@ async def revision(conn: psycopg.AsyncConnection, paper_id: str) -> int:
         await conn.execute("SELECT revision FROM papers WHERE id = %s", (paper_id,))
     ).fetchone()
     return row["revision"] if row else 1
+
+
+async def still_current(conn: psycopg.AsyncConnection, paper: Paper) -> bool:
+    """Whether a result about `paper` may still be recorded: the stored paper has the same
+    text (revision) and has not been dismissed. Call it inside the recording transaction: the
+    share lock waits for a correction or dismissal in progress, which update the row."""
+    row = await (
+        await conn.execute(
+            "SELECT revision, dismissed_at FROM papers WHERE id = %s FOR SHARE", (paper.id,)
+        )
+    ).fetchone()
+    return row is not None and row["dismissed_at"] is None and row["revision"] == paper.revision
+
+
+async def correct(
+    conn: psycopg.AsyncConnection, paper_id: str, title: str | None, abstract: str | None
+) -> bool:
+    """The owner's fix of a title or abstract (a broken character, a garbled abstract). It
+    counts as a rewrite: the revision goes up and the paper is triaged again, its failures
+    forgotten. The caller settles the paper, so its takes are known to be stale."""
+    async with conn.transaction():
+        cur = await conn.execute(
+            "UPDATE papers SET title = coalesce(%s, title), abstract = coalesce(%s, abstract), "
+            "corrected_at = now(), revision = revision + 1, "
+            f"corrected_from = coalesce(corrected_from, {fingerprint('papers')}) WHERE id = %s",
+            (title, abstract, paper_id),
+        )
+        if cur.rowcount == 0:
+            return False
+        await conn.execute("DELETE FROM triage WHERE paper_id = %s", (paper_id,))
+        await events.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
+    return True

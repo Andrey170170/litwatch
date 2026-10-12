@@ -12,7 +12,8 @@ from typing import Literal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from croniter import croniter
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ROLES = ("triage", "judge", "check", "review", "writer")
 
@@ -83,7 +84,7 @@ class Limits(_Section):
     grading: int = Field(default=6, gt=0)
     # A candidate that failed grading this many runs is shown to the owner ungraded.
     grading_attempts: int = Field(default=3, gt=0)
-    # A paper whose triage failed this many runs is counted as stuck; it is still retried.
+    # A paper whose triage failed this many runs is not retried: it waits for the owner.
     triage_stuck_after: int = Field(default=3, gt=0)
     writing: int = Field(default=4, gt=0)  # takes written at once
     # A pair the writer failed on this many runs enters its issue without a take.
@@ -112,10 +113,20 @@ def system_zone() -> tzinfo:
 
 
 class Schedule(_Section):
+    # Off until cutover: jobs run by hand before then (spec decision 22).
+    enabled: bool = False
     nightly: str = "0 6 * * *"
     weekly: str = "0 7 * * 1"
     # Decides which calendar date an issue belongs to. None is the server's own zone.
     timezone: str | None = None
+
+    @field_validator("nightly", "weekly")
+    @classmethod
+    def _cron(cls, value: str) -> str:
+        # Checked at load, so one bad expression stops the start rather than one job.
+        if not croniter.is_valid(value):
+            raise ValueError(f"not a cron expression: {value!r}")
+        return value
 
     @property
     def zone(self) -> tzinfo:

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -17,6 +21,7 @@ from litwatch.api.deps import Conn, authorised, set_token_cookie, token_ok
 from litwatch.config import Config
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue, Status, TopicKind
 from litwatch.feedback import word
+from litwatch.jobs import scheduler
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.store import feedback as feedback_store
 from litwatch.store import topics as topics_store
@@ -40,6 +45,24 @@ class LabelIn(BaseModel):
     queue: str = "rejects"
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Start the scheduler with the service when the configuration enables it."""
+    task = None
+    if app.state.config.schedule.enabled:
+        task = asyncio.create_task(
+            scheduler.run_forever(app.state.dsn, app.state.config, app.state.gateway)
+        )
+    try:
+        yield
+    finally:
+        if task:
+            # Wait for the job in progress to record how it ended.
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 def create_app(
     dsn: str,
     token: str,
@@ -49,7 +72,7 @@ def create_app(
     """The app over one database. Every request but the health check and signing in needs
     the shared token, as a bearer header or the cookie (set by `/api/session`, or by opening
     the labelling page once with `?token=`)."""
-    app = FastAPI(title="litwatch", docs_url=None, redoc_url=None)
+    app = FastAPI(title="litwatch", docs_url=None, redoc_url=None, lifespan=_lifespan)
     app.state.dsn, app.state.token = dsn, token
     app.state.config, app.state.gateway = config or Config(), gateway
     protected = [Depends(authorised)]

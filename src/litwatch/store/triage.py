@@ -11,26 +11,41 @@ from litwatch.core import Candidate, Paper
 from litwatch.store.papers import COLUMNS, row_to_paper
 
 
-async def untriaged(conn: psycopg.AsyncConnection, limit: int | None = None) -> list[Paper]:
-    """Papers no triage has answered for, oldest first. Failed ones are tried again every
-    run, after the new ones, so a paper that always fails never takes a new paper's place
-    under `limit`. A dropped paper is seen by no one, so triage does not give up."""
+async def untriaged(
+    conn: psycopg.AsyncConnection, limit: int | None = None, attempts: int | None = None
+) -> list[Paper]:
+    """Papers no triage has answered for, oldest first. Failed ones are tried again on later
+    runs, after the new ones, so a paper that keeps failing never takes a new paper's place
+    under `limit`. After `attempts` failed runs a paper is not retried by itself: it waits
+    for the owner (spec decision 24). A dismissed paper is never triaged."""
     rows = await (
         await conn.execute(
             f"SELECT {COLUMNS} FROM papers p LEFT JOIN triage t ON t.paper_id = p.id "
-            "WHERE t.paper_id IS NULL OR t.state = 'failed' "
+            "WHERE p.dismissed_at IS NULL AND (t.paper_id IS NULL "
+            "   OR (t.state = 'failed' AND (%s::int IS NULL OR t.failed_runs < %s))) "
             "ORDER BY coalesce(t.failed_runs, 0), p.fetched_at, p.id LIMIT %s",
-            (limit,),
+            (attempts, attempts, limit),
         )
     ).fetchall()
     return [row_to_paper(r) for r in rows]
+
+
+async def dismiss(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Drop the paper from litwatch: never triaged or graded again, even after a rewrite. It
+    stays in the collection, and in the archive."""
+    cur = await conn.execute(
+        "UPDATE papers SET dismissed_at = now() WHERE id = %s AND dismissed_at IS NULL",
+        (paper_id,),
+    )
+    return cur.rowcount == 1
 
 
 async def stuck(conn: psycopg.AsyncConnection, min_failed_runs: int) -> list[dict[str, Any]]:
     """Papers triage has failed on this many runs in a row, with the last error."""
     return await (
         await conn.execute(
-            "SELECT paper_id, failed_runs, last_error FROM triage "
+            "SELECT paper_id, failed_runs, last_error FROM triage t "
+            "JOIN papers p ON p.id = t.paper_id AND p.dismissed_at IS NULL "
             "WHERE state = 'failed' AND failed_runs >= %s ORDER BY failed_runs DESC, paper_id",
             (min_failed_runs,),
         )
@@ -108,13 +123,15 @@ async def put_candidate(conn: psycopg.AsyncConnection, candidate: Candidate) -> 
     await conn.execute(
         """
         INSERT INTO candidates (paper_id, topic, topic_revision, paper_version, paper_revision,
-                                by_triage, by_keyword, reason)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                by_triage, by_keyword, by_owner, reason)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (paper_id, topic, topic_revision) DO UPDATE SET
             by_triage = EXCLUDED.by_triage
                 OR (candidates.by_triage AND candidates.paper_revision = EXCLUDED.paper_revision),
             by_keyword = EXCLUDED.by_keyword
                 OR (candidates.by_keyword AND candidates.paper_revision = EXCLUDED.paper_revision),
+            by_owner = EXCLUDED.by_owner
+                OR (candidates.by_owner AND candidates.paper_revision = EXCLUDED.paper_revision),
             reason = CASE WHEN candidates.paper_revision = EXCLUDED.paper_revision
                           THEN coalesce(EXCLUDED.reason, candidates.reason)
                           ELSE EXCLUDED.reason END,
@@ -135,6 +152,7 @@ async def put_candidate(conn: psycopg.AsyncConnection, candidate: Candidate) -> 
             candidate.paper_revision,
             candidate.by_triage,
             candidate.by_keyword,
+            candidate.by_owner,
             candidate.reason,
         ),
     )
@@ -157,10 +175,10 @@ async def pending_candidates(
         await conn.execute(
             f"""
             SELECT c.paper_id, c.topic, c.topic_revision, c.paper_version, c.paper_revision,
-                   c.by_triage,
-                   c.by_keyword, c.reason, c.state, c.failed_runs, c.last_error, {COLUMNS}
+                   c.by_triage, c.by_keyword, c.by_owner, c.reason, c.state, c.failed_runs,
+                   c.last_error, {COLUMNS}
             FROM candidates c JOIN papers p ON p.id = c.paper_id
-            WHERE c.state = 'pending' AND c.failed_runs < %s
+            WHERE c.state = 'pending' AND c.failed_runs < %s AND p.dismissed_at IS NULL
               AND NOT EXISTS (SELECT 1 FROM candidates n
                               WHERE n.paper_id = c.paper_id AND n.topic = c.topic
                                 AND n.topic_revision > c.topic_revision)

@@ -50,7 +50,7 @@ async def ungraded(conn: psycopg.AsyncConnection, attempts: int) -> list[dict[st
         """
         SELECT c.paper_id, c.topic, c.failed_runs, c.last_error, c.updated_at, p.title
         FROM candidates c JOIN papers p ON p.id = c.paper_id
-        WHERE c.state = 'pending' AND c.failed_runs >= %s
+        WHERE c.state = 'pending' AND c.failed_runs >= %s AND p.dismissed_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM candidates n WHERE n.paper_id = c.paper_id
                           AND n.topic = c.topic AND n.topic_revision > c.topic_revision)
         ORDER BY c.updated_at DESC
@@ -63,7 +63,8 @@ async def awaiting_triage(conn: psycopg.AsyncConnection, attempts: int) -> list[
     return await _all(
         conn,
         "SELECT t.paper_id, t.failed_runs, t.last_error, p.title FROM triage t "
-        "JOIN papers p ON p.id = t.paper_id WHERE t.state = 'failed' AND t.failed_runs >= %s "
+        "JOIN papers p ON p.id = t.paper_id AND p.dismissed_at IS NULL "
+        "WHERE t.state = 'failed' AND t.failed_runs >= %s "
         "ORDER BY t.failed_runs DESC, t.paper_id",
         (attempts,),
     )
@@ -134,7 +135,10 @@ async def cost_per_call(conn: psycopg.AsyncConnection, days: int = 30) -> dict[s
 async def _texts(conn: psycopg.AsyncConnection) -> AsyncIterator[tuple[str, str]]:
     """Every stored paper's id and title with abstract, streamed."""
     async with conn.cursor(name="keyword_scan") as cur:
-        await cur.execute("SELECT id, title, abstract FROM papers ORDER BY id")
+        # A paper the owner dismissed is never triaged or graded again (decision 24).
+        await cur.execute(
+            "SELECT id, title, abstract FROM papers WHERE dismissed_at IS NULL ORDER BY id"
+        )
         async for row in cur:
             yield row["id"], f"{row['title']}\n{row['abstract']}"
 
@@ -166,7 +170,8 @@ async def keyword_papers(conn: psycopg.AsyncConnection, patterns: list[str]) -> 
 async def papers_between(conn: psycopg.AsyncConnection, since: Any, until: Any) -> list[str]:
     rows = await _all(
         conn,
-        "SELECT id FROM papers WHERE published >= %s AND published < %s ORDER BY id",
+        "SELECT id FROM papers WHERE published >= %s AND published < %s "
+        "AND dismissed_at IS NULL ORDER BY id",
         (since, until),
     )
     return [r["id"] for r in rows]
@@ -177,6 +182,7 @@ async def newest_candidates(conn: psycopg.AsyncConnection, topic: str) -> list[C
     rows = await _all(
         conn,
         "SELECT DISTINCT ON (paper_id) * FROM candidates WHERE topic = %s "
+        "AND paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) "
         "ORDER BY paper_id, topic_revision DESC",
         (topic,),
     )
@@ -185,7 +191,10 @@ async def newest_candidates(conn: psycopg.AsyncConnection, topic: str) -> list[C
 
 async def candidate_papers(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
     rows = await _all(
-        conn, "SELECT DISTINCT paper_id FROM candidates WHERE topic = %s ORDER BY 1", (topic,)
+        conn,
+        "SELECT DISTINCT paper_id FROM candidates WHERE topic = %s "
+        "AND paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) ORDER BY 1",
+        (topic,),
     )
     return [r["paper_id"] for r in rows]
 
@@ -194,8 +203,10 @@ async def evidence_papers(conn: psycopg.AsyncConnection, topic: str) -> list[str
     """The topic's labelled papers (unsure aside) and reported misses."""
     rows = await _all(
         conn,
-        "SELECT paper_id FROM labels WHERE topic = %(t)s AND value <> 'unsure' "
-        "UNION SELECT paper_id FROM misses WHERE topic = %(t)s ORDER BY 1",
+        "SELECT paper_id FROM (SELECT paper_id FROM labels WHERE topic = %(t)s "
+        "AND value <> 'unsure' UNION SELECT paper_id FROM misses WHERE topic = %(t)s) e "
+        "WHERE paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) "
+        "ORDER BY 1",
         {"t": topic},
     )
     return [r["paper_id"] for r in rows]

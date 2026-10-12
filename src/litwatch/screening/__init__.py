@@ -6,7 +6,7 @@ evaluation never does.
 """
 
 from litwatch.screening.audit import audit
-from litwatch.screening.record import record
+from litwatch.screening.record import by_hand, record
 from litwatch.screening.triage import Triaged, triage, triage_request
 
-__all__ = ["Triaged", "audit", "record", "triage", "triage_request"]
+__all__ = ["Triaged", "audit", "by_hand", "record", "triage", "triage_request"]

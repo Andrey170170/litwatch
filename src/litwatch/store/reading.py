@@ -11,6 +11,10 @@ from psycopg import sql
 
 GRADE_ORDER = "ARRAY['must_read', 'relevant', 'adjacent', 'none']"
 SHOWN = ("must_read", "relevant")
+# A candidate still counts as waiting only while its paper is not dismissed (decision 24).
+LIVE = (
+    "AND NOT EXISTS (SELECT 1 FROM papers d WHERE d.id = c.paper_id AND d.dismissed_at IS NOT NULL)"
+)
 STALE_AFTER = timedelta(hours=36)
 # A take whose pair is owed a new one describes text, a rubric or a length that no longer
 # holds; current views show no take until the writer catches up. Issues keep theirs.
@@ -63,6 +67,7 @@ async def status(
             await _one(
                 conn,
                 "SELECT count(*) AS n FROM candidates c WHERE state = 'pending' "
+                f"{LIVE} "
                 "AND failed_runs >= %s AND NOT EXISTS (SELECT 1 FROM candidates n "
                 "WHERE n.paper_id = c.paper_id AND n.topic = c.topic "
                 "AND n.topic_revision > c.topic_revision)",
@@ -72,7 +77,8 @@ async def status(
         "awaiting_triage": (
             await _one(
                 conn,
-                "SELECT count(*) AS n FROM triage WHERE state = 'failed' AND failed_runs >= %s",
+                "SELECT count(*) AS n FROM triage t JOIN papers p ON p.id = t.paper_id "
+                "AND p.dismissed_at IS NULL WHERE t.state = 'failed' AND t.failed_runs >= %s",
                 (triage_attempts,),
             )
         )["n"],
@@ -198,7 +204,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
                EXISTS (SELECT 1 FROM memberships m WHERE m.paper_id = %(p)s
                        AND m.topic = t.slug) AS member,
                EXISTS (SELECT 1 FROM candidates c WHERE c.paper_id = %(p)s AND c.topic = t.slug
-                       AND c.state = 'pending') AS grading
+                       AND c.state = 'pending' {LIVE}) AS grading
         FROM topics t
         LEFT JOIN effective_grades g ON g.paper_id = %(p)s AND g.topic = t.slug
         WHERE t.status <> 'draft'
@@ -332,7 +338,7 @@ async def papers(
                {grade} AS grade, tk.text AS take, tk.topic AS take_topic,
                coalesce(l.saved, false) AS saved,
                EXISTS (SELECT 1 FROM candidates c WHERE c.paper_id = p.id
-                       AND c.state = 'pending') AS grading,
+                       AND c.state = 'pending' {live}) AS grading,
                (SELECT coalesce(array_agg(t2.name ORDER BY t2.position), '{{}}')
                 FROM effective_grades g2 JOIN topics t2 ON t2.slug = g2.topic
                 WHERE g2.paper_id = p.id AND g2.grade IN ('must_read', 'relevant')
@@ -346,6 +352,7 @@ async def papers(
         """
     ).format(
         authors=sql.SQL(AUTHORS),
+        live=sql.SQL(LIVE),
         grade=grade,
         take=take,
         scope=scope,
