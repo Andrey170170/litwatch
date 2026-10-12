@@ -85,11 +85,12 @@ async def all(conn: psycopg.AsyncConnection, status: Status | None = Status.ACTI
 
 
 async def kind_for_update(conn: psycopg.AsyncConnection, slug: str) -> TopicKind | None:
-    """The topic's kind, locking its row to the end of the transaction."""
-    row = await (
-        await conn.execute("SELECT kind FROM topics WHERE slug = %s FOR UPDATE", (slug,))
-    ).fetchone()
-    return TopicKind(row["kind"]) if row else None
+    """The topic's kind, locking every topic row to the end of the transaction, in slug order:
+    topic edits are serialized, and wait for settles in flight (see feedback.word.lock)."""
+    rows = await (
+        await conn.execute("SELECT slug, kind FROM topics ORDER BY slug FOR UPDATE")
+    ).fetchall()
+    return next((TopicKind(r["kind"]) for r in rows if r["slug"] == slug), None)
 
 
 async def get(conn: psycopg.AsyncConnection, slug: str) -> Topic | None:

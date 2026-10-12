@@ -45,12 +45,18 @@ async def _watch_topics(conn: psycopg.AsyncConnection) -> set[str]:
 
 
 # Advisory lock namespace for settling one paper; the second key is the paper id's hash.
-SETTLE_LOCK = 7213911
+SETTLE_LOCK = 7213912
 
 
-async def _lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
+async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     """Hold the paper's settle lock to the end of the transaction. Every write that ends in a
-    settle takes it first, so no two transactions wait on each other's rows."""
+    settle takes it first, so no two transactions wait on each other's rows.
+
+    The topic rows are share-locked first, in slug order: a topic edit locks them all before
+    any paper, so locks are always taken topics first, and a settle never reads a kind that
+    an edit in flight is about to change.
+    """
+    await conn.execute("SELECT slug FROM topics ORDER BY slug FOR SHARE")
     await conn.execute("SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (SETTLE_LOCK, paper_id))
 
 
@@ -61,7 +67,7 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
     run sees every committed change and leaves the stored state right.
     """
     async with conn.transaction():
-        await _lock(conn, paper_id)
+        await lock(conn, paper_id)
         watched = await _watch_topics(conn)
         labels = {x.topic: x for x in await feedback_store.labels_for(conn, paper_id)}
         reactions = {r.topic: r for r in await word_store.reactions_for(conn, paper_id)}
@@ -106,21 +112,21 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
 
 async def label(conn: psycopg.AsyncConnection, given: Label) -> tuple[Label, Settled]:
     async with conn.transaction():
-        await _lock(conn, given.paper_id)
+        await lock(conn, given.paper_id)
         stored = await feedback_store.set_label(conn, given)
         return stored, await settle(conn, given.paper_id)
 
 
 async def unlabel(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> Settled:
     async with conn.transaction():
-        await _lock(conn, paper_id)
+        await lock(conn, paper_id)
         await feedback_store.delete_label(conn, paper_id, topic)
         return await settle(conn, paper_id)
 
 
 async def react(conn: psycopg.AsyncConnection, given: Reaction) -> tuple[Reaction, Settled]:
     async with conn.transaction():
-        await _lock(conn, given.paper_id)
+        await lock(conn, given.paper_id)
         stored = await word_store.set_reaction(conn, given)
         return stored, await settle(conn, given.paper_id)
 
@@ -128,7 +134,7 @@ async def react(conn: psycopg.AsyncConnection, given: Reaction) -> tuple[Reactio
 async def unreact(conn: psycopg.AsyncConnection, paper_id: str, topic: str | None) -> Settled:
     """Clear a thumb. It takes back its own word and nothing else."""
     async with conn.transaction():
-        await _lock(conn, paper_id)
+        await lock(conn, paper_id)
         await word_store.clear_reaction(conn, paper_id, topic)
         return await settle(conn, paper_id)
 
@@ -136,20 +142,21 @@ async def unreact(conn: psycopg.AsyncConnection, paper_id: str, topic: str | Non
 async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Settled:
     """Save or unsave by hand. The newest use outranks every other reason, until the next."""
     async with conn.transaction():
-        await _lock(conn, paper_id)
+        await lock(conn, paper_id)
         await word_store.set_hand(conn, paper_id, hand)
         return await settle(conn, paper_id)
 
 
 async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
-    """Settle every paper the topic has a grade, verdict or word for, without announcing:
-    after its kind changed, so a topic that stopped being Watch takes its grades with it."""
+    """Settle every paper the topic has a grade, verdict or word for, in id order: after its
+    kind changed, so a topic that stopped being Watch takes its grades with it. Call it in
+    the transaction that changed the kind, after `topics.kind_for_update`."""
     rows = await (
         await conn.execute(
             "SELECT paper_id FROM effective_grades WHERE topic = %(t)s "
             "UNION SELECT paper_id FROM verdicts WHERE topic = %(t)s "
             "UNION SELECT paper_id FROM labels WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM reactions WHERE topic = %(t)s",
+            "UNION SELECT paper_id FROM reactions WHERE topic = %(t)s ORDER BY 1",
             {"t": slug},
         )
     ).fetchall()
