@@ -1,4 +1,4 @@
-"""The nightly run: intake, triage with the keyword audit, grading."""
+"""The nightly run: intake, triage with the keyword audit, grading, takes and the issue."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import psycopg
 
 from litwatch import intake
 from litwatch.config import Config
+from litwatch.jobs import digest as digest_jobs
 from litwatch.jobs import watch as watch_jobs
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
@@ -50,4 +51,7 @@ async def run(
             run.counts["rewritten"] = len(result.rewritten)
         await watch_jobs.triage(conn, config, run, limit=limit)
         await watch_jobs.grade(conn, config, run)
+        await digest_jobs.write_takes(conn, config, run)
+        issue_id = await digest_jobs.build_daily(conn, config, run)
+        run.counts["issue"] = issue_id
         return run.run_id

@@ -14,6 +14,8 @@ VERDICT_RECORDED = "verdict.recorded"
 GRADE_CHANGED = "grade.changed"
 PAPER_SAVED = "paper.saved"
 PAPER_UNSAVED = "paper.unsaved"
+# A take was written for (paper, topic); it may arrive after `paper.saved`.
+TAKE_WRITTEN = "take.written"
 
 
 async def emit(

@@ -80,6 +80,9 @@ class Topic(BaseModel):
     keywords: list[str] = Field(default_factory=list)  # Watch: regexes for the keyword audit
     status: Status = Status.ACTIVE
     revision: int | None = None
+    # The owner's order and the topic's colour; the store assigns both when a topic is new.
+    position: int | None = None
+    colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
     @field_validator("slug")
     @classmethod
@@ -285,6 +288,29 @@ class Hand(StrEnum):
 
     SAVE = "save"
     UNSAVE = "unsave"
+
+
+class TakeSource(StrEnum):
+    """What the writer had besides the abstract and the topic."""
+
+    VERDICT = "verdict"  # both graders' opinions
+    EVALUATION = "evaluation"  # a reported miss's trace
+    MIGRATED = "migrated"  # the single opinion carried over from 0.14
+    OWNER = "owner"  # nothing: the owner's word alone made the paper relevant
+
+
+class Take(BaseModel):
+    """Litwatch's own words on a paper for a Watch topic, bound to what it was written from."""
+
+    id: int | None = None
+    paper_id: str
+    topic: str
+    paper_revision: int
+    topic_revision: int
+    grade: Grade  # must_read or relevant: decides the length
+    source: TakeSource
+    text: str
+    written_at: datetime | None = None
 
 
 class Event(BaseModel):

@@ -36,6 +36,11 @@ class Models:
         self.calls: list[tuple[str, str]] = []
 
     def respond(self, role, request):
+        if "You write for litwatch" in request.system:
+            self.calls.append(("writer", request.user.splitlines()[0]))
+            if "lede" in request.system:
+                return json.dumps({"lede": "One paper for CoT faithfulness."})
+            return json.dumps({"take": "It does a thing that matters."})
         title = request.user.splitlines()[0].removeprefix("Title: ")
         paper_id = next(p.id for p in PAPERS if p.title == title)
         who = "triage" if "sort arXiv papers" in request.system else role.label
@@ -132,8 +137,16 @@ async def test_a_nightly_run_triages_audits_and_grades(conn, models):
         "grade_must_read": 1,
         "grade_none": 1,
         "split": 1,
+        "takes": 1,
+        "issue_entries": 1,
+        "issue": run["counts"]["issue"],
         "calls": None,
     }
+    # The must-read paper got its take and its entry in today's issue, with a lede.
+    (issue,) = await table(conn, "issues")
+    assert run["counts"]["issue"] == issue["id"] and issue["lede"]
+    (entry,) = await table(conn, "issue_entries")
+    assert (entry["paper_id"], entry["grade"]) == (ON_TOPIC.id, "must_read") and entry["take_id"]
     assert run["counts"]["calls"]["triage"]["calls"] == 4
     recorded = [e["type"] for e in await table(conn, "outbox", "id")]
     assert recorded.count("verdict.recorded") == 2

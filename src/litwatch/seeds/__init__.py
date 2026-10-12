@@ -33,7 +33,7 @@ def starter() -> list[Topic]:
 
 
 def dump(topic: Topic) -> str:
-    spec = topic.model_dump(mode="json", exclude={"revision"}, exclude_none=True)
+    spec = topic.model_dump(mode="json", exclude={"revision", "position"}, exclude_none=True)
     if not spec["keywords"]:
         del spec["keywords"]
     return yaml.safe_dump(spec, sort_keys=False, allow_unicode=True, width=96)

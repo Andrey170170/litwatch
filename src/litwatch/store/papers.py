@@ -169,3 +169,10 @@ async def get_many(conn: psycopg.AsyncConnection, ids: list[str]) -> list[Paper]
 
 async def count(conn: psycopg.AsyncConnection) -> int:
     return (await (await conn.execute("SELECT count(*) AS n FROM papers")).fetchone())["n"]
+
+
+async def revision(conn: psycopg.AsyncConnection, paper_id: str) -> int:
+    row = await (
+        await conn.execute("SELECT revision FROM papers WHERE id = %s", (paper_id,))
+    ).fetchone()
+    return row["revision"] if row else 1

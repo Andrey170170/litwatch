@@ -18,13 +18,16 @@ from litwatch.core import (
     Hand,
     Label,
     Reaction,
+    Topic,
     TopicKind,
     current_verdict,
     effective_grade,
     in_library,
     owners_word,
 )
+from litwatch.store import digest as digest_store
 from litwatch.store import feedback as feedback_store
+from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
@@ -40,8 +43,53 @@ class Settled:
     saved: bool = False
 
 
-async def _watch_topics(conn: psycopg.AsyncConnection) -> set[str]:
-    return {t.slug for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
+async def _watch_topics(conn: psycopg.AsyncConnection) -> dict[str, Topic]:
+    return {t.slug: t for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
+
+
+def _shown(grade: Grade | None) -> bool:
+    return grade is not None and grade.at_least(Grade.RELEVANT)
+
+
+async def _owe(
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    topic: str,
+    old: Grade | None,
+    new: Grade | None,
+    binding: tuple[int, int],
+    announce: bool,
+) -> None:
+    """Keep the pair's debts to the writer and the next issue in step with its grade.
+
+    Shown (relevant or above), the pair is owed a take unless its newest take was written for
+    this text, rubric and length, and is owed an entry when it has just crossed the line and
+    no issue has carried it yet. Falling below the line cancels both. A paper newly adjacent
+    is counted in the next issue's fold line.
+    """
+    if _shown(new):
+        latest = await digest_store.latest_take(conn, paper_id, topic)
+        wanted = (*binding, new == Grade.MUST_READ)
+        stale = (
+            latest is None
+            or (
+                latest.paper_revision,
+                latest.topic_revision,
+                latest.grade == Grade.MUST_READ,
+            )
+            != wanted
+        )
+        crossed = (
+            announce and not _shown(old) and not await digest_store.announced(conn, paper_id, topic)
+        )
+        if stale or crossed:
+            await digest_store.mark_due(conn, paper_id, topic, take=stale, issue=crossed)
+        if not _shown(old):
+            await digest_store.settle_due(conn, paper_id, topic, fold=False)
+    elif new != old:
+        await digest_store.clear_due(conn, paper_id, topic)
+        if announce and new == Grade.ADJACENT and old in (None, Grade.NONE):
+            await digest_store.mark_due(conn, paper_id, topic, fold=True)
 
 
 # Advisory lock namespace for settling one paper; the second key is the paper id's hash.
@@ -60,15 +108,19 @@ async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     await conn.execute("SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (SETTLE_LOCK, paper_id))
 
 
-async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
-    """Recompute and store the paper's effective grades and library state, with their events.
+async def settle(conn: psycopg.AsyncConnection, paper_id: str, *, announce: bool = True) -> Settled:
+    """Recompute and store the paper's effective grades and library state, with their events,
+    and what the writer and the next issue owe it. `announce=False` settles without making
+    anything due for an issue, for papers brought in rather than found (sync, migration).
 
     Settles of one paper are serialized and read only after the lock is held, so the last to
     run sees every committed change and leaves the stored state right.
     """
+
     async with conn.transaction():
         await lock(conn, paper_id)
         watched = await _watch_topics(conn)
+        revision = await papers_store.revision(conn, paper_id)
         labels = {x.topic: x for x in await feedback_store.labels_for(conn, paper_id)}
         reactions = {r.topic: r for r in await word_store.reactions_for(conn, paper_id)}
         by_topic: dict[str, list] = {}
@@ -79,13 +131,21 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
         result = Settled(paper_id)
         after: dict[str, Grade | None] = {}
         # A stored grade for a topic that is no longer Watch is removed, with its event.
-        involved = (watched & (set(labels) | set(reactions) | set(by_topic))) | set(before)
+        involved = (set(watched) & (set(labels) | set(reactions) | set(by_topic))) | set(before)
         for topic in sorted(involved):
             word = owners_word(labels.get(topic), reactions.get(topic))
             old = before.get(topic)
             verdict = current_verdict(by_topic.get(topic, []))
-            new = effective_grade(word, verdict) if topic in watched else None
-            after[topic] = new
+            new = after[topic] = effective_grade(word, verdict) if topic in watched else None
+            if topic in watched:
+                binding = (
+                    (verdict.paper_revision, verdict.topic_revision)
+                    if verdict
+                    else (revision, watched[topic].revision or 1)
+                )
+                await _owe(conn, paper_id, topic, old, new, binding, announce)
+            elif new != old:
+                await digest_store.clear_due(conn, paper_id, topic)
             if new != old:
                 result.grades[topic] = (old, new)
                 await word_store.set_effective(conn, paper_id, topic, new)
@@ -161,16 +221,20 @@ async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
         )
     ).fetchall()
     for row in rows:
-        await settle(conn, row["paper_id"])
+        await settle(conn, row["paper_id"], announce=False)
     return len(rows)
 
 
 async def sync(conn: psycopg.AsyncConnection) -> dict[str, int]:
     """Settle every paper that has a verdict, a word or a library row. For an adopted or
-    seeded database, and after anything that wrote verdicts or labels around `settle`."""
+    seeded database, and after anything that wrote verdicts or labels around `settle`.
+
+    Nothing it moves is announced in an issue: these papers were brought in, not found. The
+    writer still owes each shown pair a take.
+    """
     counts = {"papers": 0, "grades_changed": 0, "saved": 0, "unsaved": 0}
     for paper_id in await word_store.touched(conn):
-        settled = await settle(conn, paper_id)
+        settled = await settle(conn, paper_id, announce=False)
         counts["papers"] += 1
         counts["grades_changed"] += len(settled.grades)
         if settled.saved != settled.was_saved:

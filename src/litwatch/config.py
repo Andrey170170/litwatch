@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import os
 import tomllib
+from datetime import date, datetime, tzinfo
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ROLES = ("triage", "judge", "check", "review")
+ROLES = ("triage", "judge", "check", "review", "writer")
 
 
 class _Section(BaseModel):
@@ -49,6 +51,7 @@ class Models(_Section):
         provider="openrouter", model="meta/muse-spark-1.3-contributor", effort="high"
     )
     review: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
+    writer: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 
     @model_validator(mode="after")
     def _two_labs_grade(self) -> Models:
@@ -81,11 +84,23 @@ class Limits(_Section):
     grading_attempts: int = Field(default=3, gt=0)
     # A paper whose triage failed this many runs is counted as stuck; it is still retried.
     triage_stuck_after: int = Field(default=3, gt=0)
+    writing: int = Field(default=4, gt=0)  # takes written at once
+    # A pair the writer failed on this many runs enters its issue without a take.
+    take_attempts: int = Field(default=3, gt=0)
 
 
 class Schedule(_Section):
     nightly: str = "0 6 * * *"
     weekly: str = "0 7 * * 1"
+    # Decides which calendar date an issue belongs to. None is the server's own zone.
+    timezone: str | None = None
+
+    @property
+    def zone(self) -> tzinfo:
+        return ZoneInfo(self.timezone) if self.timezone else datetime.now().astimezone().tzinfo
+
+    def today(self) -> date:
+        return datetime.now(self.zone).date()
 
 
 class Config(_Section):
