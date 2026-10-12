@@ -33,15 +33,20 @@ researcher as "you" once, sparingly.
 {subject}"""
 
 LENGTHS = {
-    Grade.MUST_READ: "Two or three sentences; the last may say what makes it required reading.",
-    Grade.RELEVANT: "One sentence.",
+    Grade.MUST_READ: (
+        "Two or three short sentences, at most 70 words; the last may say what makes it "
+        "required reading."
+    ),
+    Grade.RELEVANT: "One sentence, at most 35 words.",
 }
 
 LEDE = """{voice}
 
-Write the lede of today's issue: one or two sentences, read before anything else, saying what \
-is in it. Name the topics, count papers in words, and give the reader a reason to read on from \
-the strongest entry. Lead entries are required reading; brief entries are worth the time."""
+Write the lede of today's issue: what a newspaper prints above its first story. One or two \
+short sentences, at most 35 words in all, saying what is in the issue: the topics, the number \
+of papers in words, and a few words on the strongest entry. Do not summarise any paper; the \
+takes below the lede do that. Lead entries are required reading; brief entries are worth the \
+time."""
 
 
 class TakeOutput(BaseModel):
