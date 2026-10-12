@@ -11,6 +11,7 @@ from litwatch import intake
 from litwatch.config import Config
 from litwatch.feedback import word
 from litwatch.jobs import digest as digest_jobs
+from litwatch.jobs import reviews as review_jobs
 from litwatch.jobs import watch as watch_jobs
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
@@ -56,6 +57,7 @@ async def run(
         await watch_jobs.triage(conn, config, run, limit=limit)
         await watch_jobs.grade(conn, config, run)
         await digest_jobs.write_takes(conn, config, run)
+        await review_jobs.daily_reviews(conn, config, run)
         issue_id = await digest_jobs.build_daily(conn, config, run)
         run.counts["issue"] = issue_id
         return run.run_id

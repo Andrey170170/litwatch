@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from datetime import date, datetime, tzinfo
+from datetime import date, datetime, time, timedelta, tzinfo
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -101,6 +101,15 @@ class Schedule(_Section):
 
     def today(self) -> date:
         return datetime.now(self.zone).date()
+
+    def window(self, start: date, days: int = 1) -> tuple[datetime, datetime]:
+        """From midnight of `start` to midnight `days` later, in the configured zone."""
+        begin = datetime.combine(start, time.min, self.zone)
+        return begin, begin + timedelta(days=days)
+
+    def week_of(self, day: date) -> date:
+        """The Monday of the week the day falls in."""
+        return day - timedelta(days=day.weekday())
 
 
 class Config(_Section):

@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
@@ -51,6 +51,14 @@ class Status(StrEnum):
     PAUSED = "paused"  # history kept, no new judgements
 
 
+class Cadence(StrEnum):
+    """How often a Radar or Pulse topic is reviewed. Weekly always; daily adds a review after
+    each nightly run, for a Radar field followed closely."""
+
+    WEEKLY = "weekly"
+    DAILY = "daily"
+
+
 class Grade(StrEnum):
     """A Watch topic's judgement of a paper, most inclusive first."""
 
@@ -83,6 +91,13 @@ class Topic(BaseModel):
     # The owner's order and the topic's colour; the store assigns both when a topic is new.
     position: int | None = None
     colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    cadence: Cadence = Cadence.WEEKLY  # Radar may be daily too; Watch and Pulse are weekly
+
+    @model_validator(mode="after")
+    def _daily_is_radar(self) -> Topic:
+        if self.cadence == Cadence.DAILY and self.kind != TopicKind.RADAR:
+            raise ValueError("only a Radar topic can be reviewed daily")
+        return self
 
     @field_validator("slug")
     @classmethod

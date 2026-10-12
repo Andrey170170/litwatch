@@ -46,7 +46,7 @@ Write the lede of today's issue: what a newspaper prints above its first story. 
 short sentences, at most 35 words in all, saying what is in the issue: the topics, the number \
 of papers in words, and a few words on the strongest entry. Do not summarise any paper; the \
 takes below the lede do that. Lead entries are required reading; brief entries are worth the \
-time."""
+time. When notes on the day in a field follow, end with a few words on that field too."""
 
 
 class TakeOutput(BaseModel):
@@ -85,7 +85,12 @@ class Entry:
     lead: bool
 
 
-def lede_request(entries: list[Entry], folds: dict[str, int] | None = None) -> Request:
+def lede_request(
+    entries: list[Entry],
+    folds: dict[str, int] | None = None,
+    notes: list[tuple[str, str]] | None = None,
+) -> Request:
+    """`notes` are the day's field reviews, as (topic name, review text)."""
     lines = []
     for topic in dict.fromkeys(e.topic for e in entries):
         lines.append(f"## {topic}")
@@ -96,6 +101,8 @@ def lede_request(entries: list[Entry], folds: dict[str, int] | None = None) -> R
         near = ", ".join(f"{n} near {topic}" for topic, n in folds.items() if n)
         if near:
             lines.append(f"\nAlso noted, not in the issue: {near}.")
+    for topic, text in notes or []:
+        lines.append(f"\n## {topic} (the day in the field)\n{text[:600]}")
     return Request(system=LEDE.format(voice=VOICE), user="\n".join(lines), output=LedeOutput)
 
 
@@ -113,6 +120,11 @@ async def take(
     return answer.value.take.strip()
 
 
-async def lede(gateway: Gateway, entries: list[Entry], folds: dict[str, int] | None = None) -> str:
-    answer = await gateway.ask("writer", lede_request(entries, folds))
+async def lede(
+    gateway: Gateway,
+    entries: list[Entry],
+    folds: dict[str, int] | None = None,
+    notes: list[tuple[str, str]] | None = None,
+) -> str:
+    answer = await gateway.ask("writer", lede_request(entries, folds, notes))
     return answer.value.lede.strip()

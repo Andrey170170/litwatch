@@ -215,12 +215,20 @@ async def set_lede(conn: psycopg.AsyncConnection, issue_id: int, lede: str) -> N
     )
 
 
+async def mark_lede_stale(conn: psycopg.AsyncConnection, issue_id: int) -> None:
+    await conn.execute("UPDATE issues SET lede_stale = true WHERE id = %s", (issue_id,))
+
+
 async def lede_owed(conn: psycopg.AsyncConnection, since: date) -> list[int]:
-    """Issues since `since` whose lede is missing or older than their entries."""
+    """Daily issues since `since` whose lede is missing or older than their entries or
+    reviews."""
     rows = await (
         await conn.execute(
-            "SELECT id FROM issues i WHERE day >= %s AND (lede IS NULL OR lede_stale) "
-            "AND EXISTS (SELECT 1 FROM issue_entries e WHERE e.issue_id = i.id) ORDER BY day",
+            "SELECT id FROM issues i WHERE kind = 'daily' AND day >= %s "
+            "AND (lede IS NULL OR lede_stale) "
+            "AND (EXISTS (SELECT 1 FROM issue_entries e WHERE e.issue_id = i.id) "
+            "     OR EXISTS (SELECT 1 FROM reviews r WHERE r.period = 'day' AND r.day = i.day "
+            "                AND r.state = 'written')) ORDER BY day",
             (since,),
         )
     ).fetchall()

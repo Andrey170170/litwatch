@@ -23,6 +23,7 @@ def _topic(row: dict[str, Any]) -> Topic:
         revision=row["revision"],
         position=row["position"],
         colour=row["colour"],
+        cadence=row["cadence"],
     )
 
 
@@ -69,15 +70,16 @@ async def save(conn: psycopg.AsyncConnection, topic: Topic) -> Topic:
         cur = await conn.execute(
             """
             INSERT INTO topics (slug, name, kind, subject, rubric, interests, keywords, status,
-                                version, revision, position, colour)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                version, revision, position, colour, cadence)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (slug) DO UPDATE SET
                 name = EXCLUDED.name, kind = EXCLUDED.kind, subject = EXCLUDED.subject,
                 rubric = EXCLUDED.rubric, interests = EXCLUDED.interests,
                 keywords = EXCLUDED.keywords, status = EXCLUDED.status,
                 version = EXCLUDED.version, revision = EXCLUDED.revision,
                 position = coalesce(EXCLUDED.position, topics.position),
-                colour = coalesce(EXCLUDED.colour, topics.colour), updated_at = now()
+                colour = coalesce(EXCLUDED.colour, topics.colour), cadence = EXCLUDED.cadence,
+                updated_at = now()
             RETURNING position, colour
             """,
             (
@@ -93,12 +95,14 @@ async def save(conn: psycopg.AsyncConnection, topic: Topic) -> Topic:
                 revision,
                 position,
                 colour,
+                topic.cadence.value,
             ),
         )
         placed = await cur.fetchone()
         if changed:
             content = topic.model_dump(
-                mode="json", exclude={"revision", "status", "name", "position", "colour"}
+                mode="json",
+                exclude={"revision", "status", "name", "position", "colour", "cadence"},
             )
             await conn.execute(
                 "INSERT INTO topic_versions (topic, revision, hash, content) "
