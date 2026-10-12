@@ -35,14 +35,14 @@ async def test_everything_but_the_health_check_needs_the_token(client):
         await client.get("/api/labelling", headers={"authorization": "Bearer no"})
     ).status_code == 401
     # Opening the page once with the token sets a cookie that then serves as the token.
-    page = await client.get("/", params={"token": TOKEN})
+    page = await client.get("/label", params={"token": TOKEN})
     assert "litwatch_token" in page.headers["set-cookie"]
     # It sends the browser on to the bare address, so the token does not stay in the URL.
-    assert (page.status_code, page.headers["location"]) == (303, "/")
+    assert (page.status_code, page.headers["location"]) == (303, "/label")
     assert (await client.get("/api/labelling")).json()["topics"] == [
         {"slug": FAITH.slug, "name": FAITH.name}
     ]
-    assert "set-cookie" not in (await client.get("/", params={"token": "wrong"})).headers
+    assert "set-cookie" not in (await client.get("/label", params={"token": "wrong"})).headers
 
 
 async def test_a_label_records_how_its_paper_was_chosen_and_can_be_taken_back(client, conn):

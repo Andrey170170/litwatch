@@ -1,24 +1,24 @@
-"""A small token-protected app: the labelling queues and the labels."""
+"""The service's HTTP side: the JSON API the web app reads, and the evaluation's labelling page."""
 
 from __future__ import annotations
 
-import hmac
-from collections.abc import AsyncIterator
 from importlib import resources
-from typing import Annotated, Any
+from typing import Any
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from litwatch import store
+from litwatch.api import reading
+from litwatch.api.deps import COOKIE, Conn, authorised, token_ok
+from litwatch.config import Config
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue, Status, TopicKind
 from litwatch.feedback import word
+from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.store import feedback as feedback_store
 from litwatch.store import topics as topics_store
 
-COOKIE = "litwatch_token"
 # The queue a label is given in says how its paper was chosen.
 ORIGINS = {
     "rejects": LabelOrigin.REJECT_SAMPLE,
@@ -35,41 +35,35 @@ class LabelIn(BaseModel):
     queue: str = "rejects"
 
 
-async def _conn(request: Request) -> AsyncIterator[psycopg.AsyncConnection]:
-    async with await store.connect(request.app.state.dsn) as conn:
-        yield conn
-
-
-def _authorised(request: Request) -> None:
-    scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
-    given = [request.cookies.get(COOKIE), bearer if scheme.lower() == "bearer" else None]
-    token = request.app.state.token.encode()
-    # Either credential is enough, so a stale cookie does not block a good header.
-    if not any(g and hmac.compare_digest(g.encode(), token) for g in given):
-        raise HTTPException(status_code=401, detail="missing or wrong token")
-
-
-Conn = Annotated[psycopg.AsyncConnection, Depends(_conn)]
-
-
-def create_app(dsn: str, token: str) -> FastAPI:
-    """The app over one database. Every request but the health check needs the shared token,
-    as a bearer header or the cookie set by opening `/?token=...` once."""
+def create_app(
+    dsn: str,
+    token: str,
+    config: Config | None = None,
+    gateway: GatewayFactory = default_gateway,
+) -> FastAPI:
+    """The app over one database. Every request but the health check and signing in needs
+    the shared token, as a bearer header or the cookie (set by `/api/session`, or by opening
+    the labelling page once with `?token=`)."""
     app = FastAPI(title="litwatch", docs_url=None, redoc_url=None)
     app.state.dsn, app.state.token = dsn, token
-    protected = [Depends(_authorised)]
+    app.state.config, app.state.gateway = config or Config(), gateway
+    protected = [Depends(authorised)]
+    app.include_router(reading.router, dependencies=protected)
+    app.include_router(reading.session)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/", response_class=HTMLResponse)
+    # -- the evaluation's labelling page (replaced by Calibrate later in M3) ----------------------
+
+    @app.get("/label", response_class=HTMLResponse)
     async def page(request: Request) -> Response:
         given = request.query_params.get("token")
-        if given and hmac.compare_digest(given.encode(), token.encode()):
+        if given and token_ok(request, given):
             # Straight on to the bare address, so the token does not stay in the address bar,
             # the history or a later referrer.
-            response = RedirectResponse("/", status_code=303)
+            response = RedirectResponse("/label", status_code=303)
             response.set_cookie(COOKIE, given, httponly=True, samesite="strict", max_age=90 * 86400)
             return response
         return HTMLResponse(

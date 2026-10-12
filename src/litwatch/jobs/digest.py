@@ -13,7 +13,7 @@ import psycopg
 from litwatch import events
 from litwatch.config import Config
 from litwatch.core import Grade, Opinion, Paper, Take, TakeSource, Topic, TopicKind
-from litwatch.feedback import word
+from litwatch.feedback import misses, word
 from litwatch.jobs.context import ModelRun
 from litwatch.llm import CallError, Gateway
 from litwatch.review import writer
@@ -54,7 +54,11 @@ async def prepare(
     verdict = await verdicts_store.current(conn, paper.id, topic.slug)
     binding = word.binding(verdict, paper.revision, topic.revision or 1)
     if not word.speaks(verdict):
-        return Owed(paper, topic, grade, TakeSource.OWNER, [], binding)
+        # A reported miss's trace has both graders' opinions; otherwise the owner's word alone
+        # asked for this take.
+        opinions = await misses.opinions(conn, paper.id, topic.slug)
+        source = TakeSource.EVALUATION if opinions else TakeSource.OWNER
+        return Owed(paper, topic, grade, source, opinions, binding)
     if verdict.paper_revision != paper.revision:
         # Only the current text is stored: the take waits for the rewrite's re-grade.
         return REWRITTEN
