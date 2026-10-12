@@ -51,7 +51,7 @@ def gateway(config, journal):
     return Gateway(config.models, providers, journal, retry_delays=())
 
 
-async def label(conn, name, value, origin=LabelOrigin.INBOX, provisional=False):
+async def label(conn, name, value, origin=LabelOrigin.READER, provisional=False):
     made = Label(paper_id=PAPERS[name].id, topic=FAITH.slug, value=LabelValue(value), origin=origin)
     if provisional:
         await feedback_store.add_provisional(conn, made)
@@ -87,7 +87,7 @@ async def test_replay_reports_four_recalls_over_the_papers_labelled_relevant(see
     # Precision is kept apart by how the labelled paper was chosen.
     assert report["topics"][FAITH.slug]["precision_by_origin"] == {
         "candidate_sample": {"surfaced": 1, "precision": 0.0},
-        "inbox": {"surfaced": 2, "precision": 1.0},
+        "reader": {"surfaced": 2, "precision": 1.0},
     }
     assert report["models"]["check"] == "openrouter:meta/muse-spark-1.3-contributor@high"
     assert report["calls"]["judge"]["calls"] == 5

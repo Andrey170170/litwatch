@@ -536,7 +536,8 @@ one an old issue showed; review references), `labels` (paper, topic, value, grad
 `reactions` (paper, topic, value, reason, at), `appraisals` (paper, value: matters, fine or not for me, note, at),
 `take_ratings` (take, accurate or off, at), `calibration_sessions` (drawn at, seed, the papers in order, each with the topic and group it was drawn for
 or why it was taken, and the verdict current at the draw), `topic_visits` (topic, last opened at), `misses`, `publications`, `library` (paper, the owner's newest
-save or unsave, at), `outbox`,
+save or unsave, at, whether it is saved now), `effective_grades` (paper, Watch topic, grade: kept so a change is
+noticed and every surface reads one answer), `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
 and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
 opinions, reconciled grade, grading error), which hold replays, previews and miss traces. `papers` gains `revision` and the owner's correction of title and abstract, if any; the triage state records awaiting triage and dismissed. Kept as they are: `runs`, `inference_calls`, intake checkpoints.
@@ -776,7 +777,8 @@ lookup finds the right record for at least 45 and never a wrong one.
 
 **M6 · Integrations.** Outbox and dispatcher; Zotero and WebDAV, archive, deep, webhook; the n8n
 workflow for Notion. *Check:* with every integration disabled the system is fully usable; with
-each enabled, its 0.14 behaviour is reproduced for Watch papers, and Zotero creates no duplicate of an item 0.x made; a small new integration can be
+each enabled, its 0.14 behaviour is reproduced for Watch papers, and Zotero creates no duplicate of an item 0.x made; an integration enabled for the first time starts
+reading the outbox from its current end, so the events of an initial `library sync` wake nothing; a small new integration can be
 written from `docs/integrations.md` without editing any other package.
 
 **M7 · Migration and cutover.** Data migration, a week side by side, switch production.

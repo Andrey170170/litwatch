@@ -67,6 +67,14 @@ async def history(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> l
     return [_verdict(r) for r in rows]
 
 
+async def for_paper(conn: psycopg.AsyncConnection, paper_id: str) -> list[Verdict]:
+    """Every verdict on the paper, for every topic."""
+    rows = await (
+        await conn.execute("SELECT * FROM verdicts WHERE paper_id = %s ORDER BY id", (paper_id,))
+    ).fetchall()
+    return [_verdict(r) for r in rows]
+
+
 async def current(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> Verdict | None:
     """The verdict that counts. A re-grade still pending, or one that failed, has no row and
     so displaces nothing."""
