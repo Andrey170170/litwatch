@@ -227,6 +227,30 @@
   .lw .tfoot { display: flex; justify-content: space-between; font-size: 13px; color: var(--mt); margin-top: 10px; }
   .lw .tfoot a { text-decoration: underline; text-decoration-color: var(--bd); }
 
+  /* topics tab: cards and rail */
+  .lw .tcard { display: grid; grid-template-columns: 4px 1fr auto; gap: 0 14px; border: 1px solid var(--bd); border-radius: 10px; padding: 12px 14px 12px 0; margin: 10px 0; background: var(--bg); align-items: center; }
+  .lw .tcard .bar { width: 4px; align-self: stretch; border-radius: 0 3px 3px 0; background: var(--tc, var(--fg)); margin: 0; }
+  .lw .tcard .n { font-family: var(--font-serif); font-weight: 600; font-size: 17px; line-height: 1.2; }
+  .lw .tcard .n small { font-family: var(--font-sans); font-weight: 400; font-size: 12px; color: var(--mt); margin-left: 8px; letter-spacing: .02em; }
+  .lw .tcard .new { font-size: 13.5px; color: #2a2a2a; margin-top: 3px; }
+  .lw .tcard .new.q { color: var(--mt); }
+  .lw .tcard .c { font-size: 12.5px; color: var(--mt); text-align: right; white-space: nowrap; line-height: 1.4; }
+  .lw .tcard.paused { opacity: .55; }
+  .lw .tgrp { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--mt); margin: 18px 0 2px; }
+  .lw.rail .body { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 560px; }
+  .lw.rail .side { border-right: 1px solid var(--bd); padding: 18px 0 24px; font-size: 14px; }
+  .lw.rail .side .tgrp { padding: 0 20px; margin-top: 16px; }
+  .lw.rail .side a { display: grid; grid-template-columns: 3px 1fr auto; gap: 0 12px; padding: 8px 18px 8px 0; align-items: baseline; color: var(--fg); }
+  .lw.rail .side a .bar { width: 3px; align-self: stretch; background: transparent; border-radius: 0 2px 2px 0; }
+  .lw.rail .side a.on { background: var(--soft); font-weight: 600; }
+  .lw.rail .side a.on .bar { background: var(--tc, var(--fg)); }
+  .lw.rail .side a .cnt { font-size: 12px; color: var(--mt); font-variant-numeric: tabular-nums; }
+  .lw.rail .side a .cnt.new { color: var(--fg); font-weight: 600; }
+  .lw.rail .side a.paused { color: var(--mt); }
+  .lw.rail .side .sub { font-size: 12px; color: var(--mt); grid-column: 2 / -1; margin-top: -2px; }
+  .lw.rail .body > main { margin: 0; max-width: none; padding: 24px 30px 36px; }
+  .lw.rail .tbl td.k { max-width: 300px; }
+
   /* phone adjustments */
   .lw.ph .nav { padding: 12px 16px; gap: 14px; } .lw.ph .nav a:not(.on) { display: none; }
   .lw.ph main { padding: 20px 16px 36px; } .lw.ph .date { font-size: 28px; } .lw.ph .lede { font-size: 16px; }
@@ -585,13 +609,59 @@ if it has any. It is the Notion table with the noise taken out: no status, no so
 the take where Key Claim was. The Topics tab lists the topic pages with one line of what is new on each. Saved is a filter,
 and Export BibTeX acts on whatever is filtered or selected, so there is no separate library page.</p>
 </div>
-<p class="frame-label">Desktop, the CoT faithfulness page</p>
-<div class="frame lw">
+<p class="frame-label">Phone, the Topics tab. One screen of cards, no search, no hierarchy.</p>
+<div class="pair pl">
+  <div class="phone lw ph">
+    <nav class="nav"><span class="brand">litwatch</span><a class="on" href="#">Topics</a><span class="gear">⚙</span></nav>
+    <main style="padding-top:14px">
+      <p class="tgrp" style="margin-top:0">Watch</p>
+      <div class="tcard t-mon"><span class="bar"></span><div><div class="n">CoT monitoring<small>Watch</small></div><div class="new">3 new since Tuesday, 1 saved</div></div><div class="c">84 papers<br>14 saved</div></div>
+      <div class="tcard t-fai"><span class="bar"></span><div><div class="n">CoT faithfulness<small>Watch</small></div><div class="new">1 new today</div></div><div class="c">61 papers<br>9 saved</div></div>
+      <p class="tgrp">Radar</p>
+      <div class="tcard t-int"><span class="bar"></span><div><div class="n">Interpretability<small>Radar · daily</small></div><div class="new q">Today's review: a quiet day</div></div><div class="c">212 picks<br>6 saved</div></div>
+      <div class="tcard" style="--tc:#5a6b3a"><span class="bar"></span><div><div class="n">Alignment and safety<small>Radar · weekly</small></div><div class="new">This week's review, Monday</div></div><div class="c">140 picks<br>3 saved</div></div>
+      <p class="tgrp">Pulse</p>
+      <div class="tcard t-age"><span class="bar"></span><div><div class="n">Agents<small>Pulse · weekly</small></div><div class="new">This week's review, Monday</div></div><div class="c">38 picks</div></div>
+      <div class="tcard" style="--tc:#7a4f8a"><span class="bar"></span><div><div class="n">Efficiency<small>Pulse · weekly</small></div><div class="new">This week's review, Monday</div></div><div class="c">31 picks</div></div>
+      <div class="tcard" style="--tc:#2f6b7a"><span class="bar"></span><div><div class="n">Reasoning<small>Pulse · weekly</small></div><div class="new">This week's review, Monday</div></div><div class="c">44 picks</div></div>
+      <div class="tcard paused" style="--tc:#999"><span class="bar"></span><div><div class="n">Diffusion LMs<small>Watch · paused</small></div><div class="new q">Paused in August</div></div><div class="c">12 papers</div></div>
+    </main>
+    <div class="tabbar"><span>Digest</span><span class="on">Topics</span><span>Papers</span></div>
+  </div>
+  <div class="prose notes">
+    <p class="frame-label">How a topic is picked</p>
+    <ul>
+      <li><strong>One screen.</strong> Five to ten topics is the realistic range for anyone, so the tab is the full list, grouped Watch, Radar, Pulse in the same order as the Digest's sections. No search box, no folders.</li>
+      <li><strong>Each card</strong>: the topic's colour as a bar on the left, its name, its kind and cadence in small type, one line of what is new since you last opened it, and counts on the right. "Nothing new" is grey; a paused topic sinks to the bottom and fades, still openable.</li>
+      <li><strong>One tap</strong> opens the topic page: the table for a Watch topic, the reviews with the table under them for Radar and Pulse.</li>
+      <li><strong>No edit controls</strong> on the cards. Creating, editing, pausing and reordering are Settings → Topics, reached by the gear.</li>
+      <li><strong>Desktop</strong> replaces the cards with a rail: the same list down the left, with the chosen topic open beside it, so switching topics is one click and never leaves the table. Opening the Topics tab lands on the first topic, or the one you had open last.</li>
+    </ul>
+  </div>
+</div>
+
+<p class="frame-label" style="margin-top:28px">Desktop, the Topics tab: rail on the left, the chosen topic open beside it</p>
+<div class="frame lw rail">
   <nav class="nav"><span class="brand">litwatch</span><a href="#">Digest</a><a class="on" href="#">Topics</a><a href="#">Papers</a><span class="chip" style="margin-left:18px"><i></i>Ran 06:14 · 530 papers · all quiet</span><span class="gear">⚙</span></nav>
-  <main style="max-width:1080px;padding-top:24px">
+  <div class="body">
+    <div class="side">
+      <p class="tgrp" style="margin-top:0">Watch</p>
+      <a href="#" class="t-mon"><span class="bar"></span><span>CoT monitoring</span><span class="cnt new">3 new</span></a>
+      <a href="#" class="on t-fai"><span class="bar"></span><span>CoT faithfulness</span><span class="cnt new">1 new</span></a>
+      <p class="tgrp">Radar</p>
+      <a href="#" class="t-int"><span class="bar"></span><span>Interpretability</span><span class="cnt">daily</span></a>
+      <a href="#" style="--tc:#5a6b3a"><span class="bar"></span><span>Alignment and safety</span><span class="cnt">Mon</span></a>
+      <p class="tgrp">Pulse</p>
+      <a href="#" class="t-age"><span class="bar"></span><span>Agents</span><span class="cnt">Mon</span></a>
+      <a href="#" style="--tc:#7a4f8a"><span class="bar"></span><span>Efficiency</span><span class="cnt">Mon</span></a>
+      <a href="#" style="--tc:#2f6b7a"><span class="bar"></span><span>Reasoning</span><span class="cnt">Mon</span></a>
+      <p class="tgrp">Paused</p>
+      <a href="#" class="paused"><span class="bar"></span><span>Diffusion LMs</span><span class="cnt">Aug</span></a>
+    </div>
+    <main>
     <div class="topichead">
       <div>
-        <h1 class="date" style="font-size:28px;border-left:4px solid #8a3b2e;padding-left:12px">CoT faithfulness</h1>
+        <h1 class="date" style="font-size:26px;color:#8a3b2e">CoT faithfulness</h1>
         <p style="margin-top:8px">Whether a model's chain of thought reflects the computation that produced its answer. 61 papers since March, 9 saved.</p>
       </div>
       <span class="gear" title="Edit this topic">⚙</span>
@@ -607,13 +677,14 @@ and Export BibTeX acts on whatever is filtered or selected, so there is no separ
       <tr class="adj"><td><i></i></td><td class="t">Beyond Accuracy: How Procedural Traces Shift the Decision Criterion of LLM Overseers<small>near the topic</small></td><td class="d">5 Oct 2026</td><td class="d">7 Oct</td><td class="k">How showing a trace changes what an overseer accepts; about the reader of the trace, not its faithfulness.</td><td></td><td class="ic">⇗ ▤</td></tr>
     </table>
     <div class="tfoot"><span>6 of 61 · <a href="#">older</a></span><span>Columns: Title · Published · Added · Take · Saved · Links</span></div>
-  </main>
+    </main>
+  </div>
 </div>
 <div class="prose notes">
   <ul>
     <li><strong>Columns.</strong> Title with authors under it, Published, Added, the one-line take, Saved, and link icons (arXiv, PDF, code when there is one). Sort by any column; Added descending is the default so new papers are on top, which is what the Digest's "11 more" link lands on.</li>
     <li><strong>The dot</strong> is the only trace of the grade: ink for must read, green for relevant, pale for adjacent. Adjacent rows are hidden until "Also adjacent" is on; here it is on to show one.</li>
-    <li><strong>The topic's colour</strong> is the rule beside its name, the same colour as its section on the Digest and its chip on a paper page.</li>
+    <li><strong>The topic's colour</strong> is its name on the page and the bar in the rail, the same colour as its section on the Digest and its chip on a paper page.</li>
     <li><strong>A Radar or Pulse topic's page</strong> has a Reviews tab before the table: its reviews as dated prose, newest first, each with its picks. The table under it holds the picks.</li>
     <li><strong>Phone.</strong> The same rows stack: title, authors, the take, dates on one small line, the saved mark. Sorting and filters sit in a sheet behind one button.</li>
     <li><strong>Editing the topic</strong> is the gear in the corner, which opens the editor in Settings (subject, rubric, keywords with match counts, preview against labelled papers, scoped re-runs).</li>
