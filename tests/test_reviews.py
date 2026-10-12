@@ -346,10 +346,13 @@ async def test_the_default_weekly_run_retries_the_week_before(db):
         (AGENTS.slug, last - timedelta(days=7)),
     )
     await job(db, models, lambda run: reviews.weekly(db, Config(), run))
-    row = await (
-        await db.execute("SELECT state FROM reviews WHERE day = %s", (last - timedelta(days=7),))
-    ).fetchone()
-    assert row["state"] != "failed"
+    rows = await (
+        await db.execute(
+            "SELECT topic, state FROM reviews WHERE day = %s", (last - timedelta(days=7),)
+        )
+    ).fetchall()
+    # Only the failed review is tried again; the week's other topics are left as they were.
+    assert [(r["topic"], r["state"]) for r in rows] == [(AGENTS.slug, "quiet")]
 
 
 async def test_an_empty_shortlist_still_reviews_a_sample_of_the_field(db, monkeypatch):

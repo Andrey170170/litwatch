@@ -117,16 +117,25 @@ async def weekly(
     if monday is None:
         monday = config.schedule.week_of(config.schedule.today()) - timedelta(days=7)
         for earlier in await reviews_store.failed_days(conn, "week", monday - RETRY, monday):
-            await _week(conn, config, run, earlier)
+            await _week(conn, config, run, earlier, failed_only=True)
     return await _week(conn, config, run, monday)
 
 
-async def _week(conn: psycopg.AsyncConnection, config: Config, run: ModelRun, monday: date) -> int:
+async def _week(
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    run: ModelRun,
+    monday: date,
+    *,
+    failed_only: bool = False,
+) -> int:
     since, until = config.schedule.window(monday, 7)
     changed = False
     for topic in await topics_store.all(conn, Status.ACTIVE):
         existing = await reviews_store.get(conn, topic.slug, "week", monday)
         if existing and existing["state"] == "written":
+            continue
+        if failed_only and not (existing and existing["state"] == "failed"):
             continue
         if topic.kind == TopicKind.WATCH:
             state = await _recap(conn, run, topic, monday)
