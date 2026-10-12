@@ -15,9 +15,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// Debug aid: the cache, reachable from the console.
-(window as unknown as { __qc: QueryClient }).__qc = queryClient;
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
