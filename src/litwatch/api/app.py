@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from litwatch.api import reading
@@ -18,6 +20,9 @@ from litwatch.feedback import word
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.store import feedback as feedback_store
 from litwatch.store import topics as topics_store
+
+# The built web app (`web/`, `pnpm build`), shipped inside the package.
+WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
 
 # The queue a label is given in says how its paper was chosen.
 ORIGINS = {
@@ -51,13 +56,13 @@ def create_app(
     app.include_router(reading.router, dependencies=protected)
     app.include_router(reading.session)
 
-    @app.get("/healthz")
+    @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
     # -- the evaluation's labelling page (replaced by Calibrate later in M3) ----------------------
 
-    @app.get("/label", response_class=HTMLResponse)
+    @app.get("/label", response_class=HTMLResponse, include_in_schema=False)
     async def page(request: Request) -> Response:
         given = request.query_params.get("token")
         if given and token_ok(request, given):
@@ -111,4 +116,29 @@ def create_app(
     async def delete_label(topic: str, paper_id: str, c: Conn) -> None:
         await word.unlabel(c, paper_id, topic)
 
+    _serve_web(app)
     return app
+
+
+def _serve_web(app: FastAPI) -> None:
+    """The web app's files, and its index for every other path so client-side routes such as
+    `/papers?lookup=...` (the share target) load the app. Unknown `/api` paths stay 404."""
+    if not (WEB / "index.html").exists():
+
+        @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+        async def unbuilt() -> str:
+            return (
+                "<p>The web app is not built. Run <code>pnpm build</code> in <code>web/</code>.</p>"
+            )
+
+        return
+    app.mount("/assets", StaticFiles(directory=WEB / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str) -> FileResponse:
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        file = (WEB / path).resolve()
+        if path and file.is_file() and file.is_relative_to(WEB.resolve()):
+            return FileResponse(file)
+        return FileResponse(WEB / "index.html")

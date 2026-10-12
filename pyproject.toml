@@ -48,6 +48,8 @@ testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/litwatch"]
+# The built web app is not in git but ships in the package.
+artifacts = ["src/litwatch/api/web/**"]
 
 [tool.uv.sources]
 arxiv-archive = { path = "vendor/arxiv_archive-0.2.0-py3-none-any.whl" }

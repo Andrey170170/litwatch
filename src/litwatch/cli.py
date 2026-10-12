@@ -370,6 +370,18 @@ def serve(
     uvicorn.run(app_, host=host, port=port)
 
 
+@app.command("openapi")
+def openapi(out: Annotated[Path, typer.Argument(help="Where to write the schema.")]) -> None:
+    """Write the API's OpenAPI schema, which the web app's client is generated from."""
+    import json  # noqa: PLC0415
+
+    from litwatch.api import create_app  # noqa: PLC0415
+
+    schema = create_app("postgresql://unused", "unused").openapi()
+    out.write_text(json.dumps(schema, indent=2) + "\n")
+    console.print(f"wrote {out}")
+
+
 @app.command()
 def ping(
     role: Annotated[str, typer.Argument(help="triage, judge, check or review")],
