@@ -39,7 +39,7 @@ export function QualityPage() {
         <>
           <h3 className="mt-4 mb-1 text-[13px] font-medium">
             {n.splits.length} {n.splits.length === 1 ? "disagreement" : "disagreements"}
-            <span className="ml-2 font-normal text-muted-foreground">the graders straddled the line; the more inclusive grade stood. Your call settles it.</span>
+            <span className="ml-2 font-normal text-muted-foreground">the two graders disagreed; the more inclusive grade stood. Your call settles it.</span>
           </h3>
           <div className="divide-y divide-border">
             {n.splits.map((s) => (
