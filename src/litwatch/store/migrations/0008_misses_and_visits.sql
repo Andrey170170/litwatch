@@ -11,6 +11,7 @@ CREATE TABLE misses (
     eval_run_id  bigint REFERENCES eval_runs (id) ON DELETE SET NULL,
     trace        text NOT NULL DEFAULT 'pending' CHECK (trace IN ('pending', 'done', 'failed')),
     trace_error  text,
+    trace_started timestamptz,
     reported_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (paper_id, topic)
 );
@@ -23,6 +24,7 @@ CREATE TABLE topic_visits (
 -- When each entry joined its issue: a same-day amendment is new to a topic page opened
 -- after the issue was first built.
 ALTER TABLE issue_entries ADD COLUMN added_at timestamptz NOT NULL DEFAULT now();
+UPDATE issue_entries e SET added_at = i.built_at FROM issues i WHERE i.id = e.issue_id;
 
 -- Which text an evaluation saw: the paper's own revision, which a rewrite always raises
 -- (arXiv's version is often unknown and may not change).

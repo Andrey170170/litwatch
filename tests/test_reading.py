@@ -341,3 +341,16 @@ async def test_a_trace_of_rewritten_text_gives_no_notes(client, conn):
     await conn.execute("UPDATE papers SET revision = 2 WHERE id = %s", (Q.id,))
     rewritten = await papers_store.get(conn, Q.id)
     assert await misses.opinions(conn, rewritten, FAITH.model_copy(update={"revision": 1})) == []
+
+
+async def test_a_trace_cut_off_long_ago_stops_holding_the_take_back(conn):
+    from litwatch.feedback import misses
+
+    for topic in TOPICS:
+        await topics_store.save(conn, topic)
+    await papers_store.upsert(conn, [Q])
+    await misses.report(conn, Q.id, FAITH.slug)
+    assert await digest._owed(conn) == []
+    await conn.execute("UPDATE misses SET reported_at = now() - interval '2 hours'")
+    (item,) = await digest._owed(conn)
+    assert item.source == "owner"

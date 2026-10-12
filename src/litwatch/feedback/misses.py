@@ -8,6 +8,8 @@ evaluation tables only.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from datetime import timedelta
 from typing import Any
 
 import psycopg
@@ -85,19 +87,26 @@ async def trace(
     """Run the missed paper through triage, the keyword audit and both graders for every
     Watch topic, as a dry run, and attach the evaluation run to the miss. A failure is
     recorded on the miss, which Settings can trace again; the owner's word is untouched."""
-    row = await (
-        await conn.execute("SELECT paper_id FROM misses WHERE id = %s", (miss_id,))
-    ).fetchone()
-    paper = await papers_store.get(conn, row["paper_id"])
     try:
+        row = await (
+            await conn.execute(
+                "UPDATE misses SET trace = 'pending', trace_started = now() WHERE id = %s "
+                "RETURNING paper_id",
+                (miss_id,),
+            )
+        ).fetchone()
+        paper = await papers_store.get(conn, row["paper_id"])
         eval_run_id = await replay(
             conn, config, [paper], kind="miss", params={"miss": miss_id}, gateway=gateway
         )
-    except Exception as exc:
-        await conn.execute(
-            "UPDATE misses SET trace = 'failed', trace_error = %s WHERE id = %s",
-            (f"{type(exc).__name__}: {exc}"[:500], miss_id),
-        )
+    except BaseException as exc:  # a cancelled trace is recorded too, then the cancel goes on
+        with contextlib.suppress(Exception):  # the original failure matters more
+            await conn.execute(
+                "UPDATE misses SET trace = 'failed', trace_error = %s WHERE id = %s",
+                (f"{type(exc).__name__}: {exc}"[:500], miss_id),
+            )
+        if not isinstance(exc, Exception):
+            raise
         return None
     async with conn.transaction():
         miss = await (
@@ -119,6 +128,11 @@ class Pending:
     """A reported miss whose trace has not finished: its take waits for the graders' notes."""
 
 
+# A trace pending longer than this was cut off (a restart, a crash): the take stops waiting
+# for it, and is rewritten with the notes if the trace is run again and finishes.
+TRACE_PATIENCE = timedelta(hours=1)
+
+
 async def opinions(
     conn: psycopg.AsyncConnection, paper: Paper, topic: Topic
 ) -> list[Opinion] | type[Pending]:
@@ -127,10 +141,12 @@ async def opinions(
     (topic revision) counts. `Pending` while a reported miss's trace is still running."""
     miss = await (
         await conn.execute(
-            "SELECT trace FROM misses WHERE paper_id = %s AND topic = %s", (paper.id, topic.slug)
+            "SELECT trace = 'pending' AND coalesce(trace_started, reported_at) > now() - %s "
+            "AS waiting FROM misses WHERE paper_id = %s AND topic = %s",
+            (TRACE_PATIENCE, paper.id, topic.slug),
         )
     ).fetchone()
-    if miss and miss["trace"] == "pending":
+    if miss and miss["waiting"]:
         return Pending
     row = await (
         await conn.execute(
