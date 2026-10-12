@@ -203,7 +203,10 @@ async def add_folds(conn: psycopg.AsyncConnection, issue_id: int, counts: dict[s
     folds = dict(row["folds"])
     for topic, n in counts.items():
         folds[topic] = folds.get(topic, 0) + n
-    await conn.execute("UPDATE issues SET folds = %s WHERE id = %s", (Jsonb(folds), issue_id))
+    # The lede mentions what is near; new counts make it stale.
+    await conn.execute(
+        "UPDATE issues SET folds = %s, lede_stale = true WHERE id = %s", (Jsonb(folds), issue_id)
+    )
 
 
 async def set_lede(conn: psycopg.AsyncConnection, issue_id: int, lede: str) -> None:

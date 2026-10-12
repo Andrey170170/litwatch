@@ -21,6 +21,7 @@ from litwatch.core import (
     Take,
     Topic,
     TopicKind,
+    Verdict,
     current_verdict,
     effective_grade,
     in_library,
@@ -70,9 +71,20 @@ async def wanted(
     if topic.kind != TopicKind.WATCH or not _shown(grade):
         return None
     verdict = await verdicts_store.current(conn, paper_id, topic.slug)
-    if verdict:
-        return grade, (verdict.paper_revision, verdict.topic_revision)
-    return grade, (await papers_store.revision(conn, paper_id), topic.revision or 1)
+    revision = await papers_store.revision(conn, paper_id)
+    return grade, binding(verdict, revision, topic.revision or 1)
+
+
+def speaks(verdict: Verdict | None) -> bool:
+    """Whether the verdict itself puts the paper on the reading side. When only the owner's
+    word does, the take is the owner's and the graders' opinions are not its source."""
+    return verdict is not None and _shown(verdict.grade)
+
+
+def binding(verdict: Verdict | None, paper_revision: int, topic_revision: int) -> tuple[int, int]:
+    """What a take must be written from: always the paper's current text (only it is stored),
+    and the rubric the verdict was given under when the verdict is the take's source."""
+    return paper_revision, verdict.topic_revision if speaks(verdict) else topic_revision
 
 
 async def _owe(
@@ -154,12 +166,8 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str, *, announce: bool
             verdict = current_verdict(by_topic.get(topic, []))
             new = after[topic] = effective_grade(word, verdict) if topic in watched else None
             if topic in watched:
-                binding = (
-                    (verdict.paper_revision, verdict.topic_revision)
-                    if verdict
-                    else (revision, watched[topic].revision or 1)
-                )
-                await _owe(conn, paper_id, topic, old, new, binding, announce)
+                bound = binding(verdict, revision, watched[topic].revision or 1)
+                await _owe(conn, paper_id, topic, old, new, bound, announce)
             elif new != old:
                 await digest_store.clear_due(conn, paper_id, topic)
             if new != old:

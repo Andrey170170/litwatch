@@ -33,12 +33,14 @@ class Writer:
     def __init__(self):
         self.down = False
         self.lede_down = False
+        self.ledes = 0
         self.takes: list[str] = []
 
     def respond(self, role, request):
         if self.down or (self.lede_down and "lede" in request.system):
             raise ProviderError("InternalServerError")
         if "lede" in request.system:
+            self.ledes += 1
             return json.dumps({"lede": "Lede."})
         self.takes.append(request.user.splitlines()[0])
         return json.dumps({"take": f"Take {len(self.takes)}."})
@@ -215,3 +217,42 @@ async def test_a_failed_lede_is_written_by_a_later_build(db):
     writer.lede_down = False
     await night(db, writer, date(2026, 10, 13))
     assert (await rows(db, "SELECT lede FROM issues"))[0]["lede"] == "Lede."
+
+
+async def test_a_rewritten_text_does_not_keep_its_old_take(db):
+    writer = Writer()
+    await grade(db, P, "relevant")
+    async with model_run(db, Config(), "nightly", gateway=writer.gateway) as run:
+        await digest.write_takes(db, Config(), run)
+    await db.execute("UPDATE papers SET revision = 2 WHERE id = %s", (P.id,))
+    await word.settle(db, P.id)
+    for _ in range(3):  # the re-grade never comes; the writer waits for it
+        await night(db, writer)
+    (entry,) = await rows(db, "SELECT * FROM issue_entries")
+    assert entry["take_id"] is None and len(writer.takes) == 1
+
+
+async def test_a_take_the_owners_word_alone_asked_for_is_the_owners(db):
+    await grade(db, P, "none")
+    await word.react(
+        db,
+        Reaction(
+            paper_id=P.id,
+            topic=FAITH.slug,
+            value=ReactionValue.UP,
+            reason=ReactionReason.GREAT_FIND,
+        ),
+    )
+    (item,) = await digest._owed(db)
+    assert (item.source, item.opinions) == ("owner", [])
+
+
+async def test_new_fold_counts_rewrite_the_lede(db):
+    writer = Writer()
+    await grade(db, P, "relevant")
+    await night(db, writer)
+    await grade(db, Q, "adjacent")
+    await night(db, writer)
+    (issue,) = await rows(db, "SELECT folds, lede_stale FROM issues")
+    assert issue["folds"] == {FAITH.slug: 1} and issue["lede_stale"] is False
+    assert writer.ledes == 2

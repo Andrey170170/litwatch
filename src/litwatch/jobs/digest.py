@@ -54,9 +54,9 @@ async def _owed(conn: psycopg.AsyncConnection) -> list[Owed]:
             await digest_store.clear_due(conn, row["paper_id"], row["topic"])
             continue
         verdict = await verdicts_store.current(conn, paper.id, topic.slug)
-        if verdict is None:
+        binding = word.binding(verdict, paper.revision, topic.revision or 1)
+        if not word.speaks(verdict):
             source, opinions = TakeSource.OWNER, []
-            binding = (paper.revision, topic.revision or 1)
         else:
             if verdict.paper_revision != paper.revision:
                 # Only the current text is stored; the take waits for the rewrite's re-grade,
@@ -67,7 +67,6 @@ async def _owed(conn: psycopg.AsyncConnection) -> list[Owed]:
                 continue
             source = TakeSource.MIGRATED if verdict.migrated else TakeSource.VERDICT
             opinions = [o for o in (verdict.judge, verdict.check) if o]
-            binding = (verdict.paper_revision, verdict.topic_revision)
             # The rubric the verdict was given under, which the take is bound to.
             topic = await topics_store.at_revision(conn, topic.slug, verdict.topic_revision)
         owed.append(Owed(paper, topic, grade, source, opinions, binding))
