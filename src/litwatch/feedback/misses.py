@@ -45,10 +45,11 @@ async def lookup(conn: psycopg.AsyncConnection, text: str) -> tuple[Paper, bool]
 
 async def report(
     conn: psycopg.AsyncConnection, paper_id: str, topic: str
-) -> tuple[int, Settled, bool]:
-    """File the miss and give the owner's word on it. Returns the miss id, what settled, and
-    whether it is new. Reporting again changes nothing: a correction made since stands, and
-    no second trace runs. The trace is `trace`'s job, since it waits on models."""
+) -> tuple[int, Settled, bool, bool]:
+    """File the miss and give the owner's word on it. Returns the miss id, what settled,
+    whether it is new, and whether it needs a trace. Reporting again changes nothing (a
+    correction made since stands), except that a trace never finished is asked for again:
+    one cut off by a restart would otherwise stay pending. The trace is `trace`'s job."""
     async with conn.transaction():
         row = await (
             await conn.execute(
@@ -60,17 +61,19 @@ async def report(
         if row is None:
             existing = await (
                 await conn.execute(
-                    "SELECT id FROM misses WHERE paper_id = %s AND topic = %s", (paper_id, topic)
+                    "SELECT id, trace FROM misses WHERE paper_id = %s AND topic = %s",
+                    (paper_id, topic),
                 )
             ).fetchone()
-            return existing["id"], await word.settle(conn, paper_id), False
+            settled = await word.settle(conn, paper_id)
+            return existing["id"], settled, False, existing["trace"] != "done"
         _, settled = await word.label(
             conn,
             Label(
                 paper_id=paper_id, topic=topic, value=LabelValue.RELEVANT, origin=LabelOrigin.MISS
             ),
         )
-    return row["id"], settled, True
+    return row["id"], settled, True, True
 
 
 async def trace(
@@ -120,7 +123,7 @@ async def opinions(
     conn: psycopg.AsyncConnection, paper: Paper, topic: Topic
 ) -> list[Opinion] | type[Pending]:
     """The graders' opinions from the miss trace of the paper for the topic, for the writer
-    when no verdict speaks. Only a trace of this text (arXiv version) under this rubric
+    when no verdict speaks. Only a trace of this text (the paper's revision) under this rubric
     (topic revision) counts. `Pending` while a reported miss's trace is still running."""
     miss = await (
         await conn.execute(
@@ -135,11 +138,10 @@ async def opinions(
             SELECT r.judge, r.check_opinion FROM eval_results r
             JOIN eval_runs e ON e.id = r.eval_run_id
             WHERE e.kind = 'miss' AND r.paper_id = %s AND r.topic = %s
-              AND (e.topics->>%s)::int = %s
-              AND r.paper_version IS NOT DISTINCT FROM %s
+              AND (e.topics->>%s)::int = %s AND r.paper_revision = %s
             ORDER BY e.id DESC LIMIT 1
             """,
-            (paper.id, topic.slug, topic.slug, topic.revision, paper.version),
+            (paper.id, topic.slug, topic.slug, topic.revision, paper.revision),
         )
     ).fetchone()
     if row is None:

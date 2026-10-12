@@ -82,6 +82,7 @@ async def replay(
                         why,
                         keywords.get(paper.id, {}).get(topic.slug),
                         triaged.error,
+                        paper.revision,
                     )
         pairs = [(p, t) for p in papers if grade is None or p.id in grade for t in watched]
         log.info("eval %s: grading %s paper-topic pairs", eval_run_id, len(pairs))

@@ -247,7 +247,7 @@ async def test_a_trace_that_fails_is_recorded_on_the_miss(conn):
     for topic in TOPICS:
         await topics_store.save(conn, topic)
     await papers_store.upsert(conn, [Q])
-    miss_id, _, _ = await misses.report(conn, Q.id, FAITH.slug)
+    miss_id, *_ = await misses.report(conn, Q.id, FAITH.slug)
     assert await misses.trace(conn, Config(), miss_id, gateway=broken) is None
     row = await (await conn.execute("SELECT trace, trace_error FROM misses")).fetchone()
     assert row["trace"] == "failed" and "no provider" in row["trace_error"]
@@ -284,7 +284,7 @@ async def test_a_misss_take_waits_for_its_trace_and_is_rewritten_with_it(conn):
     for topic in TOPICS:
         await topics_store.save(conn, topic)
     await papers_store.upsert(conn, [Q])
-    miss_id, _, _ = await misses.report(conn, Q.id, FAITH.slug)
+    miss_id, *_ = await misses.report(conn, Q.id, FAITH.slug)
     assert await digest._owed(conn) == []  # waiting, not failing
     (due,) = await (await conn.execute("SELECT failed_runs FROM due")).fetchall()
     assert due["failed_runs"] == 0
@@ -313,3 +313,31 @@ async def test_the_paper_page_lists_versions_seen(client, conn):
         1,
         2,
     ]
+
+
+async def test_a_take_owed_a_rewrite_is_not_shown_until_it_is_written(client, conn):
+    await grade(conn, P, "relevant")
+    await night(conn)
+    await grade(conn, P, "must_read")  # the short take no longer fits
+    page = (await client.get(f"/api/papers/{P.id}")).json()
+    assert page["topics"][0]["take"] is None
+    await night(conn)
+    assert (await client.get(f"/api/papers/{P.id}")).json()["topics"][0]["take"] == "A take."
+
+
+async def test_reporting_again_traces_a_miss_whose_trace_never_finished(client, conn):
+    from litwatch.feedback import misses
+
+    await misses.report(conn, Q.id, FAITH.slug)  # its trace was cut off
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    row = await (await conn.execute("SELECT trace FROM misses")).fetchone()
+    assert row["trace"] == "done"
+
+
+async def test_a_trace_of_rewritten_text_gives_no_notes(client, conn):
+    from litwatch.feedback import misses
+
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    await conn.execute("UPDATE papers SET revision = 2 WHERE id = %s", (Q.id,))
+    rewritten = await papers_store.get(conn, Q.id)
+    assert await misses.opinions(conn, rewritten, FAITH.model_copy(update={"revision": 1})) == []

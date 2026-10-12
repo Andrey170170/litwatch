@@ -330,10 +330,11 @@ async def report_miss(
     if known is None or known.kind != TopicKind.WATCH:
         raise HTTPException(status_code=404, detail="not a Watch topic")
     await _known(c, body.paper_id)
-    miss_id, settled, new = await misses.report(c, body.paper_id, body.topic)
+    miss_id, settled, new, needs_trace = await misses.report(c, body.paper_id, body.topic)
+    if needs_trace:
+        background.add_task(_trace, request.app.state, miss_id)
     if not new:
         return _ack(f"Already reported as missed for {known.name}", settled)
-    background.add_task(_trace, request.app.state, miss_id)
     return _ack(f"Reported as missed for {known.name}", settled)
 
 

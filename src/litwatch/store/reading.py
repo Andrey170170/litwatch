@@ -12,6 +12,12 @@ from psycopg import sql
 GRADE_ORDER = "ARRAY['must_read', 'relevant', 'adjacent', 'none']"
 SHOWN = ("must_read", "relevant")
 STALE_AFTER = timedelta(hours=36)
+# A take whose pair is owed a new one describes text, a rubric or a length that no longer
+# holds; current views show no take until the writer catches up. Issues keep theirs.
+FRESH = (
+    "AND NOT EXISTS (SELECT 1 FROM due d WHERE d.paper_id = k.paper_id "
+    "AND d.topic = k.topic AND d.for_take)"
+)
 # A stored JSON null in `authors` reads as no authors.
 AUTHORS = "CASE WHEN jsonb_typeof(p.authors) = 'array' THEN p.authors ELSE '[]' END AS authors"
 
@@ -169,10 +175,10 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         return None
     topics = await _all(
         conn,
-        """
+        f"""
         SELECT t.slug, t.name, t.kind, t.colour, t.position, g.grade,
                (SELECT text FROM takes k WHERE k.paper_id = %(p)s AND k.topic = t.slug
-                ORDER BY id DESC LIMIT 1) AS take,
+                {FRESH} ORDER BY id DESC LIMIT 1) AS take,
                (SELECT row_to_json(l) FROM (SELECT value, grade, origin, provisional
                 FROM labels WHERE paper_id = %(p)s AND topic = t.slug) l) AS label,
                (SELECT row_to_json(r) FROM (SELECT value, reason FROM reactions
@@ -282,7 +288,7 @@ async def papers(
         grade = sql.SQL("g.grade")
         take = sql.SQL(
             "(SELECT text FROM takes k WHERE k.paper_id = p.id AND k.topic = %s "
-            "ORDER BY id DESC LIMIT 1)"
+            f"{FRESH} ORDER BY id DESC LIMIT 1)"
         )
         take_params = [topic]
     else:
@@ -299,7 +305,7 @@ async def papers(
             "(SELECT k.text FROM takes k JOIN topics t ON t.slug = k.topic "
             "JOIN effective_grades g ON g.paper_id = k.paper_id AND g.topic = k.topic "
             "WHERE k.paper_id = p.id AND g.grade IN ('must_read', 'relevant') "
-            "ORDER BY t.position, k.id DESC LIMIT 1)"
+            f"{FRESH} ORDER BY t.position, k.id DESC LIMIT 1)"
         )
         take_params = []
     order = SORTS.get(sort or ("published" if q else "added"), SORTS["added"])

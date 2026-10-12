@@ -23,3 +23,7 @@ CREATE TABLE topic_visits (
 -- When each entry joined its issue: a same-day amendment is new to a topic page opened
 -- after the issue was first built.
 ALTER TABLE issue_entries ADD COLUMN added_at timestamptz NOT NULL DEFAULT now();
+
+-- Which text an evaluation saw: the paper's own revision, which a rewrite always raises
+-- (arXiv's version is often unknown and may not change).
+ALTER TABLE eval_results ADD COLUMN paper_revision integer;
