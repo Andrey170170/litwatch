@@ -1581,6 +1581,134 @@
         }
       }
     },
+    "/api/settings/triage/{paper_id}/dismiss": {
+      "post": {
+        "summary": "Dismiss",
+        "description": "Litwatch drops the paper; it stays in the collection and the archive.",
+        "operationId": "dismiss_api_settings_triage__paper_id__dismiss_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/triage/{paper_id}": {
+      "put": {
+        "summary": "Triage By Hand",
+        "description": "The owner's own triage answers; the paper goes on to the keyword audit and grading.",
+        "operationId": "triage_by_hand_api_settings_triage__paper_id__put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswersIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Triage By Hand Api Settings Triage  Paper Id  Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/triage/{paper_id}/correction": {
+      "post": {
+        "summary": "Correct",
+        "description": "Fix the text triage choked on; the next run triages the corrected paper.",
+        "operationId": "correct_api_settings_triage__paper_id__correction_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/misses": {
       "get": {
         "summary": "Reported",
@@ -1972,6 +2100,22 @@
         "title": "Answer",
         "description": "One paper's answers. Fit for the topic it was drawn or taken for is required."
       },
+      "AnswersIn": {
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Answers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "title": "AnswersIn"
+      },
       "BibtexIn": {
         "properties": {
           "ids": {
@@ -2056,6 +2200,34 @@
         ],
         "title": "Chosen",
         "description": "The folded \"how this was chosen\" for one Watch topic."
+      },
+      "CorrectionIn": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstract"
+          }
+        },
+        "type": "object",
+        "title": "CorrectionIn"
       },
       "Digest": {
         "properties": {

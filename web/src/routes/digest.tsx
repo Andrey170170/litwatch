@@ -3,7 +3,10 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api, ok, type Entry as EntryT, type Issue, type IssueSummary, type Section as SectionT } from "@/api/client";
 import { issueQuery } from "@/api/queries";
+import { configQuery, scheduleOf } from "@/api/settings";
+import { cronWords } from "@/lib/cron";
 import { PaperView } from "@/components/PaperView";
+import { RecapView, ReviewView } from "@/components/Review";
 import { GearLink } from "@/components/Shell";
 import { StatusText } from "@/components/StatusChip";
 import { Thumbs } from "@/components/Thumbs";
@@ -62,11 +65,7 @@ export function DigestPage() {
 
           {feed.isPending && <p className="meta mt-6">Opening the paper…</p>}
           {feed.isError && <p className="mt-6 text-destructive">The Digest could not be loaded.</p>}
-          {first && !newest && !weekly && (
-            <p className="mt-8 font-serif text-[17px] text-body">
-              No issue yet. The first one is written after the first nightly run.
-            </p>
-          )}
+          {first && !newest && !weekly && <FirstIssue />}
           {open.isError && <p className="mt-6 text-destructive">No such issue.</p>}
           {open.data && <IssueView issue={open.data} openPaper={desktop ? search.paper : undefined} />}
 
@@ -99,6 +98,18 @@ export function DigestPage() {
         </aside>
       )}
     </div>
+  );
+}
+
+/** Before any issue exists: when the first run is, if one is scheduled. */
+function FirstIssue() {
+  const config = useQuery(configQuery);
+  const s = scheduleOf(config.data);
+  return (
+    <p className="mt-8 font-serif text-[17px] text-body">
+      No issue yet. The first one is written after the first nightly run
+      {s?.enabled ? `, ${cronWords(s.nightly)}` : ""}.
+    </p>
   );
 }
 
@@ -159,7 +170,7 @@ function IssueView({ issue, openPaper }: { issue: Issue; openPaper: string | und
     <article>
       {issue.lede && <p className="mt-3 font-serif text-[16px] leading-[1.45] text-body desk:text-[17px]">{issue.lede}</p>}
       {issue.sections.map((s) => (
-        <Section key={s.topic.slug} section={s} openPaper={openPaper} />
+        <Section key={s.topic.slug} section={s} kind={issue.kind} openPaper={openPaper} />
       ))}
       {issue.sections.length === 0 && (
         <p className="mt-6 font-serif text-[16px] text-body">Nothing new for any topic.</p>
@@ -173,9 +184,13 @@ function IssueView({ issue, openPaper }: { issue: Issue; openPaper: string | und
   );
 }
 
-function Section({ section, openPaper }: { section: SectionT; openPaper: string | undefined }) {
+/** One topic's section: entries for Watch, a review for Radar and Pulse, a recap in a weekly issue. */
+function Section({ section, kind, openPaper }: { section: SectionT; kind: Issue["kind"]; openPaper: string | undefined }) {
   const colour = topicColour(section.topic.colour);
   const near = section.near ?? 0;
+  const review = section.review ?? null;
+  const recap = section.recap ?? null;
+  const empty = section.entries.length === 0 && !review && !recap;
   return (
     <section className="mt-[26px]">
       <h2
@@ -185,11 +200,11 @@ function Section({ section, openPaper }: { section: SectionT; openPaper: string 
         <Link to="/topics/$slug" params={{ slug: section.topic.slug }}>
           {section.topic.name}
         </Link>
-        {section.topic.kind !== "watch" && <small className="font-sans text-[13px] font-normal" style={{ color: colour }}>daily</small>}
+        {kind === "daily" && review && <small className="font-sans text-[13px] font-normal" style={{ color: colour }}>today's review</small>}
       </h2>
-      {section.entries.length === 0 && (
-        <p className="mt-1.5 text-[14px] text-muted-foreground">Nothing new for {section.topic.name}.</p>
-      )}
+      {empty && <p className="mt-1.5 text-[14px] text-muted-foreground">Nothing new for {section.topic.name}.</p>}
+      {recap && <RecapView recap={recap} topic={section.topic} surface="digest" />}
+      {review && <ReviewView review={review} topic={section.topic} surface="digest" />}
       {section.entries.map((e) => (
         <EntryView key={e.paper_id} entry={e} open={openPaper === e.paper_id} />
       ))}
