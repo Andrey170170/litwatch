@@ -43,8 +43,8 @@ async def topics(c: Conn) -> list[Topic]:
 
 @router.put("/topics/{slug}")
 async def save_topic(slug: str, body: dict[str, Any], c: Conn) -> Topic:
-    """Create or edit a topic. Edits apply forward; a change of kind settles the topic's
-    papers again, so a topic that stops being Watch takes its grades with it."""
+    """Create or edit a topic. Edits apply forward; a change of kind or content settles the
+    topic's papers again (see feedback.word.settle_topic)."""
     try:
         topic = Topic.model_validate(body | {"slug": slug})
     except ValidationError as exc:
@@ -53,8 +53,9 @@ async def save_topic(slug: str, body: dict[str, Any], c: Conn) -> Topic:
         ) from exc
     async with c.transaction():
         before = await topics_store.kind_for_update(c, slug)
+        revision = (await topics_store.get(c, slug) or topic).revision
         saved = await topics_store.save(c, topic)
-        if before is not None and before != topic.kind:
+        if before is not None and (before != topic.kind or saved.revision != revision):
             await word.settle_topic(c, slug)
     return saved
 
