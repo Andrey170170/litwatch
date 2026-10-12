@@ -126,17 +126,29 @@ async def card_failed(
     error: str,
     stats: dict[str, Any] | None = None,
     trace: list[Any] | None = None,
+    *,
+    attempt: bool = True,
 ) -> None:
-    """Record a failed attempt. A card written earlier stays."""
+    """Record why a paper has no card. A card written earlier stays. With `attempt=False`
+    nothing was tried, so neither the attempts nor the time of the last attempt move."""
     await conn.execute(
         """
         INSERT INTO deep_cards (paper_id, stats, trace, error, attempts, attempted_at)
-        VALUES (%s, %s, %s, %s, 1, now())
+        VALUES (%(p)s, %(stats)s, %(trace)s, %(error)s, %(n)s,
+                CASE WHEN %(attempt)s THEN now() END)
         ON CONFLICT (paper_id) DO UPDATE SET
             stats = EXCLUDED.stats, trace = EXCLUDED.trace, error = EXCLUDED.error,
-            attempts = deep_cards.attempts + 1, attempted_at = now()
+            attempts = deep_cards.attempts + %(n)s,
+            attempted_at = CASE WHEN %(attempt)s THEN now() ELSE deep_cards.attempted_at END
         """,
-        (paper_id, Jsonb(stats or {}), Jsonb(trace or []), error),
+        {
+            "p": paper_id,
+            "stats": Jsonb(stats or {}),
+            "trace": Jsonb(trace or []),
+            "error": error,
+            "n": int(attempt),
+            "attempt": attempt,
+        },
     )
 
 
