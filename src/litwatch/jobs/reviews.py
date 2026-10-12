@@ -31,14 +31,21 @@ async def _review(
 ) -> str:
     """Review the topic's members for the period and store it. Returns the review's state."""
     if not papers:
-        await reviews_store.put(conn, topic.slug, period, day, state="quiet")
+        await reviews_store.put(conn, topic.slug, period, day, kind=topic.kind, state="quiet")
         return "quiet"
     try:
         written = await reviews.review(run.gateway, topic, period, papers)
     except CallError as exc:
         log.warning("%s %s review of %s failed: %s", topic.slug, period, day, exc)
         await reviews_store.put(
-            conn, topic.slug, period, day, state="failed", error=str(exc), members=len(papers)
+            conn,
+            topic.slug,
+            period,
+            day,
+            kind=topic.kind,
+            state="failed",
+            error=str(exc),
+            members=len(papers),
         )
         run.add("reviews_failed")
         return "failed"
@@ -47,6 +54,7 @@ async def _review(
         topic.slug,
         period,
         day,
+        kind=topic.kind,
         state="written",
         topic_revision=topic.revision,
         text=written.text,
@@ -99,7 +107,9 @@ async def weekly(
             state = await _review(conn, run, topic, "week", monday, papers)
         changed |= state == "written"
     issue = await digest_store.open_issue(conn, "weekly", monday)
-    if not changed and issue["lede"]:
+    if changed:  # stale until rewritten, so a failed rewrite is tried on the next run
+        await digest_store.mark_lede_stale(conn, issue["id"])
+    elif issue["lede"] and not issue["lede_stale"]:
         return issue["id"]
     written = [
         (r["topic_name"], r["text"])
@@ -122,7 +132,7 @@ async def _recap(conn: psycopg.AsyncConnection, run: ModelRun, topic: Topic, mon
     announced is quiet; what was set aside and missed is listed either way."""
     entries = await reviews_store.week_entries(conn, topic.slug, monday)
     if not entries:
-        await reviews_store.put(conn, topic.slug, "week", monday, state="quiet")
+        await reviews_store.put(conn, topic.slug, "week", monday, kind=topic.kind, state="quiet")
         return "quiet"
     try:
         text = await reviews.recap(
@@ -130,7 +140,14 @@ async def _recap(conn: psycopg.AsyncConnection, run: ModelRun, topic: Topic, mon
         )
     except CallError as exc:
         await reviews_store.put(
-            conn, topic.slug, "week", monday, state="failed", error=str(exc), members=len(entries)
+            conn,
+            topic.slug,
+            "week",
+            monday,
+            kind=topic.kind,
+            state="failed",
+            error=str(exc),
+            members=len(entries),
         )
         run.add("recaps_failed")
         return "failed"
@@ -139,6 +156,7 @@ async def _recap(conn: psycopg.AsyncConnection, run: ModelRun, topic: Topic, mon
         topic.slug,
         "week",
         monday,
+        kind=topic.kind,
         state="written",
         topic_revision=topic.revision,
         text=text,

@@ -195,9 +195,10 @@ async def build_daily(
                 conn, issue["id"], paper_id, slug, now[0], take_id
             )
             await digest_store.settle_due(conn, paper_id, slug, issue=False)
-        # A daily review alone makes an issue, as an entry does.
+        # A daily review alone makes an issue, as an entry does; so does a failed one, which
+        # the issue says. A quiet day makes none.
         if issue is None and any(
-            r["state"] == "written" for r in await reviews_store.for_period(conn, "day", day)
+            r["state"] != "quiet" for r in await reviews_store.for_period(conn, "day", day)
         ):
             issue = await digest_store.open_issue(conn, "daily", day)
         counts: dict[str, int] = {}

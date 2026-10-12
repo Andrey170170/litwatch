@@ -530,9 +530,9 @@ last error), `verdicts` (paper, topic, topic version,
 paper version, paper revision, grade, split, judge and check opinions, recorded at; each grading is its own
 row with its own id, so a re-run over the same versions adds a row, and the latest recorded
 is current), `takes` (id, paper, topic, paper revision, topic version, grade, source: verdict, evaluation, migrated or owner,
-text, written at, failed runs), `due` (paper, topic, due for take, due for issue), `reviews` (topic, a day or a week keyed by its Monday,
+text, written at, failed runs), `due` (paper, topic, due for take, due for issue), `reviews` (topic, the topic's kind when written, a day or a week keyed by its Monday,
 the text, written, failed or quiet; a Watch topic's weekly recap is a review too) with `review_picks` (review, paper,
-order, why), `issues` (date, kind
+order, why), `set_asides` (paper, topic, at: the owner putting an announced paper below relevant, for the recap), `issues` (date, kind
 daily or weekly, lede, entries as paper, topic and take id in section order, so a rewritten take never replaces the
 one an old issue showed; review references), `labels` (paper, topic, value, grade, origin, provisional, at),
 `reactions` (paper, topic, value, reason, at), `appraisals` (paper, value: matters, fine or not for me, note, at),

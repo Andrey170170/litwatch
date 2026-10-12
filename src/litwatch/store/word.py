@@ -134,3 +134,9 @@ async def touched(conn: psycopg.AsyncConnection) -> list[str]:
         )
     ).fetchall()
     return [r["paper_id"] for r in rows]
+
+
+async def set_aside(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> None:
+    await conn.execute(
+        "INSERT INTO set_asides (paper_id, topic) VALUES (%s, %s)", (paper_id, topic)
+    )

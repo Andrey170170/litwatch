@@ -11,6 +11,7 @@ ALTER TABLE topics ADD COLUMN cadence text NOT NULL DEFAULT 'weekly'
 CREATE TABLE reviews (
     id              bigserial PRIMARY KEY,
     topic           text NOT NULL,
+    kind            text NOT NULL CHECK (kind IN ('watch', 'radar', 'pulse')),  -- when written
     period          text NOT NULL CHECK (period IN ('day', 'week')),
     day             date NOT NULL,
     topic_revision  integer,
@@ -31,3 +32,12 @@ CREATE TABLE review_picks (
     PRIMARY KEY (review_id, paper_id)
 );
 CREATE INDEX review_picks_paper_idx ON review_picks (paper_id);
+
+-- When the owner put a paper an issue had announced below the line: the week's recap lists
+-- these as they happened, whatever the paper's grade is now.
+CREATE TABLE set_asides (
+    paper_id  text NOT NULL REFERENCES papers (id) ON DELETE CASCADE,
+    topic     text NOT NULL,
+    at        timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX set_asides_topic_idx ON set_asides (topic, at);

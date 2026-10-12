@@ -10,6 +10,15 @@ import psycopg
 from litwatch.core import Paper
 from litwatch.store.papers import COLUMNS, row_to_paper
 
+# A review's picks as a JSON list, in order, with what the reading side shows of each paper.
+PICKS = """coalesce((SELECT jsonb_agg(jsonb_build_object(
+                'paper_id', k.paper_id, 'why', k.why, 'title', p.title,
+                'authors', CASE WHEN jsonb_typeof(p.authors) = 'array' THEN p.authors ELSE '[]' END,
+                'published', p.published, 'saved', coalesce(l.saved, false)) ORDER BY k.position)
+            FROM review_picks k JOIN papers p ON p.id = k.paper_id
+            LEFT JOIN library l ON l.paper_id = k.paper_id
+            WHERE k.review_id = r.id), '[]') AS picks"""
+
 
 async def members(
     conn: psycopg.AsyncConnection, topic: str, since: datetime, until: datetime
@@ -32,6 +41,7 @@ async def put(
     period: str,
     day: date,
     *,
+    kind: str,
     state: str,
     topic_revision: int | None = None,
     text: str | None = None,
@@ -44,16 +54,16 @@ async def put(
         row = await (
             await conn.execute(
                 """
-                INSERT INTO reviews (topic, period, day, topic_revision, text, state, error,
+                INSERT INTO reviews (topic, kind, period, day, topic_revision, text, state, error,
                                      members)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (topic, period, day) DO UPDATE SET
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (topic, period, day) DO UPDATE SET kind = EXCLUDED.kind,
                     topic_revision = EXCLUDED.topic_revision, text = EXCLUDED.text,
                     state = EXCLUDED.state, error = EXCLUDED.error, members = EXCLUDED.members,
                     written_at = clock_timestamp()
                 RETURNING id
                 """,
-                (topic, period, day, topic_revision, text, state, error, members),
+                (topic, kind, period, day, topic_revision, text, state, error, members),
             )
         ).fetchone()
         await conn.execute("DELETE FROM review_picks WHERE review_id = %s", (row["id"],))
@@ -81,18 +91,12 @@ async def for_period(conn: psycopg.AsyncConnection, period: str, day: date) -> l
     """The period's reviews and recaps with their picks, in the owner's topic order."""
     return await (
         await conn.execute(
-            """
-            SELECT r.*, t.name AS topic_name, t.kind,
-                   coalesce((SELECT jsonb_agg(jsonb_build_object(
-                        'paper_id', k.paper_id, 'why', k.why, 'title', p.title,
-                        'authors', p.authors, 'published', p.published,
-                        'saved', coalesce(l.saved, false)) ORDER BY k.position)
-                    FROM review_picks k JOIN papers p ON p.id = k.paper_id
-                    LEFT JOIN library l ON l.paper_id = k.paper_id
-                    WHERE k.review_id = r.id), '[]') AS picks
+            f"""
+            SELECT r.*, t.name AS topic_name,
+                   {PICKS}
             FROM reviews r JOIN topics t ON t.slug = r.topic
             WHERE r.period = %s AND r.day = %s
-            ORDER BY array_position(ARRAY['watch', 'radar', 'pulse'], t.kind), t.position
+            ORDER BY array_position(ARRAY['watch', 'radar', 'pulse'], r.kind), t.position
             """,
             (period, day),
         )
@@ -103,15 +107,9 @@ async def for_topic(conn: psycopg.AsyncConnection, topic: str, limit: int = 20) 
     """A topic's reviews, newest first, with their picks."""
     return await (
         await conn.execute(
-            """
+            f"""
             SELECT r.*,
-                   coalesce((SELECT jsonb_agg(jsonb_build_object(
-                        'paper_id', k.paper_id, 'why', k.why, 'title', p.title,
-                        'authors', p.authors, 'published', p.published,
-                        'saved', coalesce(l.saved, false)) ORDER BY k.position)
-                    FROM review_picks k JOIN papers p ON p.id = k.paper_id
-                    LEFT JOIN library l ON l.paper_id = k.paper_id
-                    WHERE k.review_id = r.id), '[]') AS picks
+                   {PICKS}
             FROM reviews r WHERE r.topic = %s
             ORDER BY r.day DESC, r.period LIMIT %s
             """,
@@ -141,15 +139,14 @@ async def week_entries(
 async def week_set_aside(
     conn: psycopg.AsyncConnection, topic: str, since: datetime, until: datetime
 ) -> list[dict[str, Any]]:
-    """Papers once announced for the topic that the owner put below relevant this week."""
+    """Papers once announced for the topic that the owner put below relevant in the window,
+    as it happened, whatever the paper's grade is now."""
     return await (
         await conn.execute(
             """
-            SELECT DISTINCT p.id AS paper_id, p.title FROM issue_entries e
-            JOIN papers p ON p.id = e.paper_id
-            JOIN effective_grades g ON g.paper_id = e.paper_id AND g.topic = e.topic
-            WHERE e.topic = %s AND g.grade NOT IN ('must_read', 'relevant')
-              AND g.updated_at >= %s AND g.updated_at < %s
+            SELECT DISTINCT p.id AS paper_id, p.title FROM set_asides a
+            JOIN papers p ON p.id = a.paper_id
+            WHERE a.topic = %s AND a.at >= %s AND a.at < %s
             """,
             (topic, since, until),
         )

@@ -9,7 +9,16 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Cadence, Grade, Topic, TopicKind, Verdict
+from litwatch.core import (
+    Cadence,
+    Grade,
+    Label,
+    LabelOrigin,
+    LabelValue,
+    Topic,
+    TopicKind,
+    Verdict,
+)
 from litwatch.feedback import word
 from litwatch.jobs import digest, reviews
 from litwatch.jobs.context import model_run
@@ -30,6 +39,7 @@ P = paper("2610.00001", title="Traces that hide steps")
 class Models:
     def __init__(self):
         self.down = False
+        self.lede_down = False
         self.calls: list[str] = []
 
     def respond(self, role, request):
@@ -42,12 +52,14 @@ class Models:
         if "You review the new arXiv papers" in request.system:
             self.calls.append("review")
             picks = [{"id": i, "why": f"why {i}"} for i in ids] + [{"id": "9999.9", "why": "?"}]
-            return json.dumps({"text": "A quiet field.", "picks": picks})
+            return json.dumps({"text": f"A quiet field of {len(ids)}.", "picks": picks})
         if "recap" in request.system:
             self.calls.append("recap")
             return json.dumps({"recap": "The week was about hidden steps."})
         if "lede" in request.system:
             self.calls.append("lede")
+            if self.lede_down:
+                raise ProviderError("InternalServerError")
             return json.dumps({"lede": "Lede."})
         self.calls.append("take")
         return json.dumps({"take": "A take."})
@@ -111,6 +123,8 @@ async def test_a_quiet_day_makes_no_issue_and_a_failed_review_is_tried_again(db)
     await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
     (row,) = await (await db.execute("SELECT state FROM reviews")).fetchall()
     assert row["state"] == "failed"
+    # A failed review makes an issue, so the reader sees that it failed.
+    assert await job(db, models, lambda run: digest.build_daily(db, Config(), run)) is not None
     models.down = False
     await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
     (row,) = await (await db.execute("SELECT state FROM reviews")).fetchall()
@@ -136,6 +150,14 @@ async def test_the_weekly_issue_reviews_every_field_and_recaps_every_watch_topic
     await word.settle(db, P.id)
     await job(db, models, lambda run: digest.write_takes(db, Config(), run))
     await job(db, models, lambda run: digest.build_daily(db, Config(), run))
+    # The owner sets it aside, then changes their mind: the recap still lists the set-aside.
+    for value in (LabelValue.NOT_RELEVANT, LabelValue.RELEVANT):
+        await word.label(
+            db,
+            Label(paper_id=P.id, topic=FAITH.slug, value=value, origin=LabelOrigin.READER),
+        )
+    # A paper whose authors are a JSON null is still shown in a review's picks.
+    await db.execute("UPDATE papers SET authors = 'null'::jsonb WHERE id = %s", (FIELD[0].id,))
 
     issue_id = await job(db, models, lambda run: reviews.weekly(db, Config(), run, monday))
     rows = await (
@@ -165,6 +187,7 @@ async def test_the_weekly_issue_reviews_every_field_and_recaps_every_watch_topic
         faith = next(s for s in issue["sections"] if s["topic"]["slug"] == FAITH.slug)
         assert faith["recap"]["text"] == "The week was about hidden steps."
         assert [p["paper_id"] for p in faith["recap"]["papers"]] == [P.id]
+        assert [p["paper_id"] for p in faith["recap"]["set_aside"]] == [P.id]
         agents = next(s for s in issue["sections"] if s["topic"]["slug"] == AGENTS.slug)
         assert len(agents["review"]["picks"]) == 3
         # A field topic's page lists its picks; its card says when it was last reviewed.
@@ -174,10 +197,36 @@ async def test_the_weekly_issue_reviews_every_field_and_recaps_every_watch_topic
         assert card["last_review"] == monday.isoformat() and card["papers"] == 3
         listed = (await c.get(f"/api/topics/{AGENTS.slug}/reviews")).json()
         assert listed[0]["period"] == "week"
+        # A topic that has since changed kind still reads as what was written then.
+        await db.execute("UPDATE topics SET kind = 'watch' WHERE slug = %s", (AGENTS.slug,))
+        issue = (await c.get(f"/api/issues/{issue_id}")).json()
+        agents = next(s for s in issue["sections"] if s["topic"]["slug"] == AGENTS.slug)
+        assert agents["review"] is not None and agents["recap"] is None
+        await db.execute("UPDATE topics SET kind = 'pulse' WHERE slug = %s", (AGENTS.slug,))
     # Running the week again keeps what is written and asks nothing.
     before = len(models.calls)
     await job(db, models, lambda run: reviews.weekly(db, Config(), run, monday))
     assert models.calls[before:] == []
+
+
+async def test_a_weekly_lede_that_failed_after_a_change_is_tried_again(db):
+    models = Models()
+    monday = Config().schedule.week_of(Config().schedule.today())
+    await job(db, models, lambda run: reviews.weekly(db, Config(), run, monday))
+    # A review fails, then is written on a run whose lede fails: the old lede is stale.
+    await db.execute("UPDATE reviews SET state = 'failed' WHERE topic = %s", (AGENTS.slug,))
+    await db.execute("DELETE FROM memberships WHERE paper_id = %s", (FIELD[0].id,))
+    models.lede_down = True
+    issue_id = await job(db, models, lambda run: reviews.weekly(db, Config(), run, monday))
+    issue = await (await db.execute("SELECT * FROM issues WHERE id = %s", (issue_id,))).fetchone()
+    assert issue["lede_stale"]
+    # Nothing changes on the next run, but the stale lede is written again.
+    models.lede_down = False
+    before = len(models.calls)
+    await job(db, models, lambda run: reviews.weekly(db, Config(), run, monday))
+    assert models.calls[before:] == ["lede"]
+    issue = await (await db.execute("SELECT * FROM issues WHERE id = %s", (issue_id,))).fetchone()
+    assert not issue["lede_stale"]
 
 
 def test_the_default_week_is_the_last_full_one():
