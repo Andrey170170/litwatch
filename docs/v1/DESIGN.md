@@ -69,9 +69,9 @@ on a row starts a miss report; "Look up an arXiv id or link" under the table fet
 **Settings.** An index on the left, plain pages on the right, in the interface sans. Topics (list and editor: subject,
 rubric, keywords with match counts; preview against labelled papers and misses; scoped re-runs after saving; pause,
 order and colour). Quality (at the top, last night: a failure summary linking to the run when it failed, the splits with
-both opinions and the label row, ungraded candidates with "grade it now", a review that failed; below, recall and
-precision per Watch topic over evaluation runs, each number a link to its papers; correction rate from reactions; "draw
-a calibration sample"). Misses (the stage trace per report). Runs and cost. Integrations (one card per
+both opinions and the label row, ungraded candidates with "grade it now", papers awaiting triage with Dismiss, Triage by hand and Fix the text, a review that failed; then **Calibrate**;
+below, recall and precision per Watch topic over evaluation runs, each number a link to its papers; correction rate
+from reactions; the "matters, no topic" list with its notes). Misses (the stage trace per report). Runs and cost. Integrations (one card per
 module: enabled, description, cursor lag, failures with last error, retry and skip, search provider statistics; the
 outbox table under them). Configuration (the loaded `litwatch.toml`, secrets masked, read-only).
 
@@ -142,22 +142,25 @@ More than eight topics cycle; a paused topic shows grey.
 **Status line** (the printer's line under the masthead; the chip in the header elsewhere): a dot and a sentence about
 the latest nightly run. Green: "530 read · all quiet", the count being papers triaged in that run. Amber, with a
 count, when the run finished but left something for Quality: "530 read · 2 disagreements" (split verdicts among the
-papers shown; which splits count is spec decision 14), "· 1 ungraded", "· interpretability review failed". Red: "last
+papers shown; which splits count is spec decision 14), "· 1 ungraded", "· 1 awaiting triage", "· interpretability review failed". Red: "last
 night's run failed · showing Tuesday", also when no run finished in the last 36 hours. Grey while running: "running
 since 06:02"; on a fresh install "no run yet". Red wins over amber. It always opens Quality, and opening an old issue
 does not change it.
 
 **Entry** (one paper on the Digest): title; meta line (authors with "and N more", date, "revised, first seen …" when
-so); take; action row: Read, arXiv, PDF, Save or Saved, BibTeX, then the thumbs at the right edge. On a desktop the
+so); take; action row: Read, arXiv, PDF, Save or Saved (tapping Saved unsaves), BibTeX, then the thumbs at the right
+edge. On a desktop the
 title is the link and Read is dropped. Lead and brief entries differ in title size and take length only.
 
 **Thumbs**: two 16 px glyphs in 40 px hit areas, quiet until used, on every paper wherever it is shown, for the topic
-of that surface or for none on a plain search result; only a Watch-topic reaction writes a label. A
+of that surface or for none on a plain search result; only a Watch-topic reaction counts as the owner's word. A
 thumb down opens the reasons as chips: Not for me, Unrelated to the topic, Already knew it, Overrated; the first tap on
 a reason closes it. The acknowledgement says what happened: "Remembered for <topic>" (or "Remembered") for the reasons
-that write no label, "Marked not relevant for <topic>; it leaves the library" for Unrelated. A thumb up stands alone; a second tap on
-an active thumb up offers Great find, a third clears it, so every state is reachable by tap and by keyboard. Tapping an
-active thumb clears the reaction and the label it wrote, and only that one.
+that carry no word, "Marked not relevant for <topic>" for Unrelated, followed by "; it leaves the library" only when
+it does (another topic or a save by hand can keep it). A thumb up: the first tap sets it, a second offers Great find
+as a chip beside it, a third clears it. A thumb down: the first tap sets it and opens the reasons, a second clears it.
+So every state is reachable by tap and by keyboard, and clearing a thumb takes back the reaction and the word it
+carried, and nothing else.
 
 **Row** (one paper in a table): grade dot (ink must read, green relevant, pale adjacent, an empty ring for a paper
 that is no topic's candidate; the word "grading" in the muted colour for a pending candidate; Radar and Pulse picks
@@ -174,6 +177,11 @@ saved for Radar and Pulse). **Rail entry**: a 3 px bar that shows only when chos
 "N new" count in bold or the cadence in the muted colour.
 
 **Issue in the feed**: date in serif, "weekly" in the meta style when so, "Open" at the right, the lede under it.
+
+**Calibrate** (Settings → Quality): one paper per screen, title, abstract and its takes, then the questions in the
+order of the spec's table (section 8, M3): fit as a row of chips per Watch topic, the required one first; value as
+three chips; accurate or off beside each take; a note field. Next and Back, a count ("7 of 20"), and Done, which
+shows what the session changed. Answers save as they are given, so leaving mid-session loses nothing.
 
 **Integration card**: name, enabled state and target in the meta style; one-line description from the module; status
 line with a dot (green up to date, amber with failures, grey not loaded); the last error in mono; Retry now, Skip this
