@@ -20,6 +20,7 @@ from litwatch.feedback import seed, word
 from litwatch.jobs import digest as digest_job
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
+from litwatch.jobs import reviews as review_jobs
 from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
 from litwatch.store import digest as digest_store
@@ -294,6 +295,25 @@ def write(config: ConfigPath = None) -> None:
         async with run_lock(conn), model_run(conn, cfg, "writer") as run:
             await digest_job.write_takes(conn, cfg, run)
             return run.counts
+
+    console.print_json(data=_run(work))
+
+
+@app.command()
+def weekly(
+    week: Annotated[
+        str | None, typer.Option(help="The week's Monday, YYYY-MM-DD; default the last full week.")
+    ] = None,
+    config: ConfigPath = None,
+) -> None:
+    """Review the week for every topic and build the weekly issue, as Monday's run does."""
+    cfg = configuration.load(config)
+    monday = cfg.schedule.week_of(date.fromisoformat(week)) if week else None
+
+    async def work(conn: psycopg.AsyncConnection) -> dict[str, Any]:
+        async with run_lock(conn), model_run(conn, cfg, "weekly") as run:
+            issue_id = await review_jobs.weekly(conn, cfg, run, monday)
+            return {"issue": issue_id, **run.counts}
 
     console.print_json(data=_run(work))
 

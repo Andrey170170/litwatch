@@ -136,10 +136,14 @@ async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     await conn.execute("SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (SETTLE_LOCK, paper_id))
 
 
-async def settle(conn: psycopg.AsyncConnection, paper_id: str, *, announce: bool = True) -> Settled:
+async def settle(
+    conn: psycopg.AsyncConnection, paper_id: str, *, announce: bool = True, owner: bool = False
+) -> Settled:
     """Recompute and store the paper's effective grades and library state, with their events,
     and what the writer and the next issue owe it. `announce=False` settles without making
     anything due for an issue, for papers brought in rather than found (sync, migration).
+    `owner=True` says the owner's own label or reaction changed: only then does a paper an
+    issue announced, now below the line, count as set aside.
 
     Settles of one paper are serialized and read only after the lock is held, so the last to
     run sees every committed change and leaves the stored state right.
@@ -173,6 +177,16 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str, *, announce: bool
             if new != old:
                 result.grades[topic] = (old, new)
                 await word_store.set_effective(conn, paper_id, topic, new)
+                # The owner putting an announced paper below the line, for the week's recap:
+                # by a word, or by taking back the word that kept it above.
+                if (
+                    owner
+                    and topic in watched
+                    and _shown(old)
+                    and not _shown(new)
+                    and await digest_store.announced(conn, paper_id, topic)
+                ):
+                    await word_store.set_aside(conn, paper_id, topic)
                 await events.emit(
                     conn,
                     events.GRADE_CHANGED,
@@ -198,21 +212,21 @@ async def label(conn: psycopg.AsyncConnection, given: Label) -> tuple[Label, Set
     async with conn.transaction():
         await lock(conn, given.paper_id)
         stored = await feedback_store.set_label(conn, given)
-        return stored, await settle(conn, given.paper_id)
+        return stored, await settle(conn, given.paper_id, owner=True)
 
 
 async def unlabel(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> Settled:
     async with conn.transaction():
         await lock(conn, paper_id)
         await feedback_store.delete_label(conn, paper_id, topic)
-        return await settle(conn, paper_id)
+        return await settle(conn, paper_id, owner=True)
 
 
 async def react(conn: psycopg.AsyncConnection, given: Reaction) -> tuple[Reaction, Settled]:
     async with conn.transaction():
         await lock(conn, given.paper_id)
         stored = await word_store.set_reaction(conn, given)
-        return stored, await settle(conn, given.paper_id)
+        return stored, await settle(conn, given.paper_id, owner=True)
 
 
 async def unreact(conn: psycopg.AsyncConnection, paper_id: str, topic: str | None) -> Settled:
@@ -220,7 +234,7 @@ async def unreact(conn: psycopg.AsyncConnection, paper_id: str, topic: str | Non
     async with conn.transaction():
         await lock(conn, paper_id)
         await word_store.clear_reaction(conn, paper_id, topic)
-        return await settle(conn, paper_id)
+        return await settle(conn, paper_id, owner=True)
 
 
 async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Settled:

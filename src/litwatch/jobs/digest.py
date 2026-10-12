@@ -19,6 +19,7 @@ from litwatch.llm import CallError, Gateway
 from litwatch.review import writer
 from litwatch.store import digest as digest_store
 from litwatch.store import papers as papers_store
+from litwatch.store import reviews as reviews_store
 from litwatch.store import topics as topics_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
@@ -194,6 +195,12 @@ async def build_daily(
                 conn, issue["id"], paper_id, slug, now[0], take_id
             )
             await digest_store.settle_due(conn, paper_id, slug, issue=False)
+        # A daily review alone makes an issue, as an entry does; so does a failed one, which
+        # the issue says. A quiet day makes none.
+        if issue is None and any(
+            r["state"] != "quiet" for r in await reviews_store.for_period(conn, "day", day)
+        ):
+            issue = await digest_store.open_issue(conn, "daily", day)
         counts: dict[str, int] = {}
         for row in folds if issue else []:
             paper_id, slug = row["paper_id"], row["topic"]
@@ -218,19 +225,25 @@ async def _write_lede(conn: psycopg.AsyncConnection, run: ModelRun, issue_id: in
     """Write the lede from the issue as it now stands. A failure leaves the old one, or none,
     and the next build tries again."""
     rows = await digest_store.entries(conn, issue_id)
-    if not rows:
+    issue = await (
+        await conn.execute("SELECT day, folds FROM issues WHERE id = %s", (issue_id,))
+    ).fetchone()
+    notes = [
+        (r["topic_name"], r["text"])
+        for r in await reviews_store.for_period(conn, "day", issue["day"])
+        if r["state"] == "written" and r["text"]
+    ]
+    if not rows and not notes:
         return
     entries = [
         writer.Entry(r["topic_name"], r["title"], r["take"], r["grade"] == "must_read")
         for r in rows
     ]
-    issue = await (
-        await conn.execute("SELECT folds FROM issues WHERE id = %s", (issue_id,))
-    ).fetchone()
     names = {t.slug: t.name for t in await topics_store.all(conn, None)}
     folds = {names.get(k, k): v for k, v in issue["folds"].items()}
     try:
-        await digest_store.set_lede(conn, issue_id, await writer.lede(run.gateway, entries, folds))
+        lede = await writer.lede(run.gateway, entries, folds, notes)
+        await digest_store.set_lede(conn, issue_id, lede)
     except CallError as exc:
         log.warning("issue %s: no lede (%s)", issue_id, exc)
         run.add("lede_failed")

@@ -10,6 +10,7 @@ from litwatch.core.rules import (
     rewritten,
 )
 from litwatch.core.types import (
+    Cadence,
     Candidate,
     CandidateState,
     Event,
@@ -34,6 +35,7 @@ from litwatch.core.types import (
 )
 
 __all__ = [
+    "Cadence",
     "Candidate",
     "CandidateState",
     "Event",

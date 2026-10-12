@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import os
 import tomllib
-from datetime import date, datetime, tzinfo
+from datetime import date, datetime, time, timedelta, tzinfo
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -89,6 +89,24 @@ class Limits(_Section):
     take_attempts: int = Field(default=3, gt=0)
 
 
+def system_zone() -> tzinfo:
+    """The server's own zone with its daylight-saving rules: `TZ`, else the zone
+    `/etc/localtime` links to, else the one `/etc/timezone` names. Only when none names one,
+    the current fixed offset."""
+    name = os.environ.get("TZ", "").lstrip(":")
+    if not name:
+        _, _, name = os.path.realpath("/etc/localtime").partition("zoneinfo/")
+    if not name:
+        try:
+            name = Path("/etc/timezone").read_text().strip()
+        except OSError:
+            name = ""
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return datetime.now().astimezone().tzinfo
+
+
 class Schedule(_Section):
     nightly: str = "0 6 * * *"
     weekly: str = "0 7 * * 1"
@@ -97,10 +115,19 @@ class Schedule(_Section):
 
     @property
     def zone(self) -> tzinfo:
-        return ZoneInfo(self.timezone) if self.timezone else datetime.now().astimezone().tzinfo
+        return ZoneInfo(self.timezone) if self.timezone else system_zone()
 
     def today(self) -> date:
         return datetime.now(self.zone).date()
+
+    def window(self, start: date, days: int = 1) -> tuple[datetime, datetime]:
+        """From midnight of `start` to midnight `days` later, in the configured zone."""
+        begin = datetime.combine(start, time.min, self.zone)
+        return begin, begin + timedelta(days=days)
+
+    def week_of(self, day: date) -> date:
+        """The Monday of the week the day falls in."""
+        return day - timedelta(days=day.weekday())
 
 
 class Config(_Section):

@@ -16,17 +16,20 @@ You write for litwatch, which reads every new arXiv paper in a field so that one
 does not have to. The researcher follows a narrow research question and reads what you write \
 the way one reads a good newspaper: quickly, trusting it to be specific and honest.
 
-Never mention grades, ratings, scores, relevance labels, models, graders, reviewers, a \
-pipeline, or that anything was selected, flagged or judged. Do not hype, and do not hedge with \
-boilerplate. Use plain sentences and the paper's own terms. Answer with the structured output \
-only."""
+Write about the papers, never to the reader: no "you", no "for your question", no audience \
+("for monitor builders", "for practitioners"), and no verdict on whether to read it ("required \
+reading", "worth reading", "a must"). State what a paper does and shows, in its own terms; \
+importance comes through in what you choose to say. Never mention grades, ratings, scores, \
+relevance labels, models, graders, reviewers, a pipeline, or that anything was selected, \
+flagged or judged. Do not hype, and do not hedge with boilerplate. Use plain sentences. Answer \
+with the structured output only."""
 
 TAKE = """{voice}
 
-Write the take on one paper for the research question below: what the paper does, and why it \
-matters for the question. {length} Do not start with "This paper" or repeat the title. Where \
-the paper only touches the question, say which part of it does. You may address the \
-researcher as "you" once, sparingly.
+Write the take on one paper read for the research question below: what the paper does, and \
+what it shows that bears on the question, stated as findings rather than as advice. {length} \
+Do not start with "This paper" or repeat the title. Where the paper only touches the question, \
+say which part of it does.
 
 # The question: {name}
 
@@ -34,8 +37,8 @@ researcher as "you" once, sparingly.
 
 LENGTHS = {
     Grade.MUST_READ: (
-        "Two or three short sentences, at most 70 words; the last may say what makes it "
-        "required reading."
+        "Two or three short sentences, at most 70 words; the last may say what follows from "
+        "the result."
     ),
     Grade.RELEVANT: "One sentence, at most 35 words.",
 }
@@ -44,9 +47,10 @@ LEDE = """{voice}
 
 Write the lede of today's issue: what a newspaper prints above its first story. One or two \
 short sentences, at most 35 words in all, saying what is in the issue: the topics, the number \
-of papers in words, and a few words on the strongest entry. Do not summarise any paper; the \
-takes below the lede do that. Lead entries are required reading; brief entries are worth the \
-time."""
+of papers in words, and a few words on the strongest entry. When there are no entries, only \
+notes on fields, give no paper count and speak of the fields alone. Do not summarise any \
+paper; the takes below the lede do that. Lead entries are the day's most important papers. \
+When notes on the day in a field follow, end with a few words on that field too."""
 
 
 class TakeOutput(BaseModel):
@@ -85,7 +89,12 @@ class Entry:
     lead: bool
 
 
-def lede_request(entries: list[Entry], folds: dict[str, int] | None = None) -> Request:
+def lede_request(
+    entries: list[Entry],
+    folds: dict[str, int] | None = None,
+    notes: list[tuple[str, str]] | None = None,
+) -> Request:
+    """`notes` are the day's field reviews, as (topic name, review text)."""
     lines = []
     for topic in dict.fromkeys(e.topic for e in entries):
         lines.append(f"## {topic}")
@@ -96,6 +105,8 @@ def lede_request(entries: list[Entry], folds: dict[str, int] | None = None) -> R
         near = ", ".join(f"{n} near {topic}" for topic, n in folds.items() if n)
         if near:
             lines.append(f"\nAlso noted, not in the issue: {near}.")
+    for topic, text in notes or []:
+        lines.append(f"\n## {topic} (the day in the field)\n{text[:600]}")
     return Request(system=LEDE.format(voice=VOICE), user="\n".join(lines), output=LedeOutput)
 
 
@@ -113,6 +124,11 @@ async def take(
     return answer.value.take.strip()
 
 
-async def lede(gateway: Gateway, entries: list[Entry], folds: dict[str, int] | None = None) -> str:
-    answer = await gateway.ask("writer", lede_request(entries, folds))
+async def lede(
+    gateway: Gateway,
+    entries: list[Entry],
+    folds: dict[str, int] | None = None,
+    notes: list[tuple[str, str]] | None = None,
+) -> str:
+    answer = await gateway.ask("writer", lede_request(entries, folds, notes))
     return answer.value.lede.strip()

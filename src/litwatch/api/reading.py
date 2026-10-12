@@ -26,6 +26,7 @@ from litwatch.feedback.word import Settled
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
 from litwatch.store import reading
+from litwatch.store import reviews as reviews_store
 from litwatch.store import topics as topics_store
 
 router = APIRouter(prefix="/api")
@@ -70,7 +71,7 @@ async def digest(
 
 
 @router.get("/issues/{issue_id}")
-async def issue(issue_id: int, c: Conn) -> s.Issue:
+async def issue(issue_id: int, request: Request, c: Conn) -> s.Issue:
     found = await reading.issue(c, issue_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such issue")
@@ -90,6 +91,17 @@ async def issue(issue_id: int, c: Conn) -> s.Issue:
         if slug in topics:
             ref = _ref(topics[slug])
             sections.setdefault(slug, s.Section(topic=ref, entries=[])).near = n
+    period = "day" if found["kind"] == "daily" else "week"
+    for row in await reviews_store.for_period(c, period, found["day"]):
+        if row["topic"] not in topics:
+            continue
+        section = sections.setdefault(
+            row["topic"], s.Section(topic=_ref(topics[row["topic"]]), entries=[])
+        )
+        if row["kind"] == "watch":
+            section.recap = await _recap(c, row, found["day"], _config(request).schedule)
+        else:
+            section.review = _review(row)
     order = {slug: i for i, slug in enumerate(topics)}
     return s.Issue(
         id=found["id"],
@@ -97,6 +109,32 @@ async def issue(issue_id: int, c: Conn) -> s.Issue:
         day=found["day"],
         lede=found["lede"],
         sections=sorted(sections.values(), key=lambda x: order.get(x.topic.slug, 99)),
+    )
+
+
+def _review(row: Any) -> s.Review:
+    return s.Review(
+        period=row["period"],
+        day=row["day"],
+        state=row["state"],
+        text=row["text"],
+        picks=[s.Pick(**p) for p in row["picks"]],
+        members=row["members"],
+    )
+
+
+async def _recap(c: psycopg.AsyncConnection, row: Any, monday: date, schedule: Any) -> s.Recap:
+    since, until = schedule.window(monday, 7)  # the week, in the configured zone
+    topic = row["topic"]
+    entries = await reviews_store.week_entries(c, topic, monday)
+    set_aside = await reviews_store.week_set_aside(c, topic, since, until)
+    missed = await reviews_store.week_misses(c, topic, since, until)
+    return s.Recap(
+        state=row["state"],
+        text=row["text"],
+        papers=[s.Listed(paper_id=e["paper_id"], title=e["title"]) for e in entries],
+        set_aside=[s.Listed(**r) for r in set_aside],
+        misses=[s.Listed(**r) for r in missed],
     )
 
 
@@ -229,6 +267,12 @@ async def lookup(body: s.LookupIn, c: Conn) -> s.Lookup:
 @router.get("/topics")
 async def topics(c: Conn) -> list[s.TopicCard]:
     return [s.TopicCard(**t) for t in await reading.topic_cards(c)]
+
+
+@router.get("/topics/{slug}/reviews")
+async def topic_reviews(slug: str, c: Conn) -> list[s.Review]:
+    """A Radar or Pulse topic's reviews, newest first, shown above its picks."""
+    return [_review(r) for r in await reviews_store.for_topic(c, slug)]
 
 
 @router.post("/topics/{slug}/visit", status_code=204)

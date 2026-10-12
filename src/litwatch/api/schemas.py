@@ -23,6 +23,7 @@ class Status(BaseModel):
     splits: int = 0
     ungraded: int = 0
     awaiting_triage: int = 0
+    reviews_failed: int = 0
 
 
 class IssueSummary(BaseModel):
@@ -65,10 +66,51 @@ class TopicRef(BaseModel):
     colour: str | None = None
 
 
+class Pick(BaseModel):
+    """A paper a review picked, with its sentence on why."""
+
+    paper_id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    published: datetime | None = None
+    why: str
+    saved: bool = False
+
+
+class Review(BaseModel):
+    """A Radar or Pulse topic's review of a day or a week. A failed one says so in one line;
+    a quiet one had no papers to read."""
+
+    period: Literal["day", "week"]
+    day: date
+    state: Literal["written", "failed", "quiet"]
+    text: str | None = None
+    picks: list[Pick] = Field(default_factory=list)
+    members: int = 0
+
+
+class Listed(BaseModel):
+    paper_id: str
+    title: str
+
+
+class Recap(BaseModel):
+    """A Watch topic's week: prose over its entries, then the entries as one-liners, what
+    the owner set aside and the misses reported."""
+
+    state: Literal["written", "failed", "quiet"]
+    text: str | None = None
+    papers: list[Listed] = Field(default_factory=list)
+    set_aside: list[Listed] = Field(default_factory=list)
+    misses: list[Listed] = Field(default_factory=list)
+
+
 class Section(BaseModel):
     topic: TopicRef
     entries: list[Entry]
     near: int = 0  # adjacent arrivals, for the fold line
+    review: Review | None = None  # a Radar or Pulse topic's section
+    recap: Recap | None = None  # a Watch topic's section in a weekly issue
 
 
 class Issue(IssueSummary):
@@ -168,6 +210,8 @@ class Papers(BaseModel):
 
 class TopicCard(TopicRef):
     status: str
+    cadence: Literal["weekly", "daily"] = "weekly"
+    last_review: date | None = None
     position: int | None = None
     subject: str
     papers: int

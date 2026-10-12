@@ -76,6 +76,16 @@ async def status(
                 (triage_attempts,),
             )
         )["n"],
+        "reviews_failed": (
+            await _one(
+                conn,
+                # Failed and not since written, for a day or week in the last seven days:
+                # whichever run it failed in, the issue still says so.
+                "SELECT count(*) AS n FROM reviews WHERE state = 'failed' "
+                "AND day >= %s::date - CASE period WHEN 'week' THEN 13 ELSE 7 END",
+                (run["started_at"],),
+            )
+        )["n"],
     }
     return result | {"state": "attention" if any(waiting.values()) else "quiet"} | waiting
 
@@ -295,8 +305,11 @@ async def papers(
         )
         take_params = [topic]
     else:
-        if kind:
-            scope = sql.SQL("JOIN memberships m ON m.paper_id = p.id AND m.topic = %s")
+        if kind:  # a field topic's table is its picks
+            scope = sql.SQL(
+                "JOIN (SELECT DISTINCT k.paper_id FROM review_picks k "
+                "JOIN reviews r ON r.id = k.review_id WHERE r.topic = %s) m ON m.paper_id = p.id"
+            )
             scope_params = [topic]
         else:
             scope, scope_params = sql.SQL(""), []
@@ -371,26 +384,50 @@ async def topic_cards(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
     return await _all(
         conn,
         """
-        SELECT t.slug, t.name, t.kind, t.status, t.colour, t.position, t.subject,
+        SELECT t.slug, t.name, t.kind, t.status, t.colour, t.position, t.subject, t.cadence,
                v.opened_at,
+               (SELECT max(day) FROM reviews r WHERE r.topic = t.slug AND r.state = 'written'
+                  AND r.kind <> 'watch')
+                   AS last_review,
                CASE WHEN t.kind = 'watch'
                     THEN (SELECT count(*) FROM effective_grades g WHERE g.topic = t.slug
                           AND g.grade IN ('must_read', 'relevant'))
-                    ELSE (SELECT count(*) FROM memberships m WHERE m.topic = t.slug) END
+                    ELSE (SELECT count(DISTINCT k.paper_id) FROM review_picks k
+                          JOIN reviews r ON r.id = k.review_id WHERE r.topic = t.slug) END
                    AS papers,
                CASE WHEN t.kind = 'watch'
                     THEN (SELECT count(*) FROM effective_grades g JOIN library l
                           ON l.paper_id = g.paper_id AND l.saved
                           WHERE g.topic = t.slug AND g.grade IN ('must_read', 'relevant'))
-                    ELSE (SELECT count(*) FROM memberships m JOIN library l
-                          ON l.paper_id = m.paper_id AND l.saved WHERE m.topic = t.slug) END
+                    ELSE (SELECT count(DISTINCT k.paper_id) FROM review_picks k
+                          JOIN reviews r ON r.id = k.review_id
+                          JOIN library l ON l.paper_id = k.paper_id AND l.saved
+                          WHERE r.topic = t.slug) END
                    AS saved,
-               (SELECT count(*) FROM issue_entries e
-                WHERE e.topic = t.slug AND e.added_at > coalesce(v.opened_at, t.created_at))
+               CASE WHEN t.kind = 'watch'
+                    THEN (SELECT count(*) FROM issue_entries e
+                          WHERE e.topic = t.slug
+                            AND e.added_at > coalesce(v.opened_at, t.created_at))
+                    ELSE (SELECT count(*) FROM (
+                            SELECT k.paper_id FROM review_picks k
+                            JOIN reviews r ON r.id = k.review_id WHERE r.topic = t.slug
+                            GROUP BY k.paper_id
+                            HAVING min(r.written_at) > coalesce(v.opened_at, t.created_at)) f)
+                    END
                    AS new,
-               (SELECT count(*) FROM issue_entries e
-                JOIN library l ON l.paper_id = e.paper_id AND l.saved
-                WHERE e.topic = t.slug AND e.added_at > coalesce(v.opened_at, t.created_at))
+               CASE WHEN t.kind = 'watch'
+                    THEN (SELECT count(*) FROM issue_entries e
+                          JOIN library l ON l.paper_id = e.paper_id AND l.saved
+                          WHERE e.topic = t.slug
+                            AND e.added_at > coalesce(v.opened_at, t.created_at))
+                    ELSE (SELECT count(*) FROM (
+                            SELECT k.paper_id FROM review_picks k
+                            JOIN reviews r ON r.id = k.review_id
+                            JOIN library l ON l.paper_id = k.paper_id AND l.saved
+                            WHERE r.topic = t.slug
+                            GROUP BY k.paper_id
+                            HAVING min(r.written_at) > coalesce(v.opened_at, t.created_at)) f)
+                    END
                    AS new_saved
         FROM topics t LEFT JOIN topic_visits v ON v.topic = t.slug
         WHERE t.status <> 'draft'
