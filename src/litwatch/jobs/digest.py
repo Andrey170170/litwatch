@@ -43,6 +43,28 @@ class Owed:
     error: str | None = None
 
 
+REWRITTEN = "the text was rewritten; waiting for its re-grade"
+
+
+async def prepare(
+    conn: psycopg.AsyncConnection, paper: Paper, topic: Topic, grade: Grade
+) -> Owed | str:
+    """What the writer is given for one pair, as production gives it, or why it must wait.
+    Shared with the writer comparison, so models are compared on the prompts they would get."""
+    verdict = await verdicts_store.current(conn, paper.id, topic.slug)
+    binding = word.binding(verdict, paper.revision, topic.revision or 1)
+    if not word.speaks(verdict):
+        return Owed(paper, topic, grade, TakeSource.OWNER, [], binding)
+    if verdict.paper_revision != paper.revision:
+        # Only the current text is stored: the take waits for the rewrite's re-grade.
+        return REWRITTEN
+    source = TakeSource.MIGRATED if verdict.migrated else TakeSource.VERDICT
+    opinions = [o for o in (verdict.judge, verdict.check) if o]
+    # The rubric the verdict was given under, which the take is bound to.
+    bound = await topics_store.at_revision(conn, topic.slug, verdict.topic_revision)
+    return Owed(paper, bound or topic, grade, source, opinions, binding)
+
+
 async def _owed(conn: psycopg.AsyncConnection) -> list[Owed]:
     watched = {t.slug: t for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
     owed = []
@@ -53,23 +75,12 @@ async def _owed(conn: psycopg.AsyncConnection) -> list[Owed]:
         if topic is None or paper is None or grade is None or not grade.at_least(Grade.RELEVANT):
             await digest_store.clear_due(conn, row["paper_id"], row["topic"])
             continue
-        verdict = await verdicts_store.current(conn, paper.id, topic.slug)
-        binding = word.binding(verdict, paper.revision, topic.revision or 1)
-        if not word.speaks(verdict):
-            source, opinions = TakeSource.OWNER, []
-        else:
-            if verdict.paper_revision != paper.revision:
-                # Only the current text is stored; the take waits for the rewrite's re-grade,
-                # and after enough runs the pair enters its issue without one.
-                await digest_store.take_failed(
-                    conn, paper.id, topic.slug, "the text was rewritten; waiting for its re-grade"
-                )
-                continue
-            source = TakeSource.MIGRATED if verdict.migrated else TakeSource.VERDICT
-            opinions = [o for o in (verdict.judge, verdict.check) if o]
-            # The rubric the verdict was given under, which the take is bound to.
-            topic = await topics_store.at_revision(conn, topic.slug, verdict.topic_revision)
-        owed.append(Owed(paper, topic, grade, source, opinions, binding))
+        prepared = await prepare(conn, paper, topic, grade)
+        if isinstance(prepared, str):
+            # After enough runs the pair enters its issue without a take.
+            await digest_store.take_failed(conn, paper.id, topic.slug, prepared)
+            continue
+        owed.append(prepared)
     return owed
 
 
@@ -128,9 +139,13 @@ async def _record(conn: psycopg.AsyncConnection, item: Owed, run: ModelRun) -> N
                 text=item.text,
             ),
         )
-        now = await word.wanted(conn, paper_id, item.topic)
+        # The topic as it is now: an edit may have landed while the model was writing.
+        current = await topics_store.get(conn, slug)
+        now = await word.wanted(conn, paper_id, current) if current else None
         if now is None or word.fits(take, *now):
             await digest_store.settle_due(conn, paper_id, slug, take=False)
+        else:  # written for what the pair no longer is: still owed
+            await digest_store.mark_due(conn, paper_id, slug, take=True)
         await events.emit(conn, events.TAKE_WRITTEN, paper_id, topic=slug, take_id=take.id)
     run.add("takes")
 
@@ -172,8 +187,14 @@ async def build_daily(
             await digest_store.settle_due(conn, paper_id, slug, issue=False)
         counts: dict[str, int] = {}
         for row in folds if issue else []:
-            counts[row["topic"]] = counts.get(row["topic"], 0) + 1
-            await digest_store.settle_due(conn, row["paper_id"], row["topic"], fold=False)
+            paper_id, slug = row["paper_id"], row["topic"]
+            # Read again under the lock: the owner may have moved it since.
+            await word.lock(conn, paper_id)
+            due = await digest_store.due_row(conn, paper_id, slug)
+            grade = (await word_store.effective_for(conn, paper_id)).get(slug)
+            if due and due["fold"] and grade == Grade.ADJACENT and slug in watched:
+                counts[slug] = counts.get(slug, 0) + 1
+                await digest_store.settle_due(conn, paper_id, slug, fold=False)
         if counts:
             await digest_store.add_folds(conn, issue["id"], counts)
     run.add("issue_entries", added)

@@ -13,13 +13,12 @@ import psycopg
 from litwatch import llm
 from litwatch.config import Config, RoleConfig
 from litwatch.core import Grade, TopicKind
-from litwatch.feedback import word
+from litwatch.jobs import digest
 from litwatch.jobs.context import ModelRun
 from litwatch.llm import CallError
 from litwatch.review import writer
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
-from litwatch.store import verdicts as verdicts_store
 
 
 def role(spec: str) -> RoleConfig:
@@ -69,10 +68,12 @@ async def compare(
     rng = random.Random(seed)
     lines, key = [f"# Writer comparison (seed {seed})\n"], {}
     for i, (paper_id, slug, grade) in enumerate(await _pairs(conn, n), 1):
-        paper, topic = await papers_store.get(conn, paper_id), topics[slug]
-        verdict = await verdicts_store.current(conn, paper_id, slug)
-        # As production gives them: the graders' notes only when the verdict is the source.
-        opinions = [o for o in (verdict.judge, verdict.check) if o] if word.speaks(verdict) else []
+        prepared = await digest.prepare(
+            conn, await papers_store.get(conn, paper_id), topics[slug], grade
+        )
+        if isinstance(prepared, str):
+            continue  # production would not write this one yet
+        paper, topic, opinions = prepared.paper, prepared.topic, prepared.opinions
 
         texts = await asyncio.gather(
             *(_one(g, paper, topic, grade, opinions) for g in gateways.values())

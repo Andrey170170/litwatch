@@ -275,3 +275,18 @@ async def test_a_rubric_edit_makes_takes_that_rest_on_the_owners_word_stale(db):
     assert (await rows(db, "SELECT for_take FROM due"))[0]["for_take"] is False
     await _save_all(db, [FAITH.model_copy(update={"rubric": "A new rubric."})])
     assert (await rows(db, "SELECT for_take FROM due"))[0]["for_take"] is True
+
+
+async def test_a_late_result_that_no_longer_fits_leaves_the_take_owed(db):
+    writer = Writer()
+    await grade(db, P, "relevant")
+    await night(db, writer)  # the short take, in an issue
+    await grade(db, P, "must_read")
+    (item,) = await digest._owed(db)  # the long take is being written ...
+    await grade(db, P, "relevant")  # ... while the pair goes back: the short take fits again
+    assert await rows(db, "SELECT * FROM due") == []
+    item.text = "A long take."
+    async with model_run(db, Config(), "nightly", gateway=writer.gateway) as run:
+        await digest._record(db, item, run)
+    (due,) = await rows(db, "SELECT * FROM due")
+    assert due["for_take"] is True  # the newest take is the long one, which does not fit
