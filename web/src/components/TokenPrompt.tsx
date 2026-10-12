@@ -6,17 +6,21 @@ import { Input } from "@/components/ui/input";
 /** The token prompt on first use. It covers the page and keeps the route underneath. */
 export function TokenPrompt({ onSignedIn }: { onSignedIn: () => void }) {
   const [token, setToken] = useState("");
-  const [wrong, setWrong] = useState(false);
+  const [problem, setProblem] = useState<"wrong" | "offline" | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!token.trim()) return;
     setBusy(true);
-    const good = await signIn(token.trim());
-    setBusy(false);
-    if (good) onSignedIn();
-    else setWrong(true);
+    try {
+      if (await signIn(token.trim())) onSignedIn();
+      else setProblem("wrong");
+    } catch {
+      setProblem("offline");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -31,14 +35,15 @@ export function TokenPrompt({ onSignedIn }: { onSignedIn: () => void }) {
           value={token}
           onChange={(e) => {
             setToken(e.target.value);
-            setWrong(false);
+            setProblem(null);
           }}
           placeholder="Token"
           aria-label="Token"
-          aria-invalid={wrong}
+          aria-invalid={problem === "wrong"}
           className="mt-4 h-11 text-[15px]"
         />
-        {wrong && <p className="mt-2 text-[13px] text-destructive">That token was not accepted.</p>}
+        {problem === "wrong" && <p className="mt-2 text-[13px] text-destructive">That token was not accepted.</p>}
+        {problem === "offline" && <p className="mt-2 text-[13px] text-destructive">Could not reach litwatch. Check the connection and try again.</p>}
         <Button type="submit" disabled={busy || !token.trim()} className="mt-4 h-11 w-full text-[15px]">
           Open
         </Button>

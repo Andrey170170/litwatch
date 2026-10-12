@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import type { ReactionReason, ReactionValue } from "@/api/client";
 import { useReact, useUnreact } from "@/api/mutations";
 import { DOWN_REASONS, initial, reduce, type ThumbState } from "@/lib/thumbs";
 import { cn } from "@/lib/utils";
+import { writes } from "@/lib/writeQueue";
 
 type Props = {
   paperId: string;
@@ -16,23 +17,50 @@ type Props = {
 
 /**
  * Two 16px glyphs in 40px hit areas, quiet until used (DESIGN.md "Thumbs"). The reason chips
- * open under the row; the first tap on one closes them.
+ * open under the row; the first tap on one closes them. Writes for one paper and topic go out
+ * one after another, in tap order; a failed write puts the thumb back where the server has it.
  */
 export function Thumbs({ paperId, topic, value, reason, className }: Props) {
   const [state, setState] = useState<ThumbState>(() => initial(value, reason));
   const react = useReact(paperId);
   const unreact = useUnreact(paperId);
+  // What the server is known to hold, the number of writes still out, and the newest one's id.
+  const confirmed = useRef<ThumbState>(initial(value, reason));
+  const inflight = useRef(0);
+  const newest = useRef(0);
 
-  // The server's view wins when it changes under us (another surface reacted).
+  // The server's view wins when it changes under us (another surface reacted), but not while
+  // our own writes are still landing: a refetch in between would show the older state.
   useEffect(() => {
+    if (inflight.current > 0) return;
+    confirmed.current = initial(value, reason);
     setState((s) => (s.value === (value ?? null) && s.reason === (reason ?? null) ? s : initial(value, reason)));
   }, [value, reason]);
 
   function dispatch(action: Parameters<typeof reduce>[1]) {
     const [next, effect] = reduce(state, action);
     setState(next);
-    if (effect.kind === "put") react.mutate({ topic, value: effect.value, reason: effect.reason });
-    else if (effect.kind === "delete") unreact.mutate(topic);
+    if (effect.kind === "none") return;
+    const id = ++newest.current;
+    inflight.current++;
+    const job =
+      effect.kind === "put"
+        ? () => react.mutateAsync({ topic, value: effect.value, reason: effect.reason })
+        : () => unreact.mutateAsync(topic);
+    writes
+      .enqueue(`reaction|${paperId}|${topic ?? ""}`, job)
+      .then(
+        () => {
+          confirmed.current = { value: next.value, reason: next.reason, open: null };
+        },
+        () => {
+          // Only the newest intent may reset the thumb; an older failure is superseded.
+          if (id === newest.current) setState({ ...confirmed.current, open: null });
+        },
+      )
+      .finally(() => {
+        inflight.current--;
+      });
   }
 
   const up = state.value === "up";

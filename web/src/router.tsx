@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, type RouterHistory } from "@tanstack/react-router";
 import { Shell } from "@/components/Shell";
 import { DigestPage } from "@/routes/digest";
 import { PaperPage } from "@/routes/paper";
@@ -13,14 +13,23 @@ import { bool, int, str, tableSearch, type TableSearch } from "@/lib/search";
 
 const rootRoute = createRootRoute({ component: Shell });
 
-export type DigestSearch = { issue?: number; paper?: string };
+/** An arXiv link or bare id inside shared text, else the text itself for the lookup to judge. */
+export function arxivIn(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const link = text.match(/https?:\/\/(?:www\.)?arxiv\.org\/(?:abs|pdf|html)\/[\w.\/-]+/i);
+  if (link) return link[0];
+  const id = text.match(/\b(?:arXiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)\b/i);
+  return id ? id[1] : text;
+}
+
+export type DigestSearch = { issue?: number; paper?: string; topic?: string };
 export type PaperSearch = { topic?: string };
 export type PapersSearch = TableSearch & { topic?: string; lookup?: string };
 
 export const digestRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  validateSearch: (s: Record<string, unknown>): DigestSearch => ({ issue: int(s.issue), paper: str(s.paper) }),
+  validateSearch: (s: Record<string, unknown>): DigestSearch => ({ issue: int(s.issue), paper: str(s.paper), topic: str(s.topic) }),
   component: DigestPage,
 });
 
@@ -47,7 +56,8 @@ export const papersRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): PapersSearch => ({
     ...tableSearch(s),
     topic: str(s.topic),
-    lookup: str(s.lookup) ?? str(s.text) ?? str(s.url),
+    // The share target: the explicit url first, else an arXiv link or id found in the text.
+    lookup: str(s.lookup) ?? str(s.url) ?? arxivIn(str(s.text)),
     adjacent: bool(s.adjacent),
   }),
   component: PapersPage,
@@ -99,13 +109,18 @@ function stringifySearch(search: Record<string, unknown>): string {
   return s ? `?${s}` : "";
 }
 
-export const router = createRouter({
-  routeTree,
-  scrollRestoration: true,
-  defaultPreload: "intent",
-  parseSearch,
-  stringifySearch,
-});
+export function createAppRouter(history?: RouterHistory) {
+  return createRouter({
+    routeTree,
+    history,
+    scrollRestoration: true,
+    defaultPreload: "intent",
+    parseSearch,
+    stringifySearch,
+  });
+}
+
+export const router = createAppRouter();
 
 declare module "@tanstack/react-router" {
   interface Register {

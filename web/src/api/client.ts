@@ -48,7 +48,8 @@ const auth: Middleware = {
   },
 };
 
-export const api = createClient<paths>({ baseUrl: "/", credentials: "same-origin" });
+// fetch is looked up per call rather than captured here, so tests can script it.
+export const api = createClient<paths>({ baseUrl: globalThis.location?.origin ?? "/", credentials: "same-origin", fetch: (request) => globalThis.fetch(request) });
 api.use(auth);
 
 /** Unwrap an openapi-fetch result, throwing `ApiError` on any failure. */

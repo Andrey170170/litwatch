@@ -5,6 +5,7 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ok, type Grade, type LabelValue, type Schemas } from "./client";
 import { toast } from "@/lib/toast";
+import { invalidateAfterWrite } from "./invalidate";
 
 export type Topic = Schemas["Topic"];
 export type TopicStatus = Schemas["litwatch__core__types__Status"];
@@ -122,10 +123,14 @@ export const settingsTopicsQuery = queryOptions({
   queryKey: ["settings", "topics"],
   queryFn: async () => ok(await api.GET(`${S}/topics`)),
 });
-export const keywordsQuery = (slug: string) =>
+/** Match counts for the editor's draft patterns (-1 for a pattern that is not a valid regex). */
+export const keywordsQuery = (slug: string, patterns: string[]) =>
   queryOptions({
-    queryKey: ["settings", "keywords", slug],
-    queryFn: async () => ok(await api.GET(`${S}/topics/{slug}/keywords`, { params: { path: { slug } } })),
+    queryKey: ["settings", "keywords", slug, patterns],
+    queryFn: async () =>
+      ok(await api.GET(`${S}/topics/{slug}/keywords`, { params: { path: { slug }, query: { pattern: patterns } } })),
+    placeholderData: (previous) => previous,
+    staleTime: 60_000,
   });
 export const rerunsQuery = (slug: string, since?: string, until?: string) =>
   queryOptions({
@@ -160,6 +165,8 @@ export const sessionQuery = (id: number) =>
 export const missesQuery = queryOptions({
   queryKey: ["settings", "misses"],
   queryFn: async () => typed<Miss[]>(ok(await api.GET(`${S}/misses`))),
+  // A trace runs in the background for a minute; keep looking while one is pending.
+  refetchInterval: (q) => (q.state.data?.some((m) => m.trace !== "done" && m.trace !== "failed") ? 3000 : false),
 });
 export const runsQuery = queryOptions({
   queryKey: ["settings", "runs"],
@@ -172,11 +179,7 @@ export const configQuery = queryOptions({
 
 function useRefresh() {
   const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["settings"] });
-    void qc.invalidateQueries({ queryKey: ["topics"] });
-    void qc.invalidateQueries({ queryKey: ["status"] });
-  };
+  return () => invalidateAfterWrite(qc);
 }
 
 const onError = (e: Error) => toast(e.message || "That did not work", "error");
@@ -270,11 +273,8 @@ export function useAnswer(id: number) {
           body: v.answer,
         }),
       ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["settings", "calibrate"] });
-      void qc.invalidateQueries({ queryKey: ["settings", "quality"] });
-      void qc.invalidateQueries({ queryKey: ["paper"] });
-    },
+    // An answer is a label and an appraisal: it can move a grade and the library.
+    onSuccess: () => invalidateAfterWrite(qc),
     onError,
   });
 }
@@ -285,7 +285,6 @@ export function useRetrace() {
     mutationFn: async (id: number) => ok(await api.POST(`${S}/misses/{miss_id}/trace`, { params: { path: { miss_id: id } } })),
     onSuccess: () => {
       toast("Tracing again; this takes a minute");
-      window.setTimeout(refresh, 20_000);
       refresh();
     },
     onError,

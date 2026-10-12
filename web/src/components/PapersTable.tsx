@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useQuery } from "@tanstack/react-query";
@@ -27,10 +27,12 @@ type Props = {
   showMiss?: boolean;
   /** Rows to show in their own band above the table (the lookup result). */
   above?: ReactNode;
+  /** The topic this table is a surface for, or null for the plain collection and search. */
+  surfaceTopic: string | null;
 };
 
 /** The one table: a topic page with the topic fixed, or the whole collection (DESIGN.md "Row"). */
-export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMiss, above }: Props) {
+export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMiss, above, surfaceTopic }: Props) {
   const desktop = useDesktop();
   const page = filter.page ?? 0;
   const q = useQuery(papersQuery({ ...filter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }));
@@ -103,6 +105,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
                 selected={selected.has(r.id)}
                 onSelect={() => toggle(r.id)}
                 miss={showMiss && !shownRow(r) ? <MissLink paperId={r.id} topics={watchTopics} /> : null}
+                surface={surfaceTopic ?? "none"}
               />
             ))}
           </tbody>
@@ -117,6 +120,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
               selected={selected.has(r.id)}
               onSelect={() => toggle(r.id)}
               miss={showMiss && !shownRow(r) ? <MissLink paperId={r.id} topics={watchTopics} /> : null}
+              surface={surfaceTopic ?? "none"}
             />
           ))}
         </div>
@@ -163,9 +167,9 @@ function Links({ id }: { id: string }) {
   );
 }
 
-type RowProps = { row: Row; picks: boolean; selected: boolean; onSelect: () => void; miss: ReactNode };
+type RowProps = { row: Row; picks: boolean; selected: boolean; onSelect: () => void; miss: ReactNode; surface: string };
 
-function DesktopRow({ row: r, picks, selected, onSelect, miss }: RowProps) {
+function DesktopRow({ row: r, picks, selected, onSelect, miss, surface }: RowProps) {
   const adjacent = r.grade === "adjacent";
   return (
     <tr className={cn("border-b border-border align-top", adjacent && "text-muted-foreground")}>
@@ -174,7 +178,7 @@ function DesktopRow({ row: r, picks, selected, onSelect, miss }: RowProps) {
       </td>
       <td className="py-[15px] pr-1">{!picks && <GradeDot grade={r.grade} grading={r.grading} />}</td>
       <td className="min-w-[220px] py-[11px] pr-2.5 font-serif text-[16.5px] leading-[1.3] font-semibold">
-        <Link to="/paper/$" params={{ _splat: r.id }} className="hover:underline decoration-border">
+        <Link to="/paper/$" params={{ _splat: r.id }} search={{ topic: surface }} className="hover:underline decoration-border">
           {r.title}
         </Link>
         <small className="meta mt-0.5 block text-[12.5px] font-normal">{adjacent ? "near the topic" : authorsLine(r.authors, 5)}</small>
@@ -199,14 +203,14 @@ function DesktopRow({ row: r, picks, selected, onSelect, miss }: RowProps) {
 }
 
 /** The same row on the phone: title, authors, take, one small line of dates, the saved mark. */
-function PhoneRow({ row: r, picks, selected, onSelect, miss }: RowProps) {
+function PhoneRow({ row: r, picks, selected, onSelect, miss, surface }: RowProps) {
   const adjacent = r.grade === "adjacent";
   return (
     <div className={cn("grid grid-cols-[14px_1fr_auto] gap-x-2.5 border-t border-border py-[11px]", adjacent && "text-muted-foreground")}>
       <div className="pt-[7px]">{!picks && <GradeDot grade={r.grade} grading={r.grading} />}</div>
       <div>
         <h3 className="font-serif text-[15.5px] leading-[1.3] font-semibold">
-          <Link to="/paper/$" params={{ _splat: r.id }}>
+          <Link to="/paper/$" params={{ _splat: r.id }} search={{ topic: surface }}>
             {r.title}
           </Link>
         </h3>
@@ -305,6 +309,8 @@ export function YearChip({ year, onChange }: { year: number | undefined; onChang
 
 export function SearchBox({ value, onChange, placeholder }: { value: string | undefined; onChange: (q: string | undefined) => void; placeholder: string }) {
   const [draft, setDraft] = useState(value ?? "");
+  // The route is the truth: Back and Forward change the query under the box.
+  useEffect(() => setDraft(value ?? ""), [value]);
   return (
     <form
       className="flex min-w-[160px] flex-1 items-center rounded-full border border-border px-3"
@@ -323,5 +329,29 @@ export function SearchBox({ value, onChange, placeholder }: { value: string | un
         className="min-h-[36px] w-full bg-transparent text-[13.5px] outline-none placeholder:text-muted-foreground"
       />
     </form>
+  );
+}
+
+const SORT_WORDS: { key: Sort; word: string }[] = [
+  { key: "added", word: "added" },
+  { key: "published", word: "published" },
+  { key: "title", word: "title" },
+];
+
+/** The sort as a select, for the phone where there are no column headings. */
+export function SortSelect({ sort, hasQuery, onChange }: { sort: Sort | undefined; hasQuery: boolean; onChange: (s: Sort) => void }) {
+  return (
+    <select
+      value={sort ?? (hasQuery ? "published" : "added")}
+      onChange={(e) => onChange(e.target.value as Sort)}
+      aria-label="Sort"
+      className="min-h-[36px] rounded-full border border-border bg-transparent px-3 text-[13px] text-muted-foreground"
+    >
+      {SORT_WORDS.map((s) => (
+        <option key={s.key} value={s.key}>
+          Sort by {s.word}
+        </option>
+      ))}
+    </select>
   );
 }

@@ -5,7 +5,7 @@ import { ArrowLeft, Settings, SlidersHorizontal } from "lucide-react";
 import type { TopicCard as Card, TopicKind } from "@/api/client";
 import { useVisit } from "@/api/mutations";
 import { topicsQuery } from "@/api/queries";
-import { Chip, PapersTable, SearchBox, YearChip } from "@/components/PapersTable";
+import { Chip, PapersTable, SearchBox, SortSelect, YearChip } from "@/components/PapersTable";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useDesktop } from "@/hooks/useDesktop";
 import { fmt, plural } from "@/lib/format";
@@ -178,6 +178,7 @@ export function TopicPage() {
         </Chip>
       )}
       <YearChip year={search.year} onChange={(year) => onFilter({ year })} />
+      {!desktop && <SortSelect sort={search.sort} hasQuery={!!search.q} onChange={(sort) => onFilter({ sort })} />}
     </>
   );
 
@@ -222,7 +223,7 @@ export function TopicPage() {
         )}
       </div>
       {card && (
-        <PapersTable filter={{ ...search, topic: slug }} onFilter={onFilter} watchTopics={watch} fixedTopic={card} />
+        <PapersTable filter={{ ...search, topic: slug }} onFilter={onFilter} watchTopics={watch} fixedTopic={card} surfaceTopic={slug} />
       )}
     </div>
   );

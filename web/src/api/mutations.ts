@@ -5,19 +5,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ok, type Ack, type LabelValue, type ReactionReason, type ReactionValue } from "./client";
 import { toast } from "@/lib/toast";
+import { invalidateAfterWrite } from "./invalidate";
 
 function useAck() {
   const qc = useQueryClient();
   return {
     onSuccess: (ack: Ack) => {
       toast(ack.message);
-      // The paper, the issues it is in, the tables and the topic counts may all have moved.
-      void qc.invalidateQueries({ queryKey: ["paper"] });
-      void qc.invalidateQueries({ queryKey: ["issue"] });
-      void qc.invalidateQueries({ queryKey: ["papers"] });
-      void qc.invalidateQueries({ queryKey: ["topics"] });
-      void qc.invalidateQueries({ queryKey: ["lookup"] });
-      void qc.invalidateQueries({ queryKey: ["settings"] });
+      invalidateAfterWrite(qc);
     },
     onError: (e: Error) => toast(e.message || "That did not save", "error"),
   };
@@ -90,6 +85,7 @@ export function useVisit() {
     mutationFn: async (slug: string) => {
       await api.POST("/api/topics/{slug}/visit", { params: { path: { slug } } });
     },
+    // A visit moves only the "new since" counts.
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["topics"] }),
   });
 }

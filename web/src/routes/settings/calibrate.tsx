@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
@@ -9,6 +9,7 @@ import { useDesktop } from "@/hooks/useDesktop";
 import { authorsLine, fmt } from "@/lib/format";
 import { topicColour } from "@/lib/topics";
 import { cn } from "@/lib/utils";
+import { writes } from "@/lib/writeQueue";
 import { BTN, BTN_PRIMARY, FIELD, Page } from "@/routes/settings/index";
 
 type FitChoice = "must_read" | "relevant" | "adjacent" | "not_relevant" | "unsure";
@@ -47,26 +48,42 @@ export function CalibratePage() {
   const topics = useQuery(topicsQuery);
   const watch = useMemo(() => (topics.data ?? []).filter((t) => t.kind === "watch"), [topics.data]);
   const items = session.data?.items ?? [];
-  const firstOpen = items.findIndex((i) => !i.answered_at);
-  const index = Math.min(Math.max(at ?? (firstOpen === -1 ? items.length : firstOpen), 0), items.length);
-  const go = (i: number) => void navigate({ search: { at: i }, replace: true });
 
-  if (session.isPending) return <Page title="Calibrate" back={{ to: "/settings/quality", label: "Quality" }}>{null}</Page>;
-  if (session.isError || !session.data) return <Page title="Calibrate" back={{ to: "/settings/quality", label: "Quality" }}><p className="text-destructive">No such session.</p></Page>;
-  if (items.length === 0) return <Page title="Calibrate" back={{ to: "/settings/quality", label: "Quality" }}><p className="text-muted-foreground">Nothing to draw: no Watch topic has graded papers in the last month.</p></Page>;
-  if (index >= items.length) return <Done items={items} sessionId={sessionId} go={go} watchNames={Object.fromEntries(watch.map((t) => [t.slug, t.name]))} />;
+  // The position is chosen once, from the route or the first unanswered paper, and moves only
+  // when the owner moves it: an answer landing must not jump to the next paper mid-thought.
+  const [index, setIndex] = useState<number | null>(at ?? null);
+  useEffect(() => {
+    if (at !== undefined) setIndex(at);
+  }, [at]);
+  useEffect(() => {
+    if (index === null && session.data) {
+      const firstOpen = session.data.items.findIndex((i) => !i.answered_at);
+      setIndex(firstOpen === -1 ? session.data.items.length : firstOpen);
+    }
+  }, [index, session.data]);
+  const go = (i: number) => {
+    setIndex(i);
+    void navigate({ search: { at: i }, replace: true });
+  };
 
-  const item = items[index]!;
+  const back = { to: "/settings/quality", label: "Quality" };
+  if (session.isPending || index === null) return <Page title="Calibrate" back={back}>{null}</Page>;
+  if (session.isError || !session.data) return <Page title="Calibrate" back={back}><p className="text-destructive">No such session.</p></Page>;
+  if (items.length === 0) return <Page title="Calibrate" back={back}><p className="text-muted-foreground">Nothing to draw: no Watch topic has graded papers in the last month.</p></Page>;
+  const current = Math.min(Math.max(index, 0), items.length);
+  if (current >= items.length) return <Done items={items} sessionId={sessionId} go={go} watchNames={Object.fromEntries(watch.map((t) => [t.slug, t.name]))} />;
+
+  const item = items[current]!;
   return (
     <Screen
       key={`${sessionId}-${item.position}`}
       sessionId={sessionId}
       item={item}
-      index={index}
+      index={current}
       total={items.length}
       watch={watch}
-      onBack={index > 0 ? () => go(index - 1) : undefined}
-      onNext={() => go(index + 1)}
+      onBack={current > 0 ? () => go(current - 1) : undefined}
+      onNext={() => go(current + 1)}
     />
   );
 }
@@ -87,26 +104,55 @@ function Screen({ sessionId, item, index, total, watch, onBack, onNext }: { sess
   const [draft, setDraft] = useState<Draft>(() => fromItem(item));
   const [saved, setSaved] = useState<"idle" | "saving" | "saved" | "waiting">(item.answered_at ? "saved" : "idle");
   const answer = useAnswer(sessionId);
-  const noteTimer = useRef<number | null>(null);
   const required = item.topic;
   const ordered = [...watch].sort((a, b) => Number(b.slug === required) - Number(a.slug === required));
   const [abstractOpen, setAbstractOpen] = useState(desktop);
 
-  function persist(next: Draft) {
-    setDraft(next);
-    if (!next.fit[required]) {
+  // The newest draft, what was last sent, and the note's timer. Every write carries the whole
+  // answer, so only the newest draft is ever sent, and writes for this paper go out in order.
+  const latest = useRef(draft);
+  const sent = useRef<string | null>(item.answered_at ? JSON.stringify(toAnswer(fromItem(item))) : null);
+  const timer = useRef<number | null>(null);
+  const { mutateAsync } = answer;
+
+  const flush = useCallback(() => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    const d = latest.current;
+    if (!d.fit[required]) {
       setSaved("waiting");
       return;
     }
+    const body = toAnswer(d);
+    const json = JSON.stringify(body);
+    if (json === sent.current) return;
+    sent.current = json;
     setSaved("saving");
-    answer.mutate({ position: item.position, answer: toAnswer(next) }, { onSuccess: () => setSaved("saved"), onError: () => setSaved("idle") });
+    writes.enqueue(`calibrate|${sessionId}|${item.position}`, () => mutateAsync({ position: item.position, answer: body })).then(
+      () => {
+        if (sent.current === json) setSaved("saved");
+      },
+      () => {
+        if (sent.current === json) {
+          sent.current = null;
+          setSaved("idle");
+        }
+      },
+    );
+  }, [required, sessionId, item.position, mutateAsync]);
+
+  function persist(next: Draft, debounce = false) {
+    latest.current = next;
+    setDraft(next);
+    if (timer.current) window.clearTimeout(timer.current);
+    if (debounce) timer.current = window.setTimeout(flush, 800);
+    else flush();
   }
 
-  function setNote(note: string) {
-    setDraft((d) => ({ ...d, note }));
-    if (noteTimer.current) window.clearTimeout(noteTimer.current);
-    noteTimer.current = window.setTimeout(() => persist({ ...draft, note }), 800);
-  }
+  const setNote = (note: string) => persist({ ...latest.current, note }, true);
+
+  // Leaving the paper (Next, Back, the Quality link) sends whatever the timer still held.
+  useEffect(() => () => flush(), [flush]);
 
   // Arrows move between papers unless the note has focus.
   useEffect(() => {
@@ -165,10 +211,10 @@ function Screen({ sessionId, item, index, total, watch, onBack, onNext }: { sess
                 </div>
                 <p className="mt-1 font-serif text-[15px] leading-[1.5] text-body">{t.text}</p>
                 <div className="mt-2 flex items-center gap-1.5" role="group" aria-label={`Is the take for ${name} accurate?`}>
-                  <Chip on={draft.takes[t.id] === true} onClick={() => persist({ ...draft, takes: { ...draft.takes, [t.id]: true } })}>
+                  <Chip on={draft.takes[t.id] === true} onClick={() => persist({ ...latest.current, takes: { ...draft.takes, [t.id]: true } })}>
                     Accurate
                   </Chip>
-                  <Chip on={draft.takes[t.id] === false} onClick={() => persist({ ...draft, takes: { ...draft.takes, [t.id]: false } })}>
+                  <Chip on={draft.takes[t.id] === false} onClick={() => persist({ ...latest.current, takes: { ...draft.takes, [t.id]: false } })}>
                     Off
                   </Chip>
                 </div>
@@ -189,21 +235,21 @@ function Screen({ sessionId, item, index, total, watch, onBack, onNext }: { sess
                 {t.slug === required ? <span className="ml-2 font-normal text-muted-foreground">required</span> : null}
               </div>
               <div className="flex flex-wrap gap-1.5">
-                <Chip on={about} onClick={() => persist({ ...draft, fit: { ...draft.fit, [t.slug]: about ? c! : "relevant" } })}>
+                <Chip on={about} onClick={() => persist({ ...latest.current, fit: { ...draft.fit, [t.slug]: about ? c! : "relevant" } })}>
                   About it
                 </Chip>
                 {about && (
                   <>
-                    <Chip on={c === "must_read"} small onClick={() => persist({ ...draft, fit: { ...draft.fit, [t.slug]: "must_read" } })}>
+                    <Chip on={c === "must_read"} small onClick={() => persist({ ...latest.current, fit: { ...draft.fit, [t.slug]: "must_read" } })}>
                       must read
                     </Chip>
-                    <Chip on={c === "relevant"} small onClick={() => persist({ ...draft, fit: { ...draft.fit, [t.slug]: "relevant" } })}>
+                    <Chip on={c === "relevant"} small onClick={() => persist({ ...latest.current, fit: { ...draft.fit, [t.slug]: "relevant" } })}>
                       worth reading
                     </Chip>
                   </>
                 )}
                 {FIT_CHOICES.map((f) => (
-                  <Chip key={f.value} on={c === f.value} onClick={() => persist({ ...draft, fit: { ...draft.fit, [t.slug]: f.value } })}>
+                  <Chip key={f.value} on={c === f.value} onClick={() => persist({ ...latest.current, fit: { ...draft.fit, [t.slug]: f.value } })}>
                     {f.word}
                   </Chip>
                 ))}
@@ -218,7 +264,7 @@ function Screen({ sessionId, item, index, total, watch, onBack, onNext }: { sess
           </div>
           <div className="flex flex-wrap gap-1.5">
             {VALUE_CHOICES.map((v) => (
-              <Chip key={v.value} on={draft.value === v.value} onClick={() => persist({ ...draft, value: draft.value === v.value ? null : v.value })}>
+              <Chip key={v.value} on={draft.value === v.value} onClick={() => persist({ ...latest.current, value: draft.value === v.value ? null : v.value })}>
                 {v.word}
               </Chip>
             ))}
@@ -229,7 +275,7 @@ function Screen({ sessionId, item, index, total, watch, onBack, onNext }: { sess
           <span className="mb-1 block text-[12.5px] font-medium">
             A note <span className="ml-1 font-normal text-muted-foreground">optional</span>
           </span>
-          <textarea className={cn(FIELD, "min-h-[64px]")} value={draft.note} onChange={(e) => setNote(e.target.value)} onBlur={() => persist(draft)} placeholder="Why it matters, or what the take got wrong" />
+          <textarea className={cn(FIELD, "min-h-[64px]")} value={draft.note} onChange={(e) => setNote(e.target.value)} onBlur={flush} placeholder="Why it matters, or what the take got wrong" />
         </label>
       </div>
 

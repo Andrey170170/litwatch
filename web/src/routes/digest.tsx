@@ -89,7 +89,7 @@ export function DigestPage() {
       {desktop && (
         <aside className="sticky top-[49px] max-h-[calc(100dvh-49px)] overflow-y-auto bg-card px-8 pt-6 pb-10">
           {search.paper ? (
-            <PaperView id={search.paper} surfaceTopic={paperTopic(open.data, search.paper)} compact />
+            <PaperView id={search.paper} surfaceTopic={search.topic ?? paperTopic(open.data, search.paper)} compact />
           ) : (
             <p className="mt-10 text-center font-serif text-[16px] italic text-muted-foreground">Open an entry to read it here.</p>
           )}
@@ -208,7 +208,7 @@ function EntryView({ entry, open }: { entry: EntryT; open: boolean }) {
   const navigate = useNavigate({ from: "/" });
   const meta = [authorsLine(entry.authors), entry.revised ? "revised" : fmt.published(entry.published)].filter(Boolean);
   const title = desktop ? (
-    <Link to="/" search={(prev) => ({ ...prev, paper: entry.paper_id })} className="hover:underline decoration-border">
+    <Link to="/" search={(prev) => ({ ...prev, paper: entry.paper_id, topic: entry.topic })} className="hover:underline decoration-border">
       {entry.title}
     </Link>
   ) : (

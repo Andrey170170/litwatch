@@ -3,12 +3,11 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, ok } from "@/api/client";
 import { topicsQuery } from "@/api/queries";
-import { Chip, MissLink, PapersTable, SearchBox, YearChip, type TableFilter } from "@/components/PapersTable";
+import { Chip, MissLink, PapersTable, SearchBox, SortSelect, YearChip, type TableFilter } from "@/components/PapersTable";
 import { GradeDot } from "@/components/paper-bits";
 import { FilterSheet } from "@/routes/topics";
 import { useDesktop } from "@/hooks/useDesktop";
 import { authorsLine, fmt } from "@/lib/format";
-import type { Sort } from "@/lib/search";
 import { Link } from "@tanstack/react-router";
 
 /** The whole collection as one table, with the miss flow under it (DESIGN.md "Papers"). */
@@ -21,11 +20,6 @@ export function PapersPage() {
   const onFilter = (patch: Partial<TableFilter & { lookup: string }>) =>
     void navigate({ search: (prev) => ({ ...prev, page: undefined, ...patch }) });
 
-  const sorts: { key: Sort; word: string }[] = [
-    { key: "added", word: "Added" },
-    { key: "published", word: "Published" },
-    { key: "title", word: "Title" },
-  ];
   const filters = (
     <>
       <select
@@ -45,20 +39,7 @@ export function PapersPage() {
         Saved
       </Chip>
       <YearChip year={search.year} onChange={(year) => onFilter({ year })} />
-      {!desktop && (
-        <select
-          value={search.sort ?? (search.q ? "published" : "added")}
-          onChange={(e) => onFilter({ sort: e.target.value as Sort })}
-          aria-label="Sort"
-          className="min-h-[36px] rounded-full border border-border bg-transparent px-3 text-[13px] text-muted-foreground"
-        >
-          {sorts.map((s) => (
-            <option key={s.key} value={s.key}>
-              Sort by {s.word.toLowerCase()}
-            </option>
-          ))}
-        </select>
-      )}
+      {!desktop && <SortSelect sort={search.sort} hasQuery={!!search.q} onChange={(sort) => onFilter({ sort })} />}
     </>
   );
 
@@ -74,6 +55,7 @@ export function PapersPage() {
         onFilter={onFilter}
         watchTopics={watch}
         showMiss={!!search.q}
+        surfaceTopic={null}
         above={search.lookup ? <LookupBand q={search.lookup} watch={watch} /> : null}
       />
       <LookupPrompt onLookup={(q) => onFilter({ lookup: q })} initial={search.lookup} />

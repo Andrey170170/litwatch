@@ -11,7 +11,10 @@ import { cn } from "@/lib/utils";
 
 type Props = {
   id: string;
-  /** The topic of the surface the paper was opened from; decides which topic the thumbs speak for. */
+  /**
+   * The topic of the surface the paper was opened from, which the thumbs speak for: a slug,
+   * "none" for a plain search result, or absent to take the first Watch topic shown.
+   */
   surfaceTopic?: string;
   /** In the reading pane: a smaller title. */
   compact?: boolean;
@@ -25,7 +28,7 @@ export function PaperView({ id, surfaceTopic, compact }: Props) {
   const p = q.data;
   const watch = p.topics.filter((t) => t.kind === "watch" && t.grade && t.grade !== "none");
   const shown = p.topics.filter((t) => (t.kind === "watch" ? t.grade === "must_read" || t.grade === "relevant" : t.member));
-  const thumbsTopic = surfaceTopic ?? shown.find((t) => t.kind === "watch")?.slug ?? null;
+  const thumbsTopic = surfaceTopic === "none" ? null : (surfaceTopic ?? shown.find((t) => t.kind === "watch")?.slug ?? null);
   const reactionOn = thumbsTopic ? p.topics.find((t) => t.slug === thumbsTopic) : null;
 
   return (

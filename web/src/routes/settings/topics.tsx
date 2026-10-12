@@ -117,7 +117,8 @@ function TopicEditor({ stored, base, isNew }: { stored: Topic | undefined; base:
   const [slugTouched, setSlugTouched] = useState(!isNew);
   const [savedWatch, setSavedWatch] = useState<Topic | null>(null);
   const save = useSaveTopic();
-  const counts = useQuery({ ...keywordsQuery(stored?.slug ?? ""), enabled: !!stored });
+  const patterns = (draft.keywords ?? []).map((k) => k.trim()).filter(Boolean);
+  const counts = useQuery({ ...keywordsQuery(stored?.slug ?? (draft.slug.trim() || "new"), patterns), enabled: patterns.length > 0 });
   const set = <K extends keyof Topic>(k: K, v: Topic[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const dirty = JSON.stringify(draft) !== JSON.stringify({ ...base, keywords: base.keywords ?? [] });
   const valid = draft.slug.trim() !== "" && draft.name.trim() !== "" && draft.subject.trim() !== "";
@@ -204,13 +205,8 @@ function TopicEditor({ stored, base, isNew }: { stored: Topic | undefined; base:
             <textarea className={cn(FIELD, "min-h-[100px]")} value={draft.interests ?? ""} onChange={(e) => set("interests", e.target.value)} />
           </Field>
         )}
-        <Field label="Keywords" hint="Patterns matched against titles and abstracts; a match makes a paper a candidate without a model. Counts are over the stored collection for the saved patterns.">
-          <Keywords
-            value={draft.keywords ?? []}
-            counts={counts.data ?? {}}
-            saved={new Set(stored?.keywords ?? [])}
-            onChange={(k) => set("keywords", k)}
-          />
+        <Field label="Keywords" hint="Patterns matched against titles and abstracts; a match makes a paper a candidate without a model. Counts are over the stored collection, for the patterns as drafted.">
+          <Keywords value={draft.keywords ?? []} counts={counts.data ?? {}} onChange={(k) => set("keywords", k)} />
         </Field>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
@@ -243,12 +239,12 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function Keywords({ value, counts, saved, onChange }: { value: string[]; counts: Record<string, number>; saved: Set<string>; onChange: (k: string[]) => void }) {
+function Keywords({ value, counts, onChange }: { value: string[]; counts: Record<string, number>; onChange: (k: string[]) => void }) {
   const [adding, setAdding] = useState("");
   return (
     <div className="rounded-lg border border-border">
       {value.map((k, i) => {
-        const n = counts[k];
+        const n = counts[k.trim()];
         return (
           <div key={i} className="flex items-center gap-2 border-b border-border px-2 py-1">
             <input
@@ -258,7 +254,7 @@ function Keywords({ value, counts, saved, onChange }: { value: string[]; counts:
               aria-label={`Keyword ${i + 1}`}
             />
             <span className="tabular w-24 text-right text-[12px] text-muted-foreground">
-              {!saved.has(k) ? "unsaved" : n === undefined ? "…" : n < 0 ? "bad pattern" : `${n} ${n === 1 ? "paper" : "papers"}`}
+              {!k.trim() ? "" : n === undefined ? "…" : n < 0 ? "not a regex" : `${n} ${n === 1 ? "paper" : "papers"}`}
             </span>
             <button type="button" className="hit text-muted-foreground hover:text-foreground" aria-label="Remove keyword" onClick={() => onChange(value.filter((_, j) => j !== i))}>
               ×
@@ -285,47 +281,56 @@ function Keywords({ value, counts, saved, onChange }: { value: string[]; counts:
   );
 }
 
-/** Preview a draft against the labelled papers and misses: a dry run, polled until its metrics arrive. */
+/**
+ * Preview a draft against the labelled papers and misses: a dry run, polled until its metrics
+ * arrive. The API returns no evaluation id, so the run is the first preview evaluation for
+ * this topic started after the request was posted; a new request starts the search afresh.
+ */
 function Preview({ draft }: { draft: Topic }) {
   const preview = usePreview();
   const qc = useQueryClient();
-  const [started, setStarted] = useState<{ at: string; estimate: RerunEstimate } | null>(null);
-  const [evalId, setEvalId] = useState<number | null>(null);
-  const list = useQuery({ ...evaluationsQuery("preview"), enabled: !!started && evalId === null, refetchInterval: 3000 });
-  const result = useQuery({ ...evaluationQuery(evalId ?? 0), enabled: evalId !== null, refetchInterval: (q) => (q.state.data?.finished ? false : 3000) });
+  const [run, setRun] = useState<{ at: number; estimate: RerunEstimate; evalId: number | null } | null>(null);
+  const list = useQuery({ ...evaluationsQuery("preview"), enabled: !!run && run.evalId === null, refetchInterval: 3000 });
+  const result = useQuery({
+    ...evaluationQuery(run?.evalId ?? 0),
+    enabled: !!run && run.evalId !== null,
+    refetchInterval: (q) => (q.state.data?.finished ? false : 3000),
+  });
 
   useEffect(() => {
-    if (!started || evalId !== null || !list.data) return;
-    const mine = list.data.find((e) => e.params?.topic === draft.slug && e.started_at >= started.at);
-    if (mine) setEvalId(mine.id);
-  }, [list.data, started, evalId, draft.slug]);
+    if (!run || run.evalId !== null || !list.data) return;
+    // Two seconds of slack for the server's clock against this one's.
+    const mine = list.data.find((e) => e.params?.topic === draft.slug && new Date(e.started_at).getTime() >= run.at - 2000);
+    if (mine) setRun((r) => (r && r.at === run.at ? { ...r, evalId: mine.id } : r));
+  }, [list.data, run, draft.slug]);
 
-  function run() {
-    setEvalId(null);
+  function start() {
+    const at = Date.now();
+    setRun(null);
     preview.mutate(draft, {
       onSuccess: (estimate) => {
-        setStarted({ at: new Date(Date.now() - 5000).toISOString(), estimate });
+        setRun({ at, estimate, evalId: null });
         void qc.invalidateQueries({ queryKey: ["settings", "evaluations", "preview"] });
       },
     });
   }
 
-  const metrics = result.data?.finished ? result.data.topics?.[draft.slug] : undefined;
+  const metrics = run?.evalId !== null && result.data?.finished ? result.data.topics?.[draft.slug] : undefined;
   return (
     <div className="border-t border-border pt-4">
       <H2 note="a dry run of this draft over the papers you have labelled and the misses you reported; nothing is stored">Preview</H2>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={BTN} disabled={preview.isPending} onClick={run}>
+        <button type="button" className={BTN} disabled={preview.isPending} onClick={start}>
           {preview.isPending ? "Starting…" : "Preview this draft"}
         </button>
-        {started && (
+        {run && (
           <span className="text-[12.5px] text-muted-foreground">
-            {started.estimate.papers} {started.estimate.papers === 1 ? "paper" : "papers"}, about {money(started.estimate.cost)}
+            {run.estimate.papers} {run.estimate.papers === 1 ? "paper" : "papers"}, about {money(run.estimate.cost)}
             {!metrics && " · running…"}
           </span>
         )}
       </div>
-      {metrics && <MetricsView m={metrics} evaluation={result.data!} />}
+      {metrics && result.data && <MetricsView m={metrics} evaluation={result.data} />}
     </div>
   );
 }

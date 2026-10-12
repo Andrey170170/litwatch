@@ -311,7 +311,9 @@ export interface paths {
         };
         /**
          * Keywords
-         * @description How many stored papers each keyword pattern matches; -1 for one Postgres rejects.
+         * @description How many stored papers each keyword pattern matches, as the keyword audit matches:
+         *     the topic's saved patterns, or the `pattern`s given (an editor's unsaved draft). A
+         *     pattern that is not a valid regular expression counts -1.
          */
         get: operations["keywords_api_settings_topics__slug__keywords_get"];
         put?: never;
@@ -985,6 +987,10 @@ export interface components {
             reaction_reason?: components["schemas"]["ReactionReason"] | null;
             /** History */
             history: components["schemas"]["HistoryItem"][];
+            /** Versions */
+            versions?: {
+                [key: string]: unknown;
+            }[];
             /** Triage */
             triage?: {
                 [key: string]: unknown;
@@ -1861,7 +1867,9 @@ export interface operations {
     };
     keywords_api_settings_topics__slug__keywords_get: {
         parameters: {
-            query?: never;
+            query?: {
+                pattern?: string[] | null;
+            };
             header?: never;
             path: {
                 slug: string;
