@@ -123,6 +123,11 @@ export async function copyText(text: string, said: string) {
 export function download(text: string, name: string) {
   const url = URL.createObjectURL(new Blob([text], { type: "application/x-bibtex" }));
   const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  // Safari saves an empty file when the URL is revoked in the same task as the click.
+  window.setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 1000);
 }

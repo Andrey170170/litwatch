@@ -2,6 +2,7 @@
 import { Link } from "@tanstack/react-router";
 import type { Grade } from "@/api/client";
 import { bibtexFor, copyText, useSave } from "@/api/mutations";
+import { toast } from "@/lib/toast";
 import { topicColour } from "@/lib/topics";
 import { cn } from "@/lib/utils";
 
@@ -86,7 +87,13 @@ export function pdfUrl(id: string) {
 }
 
 export function BibtexCopy({ ids, as = "link" }: { ids: string[]; as?: "link" | "button" }) {
-  const copy = async () => copyText(await bibtexFor(ids), "BibTeX copied");
+  const copy = async () => {
+    try {
+      await copyText(await bibtexFor(ids), "BibTeX copied");
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : "Could not fetch the BibTeX", "error");
+    }
+  };
   if (as === "button")
     return (
       <button type="button" onClick={copy} className="min-h-[40px] rounded-full border border-border px-4 text-[13.5px] hover:bg-muted">

@@ -211,10 +211,10 @@ function Screen({ sessionId, item, index, total, watch, onBack, onNext }: { sess
                 </div>
                 <p className="mt-1 font-serif text-[15px] leading-[1.5] text-body">{t.text}</p>
                 <div className="mt-2 flex items-center gap-1.5" role="group" aria-label={`Is the take for ${name} accurate?`}>
-                  <Chip on={draft.takes[t.id] === true} onClick={() => persist({ ...latest.current, takes: { ...draft.takes, [t.id]: true } })}>
+                  <Chip on={draft.takes[t.id] === true} onClick={() => persist({ ...latest.current, takes: { ...latest.current.takes, [t.id]: true } })}>
                     Accurate
                   </Chip>
-                  <Chip on={draft.takes[t.id] === false} onClick={() => persist({ ...latest.current, takes: { ...draft.takes, [t.id]: false } })}>
+                  <Chip on={draft.takes[t.id] === false} onClick={() => persist({ ...latest.current, takes: { ...latest.current.takes, [t.id]: false } })}>
                     Off
                   </Chip>
                 </div>
@@ -235,21 +235,21 @@ function Screen({ sessionId, item, index, total, watch, onBack, onNext }: { sess
                 {t.slug === required ? <span className="ml-2 font-normal text-muted-foreground">required</span> : null}
               </div>
               <div className="flex flex-wrap gap-1.5">
-                <Chip on={about} onClick={() => persist({ ...latest.current, fit: { ...draft.fit, [t.slug]: about ? c! : "relevant" } })}>
+                <Chip on={about} onClick={() => persist({ ...latest.current, fit: { ...latest.current.fit, [t.slug]: about ? c! : "relevant" } })}>
                   About it
                 </Chip>
                 {about && (
                   <>
-                    <Chip on={c === "must_read"} small onClick={() => persist({ ...latest.current, fit: { ...draft.fit, [t.slug]: "must_read" } })}>
+                    <Chip on={c === "must_read"} small onClick={() => persist({ ...latest.current, fit: { ...latest.current.fit, [t.slug]: "must_read" } })}>
                       must read
                     </Chip>
-                    <Chip on={c === "relevant"} small onClick={() => persist({ ...latest.current, fit: { ...draft.fit, [t.slug]: "relevant" } })}>
+                    <Chip on={c === "relevant"} small onClick={() => persist({ ...latest.current, fit: { ...latest.current.fit, [t.slug]: "relevant" } })}>
                       worth reading
                     </Chip>
                   </>
                 )}
                 {FIT_CHOICES.map((f) => (
-                  <Chip key={f.value} on={c === f.value} onClick={() => persist({ ...latest.current, fit: { ...draft.fit, [t.slug]: f.value } })}>
+                  <Chip key={f.value} on={c === f.value} onClick={() => persist({ ...latest.current, fit: { ...latest.current.fit, [t.slug]: f.value } })}>
                     {f.word}
                   </Chip>
                 ))}
@@ -264,7 +264,7 @@ function Screen({ sessionId, item, index, total, watch, onBack, onNext }: { sess
           </div>
           <div className="flex flex-wrap gap-1.5">
             {VALUE_CHOICES.map((v) => (
-              <Chip key={v.value} on={draft.value === v.value} onClick={() => persist({ ...latest.current, value: draft.value === v.value ? null : v.value })}>
+              <Chip key={v.value} on={draft.value === v.value} onClick={() => persist({ ...latest.current, value: latest.current.value === v.value ? null : v.value })}>
                 {v.word}
               </Chip>
             ))}

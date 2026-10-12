@@ -10,6 +10,7 @@ import { GradeDot } from "@/components/paper-bits";
 import { useDesktop } from "@/hooks/useDesktop";
 import { authorsLine, fmt } from "@/lib/format";
 import type { Sort, TableSearch } from "@/lib/search";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 export const PAGE_SIZE = 50;
@@ -51,8 +52,12 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
   }
 
   async function exportBibtex() {
-    const text = selected.size ? await bibtexFor([...selected]) : await bibtexForFilter(filter);
-    download(text, `litwatch${fixedTopic ? `-${fixedTopic.slug}` : ""}.bib`);
+    try {
+      const text = selected.size ? await bibtexFor([...selected]) : await bibtexForFilter(filter);
+      download(text, `litwatch${fixedTopic ? `-${fixedTopic.slug}` : ""}.bib`);
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : "Could not fetch the BibTeX", "error");
+    }
   }
 
   const sort: Sort = filter.sort ?? (filter.q ? "published" : "added");
