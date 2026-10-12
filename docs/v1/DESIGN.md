@@ -15,12 +15,12 @@ produces this is the kitchen; it is reachable through Settings and not on the ta
 
 | Principle | What it rules out |
 | --- | --- |
-| **One voice.** Litwatch speaks as itself: "this paper does X; it matters for your question because Y." | Grade names, judge and check, split, model names, reason strings on a reading page. A split verdict is shown at the standing grade with no mark. |
+| **One voice.** Litwatch speaks as itself: "this paper does X; it matters for your question because Y." | Grade names, judge and check, split, model names, reason strings on a reading page, with two exceptions: the status line's split count and the folded "how this was chosen" on a paper page. A split verdict is shown at the standing grade with no mark. |
 | **Written where it is read, tabular where it is browsed.** The Digest is prose with headlines; a topic is a table. | Verdict rows on the Digest; prose where a sortable list is wanted. |
 | **Offered, never asked.** Feedback is always available and never requested. | Label queues, "mark as read", anything that accumulates as a backlog. |
-| **All quiet, at a glance.** One line says whether the run finished and whether the graders seriously disagreed. | Run logs, costs and recall on the front. |
+| **All quiet, at a glance.** One line says whether the run finished and whether it left anything for Quality. | Run logs, costs and recall on the front. |
 | **Kitchen behind a door.** Topic configuration, quality, runs, integrations, misses are Settings pages. | Quality and System as top-level navigation. |
-| **Self-contained.** With no integration connected, every page works. | Any page that assumes the archive, Nextcloud, n8n or a deep-card provider. |
+| **Self-contained.** With no integration connected, every page works. | Any page that assumes the archive, Nextcloud, n8n or a deep-card provider. A stored deep card is still shown; only the request button needs a provider. |
 | **Phone first, desktop whole.** One column on the phone; on a desktop the width is used for a reading pane and real tables. | A desktop that is a stretched phone, or a phone that is a cut-down desktop. |
 
 ## Navigation
@@ -33,7 +33,8 @@ the gear appears in front of it.
 ## Pages
 
 **Digest.** A feed of issues, newest open, earlier ones folded to date and lede. The masthead carries the open issue's
-date and the status line. This week's weekly issue is pinned as a compact row above the feed from Monday to Sunday. A
+date and the status line. The most recent weekly issue is pinned as a compact row above the feed, labelled with its
+week, and absent until one exists. Before any issue exists the Digest says when the first run is. A
 daily issue is: lede; one section per Watch topic, in the owner's order, with lead entries (must read, a two or three
 sentence take) and brief entries (relevant, one sentence); a fold line counting the adjacent papers and linking to the
 topic pages; one section per daily Radar topic with its review; a closing line. A topic with nothing new is one line,
@@ -41,8 +42,9 @@ never an empty section. On a day with no issue the last one is shown and the mas
 "mark read". On a desktop the feed keeps its reading width and the right half is a reading pane.
 
 **Paper.** Title; topic chips in the topic's colour; authors, arXiv id, dates, version; the action bar (Save, arXiv,
-PDF, Copy BibTeX); the take; the abstract; the deep card when one exists, a "Request a deep card" button when a provider
-is configured, nothing otherwise; published version; history; "How this was chosen" as one quiet link that unfolds the
+PDF, Copy BibTeX); the take, one per Watch topic the paper is relevant to, each under its topic's chip; the abstract;
+the deep card when one is stored, else a "Request a deep card" button while a deep-card integration is loaded, else
+nothing; published version; history; "How this was chosen" as one quiet link that unfolds the
 triage answer, both opinions by model name, the reconciled grade and an optional label row; thumbs at the end.
 
 **Topics.** On the phone one screen of cards grouped Watch, Radar, Pulse in the Digest's order: colour bar, name, kind
@@ -53,16 +55,21 @@ within, Export BibTeX, and a gear to the editor in Settings. A Radar or Pulse to
 above the table, which holds the picks.
 
 **Papers.** The whole collection as the same table with a search box and filters for topic, saved, year and source.
-Saved is the filter that makes it the library. Export BibTeX acts on the filter or selection. The archive's hits merge in
-when it is connected; an archive-only row is marked outside the collection with Fetch as its action; archive-only hits
-sit in their own band under rows that litwatch's filters apply to. The amber link "Should have been found for a topic…"
+Saved is the filter that makes it the library. Export BibTeX acts on the filter or selection and covers collection rows,
+counting the archive-only rows it skipped. Without a query the table sorts by added date; a search sorts by published
+date, newest first, or by the provider's score under "best match" when every hit in the band has one. The archive's hits
+merge in when it is connected; an archive-only row is marked outside the collection with Fetch as its action and no
+added date; archive-only hits sit in their own band under the collection rows, and the year filter is the only one
+that reaches them. "Should have been found for a topic…" on a row, and "Look up an arXiv id or link" under the table,
+are the miss flow; the Android share target lands on the lookup with the link filled in. The amber link "Should have been found for a topic…"
 on a row starts a miss report; "Look up an arXiv id or link" under the table fetches a paper and offers the same.
 
 **Settings.** An index on the left, plain pages on the right, in the interface sans. Topics (list and editor: subject,
-rubric, keywords with match counts; preview against labelled papers and misses; scoped re-runs after saving; pause and
-order). Quality (last night's splits with both opinions and the label row; ungraded candidates with "grade it now";
-recall and precision per Watch topic over evaluation runs, each number a link to its papers; correction rate from
-reactions; "draw a calibration sample"). Misses (the stage trace per report). Runs and cost. Integrations (one card per
+rubric, keywords with match counts; preview against labelled papers and misses; scoped re-runs after saving; pause,
+order and colour). Quality (at the top, last night: a failure summary linking to the run when it failed, the splits with
+both opinions and the label row, ungraded candidates with "grade it now", a review that failed; below, recall and
+precision per Watch topic over evaluation runs, each number a link to its papers; correction rate from reactions; "draw
+a calibration sample"). Misses (the stage trace per report). Runs and cost. Integrations (one card per
 module: enabled, description, cursor lag, failures with last error, retry and skip, search provider statistics; the
 outbox table under them). Configuration (the loaded `litwatch.toml`, secrets masked, read-only).
 
@@ -93,7 +100,8 @@ Grade dots on tables, never with a word beside them: must read `--foreground`, r
 
 ### Topic colours
 
-Each topic gets one colour at creation, from this list in order, and keeps it. It appears as the rule above the topic's
+Each topic gets one colour at creation, the first of this list not in use, stored on the topic and changeable in its
+editor; its position in the list is the owner's order. It appears as the rule above the topic's
 section on the Digest, the bar on its card, the bar on its rail entry when chosen, its name on its page, and its chip
 on a paper page.
 
@@ -129,25 +137,36 @@ More than eight topics cycle; a paused topic shows grey.
 
 ### Anatomy
 
-**Status line** (the printer's line under the masthead; the chip in the header elsewhere): a dot and a sentence.
-Green: "530 read · all quiet". Amber: "530 read · 2 disagreements", when the two graders were more than one grade
-apart on a paper shown. Red: "last night's run failed · showing Tuesday". It always opens Quality.
+**Status line** (the printer's line under the masthead; the chip in the header elsewhere): a dot and a sentence about
+the latest nightly run. Green: "530 read · all quiet", the count being papers triaged in that run. Amber, with a
+count, when the run finished but left something for Quality: "530 read · 2 disagreements" (split verdicts among the
+papers shown; which splits count is spec decision 14), "· 1 ungraded", "· interpretability review failed". Red: "last
+night's run failed · showing Tuesday", also when no run finished in the last 36 hours. Grey while running: "running
+since 06:02"; on a fresh install "no run yet". Red wins over amber. It always opens Quality, and opening an old issue
+does not change it.
 
 **Entry** (one paper on the Digest): title; meta line (authors with "and N more", date, "revised, first seen …" when
 so); take; action row: Read, arXiv, PDF, Save or Saved, BibTeX, then the thumbs at the right edge. On a desktop the
 title is the link and Read is dropped. Lead and brief entries differ in title size and take length only.
 
-**Thumbs**: two 28 px targets (32 on the phone), quiet until used. A thumb down opens the reasons as chips: Not for
-me, Unrelated to the topic, Already knew it, Overrated; the first tap on a reason closes it, with "Remembered for
-<topic>. Changes nothing today." A thumb up stands alone; a long press offers Great find.
+**Thumbs**: two 16 px glyphs in 40 px hit areas, quiet until used, one pair per Watch topic the paper is shown for. A
+thumb down opens the reasons as chips: Not for me, Unrelated to the topic, Already knew it, Overrated; the first tap on
+a reason closes it. The acknowledgement says what happened: "Remembered for <topic>" for the reasons that write no
+label, "Marked not relevant for <topic>; it leaves the library" for Unrelated. A thumb up stands alone; a second tap on
+an active thumb up offers Great find, a third clears it, so every state is reachable by tap and by keyboard. Tapping an
+active thumb clears the reaction and the label it wrote, and only that one.
 
-**Row** (one paper in a table): grade dot; title with authors under it in the meta style, or "near the topic" for an
-adjacent row; published; added; take; Saved; link icons (arXiv, PDF, code when present). Sort by any column; default
-Added descending. Adjacent rows are hidden until "Also adjacent" is on, and shown in the muted colour.
+**Row** (one paper in a table): grade dot (ink must read, green relevant, pale adjacent, an empty ring for a paper
+that is no topic's candidate; the word "grading" in the muted colour for a pending candidate; Radar and Pulse picks
+carry no dot); title with authors under it in the meta style, or "near the topic" for an adjacent row; published; added
+(empty for an archive-only row); take, empty where there is none; Saved; link icons (arXiv, PDF, code when present).
+Sort by any column; default Added descending. A topic table shows relevant and above, adjacent rows until "Also
+adjacent" is on in the muted colour, and nothing below; the Papers table shows every paper.
 
 **Topic card**: a 4 px colour bar; name with kind and cadence in the meta style; the new line ("3 new since Tuesday,
-1 saved"; "This week's review, Monday"; "Nothing new" in the muted colour); counts right-aligned (papers and saved for
-Watch; picks and saved for Radar and Pulse). **Rail entry**: a 3 px bar that shows only when chosen, name, and either a
+1 saved": entries in issues since the topic was last opened, which the server remembers so every device agrees; "This
+week's review, Monday"; "Nothing new" in the muted colour); counts right-aligned (papers and saved for Watch; picks and
+saved for Radar and Pulse). **Rail entry**: a 3 px bar that shows only when chosen, name, and either a
 "N new" count in bold or the cadence in the muted colour.
 
 **Issue in the feed**: date in serif, "weekly" in the meta style when so, "Open" at the right, the lede under it.
@@ -160,5 +179,6 @@ event, All events.
 
 One column, 16 px gutters, the three-button footer, the gear in the header. The paper page is a full page with a back
 link. Table rows stack as title, authors, take, one small line of dates, the saved mark; sort and filters sit in a sheet
-behind one button. Thumbs and buttons are at least 40 px tall. The app is an installable PWA and the Android share
-target lands on the miss flow with the link already looked up (spec, decision 4).
+behind one button. Every control has a hit area of at least 40 px. The app is an installable PWA; the Android share
+target opens Papers with the shared link looked up, and the token prompt on first use keeps that route (spec,
+decision 4).
