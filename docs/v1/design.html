@@ -53,7 +53,7 @@
   .chips { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 8px 0 4px; }
 
   /* ---- the app skin: one look, used by every frame ---- */
-  .lw { --bg: #ffffff; --fg: #171717; --mt: #6b6b68; --bd: #e2e2de; --soft: #f5f5f3; --pri: #2f5d50;
+  .lw { --bg: #faf7f1; --fg: #1a1a18; --mt: #6f6c64; --bd: #dcd6c9; --soft: #f1ece1; --pri: #2f5d50;
         --ink: #171717; --rel: #2e7d4f; --adj: #6b7a88; --ok: #2e7d4f; --amb: #b7791f; --bad: #b2412f;
         background: var(--bg); color: var(--fg); font: 15px/1.55 var(--font-sans); color-scheme: light; }
   .lw * { box-sizing: border-box; }
@@ -176,6 +176,57 @@
   .lw .ops .lab { display: flex; gap: 6px; flex-wrap: wrap; grid-column: 1 / -1; }
   .lw .ops .lab span { border: 1px solid var(--bd); border-radius: 999px; padding: 3px 11px; font-size: 13px; }
 
+
+  /* ---- looks: quiet white, masthead, dark ---- */
+  .lw.quiet { --bg: #ffffff; --fg: #171717; --mt: #6b6b68; --bd: #e2e2de; --soft: #f5f5f3; }
+  .lw.dark { --bg: #15171a; --fg: #e9e6df; --mt: #9a9b96; --bd: #2b2f34; --soft: #1d2024; color-scheme: dark; }
+  .lw.dark .lede, .lw.dark .entry .take, .lw.dark .review, .lw.dark .row .l, .lw.dark .paper p, .lw.dark .tbl td { color: #cfccc4; }
+  .lw.dark .chip, .lw.dark .pop, .lw.dark .acts .fb span.on, .lw.dark .icard .err { background: var(--soft); }
+  .lw.dark .bar a.pri, .lw.dark .filters span.on, .lw.dark .pop span.on { background: #e9e6df; color: #15171a; border-color: #e9e6df; }
+  .lw .mast { text-align: center; padding: 18px 16px 10px; border-bottom: 3px double var(--fg); margin-bottom: 4px; }
+  .lw .mast .brand { font-family: var(--font-serif); font-weight: 700; font-size: 28px; letter-spacing: .06em; text-transform: lowercase; display: block; line-height: 1; }
+  .lw .mast .brand::first-letter { text-transform: uppercase; }
+  .lw .mast .line { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--mt); margin-top: 8px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .lw .mast .line > span { white-space: nowrap; }
+  .lw .mast .line i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 5px; vertical-align: 1px; }
+  .lw .mast .line .amb i { background: var(--amb); }
+  .lw .sec { --tc: var(--fg); }
+  .lw .sec h2 { border-top: 2px solid var(--tc); padding-top: 9px; margin-top: 26px; }
+  .lw .sec h2 small { color: var(--tc); opacity: .85; }
+  .lw .t-mon { --tc: #2f5d50; } .lw .t-fai { --tc: #8a3b2e; } .lw .t-int { --tc: #3b4f8a; } .lw .t-age { --tc: #a2661e; }
+  .lw.serifbody .entry .take, .lw.serifbody .lede { font-family: var(--font-serif); }
+  .lw.serifbody .entry .take { font-size: 15.5px; line-height: 1.5; }
+  .lw .week { display: flex; gap: 10px; align-items: center; border: 1px solid var(--bd); border-radius: 10px; padding: 10px 14px; font-size: 13.5px; margin: 14px 0 0; background: var(--soft); }
+  .lw .week b { font-family: var(--font-serif); font-size: 14.5px; white-space: nowrap; }
+  .lw .week span { color: var(--mt); } .lw .week .topics { display: flex; gap: 6px; flex-wrap: wrap; }
+  .lw .week .topics a { border: 1px solid var(--bd); background: var(--bg); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; }
+  .lw .issue { border-top: 1px solid var(--bd); padding: 13px 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; align-items: baseline; }
+  .lw .issue .d { font-family: var(--font-serif); font-weight: 600; font-size: 16px; }
+  .lw .issue .d small { font-family: var(--font-sans); font-weight: 400; color: var(--mt); font-size: 12.5px; margin-left: 8px; }
+  .lw .issue .l { grid-column: 1 / -1; font-size: 14px; color: #3a3a37; }
+  .lw .issue .o { font-size: 13px; color: var(--mt); }
+  .lw .feedhead { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--mt); margin: 30px 0 4px; }
+  .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; width: min(1132px, calc(100vw - 48px)); }
+  @media (max-width: 1000px) { .trio { grid-template-columns: 1fr; } }
+  .trio .phone { width: 100%; }
+  /* table */
+  .lw .tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .lw .tbl th { text-align: left; font-weight: 500; color: var(--mt); font-size: 12.5px; padding: 8px 10px; border-bottom: 1px solid var(--fg); white-space: nowrap; }
+  .lw .tbl th.sort { color: var(--fg); }
+  .lw .tbl td { padding: 11px 10px; border-bottom: 1px solid var(--bd); vertical-align: top; color: #2a2a2a; }
+  .lw .tbl td.t { font-family: var(--font-serif); font-weight: 600; font-size: 15px; line-height: 1.3; min-width: 220px; }
+  .lw .tbl td.t small { display: block; font-family: var(--font-sans); font-weight: 400; font-size: 12.5px; color: var(--mt); margin-top: 2px; }
+  .lw .tbl td.d { white-space: nowrap; color: var(--mt); font-variant-numeric: tabular-nums; }
+  .lw .tbl td.k { max-width: 360px; }
+  .lw .tbl td.s { color: var(--rel); font-weight: 600; white-space: nowrap; }
+  .lw .tbl td.ic { white-space: nowrap; color: var(--mt); letter-spacing: .1em; }
+  .lw .tbl tr.adj td { color: var(--mt); } .lw .tbl tr.adj td.t { font-weight: 500; }
+  .lw .tbl td i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--rel); margin-right: 8px; vertical-align: 2px; }
+  .lw .tbl tr.lead td i { background: var(--ink); } .lw .tbl tr.adj td i { background: #c9c7c0; } .lw .tbl tr.none td i { background: transparent; border: 1px solid var(--bd); }
+  .lw .tbl tr.out td { background: var(--soft); } .lw .tbl td .out { color: var(--amb); font-weight: 600; font-size: 12.5px; }
+  .lw .tfoot { display: flex; justify-content: space-between; font-size: 13px; color: var(--mt); margin-top: 10px; }
+  .lw .tfoot a { text-decoration: underline; text-decoration-color: var(--bd); }
+
   /* phone adjustments */
   .lw.ph .nav { padding: 12px 16px; gap: 14px; } .lw.ph .nav a:not(.on) { display: none; }
   .lw.ph main { padding: 20px 16px 36px; } .lw.ph .date { font-size: 28px; } .lw.ph .lede { font-size: 16px; }
@@ -189,15 +240,14 @@
 <body>
 <header class="top">
   <h1>litwatch v1: web app design</h1>
-  <span class="muted small">Draft for discussion, 2026-10-11, second pass. Nothing here is built.</span>
+  <span class="muted small">Draft for discussion, 2026-10-11, third pass. Nothing here is built.</span>
 </header>
 
 <div class="tabs" role="tablist">
   <button role="tab" aria-selected="true" data-tab="frame">Frame</button>
-  <button role="tab" data-tab="today">Today</button>
+  <button role="tab" data-tab="digest">Digest</button>
   <button role="tab" data-tab="paper">Paper</button>
-  <button role="tab" data-tab="topic">Topic</button>
-  <button role="tab" data-tab="search">Search and Library</button>
+  <button role="tab" data-tab="topic">Topics and Papers</button>
   <button role="tab" data-tab="settings">Settings</button>
   <button role="tab" data-tab="spec">What changes in the spec</button>
 </div>
@@ -217,16 +267,18 @@ nothing needs the owner. They read.</div>
 
 <h2>How it is used</h2>
 <ul>
-  <li><strong>Every morning, usually on a phone:</strong> open Today and read it like a newspaper. First the research questions
-  (the Watch topics): the new papers that matter, each with a short written take. Then the field: the daily review of
-  interpretability, and on Mondays the weekly reviews. It ends, and says so.</li>
+  <li><strong>Every morning, usually on a phone:</strong> open the Digest and read the latest issue like a newspaper. First
+  the research questions (the Watch topics): the new papers that matter, each with a short written take. Then the field:
+  the daily review of interpretability. On Mondays a weekly issue carries the weekly reviews and a recap. It ends, and says so.</li>
+  <li><strong>Through the week:</strong> come back to this week's reviews, pinned above the feed, and scroll back through earlier
+  issues when something rings a bell.</li>
   <li><strong>When a paper looks good:</strong> open it. Abstract, litwatch's take, the deep card, links to arXiv and the PDF, save
   to the library, copy BibTeX. One tap each, with the pen already there.</li>
-  <li><strong>When working on a topic:</strong> open its page and read down the list of what the topic has found, newest first,
-  as the reading list for current research. Adjacent papers are there too, folded.</li>
-  <li><strong>When looking for something:</strong> search. One box over litwatch's collection and the arxiv-archive together.
-  One of the possible outcomes of a search is "the automation missed this", and that is where a miss is reported from.</li>
-  <li><strong>Occasionally:</strong> glance at the status chip to see that the night went fine; thumb a paper up or down to tell
+  <li><strong>When working on a topic:</strong> open its page and go through every paper the topic has found, as a table, sorted
+  and filtered as needed. That is the reading list for current research.</li>
+  <li><strong>When looking for something:</strong> Papers. One table over the whole collection with a search box; the arxiv-archive
+  joins the search when it is connected. One of the possible outcomes of a search is "the automation missed this".</li>
+  <li><strong>Occasionally:</strong> glance at the status line to see that the night went fine; thumb a paper up or down to tell
   the chef; open Settings to edit a topic, check quality, or look at an integration.</li>
 </ul>
 
@@ -235,59 +287,102 @@ nothing needs the owner. They read.</div>
   <tr><th style="width:34%">Principle</th><th>What it rules out</th></tr>
   <tr><td><strong>One voice.</strong> Litwatch speaks as itself: "this paper does X; it matters for your question because Y."</td>
       <td>Grade names, judge and check, split, model names, reason strings. Those exist, under Settings. A disagreement is shown at the more inclusive grade with no mark.</td></tr>
-  <tr><td><strong>Written, not listed.</strong> The front page is prose with headlines, not rows of verdicts.</td>
-      <td>Tables, badges and counts as the main content. Counts live in the status chip and the lede.</td></tr>
+  <tr><td><strong>Written where it is read, tabular where it is browsed.</strong> The Digest is prose with headlines; a topic is a table.</td>
+      <td>Verdict rows on the Digest; prose where a sortable list is wanted.</td></tr>
   <tr><td><strong>Offered, never asked.</strong> Feedback is always available and never requested.</td>
       <td>Label queues, "mark as read" to clear, anything that accumulates as a backlog.</td></tr>
-  <tr><td><strong>All quiet, at a glance.</strong> One chip says whether the run finished and whether the graders seriously disagreed.</td>
-      <td>Run logs, costs and recall on the front. The chip opens the quality page in Settings.</td></tr>
+  <tr><td><strong>All quiet, at a glance.</strong> One line says whether the run finished and whether the graders seriously disagreed.</td>
+      <td>Run logs, costs and recall on the front. The line opens the quality page in Settings.</td></tr>
   <tr><td><strong>Kitchen behind a door.</strong> Topic configuration, quality, runs, integrations, misses are Settings pages.</td>
       <td>Quality and System as top-level navigation.</td></tr>
-  <tr><td><strong>Phone first, desktop whole.</strong> One column on the phone; on a desktop the width is used for a reading pane.</td>
+  <tr><td><strong>Self-contained.</strong> With no integration connected, every page works: search is litwatch's own, PDFs link to arXiv, published versions come from DBLP in the core, the deep card section is absent rather than a dead button.</td>
+      <td>Any page that assumes Nextcloud, the archive, n8n or a deep-card provider. Lab mates will run it bare.</td></tr>
+  <tr><td><strong>Phone first, desktop whole.</strong> One column on the phone; on a desktop the width is used for a reading pane and real tables.</td>
       <td>A desktop that is a stretched phone, or a phone that is a cut-down desktop.</td></tr>
 </table>
 
 <h2>Navigation</h2>
-<p><strong>Today</strong>, <strong>Topics</strong>, <strong>Library</strong>, <strong>Search</strong>, and a gear. Behind the gear:
-Topics (edit, preview, re-run), Quality, Misses, Runs, Integrations, Configuration. On the phone the four are a bottom
-bar and the gear sits in the header. Nothing from behind the gear appears in front of it.</p>
+<p>Three places and a gear. <strong>Digest</strong>, <strong>Topics</strong>, <strong>Papers</strong>: a footer with three buttons on
+the phone, three words in the header on a desktop. The gear holds Topics (edit, preview, re-run), Quality, Misses, Runs,
+Integrations, Configuration. Papers absorbs Search and the Library: it is the whole collection as a table with a search box,
+and Saved is a filter on it. The levels are Digest → issue → paper and Topics → topic → paper, each one tap apart.</p>
 
 <h2>Look</h2>
-<p>White. Serif for titles, the date, the lede and the reviews, since those are what is read; the system sans for
-everything that is interface. The plan document's dark green is the one accent. The only colour on the reading surface
-is the status chip's dot and the small saved mark. Grade colours are kept for Settings and for the quiet dots on topic
-lists, where the order already says what the dot repeats.</p>
-<div class="chips lw" style="background:transparent">
-  <span class="chip"><i></i>Ran 06:14 · 530 papers · all quiet</span>
-  <span class="chip amb"><i></i>Ran 06:14 · 530 papers · 2 disagreements</span>
-  <span class="chip bad"><i></i>Last night's run failed · showing Tuesday</span>
+<p>Three candidates, same structure. <strong>Quiet</strong> is pure white with system fonts and nothing but type. <strong>Masthead</strong>
+is the proposal: warm paper, a newspaper masthead with a double rule, the status line set as the printer's line under it,
+section headings with a short rule in a colour per topic (green for CoT monitoring, oxblood for CoT faithfulness, indigo for
+interpretability, ochre for agents), serif for the takes as well as the titles. The topic colours carry over to the topic
+chips and the topic pages, so a colour means a topic everywhere. <strong>Dark</strong> is Masthead on a dark ground, for the
+phone at night and for anyone whose Notion looks like Andrei's. All three are one token file apart; the structure does
+not move. The rest of this document is drawn in Masthead.</p>
+<div class="trio">
+  <div class="phone lw ph quiet">
+    <nav class="nav"><span class="brand">litwatch</span><a class="on" href="#">Digest</a><span class="gear">⚙</span></nav>
+    <main>
+      <h1 class="date">Wednesday<br>8 October</h1>
+      <p style="margin:12px 0 0"><span class="chip"><i></i>Ran 06:14 · 530 papers · all quiet</span></p>
+      <p class="lede">Two papers for CoT monitoring, one of them a testbed that watches a monitor erode. One for CoT faithfulness.</p>
+      <h2>CoT monitoring</h2>
+      <div class="entry">
+        <h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3>
+        <p class="m">Wang, Jia, Ou and 6 more · 30 September</p>
+        <p class="take">A coding-RL testbed with deliberate loopholes and an independent audit that labels when the policy hacks. The part for you: a chain-of-thought monitor suppresses hacking early in training, then loses its grip as the policy learns to mislead it through code comments.</p>
+        <div class="acts"><a class="pri" href="#">Read</a><a href="#">arXiv</a><a href="#">Save</a><span class="fb"><span>▲</span><span>▼</span></span></div>
+      </div>
+    </main>
+    <div class="tabbar"><span class="on">Digest</span><span>Topics</span><span>Papers</span></div>
+  </div>
+  <div class="phone lw ph serifbody">
+    <div class="mast"><span class="brand">litwatch</span><div class="line"><span>Wednesday 8 October</span><span><i></i>530 read · all quiet</span></div></div>
+    <main style="padding-top:12px">
+      <p class="lede" style="margin-top:4px">Two papers for CoT monitoring, one of them a testbed that watches a monitor erode. One for CoT faithfulness.</p>
+      <div class="sec t-mon"><h2>CoT monitoring</h2>
+      <div class="entry">
+        <h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3>
+        <p class="m">Wang, Jia, Ou and 6 more · 30 September</p>
+        <p class="take">A coding-RL testbed with deliberate loopholes and an independent audit that labels when the policy hacks. The part for you: a chain-of-thought monitor suppresses hacking early in training, then loses its grip as the policy learns to mislead it through code comments.</p>
+        <div class="acts"><a class="pri" href="#">Read</a><a href="#">arXiv</a><a href="#">Save</a><span class="fb"><span>▲</span><span>▼</span></span></div>
+      </div></div>
+    </main>
+    <div class="tabbar"><span class="on">Digest</span><span>Topics</span><span>Papers</span></div>
+  </div>
+  <div class="phone lw ph serifbody dark">
+    <div class="mast"><span class="brand">litwatch</span><div class="line"><span>Wednesday 8 October</span><span><i></i>530 read · all quiet</span></div></div>
+    <main style="padding-top:12px">
+      <p class="lede" style="margin-top:4px">Two papers for CoT monitoring, one of them a testbed that watches a monitor erode. One for CoT faithfulness.</p>
+      <div class="sec t-mon"><h2>CoT monitoring</h2>
+      <div class="entry">
+        <h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3>
+        <p class="m">Wang, Jia, Ou and 6 more · 30 September</p>
+        <p class="take">A coding-RL testbed with deliberate loopholes and an independent audit that labels when the policy hacks. The part for you: a chain-of-thought monitor suppresses hacking early in training, then loses its grip as the policy learns to mislead it through code comments.</p>
+        <div class="acts"><a class="pri" href="#">Read</a><a href="#">arXiv</a><a href="#">Save</a><span class="fb"><span>▲</span><span>▼</span></span></div>
+      </div></div>
+    </main>
+    <div class="tabbar"><span class="on">Digest</span><span>Topics</span><span>Papers</span></div>
+  </div>
 </div>
-<p class="small muted">The three states of the status chip. Green: the run finished and the graders agreed on everything shown.
-Amber: finished, but on some papers the two graders were more than one grade apart; those are shown at the higher grade and
-listed on the quality page. Red: no run, or a run that did not finish; Today shows the last complete day and says so.</p>
+<p class="small muted">Quiet, Masthead, Masthead dark. The masthead's double rule and the printer's line replace the chip on the Digest; the chip stays as it was on the other pages, where there is no masthead.</p>
 </section>
 
-<!-- ======================================================================= TODAY -->
-<section id="tab-today" hidden>
+<!-- ======================================================================= DIGEST -->
+<section id="tab-digest" hidden>
 <div class="prose">
-<h2>Today</h2>
-<p>The night's reading, written up. Research questions first, each as a section with the papers that matter; the field
-after, as reviews. Lead papers get a two or three sentence take; the others one sentence. There are no grades on the
-page: weight and order carry what the grade knows. Papers from 8 October, eval run 7, with the takes written as the
-digest writer would.</p>
+<h2>Digest</h2>
+<p>A feed of issues, newest open. A <strong>daily issue</strong> is the night's reading: the Watch topics with written takes,
+then the daily Radar review. A <strong>weekly issue</strong> appears on Monday and carries the weekly reviews (Pulse topics,
+weekly Radar topics) and a recap of the week's Watch papers. This week's weekly issue is pinned above the feed all week.
+Earlier issues follow below the open one, folded to their date and lede; browsing back is scrolling. On a weekend there is
+no new issue, so the feed opens on Friday's and the masthead says "nothing new since Friday". Nothing is ever empty.</p>
 </div>
-
-<p class="frame-label">Phone, Today. The primary layout.</p>
+<p class="frame-label">Phone, the Digest. The primary layout.</p>
 <div class="pair pl">
-  <div class="phone lw ph">
-    <nav class="nav"><span class="brand">litwatch</span><a class="on" href="#">Today</a><span class="gear">⚙</span></nav>
-    <main>
-      <div class="datehead"><h1 class="date">Wednesday<br>8 October</h1></div>
-      <p style="margin:12px 0 0"><span class="chip"><i></i>Ran 06:14 · 530 papers · all quiet</span></p>
+  <div class="phone lw ph serifbody">
+    <div class="mast"><span class="brand">litwatch</span><div class="line"><span>Wednesday 8 October</span><span><i></i>530 read · all quiet</span></div></div>
+    <main style="padding-top:8px">
+      <div class="week"><b>This week</b><div class="topics"><a href="#">Agents</a><a href="#">Efficiency</a><a href="#">Reasoning</a><a href="#">Alignment</a><a href="#">Watch recap</a></div></div>
       <p class="lede">Two papers for CoT monitoring, one of them a testbed that watches a monitor erode. One for CoT faithfulness. Interpretability had a quiet day.</p>
-      <div class="pager"><a href="#">← Tuesday 7 October</a><span>Monday's weekly reviews</span></div>
 
-      <h2>CoT monitoring</h2>
+      <div class="sec t-mon"><h2>CoT monitoring</h2>
       <div class="entry">
         <h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3>
         <p class="m">Wang, Jia, Ou and 6 more · 30 September</p>
@@ -305,38 +400,47 @@ digest writer would.</p>
         <p class="m">Chen, Shao, Luo and 3 more · revised, first seen February 2025</p>
         <p class="take">Trains hidden representations to be easier for a monitor to read, setting the chain of thought aside as unreliable; shown on detoxification only.</p>
         <div class="acts"><a class="pri" href="#">Read</a><a href="#">arXiv</a><a href="#">Save</a><span class="fb"><span>▲</span><span>▼</span></span></div>
-      </div>
+      </div></div>
 
-      <h2>CoT faithfulness</h2>
+      <div class="sec t-fai"><h2>CoT faithfulness</h2>
       <div class="entry">
         <h3 class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies</h3>
         <p class="m">Mendi, Bent · 21 August</p>
         <p class="take">Asks whether an agent's stated reasoning reflects its decision to speak or stay silent, using activation probes and reasoning ablations on one model. Argues that standard faithfulness tests overstate how much the trace reflects the decision. Small, but squarely on your question.</p>
         <div class="acts"><a class="pri" href="#">Read</a><a href="#">arXiv</a><a href="#">PDF</a><span class="saved">Saved</span><a href="#">BibTeX</a><span class="fb"><span class="on">▲</span><span>▼</span></span></div>
-      </div>
+      </div></div>
       <p class="fold"><a href="#">11 more</a> near these topics, on their pages.</p>
 
-      <h2>Interpretability <small>daily</small></h2>
+      <div class="sec t-int"><h2>Interpretability <small>daily</small></h2>
       <div class="review">
         <p>A quiet day: nothing that changes the picture. Two methods papers worth knowing exist: <span class="pick">[paper]</span>, which <em>…one sentence on what it does and why it is notable…</em>, and <span class="pick">[paper]</span>, <em>…</em>. One position paper on <em>…</em> is making the rounds and says little new.</p>
       </div>
-      <div class="m4">Arrives with M4. The review is a Radar topic's daily output: ranked picks with a sentence each, plus a line on anything that stands out. Picks are links to their paper pages. Weekly reviews (alignment and safety, agents, efficiency, reasoning) appear on Mondays under their own headings.</div>
+      <div class="m4">Arrives with M4: a Radar topic's daily review, ranked picks with a sentence each and a line on anything that stands out. Picks link to their paper pages.</div></div>
 
       <p class="end">That is everything from the night of 7 October.</p>
+
+      <p class="feedhead">Earlier</p>
+      <div class="issue"><span class="d">Tuesday 7 October</span><span class="o">Open</span><span class="l">One paper for CoT faithfulness and a revision that moved up. Interpretability: a new attribution method everyone will cite.</span></div>
+      <div class="issue"><span class="d">Monday 6 October<small>weekly</small></span><span class="o">Open</span><span class="l">Agents: the week belonged to long-horizon evaluation. Efficiency: two serious KV-cache papers. Reasoning: RL for reasoning keeps absorbing the field. Watch: four papers saved, one overruled.</span></div>
+      <div class="issue"><span class="d">Friday 3 October</span><span class="o">Open</span><span class="l">A must-read for CoT faithfulness on filler-token computation. Nothing for CoT monitoring.</span></div>
+      <div class="issue"><span class="d">Thursday 2 October</span><span class="o">Open</span><span class="l">Nothing new for the Watch topics. Interpretability: a quiet day.</span></div>
+      <p class="fold" style="margin-top:12px"><a href="#">September</a> · <a href="#">August</a> · <a href="#">pick a date</a></p>
     </main>
-    <div class="tabbar"><span class="on">Today</span><span>Topics</span><span>Library</span><span>Search</span></div>
+    <div class="tabbar"><span class="on">Digest</span><span>Topics</span><span>Papers</span></div>
   </div>
 
   <div class="prose notes">
     <p class="frame-label">What is on the page, and what is not</p>
     <ul>
-      <li><strong>The lede</strong> is written by the digest writer from the night's verdicts: what came in, in one breath. It is the only place counts appear outside the chip.</li>
-      <li><strong>Sections</strong> are the Watch topics in the owner's order, then the Radar topics with a daily cadence, then on Mondays the weekly ones. A topic with nothing new is a single line ("Nothing new for CoT faithfulness"), never an empty section.</li>
-      <li><strong>Lead entries</strong> are the papers graded must read: a two or three sentence take. <strong>Brief entries</strong> are the relevant ones: one sentence. A paper the graders disagreed on is shown at the more inclusive grade and looks like any other.</li>
-      <li><strong>Adjacent papers</strong> are not on Today. The fold line says how many and sends you to the topic pages.</li>
-      <li><strong>The action row</strong> is the pen: Read opens the paper page (on the desktop, the reading pane), then arXiv, PDF, Save, BibTeX. Saved is a state, not a button. The thumbs sit at the end, quiet until used.</li>
-      <li><strong>Days away.</strong> The pager walks back a day at a time, and the header notes how many days are unread. Merging unread days into one page is a later improvement; the per-day pages are the data either way.</li>
-      <li><strong>No "mark read".</strong> The page ends when it ends. What was opened and saved is remembered without a ritual.</li>
+      <li><strong>The masthead</strong> carries the date of the open issue and the printer's line: how many papers were read and whether all is quiet. Amber with a count when the graders seriously disagreed; red "last night's run failed" when there is no issue. Tapping the line opens Quality.</li>
+      <li><strong>This week</strong> is the pinned row: the weekly issue's sections, one tap each, there from Monday to Sunday. The next Monday replaces it.</li>
+      <li><strong>The lede</strong> is written by the writer from the night's verdicts, in one breath. It is the only place counts appear outside the printer's line.</li>
+      <li><strong>Sections</strong> are the Watch topics in the owner's order, then the daily Radar topics. Each has its colour on the rule. A topic with nothing new is one line, never an empty section.</li>
+      <li><strong>Lead entries</strong> are the papers graded must read: a two or three sentence take. <strong>Brief entries</strong> are the relevant ones: one sentence. A paper the graders disagreed on is shown at the more inclusive grade and looks like any other. Adjacent papers are not here; the fold line counts them and sends you to the topic pages.</li>
+      <li><strong>The action row</strong> is the pen: Read, arXiv, PDF, Save, BibTeX; Saved is a state. The thumbs sit at the end, quiet until used.</li>
+      <li><strong>Earlier</strong> is the feed: every issue back in time, folded to date and lede. A weekly issue is marked. Month links and a date picker are for going far back.</li>
+      <li><strong>Weekend.</strong> No run with content, no issue. The masthead reads "Saturday 11 October · nothing new since Friday" over Friday's issue.</li>
+      <li><strong>No "mark read".</strong> The issue ends when it ends.</li>
     </ul>
     <p class="frame-label">Feedback, when wanted</p>
     <div class="lw" style="background:transparent;max-width:360px">
@@ -344,21 +448,21 @@ digest writer would.</p>
       <div class="pop"><span class="on">Not for me</span><span>Unrelated to the topic</span><span>Already knew it</span><span>Overrated</span><small>Remembered for CoT monitoring. Changes nothing today.</small></div>
     </div>
     <ul>
-      <li>A thumb down opens the reasons; the first tap on a reason closes it. A thumb up stands alone, with "Great find" on a long press for the ones worth saying so about.</li>
-      <li>"Unrelated to the topic" is the one reason that speaks to the pipeline's job and becomes a label (not relevant, origin reader). The others are stored as reactions and feed Quality as a correction rate and, later, the writer's sense of taste. Opening and saving are recorded as implicit signals.</li>
+      <li>A thumb down opens the reasons; the first tap on a reason closes it. A thumb up stands alone, with "Great find" on a long press.</li>
+      <li>"Unrelated to the topic" is the one reason that speaks to the pipeline's job and becomes a label (not relevant, origin reader). The others are stored as reactions and feed Quality as a correction rate. Opening and saving are recorded as implicit signals.</li>
     </ul>
   </div>
 </div>
 
-<p class="frame-label" style="margin-top:28px">Desktop, Today, with a paper open in the reading pane</p>
-<div class="frame lw desk">
-  <nav class="nav"><span class="brand">litwatch</span><a class="on" href="#">Today</a><a href="#">Topics</a><a href="#">Library</a><a href="#">Search</a><span class="chip" style="margin-left:18px"><i></i>Ran 06:14 · 530 papers · all quiet</span><span class="gear">⚙</span></nav>
+<p class="frame-label" style="margin-top:28px">Desktop, the Digest with a paper open in the reading pane</p>
+<div class="frame lw desk serifbody">
+  <nav class="nav"><span class="brand">litwatch</span><a class="on" href="#">Digest</a><a href="#">Topics</a><a href="#">Papers</a><span class="chip" style="margin-left:18px"><i></i>Ran 06:14 · 530 papers · all quiet</span><span class="gear">⚙</span></nav>
   <div class="body">
     <main>
       <h1 class="date">Wednesday 8 October</h1>
+      <div class="week"><b>This week</b><div class="topics"><a href="#">Agents</a><a href="#">Efficiency</a><a href="#">Reasoning</a><a href="#">Alignment</a><a href="#">Watch recap</a></div></div>
       <p class="lede">Two papers for CoT monitoring, one of them a testbed that watches a monitor erode. One for CoT faithfulness. Interpretability had a quiet day.</p>
-      <div class="pager"><a href="#">← Tuesday 7 October</a><span>Monday's weekly reviews</span></div>
-      <h2>CoT monitoring</h2>
+      <div class="sec t-mon"><h2>CoT monitoring</h2>
       <div class="entry open">
         <h3 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h3>
         <p class="m">Wang, Jia, Ou and 6 more · 30 September</p>
@@ -376,19 +480,22 @@ digest writer would.</p>
         <p class="m">Chen, Shao, Luo and 3 more · revised, first seen February 2025</p>
         <p class="take">Trains hidden representations to be easier for a monitor to read, setting the chain of thought aside as unreliable; shown on detoxification only.</p>
         <div class="acts"><a href="#">arXiv</a><a href="#">Save</a><span class="fb"><span>▲</span><span>▼</span></span></div>
-      </div>
-      <h2>CoT faithfulness</h2>
+      </div></div>
+      <div class="sec t-fai"><h2>CoT faithfulness</h2>
       <div class="entry">
         <h3 class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies</h3>
         <p class="m">Mendi, Bent · 21 August</p>
         <p class="take">Asks whether an agent's stated reasoning reflects its decision to speak or stay silent, with activation probes and reasoning ablations. Argues that standard faithfulness tests overstate how much the trace reflects the decision.</p>
         <div class="acts"><a href="#">arXiv</a><a href="#">PDF</a><span class="saved">Saved</span><a href="#">BibTeX</a><span class="fb"><span class="on">▲</span><span>▼</span></span></div>
-      </div>
+      </div></div>
       <p class="fold"><a href="#">11 more</a> near these topics, on their pages.</p>
+      <p class="feedhead">Earlier</p>
+      <div class="issue"><span class="d">Tuesday 7 October</span><span class="o">Open</span><span class="l">One paper for CoT faithfulness and a revision that moved up. Interpretability: a new attribution method everyone will cite.</span></div>
+      <div class="issue"><span class="d">Monday 6 October<small>weekly</small></span><span class="o">Open</span><span class="l">Agents: the week belonged to long-horizon evaluation. Efficiency: two serious KV-cache papers. Watch: four papers saved, one overruled.</span></div>
     </main>
     <aside class="paper">
       <h1 class="t">CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL</h1>
-      <p class="m"><span class="topic">CoT monitoring</span> Wang, Jia, Ou, Li, Zhang, Chen, Liu, Sun, Zhao · arXiv 2609.39533 · 30 September 2026 · v1</p>
+      <p class="m"><span class="topic" style="border-color:#2f5d50;color:#2f5d50">CoT monitoring</span> Wang, Jia, Ou, Li, Zhang, Chen, Liu, Sun, Zhao · arXiv 2609.39533 · 30 September 2026 · v1</p>
       <div class="bar"><a class="pri" href="#">Save to library</a><a href="#">arXiv</a><a href="#">PDF</a><a href="#">Copy BibTeX</a></div>
       <div class="take"><p>A coding-RL testbed with deliberate loopholes and an independent audit that labels when the policy hacks. The part for you: a chain-of-thought monitor suppresses hacking early in training, then loses its grip as the policy learns to mislead it through code comments. A clean, measured instance of monitorability eroding under training pressure.</p></div>
       <h3>Abstract</h3>
@@ -405,9 +512,8 @@ digest writer would.</p>
 </div>
 <div class="prose notes">
   <ul>
-    <li>On a desktop the digest keeps its reading width and the right half is the reading pane. Read opens a paper there; the digest does not scroll away. Closing the pane, or a narrow window, gives the phone layout centred.</li>
-    <li>The chip moves into the header on the desktop; it is the same chip.</li>
-    <li>The action row drops Read on the desktop, since the title is the link, and the pane carries Save and BibTeX as proper buttons.</li>
+    <li>On a desktop the feed keeps its reading width and the right half is the reading pane; the title is the link and the pane carries Save and BibTeX as buttons. The masthead folds into the header, where the chip stands in for the printer's line.</li>
+    <li>A weekly issue opened from the pinned row or the feed is the same page type with more sections: one per weekly topic, then the Watch recap (saved, overruled, and the misses reported that week).</li>
   </ul>
 </div>
 </section>
@@ -422,11 +528,11 @@ is one quiet link at the bottom that unfolds the verdict with both opinions; on 
 only place the kitchen shows on a reading page.</p>
 </div>
 <div class="pair pl">
-  <div class="phone lw ph">
-    <nav class="nav"><a href="#" style="display:inline;color:var(--mt)">← Today</a><span class="gear">⚙</span></nav>
+  <div class="phone lw ph serifbody">
+    <nav class="nav"><a href="#" style="display:inline;color:var(--mt)">← Digest</a><span class="gear">⚙</span></nav>
     <main class="paper" style="padding-top:18px">
       <h1 class="t">Towards Mitigating Deceptive Safety Alignment in Large Reasoning Models</h1>
-      <p class="m"><span class="topic">CoT monitoring</span> Zhou, Zare Zade, Ibn Sultan, Kotov, Zhu · arXiv 2609.36254 · 28 September 2026</p>
+      <p class="m"><span class="topic" style="border-color:#2f5d50;color:#2f5d50">CoT monitoring</span> Zhou, Zare Zade, Ibn Sultan, Kotov, Zhu · arXiv 2609.36254 · 28 September 2026</p>
       <div class="bar"><a class="pri" href="#">Save</a><a href="#">arXiv</a><a href="#">PDF</a><a href="#">BibTeX</a></div>
       <div class="take"><p>Defines a rate of safety inconsistency between a model's reasoning trace and its final answer, finds it common across reasoning models and worse under prefilling attacks, and trains for consistency. Framed as alignment, but the finding that answer-only RL pulls trace and answer apart is a monitorability result.</p></div>
       <h3>Abstract</h3>
@@ -469,92 +575,76 @@ only place the kitchen shows on a reading page.</p>
 </div>
 </section>
 
-<!-- ======================================================================= TOPIC -->
+<!-- ======================================================================= TOPICS AND PAPERS -->
 <section id="tab-topic" hidden>
 <div class="prose">
-<h2>Topic</h2>
-<p>A topic page is a reading list. For a Watch topic: what litwatch has found for it, newest first, with a one-line take
-per paper, and the adjacent papers behind a toggle. For a Radar or Pulse topic: the review history, each review a dated
-piece of prose, with its picks. The gear in the corner goes to the editor in Settings. Topics, the tab, is the list of
-topic pages with one line of what is new on each.</p>
+<h2>Topics and Papers</h2>
+<p>Both are the same table. <strong>Papers</strong> is the whole collection: a search box, filters for topic, saved, year and
+source, and every column sortable. A <strong>topic page</strong> is that table with the topic fixed, plus the topic's reviews
+if it has any. It is the Notion table with the noise taken out: no status, no source column, the authors under the title,
+the take where Key Claim was. The Topics tab lists the topic pages with one line of what is new on each. Saved is a filter,
+and Export BibTeX acts on whatever is filtered or selected, so there is no separate library page.</p>
 </div>
 <p class="frame-label">Desktop, the CoT faithfulness page</p>
 <div class="frame lw">
-  <nav class="nav"><span class="brand">litwatch</span><a href="#">Today</a><a class="on" href="#">Topics</a><a href="#">Library</a><a href="#">Search</a><span class="chip" style="margin-left:18px"><i></i>Ran 06:14 · 530 papers · all quiet</span><span class="gear">⚙</span></nav>
-  <main style="max-width:760px">
+  <nav class="nav"><span class="brand">litwatch</span><a href="#">Digest</a><a class="on" href="#">Topics</a><a href="#">Papers</a><span class="chip" style="margin-left:18px"><i></i>Ran 06:14 · 530 papers · all quiet</span><span class="gear">⚙</span></nav>
+  <main style="max-width:1080px;padding-top:24px">
     <div class="topichead">
       <div>
-        <h1 class="date" style="font-size:30px">CoT faithfulness</h1>
-        <p>Whether a model's chain of thought reflects the computation that produced its answer: measures of faithfulness, causes of unfaithfulness, and ways to improve it. 61 papers since March, 9 saved.</p>
+        <h1 class="date" style="font-size:28px;border-left:4px solid #8a3b2e;padding-left:12px">CoT faithfulness</h1>
+        <p style="margin-top:8px">Whether a model's chain of thought reflects the computation that produced its answer. 61 papers since March, 9 saved.</p>
       </div>
       <span class="gear" title="Edit this topic">⚙</span>
     </div>
-    <div class="filters"><span class="on">All</span><span>This week</span><span>Saved</span><span>Also adjacent</span><span class="box">Search within CoT faithfulness</span></div>
-
-    <p class="day">Wednesday 8 October</p>
-    <div class="row"><i></i><div><h3 class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies</h3><p class="l">Whether an agent's stated reasoning reflects its decision to speak or stay silent; argues standard faithfulness tests overstate it. <small>Mendi, Bent</small></p></div><span class="s">Saved</span></div>
-    <p class="day">Tuesday 7 October</p>
-    <div class="row adj"><i></i><div><h3 class="t">Beyond Accuracy: How Procedural Traces Shift the Decision Criterion of LLM Overseers</h3><p class="l">How showing a trace changes what a human or model overseer accepts; about the reader of the trace, not its faithfulness. <small>near the topic</small></p></div><span></span></div>
-    <div class="row adj"><i></i><div><h3 class="t">Do Reasoning Representations Help Humans Evaluate LLM Outputs?</h3><p class="l">A user study on whether exposed reasoning helps people judge answers. <small>near the topic</small></p></div><span></span></div>
-    <p class="day">Friday 3 October</p>
-    <div class="row lead"><i></i><div><h3 class="t">[a must-read from the week before]</h3><p class="l">One-line take. <small>authors</small></p></div><span class="s">Saved</span></div>
-    <div class="row"><i></i><div><h3 class="t">[a relevant paper]</h3><p class="l">One-line take. <small>authors</small></p></div><span></span></div>
-    <p class="fold" style="margin-top:16px">Older: <a href="#">September</a> · <a href="#">August</a> · <a href="#">July</a> · <a href="#">before</a></p>
+    <div class="filters"><span class="box">Search within CoT faithfulness</span><span class="on">All</span><span>Saved</span><span>Also adjacent</span><span>2026</span><span style="margin-left:auto">Export BibTeX</span></div>
+    <table class="tbl">
+      <tr><th></th><th>Title</th><th>Published</th><th class="sort">Added ↓</th><th>Take</th><th></th><th></th></tr>
+      <tr><td><i></i></td><td class="t">Why2Speak: Faithful Reasoning for Abstaining Action Policies<small>Mendi, Bent</small></td><td class="d">21 Aug 2026</td><td class="d">8 Oct</td><td class="k">Whether an agent's stated reasoning reflects its decision to speak or stay silent; argues standard faithfulness tests overstate it.</td><td class="s">Saved</td><td class="ic">⇗ ▤</td></tr>
+      <tr class="lead"><td><i></i></td><td class="t">Reading Between the Dots: Decoding Hidden Computation across Filler Tokens<small>Brauer, Mayrink Verdun, Sanyal and 2 more</small></td><td class="d">3 Jul 2026</td><td class="d">2 Oct</td><td class="k">On decomposable tasks, computation omitted from content-free filler traces stays partly recoverable from the residual stream without a trained decoder.</td><td class="s">Saved</td><td class="ic">⇗ ▤ ⌥</td></tr>
+      <tr><td><i></i></td><td class="t">The Fragility of Chain-of-Thought Monitoring Across Typologically Diverse Languages<small>Onyame, Zhou, Thopalli and 3 more</small></td><td class="d">27 May 2026</td><td class="d">2 Oct</td><td class="k">Across 13 languages, taking a hinted answer often comes with no disclosure of the hint, even when complex hints reduce susceptibility.</td><td></td><td class="ic">⇗ ▤</td></tr>
+      <tr class="lead"><td><i></i></td><td class="t">Making LLMs Say What They Think: Measuring and Improving CoT-Interpretability Alignment<small>Hong, Ravfogel, Zhao and 2 more</small></td><td class="d">30 Sep 2026</td><td class="d">1 Oct</td><td class="k">Interpretability-tool signals measure parametric faithfulness and work as post-training rewards that improve CoT–computation alignment without hurting accuracy.</td><td class="s">Saved</td><td class="ic">⇗ ▤ ⌥</td></tr>
+      <tr><td><i></i></td><td class="t">When Confidence Rises Too Early: Detecting Shortcut Reasoning via Token Distributions<small>Zhang, Liu, Chengzhengxu and 3 more</small></td><td class="d">28 Sep 2026</td><td class="d">29 Sep</td><td class="k">Premature concentration of forced-answer distributions is an efficient signal of shortcut reasoning.</td><td></td><td class="ic">⇗ ▤</td></tr>
+      <tr class="adj"><td><i></i></td><td class="t">Beyond Accuracy: How Procedural Traces Shift the Decision Criterion of LLM Overseers<small>near the topic</small></td><td class="d">5 Oct 2026</td><td class="d">7 Oct</td><td class="k">How showing a trace changes what an overseer accepts; about the reader of the trace, not its faithfulness.</td><td></td><td class="ic">⇗ ▤</td></tr>
+    </table>
+    <div class="tfoot"><span>6 of 61 · <a href="#">older</a></span><span>Columns: Title · Published · Added · Take · Saved · Links</span></div>
   </main>
 </div>
 <div class="prose notes">
   <ul>
-    <li>Rows carry a small dot: ink for must read, green for relevant, pale for adjacent. The dot never has a word next to it; "near the topic" in the meta line is as explicit as the page gets about a grade.</li>
-    <li>"Also adjacent" is on here for the sketch to show the rows; off by default. The topic's intro line is its subject from the configuration, in the owner's words, plus two counts.</li>
-    <li>Search within the topic is the same search as the Search tab with the topic filter set, so there is one search to build.</li>
-    <li>A Radar topic's page has the same head, then its reviews as dated prose, newest first, each with its picks as rows under it. Its filter row is "Reviews · Picks · Saved".</li>
-    <li>The editor behind the gear is unchanged from the first draft: subject, rubric, keywords with match counts, preview against labelled papers, scoped re-runs after saving. It lives in Settings and the gear is a shortcut.</li>
+    <li><strong>Columns.</strong> Title with authors under it, Published, Added, the one-line take, Saved, and link icons (arXiv, PDF, code when there is one). Sort by any column; Added descending is the default so new papers are on top, which is what the Digest's "11 more" link lands on.</li>
+    <li><strong>The dot</strong> is the only trace of the grade: ink for must read, green for relevant, pale for adjacent. Adjacent rows are hidden until "Also adjacent" is on; here it is on to show one.</li>
+    <li><strong>The topic's colour</strong> is the rule beside its name, the same colour as its section on the Digest and its chip on a paper page.</li>
+    <li><strong>A Radar or Pulse topic's page</strong> has a Reviews tab before the table: its reviews as dated prose, newest first, each with its picks. The table under it holds the picks.</li>
+    <li><strong>Phone.</strong> The same rows stack: title, authors, the take, dates on one small line, the saved mark. Sorting and filters sit in a sheet behind one button.</li>
+    <li><strong>Editing the topic</strong> is the gear in the corner, which opens the editor in Settings (subject, rubric, keywords with match counts, preview against labelled papers, scoped re-runs).</li>
   </ul>
 </div>
-</section>
 
-<!-- ======================================================================= SEARCH -->
-<section id="tab-search" hidden>
-<div class="prose">
-<h2>Search and Library</h2>
-<p>Search is one box over everything: litwatch's collection, and the arxiv-archive through the <code>archive</code> integration,
-merged by arXiv id (spec, decision 6). It is a real tool, used because it is closer to hand than Google, and later a
-semantic one. Where a result comes from is a filter beside topic and year. A paper that only the archive holds is marked
-as outside the collection, with one action to fetch it in and, if it belonged to a Watch topic, to say so: that is how a
-miss is reported. The library is the saved pile and where export happens.</p>
-</div>
-<p class="frame-label">Desktop, a search with a miss among the results</p>
+<p class="frame-label" style="margin-top:28px">Desktop, Papers, with a search that found a miss</p>
 <div class="frame lw">
-  <nav class="nav"><span class="brand">litwatch</span><a href="#">Today</a><a href="#">Topics</a><a href="#">Library</a><a class="on" href="#">Search</a><span class="chip" style="margin-left:18px"><i></i>Ran 06:14 · 530 papers · all quiet</span><span class="gear">⚙</span></nav>
-  <main style="max-width:760px">
+  <nav class="nav"><span class="brand">litwatch</span><a href="#">Digest</a><a href="#">Topics</a><a class="on" href="#">Papers</a><span class="chip" style="margin-left:18px"><i></i>Ran 06:14 · 530 papers · all quiet</span><span class="gear">⚙</span></nav>
+  <main style="max-width:1080px;padding-top:24px">
     <div class="searchbox"><span class="q">segment-aware alignment reasoning safety</span></div>
-    <div class="filters" style="margin-top:4px"><span class="on">Any topic</span><span>CoT monitoring</span><span>CoT faithfulness</span><span class="on">2026</span><span>Any year</span><span class="on">Collection and archive</span><span>Collection only</span></div>
-    <p class="muted small" style="color:var(--mt);margin:10px 0 4px">3 results, 1 only in the archive. Titles and abstracts; semantic search arrives when the archive gains embeddings.</p>
-    <div class="res">
-      <h3 class="t">Beyond Safe Answers: Segment-Aware Listwise Alignment for Reasoning Safety in Large Reasoning Models</h3>
-      <p class="m">Yun, Kwon, Ryu, Lim, Kwon, Kim · arXiv 2609.15517 · 14 September 2026 · <b>in the collection</b>, graded near CoT faithfulness</p>
-      <p class="ab">Aligns reasoning models to keep unsafe content out of the reasoning trace as well as the answer, using a listwise objective over trace segments…</p>
-      <div class="acts"><a class="pri" href="#">Open</a><a href="#">arXiv</a><a href="#">Save</a><a href="#" style="color:var(--amb)">This should have been found for a topic…</a></div>
-    </div>
-    <div class="res">
-      <h3 class="t">[a paper only the archive holds]</h3>
-      <p class="m">authors · arXiv id · 2 October 2026 · <span class="out">outside the collection</span>, in the archive</p>
-      <p class="ab">Its abstract from the archive…</p>
-      <div class="acts"><a class="pri" href="#">Fetch into litwatch</a><a href="#">arXiv</a><a href="#" style="color:var(--amb)">This should have been found for a topic…</a></div>
-    </div>
-    <div class="res">
-      <h3 class="t">[a third result]</h3>
-      <p class="m">authors · arXiv id · 2026 · <b>in the collection</b>, not a candidate for any topic</p>
-      <div class="acts"><a class="pri" href="#">Open</a><a href="#">arXiv</a><a href="#">Save</a></div>
-    </div>
-    <p class="fold" style="margin-top:18px">Not here? <a href="#">Look up an arXiv id or link</a>, which fetches the paper and offers the same report.</p>
+    <div class="filters" style="margin-top:4px"><span class="on">Any topic</span><span>CoT monitoring</span><span>CoT faithfulness</span><span>Saved</span><span class="on">2026</span><span class="on">Collection and archive</span><span style="margin-left:auto">Export BibTeX</span></div>
+    <p class="muted small" style="color:var(--mt);margin:8px 0 4px">3 results, 1 only in the archive. Titles and abstracts, newest first.</p>
+    <table class="tbl">
+      <tr><th></th><th>Title</th><th>Published</th><th>Added</th><th>Where it stands</th><th></th><th></th></tr>
+      <tr class="adj"><td><i></i></td><td class="t">Beyond Safe Answers: Segment-Aware Listwise Alignment for Reasoning Safety in Large Reasoning Models<small>Yun, Kwon, Ryu, Lim, Kwon, Kim</small></td><td class="d">14 Sep 2026</td><td class="d">15 Sep</td><td class="k">In the collection, near CoT faithfulness. <a href="#" style="color:var(--amb);font-weight:600">Should have been found for a topic…</a></td><td></td><td class="ic">⇗ ▤</td></tr>
+      <tr class="out"><td></td><td class="t">[a paper only the archive holds]<small>authors</small></td><td class="d">2 Oct 2026</td><td class="d">—</td><td class="k"><span class="out">Outside the collection</span>, in the archive. <a href="#" style="font-weight:600">Fetch into litwatch</a> · <a href="#" style="color:var(--amb);font-weight:600">Should have been found…</a></td><td></td><td class="ic">⇗</td></tr>
+      <tr class="none"><td><i></i></td><td class="t">[a third result]<small>authors</small></td><td class="d">2026</td><td class="d">Mar</td><td class="k">In the collection, not a candidate for any topic.</td><td></td><td class="ic">⇗ ▤</td></tr>
+    </table>
+    <div class="tfoot"><span>Not here? <a href="#">Look up an arXiv id or link</a>, which fetches the paper and offers the same report.</span><span></span></div>
   </main>
 </div>
 <div class="prose notes">
+  <p class="frame-label">Search, and the archive</p>
   <ul>
-    <li><strong>Reporting a miss</strong> is the amber link on a result. It asks which topic, takes an optional note, and the trace of what each stage said (triage, keyword audit, grading as it happened, grading forced for the report) is written to Settings → Misses, where the first draft's trace page lives unchanged. On the phone the Android share target lands on this same flow with the link already looked up.</li>
-    <li><strong>Result lines</strong> say where a paper stands in one phrase: in the collection and graded for a topic, in the collection but never a candidate, outside the collection. No grade names.</li>
-    <li><strong>Library</strong> is the saved papers as rows like the topic page's, grouped by topic or by month, with a search box, a selection, and "Export BibTeX" for the selection or everything. It is the view the Zotero and WebDAV integrations mirror. Nothing else is needed there in v1.</li>
+    <li><strong>Litwatch's own search</strong> is titles and abstracts over its database, and it is what a lab mate with nothing connected gets. It is the baseline the page must work on.</li>
+    <li><strong>The archive joins automatically</strong> when its integration is connected (spec, decision 6): every query goes to it too, through the search provider protocol, and its hits merge by arXiv id. Where a result comes from is a filter beside topic and year, with no default restriction. An archive-only paper shows as outside the collection with Fetch as its action.</li>
+    <li><strong>Ranking.</strong> Both sides are lexical today, so the merged list is newest first, which is honest about what the search is. When the archive gains embeddings, the protocol grows an optional score and the page gains a "best match" sort that orders by the provider's score where there is one. Semantic search is not built into litwatch; it is where the papers are, and the archive has all of them.</li>
+    <li><strong>Filters only litwatch knows</strong> (topic, saved) apply to collection papers; archive-only hits stay in their own band under the filtered rows.</li>
+    <li><strong>Reporting a miss</strong> is the amber link on a row. It asks which topic, takes an optional note, and the trace of what each stage said goes to Settings → Misses. On the phone the Android share target lands on this same flow with the link already looked up.</li>
+    <li><strong>Without the search box</strong>, Papers is simply the whole collection, newest first, with Saved as the filter that makes it the library. Export BibTeX is on the filter row.</li>
   </ul>
 </div>
 </section>
@@ -568,8 +658,8 @@ spec's Topics editor, Quality and System pages live here, with Integrations and 
 they are what the owner comes here to look at. The chip on the front links to Quality.</p>
 </div>
 <p class="frame-label">Desktop, Settings → Integrations</p>
-<div class="frame lw settings">
-  <nav class="nav"><span class="brand">litwatch</span><a href="#">Today</a><a href="#">Topics</a><a href="#">Library</a><a href="#">Search</a><span class="gear" style="border-color:var(--fg);color:var(--fg)">⚙</span></nav>
+<div class="frame lw settings quiet">
+  <nav class="nav"><span class="brand">litwatch</span><a href="#">Digest</a><a href="#">Topics</a><a href="#">Papers</a><span class="gear" style="border-color:var(--fg);color:var(--fg)">⚙</span></nav>
   <div class="body">
     <div class="idx">
       <div class="grp">Reading</div><a href="#">Topics</a><a href="#">Quality</a><a href="#">Misses</a>
@@ -644,48 +734,56 @@ document is agreed.</p>
 <h3>4.1 web: pages</h3>
 <table>
   <tr><th style="width:22%">Page</th><th>Purpose</th><th style="width:26%">Replaces</th></tr>
-  <tr><td>Today</td><td>The night's digest as prose: per Watch topic the new relevant papers with written takes; per daily Radar topic its review; weekly reviews on Mondays. A status chip. Previous days by pager.</td><td>Inbox, Briefings</td></tr>
-  <tr><td>Paper</td><td>Take, abstract, deep card or a request button, links (arXiv, PDF, published version), BibTeX, save, history; "how this was chosen" folded, with the optional label.</td><td>Paper (reordered)</td></tr>
-  <tr><td>Topics, Topic</td><td>List of topics with what is new; per topic a reading list newest first (Watch) or review history (Radar, Pulse); search within; gear to the editor.</td><td>new reading surface; editor moves to Settings</td></tr>
-  <tr><td>Library</td><td>Saved papers; export BibTeX.</td><td>was implied by /library</td></tr>
-  <tr><td>Search</td><td>One box over the collection and the archive; filters topic, year, source; fetch an archive-only paper; report a miss from a result or from an arXiv id.</td><td>Search, Report a miss</td></tr>
+  <tr><td>Digest</td><td>A feed of issues, newest open, earlier ones folded. Daily issues: per Watch topic the new relevant papers with written takes, then the daily Radar reviews. Weekly issues on Monday: weekly reviews and a Watch recap; the current one pinned above the feed. Masthead with the status line.</td><td>Inbox, Briefings</td></tr>
+  <tr><td>Paper</td><td>Take, abstract, deep card or a request button when a provider is configured, links (arXiv, PDF, published version), BibTeX, save, history; "how this was chosen" folded, with the optional label.</td><td>Paper (reordered)</td></tr>
+  <tr><td>Topics, Topic</td><td>List of topics with what is new; per topic the papers table with the topic fixed (title, published, added, take, saved, links; adjacent on a toggle), and for Radar and Pulse the review history; gear to the editor.</td><td>new reading surface; editor moves to Settings</td></tr>
+  <tr><td>Papers</td><td>The whole collection as the same table with a search box; filters topic, saved, year, source; the archive's hits merged when connected; fetch an archive-only paper; report a miss from a row or from an arXiv id; export BibTeX for the filter or selection.</td><td>Search, Report a miss, the library</td></tr>
   <tr><td>Settings</td><td>Topics (editor, preview, re-runs), Quality (disagreements, recalls, precision, calibration sample, correction rate), Misses (traces), Runs and cost, Integrations (status, failures, retry), Configuration (read-only).</td><td>Topics editor, Quality, System</td></tr>
 </table>
 
-<h3>Pipeline: the digest writer</h3>
-<p>Today needs written takes, so the pipeline gains one step after reconciliation: for each paper graded relevant or above,
-a <strong>writer</strong> produces the take (two or three sentences for must read, one for relevant) from the abstract, the
-two graders' reasons and the topic's subject, in litwatch's voice and addressed to the owner. Once a night it also writes
-the lede from the day's verdicts. A mid-sized model (Sonnet 5.5 as the proposal, settled by evaluation like the other
-roles); at one to five papers a night the cost is cents. The take is stored on the verdict and regenerated only when the
-verdict changes. This belongs in M3, since the page has nothing to say without it, and it is the same shape as the M4
-review writer, which can share its prompt scaffolding.</p>
+<h3>Pipeline: the writer</h3>
+<p>The Digest needs written takes, so the pipeline gains one step after reconciliation: for each paper graded relevant or
+above, a <strong>writer</strong> produces the take (two or three sentences for must read, one for relevant) from the abstract,
+the two graders' reasons and the topic's subject, in litwatch's voice and addressed to the owner. Once a night it also
+writes the lede from the day's verdicts. A mid-sized model (Sonnet 5.5 as the proposal, settled by evaluation like the
+other roles); at one to five papers a night the cost is cents. The take is stored on the verdict and regenerated only
+when the verdict changes. This belongs in M3, since the page has nothing to say without it, and it is the same shape as
+the M4 review writer, which can share its prompt scaffolding. The weekly issue's Watch recap is also the writer's.</p>
 
 <h3>Feedback model</h3>
 <p>Thumbs are stored as <strong>reactions</strong> (paper, topic, value up or down, reason, time). The reason "unrelated to
 the topic" also writes a label (not relevant, origin reader) and "great find" writes relevant; the other reasons do not
-touch labels. Opening a paper page and saving are recorded as events already (<code>paper.saved</code> exists; <code>paper.opened</code> is
-new and local). Quality reports the correction rate from reactions and keeps precision honest with the calibration sample
-rather than from reactions, which are biased by construction. The existing labelling page stays as the evaluation tool.</p>
+touch labels. Opening a paper page and saving are recorded as events already (<code>paper.saved</code> exists;
+<code>paper.opened</code> is new and local). Quality reports the correction rate from reactions and keeps precision honest
+with the calibration sample rather than from reactions, which are biased by construction. The existing labelling page
+stays as the evaluation tool.</p>
+
+<h3>Search</h3>
+<p>Decision 6 stands. Two additions: the <code>SearchProvider</code> hit gains an optional score, and the merged list is
+sorted newest first until a provider supplies scores, when a "best match" sort appears. Semantic search is explicitly the
+archive's job, not litwatch's.</p>
 
 <h3>API</h3>
-<p><code>/inbox</code> becomes <code>/digest</code> (days, with sections and takes). <code>/feedback</code> gains reactions.
-<code>/integrations</code> grows the status shape the cards render (description, lag, failures, retry, skip, search
-provider stats). Everything else stands.</p>
+<p><code>/inbox</code> becomes <code>/digest</code> (issues, daily and weekly, with sections and takes). <code>/feedback</code>
+gains reactions. <code>/papers</code> search gains the source filter and the provider score. <code>/integrations</code>
+grows the status shape the cards render (description, lag, failures, retry, skip, search provider stats). <code>/library</code>
+stays as the saved set behind the Saved filter. Everything else stands.</p>
 
 <h3>M3, restated</h3>
 <div class="callout"><strong>M3 · API and web app, Watch first.</strong> The API with its OpenAPI schema and generated client; the
-writer step; Today, Paper, Topic, Library, Search and Settings over Watch data, with the field sections of Today arriving
-in M4. <em>Check:</em> the morning digest reads as prose with no grade, model or pipeline term on it; a paper can be
-opened, saved and exported as BibTeX in one tap each; the status chip reflects a failed run and a disagreement; a reported
-miss shows what each stage said, under Settings; nothing about the pipeline is visible without opening Settings.</div>
+writer step; Digest, Paper, Topics, Papers and Settings over Watch data, with the review sections of the issues arriving
+in M4. <em>Check:</em> the daily issue reads as prose with no grade, model or pipeline term on it; earlier issues are reachable
+by scrolling; a paper can be opened, saved and exported as BibTeX in one tap each; a topic's papers can be sorted and
+filtered as a table; the status line reflects a failed run and a disagreement; a reported miss shows what each stage said,
+under Settings; with no integration connected every page works.</div>
 
 <h3>Next</h3>
 <ol>
-  <li>Andrei marks up this page.</li>
-  <li>Fold the agreed version into <code>SPEC.md</code> (4.1, section 3 writer step, M3) and a short <code>docs/v1/DESIGN.md</code>
-  (tokens, type scale, the entry and row anatomy, the chip's three states); one Astra spec review; PR into <code>v1</code>.</li>
-  <li>M3 code: API and client, then the writer, then Today and Paper, since they are the check.</li>
+  <li>Andrei marks up this page, including the choice of look.</li>
+  <li>Fold the agreed version into <code>SPEC.md</code> (4.1, section 3 writer step, decision 6 additions, M3) and a short
+  <code>docs/v1/DESIGN.md</code> (tokens for the chosen look, topic colours, type scale, the entry and row anatomy, the status
+  line's three states); one Astra spec review; PR into <code>v1</code>.</li>
+  <li>M3 code: API and client, then the writer, then Digest and Paper, since they are the check.</li>
 </ol>
 </section>
 
