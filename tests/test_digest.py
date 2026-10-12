@@ -256,3 +256,22 @@ async def test_new_fold_counts_rewrite_the_lede(db):
     (issue,) = await rows(db, "SELECT folds, lede_stale FROM issues")
     assert issue["folds"] == {FAITH.slug: 1} and issue["lede_stale"] is False
     assert writer.ledes == 2
+
+
+async def test_a_rubric_edit_makes_takes_that_rest_on_the_owners_word_stale(db):
+    from litwatch.cli import _save_all
+
+    await word.react(
+        db,
+        Reaction(
+            paper_id=P.id,
+            topic=FAITH.slug,
+            value=ReactionValue.UP,
+            reason=ReactionReason.GREAT_FIND,
+        ),
+    )
+    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
+        await digest.write_takes(db, Config(), run)
+    assert (await rows(db, "SELECT for_take FROM due"))[0]["for_take"] is False
+    await _save_all(db, [FAITH.model_copy(update={"rubric": "A new rubric."})])
+    assert (await rows(db, "SELECT for_take FROM due"))[0]["for_take"] is True

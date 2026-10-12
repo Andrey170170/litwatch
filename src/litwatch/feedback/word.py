@@ -232,9 +232,10 @@ async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Se
 
 
 async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
-    """Settle every paper the topic has a grade, verdict or word for, in id order: after its
-    kind changed, so a topic that stopped being Watch takes its grades with it. Call it in
-    the transaction that changed the kind, after `topics.kind_for_update`."""
+    """Settle every paper the topic has a grade, verdict or word for, in id order, without
+    announcing: after its kind or content changed, so a topic that stopped being Watch takes
+    its grades with it and takes bound to the old rubric are owed again. Call it in the
+    transaction that saved the topic, after `topics.kind_for_update`."""
     rows = await (
         await conn.execute(
             "SELECT paper_id FROM effective_grades WHERE topic = %(t)s "

@@ -13,6 +13,7 @@ import psycopg
 from litwatch import llm
 from litwatch.config import Config, RoleConfig
 from litwatch.core import Grade, TopicKind
+from litwatch.feedback import word
 from litwatch.jobs.context import ModelRun
 from litwatch.llm import CallError
 from litwatch.review import writer
@@ -70,7 +71,8 @@ async def compare(
     for i, (paper_id, slug, grade) in enumerate(await _pairs(conn, n), 1):
         paper, topic = await papers_store.get(conn, paper_id), topics[slug]
         verdict = await verdicts_store.current(conn, paper_id, slug)
-        opinions = [o for o in (verdict.judge, verdict.check) if o] if verdict else []
+        # As production gives them: the graders' notes only when the verdict is the source.
+        opinions = [o for o in (verdict.judge, verdict.check) if o] if word.speaks(verdict) else []
 
         texts = await asyncio.gather(
             *(_one(g, paper, topic, grade, opinions) for g in gateways.values())

@@ -9,6 +9,7 @@ import psycopg
 
 from litwatch import intake
 from litwatch.config import Config
+from litwatch.feedback import word
 from litwatch.jobs import digest as digest_jobs
 from litwatch.jobs import watch as watch_jobs
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
@@ -49,6 +50,9 @@ async def run(
                 intake=result.details,
             )
             run.counts["rewritten"] = len(result.rewritten)
+            # A rewritten text makes its takes stale whatever triage and grading do next.
+            for paper_id in result.rewritten:
+                await word.settle(conn, paper_id, announce=False)
         await watch_jobs.triage(conn, config, run, limit=limit)
         await watch_jobs.grade(conn, config, run)
         await digest_jobs.write_takes(conn, config, run)
