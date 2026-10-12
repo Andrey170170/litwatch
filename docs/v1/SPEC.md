@@ -105,17 +105,22 @@ otherwise stay behind Settings.
 
 **Issue.** What the owner reads, written like a newspaper. The daily issue opens with a lede, then one section per
 Watch topic with the papers newly at an effective grade of `relevant` or above and their takes, then the review of
-every daily topic. The weekly issue, on Monday, carries each weekly Radar and Pulse review and a Watch recap. (These were
+every daily topic. The weekly issue, on Monday, carries each weekly Radar and Pulse review and a Watch recap: per
+Watch topic the week's papers newly in the library, those the owner set aside, and the misses reported that week. (These were
 called briefings in earlier drafts; the API keeps the shape, the name follows the page.)
 
-**Feedback.** The owner's corrections, and the only ground truth the system has. Every surface offers it and none asks
-for it: there is no queue of papers to label.
+**Feedback.** The owner's corrections, and the only ground truth the system has. Every reading surface offers it and
+none asks for it: there is no queue of papers to label there. Only Calibrate, behind the gear on the Quality page,
+asks, because the owner opens it to answer (decision 20).
 
 - a **label** on a paper for a Watch topic: relevant, adjacent, not relevant or unsure, with an
   optional grade. Unsure changes nothing and is left out of every metric.
   Not relevant means an effective grade of `none`. Adjacent means `adjacent`: a source of
   ideas for the topic without being about it, which is not a positive for recall. Relevant without a grade keeps the
-  verdict's grade if that is `relevant` or above, and is `relevant` otherwise;
+  verdict's grade if that is `relevant` or above, and is `relevant` otherwise. A label is given explicitly: in the
+  label row on a paper page, in a Calibrate session on the Quality page, or by marking a miss. It records how its
+  paper came to be labelled (its origin, section 4.1) and keeps that origin when the owner later changes its value,
+  so a change of mind never moves a paper out of the sample it was drawn in;
 - a **miss**: a paper the owner found elsewhere that litwatch did not surface. Reporting one
   takes only the arXiv link, so it works from a phone's share sheet. It stores the paper, runs
   triage, grades it against every Watch topic whatever triage said (there are few), and
@@ -124,20 +129,32 @@ for it: there is no queue of papers to label.
   evaluation replays it for that topic;
 - a **reaction**: a thumb up or down on a paper for the topic it was shown under, or for no topic, one per paper and
   topic, replaced on change and removable. On a thumb down a reason: not for me, unrelated to the topic, already knew it, overrated; on a thumb up,
-  optionally, great find. "Unrelated to the topic" also writes a label of not relevant and "great find" a label of
-  relevant, both with origin `reaction`, when the topic is a Watch topic; the other reasons, and every reaction on a
-  Radar or Pulse field or on no topic, touch no label (decision 17). Clearing or changing the reaction removes the
-  label it wrote and no other: a label the owner set on the paper page (origin `reader`) outranks a reaction's and is
-  never touched by one. The acknowledgement says what happened ("Marked not relevant for CoT monitoring; it leaves the
-  library"), since that label has every effect a label has. Reactions feed the Quality page as a **correction rate**:
+  optionally, great find. A reaction is never a label and writes none. On a Watch topic two reasons are nevertheless
+  the owner's word on the paper's place in that topic: "unrelated to the topic" counts as not relevant and "great
+  find" as relevant without a grade. The other reasons, and every reaction on a Radar or Pulse field or on no topic,
+  have no effect beyond being collected (decision 17). Clearing or changing the reaction takes back its word and
+  nothing else. The acknowledgement says what happened ("Marked not relevant for CoT monitoring; it leaves the
+  library"). Reactions feed the Quality page as a **correction rate**:
   per Watch topic and trailing 30 days, the share of papers shown in issues at `relevant` or above that carry a thumb
   down with reason not for me, unrelated or overrated; "already knew it" is not a correction and is not counted.
-  Reactions are biased by what the owner chose to react to, so precision is measured from a drawn calibration sample
-  (section 8, M3), not from reactions.
+  Reactions are biased by what the owner chose to react to, so the evaluation reads labels only, and precision is
+  measured from a drawn calibration sample (section 8, M3).
+- an **appraisal**: the owner's view of a paper regardless of topic (matters, fine, not for me) with an optional
+  note, and an **accurate or off** on a take. Both are given in a Calibrate session only. A paper that matters
+  to the owner but fits no Watch topic is the signal that a topic is missing or a rubric is drawn too narrowly;
+  Quality lists those papers with their notes, for the owner or an agent to read.
 
-**Library.** Papers marked saved: every Watch paper at `relevant` or above unless the owner
-labelled it not relevant, every paper the owner labelled relevant, and anything the owner
-saves by hand, such as a Radar pick. The library is what integrations act on; BibTeX can be copied for any paper.
+**The owner's word** on a paper for a Watch topic is the newer of its label and its word-carrying reaction; an
+unsure label is no word, and a provisional label (accepted in bulk, section 8, M2) is older than either. The
+**effective grade** is the owner's word where there is one, otherwise the current verdict (section 3, step 5). Every
+reader-facing surface uses it: issues, topic pages, the library, exports and integrations.
+
+**Library.** Papers marked saved: every paper at an effective grade of `relevant` or above for a Watch topic, and
+anything the owner saves by hand, such as a Radar pick, except what the owner has unsaved. Save and Unsave are one
+toggle on every paper, and the owner's newest use of it outranks every other reason: an unsaved paper leaves the
+library and stays out, even if a later re-grade would save it, until the owner saves it again. Unsaving is not a
+label: the paper keeps its place in its topics and in past issues. The library is what integrations act on; BibTeX
+can be copied for any paper.
 
 **Publication.** The published record of a paper, when one exists: venue, year, DOI, DBLP key.
 BibTeX is generated from it, or from arXiv metadata when there is none.
@@ -166,45 +183,48 @@ papers, which is what backfill will use later.
    paths is one candidate carrying both sources, and is graded once.
 4. **Grading.** For every (paper, Watch topic) candidate, the judge and the check model each
    return a grade and reason. The two are reconciled into a verdict.
-5. **Library.** Verdicts at `relevant` or above mark the paper saved. For one topic the
-   owner's label outranks the verdict. Saved state belongs to the paper, not the topic, so it
-   is recomputed from every reason the paper has: on any Watch topic, a label of relevant, or,
-   where there is no label, a current verdict of `relevant` or above; or a save by hand. The
+5. **Library.** An effective grade of `relevant` or above marks the paper saved. For one topic the
+   owner's word (section 2) outranks the verdict. Saved state belongs to the paper, not the topic, so it
+   is recomputed from every reason the paper has: an effective grade of `relevant` or above on any Watch topic,
+   or a save by hand; an unsave by hand, while it is the owner's newest use of the toggle, overrides them all. The
    current verdict for a paper and topic is chosen by text first and time second: among
    the verdicts for the newest paper revision and topic version that have one, the most
    recently recorded. Older rows are history and give no reason. A re-grade that is still pending, or that failed, replaces
    nothing: the previous verdict stays current, and the paper stays saved, until a new verdict
-   is recorded or the owner labels it. `paper.unsaved` is emitted only when the last reason goes.
+   is recorded or the owner's word changes. `paper.unsaved` is emitted when the paper leaves the library, because
+   its last reason went or because the owner unsaved it.
 6. **Writer.** When a paper's effective grade for a Watch topic crosses from below `relevant` to `relevant` or above,
-   whether a verdict or a label moved it, the pair becomes **due**: due for a take, and due for an issue. The writer
+   whether a verdict or the owner's word moved it, the pair becomes **due**: due for a take, and due for an issue,
+   unless the pair has already appeared in an issue, in which case it is due for a take only. A paper the owner set
+   aside and then took back is therefore not announced again; its old entry stops being struck through. The writer
    takes every pair due for a take and writes it in litwatch's voice, addressed to the owner, from the abstract at the
    verdict's paper revision, the topic's subject at its topic version, and the opinions that exist (see *Take*); where
-   no verdict exists (a label alone moved the paper), the current paper revision and topic version are used. A
+   no verdict exists (the owner's word alone moved the paper), the current paper revision and topic version are used. A
    failed call leaves the pair due and is retried next run; after three failed runs the pair enters the issue with its
    title and abstract and no take, and the writer keeps trying. A take is written again when the pair gets a new
    current verdict with a different paper revision, topic version or grade (a move between `relevant` and `must_read`
    changes its length); a re-grade that lands on the same grade from the same text keeps the take. Rewriting a take
    makes nothing due for an issue again. Once a night the writer also produces the issue's lede from that night's
-   entries, and on Monday the weekly issue's Watch recap. One gateway role, `writer` (section 4.4), a mid-sized model
-   settled by evaluation in M3; at one to five papers a night the cost is cents. The review writer of Radar and Pulse
-   topics shares its prompt scaffolding.
+   entries, and on Monday the weekly issue's Watch recap. One gateway role, `writer` (section 4.4), Opus 5.5 on the
+   Anthropic API by default (credits), compared in M3 with one or two OpenRouter models on a small set of papers; at
+   one to five papers a night the cost is cents. The review writer of Radar and Pulse topics shares its prompt
+   scaffolding.
 7. **Events.** `paper.saved`, `verdict.recorded`, `grade.changed`, `take.written` (paper, topic, take id) and similar
    are written to the outbox. `take.written` may arrive after `paper.saved`; an integration that mirrors notes
    (Zotero) subscribes to it and updates the note when it comes. `grade.changed` fires when a paper's effective grade for a topic changes,
-   whether a verdict or the owner's label caused it.
+   whether a verdict or the owner's word caused it.
    Integrations consume them on their own schedule; a failing integration delays nothing.
 8. **Daily issue.** One per calendar date in the configured timezone (`[schedule] timezone`, default the server's),
    keyed by that date, built at the end of the nightly run from every pair due for an issue, with their takes, and the
    daily reviews. A pair is taken into the issue when its take is ready, or when the writer has failed on it three
    runs, in which case it enters with title and abstract and no take; until then it waits. Including a pair consumes
-   its due state, so a pair appears in one issue only; a pair still waiting on its take, or a late re-grade, makes the
+   its due state for good, so a pair appears in one issue only (step 6); a pair still waiting on its take makes the
    next issue, never a duplicate. Running the day's jobs again amends the same
    issue, adding entries and never repeating one. An issue exists when there is at least one Watch entry or one daily
    review; adjacent arrivals alone make no issue, though an issue that exists counts them in its fold line. A section
-   whose review failed says so in one line and is filled in if the review is re-run that day. The effective grade (the
-   owner's label where there is one, otherwise the current verdict) is what every reader-facing surface uses: issues,
-   topic pages, the library, exports and integrations. A paper the owner rejected does not come back because a re-grade
-   liked it. A night with no issue leaves the Digest on the last one, which says since when.
+   whose review failed says so in one line and is filled in if the review is re-run that day. Issues use the effective
+   grade (section 2), as every reader-facing surface does. A paper the owner rejected does not come back because a
+   re-grade liked it. A night with no issue leaves the Digest on the last one, which says since when.
 
 Weekly: one **review** per weekly Radar and Pulse topic over the week's members, then the weekly
 issue. A topic with a daily cadence is reviewed after each nightly run instead, over that
@@ -213,8 +233,8 @@ night's members, before the daily issue is built.
 Continuously: **publication lookup** for library papers, first when saved, then monthly for two
 years, and on demand when BibTeX is exported.
 
-On demand: the owner reacts to or labels a paper, reports a miss, saves a pick, asks for a deep card, or
-edits a topic. Editing a
+On demand: the owner reacts to or labels a paper, reports a miss, saves or unsaves a paper, calibrates, asks for a
+deep card, or edits a topic. Editing a
 topic applies forward: the new version is used from the next run, and past papers keep the
 answer they got. Every membership, candidate and verdict records the topic version that
 produced it, so mixed history is visible. Nothing retroactive runs by itself. After an edit
@@ -332,7 +352,7 @@ is graded under the topic as it then is, and its verdict records that revision.
 
 **review.** `review(topic, period)` for Radar and Pulse, where the period is a week or a day; a field too large for one call is
 shortlisted in chunks first. `take(paper, topic, source)` writes a paper's take, where the source is the current verdict, an evaluation
-result (a miss), a migrated opinion, or the owner's label alone, and `lede(day)` the issue's opening
+result (a miss), a migrated opinion, or the owner's word alone, and `lede(day)` the issue's opening
 (section 3, writer). `daily_issue(day)` and `weekly_issue(week)` assemble stored takes, verdicts and reviews into
 structured issues; the web app and exports render them.
 
@@ -341,7 +361,8 @@ endpoint: find the preprint record by arXiv DOI, then records sharing its title 
 and prefer the one that is not CoRR. `bibtex(paper)` renders either record. A wrong or missing
 match can be corrected by hand and is then never overwritten.
 
-**feedback.** Stores labels and misses. Replay, topic previews and the grading of a reported
+**feedback.** Stores labels, reactions, appraisals, take ratings, saves and unsaves, and misses, and resolves the
+owner's word and the effective grade (section 2) for the rest of the system. Replay, topic previews and the grading of a reported
 miss are dry runs: they call the same pure triage, audit and grading functions but write
 their answers to evaluation tables only, never to candidates, verdicts, the library or the
 outbox, so running an evaluation cannot save a paper or wake an integration. Their model
@@ -356,8 +377,10 @@ candidate), grading recall (graded `relevant` or above when forced), and end-to-
 (a candidate and graded `relevant` or above). Triage recall is the one that judges the
 triage model; the audit must not be allowed to hide its misses. It
 also reports each miss still missed, and precision at `relevant`. Every label records how
-its paper was chosen (random candidate sample, reject sample, 0.14 positive, reader, miss),
-and production precision is computed from the random candidate sample alone, since only
+its paper was chosen: calibration sample (`sample`, the random candidate sample), reject sample, 0.14 positive,
+reader (the paper page's label row, a paper taken into Calibrate because of a split or a reaction, and the M2
+labelling page's labels, which migrate to it), or miss. Production precision is computed from the calibration
+sample alone, since only
 that one was drawn the way production surfaces papers. Precision over the other groups is
 reported per group and never pooled.
 Grading the non-candidates is what keeps a triage miss from being counted as a grading error. This is the evaluation;
@@ -378,8 +401,8 @@ failures to the API.
 | `deep` | `grade.changed` to `must_read`, `card.requested` | Requests a deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off this |
 
-An integration that acts on a grade checks the paper's effective current grade when it handles
-the event: the owner's label where there is one, otherwise the current verdict. A `must_read`
+An integration that acts on a grade checks the paper's effective grade (section 2) when it handles
+the event. A `must_read`
 verdict the owner has overruled, or one a later version superseded, fetches no PDF and
 requests no card.
 
@@ -416,7 +439,8 @@ cost and errors.
 are generated. Resource groups: `/papers` (get, list and search with filters for topic, saved, year and
 source, BibTeX for one paper or a filter), `/topics` (list with what is new, the topic's papers and reviews; CRUD,
 preview against labelled papers, scoped re-runs), `/digest` (issues, daily and weekly, with sections and takes; the
-status line), `/feedback` (reactions, labels, misses, evaluation, calibration sample), `/library` (the saved set),
+status line), `/feedback` (reactions, labels, misses, evaluation, Calibrate sessions and their answers, the
+"matters, no topic" list), `/library` (the saved set; save and unsave),
 `/runs`, `/integrations` (status: description, enabled, cursor lag, failures with the last error, retry and skip, search
 provider statistics), `/events` (changes feed), `/settings` (read-only view of configuration). A single shared token
 protects it; there are no accounts.
@@ -430,10 +454,10 @@ three places and a gear: Digest, Topics, Papers, as a footer on the phone and th
 | Page | Purpose |
 | --- | --- |
 | Digest | A feed of issues, newest open, earlier ones folded to date and lede. A masthead with the **status line**, which reads the latest nightly run: red when that run failed or none finished in the last 36 hours ("last night's run failed · showing Tuesday"); amber when it finished but left something for Quality, with a count: split verdicts among the papers shown (section 9, decision 14), candidates still ungraded, a review that failed; green otherwise ("530 read · all quiet", the count being papers triaged in that run); "running since 06:02" while it runs; "no run yet" on a fresh install. It opens Quality, whose top shows the night's splits, ungraded candidates and a failure summary linking to the run. Opening an old issue does not change it. The most recent weekly issue is pinned as a row above the feed, labelled with its week, absent until one exists. On a day with no issue the last one is shown with "nothing new since"; before any issue exists the Digest says when the first run is |
-| Paper | Take, abstract, deep card when one is stored, else a request button while a deep-card integration is loaded, else nothing; links (arXiv, PDF, published version), BibTeX, save, history; thumbs; "how this was chosen" folded at the end with the triage answer, both opinions by model name, the reconciled grade and an optional label row (origin `reader`) |
+| Paper | Take, abstract, deep card when one is stored, else a request button while a deep-card integration is loaded, else nothing; links (arXiv, PDF, published version), BibTeX, save or unsave, history (versions seen, and when the paper became a candidate or was graded for each Watch topic); thumbs; "how this was chosen" folded at the end with the triage answer, both opinions by model name, the reconciled grade and an optional label row (origin `reader`) |
 | Topics | One screen of topic cards grouped Watch, Radar, Pulse, each with its colour, kind, one line of what is new (entries in issues since the topic was last opened, kept server-side in `topic_visits`) and counts; on a desktop a rail with the chosen topic open beside it. A topic page is the papers table with the topic fixed: by default the papers at an effective grade of `relevant` or above, adjacent on a toggle, nothing below that; for Radar and Pulse the picks, with the reviews above the table. The gear opens the editor in Settings |
 | Papers | The whole collection as one sortable table (title with authors, published, added, take of the first Watch topic by the owner's order, saved, links; a grade dot per row, an empty ring for a paper that is no topic's candidate, "grading" for a pending one, the take column empty where there is none) with a search box and filters for topic, saved, year and source; the archive's hits merged when it is connected; fetch an archive-only paper; report a miss from a row or by arXiv id; export BibTeX for the filter or selection. Saved is the filter that makes it the library |
-| Settings | Topics (create, edit, order, pause; preview a draft against labelled papers and misses; scoped re-runs after saving), Quality (last night's splits with both opinions and the label row; recall and precision per Watch topic over evaluation runs; correction rate; draw a calibration sample), Misses (reported misses with what each stage said), Runs and cost, Integrations (one card per module), Configuration (read-only) |
+| Settings | Topics (create, edit, order, pause; preview a draft against labelled papers and misses; scoped re-runs after saving), Quality (last night's splits with both opinions and the label row, ungraded candidates, failures; **Calibrate**, a session for giving the owner's word, section 8 M3; recall and precision per Watch topic over evaluation runs; correction rate; the "matters, no topic" list with its notes), Misses (reported misses with what each stage said), Runs and cost, Integrations (one card per module), Configuration (read-only) |
 
 Phone first, desktop whole: one column on the phone; on a desktop the Digest gets a reading pane beside the feed and
 Topics and Papers are real tables. With no integration connected every page works: search is litwatch's own, PDFs link
@@ -453,7 +477,7 @@ The places a part can be replaced or tested alone:
 | `Integration` | handles an event idempotently | Everything outside the core lives behind it |
 | `SearchProvider` | query and filters → hits keyed by arXiv id | Lets an integration add results to search without the API knowing which one |
 | Repositories | `core` types in and out | The only code that knows SQL |
-| HTTP API | OpenAPI schema | The web app, the CLI's remote mode and n8n are equal clients |
+| HTTP API | OpenAPI schema | The web app and n8n are equal clients |
 | Job | paper set or window in, run record out | The scheduler, the CLI and backfill call the same thing |
 
 ### 4.3 Data
@@ -468,8 +492,11 @@ row with its own id, so a re-run over the same versions adds a row, and the late
 is current), `takes` (paper, topic, paper revision, topic version, source: verdict, evaluation, migrated or label,
 text, written at, failed runs), `due` (paper, topic, due for take, due for issue), `reviews`, `issues` (date, kind
 daily or weekly, lede, entries as paper, topic and take id in section order, so a rewritten take never replaces the
-one an old issue showed; review references), `labels`, `reactions`
-(paper, topic, value, reason, at), `topic_visits` (topic, last opened at), `misses`, `publications`, `library`, `outbox`,
+one an old issue showed; review references), `labels` (paper, topic, value, grade, origin, provisional, at),
+`reactions` (paper, topic, value, reason, at), `appraisals` (paper, value: matters, fine or not for me, note, at),
+`take_ratings` (take, accurate or off, at), `calibration_sessions` (drawn at, seed, the papers in order and why each
+was drawn), `topic_visits` (topic, last opened at), `misses`, `publications`, `library` (paper, the owner's newest
+save or unsave, at), `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
 and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
 opinions, reconciled grade, grading error), which hold replays, previews and miss traces. `papers` gains `revision`. Kept as they are: `runs`, `inference_calls`, intake checkpoints.
@@ -506,7 +533,7 @@ effort = "medium"
 
 [models.writer]
 provider = "anthropic"
-model = "claude-sonnet-5-5"
+model = "claude-opus-5-5"
 effort = "medium"
 
 [schedule]
@@ -519,7 +546,7 @@ enabled = false
 ```
 
 The models above are proposed defaults, not decisions. Triage, judge and check were settled by the evaluation in
-milestone 2; review and writer are settled in M4 and M3.
+milestone 2; the writer is Opus 5.5 unless the M3 comparison says otherwise; review is settled in M4.
 
 ## 5. Models, cost and lab diversity
 
@@ -540,7 +567,7 @@ Expected spend with the proposed defaults, at about 650 papers a night: triage o
 $0.25–0.40 a night; grading about 30 candidates twice, a few cents on each side; four or five
 weekly reviews at roughly $0.50–1 each on credits, and a daily review for each topic that asks
 for one, not yet measured and also on credits; takes, ledes and recaps for one to five papers a
-night on a mid-sized model, cents. Real-dollar spend is the check model alone,
+night, cents, on credits. Real-dollar spend is the check model alone,
 on the order of $1 a month, against about $30 a month in 0.x. These are estimates from 0.x token
 counts and must be re-measured in milestone 2.
 
@@ -590,16 +617,23 @@ the Paper page lets the owner paste a DOI or DBLP key instead.
   one batch (source `migrated`, about 80 papers), and makes none of them due for an issue. For Radar and Pulse topics, tier 3 or better becomes
   a membership and the tier is dropped.
 - **Zotero.** Watch items stay. The several thousand items that exist only because of a broad
-  selection's tier 2 also stay; v1 stops adding to them and deletes nothing (section 9).
+  selection's tier 2 also stay; v1 stops adding to them and deletes nothing (section 9). 0.x keeps each item's
+  key on the paper (`papers.zotero_key`, `zotero_attachment_key`, left in place by `db adopt`); the `zotero`
+  integration seeds its own state table from them on first start, so it updates the existing items and creates no
+  duplicates.
 - **Notion and n8n.** The current workflows keep working against 0.14 until cutover, then are
   replaced by the webhook workflow.
 - **Cutover.** v1 runs beside 0.14 on a copy of the database for at least a week. The switch
   happens when v1's Watch output contains everything 0.14 put at tier 1–2 on the CoT selections
-  that week, or each difference has been looked at.
+  that week, or each difference has been looked at. The owner's feedback given before cutover (labels, reactions,
+  appraisals, saves and unsaves) carries over: the side-by-side database is the one it was given in, or it is
+  copied into it.
 
 ## 8. Milestones
 
-Each ends with something that runs and a stated check. Sizes are relative, not dates.
+Each ends with something that runs and a stated check. Sizes are relative, not dates. Nothing runs on a schedule
+before the side-by-side week of M7: jobs are run by hand, and a test overnight run, if one is wanted, gets temporary
+infrastructure of its own.
 
 **M0 · Skeleton.** New package layout, migrations, `litwatch.toml`, `core` types, `store`
 repositories for papers, `intake` ported, CI. *Check:* a fresh database ingests a night of arXiv;
@@ -646,22 +680,45 @@ provisionally, to be confirmed against the calibration samples.
 
 **M3 · API and web app, Watch first.** The design pass is done (`docs/v1/DESIGN.md`, 2026-10-11). The API with its
 OpenAPI schema and generated client; the writer; Digest, Paper, Topics, Papers and Settings over Watch data, with the
-review sections of the issues arriving in M4. Reactions, labels and misses flow into the evaluation; the labelling page
-built in M2 stays as the evaluation tool. Quality can draw a **calibration sample** onto it: per Watch topic, ten
-papers drawn uniformly with a recorded seed from those graded `relevant` or above in the trailing 30 days and not yet
-labelled, plus ten from those graded below; the owner answers yes, no or unsure; precision at `relevant` is the share
-of the first group labelled relevant, unsure excluded, and the second group reports how often grading dropped a paper
-the owner wanted. These labels carry origin `sample` and are what section 4.1's "random candidate sample" means. *Check:* the daily issue reads as prose with no grade, model or pipeline term on it, the status line's
+review sections of the issues arriving in M4. Labels, misses and Calibrate answers flow into the evaluation; reactions
+feed the correction rate.
+
+**Calibrate**, on the Quality page, is where the owner gives their word on purpose, and it replaces the labelling page
+built in M2. The reading side offers feedback and never asks; Calibrate asks, because the owner went there to answer.
+A session shows one paper per screen (title, abstract, its takes) and is meant to take minutes. It draws, per Watch
+topic, ten papers uniformly with a recorded seed from those graded `relevant` or above in the trailing 30 days and
+without a label, plus ten from those graded below. On request it continues with the papers waiting for a word: last
+night's splits, reported misses not yet marked, and papers carrying a word-carrying reaction. Each paper asks:
+
+| Question | Answers | Required |
+| --- | --- | --- |
+| Fit, for each Watch topic | about it (then must read or worth reading), near it, not, unsure | for the topic it was drawn or taken for |
+| Value to the owner, whatever the topic | matters, fine, not for me | no |
+| Each take it has | accurate, off | no |
+| Note | free text | no |
+
+Fit is a label: about it is relevant at the chosen grade, near it is adjacent, not is not relevant. A drawn paper's
+label carries origin `sample`, any other `reader`. Value and note are an appraisal, and accurate or off a take rating
+(section 2). Precision at `relevant` is the share of the first drawn group labelled relevant, unsure excluded, and
+the second group reports how often grading dropped a paper the owner wanted.
+
+The writer's model is chosen once, outside the app: takes from Opus 5.5 and one or two OpenRouter models on about 20
+recent papers, read blind by the owner.
+
+*Check:* the daily issue reads as prose with no grade, model or pipeline term on it, the status line's
 split count and the folded "how this was chosen" being the two allowed exceptions; earlier
 issues are reachable by scrolling; a paper can be opened, saved and exported as BibTeX in one tap each; a topic's
 papers can be sorted and filtered as a table; the status line reflects a failed run and a split; a reported miss shows
 what each stage said, under Settings; with no integration connected every page works; nothing about the pipeline is
-visible without opening Settings.
+visible without opening Settings; Unsave takes a verdict-saved paper out of the library and a later re-grade does not
+put it back; a Calibrate session of twenty papers takes minutes and gives the precision number, and a paper marked
+as mattering with no topic fit appears on the "matters, no topic" list.
 
 **M4 · Reviews and the weekly issue.** Radar and Pulse reviews at each topic's cadence, their sections in the daily
 issue, the weekly issue with the Watch recap and the pinned row, the reviews on topic pages, in-process scheduler, Runs
-and cost under Settings (including the papers triage is stuck on). *Check:* two consecutive weekly issues generated on
-schedule; the owner prefers them to 0.14's digests or says what is missing.
+and cost under Settings (including the papers triage is stuck on). *Check:* the weekly job, run by hand over two past
+weeks, produces two weekly issues, and the owner prefers them to 0.14's digests or says what is missing; the scheduler
+starts each job at its cron time, shown with a test schedule rather than overnight.
 
 **M5 · Published versions.** `publications` with DBLP, monthly re-check, manual override,
 BibTeX from the published record. *Check:* on 50 library papers known to be published, the
@@ -669,7 +726,7 @@ lookup finds the right record for at least 45 and never a wrong one.
 
 **M6 · Integrations.** Outbox and dispatcher; Zotero and WebDAV, archive, deep, webhook; the n8n
 workflow for Notion. *Check:* with every integration disabled the system is fully usable; with
-each enabled, its 0.14 behaviour is reproduced for Watch papers; a small new integration can be
+each enabled, its 0.14 behaviour is reproduced for Watch papers, and Zotero creates no duplicate of an item 0.x made; a small new integration can be
 written from `docs/integrations.md` without editing any other package.
 
 **M7 · Migration and cutover.** Data migration, a week side by side, switch production.
@@ -736,8 +793,10 @@ Decided on 2026-10-11, in the M3 design pass (`docs/v1/design.html`):
 11. **Configuration stays read-only in the web app** in v1: `litwatch.toml` is the source of truth, so there is no
     config-write path in the API. This bounds what the shared token can change about the deployment, not what it can
     do with the data: it authorises every other write (section 4.1, web).
-12. **Thumbs and labels are separate records.** A reaction may write a label of its own origin and may take back only
-    that one; a label set on the paper page is the owner's word and nothing automatic moves it.
+12. **Thumbs and labels are separate records.** A reaction never writes a label. On a Watch topic, two of its reasons
+    are the owner's word on the paper (section 2), and the newer of that and the label decides; clearing the reaction
+    takes back only its own word. A label keeps the origin it was created with, so the evaluation's samples are never
+    disturbed by a change of mind. (Amended 2026-10-12; the first version had reactions write labels of their own.)
 13. **Takes are bound to text and rubric.** A take is keyed by paper revision and topic version and rewritten when
     either changes under a new verdict, so a take never describes an abstract or a rubric that no longer exists.
 14. **Which splits the status line counts.** A split where the two graders straddle the `relevant` line (one says
@@ -750,8 +809,24 @@ Decided on 2026-10-11, in the M3 design pass (`docs/v1/design.html`):
     its chip. The Papers table shows the take of the first such topic by the owner's order.
 17. **Reactions on every paper.** Thumbs are on every paper wherever it is shown, with the topic of the surface it is
     shown on (a Watch topic, a Radar or Pulse field, or none for a plain search result). Only a Watch-topic reaction
-    writes a label (decision 12); the rest are collected and shown on Quality with no automatic effect. The owner
-    corrects by hand from the collected feedback, or has an agent read it and adjust rubrics and settings.
+    can be the owner's word (decision 12); the rest are collected and shown on Quality with no automatic effect. The
+    owner corrects by hand from the collected feedback, or has an agent read it and adjust rubrics and settings.
+
+Decided on 2026-10-12, reviewing the spec for the remaining milestones:
+
+18. **Unsave.** Save and Unsave are one toggle on every paper; the owner's newest use of it beats every other reason
+    to be in the library, including a later re-grade, until they save it again. Unsaving is not a label: the paper
+    stays in its topics and past issues. Zotero hears `paper.unsaved` and tags the item as dropped.
+19. **Announced once.** A paper appears in an issue at most once per Watch topic. If the owner sets it aside and then
+    changes their mind, the old entry stops being struck through and no later issue repeats it.
+20. **Quality is a calibration workspace.** The reading side and the Quality page have different jobs: the reading
+    side offers feedback and never asks; Calibrate asks, because the owner opened it to answer, and may ask more than
+    one question per paper. A paper is not one-dimensional: fit to each Watch topic, its value to the owner whatever
+    the topic, and whether its take is accurate are separate answers. A paper that matters but fits no topic points
+    at a missing topic or a narrow rubric. Calibrate replaces the M2 labelling page and is built in M3.
+21. **Writer model.** Opus 5.5 on the Anthropic API, on credits, compared once in M3 with one or two OpenRouter models.
+22. **No scheduled runs before cutover.** Jobs run by hand until the side-by-side week of M7; checks that mention a
+    schedule are shown with a test schedule.
 
 Nothing is open. Noted for later: the owner plans embeddings over the archive (abstracts,
 ideally full text) for semantic search, once a GPU server exists. That would also give a
