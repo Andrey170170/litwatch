@@ -21,6 +21,7 @@ import {
 } from "@/api/settings";
 import { BTN, BTN_PRIMARY, Empty, FIELD, H2, Page, TABLE, money, pct } from "@/routes/settings/index";
 import { KIND_LABEL } from "@/lib/topics";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 /** The eight colours of DESIGN.md, in the order they are first assigned. */
@@ -307,15 +308,27 @@ function Preview({ draft }: { draft: Topic }) {
     if (mine) setRun((r) => (r && r.at === run.at ? { ...r, evalId: mine.id } : r));
   }, [list.data, run, draft.slug]);
 
+  // Set before the list is read, so a second click cannot start a second preview meanwhile.
+  const [starting, setStarting] = useState(false);
   async function start() {
+    if (starting) return;
+    setStarting(true);
     setRun(null);
-    const before = new Set((await qc.fetchQuery(evaluationsQuery("preview"))).map((e) => e.id));
+    let before: Set<number>;
+    try {
+      before = new Set((await qc.fetchQuery(evaluationsQuery("preview"))).map((e) => e.id));
+    } catch {
+      setStarting(false);
+      toast("Could not reach litwatch; try again", "error");
+      return;
+    }
     const at = Date.now();
     preview.mutate(draft, {
       onSuccess: (estimate) => {
         setRun({ at, before, estimate, evalId: null });
         void qc.invalidateQueries({ queryKey: ["settings", "evaluations", "preview"] });
       },
+      onSettled: () => setStarting(false),
     });
   }
 
@@ -325,8 +338,8 @@ function Preview({ draft }: { draft: Topic }) {
     <div className="border-t border-border pt-4">
       <H2 note="a dry run of this draft over the papers you have labelled and the misses you reported; nothing is stored">Preview</H2>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={BTN} disabled={preview.isPending} onClick={() => void start()}>
-          {preview.isPending ? "Starting…" : "Preview this draft"}
+        <button type="button" className={BTN} disabled={preview.isPending || starting} onClick={() => void start()}>
+          {preview.isPending || starting ? "Starting…" : "Preview this draft"}
         </button>
         {run && (
           <span className="text-[12.5px] text-muted-foreground">
