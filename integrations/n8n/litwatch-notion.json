@@ -1,0 +1,214 @@
+{
+  "name": "litwatch → Notion (Watch papers)",
+  "nodes": [
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e01",
+      "name": "litwatch event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e01",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "litwatch-CHANGE-ME-TO-SOMETHING-UNGUESSABLE",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e02",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 300],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "litwatch_url",
+              "type": "string",
+              "value": "https://litwatch.example.org"
+            },
+            {
+              "id": "a2",
+              "name": "notion_database_id",
+              "type": "string",
+              "value": "CHANGE-ME"
+            },
+            {
+              "id": "a3",
+              "name": "paper_id",
+              "type": "string",
+              "value": "={{ $json.body.paper_id }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e03",
+      "name": "Read the paper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.litwatch_url }}/api/papers/{{ $json.paper_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "litwatch token" }
+      }
+    },
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e04",
+      "name": "Watch topics only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// The Notion export carries Watch topics only, at relevant or above.\nconst paper = $json;\nconst shown = { must_read: 'Must read', relevant: 'Relevant' };\nconst watch = (paper.topics || []).filter(t => t.kind === 'watch' && shown[t.grade]);\nconst best = watch.some(t => t.grade === 'must_read') ? 'must_read' : (watch.length ? 'relevant' : null);\nconst text = s => [{ text: { content: String(s || '').slice(0, 2000) } }];\nconst takes = watch.filter(t => t.take).map(t => `${t.name}: ${t.take}`).join('\\n\\n');\nconst properties = {\n  'Title': { title: text(paper.title) },\n  'arXiv': { rich_text: text(paper.id) },\n  'Authors': { rich_text: text((paper.authors || []).join(', ')) },\n  'Topics': { multi_select: watch.map(t => ({ name: t.name })) },\n  'Grade': { select: best ? { name: shown[best] } : null },\n  'Take': { rich_text: text(takes) },\n  'Link': { url: paper.arxiv_url },\n  'In library': { checkbox: Boolean(paper.saved) && watch.length > 0 },\n};\nif (paper.published) properties['Published'] = { date: { start: paper.published.slice(0, 10) } };\nif (paper.publication && paper.publication.venue) properties['Venue'] = { rich_text: text(`${paper.publication.venue} ${paper.publication.year || ''}`.trim()) };\nreturn { json: { arxiv_id: paper.id, keep: Boolean(paper.saved) && watch.length > 0, properties } };"
+      }
+    },
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e05",
+      "name": "Find its page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.notion.com/v1/databases/{{ $('Settings').item.json.notion_database_id }}/query",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2022-06-28" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filter: { property: 'arXiv', rich_text: { equals: $json.arxiv_id } }, page_size: 1 }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "Notion integration token" }
+      }
+    },
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e06",
+      "name": "Has a page?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.results.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e07",
+      "name": "Update the page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 200],
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.results[0].id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2022-06-28" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: $('Watch topics only').item.json.properties }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "Notion integration token" }
+      }
+    },
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e08",
+      "name": "In the library?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1320, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $('Watch topics only').item.json.keep }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6c1b8a3e-0f1e-4a51-9d0a-1a2b3c4d5e09",
+      "name": "Create the page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2022-06-28" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ parent: { database_id: $('Settings').item.json.notion_database_id }, properties: $('Watch topics only').item.json.properties }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "Notion integration token" }
+      }
+    }
+  ],
+  "connections": {
+    "litwatch event": { "main": [[{ "node": "Settings", "type": "main", "index": 0 }]] },
+    "Settings": { "main": [[{ "node": "Read the paper", "type": "main", "index": 0 }]] },
+    "Read the paper": { "main": [[{ "node": "Watch topics only", "type": "main", "index": 0 }]] },
+    "Watch topics only": { "main": [[{ "node": "Find its page", "type": "main", "index": 0 }]] },
+    "Find its page": { "main": [[{ "node": "Has a page?", "type": "main", "index": 0 }]] },
+    "Has a page?": {
+      "main": [
+        [{ "node": "Update the page", "type": "main", "index": 0 }],
+        [{ "node": "In the library?", "type": "main", "index": 0 }]
+      ]
+    },
+    "In the library?": {
+      "main": [[{ "node": "Create the page", "type": "main", "index": 0 }], []]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
