@@ -346,7 +346,7 @@ export function MetricsView({ m, evaluation }: { m: TopicMetrics; evaluation: Ev
               {Math.round((firm.end_to_end ?? 0) * firm.n)} of {firm.n} found end to end; triage {pct(firm.triage)}, candidates {pct(firm.candidate)}, grading {pct(firm.grading)}.
             </div>
             {firm.grading_misses.length + firm.triage_misses.length + firm.candidate_misses.length > 0 && (
-              <div className="mt-1 text-[12.5px] text-muted-foreground">Missed: {[...firm.triage_misses, ...firm.candidate_misses, ...firm.grading_misses].join(", ")}</div>
+              <div className="mt-1 text-[12.5px] text-muted-foreground">Missed: {Array.from(new Set([...firm.triage_misses, ...firm.candidate_misses, ...firm.grading_misses])).join(", ")}</div>
             )}
           </>
         ) : (
