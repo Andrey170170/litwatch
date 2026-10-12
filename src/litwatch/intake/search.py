@@ -134,9 +134,12 @@ def strip_version(arxiv_id: str) -> str:
 
 
 def id_from_url(text: str) -> str:
-    """Accepts a bare id, abs/pdf URL, or `arXiv:` prefix and returns the version-stripped id."""
+    """Accepts a bare id, abs/pdf URL, or `arXiv:` prefix and returns the version-stripped id.
+    Old-style ids (`cs/9901001`, `math.AG/0601001`) are accepted too."""
     text = text.strip()
-    m = re.search(r"(\d{4}\.\d{4,5})(v\d+)?", text)
+    m = re.search(r"(\d{4}\.\d{4,5})(v\d+)?", text) or re.search(
+        r"\b([a-z-]+(?:\.[A-Z]{2})?/\d{7})(v\d+)?", text
+    )
     if not m:
         raise ValueError(f"no arXiv id in {text!r}")
     return m.group(1)

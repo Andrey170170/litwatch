@@ -13,7 +13,7 @@ import psycopg
 from litwatch import events
 from litwatch.config import Config
 from litwatch.core import Grade, Opinion, Paper, Take, TakeSource, Topic, TopicKind
-from litwatch.feedback import word
+from litwatch.feedback import misses, word
 from litwatch.jobs.context import ModelRun
 from litwatch.llm import CallError, Gateway
 from litwatch.review import writer
@@ -44,6 +44,7 @@ class Owed:
 
 
 REWRITTEN = "the text was rewritten; waiting for its re-grade"
+WAITING = "waiting for the miss trace"  # not a failure: the trace is running
 
 
 async def prepare(
@@ -54,7 +55,13 @@ async def prepare(
     verdict = await verdicts_store.current(conn, paper.id, topic.slug)
     binding = word.binding(verdict, paper.revision, topic.revision or 1)
     if not word.speaks(verdict):
-        return Owed(paper, topic, grade, TakeSource.OWNER, [], binding)
+        # A reported miss's trace has both graders' opinions; otherwise the owner's word alone
+        # asked for this take.
+        opinions = await misses.opinions(conn, paper, topic)
+        if opinions is misses.Pending:
+            return WAITING
+        source = TakeSource.EVALUATION if opinions else TakeSource.OWNER
+        return Owed(paper, topic, grade, source, opinions, binding)
     if verdict.paper_revision != paper.revision:
         # Only the current text is stored: the take waits for the rewrite's re-grade.
         return REWRITTEN
@@ -76,6 +83,8 @@ async def _owed(conn: psycopg.AsyncConnection) -> list[Owed]:
             await digest_store.clear_due(conn, row["paper_id"], row["topic"])
             continue
         prepared = await prepare(conn, paper, topic, grade)
+        if prepared == WAITING:
+            continue
         if isinstance(prepared, str):
             # After enough runs the pair enters its issue without a take.
             await digest_store.take_failed(conn, paper.id, topic.slug, prepared)

@@ -156,14 +156,15 @@ async def put_triage_result(
     why: str | None,
     keyword: str | None,
     error: str | None,
+    paper_revision: int | None = None,
 ) -> None:
     await conn.execute(
         """
-        INSERT INTO eval_results (eval_run_id, paper_id, paper_version, topic, triage_yes,
-                                  triage_why, keyword, error)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO eval_results (eval_run_id, paper_id, paper_version, paper_revision, topic,
+                                  triage_yes, triage_why, keyword, error)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (eval_run_id, paper_id, paper_version, topic, yes, why, keyword, error),
+        (eval_run_id, paper_id, paper_version, paper_revision, topic, yes, why, keyword, error),
     )
 
 
