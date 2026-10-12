@@ -213,7 +213,8 @@ papers, which is what backfill will use later.
    current verdict with a different paper revision, topic version or grade (a move between `relevant` and `must_read`
    changes its length); a re-grade that lands on the same grade from the same text keeps the take. Rewriting a take
    makes nothing due for an issue again. Once a night the writer also produces the issue's lede from that night's
-   entries, and on Monday a recap per Watch topic. One gateway role, `writer` (section 4.4), Opus 5.5 on the
+   entries, and on Monday a recap per Watch topic. An issue whose lede failed opens without one, and the next run
+   writes it, as a failed review section is filled in. One gateway role, `writer` (section 4.4), Opus 5.5 on the
    Anthropic API by default (credits), compared in M3 with one or two OpenRouter models on a small set of papers; at
    one to five papers a night the cost is cents. The review writer of Radar and Pulse topics shares its prompt
    scaffolding.
@@ -249,7 +250,8 @@ topic applies forward: the new version is used from the next run, and past paper
 answer they got. Every membership, candidate and verdict records the topic version that
 produced it, so mixed history is visible. Nothing retroactive runs by itself. After an edit
 to a Watch topic the app offers re-runs over a chosen scope, each showing its paper count and
-estimated cost:
+estimated cost (the number of calls it makes, by role, times that role's average cost per call over the last 30 days
+in the journal):
 
 - the owner's labels and reported misses, which shows whether the edit helped;
 - the topic's existing candidates, re-graded;
