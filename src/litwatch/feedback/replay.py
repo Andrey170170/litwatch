@@ -47,13 +47,14 @@ async def replay(
     params: dict[str, Any] | None = None,
     gateway: GatewayFactory = default_gateway,
     draft: Topic | None = None,
+    only: set[str] | None = None,
 ) -> int:
     """Triage and audit `papers` under `config`, then grade those whose id is in `grade` for
     every Watch topic (all of them when `grade` is None). Returns the evaluation run's id.
 
     With a `draft`, that topic as edited but not saved replaces the stored one, and only it is
     graded: a preview of the edit. One result row per paper and topic holds what each stage
-    said.
+    said. `only` limits grading to the named Watch topics.
     """
     topics = await topics_store.all(conn, Status.ACTIVE)
     if draft is not None:
@@ -62,6 +63,9 @@ async def replay(
     watched = [t for t in topics if t.kind == TopicKind.WATCH]
     if draft is not None:
         watched = [draft] if draft.kind == TopicKind.WATCH else []
+        params = (params or {}) | {"draft": draft.model_dump(mode="json")}
+    if only is not None:
+        watched = [t for t in watched if t.slug in only]
     async with model_run(conn, config, "eval", gateway=gateway) as run:
         eval_run_id = await feedback_store.start_eval(
             conn,

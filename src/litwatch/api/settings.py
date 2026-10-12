@@ -16,14 +16,21 @@ from litwatch.core import Topic, TopicKind
 from litwatch.feedback import calibrate, metrics, misses, replay, word
 from litwatch.jobs import reruns
 from litwatch.jobs.context import model_run
+from litwatch.jobs.lock import RUN_LOCK, BusyError, run_lock
 from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
 from litwatch.store import quality
+from litwatch.store import runs as runs_store
 from litwatch.store import topics as topics_store
 
 router = APIRouter(prefix="/api/settings")
 
 SECRET_WORDS = ("key", "token", "password", "secret")
+
+
+def _errors(exc: ValidationError) -> list[Any]:
+    """Validation errors as JSON: a custom validator's exception object is left out."""
+    return exc.errors(include_url=False, include_context=False)
 
 
 # -- topics ----------------------------------------------------------------------------------------
@@ -41,7 +48,9 @@ async def save_topic(slug: str, body: dict[str, Any], c: Conn) -> Topic:
     try:
         topic = Topic.model_validate(body | {"slug": slug})
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+        raise HTTPException(
+            status_code=422, detail=exc.errors(include_url=False, include_context=False)
+        ) from exc
     async with c.transaction():
         before = await topics_store.kind_for_update(c, slug)
         saved = await topics_store.save(c, topic)
@@ -56,8 +65,14 @@ class Order(BaseModel):
 
 @router.put("/topics-order", status_code=204)
 async def order(body: Order, c: Conn) -> None:
-    """The owner's order: sections, cards and the Papers table's take column follow it."""
+    """The owner's order: sections, cards and the Papers table's take column follow it. The
+    list must name every topic once. Rows are locked as a topic save locks them."""
     async with c.transaction():
+        rows = await (
+            await c.execute("SELECT slug FROM topics ORDER BY slug FOR UPDATE")
+        ).fetchall()
+        if sorted(body.slugs) != [r["slug"] for r in rows]:
+            raise HTTPException(status_code=422, detail="name every topic exactly once")
         for position, slug in enumerate(body.slugs, 1):
             await c.execute("UPDATE topics SET position = %s WHERE slug = %s", (position, slug))
 
@@ -80,7 +95,9 @@ async def preview(
     try:
         draft = Topic.model_validate(body | {"slug": slug})
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+        raise HTTPException(
+            status_code=422, detail=exc.errors(include_url=False, include_context=False)
+        ) from exc
     estimate = await reruns.estimate(c, draft, "evidence")
     background.add_task(_preview, request.app.state, draft)
     return estimate
@@ -125,16 +142,33 @@ async def rerun(
     topic = await topics_store.get(c, slug)
     if topic is None or topic.kind != TopicKind.WATCH:
         raise HTTPException(status_code=404, detail="not a Watch topic")
+    if body.scope == "range" and not (body.since and body.until):
+        raise HTTPException(status_code=422, detail="a date range needs since and until")
+    if body.scope != "evidence" and await _busy(c):
+        raise HTTPException(status_code=409, detail="another litwatch job is running")
     estimate = await reruns.estimate(c, topic, body.scope, body.since, body.until)
     background.add_task(_rerun, request.app.state, slug, body)
     return estimate
 
 
+async def _busy(c: Any) -> bool:
+    """Whether a job holds the run lock now. A race with a job starting just after is caught
+    when the re-run takes the lock, and recorded as a failed run."""
+    row = await (await c.execute("SELECT pg_try_advisory_lock(%s) AS got", (RUN_LOCK,))).fetchone()
+    if row["got"]:
+        await c.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
+    return not row["got"]
+
+
 async def _rerun(state: Any, slug: str, body: RerunIn) -> None:
     async with await store.connect(state.dsn) as conn:
-        await reruns.run(
-            conn, state.config, slug, body.scope, body.since, body.until, gateway=state.gateway
-        )
+        try:
+            await reruns.run(
+                conn, state.config, slug, body.scope, body.since, body.until, gateway=state.gateway
+            )
+        except BusyError as exc:
+            run_id = await runs_store.start(conn, f"rerun:{body.scope}")
+            await runs_store.finish(conn, run_id, error=str(exc), counts={"topic": slug})
 
 
 @router.get("/evaluations")
@@ -190,22 +224,25 @@ class Pair(BaseModel):
     topic: str
 
 
-@router.post("/quality/grade-now", status_code=202)
-async def grade_now(body: Pair, request: Request, background: BackgroundTasks) -> dict[str, str]:
-    """Grade an ungraded candidate now, outside the nightly run."""
-    background.add_task(_grade_now, request.app.state, body)
-    return {"status": "grading"}
-
-
-async def _grade_now(state: Any, pair: Pair) -> None:
-    async with await store.connect(state.dsn) as conn:
-        paper = await papers_store.get(conn, pair.paper_id)
-        topic = await topics_store.get(conn, pair.topic)
-        if paper is None or topic is None:
-            return
-        async with model_run(conn, state.config, "grade-now", gateway=state.gateway) as run:
+@router.post("/quality/grade-now")
+async def grade_now(body: Pair, request: Request, c: Conn) -> dict[str, Any]:
+    """Grade an ungraded candidate now, under the run lock, and say what came of it."""
+    state = request.app.state
+    paper = await papers_store.get(c, body.paper_id)
+    topic = await topics_store.get(c, body.topic)
+    newest = {x.paper_id: x for x in await quality.newest_candidates(c, body.topic)}
+    if paper is None or topic is None or body.paper_id not in newest:
+        raise HTTPException(status_code=404, detail="no such candidate")
+    try:
+        async with (
+            run_lock(c),
+            model_run(c, state.config, "grade-now", gateway=state.gateway) as run,
+        ):
             graded = await watch.grade(paper, topic, run.gateway)
-            await watch.record(conn, graded)
+            verdict = await watch.record(c, graded, newest[body.paper_id].topic_revision)
+    except BusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"graded": verdict is not None, "error": graded.error}
 
 
 # -- calibrate -------------------------------------------------------------------------------------
@@ -264,6 +301,18 @@ async def answer(session_id: int, position: int, body: calibrate.Answer, c: Conn
 @router.get("/misses")
 async def reported(c: Conn) -> list[dict[str, Any]]:
     return await misses.reported(c)
+
+
+@router.post("/misses/{miss_id}/trace", status_code=202)
+async def retrace(miss_id: int, request: Request, background: BackgroundTasks) -> dict[str, str]:
+    """Trace a miss again, after a failure. The owner's word on it is untouched."""
+    background.add_task(_retrace, request.app.state, miss_id)
+    return {"status": "tracing"}
+
+
+async def _retrace(state: Any, miss_id: int) -> None:
+    async with await store.connect(state.dsn) as conn:
+        await misses.trace(conn, state.config, miss_id, gateway=state.gateway)
 
 
 @router.get("/runs")

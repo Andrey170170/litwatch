@@ -17,6 +17,9 @@ CREATE TABLE calibration_items (
     topic       text NOT NULL,
     why         text NOT NULL CHECK (why IN ('above', 'below', 'split', 'reaction')),
     verdict_id  bigint REFERENCES verdicts (id) ON DELETE SET NULL,
+    -- The fit given here for the drawn topic: precision reads it, whatever label the paper
+    -- had before or gets after.
+    answer      text CHECK (answer IN ('relevant', 'adjacent', 'not_relevant', 'unsure')),
     answered_at timestamptz,
     PRIMARY KEY (session_id, position),
     UNIQUE (session_id, paper_id)

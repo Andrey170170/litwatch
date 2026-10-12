@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import AsyncIterator
 from typing import Any
 
 import psycopg
+
+from litwatch.core import Candidate
 
 
 async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> list[dict]:
@@ -127,34 +131,36 @@ async def cost_per_call(conn: psycopg.AsyncConnection, days: int = 30) -> dict[s
     return {r["role"]: float(r["cost"]) for r in rows}
 
 
+async def _texts(conn: psycopg.AsyncConnection) -> AsyncIterator[tuple[str, str]]:
+    """Every stored paper's id and title with abstract, streamed."""
+    async with conn.cursor(name="keyword_scan") as cur:
+        await cur.execute("SELECT id, title, abstract FROM papers ORDER BY id")
+        async for row in cur:
+            yield row["id"], f"{row['title']}\n{row['abstract']}"
+
+
 async def keyword_counts(conn: psycopg.AsyncConnection, patterns: list[str]) -> dict[str, int]:
-    """How many stored papers each keyword pattern matches in title or abstract. Postgres
-    regular expressions, case-insensitive, which agree with Python's on ordinary patterns."""
-    out = {}
-    for pattern in patterns:
-        try:
-            row = await (
-                await conn.execute(
-                    "SELECT count(*) AS n FROM papers WHERE title ~* %s OR abstract ~* %s",
-                    (pattern, pattern),
-                )
-            ).fetchone()
-            out[pattern] = row["n"]
-        except psycopg.errors.InvalidRegularExpression:
-            out[pattern] = -1
-    return out
+    """How many stored papers each keyword pattern matches in title or abstract, with the
+    keyword audit's own matching (Python, case-insensitive)."""
+    compiled = {p: re.compile(p, re.IGNORECASE) for p in patterns}
+    counts = dict.fromkeys(patterns, 0)
+    async with conn.transaction():  # a named cursor lives in a transaction
+        async for _, text in _texts(conn):
+            for pattern, regex in compiled.items():
+                counts[pattern] += bool(regex.search(text))
+    return counts
 
 
 async def keyword_papers(conn: psycopg.AsyncConnection, patterns: list[str]) -> list[str]:
-    if not patterns:
-        return []
-    alternation = "|".join(f"({p})" for p in patterns)
-    rows = await _all(
-        conn,
-        "SELECT id FROM papers WHERE title ~* %s OR abstract ~* %s ORDER BY id",
-        (alternation, alternation),
-    )
-    return [r["id"] for r in rows]
+    """Stored papers any of the patterns matches, as the keyword audit would."""
+    compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
+    found = []
+    if compiled:
+        async with conn.transaction():
+            async for paper_id, text in _texts(conn):
+                if any(r.search(text) for r in compiled):
+                    found.append(paper_id)
+    return found
 
 
 async def papers_between(conn: psycopg.AsyncConnection, since: Any, until: Any) -> list[str]:
@@ -164,6 +170,17 @@ async def papers_between(conn: psycopg.AsyncConnection, since: Any, until: Any) 
         (since, until),
     )
     return [r["id"] for r in rows]
+
+
+async def newest_candidates(conn: psycopg.AsyncConnection, topic: str) -> list[Candidate]:
+    """Each paper's newest candidate row for the topic: the revision it was put forward under."""
+    rows = await _all(
+        conn,
+        "SELECT DISTINCT ON (paper_id) * FROM candidates WHERE topic = %s "
+        "ORDER BY paper_id, topic_revision DESC",
+        (topic,),
+    )
+    return [Candidate(**{k: r[k] for k in Candidate.model_fields}) for r in rows]
 
 
 async def candidate_papers(conn: psycopg.AsyncConnection, topic: str) -> list[str]:

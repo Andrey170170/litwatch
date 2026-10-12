@@ -63,6 +63,7 @@ async def estimate(
 ) -> dict[str, Any]:
     """Paper count and estimated cost: calls by role times each role's recent average cost."""
     n = len(await papers_for(conn, topic, scope, since, until))
+    # Evidence grades this topic only, like every other scope.
     graded = {
         "evidence": n,
         "candidates": n,
@@ -94,18 +95,27 @@ async def run(
     papers = await papers_store.get_many(conn, ids)
     if scope == "evidence":
         eval_run_id = await replay(
-            conn, config, papers, kind="rerun", params={"topic": slug}, gateway=gateway
+            conn,
+            config,
+            papers,
+            kind="rerun",
+            params={"topic": slug},
+            gateway=gateway,
+            only={slug},
         )
         return {"eval_run": eval_run_id, "papers": len(papers)}
     async with run_lock(conn), model_run(conn, config, f"rerun:{scope}", gateway=gateway) as r:
         r.counts["topic"] = slug
-        if scope == "candidates":
-            async for graded in watch.grade_many(
-                [(p, topic) for p in papers], r.gateway, config.limits.grading
-            ):
-                made = await watch.record(conn, graded)
-                r.add("graded" if made else "grading_failed")
-        else:
+        if scope != "candidates":
             await watch_jobs.triage(conn, config, r, papers=papers)
-            await watch_jobs.grade(conn, config, r)
+        # Grading stays inside the scope: this topic's candidates among these papers. What
+        # triage put forward for other topics waits for the nightly run.
+        chosen = set(ids)
+        made_under = {
+            c.paper_id: c.topic_revision for c in await quality.newest_candidates(conn, slug)
+        }
+        pairs = [(p, topic) for p in papers if p.id in chosen and p.id in made_under]
+        async for graded in watch.grade_many(pairs, r.gateway, config.limits.grading):
+            made = await watch.record(conn, graded, made_under[graded.paper.id])
+            r.add("graded" if made else "grading_failed")
         return {"run": r.run_id, "papers": len(papers), **r.counts}

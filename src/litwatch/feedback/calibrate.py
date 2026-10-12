@@ -194,9 +194,9 @@ async def answer(
                 (take_id, accurate),
             )
         await conn.execute(
-            "UPDATE calibration_items SET answered_at = now() "
+            "UPDATE calibration_items SET answer = %s, answered_at = now() "
             "WHERE session_id = %s AND position = %s",
-            (session_id, position),
+            (given.fit[item["topic"]].value.value, session_id, position),
         )
 
 
@@ -238,14 +238,12 @@ async def precision(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
         conn,
         """
         SELECT t.slug AS topic, i.why,
-               count(*) FILTER (WHERE l.value IS NOT NULL AND l.value <> 'unsure') AS answered,
-               count(*) FILTER (WHERE l.value = 'relevant') AS relevant
+               count(*) FILTER (WHERE i.answer IS NOT NULL AND i.answer <> 'unsure') AS answered,
+               count(*) FILTER (WHERE i.answer = 'relevant') AS relevant
         FROM topics t
         JOIN calibration_items i ON i.topic = t.slug AND i.why IN ('above', 'below')
         JOIN calibration_sessions s ON s.id = i.session_id
              AND s.drawn_at >= now() - make_interval(days => %s)
-        LEFT JOIN labels l ON l.paper_id = i.paper_id AND l.topic = i.topic
-             AND l.origin = 'sample' AND i.answered_at IS NOT NULL
         WHERE t.kind = 'watch'
         GROUP BY t.slug, t.position, i.why ORDER BY t.position, i.why
         """,

@@ -5,10 +5,12 @@ import json
 import httpx
 import pytest
 
+from litwatch import store
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue, Opinion, Verdict
 from litwatch.feedback import word
+from litwatch.jobs.lock import RUN_LOCK
 from litwatch.llm import Gateway
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
@@ -155,3 +157,49 @@ async def test_quality_lists_last_nights_splits_and_config_hides_secrets(client,
     )
     config = (await client.get("/api/settings/config")).json()
     assert config["models"]["writer"]["model"] == "claude-opus-5-5"
+
+
+async def test_a_rerun_grades_only_inside_its_scope(client, conn):
+    # A pending candidate outside the range must stay pending.
+    await conn.execute(
+        "INSERT INTO candidates (paper_id, topic, topic_revision, by_triage) "
+        "VALUES (%s, %s, 1, true)",
+        (Q.id, FAITH.slug),
+    )
+    started = await client.post(
+        f"/api/settings/topics/{FAITH.slug}/reruns",
+        json={"scope": "range", "since": "2001-01-01", "until": "2001-01-02"},
+    )
+    assert started.status_code == 202
+    assert await (await conn.execute("SELECT * FROM verdicts")).fetchall() == []
+
+
+async def test_grade_now_takes_the_run_lock_and_closes_the_old_candidate(client, conn):
+    await conn.execute(
+        "INSERT INTO candidates (paper_id, topic, topic_revision, by_triage, failed_runs) "
+        "VALUES (%s, %s, 1, true, 3)",
+        (P.id, FAITH.slug),
+    )
+    body = FAITH.model_dump(mode="json") | {"rubric": "Edited."}
+    await client.put(f"/api/settings/topics/{FAITH.slug}", json=body)  # now revision 2
+    pair = {"paper_id": P.id, "topic": FAITH.slug}
+    async with await store.sibling(conn) as other:
+        await other.execute("SELECT pg_advisory_lock(%s)", (RUN_LOCK,))
+        assert (await client.post("/api/settings/quality/grade-now", json=pair)).status_code == 409
+        await other.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
+    assert (await client.post("/api/settings/quality/grade-now", json=pair)).json()["graded"]
+    (candidate,) = await (await conn.execute("SELECT state FROM candidates")).fetchall()
+    assert candidate["state"] == "graded"
+
+
+async def test_keyword_counts_match_as_the_audit_does(client, conn):
+    await papers_store.upsert(conn, [paper("2610.00003", title="CoT methods", abstract="x")])
+    counts = (await client.get(f"/api/settings/topics/{FAITH.slug}/keywords")).json()
+    assert counts[r"\bCoT\b"] == 1
+
+
+async def test_bad_input_is_refused_not_crashed(client):
+    body = FAITH.model_dump(mode="json") | {"keywords": ["["]}
+    assert (await client.put(f"/api/settings/topics/{FAITH.slug}", json=body)).status_code == 422
+    order = {"slugs": ["agents", "agents", FAITH.slug]}
+    assert (await client.put("/api/settings/topics-order", json=order)).status_code == 422

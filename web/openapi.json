@@ -910,7 +910,7 @@
     "/api/settings/topics-order": {
       "put": {
         "summary": "Order",
-        "description": "The owner's order: sections, cards and the Papers table's take column follow it.",
+        "description": "The owner's order: sections, cards and the Papers table's take column follow it. The\nlist must name every topic once. Rows are locked as a topic save locks them.",
         "operationId": "order_api_settings_topics_order_put",
         "requestBody": {
           "content": {
@@ -1280,7 +1280,7 @@
     "/api/settings/quality/grade-now": {
       "post": {
         "summary": "Grade Now",
-        "description": "Grade an ungraded candidate now, outside the nightly run.",
+        "description": "Grade an ungraded candidate now, under the run lock, and say what came of it.",
         "operationId": "grade_now_api_settings_quality_grade_now_post",
         "requestBody": {
           "content": {
@@ -1293,14 +1293,12 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Grade Now Api Settings Quality Grade Now Post"
                 }
@@ -1536,6 +1534,50 @@
                   },
                   "type": "array",
                   "title": "Response Reported Api Settings Misses Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/misses/{miss_id}/trace": {
+      "post": {
+        "summary": "Retrace",
+        "description": "Trace a miss again, after a failure. The owner's word on it is untouched.",
+        "operationId": "retrace_api_settings_misses__miss_id__trace_post",
+        "parameters": [
+          {
+            "name": "miss_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Miss Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Retrace Api Settings Misses  Miss Id  Trace Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }

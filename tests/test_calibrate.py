@@ -131,3 +131,22 @@ async def test_more_takes_in_straddling_splits_and_thumbed_papers_once(db):
         (BELOW[0].id, "reaction"),
     }
     assert await calibrate.more(db, session_id) == 0
+
+
+async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(db):
+    session_id = await calibrate.draw(db, seed=3, size=2)
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    await word.label(
+        db,
+        Label(
+            paper_id=item["paper_id"],
+            topic=FAITH.slug,
+            value=LabelValue.RELEVANT,
+            origin=LabelOrigin.READER,
+        ),
+    )
+    await calibrate.answer(
+        db, session_id, item["position"], Answer(fit={FAITH.slug: Fit(value="relevant")})
+    )
+    (row,) = await calibrate.precision(db)
+    assert (row["precision"], row["precision_n"]) == (1.0, 1)
