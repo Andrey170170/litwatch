@@ -239,7 +239,9 @@ Watch topic, then the weekly issue. A Radar topic with a daily cadence is also r
 that night's members, before the daily issue is built.
 
 Continuously: **publication lookup** for library papers, first when saved, then monthly for two
-years, and on demand when BibTeX is exported.
+years, and on demand when BibTeX is copied for a single paper. An export of many papers (a filter, a selection, the
+library) never waits on DBLP: it uses the publications already stored and gives an arXiv entry for any paper not yet
+looked up.
 
 On demand: the owner reacts to or labels a paper, reports a miss, saves or unsaves a paper, calibrates, asks for a
 deep card, or edits a topic. Editing a
@@ -856,6 +858,8 @@ Decided on 2026-10-12, reviewing the spec for the remaining milestones:
     replaces the weekly one.
 24. **Triage stops after three failed nights.** The paper then awaits the owner, who dismisses it (litwatch drops it;
     it stays in the collection and the archive), triages it by hand, or fixes its text and lets triage run again.
+25. **Bulk BibTeX does not wait.** Only copying one paper's BibTeX looks it up on DBLP first; an export of many
+    papers uses what is stored, since library papers are looked up when saved and monthly after.
 
 Nothing is open. Noted for later: the owner plans embeddings over the archive (abstracts,
 ideally full text) for semantic search, once a GPU server exists. That would also give a
