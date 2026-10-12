@@ -6,13 +6,15 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Candidate, Grade, Take, TakeSource, Verdict
+from litwatch.core import Candidate, Grade, Opinion, Take, TakeSource, Verdict
 from litwatch.feedback import word
 from litwatch.store import digest as digest_store
 from litwatch.store import papers as papers_store
 from litwatch.store import quality, verdicts
 from litwatch.store import topics as topics_store
 from litwatch.store import triage as triage_store
+from litwatch.watch.grade import Graded
+from litwatch.watch.record import record
 from tests.conftest import FAITH, INTERP, TOPICS, paper
 
 TOKEN = "s3cret"
@@ -73,6 +75,18 @@ async def test_a_dismissed_paper_is_not_graded_or_triaged_after_a_rewrite(client
     assert await quality.candidate_papers(conn, FAITH.slug) == []
     assert await quality.newest_candidates(conn, FAITH.slug) == []
     assert STUCK.id not in await quality.keyword_papers(conn, ["abstract"])
+    # The reading side stops counting it, and no longer shows it as being graded.
+    status = (await client.get("/api/status")).json()
+    assert status["awaiting_triage"] == 0 and status["ungraded"] == 0
+    page = (await client.get(f"/api/papers/{STUCK.id}")).json()
+    assert not any(t["grading"] for t in page["topics"])
+    rows = (await client.get("/api/papers", params={"q": "abstract"})).json()["rows"]
+    assert not any(r["grading"] for r in rows if r["id"] == STUCK.id)
+    # Grading that was already in flight when the owner dismissed it records nothing.
+    opinion = Opinion(grade=Grade.RELEVANT, reason="r")
+    graded = Graded(paper=rewritten, topic=FAITH, judge=opinion, check=opinion)
+    assert await record(conn, graded) is None
+    assert await (await conn.execute("SELECT * FROM verdicts")).fetchall() == []
 
 
 async def test_triage_by_hand_puts_the_paper_forward_as_the_owners(client, conn):

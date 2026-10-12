@@ -24,6 +24,15 @@ async def record(
     paper, topic = graded.paper, graded.topic
     made_under = candidate_revision or topic.revision
     async with conn.transaction():
+        # A paper the owner dismissed while it was being graded records nothing. The share
+        # lock waits for a dismissal in progress, which updates this row.
+        row = await (
+            await conn.execute(
+                "SELECT dismissed_at FROM papers WHERE id = %s FOR SHARE", (paper.id,)
+            )
+        ).fetchone()
+        if row and row["dismissed_at"]:
+            return None
         if not graded.complete:
             await verdicts.mark_failed(conn, paper.id, topic.slug, made_under, graded.error)
             return None
