@@ -38,7 +38,7 @@ REVIEW = """{voice}
 
 You review the new arXiv papers of one {span} in a field the researcher follows for its \
 bearing on their work, without reading it closely. Write {shape}. Each pick names a paper from \
-the list by its id, with one sentence on why it is worth the researcher's time. Pick fewer when \
+the list by its id, with one sentence on what it shows or adds to the field. Pick fewer when \
 fewer deserve it. Name papers in the text by their idea, never by their id.
 
 # The field: {name}
