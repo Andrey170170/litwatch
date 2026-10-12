@@ -15,8 +15,12 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+import psycopg
+
 from litwatch.config import Config, secret
+from litwatch.core import Grade
 from litwatch.events import Integration
+from litwatch.store import word as word_store
 
 BUILT_IN = ("zotero", "webdav", "archive", "deep", "webhook")
 
@@ -58,21 +62,34 @@ def load(config: Config) -> list[Integration]:
     return loaded
 
 
-def option(
-    options: dict[str, Any], key: str, default: Any = None, *, env: str | None = None
-) -> Any:
-    """An option from the section, else the environment variable (or its `_FILE`), else the
-    default. Secrets belong in the environment, never in `litwatch.toml`."""
+def option(options: dict[str, Any], key: str, *, env: str | None = None) -> Any:
+    """A setting from the section, else from the environment variable `env` (or the file its
+    `_FILE` variable names); None if neither."""
     if key in options:
         return options[key]
-    if env and (value := secret(env)):
-        return value
-    return default
+    return secret(env) if env else None
 
 
 def required(options: dict[str, Any], key: str, *, env: str | None = None) -> Any:
     value = option(options, key, env=env)
     if value in (None, ""):
-        where = f"`{key}` in the section" + (f" or ${env}" if env else "")
-        raise IntegrationError(f"missing {where}")
+        raise IntegrationError(f"missing `{key}`" + (f" (or ${env})" if env else ""))
     return value
+
+
+def required_secret(env: str) -> str:
+    """A secret from the environment variable, or the file its `_FILE` variable names. Never
+    from `litwatch.toml`."""
+    value = secret(env)
+    if not value:
+        raise IntegrationError(f"missing ${env} (or ${env}_FILE)")
+    return value
+
+
+async def must_read_and_saved(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """What an integration acting on `must_read` checks when it handles the event, rather than
+    trusting what the event said: the owner's word or a later verdict may have moved the
+    paper since, and the owner may have unsaved it."""
+    row = await word_store.library_row(conn, paper_id)
+    grades = await word_store.effective_for(conn, paper_id)
+    return bool(row and row["saved"]) and Grade.MUST_READ in grades.values()
