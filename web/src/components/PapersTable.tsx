@@ -24,7 +24,7 @@ type Props = {
   watchTopics: TopicCard[];
   /** Set on a topic page: no dot words beyond the grade, no topic in the row. */
   fixedTopic?: TopicCard;
-  /** Offer "Should have been found for a topic…" on rows that no topic shows. */
+  /** Offer "Should have been found for a topic…" on every row: a paper shown for one topic may be a miss for another. */
   showMiss?: boolean;
   /** Rows to show in their own band above the table (the lookup result). */
   above?: ReactNode;
@@ -109,7 +109,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
                 picks={picks}
                 selected={selected.has(r.id)}
                 onSelect={() => toggle(r.id)}
-                miss={showMiss && !shownRow(r) ? <MissLink paperId={r.id} topics={watchTopics} /> : null}
+                miss={showMiss ? <MissLink paperId={r.id} topics={watchTopics} /> : null}
                 surface={surfaceTopic ?? "none"}
               />
             ))}
@@ -124,7 +124,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
               picks={picks}
               selected={selected.has(r.id)}
               onSelect={() => toggle(r.id)}
-              miss={showMiss && !shownRow(r) ? <MissLink paperId={r.id} topics={watchTopics} /> : null}
+              miss={showMiss ? <MissLink paperId={r.id} topics={watchTopics} /> : null}
               surface={surfaceTopic ?? "none"}
             />
           ))}
@@ -142,10 +142,6 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
       )}
     </div>
   );
-}
-
-function shownRow(r: Row) {
-  return r.grade === "must_read" || r.grade === "relevant";
 }
 
 function Select({ checked, onChange, title }: { checked: boolean; onChange: () => void; title: string }) {

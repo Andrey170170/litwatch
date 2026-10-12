@@ -218,7 +218,10 @@ function TopicEditor({ stored, base, isNew }: { stored: Topic | undefined; base:
         </div>
 
         {draft.kind === "watch" && !isNew && <Preview draft={{ ...draft, slug: draft.slug.trim() }} />}
-        {savedWatch && <Reruns topic={savedWatch} />}
+        {/* Re-runs for any stored Watch topic: also right after one is created. */}
+        {(savedWatch ?? (stored?.kind === "watch" ? stored : null)) && (
+          <Reruns topic={(savedWatch ?? stored)!} />
+        )}
       </div>
     </Page>
   );
