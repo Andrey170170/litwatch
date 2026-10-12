@@ -113,8 +113,8 @@ otherwise stay behind Settings.
 Watch topic with the papers newly at an effective grade of `relevant` or above and their takes, then the review of
 every daily topic. The weekly issue, on Monday, is "what happened last week": one section per topic of every kind,
 in the owner's order, holding the Watch topic's recap or the Radar or Pulse topic's weekly review. The two kinds of
-issue are separate: the daily issue never carries a weekly review, and the weekly issue never repeats a night's
-entries. (These were
+issue are separate: the daily issue never carries a weekly review, and the weekly issue lists the week's papers only
+as one-liners under each recap, never as the nights' entries again. (These were
 called briefings in earlier drafts; the API keeps the shape, the name follows the page.)
 
 **Feedback.** The owner's corrections, and the only ground truth the system has. Every reading surface offers it and
