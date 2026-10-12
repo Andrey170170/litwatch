@@ -194,8 +194,10 @@ papers, which is what backfill will use later.
    Integrations consume them on their own schedule; a failing integration delays nothing.
 8. **Daily issue.** One per calendar date in the configured timezone (`[schedule] timezone`, default the server's),
    keyed by that date, built at the end of the nightly run from every pair due for an issue, with their takes, and the
-   daily reviews. Including a pair consumes its due state, so a pair appears in one issue only; a take that was not
-   ready, or a late re-grade, makes the next issue, never a duplicate. Running the day's jobs again amends the same
+   daily reviews. A pair is taken into the issue when its take is ready, or when the writer has failed on it three
+   runs, in which case it enters with title and abstract and no take; until then it waits. Including a pair consumes
+   its due state, so a pair appears in one issue only; a pair still waiting on its take, or a late re-grade, makes the
+   next issue, never a duplicate. Running the day's jobs again amends the same
    issue, adding entries and never repeating one. An issue exists when there is at least one Watch entry or one daily
    review; adjacent arrivals alone make no issue, though an issue that exists counts them in its fold line. A section
    whose review failed says so in one line and is filled in if the review is re-run that day. The effective grade (the
@@ -328,7 +330,8 @@ version cannot overtake a newer verdict. A candidate still pending when its topi
 is graded under the topic as it then is, and its verdict records that revision.
 
 **review.** `review(topic, period)` for Radar and Pulse, where the period is a week or a day; a field too large for one call is
-shortlisted in chunks first. `take(paper, topic, verdict)` writes a paper's take and `lede(day)` the issue's opening
+shortlisted in chunks first. `take(paper, topic, source)` writes a paper's take, where the source is the current verdict, an evaluation
+result (a miss), a migrated opinion, or the owner's label alone, and `lede(day)` the issue's opening
 (section 3, writer). `daily_issue(day)` and `weekly_issue(week)` assemble stored takes, verdicts and reviews into
 structured issues; the web app and exports render them.
 

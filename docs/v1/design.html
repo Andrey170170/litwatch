@@ -473,7 +473,7 @@ no new issue, so the feed opens on Friday's and the masthead says "nothing new s
     </div>
     <ul>
       <li>A thumb down opens the reasons; the first tap on a reason closes it. A thumb up stands alone, with "Great find" on a long press.</li>
-      <li>"Unrelated to the topic" is the one reason that speaks to the pipeline's job and becomes a label (not relevant, origin reader). The others are stored as reactions and feed Quality as a correction rate. Opening and saving are recorded as implicit signals.</li>
+      <li>"Unrelated to the topic" is the one reason that speaks to the pipeline's job and becomes a label (not relevant, origin reaction, so clearing the thumb takes back that label and no other). The others are stored as reactions and feed Quality as a correction rate. Opening and saving are recorded as implicit signals.</li>
     </ul>
   </div>
 </div>
@@ -823,7 +823,7 @@ the M4 review writer, which can share its prompt scaffolding. The weekly issue's
 
 <h3>Feedback model</h3>
 <p>Thumbs are stored as <strong>reactions</strong> (paper, topic, value up or down, reason, time). The reason "unrelated to
-the topic" also writes a label (not relevant, origin reader) and "great find" writes relevant; the other reasons do not
+the topic" also writes a label (not relevant, origin reaction) and "great find" writes relevant, origin reaction; a label set on the paper page has origin reader and outranks them; the other reasons do not
 touch labels. Opening a paper page and saving are recorded as events already (<code>paper.saved</code> exists;
 <code>paper.opened</code> is new and local). Quality reports the correction rate from reactions and keeps precision honest
 with the calibration sample rather than from reactions, which are biased by construction. The existing labelling page
