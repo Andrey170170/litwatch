@@ -132,10 +132,13 @@ async def _save_all(conn: psycopg.AsyncConnection, topics: list[Topic]) -> list[
     """Save the topics; one whose kind changed has its papers settled again."""
     saved = []
     for topic in topics:
-        before = await topics_store.get(conn, topic.slug)
-        saved.append(await topics_store.save(conn, topic))
-        if before is not None and before.kind != topic.kind:
-            await word.settle_topic(conn, topic.slug)
+        # The kind is read under the row lock the save takes, so a concurrent import cannot
+        # make this one miss the transition.
+        async with conn.transaction():
+            before = await topics_store.kind_for_update(conn, topic.slug)
+            saved.append(await topics_store.save(conn, topic))
+            if before is not None and before != topic.kind:
+                await word.settle_topic(conn, topic.slug)
     return saved
 
 

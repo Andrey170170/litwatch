@@ -84,6 +84,14 @@ async def all(conn: psycopg.AsyncConnection, status: Status | None = Status.ACTI
     return [_topic(r) for r in rows]
 
 
+async def kind_for_update(conn: psycopg.AsyncConnection, slug: str) -> TopicKind | None:
+    """The topic's kind, locking its row to the end of the transaction."""
+    row = await (
+        await conn.execute("SELECT kind FROM topics WHERE slug = %s FOR UPDATE", (slug,))
+    ).fetchone()
+    return TopicKind(row["kind"]) if row else None
+
+
 async def get(conn: psycopg.AsyncConnection, slug: str) -> Topic | None:
     row = await (await conn.execute("SELECT * FROM topics WHERE slug = %s", (slug,))).fetchone()
     return _topic(row) if row else None
