@@ -30,7 +30,7 @@ from litwatch.store import topics as topics_store
 router = APIRouter(prefix="/api/settings")
 log = logging.getLogger(__name__)
 
-SECRET_WORDS = ("key", "token", "password", "secret")
+SECRET_WORDS = ("key", "token", "password", "secret", "authorization", "credential")
 
 
 def _errors(exc: ValidationError) -> list[Any]:
@@ -265,6 +265,8 @@ async def grade_now(body: Pair, request: Request, c: Conn) -> dict[str, Any]:
     newest = {x.paper_id: x for x in await quality.newest_candidates(c, body.topic)}
     if paper is None or topic is None or body.paper_id not in newest:
         raise HTTPException(status_code=404, detail="no such candidate")
+    if newest[body.paper_id].state != "pending":
+        raise HTTPException(status_code=409, detail="already graded")
     try:
         async with (
             run_lock(c),

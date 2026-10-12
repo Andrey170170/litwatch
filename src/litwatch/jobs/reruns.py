@@ -75,7 +75,9 @@ async def estimate(
     cost = triaged * per_call.get("triage", 0.0) + graded * (
         per_call.get("judge", 0.0) + per_call.get("check", 0.0)
     )
-    return {"scope": scope, "papers": n, "cost": round(cost, 2), "known": bool(per_call)}
+    needed = ({"triage"} if triaged else set()) | ({"judge", "check"} if graded else set())
+    known = needed <= set(per_call)  # a role with no recent call would count as free
+    return {"scope": scope, "papers": n, "cost": round(cost, 2), "known": known}
 
 
 async def run(
@@ -106,17 +108,16 @@ async def run(
         return {"eval_run": eval_run_id, "papers": len(papers)}
     async with run_lock(conn), model_run(conn, config, f"rerun:{scope}", gateway=gateway) as r:
         r.counts["topic"] = slug
+        put_forward = None
         if scope != "candidates":
-            await watch_jobs.triage(conn, config, r, papers=papers)
+            put_forward = await watch_jobs.triage(conn, config, r, papers=papers)
         # Grading stays inside the scope: this topic's candidates among these papers. What
         # triage put forward for other topics waits for the nightly run.
         chosen = set(ids)
-        newest = await quality.newest_candidates(conn, slug)
-        if scope != "candidates":
-            # Only what this pass put forward: pending under the topic as it is now.
-            newest = [
-                c for c in newest if c.state == "pending" and c.topic_revision == topic.revision
-            ]
+        if put_forward is None:
+            newest = await quality.newest_candidates(conn, slug)
+        else:  # only what this pass put forward for the topic
+            newest = [c for c in put_forward if c.topic == slug]
         made_under = {c.paper_id: c.topic_revision for c in newest}
         pairs = [(p, topic) for p in papers if p.id in chosen and p.id in made_under]
         async for graded in watch.grade_many(pairs, r.gateway, config.limits.grading):

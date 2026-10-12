@@ -87,7 +87,10 @@ async def test_precision_judges_the_drawn_verdict_and_ignores_the_unanswered(db)
     above = [i for i in await items(db, session_id) if i["why"] == "above"]
     below = [i for i in await items(db, session_id) if i["why"] == "below"]
     await calibrate.answer(
-        db, session_id, above[0]["position"], Answer(fit={FAITH.slug: Fit(value="relevant")})
+        db,
+        session_id,
+        above[0]["position"],
+        Answer(fit={FAITH.slug: Fit(value="relevant", grade="relevant")}),
     )
     await calibrate.answer(
         db, session_id, above[1]["position"], Answer(fit={FAITH.slug: Fit(value="not_relevant")})
@@ -146,15 +149,20 @@ async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(d
         ),
     )
     await calibrate.answer(
-        db, session_id, item["position"], Answer(fit={FAITH.slug: Fit(value="relevant")})
+        db,
+        session_id,
+        item["position"],
+        Answer(fit={FAITH.slug: Fit(value="relevant", grade="relevant")}),
     )
     (row,) = await calibrate.precision(db)
     assert (row["precision"], row["precision_n"]) == (1.0, 1)
 
 
-def test_a_grade_goes_only_with_relevant():
-    with pytest.raises(ValueError, match="a grade goes only"):
+def test_relevant_takes_must_read_or_worth_reading_and_nothing_else_takes_a_grade():
+    with pytest.raises(ValueError, match="needs a grade"):
         Fit(value="relevant", grade="none")
+    with pytest.raises(ValueError, match="needs a grade"):
+        Fit(value="relevant")
     with pytest.raises(ValueError, match="a grade goes only"):
         Fit(value="not_relevant", grade="relevant")
     assert Fit(value="relevant", grade="must_read").grade == Grade.MUST_READ
@@ -183,7 +191,9 @@ async def test_a_take_rating_must_belong_to_the_paper(db):
             db,
             session_id,
             item["position"],
-            Answer(fit={FAITH.slug: Fit(value="relevant")}, takes={other.id: True}),
+            Answer(
+                fit={FAITH.slug: Fit(value="relevant", grade="relevant")}, takes={other.id: True}
+            ),
         )
 
 
@@ -196,3 +206,11 @@ async def test_more_takes_in_an_unmarked_miss(db):
     session_id = await calibrate.draw(db, seed=5, size=0)
     await calibrate.more(db, session_id)
     assert (missed.id, "miss") in {(i["paper_id"], i["why"]) for i in await items(db, session_id)}
+
+
+async def test_fit_names_only_watch_topics(db):
+    session_id = await calibrate.draw(db, seed=1, size=2)
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    fit = {FAITH.slug: Fit(value="not_relevant"), "interpretability": Fit(value="not_relevant")}
+    with pytest.raises(ValueError, match="not Watch topics: interpretability"):
+        await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))

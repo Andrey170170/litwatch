@@ -97,13 +97,18 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
     rows = await _all(
         conn,
         """
-        SELECT * FROM (
+        SELECT s.paper_id, s.topic, s.why, s.verdict_id, s.a, s.b FROM (
             SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic, 'split' AS why,
-                   v.id AS verdict_id, v.judge->>'grade' AS a, v.check_opinion->>'grade' AS b
+                   v.id AS verdict_id, v.judge->>'grade' AS a, v.check_opinion->>'grade' AS b,
+                   v.recorded_at
             FROM verdicts v JOIN topics t ON t.slug = v.topic AND t.kind = 'watch'
             ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.topic_revision DESC,
                      v.recorded_at DESC, v.id DESC) s
         WHERE (a IN ('must_read', 'relevant')) <> (b IN ('must_read', 'relevant'))
+          -- last night's: recorded since the latest nightly run started
+          AND s.recorded_at >= coalesce(
+              (SELECT started_at FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1),
+              now() - interval '36 hours')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = s.paper_id
                           AND l.topic = s.topic AND NOT l.provisional)
         UNION ALL
@@ -151,10 +156,11 @@ class Fit(BaseModel):
 
     @model_validator(mode="after")
     def _grade_fits_value(self) -> Fit:
-        if self.grade is not None and not (
-            self.value == LabelValue.RELEVANT and self.grade.at_least(Grade.RELEVANT)
-        ):
-            raise ValueError("a grade goes only with relevant, and is must_read or relevant")
+        if self.value == LabelValue.RELEVANT:
+            if self.grade is None or not self.grade.at_least(Grade.RELEVANT):
+                raise ValueError("relevant needs a grade: must_read or relevant")
+        elif self.grade is not None:
+            raise ValueError("a grade goes only with relevant")
         return self
 
 
@@ -180,6 +186,9 @@ async def answer(
         raise LookupError("no such item")
     if item["topic"] not in given.fit:
         raise ValueError(f"fit for {item['topic']} is required")
+    watched = {t.slug for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
+    if unknown := sorted(set(given.fit) - watched):
+        raise ValueError(f"not Watch topics: {', '.join(unknown)}")
     if given.takes:
         mine = await _all(
             conn,

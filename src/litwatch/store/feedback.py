@@ -141,10 +141,12 @@ async def get_eval(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str,
 
 
 async def latest_eval(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
+    """The newest evaluation of the kind that finished without an error."""
     return await (
         await conn.execute(
-            "SELECT * FROM eval_runs WHERE kind = %s AND finished_at IS NOT NULL "
-            "ORDER BY id DESC LIMIT 1",
+            "SELECT e.* FROM eval_runs e LEFT JOIN runs r ON r.id = e.run_id "
+            "WHERE e.kind = %s AND e.finished_at IS NOT NULL AND r.error IS NULL "
+            "ORDER BY e.id DESC LIMIT 1",
             (kind,),
         )
     ).fetchone()
