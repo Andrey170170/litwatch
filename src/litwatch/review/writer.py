@@ -48,7 +48,8 @@ LEDE = """{voice}
 Write the lede of today's issue: what a newspaper prints above its first story. One or two \
 short sentences, at most 35 words in all, saying what is in the issue: the topics, the number \
 of papers in words, and a few words on the strongest entry. Do not summarise any paper; the \
-takes below the lede do that. Lead entries are the day's most important papers. When notes on the day in a field follow, end with a few words on that field too."""
+takes below the lede do that. Lead entries are the day's most important papers. When notes \
+on the day in a field follow, end with a few words on that field too."""
 
 
 class TakeOutput(BaseModel):
