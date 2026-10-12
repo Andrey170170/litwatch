@@ -202,6 +202,8 @@ async def test_the_weekly_issue_reviews_every_field_and_recaps_every_watch_topic
         assert card["new"] == 3  # picks since the page was last opened (never)
         listed = (await c.get(f"/api/topics/{AGENTS.slug}/reviews")).json()
         assert listed[0]["period"] == "week"
+        # Recaps are not field reviews: a topic lists none, even after a change of kind.
+        assert (await c.get(f"/api/topics/{FAITH.slug}/reviews")).json() == []
         # A topic that has since changed kind still reads as what was written then.
         await db.execute("UPDATE topics SET kind = 'watch' WHERE slug = %s", (AGENTS.slug,))
         issue = (await c.get(f"/api/issues/{issue_id}")).json()

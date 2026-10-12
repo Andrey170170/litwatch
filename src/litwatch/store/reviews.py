@@ -104,13 +104,14 @@ async def for_period(conn: psycopg.AsyncConnection, period: str, day: date) -> l
 
 
 async def for_topic(conn: psycopg.AsyncConnection, topic: str, limit: int = 20) -> list[dict]:
-    """A topic's reviews, newest first, with their picks."""
+    """A topic's field reviews, newest first, with their picks: not the recaps it got while it
+    was a Watch topic."""
     return await (
         await conn.execute(
             f"""
             SELECT r.*,
                    {PICKS}
-            FROM reviews r WHERE r.topic = %s
+            FROM reviews r WHERE r.topic = %s AND r.kind <> 'watch'
             ORDER BY r.day DESC, r.period LIMIT %s
             """,
             (topic, limit),

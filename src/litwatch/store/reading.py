@@ -386,7 +386,8 @@ async def topic_cards(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
         """
         SELECT t.slug, t.name, t.kind, t.status, t.colour, t.position, t.subject, t.cadence,
                v.opened_at,
-               (SELECT max(day) FROM reviews r WHERE r.topic = t.slug AND r.state = 'written')
+               (SELECT max(day) FROM reviews r WHERE r.topic = t.slug AND r.state = 'written'
+                  AND r.kind <> 'watch')
                    AS last_review,
                CASE WHEN t.kind = 'watch'
                     THEN (SELECT count(*) FROM effective_grades g WHERE g.topic = t.slug

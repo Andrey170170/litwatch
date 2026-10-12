@@ -272,7 +272,7 @@ async def topics(c: Conn) -> list[s.TopicCard]:
 @router.get("/topics/{slug}/reviews")
 async def topic_reviews(slug: str, c: Conn) -> list[s.Review]:
     """A Radar or Pulse topic's reviews, newest first, shown above its picks."""
-    return [_review(r) for r in await reviews_store.for_topic(c, slug) if r["period"]]
+    return [_review(r) for r in await reviews_store.for_topic(c, slug)]
 
 
 @router.post("/topics/{slug}/visit", status_code=204)
