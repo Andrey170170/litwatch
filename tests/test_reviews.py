@@ -2,7 +2,7 @@
 
 import json
 import re
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -364,8 +364,16 @@ async def test_an_empty_shortlist_still_reviews_a_sample_of_the_field(db, monkey
     assert models.reviewed == [3]  # every third of the seven, not nothing
 
 
-def test_an_unknown_tz_falls_through_to_the_systems_zone(monkeypatch):
+def test_a_posix_tz_rule_is_honoured_as_the_process_honours_it(monkeypatch):
+    import time
+
     from litwatch.config import system_zone
 
-    monkeypatch.setenv("TZ", "Not/AZone")
-    assert getattr(system_zone(), "key", None)  # a named zone, from /etc/localtime
+    monkeypatch.setenv("TZ", "EST5EDT,M3.2.0,M11.1.0")
+    time.tzset()
+    try:
+        offset = datetime.now(system_zone()).utcoffset()
+        assert offset in (timedelta(hours=-5), timedelta(hours=-4))
+    finally:
+        monkeypatch.undo()
+        time.tzset()

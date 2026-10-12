@@ -152,8 +152,8 @@ async def review(gateway: Gateway, topic: Topic, period: str, papers: list[Paper
         if not pool:
             # Nothing came back worth a look: the final call still reads the field, as an
             # even sample, so a quiet field is reviewed as quiet rather than unread.
-            step = -(-len(papers) // FULL_REVIEW_LIMIT)
-            pool = papers[::step]
+            n = min(len(papers), FULL_REVIEW_LIMIT)
+            pool = [papers[i * len(papers) // n] for i in range(n)]
     answer = await gateway.ask("review", review_request(topic, period, pool))
     known = {p.id for p in pool}
     _, most = SHAPES[(topic.kind, period)]

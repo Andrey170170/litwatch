@@ -91,11 +91,16 @@ class Limits(_Section):
 
 
 def system_zone() -> tzinfo:
-    """The server's own zone with its daylight-saving rules: `TZ`, else the zone
-    `/etc/localtime` links to, else the one `/etc/timezone` names. Only when none names one,
-    the current fixed offset."""
-    names = [os.environ.get("TZ", "").lstrip(":")]
-    names.append(os.path.realpath("/etc/localtime").partition("zoneinfo/")[2])
+    """The server's own zone with its daylight-saving rules. `TZ` decides when set, as it
+    does for the process: a zone name gives that zone, anything else (a POSIX rule) the
+    process's local time, which follows it. Unset, the zone `/etc/localtime` links to, else
+    the one `/etc/timezone` names; when neither names one, the current fixed offset."""
+    if tz := os.environ.get("TZ", "").lstrip(":"):
+        try:
+            return ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError):
+            return datetime.now().astimezone().tzinfo
+    names = [os.path.realpath("/etc/localtime").partition("zoneinfo/")[2]]
     with contextlib.suppress(OSError):
         names.append(Path("/etc/timezone").read_text().strip())
     for name in filter(None, names):
