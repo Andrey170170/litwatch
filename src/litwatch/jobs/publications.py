@@ -11,6 +11,7 @@ import psycopg
 from litwatch import events
 from litwatch.core import Publication
 from litwatch.publications.dblp import PublicationSource, SourceError
+from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
 from litwatch.store import runs
 
@@ -51,7 +52,10 @@ async def look_up(
 ) -> Publication | None:
     """Ask the source and store its answer, unless the owner has chosen. Raises SourceError
     when the source cannot be asked."""
-    record = await source.find(paper_id)
+    paper = await papers_store.get(conn, paper_id)
+    record = await source.find(
+        paper_id, paper.title if paper else None, paper.doi if paper else None
+    )
     await store_record(conn, paper_id, record)
     return record
 

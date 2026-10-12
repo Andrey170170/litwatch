@@ -1,10 +1,12 @@
 """Published versions from DBLP's SPARQL endpoint (spec section 6).
 
 The endpoint is public and needs no key, but dblp asks clients not to overwhelm it: queries go
-one at a time, with a pause between them, under a User-Agent naming litwatch. Matching finds
-the preprint's CoRR record by its arXiv DOI (or CoRR volume), then the records sharing its
-title (compared without case or punctuation) and at least one author, and takes the earliest
-that is not CoRR.
+one at a time, with a pause between them, under a User-Agent naming litwatch. A DOI the authors
+gave arXiv names the published record directly. Otherwise matching finds the preprint's CoRR
+record by its arXiv DOI (or CoRR volume), then the records outside CoRR sharing one of its
+authors and its title, compared without case or punctuation. The title may be the one DBLP
+filed with CoRR or the paper's current arXiv title: CoRR keeps the first version's title,
+while authors often retitle a later version to match the publication.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ REC = "https://dblp.org/rec/"
 
 PREFIX = "PREFIX dblp: <https://dblp.org/rdf/schema#>\n"
 
-# Records with the preprint's title and one of its authors, outside CoRR.
+# Records with the preprint's title (DBLP's or `%(title)s`, normalized) and one of its
+# authors, outside CoRR.
 MATCHES = (
     PREFIX
     + """SELECT DISTINCT ?rec ?year WHERE {
@@ -37,7 +40,8 @@ MATCHES = (
   ?rec dblp:authoredBy ?a ; dblp:title ?title .
   FILTER (?rec != ?corr)
   FILTER NOT EXISTS { ?rec dblp:publishedInStream <%(corr)s> }
-  FILTER (REPLACE(LCASE(STR(?title)), "[^a-z0-9]", "") = REPLACE(LCASE(STR(?t)), "[^a-z0-9]", ""))
+  BIND (REPLACE(LCASE(STR(?title)), "[^a-z0-9]", "") AS ?k)
+  FILTER (?k = REPLACE(LCASE(STR(?t)), "[^a-z0-9]", "") || ?k = "%(title)s")
   OPTIONAL { ?rec dblp:yearOfPublication ?year }
 }"""
 )
@@ -74,8 +78,11 @@ class SourceError(Exception):
 
 
 class PublicationSource(Protocol):
-    async def find(self, paper_id: str) -> Publication | None:
-        """The published record of an arXiv paper, or None when there is none yet."""
+    async def find(
+        self, paper_id: str, title: str | None = None, doi: str | None = None
+    ) -> Publication | None:
+        """The published record of an arXiv paper, or None when there is none yet. `title`
+        and `doi` are the paper's current arXiv metadata, when known."""
 
     async def record(self, key: str) -> Publication | None:
         """A record by its DBLP key, or None when DBLP has no such record."""
@@ -103,6 +110,18 @@ def clean_doi(doi: str) -> str:
     if not re.fullmatch(r"10\.\d{4,9}/[^\s<>\"{}|\\^`]+", doi):
         raise ValueError(f"not a DOI: {doi}")
     return doi
+
+
+def normalized(title: str) -> str:
+    """A title as matching compares it: lower case, letters and digits only."""
+    return re.sub(r"[^a-z0-9]", "", title.lower())
+
+
+def choose(candidates: list[tuple[str, int | None]]) -> str:
+    """Of the records matching a preprint (key, year), the published version to cite: the
+    latest, since a poster or workshop version comes before the full paper; the key breaks a
+    tie in one year."""
+    return max(candidates, key=lambda c: (c[1] or 0, c[0]))[0]
 
 
 def _value(row: dict[str, Any], name: str) -> str | None:
@@ -172,20 +191,40 @@ class Dblp:
             finally:
                 self._last = time.monotonic()
 
-    async def find(self, paper_id: str) -> Publication | None:
+    async def find(
+        self, paper_id: str, title: str | None = None, doi: str | None = None
+    ) -> Publication | None:
+        if doi and not doi.lower().startswith("10.48550/"):
+            try:
+                given = await self.by_doi(doi)
+            except ValueError:
+                given = None
+            if given and given.venue != "CoRR":
+                return given
+        found = await self.candidates(paper_id, title)
+        return await self.record(choose(found)) if found else None
+
+    async def candidates(
+        self, paper_id: str, title: str | None = None
+    ) -> list[tuple[str, int | None]]:
+        """Every record outside CoRR that matches the preprint, as (key, year)."""
         rows = await self._query(
-            MATCHES % {"id": _safe_id(paper_id), "upper": paper_id.upper(), "corr": CORR}
+            MATCHES
+            % {
+                "id": _safe_id(paper_id),
+                "upper": paper_id.upper(),
+                "corr": CORR,
+                # Never empty, so it cannot match a record with no letters in its title.
+                "title": normalized(title or "") or "-",
+            }
         )
-        if not rows:
-            return None
-
-        # The earliest, then the key for a stable choice among records of one year.
-        def order(row: dict[str, Any]) -> tuple[int, str]:
+        found = {}
+        for row in rows:
             year = _value(row, "year")
-            return (int(year) if year and year.isdigit() else 9999, row["rec"]["value"])
-
-        best = min(rows, key=order)["rec"]["value"]
-        return await self.record(best.removeprefix(REC))
+            found[row["rec"]["value"].removeprefix(REC)] = (
+                int(year) if year and year.isdigit() else None
+            )
+        return sorted(found.items())
 
     async def record(self, key: str) -> Publication | None:
         key = _safe_key(key)

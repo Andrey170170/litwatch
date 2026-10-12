@@ -40,7 +40,7 @@ def _lit(v):
     return {"type": "literal", "value": v}
 
 
-async def test_dblp_chooses_the_earliest_record_outside_corr_and_reads_it():
+async def test_dblp_chooses_the_latest_record_outside_corr_and_reads_it():
     asked = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -48,8 +48,10 @@ async def test_dblp_chooses_the_earliest_record_outside_corr_and_reads_it():
         asked.append(request.headers["user-agent"])
         if "?rec ?year" in query:
             assert "10.48550/ARXIV.1706.03762" in query and '"abs/1706.03762"' in query
+            # The paper's current arXiv title is matched too, normalized.
+            assert '"attentionisallyouneed"' in query
             rows = [
-                {"rec": _uri(dblp.REC + "conf/iclr/Later18"), "year": _lit("2018")},
+                {"rec": _uri(dblp.REC + "conf/uist/Poster16"), "year": _lit("2016")},
                 {"rec": _uri(dblp.REC + "conf/nips/VaswaniSPUJGKP17"), "year": _lit("2017")},
             ]
         elif "hasSignature" in query:
@@ -73,12 +75,34 @@ async def test_dblp_chooses_the_earliest_record_outside_corr_and_reads_it():
         return httpx.Response(200, json={"results": {"bindings": rows}})
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    found = await dblp.Dblp(client, pause=0).find("1706.03762")
+    found = await dblp.Dblp(client, pause=0).find("1706.03762", "Attention Is All You Need")
     assert found.dblp_key == "conf/nips/VaswaniSPUJGKP17" and found.kind == "inproceedings"
     assert found.title == "Attention is All you Need" and found.doi == "10.5555/3295222"
     assert found.authors == ["Ashish Vaswani", "Wei Wang"]  # without DBLP's homonym number
     assert found.container == "Advances in Neural Information Processing Systems 30"
     assert all(ua.startswith("litwatch") for ua in asked)
+
+
+async def test_a_doi_the_authors_gave_arxiv_names_the_record_directly():
+    asked = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = parse_qs(urlsplit(str(request.url)).query)["query"][0]
+        asked.append(query)
+        if "LIMIT 1" in query and "dblp:doi" in query:
+            rows = [{"rec": _uri(dblp.REC + "journals/jbi/Zong24")}]
+        elif "hasSignature" in query:
+            rows = []
+        else:
+            rows = [
+                {"title": _lit("Advancing text mining."), "venue": _lit("J. Biomed. Informatics")}
+            ]
+        return httpx.Response(200, json={"results": {"bindings": rows}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    found = await dblp.Dblp(client, pause=0).find("2403.04261", None, "10.1016/j.jbi.2024.1")
+    assert found.dblp_key == "journals/jbi/Zong24"
+    assert not any("?rec ?year" in q for q in asked)  # no matching needed
 
 
 def test_identifiers_are_checked_before_they_reach_a_query():
@@ -113,7 +137,7 @@ class Source:
         self.asked: list[str] = []
         self.down = False
 
-    async def find(self, paper_id):
+    async def find(self, paper_id, title=None, doi=None):
         self.asked.append(paper_id)
         if self.down:
             raise SourceError("down")
