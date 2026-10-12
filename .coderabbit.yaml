@@ -1,0 +1,6 @@
+# CodeRabbit reviews PRs into the default branch by default; v1 work targets `v1` (and stacked
+# feature branches), so review PRs into any branch.
+reviews:
+  auto_review:
+    base_branches:
+      - ".*"

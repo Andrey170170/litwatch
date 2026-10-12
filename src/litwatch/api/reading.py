@@ -162,6 +162,7 @@ async def paper(paper_id: str, c: Conn) -> s.Paper:
         reaction=(found["reaction"] or {}).get("value"),
         reaction_reason=(found["reaction"] or {}).get("reason"),
         history=[s.HistoryItem(**h) for h in found["history"]],
+        versions=list(found["version_history"] or []),
         triage=answers,
         chosen=[s.Chosen(**v) for v in found["verdicts"]],
     )

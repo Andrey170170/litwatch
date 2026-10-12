@@ -140,6 +140,7 @@ class Paper(BaseModel):
     reaction: ReactionValue | None = None  # for no topic (a plain search result)
     reaction_reason: ReactionReason | None = None
     history: list[HistoryItem]
+    versions: list[dict[str, Any]] = Field(default_factory=list)  # arXiv versions seen
     triage: dict[str, Any] | None = None  # topic slug -> what triage said
     chosen: list[Chosen]
 

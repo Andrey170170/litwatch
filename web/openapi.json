@@ -1779,6 +1779,14 @@
             "type": "array",
             "title": "History"
           },
+          "versions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
           "triage": {
             "anyOf": [
               {

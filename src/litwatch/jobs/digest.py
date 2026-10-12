@@ -44,6 +44,7 @@ class Owed:
 
 
 REWRITTEN = "the text was rewritten; waiting for its re-grade"
+WAITING = "waiting for the miss trace"  # not a failure: the trace is running
 
 
 async def prepare(
@@ -56,7 +57,9 @@ async def prepare(
     if not word.speaks(verdict):
         # A reported miss's trace has both graders' opinions; otherwise the owner's word alone
         # asked for this take.
-        opinions = await misses.opinions(conn, paper.id, topic.slug)
+        opinions = await misses.opinions(conn, paper, topic)
+        if opinions is misses.Pending:
+            return WAITING
         source = TakeSource.EVALUATION if opinions else TakeSource.OWNER
         return Owed(paper, topic, grade, source, opinions, binding)
     if verdict.paper_revision != paper.revision:
@@ -80,6 +83,8 @@ async def _owed(conn: psycopg.AsyncConnection) -> list[Owed]:
             await digest_store.clear_due(conn, row["paper_id"], row["topic"])
             continue
         prepared = await prepare(conn, paper, topic, grade)
+        if prepared == WAITING:
+            continue
         if isinstance(prepared, str):
             # After enough runs the pair enters its issue without a take.
             await digest_store.take_failed(conn, paper.id, topic.slug, prepared)

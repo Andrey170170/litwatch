@@ -13,12 +13,13 @@ from typing import Any
 import psycopg
 
 from litwatch.config import Config
-from litwatch.core import Label, LabelOrigin, LabelValue, Opinion, Paper
+from litwatch.core import Label, LabelOrigin, LabelValue, Opinion, Paper, TakeSource, Topic
 from litwatch.feedback import word
 from litwatch.feedback.replay import replay
 from litwatch.feedback.word import Settled
 from litwatch.intake.search import fetch_by_ids, id_from_url
 from litwatch.jobs.context import GatewayFactory, default_gateway
+from litwatch.store import digest as digest_store
 from litwatch.store import papers as papers_store
 
 
@@ -95,25 +96,50 @@ async def trace(
             (f"{type(exc).__name__}: {exc}"[:500], miss_id),
         )
         return None
-    await conn.execute(
-        "UPDATE misses SET eval_run_id = %s, trace = 'done', trace_error = NULL WHERE id = %s",
-        (eval_run_id, miss_id),
-    )
+    async with conn.transaction():
+        miss = await (
+            await conn.execute(
+                "UPDATE misses SET eval_run_id = %s, trace = 'done', trace_error = NULL "
+                "WHERE id = %s RETURNING paper_id, topic",
+                (eval_run_id, miss_id),
+            )
+        ).fetchone()
+        # A take written before the trace came back had no graders' notes: owe a new one.
+        await word.lock(conn, miss["paper_id"])
+        take = await digest_store.latest_take(conn, miss["paper_id"], miss["topic"])
+        if take is not None and take.source == TakeSource.OWNER:
+            await digest_store.mark_due(conn, miss["paper_id"], miss["topic"], take=True)
     return eval_run_id
 
 
-async def opinions(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> list[Opinion]:
-    """The graders' opinions from the latest miss trace of the paper for the topic, for the
-    writer when no verdict exists."""
+class Pending:
+    """A reported miss whose trace has not finished: its take waits for the graders' notes."""
+
+
+async def opinions(
+    conn: psycopg.AsyncConnection, paper: Paper, topic: Topic
+) -> list[Opinion] | type[Pending]:
+    """The graders' opinions from the miss trace of the paper for the topic, for the writer
+    when no verdict speaks. Only a trace of this text (arXiv version) under this rubric
+    (topic revision) counts. `Pending` while a reported miss's trace is still running."""
+    miss = await (
+        await conn.execute(
+            "SELECT trace FROM misses WHERE paper_id = %s AND topic = %s", (paper.id, topic.slug)
+        )
+    ).fetchone()
+    if miss and miss["trace"] == "pending":
+        return Pending
     row = await (
         await conn.execute(
             """
             SELECT r.judge, r.check_opinion FROM eval_results r
             JOIN eval_runs e ON e.id = r.eval_run_id
             WHERE e.kind = 'miss' AND r.paper_id = %s AND r.topic = %s
+              AND (e.topics->>%s)::int = %s
+              AND r.paper_version IS NOT DISTINCT FROM %s
             ORDER BY e.id DESC LIMIT 1
             """,
-            (paper_id, topic),
+            (paper.id, topic.slug, topic.slug, topic.revision, paper.version),
         )
     ).fetchone()
     if row is None:

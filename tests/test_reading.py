@@ -276,3 +276,40 @@ async def test_the_cookie_is_secure_behind_https(client):
     assert "secure" in signed.headers["set-cookie"].lower()
     plain = await client.post("/api/session", json={"token": TOKEN})
     assert "secure" not in plain.headers["set-cookie"].lower()
+
+
+async def test_a_misss_take_waits_for_its_trace_and_is_rewritten_with_it(conn):
+    from litwatch.feedback import misses
+
+    for topic in TOPICS:
+        await topics_store.save(conn, topic)
+    await papers_store.upsert(conn, [Q])
+    miss_id, _, _ = await misses.report(conn, Q.id, FAITH.slug)
+    assert await digest._owed(conn) == []  # waiting, not failing
+    (due,) = await (await conn.execute("SELECT failed_runs FROM due")).fetchall()
+    assert due["failed_runs"] == 0
+    # A take written in the meantime from the owner's word alone is owed again with the notes.
+    await conn.execute("UPDATE misses SET trace = 'failed'")
+    await night(conn)
+    await misses.trace(conn, Config(), miss_id, gateway=gateway)
+    (due,) = await (await conn.execute("SELECT for_take FROM due")).fetchall()
+    assert due["for_take"] is True
+
+
+def test_lookup_reads_old_style_ids():
+    from litwatch.intake.search import id_from_url
+
+    assert id_from_url("https://arxiv.org/abs/cs/9901001v2") == "cs/9901001"
+    assert id_from_url("math.AG/0601001") == "math.AG/0601001"
+    assert id_from_url("arXiv:2610.00001v3") == "2610.00001"
+
+
+async def test_the_paper_page_lists_versions_seen(client, conn):
+    await conn.execute(
+        'UPDATE papers SET version_history = \'[{"version": 1}, {"version": 2}]\' WHERE id = %s',
+        (P.id,),
+    )
+    assert [v["version"] for v in (await client.get(f"/api/papers/{P.id}")).json()["versions"]] == [
+        1,
+        2,
+    ]
