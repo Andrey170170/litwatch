@@ -132,10 +132,12 @@ async def review(gateway: Gateway, topic: Topic, period: str, papers: list[Paper
         chosen: set[str] = set()
         for start in range(0, len(papers), CHUNK):
             chunk = papers[start : start + CHUNK]
+            # Each chunk's share of the final call, so a huge week still fits in one.
+            n = max(1, min(SHORTLIST, FULL_REVIEW_LIMIT * len(chunk) // len(papers)))
             request = Request(
                 system=SHORTLIST_PROMPT.format(
                     voice=VOICE,
-                    n=SHORTLIST,
+                    n=n,
                     name=topic.name,
                     subject=topic.subject,
                     interests=_interests(topic),
@@ -144,7 +146,8 @@ async def review(gateway: Gateway, topic: Topic, period: str, papers: list[Paper
                 output=ShortlistOutput,
             )
             answer = await gateway.ask("review", request)
-            chosen |= {i for i in answer.value.ids if i in {p.id for p in chunk}}
+            ids = {p.id for p in chunk}
+            chosen |= set([i for i in dict.fromkeys(answer.value.ids) if i in ids][:n])
         pool = [p for p in papers if p.id in chosen]
     answer = await gateway.ask("review", review_request(topic, period, pool))
     known = {p.id for p in pool}

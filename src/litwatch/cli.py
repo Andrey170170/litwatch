@@ -308,7 +308,7 @@ def weekly(
 ) -> None:
     """Review the week for every topic and build the weekly issue, as Monday's run does."""
     cfg = configuration.load(config)
-    monday = date.fromisoformat(week) if week else None
+    monday = cfg.schedule.week_of(date.fromisoformat(week)) if week else None
 
     async def work(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         async with run_lock(conn), model_run(conn, cfg, "weekly") as run:

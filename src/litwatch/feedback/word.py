@@ -174,8 +174,11 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str, *, announce: bool
                 result.grades[topic] = (old, new)
                 await word_store.set_effective(conn, paper_id, topic, new)
                 # The owner putting an announced paper below the line, for the week's recap.
+                # Settles that announce nothing (a topic edit, a rewrite) are not the owner's.
                 if (
-                    word is not None
+                    announce
+                    and topic in watched
+                    and word is not None
                     and _shown(old)
                     and not _shown(new)
                     and await digest_store.announced(conn, paper_id, topic)

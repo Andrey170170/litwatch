@@ -41,6 +41,7 @@ class Models:
         self.down = False
         self.lede_down = False
         self.calls: list[str] = []
+        self.reviewed: list[int] = []  # how many papers each final review call saw
 
     def respond(self, role, request):
         if self.down:
@@ -51,6 +52,7 @@ class Models:
             return json.dumps({"ids": ids[:2]})
         if "You review the new arXiv papers" in request.system:
             self.calls.append("review")
+            self.reviewed.append(len(ids))
             picks = [{"id": i, "why": f"why {i}"} for i in ids] + [{"id": "9999.9", "why": "?"}]
             return json.dumps({"text": f"A quiet field of {len(ids)}.", "picks": picks})
         if "recap" in request.system:
@@ -137,6 +139,8 @@ async def test_a_large_field_is_shortlisted_before_it_is_reviewed(db, monkeypatc
     models = Models()
     await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
     assert models.calls.count("shortlist") == 3 and models.calls.count("review") == 1
+    # Each chunk keeps its share, so the final call stays within the limit.
+    assert models.reviewed == [3]
 
 
 async def test_the_weekly_issue_reviews_every_field_and_recaps_every_watch_topic(db):
@@ -195,6 +199,7 @@ async def test_the_weekly_issue_reviews_every_field_and_recaps_every_watch_topic
         assert table["total"] == 3
         card = next(t for t in (await c.get("/api/topics")).json() if t["slug"] == AGENTS.slug)
         assert card["last_review"] == monday.isoformat() and card["papers"] == 3
+        assert card["new"] == 3  # picks since the page was last opened (never)
         listed = (await c.get(f"/api/topics/{AGENTS.slug}/reviews")).json()
         assert listed[0]["period"] == "week"
         # A topic that has since changed kind still reads as what was written then.
@@ -234,3 +239,40 @@ def test_the_default_week_is_the_last_full_one():
     monday = schedule.week_of(date(2026, 10, 14))  # a Wednesday
     assert monday == date(2026, 10, 12) and monday.weekday() == 0
     assert schedule.window(monday, 7)[1] - schedule.window(monday, 7)[0] == timedelta(days=7)
+
+
+async def test_a_topic_edit_records_no_set_aside(db):
+    await verdicts.add(
+        db, Verdict(paper_id=P.id, topic=FAITH.slug, topic_revision=1, grade=Grade.RELEVANT)
+    )
+    await word.settle(db, P.id)
+    models = Models()
+    await job(db, models, lambda run: digest.write_takes(db, Config(), run))
+    await job(db, models, lambda run: digest.build_daily(db, Config(), run))
+    await word.label(
+        db,
+        Label(
+            paper_id=P.id, topic=FAITH.slug, value=LabelValue.RELEVANT, origin=LabelOrigin.READER
+        ),
+    )
+    # The owner makes the Watch topic a Radar one: the paper leaves Watch, but not by their word.
+    await topics_store.save(db, FAITH.model_copy(update={"kind": TopicKind.RADAR}))
+    await word.settle_topic(db, FAITH.slug)
+    assert await (await db.execute("SELECT * FROM set_asides")).fetchall() == []
+
+
+async def test_the_status_line_counts_a_failed_review_until_it_is_written(db):
+    models = Models()
+    models.down = True
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
+    models.down = False
+    # A later run that fails nothing does not hide the earlier failure.
+    await job(db, models, lambda run: digest.build_daily(db, Config(), run))
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    app = create_app(dsn, TOKEN, Config())
+    headers = {"authorization": f"Bearer {TOKEN}"}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+        assert (await c.get("/api/status")).json()["reviews_failed"] == 1
+        await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
+        assert (await c.get("/api/status")).json()["reviews_failed"] == 0

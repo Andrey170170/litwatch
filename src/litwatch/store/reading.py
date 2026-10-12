@@ -79,7 +79,10 @@ async def status(
         "reviews_failed": (
             await _one(
                 conn,
-                "SELECT count(*) AS n FROM reviews WHERE state = 'failed' AND written_at >= %s",
+                # Failed and not since written, for a day or week in the last seven days:
+                # whichever run it failed in, the issue still says so.
+                "SELECT count(*) AS n FROM reviews WHERE state = 'failed' "
+                "AND day >= %s::date - CASE period WHEN 'week' THEN 13 ELSE 7 END",
                 (run["started_at"],),
             )
         )["n"],
@@ -400,12 +403,25 @@ async def topic_cards(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
                           JOIN library l ON l.paper_id = k.paper_id AND l.saved
                           WHERE r.topic = t.slug) END
                    AS saved,
-               (SELECT count(*) FROM issue_entries e
-                WHERE e.topic = t.slug AND e.added_at > coalesce(v.opened_at, t.created_at))
+               CASE WHEN t.kind = 'watch'
+                    THEN (SELECT count(*) FROM issue_entries e
+                          WHERE e.topic = t.slug
+                            AND e.added_at > coalesce(v.opened_at, t.created_at))
+                    ELSE (SELECT count(DISTINCT k.paper_id) FROM review_picks k
+                          JOIN reviews r ON r.id = k.review_id
+                          WHERE r.topic = t.slug
+                            AND r.written_at > coalesce(v.opened_at, t.created_at)) END
                    AS new,
-               (SELECT count(*) FROM issue_entries e
-                JOIN library l ON l.paper_id = e.paper_id AND l.saved
-                WHERE e.topic = t.slug AND e.added_at > coalesce(v.opened_at, t.created_at))
+               CASE WHEN t.kind = 'watch'
+                    THEN (SELECT count(*) FROM issue_entries e
+                          JOIN library l ON l.paper_id = e.paper_id AND l.saved
+                          WHERE e.topic = t.slug
+                            AND e.added_at > coalesce(v.opened_at, t.created_at))
+                    ELSE (SELECT count(DISTINCT k.paper_id) FROM review_picks k
+                          JOIN reviews r ON r.id = k.review_id
+                          JOIN library l ON l.paper_id = k.paper_id AND l.saved
+                          WHERE r.topic = t.slug
+                            AND r.written_at > coalesce(v.opened_at, t.created_at)) END
                    AS new_saved
         FROM topics t LEFT JOIN topic_visits v ON v.topic = t.slug
         WHERE t.status <> 'draft'
