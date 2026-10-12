@@ -214,3 +214,16 @@ async def test_fit_names_only_watch_topics(db):
     fit = {FAITH.slug: Fit(value="not_relevant"), "interpretability": Fit(value="not_relevant")}
     with pytest.raises(ValueError, match="not Watch topics: interpretability"):
         await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+
+
+async def test_an_appraisal_can_be_cleared(db):
+    session_id = await calibrate.draw(db, seed=1, size=2)
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    fit = {FAITH.slug: Fit(value="not_relevant")}
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
+    assert len(await calibrate.matters_no_topic(db)) == 1
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+    assert await calibrate.matters_no_topic(db) == []
+    rows = await (await db.execute("SELECT count(*) AS n FROM appraisals")).fetchone()
+    assert rows["n"] == 2  # matters once, then cleared
