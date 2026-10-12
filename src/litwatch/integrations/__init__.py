@@ -4,7 +4,7 @@ configured, and each is one module with a `load` function:
     def load(name: str, options: dict[str, Any], config: Config) -> Integration
 
 A `[integrations.<name>]` section of `litwatch.toml` loads one. `use` says which module: a
-built-in by its short name, or any importable module by dotted path; it defaults to the
+built-in by its short name, or any importable module by its import path; it defaults to the
 section's name, so `[integrations.zotero]` loads the built-in. `enabled = false` turns a
 section off. Everything else in the section is the module's options; secrets come from the
 environment. `docs/integrations.md` is the guide to writing one.
@@ -32,9 +32,14 @@ class IntegrationError(ValueError):
 def _module(use: str) -> Any:
     if use in BUILT_IN:
         return importlib.import_module(f"litwatch.integrations.{use}")
-    if "." not in use:
-        raise IntegrationError(f"no built-in integration {use!r}; built-in: {', '.join(BUILT_IN)}")
-    return importlib.import_module(use)
+    try:
+        return importlib.import_module(use)
+    except ModuleNotFoundError as exc:
+        if exc.name != use.split(".")[0] and exc.name != use:
+            raise  # the module exists but something it imports does not
+        raise IntegrationError(
+            f"{use!r} is neither a built-in ({', '.join(BUILT_IN)}) nor an importable module"
+        ) from exc
 
 
 def load(config: Config) -> list[Integration]:

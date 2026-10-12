@@ -109,7 +109,7 @@ def test_a_configuration_that_cannot_work_is_refused_with_its_section(secrets, m
                 }
             )
         )
-    with pytest.raises(IntegrationError, match="no built-in integration 'slack'"):
+    with pytest.raises(IntegrationError, match="'slack' is neither a built-in"):
         integrations.load(Config(integrations={"slack": {"url": "http://slack.test"}}))
     monkeypatch.delenv("ZOTERO_API_KEY")
     with pytest.raises(IntegrationError, match=r"\[integrations.zotero\].*ZOTERO_API_KEY"):
