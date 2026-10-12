@@ -92,8 +92,12 @@ class Review(BaseModel):
 
 
 class Listed(BaseModel):
+    """A paper named in a recap, with the owner's thumb on it for the recap's topic."""
+
     paper_id: str
     title: str
+    reaction: ReactionValue | None = None
+    reaction_reason: ReactionReason | None = None
 
 
 class Recap(BaseModel):

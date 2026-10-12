@@ -1,11 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { configQuery, missesQuery, runsQuery, scheduleOf, useRetrace, type Miss } from "@/api/settings";
+import { configQuery, missesQuery, runsQuery, scheduleQuery, useRetrace, type Miss } from "@/api/settings";
 import { topicsQuery } from "@/api/queries";
 import { GRADE_WORD } from "@/components/paper-bits";
 import { modelName } from "@/components/PaperView";
-import { cronWords, nextFire } from "@/lib/cron";
 import { fmt } from "@/lib/format";
+import { fireWords } from "@/lib/schedule";
 import { BTN, Empty, Page, TABLE, money } from "@/routes/settings/index";
 
 /** Misses: each report with what triage, the keyword audit and both graders said. */
@@ -87,29 +87,29 @@ function Stage({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** The schedule in one line: on, with the next fires; or off, with what it would be. */
+/** The schedule in one line: on, with when each job next fires; or off, with when each would. */
 export function ScheduleLine() {
-  const config = useQuery(configQuery);
-  const s = scheduleOf(config.data);
+  const schedule = useQuery(scheduleQuery);
+  const s = schedule.data;
   if (!s) return null;
-  const zone = s.timezone ? ` (${s.timezone})` : "";
-  const when = `nightly ${cronWords(s.nightly)}, weekly ${cronWords(s.weekly)}${zone}`;
-  const next = [
-    ["nightly", nextFire(s.nightly)],
-    ["weekly", nextFire(s.weekly)],
-  ]
-    .filter((x): x is [string, Date] => x[1] instanceof Date)
-    .map(([kind, at]) => `${kind} ${fmt.weekday(at.toISOString().slice(0, 10)) === fmt.weekday(new Date().toISOString().slice(0, 10)) ? "today" : fmt.weekdayOf(at)} at ${fmt.time(at.toISOString())}`);
+  const fires = s.jobs.map((j) => (
+    <span key={j.kind} title={j.cron}>
+      {j.kind} {fireWords(j.next, s.zone)}
+    </span>
+  ));
+  const list = fires.flatMap((f, i) => (i === 0 ? [f] : [i === fires.length - 1 ? " and " : ", ", f]));
   return (
     <p className="mb-4 rounded-lg border border-border px-3.5 py-2.5 text-[13px]">
       {s.enabled ? (
         <>
-          <b className="font-medium">On a schedule:</b> {when}.{next.length > 0 && <span className="text-muted-foreground"> Next: {next.join(", ")}.</span>}
+          <b className="font-medium">On a schedule:</b> {list} <span className="text-muted-foreground">({s.zone}).</span>
         </>
       ) : (
         <>
           <b className="font-medium">No schedule:</b> runs are started by hand until cutover.{" "}
-          <span className="text-muted-foreground">Once enabled, {when}.</span>
+          <span className="text-muted-foreground">
+            Once enabled, the next would be {list} ({s.zone}).
+          </span>
         </>
       )}
     </p>

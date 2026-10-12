@@ -112,7 +112,7 @@ export type Run = {
   inserted: number | null;
   updated: number | null;
 };
-export type Schedule = { enabled: boolean; nightly: string; weekly: string; timezone: string | null };
+export type Schedule = Schemas["ScheduleOut"];
 export type RerunScope = Schemas["RerunIn"]["scope"];
 export type RerunEstimate = { scope: RerunScope; papers: number; cost: number | null; known: boolean };
 export type EvalSummary = { id: number; kind: string; note: string | null; params: Record<string, unknown>; started_at: string; finished_at: string | null; cost: string | null };
@@ -179,12 +179,12 @@ export const configQuery = queryOptions({
   queryKey: ["settings", "config"],
   queryFn: async () => ok(await api.GET(`${S}/config`)),
 });
-/** The `[schedule]` section of the loaded configuration, when it has the expected shape. */
-export function scheduleOf(config: unknown): Schedule | null {
-  const s = (config as { schedule?: Partial<Schedule> } | undefined)?.schedule;
-  if (!s || typeof s.nightly !== "string" || typeof s.weekly !== "string") return null;
-  return { enabled: !!s.enabled, nightly: s.nightly, weekly: s.weekly, timezone: s.timezone ?? null };
-}
+/** Whether the schedule is on, its zone, and when each job next fires (computed by the server). */
+export const scheduleQuery = queryOptions({
+  queryKey: ["settings", "schedule"],
+  queryFn: async () => ok(await api.GET(`${S}/schedule`)),
+  staleTime: 60_000,
+});
 
 function useRefresh() {
   const qc = useQueryClient();

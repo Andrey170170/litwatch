@@ -100,14 +100,17 @@ function PickView({ pick, topic, surface }: { pick: PickT; topic: string; surfac
   );
 }
 
-/** A Watch topic's weekly recap: the prose, then what was announced, set aside and missed. */
+/**
+ * A Watch topic's weekly recap: the prose, then what was announced, set aside and missed.
+ * A quiet week announced nothing, but can still have set-asides and misses to list.
+ */
 export function RecapView({ recap, topic, surface }: { recap: Recap; topic: TopicRef; surface: Surface }) {
   if (recap.state === "failed")
     return <p className={QUIET}>The week's recap of {topic.name} did not get written; litwatch tries again on the next run.</p>;
-  if (recap.state === "quiet" || !recap.text) return <p className={QUIET}>Nothing was announced for {topic.name} this week.</p>;
+  const quiet = recap.state === "quiet" || !recap.text;
   return (
-    <div className="mt-2.5">
-      <Prose text={recap.text} />
+    <div className={quiet ? undefined : "mt-2.5"}>
+      {quiet ? <p className={QUIET}>Nothing was announced for {topic.name} this week.</p> : <Prose text={recap.text!} />}
       <Listing label="Announced this week" items={recap.papers ?? []} topic={topic.slug} surface={surface} />
       <Listing label="Set aside" items={recap.set_aside ?? []} topic={topic.slug} surface={surface} struck />
       <Listing label="Reported as missed" items={recap.misses ?? []} topic={topic.slug} surface={surface} />
@@ -115,6 +118,7 @@ export function RecapView({ recap, topic, surface }: { recap: Recap; topic: Topi
   );
 }
 
+/** Papers a recap names, each with the thumbs for the Watch topic (decision 17). */
 function Listing({ label, items, topic, surface, struck }: { label: string; items: Listed[]; topic: string; surface: Surface; struck?: boolean }) {
   if (items.length === 0) return null;
   return (
@@ -124,8 +128,11 @@ function Listing({ label, items, topic, surface, struck }: { label: string; item
       </p>
       <ul className="mt-1 border-t border-border">
         {items.map((p) => (
-          <li key={p.paper_id} className={cn("border-b border-border py-[7px] font-serif text-[15px] leading-[1.3] font-semibold", struck && "struck text-muted-foreground")}>
-            <PaperLink id={p.paper_id} title={p.title} topic={topic} surface={surface} />
+          <li key={p.paper_id} className="flex items-center gap-3 border-b border-border py-[3px]">
+            <span className={cn("min-w-0 flex-1 py-1 font-serif text-[15px] leading-[1.3] font-semibold", struck && "struck text-muted-foreground")}>
+              <PaperLink id={p.paper_id} title={p.title} topic={topic} surface={surface} />
+            </span>
+            <Thumbs key={`${p.paper_id}:${topic}`} className="shrink-0" paperId={p.paper_id} topic={topic} value={p.reaction} reason={p.reaction_reason} />
           </li>
         ))}
       </ul>

@@ -61,6 +61,38 @@ describe("the weekly issue", () => {
     expect(screen.getByText(/That is the week of 5 October/)).toBeInTheDocument();
   });
 
+  it("lists a quiet week's set-asides and misses under the quiet line, each with thumbs", async () => {
+    const quiet = {
+      ...weekly,
+      sections: [
+        {
+          topic: watch,
+          entries: [],
+          recap: {
+            state: "quiet",
+            text: null,
+            papers: [],
+            set_aside: [{ paper_id: "2610.00002", title: "Set-aside paper", reaction: "down", reaction_reason: "not_for_me" }],
+            misses: [{ paper_id: "2610.00004", title: "Missed paper", reaction: null }],
+          },
+        },
+      ],
+    };
+    scriptFetch({
+      "GET /api/status": () => json(status),
+      "GET /api/digest": () => json({ weekly: null, issues: [], status }),
+      "GET /api/issues/7": () => json(quiet),
+    });
+    renderApp("/?issue=7");
+    expect(await screen.findByText("Nothing was announced for CoT monitoring this week.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Set-aside paper" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Missed paper" })).toBeInTheDocument();
+    expect(screen.queryByText(/Announced this week/)).not.toBeInTheDocument();
+    const thumbs = screen.getAllByRole("group", { name: "Your reaction" });
+    expect(thumbs).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /Thumb down, set/ })).toBeInTheDocument();
+  });
+
   it("pins the latest weekly issue above the feed", async () => {
     scriptFetch({
       "GET /api/status": () => json(status),

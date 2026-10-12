@@ -8,7 +8,7 @@ import re
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
@@ -18,7 +18,7 @@ from litwatch import screening, store, watch
 from litwatch.api.deps import Conn
 from litwatch.core import Status, Topic, TopicKind
 from litwatch.feedback import calibrate, metrics, misses, replay, word
-from litwatch.jobs import reruns
+from litwatch.jobs import reruns, scheduler
 from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import RUN_LOCK, BusyError, run_lock
 from litwatch.store import feedback as feedback_store
@@ -415,6 +415,36 @@ async def _retrace(state: Any, miss_id: int) -> None:
 @router.get("/runs")
 async def runs(c: Conn) -> list[dict[str, Any]]:
     return await quality.runs(c)
+
+
+class NextFire(BaseModel):
+    kind: str
+    cron: str
+    next: datetime  # aware, in the schedule's zone
+
+
+class ScheduleOut(BaseModel):
+    """The schedule as the Runs page shows it: whether it is on, the zone the cron times are
+    read in, and when each job next fires (or would, if it were on)."""
+
+    enabled: bool
+    zone: str
+    jobs: list[NextFire]
+
+
+@router.get("/schedule")
+async def schedule(request: Request) -> ScheduleOut:
+    cfg = request.app.state.config
+    zone = cfg.schedule.zone
+    now = datetime.now(zone)
+    return ScheduleOut(
+        enabled=cfg.schedule.enabled,
+        zone=getattr(zone, "key", None) or str(zone),
+        jobs=[
+            NextFire(kind=job.kind, cron=job.cron, next=scheduler.next_fire(job.cron, now))
+            for job in scheduler.jobs(cfg)
+        ],
+    )
 
 
 @router.get("/config")

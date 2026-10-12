@@ -3,8 +3,8 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api, ok, type Entry as EntryT, type Issue, type IssueSummary, type Section as SectionT } from "@/api/client";
 import { issueQuery } from "@/api/queries";
-import { configQuery, scheduleOf } from "@/api/settings";
-import { cronWords } from "@/lib/cron";
+import { scheduleQuery } from "@/api/settings";
+import { fireWords } from "@/lib/schedule";
 import { PaperView } from "@/components/PaperView";
 import { RecapView, ReviewView } from "@/components/Review";
 import { GearLink } from "@/components/Shell";
@@ -104,12 +104,13 @@ export function DigestPage() {
 
 /** Before any issue exists: when the first run is, if one is scheduled. */
 function FirstIssue() {
-  const config = useQuery(configQuery);
-  const s = scheduleOf(config.data);
+  const schedule = useQuery(scheduleQuery);
+  const s = schedule.data;
+  const nightly = s?.enabled ? s.jobs.find((j) => j.kind === "nightly") : undefined;
   return (
     <p className="mt-8 font-serif text-[17px] text-body">
       No issue yet. The first one is written after the first nightly run
-      {s?.enabled ? `, ${cronWords(s.nightly)}` : ""}.
+      {nightly ? `, ${fireWords(nightly.next, s!.zone)}` : ""}.
     </p>
   );
 }

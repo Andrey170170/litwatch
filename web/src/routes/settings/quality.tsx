@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import type { TopicCard } from "@/api/client";
 import { qualityQuery, sessionsQuery, useCorrect, useDismiss, useDraw, useGradeNow, useTriageByHand, type Awaiting, type Split } from "@/api/settings";
 import { paperQuery, topicsQuery } from "@/api/queries";
@@ -75,7 +75,7 @@ export function QualityPage() {
           </h3>
           <div className="divide-y divide-border">
             {n.awaiting_triage.map((a) => (
-              <AwaitingView key={a.paper_id} a={a} topics={(topics.data ?? []).filter((t) => t.status === "active")} names={names} />
+              <AwaitingView key={a.paper_id} a={a} topics={topics} names={names} />
             ))}
           </div>
         </>
@@ -262,7 +262,7 @@ function UngradedRow({ u, topicName }: { u: { paper_id: string; topic: string; f
 }
 
 /** A paper triage kept failing on, with its three ways out (spec decision 24). */
-function AwaitingView({ a, topics, names }: { a: Awaiting; topics: TopicCard[]; names: Record<string, string> }) {
+function AwaitingView({ a, topics, names }: { a: Awaiting; topics: UseQueryResult<TopicCard[]>; names: Record<string, string> }) {
   const [open, setOpen] = useState<"triage" | "fix" | null>(null);
   const [arming, setArming] = useState(false);
   const dismiss = useDismiss();
@@ -303,12 +303,16 @@ function AwaitingView({ a, topics, names }: { a: Awaiting; topics: TopicCard[]; 
   );
 }
 
-/** Triage's answers, given by the owner: a chip per active topic, off unless pressed. */
-function TriageByHand({ paperId, topics, names }: { paperId: string; topics: TopicCard[]; names: Record<string, string> }) {
+/**
+ * Triage's answers, given by the owner: a chip per active topic, off unless pressed. Nothing
+ * is sent until the topics are known: an empty answer would drop the paper as belonging nowhere.
+ */
+function TriageByHand({ paperId, topics, names }: { paperId: string; topics: UseQueryResult<TopicCard[]>; names: Record<string, string> }) {
   const [yes, setYes] = useState<Set<string>>(new Set());
   const send = useTriageByHand(names);
-  const watch = topics.filter((t) => t.kind === "watch");
-  const fields = topics.filter((t) => t.kind !== "watch");
+  const active = (topics.data ?? []).filter((t) => t.status === "active");
+  const watch = active.filter((t) => t.kind === "watch");
+  const fields = active.filter((t) => t.kind !== "watch");
   const flip = (slug: string) =>
     setYes((s) => {
       const n = new Set(s);
@@ -337,14 +341,23 @@ function TriageByHand({ paperId, topics, names }: { paperId: string; topics: Top
     );
   return (
     <div className="mt-3 rounded-lg border border-border px-3.5 py-3">
+      {topics.isPending && <p className="text-[12.5px] text-muted-foreground">Loading the topics…</p>}
+      {topics.isError && (
+        <p className="text-[13px] text-destructive">
+          The topics could not be loaded, so nothing can be sent.{" "}
+          <button type="button" className="underline decoration-destructive/50" onClick={() => void topics.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       {group("Could it belong to a Watch topic?", watch)}
       {group("Is it in a field?", fields)}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           className={BTN_PRIMARY}
-          disabled={send.isPending}
-          onClick={() => send.mutate({ paperId, answers: Object.fromEntries(topics.map((t) => [t.slug, yes.has(t.slug)])) })}
+          disabled={send.isPending || !topics.isSuccess}
+          onClick={() => send.mutate({ paperId, answers: Object.fromEntries(active.map((t) => [t.slug, yes.has(t.slug)])) })}
         >
           {send.isPending ? "Sending…" : "Send it on"}
         </button>

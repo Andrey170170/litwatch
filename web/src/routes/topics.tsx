@@ -236,6 +236,15 @@ function TopicReviews({ card }: { card: Card }) {
   const list = reviews.data ?? [];
   const title = (r: (typeof list)[number]) => (r.period === "week" ? fmt.week(r.day) : fmt.issueDay(r.day));
   if (reviews.isPending) return null;
+  if (reviews.isError)
+    return (
+      <p className="mt-4 text-[14px] text-destructive">
+        The reviews could not be loaded.{" "}
+        <button type="button" className="underline decoration-destructive/50" onClick={() => void reviews.refetch()}>
+          Try again
+        </button>
+      </p>
+    );
   if (list.length === 0)
     return <p className="mt-4 text-[14px] text-muted-foreground">No review yet; the first comes with the {cadence(card) === "daily" ? "next nightly run" : "next weekly run"}.</p>;
   const [newest, ...earlier] = list;

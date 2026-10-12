@@ -17,10 +17,10 @@ const quality = {
   collected: [],
 };
 
-function script() {
+function script(topicsReply: () => unknown = () => json(topics)) {
   return scriptFetch({
     "GET /api/status": () => json({ state: "attention", read: 1, awaiting_triage: 1 }),
-    "GET /api/topics": () => json(topics),
+    "GET /api/topics": topicsReply,
     "GET /api/settings/quality": () => json(quality),
     "GET /api/settings/calibrate": () => json([]),
     "GET /api/papers/2610.00009": () => json({ id: "2610.00009", title: "Broken title", abstract: "Garbled abstract.", authors: [], categories: [], added: "2026-10-12T00:00:00Z", arxiv_url: "", pdf_url: "", topics: [], history: [], chosen: [] }),
@@ -40,6 +40,24 @@ describe("a paper awaiting triage", () => {
     await user.click(screen.getByRole("button", { name: "Send it on" }));
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")).toBeTruthy());
     expect(calls.find((c) => c.method === "PUT")).toMatchObject({ url: "/api/settings/triage/2610.00009", body: { answers: { cot: true, interp: false } } });
+  });
+
+  it("cannot be sent on until the topics are known, and offers to try again", async () => {
+    let failures = 0;
+    const calls = script(() => {
+      failures += 1;
+      return failures === 1 ? json({ detail: "down" }, 500) : json(topics);
+    });
+    const user = userEvent.setup();
+    renderApp("/settings/quality");
+    await user.click(await screen.findByRole("button", { name: "Triage by hand" }));
+    expect(await screen.findByText(/The topics could not be loaded/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send it on" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send it on" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Send it on" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")).toBeTruthy());
+    expect(calls.find((c) => c.method === "PUT")!.body).toEqual({ answers: { cot: false, interp: false } });
   });
 
   it("sends only the text that changed when the owner fixes it", async () => {

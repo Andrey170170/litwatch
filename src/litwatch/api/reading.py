@@ -132,7 +132,7 @@ async def _recap(c: psycopg.AsyncConnection, row: Any, monday: date, schedule: A
     return s.Recap(
         state=row["state"],
         text=row["text"],
-        papers=[s.Listed(paper_id=e["paper_id"], title=e["title"]) for e in entries],
+        papers=[s.Listed(**{k: e[k] for k in s.Listed.model_fields}) for e in entries],
         set_aside=[s.Listed(**r) for r in set_aside],
         misses=[s.Listed(**r) for r in missed],
     )

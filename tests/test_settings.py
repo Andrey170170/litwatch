@@ -134,6 +134,31 @@ async def test_a_candidate_rerun_regrades_for_real(client, conn):
     assert verdict["grade"] == "relevant"
 
 
+async def test_the_schedule_says_when_each_job_next_fires_in_its_zone(conn):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from litwatch.config import Schedule
+
+    cfg = Config(schedule=Schedule(nightly="0 6 * * *", weekly="0 7 * * 1", timezone="America/Denver"))
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN, cfg))
+    headers = {"authorization": f"Bearer {TOKEN}"}
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+        out = (await c.get("/api/settings/schedule")).json()
+    assert out["enabled"] is False and out["zone"] == "America/Denver"
+    by_kind = {j["kind"]: j for j in out["jobs"]}
+    assert set(by_kind) >= {"nightly", "weekly"}
+    assert by_kind["nightly"]["cron"] == "0 6 * * *"
+    denver = ZoneInfo("America/Denver")
+    for kind, (hour, weekday) in {"nightly": (6, None), "weekly": (7, 0)}.items():
+        at = datetime.fromisoformat(by_kind[kind]["next"])
+        assert at.tzinfo is not None and at > datetime.now(denver)
+        local = at.astimezone(denver)
+        assert (local.hour, local.minute) == (hour, 0)
+        assert weekday is None or local.weekday() == weekday
+
+
 async def test_quality_lists_last_nights_splits_and_config_hides_secrets(client, conn):
     await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
     await verdicts.add(

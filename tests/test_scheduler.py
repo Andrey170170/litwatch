@@ -65,6 +65,21 @@ def test_the_repeated_hour_of_a_fall_back_is_scheduled_like_any_other():
     assert scheduler.is_due("* * * * *", second, last_run=before_fallback)
 
 
+def test_the_next_fire_steps_through_a_fall_back_in_the_zone():
+    denver = ZoneInfo("America/Denver")
+    # 01:45 MDT on the morning the clocks go back: 01:30 comes round again an hour later.
+    first = datetime(2026, 11, 1, 1, 45, tzinfo=denver)
+    again = scheduler.next_fire("30 1 * * *", first)
+    assert again.astimezone(UTC) == datetime(2026, 11, 1, 8, 30, tzinfo=UTC)  # 01:30 MST
+    assert again.fold == 1 and again.tzinfo is denver
+    # After the repeated half hour, the next one is the day after.
+    later = scheduler.next_fire("30 1 * * *", again)
+    assert later.astimezone(UTC) == datetime(2026, 11, 2, 8, 30, tzinfo=UTC)
+    # Exactly on a fire the next one is the one after; a weekly fires on its day.
+    assert scheduler.next_fire("0 6 * * *", at(6, 0)) == at(6, 0, days=1)
+    assert scheduler.next_fire("0 7 * * 1", at(7, 1)) == at(7, 0, days=7)
+
+
 async def test_a_job_another_scheduler_is_deciding_on_is_left_to_it(conn):
     ran = []
 

@@ -48,6 +48,14 @@ def last_fire(cron: str, now: datetime) -> datetime:
     return croniter(cron, after).get_prev(datetime)
 
 
+def next_fire(cron: str, now: datetime) -> datetime:
+    """The first time after `now` (an aware time in the configured zone) the expression
+    fires, in that zone. The step past `now` is taken in UTC, as in `last_fire`, so the
+    repeated hour of a fall-back is stepped through rather than skipped."""
+    after = (now.astimezone(UTC) + timedelta(microseconds=1)).astimezone(now.tzinfo)
+    return croniter(cron, after).get_next(datetime)
+
+
 def is_due(cron: str, now: datetime, last_run: datetime | None) -> bool:
     fired = last_fire(cron, now).astimezone(UTC)
     if now.astimezone(UTC) - fired > CATCH_UP:

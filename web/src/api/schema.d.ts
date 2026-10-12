@@ -646,6 +646,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Schedule */
+        get: operations["schedule_api_settings_schedule_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/config": {
         parameters: {
             query?: never;
@@ -999,12 +1016,17 @@ export interface components {
          * @enum {string}
          */
         LabelValue: "relevant" | "adjacent" | "not_relevant" | "unsure";
-        /** Listed */
+        /**
+         * Listed
+         * @description A paper named in a recap, with the owner's thumb on it for the recap's topic.
+         */
         Listed: {
             /** Paper Id */
             paper_id: string;
             /** Title */
             title: string;
+            reaction?: components["schemas"]["ReactionValue"] | null;
+            reaction_reason?: components["schemas"]["ReactionReason"] | null;
         };
         /** Lookup */
         Lookup: {
@@ -1026,6 +1048,18 @@ export interface components {
             paper_id: string;
             /** Topic */
             topic: string;
+        };
+        /** NextFire */
+        NextFire: {
+            /** Kind */
+            kind: string;
+            /** Cron */
+            cron: string;
+            /**
+             * Next
+             * Format: date-time
+             */
+            next: string;
         };
         /** Opinion */
         Opinion: {
@@ -1282,6 +1316,19 @@ export interface components {
         SaveIn: {
             /** Saved */
             saved: boolean;
+        };
+        /**
+         * ScheduleOut
+         * @description The schedule as the Runs page shows it: whether it is on, the zone the cron times are
+         *     read in, and when each job next fires (or would, if it were on).
+         */
+        ScheduleOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Zone */
+            zone: string;
+            /** Jobs */
+            jobs: components["schemas"]["NextFire"][];
         };
         /** Section */
         Section: {
@@ -2694,6 +2741,26 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+        };
+    };
+    schedule_api_settings_schedule_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOut"];
                 };
             };
         };
