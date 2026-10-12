@@ -9,7 +9,7 @@ from datetime import date, datetime, time, timedelta, tzinfo
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -89,6 +89,18 @@ class Limits(_Section):
     take_attempts: int = Field(default=3, gt=0)
 
 
+def system_zone() -> tzinfo:
+    """The server's own zone with its daylight-saving rules: `TZ`, else the zone
+    `/etc/localtime` links to. Only when neither names one, the current fixed offset."""
+    name = os.environ.get("TZ", "").lstrip(":")
+    if not name:
+        _, _, name = os.path.realpath("/etc/localtime").partition("zoneinfo/")
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return datetime.now().astimezone().tzinfo
+
+
 class Schedule(_Section):
     nightly: str = "0 6 * * *"
     weekly: str = "0 7 * * 1"
@@ -97,7 +109,7 @@ class Schedule(_Section):
 
     @property
     def zone(self) -> tzinfo:
-        return ZoneInfo(self.timezone) if self.timezone else datetime.now().astimezone().tzinfo
+        return ZoneInfo(self.timezone) if self.timezone else system_zone()
 
     def today(self) -> date:
         return datetime.now(self.zone).date()

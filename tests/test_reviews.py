@@ -2,7 +2,7 @@
 
 import json
 import re
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 
 import httpx
 import pytest
@@ -278,3 +278,11 @@ async def test_the_status_line_counts_a_failed_review_until_it_is_written(db):
         assert (await c.get("/api/status")).json()["reviews_failed"] == 1
         await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
         assert (await c.get("/api/status")).json()["reviews_failed"] == 0
+
+
+def test_without_a_configured_zone_the_servers_own_keeps_daylight_saving(monkeypatch):
+    monkeypatch.setenv("TZ", "America/Denver")
+    schedule = Config().schedule
+    begin, end = schedule.window(date(2026, 10, 26), 7)  # the week clocks fall back
+    assert (begin.utcoffset(), end.utcoffset()) == (timedelta(hours=-6), timedelta(hours=-7))
+    assert end.astimezone(UTC) - begin.astimezone(UTC) == timedelta(days=7, hours=1)
