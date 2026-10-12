@@ -16,6 +16,8 @@ PAPER_SAVED = "paper.saved"
 PAPER_UNSAVED = "paper.unsaved"
 # A take was written for (paper, topic); it may arrive after `paper.saved`.
 TAKE_WRITTEN = "take.written"
+# A published record was found for a paper, or the owner set one.
+PUBLICATION_FOUND = "publication.found"
 
 
 async def emit(

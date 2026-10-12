@@ -537,7 +537,7 @@ daily or weekly, lede, entries as paper, topic and take id in section order, so 
 one an old issue showed; review references), `labels` (paper, topic, value, grade, origin, provisional, at),
 `reactions` (paper, topic, value, reason, at), `appraisals` (paper, value: matters, fine or not for me, note, at),
 `take_ratings` (take, accurate or off, at), `calibration_sessions` (drawn at, seed, the papers in order, each with the topic and group it was drawn for
-or why it was taken, and the verdict current at the draw), `topic_visits` (topic, last opened at), `misses`, `publications`, `library` (paper, the owner's newest
+or why it was taken, and the verdict current at the draw), `topic_visits` (topic, last opened at), `misses`, `publications` (paper, the published record or none, whether the owner set it, first and last looked up), `library` (paper, the owner's newest
 save or unsave, at, whether it is saved now), `effective_grades` (paper, Watch topic, grade: kept so a change is
 noticed and every surface reads one answer), `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)

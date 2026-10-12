@@ -23,6 +23,7 @@ from litwatch.core import Grade, Label, LabelOrigin, LabelValue, Status, TopicKi
 from litwatch.feedback import word
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import GatewayFactory, default_gateway
+from litwatch.publications import Dblp, PublicationSource
 from litwatch.store import feedback as feedback_store
 from litwatch.store import topics as topics_store
 
@@ -51,7 +52,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     task = None
     if app.state.config.schedule.enabled:
         task = asyncio.create_task(
-            scheduler.run_forever(app.state.dsn, app.state.config, app.state.gateway)
+            scheduler.run_forever(
+                app.state.dsn, app.state.config, app.state.gateway, app.state.publications
+            )
         )
     try:
         yield
@@ -68,6 +71,7 @@ def create_app(
     token: str,
     config: Config | None = None,
     gateway: GatewayFactory = default_gateway,
+    publications: PublicationSource | None = None,
 ) -> FastAPI:
     """The app over one database. Every request but the health check and signing in needs
     the shared token, as a bearer header or the cookie (set by `/api/session`, or by opening
@@ -75,6 +79,7 @@ def create_app(
     app = FastAPI(title="litwatch", docs_url=None, redoc_url=None, lifespan=_lifespan)
     app.state.dsn, app.state.token = dsn, token
     app.state.config, app.state.gateway = config or Config(), gateway
+    app.state.publications = publications or Dblp()
     protected = [Depends(authorised)]
     app.include_router(reading.router, dependencies=protected)
     app.include_router(settings.router, dependencies=protected)

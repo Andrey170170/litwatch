@@ -20,9 +20,11 @@ from litwatch.feedback import seed, word
 from litwatch.jobs import digest as digest_job
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
+from litwatch.jobs import publications as lookups
 from litwatch.jobs import reviews as review_jobs
 from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
+from litwatch.publications import Dblp
 from litwatch.store import digest as digest_store
 from litwatch.store import legacy as legacy_store
 from litwatch.store import runs
@@ -314,6 +316,25 @@ def weekly(
         async with run_lock(conn), model_run(conn, cfg, "weekly") as run:
             issue_id = await review_jobs.weekly(conn, cfg, run, monday)
             return {"issue": issue_id, **run.counts}
+
+    console.print_json(data=_run(work))
+
+
+@app.command()
+def publications(
+    paper: Annotated[
+        str | None, typer.Option(help="Look up this one paper, whether saved or not.")
+    ] = None,
+    limit: Annotated[int, typer.Option(help="At most this many library papers.")] = 200,
+) -> None:
+    """Look up published versions on DBLP for the library papers that are due, as the
+    scheduler does daily, or for one paper."""
+
+    async def work(conn: psycopg.AsyncConnection) -> Any:
+        if paper:
+            found = await lookups.look_up(conn, Dblp(), paper)
+            return found.model_dump(mode="json") if found else None
+        return await lookups.run(conn, Dblp(), limit)
 
     console.print_json(data=_run(work))
 

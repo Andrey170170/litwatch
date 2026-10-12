@@ -17,14 +17,18 @@ from litwatch.core import (
     Hand,
     Label,
     LabelOrigin,
+    Publication,
     Reaction,
     ReactionReason,
     TopicKind,
 )
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
+from litwatch.jobs import publications as lookups
+from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
+from litwatch.store import publications as publications_store
 from litwatch.store import reading
 from litwatch.store import reviews as reviews_store
 from litwatch.store import topics as topics_store
@@ -192,6 +196,7 @@ async def paper(paper_id: str, c: Conn) -> s.Paper:
         if t["grade"] or t["member"] or t["reaction"] or t["label"] or t["grading"]
     ]
     answers = (found["triage"] or {}).get("answers") or None
+    published = await publications_store.get(c, paper_id)
     return s.Paper(
         **{k: found[k] for k in s.Paper.model_fields if k in found and k not in _SET_HERE},
         arxiv_url=f"https://arxiv.org/abs/{paper_id}",
@@ -203,7 +208,40 @@ async def paper(paper_id: str, c: Conn) -> s.Paper:
         versions=list(found["version_history"] or []),
         triage=answers,
         chosen=[s.Chosen(**v) for v in found["verdicts"]],
+        publication=published["record"] if published else None,
+        publication_by_owner=bool(published and published["by_owner"]),
     )
+
+
+@router.put("/papers/{paper_id:path}/publication")
+async def set_publication(
+    paper_id: str, body: s.PublicationIn, request: Request, c: Conn
+) -> Publication | None:
+    """The owner names the published version by DBLP key or DOI, or says there is none.
+    A lookup never overwrites it. A DOI DBLP does not know is kept with the arXiv entry."""
+    if await papers_store.get(c, paper_id) is None:
+        raise HTTPException(status_code=404, detail="no such paper")
+    source = request.app.state.publications
+    record = None
+    try:
+        if body.dblp_key:
+            record = await source.record(body.dblp_key)
+            if record is None:
+                raise HTTPException(status_code=404, detail="DBLP has no such record")
+        elif body.doi:
+            record = await source.by_doi(body.doi) or Publication(doi=dblp.clean_doi(body.doi))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    await lookups.store_record(c, paper_id, record, by_owner=True)
+    return record
+
+
+@router.delete("/papers/{paper_id:path}/publication", status_code=204)
+async def forget_publication(paper_id: str, c: Conn) -> None:
+    """Drop the stored version, the owner's choice included; the paper is looked up again."""
+    await publications_store.forget(c, paper_id)
 
 
 def _cited(row: Any) -> Cited:
@@ -218,6 +256,8 @@ def _cited(row: Any) -> Cited:
 
 
 async def _bibtex(c: psycopg.AsyncConnection, ids: list[str]) -> str:
+    """Entries from the stored published records, arXiv ones for the rest. Never waits on
+    a lookup (decision 25)."""
     rows = await (
         await c.execute(
             "SELECT id, title, authors, published, primary_category FROM papers "
@@ -225,12 +265,15 @@ async def _bibtex(c: psycopg.AsyncConnection, ids: list[str]) -> str:
             (ids, ids),
         )
     ).fetchall()
-    return entries(_cited(r) for r in rows)
+    return entries((_cited(r) for r in rows), await publications_store.found(c, ids))
 
 
 @router.post("/bibtex", response_class=PlainTextResponse)
-async def bibtex_selection(body: s.BibtexIn, c: Conn) -> str:
-    """BibTeX for chosen papers. M5 brings published records; until then, arXiv entries."""
+async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
+    """BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the
+    published version as soon as DBLP has it; several use what is stored."""
+    if len(body.ids) == 1 and await papers_store.get(c, body.ids[0]):
+        await lookups.for_copy(c, request.app.state.publications, body.ids[0])
     return await _bibtex(c, body.ids)
 
 
