@@ -61,7 +61,25 @@ const routeTree = rootRoute.addChildren([
   settingsRoute.addChildren([settingsIndexRoute, settingsPageRoute]),
 ]);
 
-export const router = createRouter({ routeTree, scrollRestoration: true, defaultPreload: "intent" });
+// Plain query strings (`?paper=2505.17244`, not JSON-quoted), so share links stay readable;
+// each route's validateSearch turns the strings back into numbers and booleans.
+function parseSearch(search: string): Record<string, string> {
+  return Object.fromEntries(new URLSearchParams(search));
+}
+function stringifySearch(search: Record<string, unknown>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(search)) if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
+export const router = createRouter({
+  routeTree,
+  scrollRestoration: true,
+  defaultPreload: "intent",
+  parseSearch,
+  stringifySearch,
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

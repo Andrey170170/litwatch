@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Outlet, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Settings, SlidersHorizontal } from "lucide-react";
@@ -148,10 +148,12 @@ export function TopicPage() {
   const topics = useQuery(topicsQuery);
   const visit = useVisit();
   const card = topics.data?.find((t) => t.slug === slug);
+  const [more, setMore] = useState(false);
   const watch = useMemo(() => topics.data?.filter((t) => t.kind === "watch") ?? [], [topics.data]);
 
   useEffect(() => {
     localStorage.setItem(LAST_OPEN, slug);
+    setMore(false);
     visit.mutate(slug);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
@@ -195,7 +197,11 @@ export function TopicPage() {
             {card?.name ?? "…"}
           </h1>
           {card && (
-            <p className="mt-2 max-w-[640px] text-[14.5px] text-body">
+            <p
+              className={cn("mt-2 max-w-[640px] text-[14.5px] text-body", !more && "line-clamp-3 cursor-pointer")}
+              onClick={() => setMore(true)}
+              title={more ? undefined : "Show the whole subject"}
+            >
               {card.subject} <span className="text-muted-foreground">{plural(card.papers, picks ? "pick" : "paper")}, {card.saved} saved.</span>
             </p>
           )}

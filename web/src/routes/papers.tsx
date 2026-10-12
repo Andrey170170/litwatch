@@ -32,7 +32,7 @@ export function PapersPage() {
         value={search.topic ?? ""}
         onChange={(e) => onFilter({ topic: e.target.value || undefined, adjacent: undefined })}
         aria-label="Topic"
-        className={`min-h-[36px] appearance-none rounded-full border border-border bg-transparent px-3 text-[13px] text-muted-foreground ${search.topic ? "border-foreground bg-foreground text-background" : ""}`}
+        className={`min-h-[36px] rounded-full border border-border bg-transparent px-3 text-[13px] text-muted-foreground ${search.topic ? "border-foreground bg-foreground text-background" : ""}`}
       >
         <option value="">Any topic</option>
         {(topics.data ?? []).map((t) => (
@@ -50,7 +50,7 @@ export function PapersPage() {
           value={search.sort ?? (search.q ? "published" : "added")}
           onChange={(e) => onFilter({ sort: e.target.value as Sort })}
           aria-label="Sort"
-          className="min-h-[36px] appearance-none rounded-full border border-border bg-transparent px-3 text-[13px] text-muted-foreground"
+          className="min-h-[36px] rounded-full border border-border bg-transparent px-3 text-[13px] text-muted-foreground"
         >
           {sorts.map((s) => (
             <option key={s.key} value={s.key}>
@@ -73,7 +73,7 @@ export function PapersPage() {
         filter={search}
         onFilter={onFilter}
         watchTopics={watch}
-        showMiss
+        showMiss={!!search.q}
         above={search.lookup ? <LookupBand q={search.lookup} watch={watch} /> : null}
       />
       <LookupPrompt onLookup={(q) => onFilter({ lookup: q })} initial={search.lookup} />

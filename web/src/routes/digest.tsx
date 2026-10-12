@@ -44,7 +44,7 @@ export function DigestPage() {
   const mastDate = stale ? today : openSummary?.day;
 
   return (
-    <div className={cn(desktop && "grid grid-cols-2")}>
+    <div className={cn(desktop && "grid min-h-[calc(100dvh-49px)] grid-cols-2")}>
       <div className={cn(desktop && "border-r border-border")}>
         {!desktop && (
           <Masthead date={mastDate} stale={stale} />

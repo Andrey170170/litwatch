@@ -232,7 +232,7 @@ export function MissLink({ paperId, topics }: { paperId: string; topics: TopicCa
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className="min-h-[36px] text-[13px] font-semibold text-warning hover:underline">
+        <button type="button" className="min-h-[36px] text-[13px] font-medium text-warning hover:underline">
           Should have been found for a topic…
         </button>
       </PopoverTrigger>
@@ -285,7 +285,7 @@ export function YearChip({ year, onChange }: { year: number | undefined; onChang
       onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
       aria-label="Year"
       className={cn(
-        "min-h-[36px] appearance-none rounded-full border border-border bg-transparent px-3 text-[13px] text-muted-foreground",
+        "min-h-[36px] rounded-full border border-border bg-transparent px-3 text-[13px] text-muted-foreground",
         year && "border-foreground bg-foreground text-background",
       )}
     >
