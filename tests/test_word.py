@@ -184,7 +184,7 @@ async def test_the_later_word_wins_inside_one_transaction(db):
 async def test_a_topic_that_stops_being_watch_takes_its_grade_with_it(db):
     await grade(db, "relevant")
     await topics_store.save(db, FAITH.model_copy(update={"kind": TopicKind.RADAR}))
-    settled = await word.settle(db, P.id)
-    assert settled.grades == {FAITH.slug: (Grade.RELEVANT, None)} and settled.saved is False
+    assert await word.settle_topic(db, FAITH.slug) == 1
+    assert (await word.settle(db, P.id)).saved is False
     rows = await (await db.execute("SELECT * FROM effective_grades")).fetchall()
     assert rows == []

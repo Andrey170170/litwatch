@@ -129,7 +129,14 @@ def topics_list() -> None:
 
 
 async def _save_all(conn: psycopg.AsyncConnection, topics: list[Topic]) -> list[Topic]:
-    return [await topics_store.save(conn, topic) for topic in topics]
+    """Save the topics; one whose kind changed has its papers settled again."""
+    saved = []
+    for topic in topics:
+        before = await topics_store.get(conn, topic.slug)
+        saved.append(await topics_store.save(conn, topic))
+        if before is not None and before.kind != topic.kind:
+            await word.settle_topic(conn, topic.slug)
+    return saved
 
 
 @topics_app.command("import")
