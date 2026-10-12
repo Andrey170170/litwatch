@@ -3,11 +3,12 @@ configuration (read-only, spec decision 11)."""
 
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import date, timedelta
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel, ValidationError
 
 from litwatch import store, watch
@@ -79,12 +80,26 @@ async def order(body: Order, c: Conn) -> None:
 
 
 @router.get("/topics/{slug}/keywords")
-async def keywords(slug: str, c: Conn) -> dict[str, int]:
-    """How many stored papers each keyword pattern matches; -1 for one Postgres rejects."""
+async def keywords(
+    slug: str, c: Conn, pattern: Annotated[list[str] | None, Query()] = None
+) -> dict[str, int]:
+    """How many stored papers each keyword pattern matches, as the keyword audit matches:
+    the topic's saved patterns, or the `pattern`s given (an editor's unsaved draft). A
+    pattern that is not a valid regular expression counts -1."""
     topic = await topics_store.get(c, slug)
-    if topic is None:
+    if topic is None and pattern is None:
         raise HTTPException(status_code=404, detail="no such topic")
-    return await quality.keyword_counts(c, topic.keywords)
+    patterns = pattern if pattern is not None else topic.keywords
+    valid = [p for p in patterns if _compiles(p)]
+    return dict.fromkeys(patterns, -1) | await quality.keyword_counts(c, valid)
+
+
+def _compiles(pattern: str) -> bool:
+    try:
+        re.compile(pattern)
+    except re.error:
+        return False
+    return True
 
 
 @router.post("/topics/{slug}/preview")

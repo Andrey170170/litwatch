@@ -203,3 +203,11 @@ async def test_bad_input_is_refused_not_crashed(client):
     assert (await client.put(f"/api/settings/topics/{FAITH.slug}", json=body)).status_code == 422
     order = {"slugs": ["agents", "agents", FAITH.slug]}
     assert (await client.put("/api/settings/topics-order", json=order)).status_code == 422
+
+
+async def test_keyword_counts_for_an_unsaved_draft(client):
+    counts = await client.get(
+        f"/api/settings/topics/{FAITH.slug}/keywords",
+        params=[("pattern", "omits"), ("pattern", "[")],
+    )
+    assert counts.json() == {"omits": 1, "[": -1}

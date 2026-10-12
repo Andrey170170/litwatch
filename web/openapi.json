@@ -942,7 +942,7 @@
     "/api/settings/topics/{slug}/keywords": {
       "get": {
         "summary": "Keywords",
-        "description": "How many stored papers each keyword pattern matches; -1 for one Postgres rejects.",
+        "description": "How many stored papers each keyword pattern matches, as the keyword audit matches:\nthe topic's saved patterns, or the `pattern`s given (an editor's unsaved draft). A\npattern that is not a valid regular expression counts -1.",
         "operationId": "keywords_api_settings_topics__slug__keywords_get",
         "parameters": [
           {
@@ -952,6 +952,25 @@
             "schema": {
               "type": "string",
               "title": "Slug"
+            }
+          },
+          {
+            "name": "pattern",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pattern"
             }
           }
         ],
