@@ -266,7 +266,7 @@ async def test_amendments_count_as_new_on_a_topic_opened_in_between(client, conn
 async def test_a_page_past_the_end_still_counts_the_filter(client, conn):
     await grade(conn, P, "relevant")
     page = (await client.get("/api/papers", params={"topic": FAITH.slug, "offset": 50})).json()
-    assert page == {"rows": [], "total": 1}
+    assert (page["rows"], page["total"]) == ([], 1)
 
 
 async def test_the_cookie_is_secure_behind_https(client):

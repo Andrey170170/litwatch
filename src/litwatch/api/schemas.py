@@ -177,6 +177,14 @@ class HistoryItem(BaseModel):
     grade: Grade | None = None
 
 
+class DeepCard(BaseModel):
+    """A deep card: the reading card the deep service wrote, as it wrote it."""
+
+    card: dict[str, Any]
+    model: str | None = None
+    written_at: datetime | None = None
+
+
 class Paper(BaseModel):
     id: str
     title: str
@@ -203,6 +211,8 @@ class Paper(BaseModel):
     chosen: list[Chosen]
     publication: Publication | None = None  # the published version, when one is known
     publication_by_owner: bool = False  # the owner chose it (or chose "none")
+    card: DeepCard | None = None  # shown whenever one is stored, integration or not
+    card_requestable: bool = False  # an integration that answers card requests is loaded
 
 
 class Row(BaseModel):
@@ -219,11 +229,19 @@ class Row(BaseModel):
     take_topic: str | None = None  # whose take it is
     saved: bool = False
     also_in: list[str] = Field(default_factory=list)  # other topics it is relevant to
+    source: str = "collection"  # or the search provider that found it outside the collection
+    score: float | None = None  # the provider's, for its "best match" order
 
 
 class Papers(BaseModel):
+    """A page of the table. A search also brings the papers search providers found that the
+    collection lacks, as a second band under the first; a provider that failed or was too
+    slow is named in `left_out`."""
+
     rows: list[Row]
     total: int
+    outside: list[Row] = Field(default_factory=list)
+    left_out: list[str] = Field(default_factory=list)
 
 
 class TopicCard(TopicRef):
@@ -299,3 +317,45 @@ class PublicationIn(BaseModel):
 
 class SessionIn(BaseModel):
     token: str
+
+
+# -- integrations ----------------------------------------------------------------------------------
+
+
+class Failing(BaseModel):
+    """The event an integration is stuck on; its later events wait behind it."""
+
+    event_id: int
+    type: str | None = None
+    paper_id: str | None = None
+    failures: int
+    retry_at: datetime | None = None  # tried again then, or at once on retry
+    error: str | None = None
+
+
+class SearchStats(BaseModel):
+    """How a search provider has answered since the service started."""
+
+    queries: int = 0
+    left_out: int = 0  # failed or too slow, and left out of the response
+    last_error: str | None = None
+    last_error_at: datetime | None = None
+
+
+class IntegrationCard(BaseModel):
+    """One integration under Settings → Integrations."""
+
+    name: str
+    description: str | None = None
+    enabled: bool  # loaded now; a configured but disabled one keeps its cursor
+    lag: int = 0  # outbox events after its cursor, wanted or not
+    failing: Failing | None = None
+    last_error: str | None = None  # kept after a recovery
+    failed_at: datetime | None = None
+    skipped: int = 0
+    answers_card_requests: bool = False
+    search: SearchStats | None = None  # for a search provider
+
+
+class CardRequested(BaseModel):
+    event_id: int

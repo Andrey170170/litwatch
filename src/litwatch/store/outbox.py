@@ -113,3 +113,13 @@ async def skip(conn: psycopg.AsyncConnection, name: str) -> int | None:
         )
     ).fetchone()
     return row["position"] if row else None
+
+
+async def event(conn: psycopg.AsyncConnection, event_id: int) -> Event | None:
+    row = await (
+        await conn.execute(
+            "SELECT id, type, paper_id, payload, created_at FROM outbox WHERE id = %s",
+            (event_id,),
+        )
+    ).fetchone()
+    return Event(**row) if row else None

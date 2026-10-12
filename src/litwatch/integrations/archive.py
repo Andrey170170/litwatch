@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -233,10 +233,12 @@ def _authors(value: Any) -> list[str]:
 
 
 def _published(value: Any) -> datetime | None:
+    """The index keeps a date; a hit carries it as midnight UTC."""
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+        at = datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
     except ValueError:
         return None
+    return at.replace(tzinfo=UTC) if at and at.tzinfo is None else at
 
 
 def hits(body: dict[str, Any]) -> list[SearchHit]:

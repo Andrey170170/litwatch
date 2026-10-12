@@ -397,7 +397,8 @@ def serve(
     port: Annotated[int, typer.Option(help="Port to listen on.")] = 8080,
     config: ConfigPath = None,
 ) -> None:
-    """Serve the API, the web app and the labelling page. Needs LITWATCH_API_TOKEN."""
+    """Serve the API, the web app and the labelling page, with the integrations the
+    configuration enables. Needs LITWATCH_API_TOKEN."""
     import uvicorn  # noqa: PLC0415
 
     from litwatch.api import create_app  # noqa: PLC0415
@@ -406,8 +407,15 @@ def serve(
     token = configuration.secret("LITWATCH_API_TOKEN")
     if not token:
         raise SystemExit("LITWATCH_API_TOKEN (or LITWATCH_API_TOKEN_FILE) is not set")
+    from litwatch import integrations  # noqa: PLC0415
+
+    cfg = configuration.load(config)
+    try:
+        loaded = integrations.load(cfg)
+    except integrations.IntegrationError as exc:
+        raise SystemExit(str(exc)) from exc
     _run(store.migrate, migrate=False)
-    app_ = create_app(configuration.database_url(), token, configuration.load(config))
+    app_ = create_app(configuration.database_url(), token, cfg, integrations=loaded)
     uvicorn.run(app_, host=host, port=port)
 
 
