@@ -72,18 +72,19 @@ async def forget(conn: psycopg.AsyncConnection, paper_id: str) -> None:
 
 
 async def due(conn: psycopg.AsyncConnection, limit: int) -> list[str]:
-    """Library papers to look up: those never looked up, newest saves first, then those
-    still without a published record a month after the last look, within two years of
-    the first."""
+    """Library papers to look up: those never looked up or saved again since the last look,
+    newest saves first, then those still without a published record a month after the
+    last look, within two years of the first look or the latest save."""
     rows = await (
         await conn.execute(
             """
             SELECT l.paper_id FROM library l
             LEFT JOIN publications p ON p.paper_id = l.paper_id
             WHERE l.saved AND (p.paper_id IS NULL OR (
-                p.record IS NULL AND NOT p.by_owner
-                AND p.checked_at < now() - %(recheck)s
-                AND p.first_checked_at > now() - %(give_up)s))
+                p.record IS NULL AND NOT p.by_owner AND (
+                    l.saved_at > p.checked_at
+                    OR (p.checked_at < now() - %(recheck)s
+                        AND greatest(p.first_checked_at, l.saved_at) > now() - %(give_up)s))))
             ORDER BY p.checked_at NULLS FIRST, l.saved_at DESC NULLS LAST, l.paper_id
             LIMIT %(limit)s
             """,

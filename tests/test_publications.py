@@ -176,9 +176,13 @@ async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db
     assert await store.due(db, 10) == []
     await db.execute("UPDATE publications SET checked_at = now() - interval '31 days'")
     assert await store.due(db, 10) == [Q.id]
-    # Two years after the first look, an unpublished paper is left alone.
+    # Two years after the first look and the save, an unpublished paper is left alone.
     await db.execute("UPDATE publications SET first_checked_at = now() - interval '731 days'")
+    await db.execute("UPDATE library SET saved_at = now() - interval '731 days'")
     assert await store.due(db, 10) == []
+    # Saved again years later, it is looked up at once, and monthly from that save.
+    await db.execute("UPDATE library SET saved_at = now() WHERE paper_id = %s", (Q.id,))
+    assert await store.due(db, 10) == [Q.id]
     # The same record found again is no new event.
     await lookups.look_up(db, source, P.id)
     assert await events(db) == [P.id]
