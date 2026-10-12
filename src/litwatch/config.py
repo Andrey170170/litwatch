@@ -91,10 +91,16 @@ class Limits(_Section):
 
 def system_zone() -> tzinfo:
     """The server's own zone with its daylight-saving rules: `TZ`, else the zone
-    `/etc/localtime` links to. Only when neither names one, the current fixed offset."""
+    `/etc/localtime` links to, else the one `/etc/timezone` names. Only when none names one,
+    the current fixed offset."""
     name = os.environ.get("TZ", "").lstrip(":")
     if not name:
         _, _, name = os.path.realpath("/etc/localtime").partition("zoneinfo/")
+    if not name:
+        try:
+            name = Path("/etc/timezone").read_text().strip()
+        except OSError:
+            name = ""
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):

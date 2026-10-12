@@ -408,21 +408,26 @@ async def topic_cards(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
                     THEN (SELECT count(*) FROM issue_entries e
                           WHERE e.topic = t.slug
                             AND e.added_at > coalesce(v.opened_at, t.created_at))
-                    ELSE (SELECT count(DISTINCT k.paper_id) FROM review_picks k
-                          JOIN reviews r ON r.id = k.review_id
-                          WHERE r.topic = t.slug
-                            AND r.written_at > coalesce(v.opened_at, t.created_at)) END
+                    ELSE (SELECT count(*) FROM (
+                            SELECT k.paper_id FROM review_picks k
+                            JOIN reviews r ON r.id = k.review_id WHERE r.topic = t.slug
+                            GROUP BY k.paper_id
+                            HAVING min(r.written_at) > coalesce(v.opened_at, t.created_at)) f)
+                    END
                    AS new,
                CASE WHEN t.kind = 'watch'
                     THEN (SELECT count(*) FROM issue_entries e
                           JOIN library l ON l.paper_id = e.paper_id AND l.saved
                           WHERE e.topic = t.slug
                             AND e.added_at > coalesce(v.opened_at, t.created_at))
-                    ELSE (SELECT count(DISTINCT k.paper_id) FROM review_picks k
-                          JOIN reviews r ON r.id = k.review_id
-                          JOIN library l ON l.paper_id = k.paper_id AND l.saved
-                          WHERE r.topic = t.slug
-                            AND r.written_at > coalesce(v.opened_at, t.created_at)) END
+                    ELSE (SELECT count(*) FROM (
+                            SELECT k.paper_id FROM review_picks k
+                            JOIN reviews r ON r.id = k.review_id
+                            JOIN library l ON l.paper_id = k.paper_id AND l.saved
+                            WHERE r.topic = t.slug
+                            GROUP BY k.paper_id
+                            HAVING min(r.written_at) > coalesce(v.opened_at, t.created_at)) f)
+                    END
                    AS new_saved
         FROM topics t LEFT JOIN topic_visits v ON v.topic = t.slug
         WHERE t.status <> 'draft'

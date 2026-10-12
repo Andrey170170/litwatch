@@ -25,6 +25,7 @@ from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, ProviderError
 from litwatch.review import reviews as review_calls
 from litwatch.store import papers as papers_store
+from litwatch.store import reading as reading_store
 from litwatch.store import topics as topics_store
 from litwatch.store import verdicts
 from tests.conftest import AGENTS, FAITH, INTERP, paper
@@ -286,3 +287,33 @@ def test_without_a_configured_zone_the_servers_own_keeps_daylight_saving(monkeyp
     begin, end = schedule.window(date(2026, 10, 26), 7)  # the week clocks fall back
     assert (begin.utcoffset(), end.utcoffset()) == (timedelta(hours=-6), timedelta(hours=-7))
     assert end.astimezone(UTC) - begin.astimezone(UTC) == timedelta(days=7, hours=1)
+
+
+async def test_taking_back_the_word_that_kept_a_paper_shown_sets_it_aside(db):
+    # Graded adjacent, shown only because the owner said relevant, and announced so.
+    await verdicts.add(
+        db, Verdict(paper_id=P.id, topic=FAITH.slug, topic_revision=1, grade=Grade.ADJACENT)
+    )
+    await word.label(
+        db,
+        Label(
+            paper_id=P.id, topic=FAITH.slug, value=LabelValue.RELEVANT, origin=LabelOrigin.READER
+        ),
+    )
+    models = Models()
+    await job(db, models, lambda run: digest.write_takes(db, Config(), run))
+    await job(db, models, lambda run: digest.build_daily(db, Config(), run))
+    await word.unlabel(db, P.id, FAITH.slug)
+    rows = await (await db.execute("SELECT paper_id FROM set_asides")).fetchall()
+    assert [r["paper_id"] for r in rows] == [P.id]
+
+
+async def test_a_field_card_counts_a_paper_new_only_when_first_picked(db):
+    models = Models()
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
+    await db.execute("INSERT INTO topic_visits (topic) VALUES (%s)", (DAILY.slug,))
+    # The weekly review picks the day's five again, and two more.
+    monday = Config().schedule.week_of(Config().schedule.today())
+    await job(db, models, lambda run: reviews.weekly(db, Config(), run, monday))
+    cards = {c["slug"]: c for c in await reading_store.topic_cards(db)}
+    assert cards[DAILY.slug]["papers"] == 7 and cards[DAILY.slug]["new"] == 2
