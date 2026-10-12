@@ -3,6 +3,7 @@ its BibTeX is copied (spec section 3, "Continuously")."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -20,6 +21,9 @@ log = logging.getLogger(__name__)
 LIMIT = 200  # papers per run, a few minutes at DBLP's pace
 GIVE_UP_AFTER = 3  # consecutive failures that end a run: the endpoint is down
 FRESH = timedelta(days=1)  # a copy of one paper's BibTeX reuses a lookup this recent
+# How long Copy BibTeX waits on DBLP, waiting for a scheduled lookup's query included,
+# before it gives what is stored.
+COPY_DEADLINE = 8.0
 
 
 async def store_record(
@@ -48,14 +52,21 @@ async def store_record(
 
 
 async def look_up(
-    conn: psycopg.AsyncConnection, source: PublicationSource, paper_id: str
+    conn: psycopg.AsyncConnection,
+    source: PublicationSource,
+    paper_id: str,
+    deadline: float | None = None,
 ) -> Publication | None:
     """Ask the source and store its answer, unless the owner has chosen. Raises SourceError
-    when the source cannot be asked."""
+    when the source cannot be asked, or does not answer within `deadline` seconds."""
     paper = await papers_store.get(conn, paper_id)
-    record = await source.find(
-        paper_id, paper.title if paper else None, paper.doi if paper else None
-    )
+    try:
+        async with asyncio.timeout(deadline):
+            record = await source.find(
+                paper_id, paper.title if paper else None, paper.doi if paper else None
+            )
+    except TimeoutError as exc:
+        raise SourceError(f"no answer within {deadline} s") from exc
     await store_record(conn, paper_id, record)
     return record
 
@@ -73,7 +84,7 @@ async def for_copy(
     )
     if stale:
         try:
-            return await look_up(conn, source, paper_id)
+            return await look_up(conn, source, paper_id, COPY_DEADLINE)
         except SourceError as exc:
             log.warning("publication lookup for %s failed: %s", paper_id, exc)
     return (await store.found(conn, [paper_id])).get(paper_id)

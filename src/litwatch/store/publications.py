@@ -10,6 +10,10 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core import Publication
 
+# Held while a paper's record is compared and stored, so two lookups of a paper never both
+# take a record for new.
+PUBLICATION_LOCK = 7213914
+
 # A library paper with no published record is looked up again monthly for two years.
 RECHECK = timedelta(days=30)
 GIVE_UP = timedelta(days=730)
@@ -42,11 +46,12 @@ async def put(
 ) -> tuple[bool, Publication | None]:
     """Store a lookup's result, or the owner's choice. Returns whether it was stored (a
     lookup never replaces the owner's choice) and the record stored before. Call it inside
-    a transaction: the row is locked while the two are compared."""
+    a transaction: the paper is locked while the two are compared, even before its first row."""
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (PUBLICATION_LOCK, paper_id)
+    )
     before = await (
-        await conn.execute(
-            "SELECT record FROM publications WHERE paper_id = %s FOR UPDATE", (paper_id,)
-        )
+        await conn.execute("SELECT record FROM publications WHERE paper_id = %s", (paper_id,))
     ).fetchone()
     stored = await conn.execute(
         """

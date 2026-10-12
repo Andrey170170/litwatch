@@ -1,6 +1,7 @@
 """Published versions: DBLP matching, BibTeX from the record, lookup when due, the owner's
 correction, and Copy BibTeX looking up only a single paper."""
 
+import asyncio
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -15,6 +16,7 @@ from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
+from litwatch.store import sibling as store_sibling
 from tests.conftest import paper
 
 TOKEN = "s3cret"
@@ -229,3 +231,23 @@ async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db):
         missing = await c.put(f"/api/papers/{Q.id}/publication", json={"dblp_key": "conf/x/Y1"})
         assert missing.status_code == 404
     assert (await events(db)).count(Q.id) == 1
+
+
+async def test_two_first_lookups_at_once_announce_the_record_once(db):
+    async with await store_sibling(db) as other:
+        await asyncio.gather(
+            lookups.store_record(db, P.id, NIPS), lookups.store_record(other, P.id, NIPS)
+        )
+    assert await events(db) == [P.id]
+
+
+async def test_copy_gives_what_is_stored_when_dblp_is_slow(db, monkeypatch):
+    monkeypatch.setattr(lookups, "COPY_DEADLINE", 0.05)
+
+    class Stalled(Source):
+        async def find(self, paper_id, title=None, doi=None):
+            await asyncio.sleep(5)
+
+    async with asyncio.timeout(1):  # far short of the stalled lookup
+        assert await lookups.for_copy(db, Stalled(), P.id) is None  # nothing stored: arXiv
+    assert await store.get(db, P.id) is None  # an unanswered lookup stores nothing
