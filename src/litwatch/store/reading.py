@@ -12,6 +12,8 @@ from psycopg import sql
 GRADE_ORDER = "ARRAY['must_read', 'relevant', 'adjacent', 'none']"
 SHOWN = ("must_read", "relevant")
 STALE_AFTER = timedelta(hours=36)
+# A stored JSON null in `authors` reads as no authors.
+AUTHORS = "CASE WHEN jsonb_typeof(p.authors) = 'array' THEN p.authors ELSE '[]' END AS authors"
 
 
 async def _all(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> list[dict]:
@@ -125,7 +127,7 @@ async def issue(conn: psycopg.AsyncConnection, issue_id: int) -> dict[str, Any] 
         conn,
         f"""
         SELECT e.paper_id, e.topic, e.grade, e.position, k.text AS take,
-               p.title, p.authors, p.published, p.version,
+               p.title, {AUTHORS}, p.published, p.version,
                p.revision > 1 AS revised, p.fetched_at AS added,
                g.grade AS grade_now,
                coalesce(l.saved, false) AS saved,
@@ -156,7 +158,8 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     """Everything the paper page shows, the folded "how this was chosen" included."""
     found = await _one(
         conn,
-        "SELECT p.id, p.title, p.abstract, p.authors, p.categories, p.published, p.updated, "
+        f"SELECT p.id, p.title, p.abstract, {AUTHORS}, "
+        "coalesce(p.categories, '{}') AS categories, p.published, p.updated, "
         "p.url, p.version, p.revision, p.version_history, p.doi, p.journal_ref, "
         "p.fetched_at AS added, coalesce(l.saved, false) AS saved, l.hand "
         "FROM papers p LEFT JOIN library l ON l.paper_id = p.id WHERE p.id = %s",
@@ -302,7 +305,8 @@ async def papers(
     order = SORTS.get(sort or ("published" if q else "added"), SORTS["added"])
     query = sql.SQL(
         """
-        SELECT p.id, p.title, p.authors, p.published, p.fetched_at AS added,
+        SELECT p.id, p.title, {authors}, p.published,
+               p.fetched_at AS added,
                {grade} AS grade, {take} AS take, coalesce(l.saved, false) AS saved,
                EXISTS (SELECT 1 FROM candidates c WHERE c.paper_id = p.id
                        AND c.state = 'pending') AS grading,
@@ -316,9 +320,33 @@ async def papers(
         WHERE {where}
         ORDER BY {order} LIMIT %s OFFSET %s
         """
-    ).format(grade=grade, take=take, scope=scope, where=sql.SQL(" AND ").join(where), order=order)
+    ).format(
+        authors=sql.SQL(AUTHORS),
+        grade=grade,
+        take=take,
+        scope=scope,
+        where=sql.SQL(" AND ").join(where),
+        order=order,
+    )
     rows = await _all(conn, query, [*take_params, topic, *scope_params, *params, limit, offset])
-    total = rows[0]["total"] if rows else 0
+    if rows:
+        total = rows[0]["total"]
+    elif offset:  # past the last page: count the filter on its own
+        total = (
+            await papers(
+                conn,
+                q=q,
+                topic=topic,
+                adjacent=adjacent,
+                saved=saved,
+                year=year,
+                limit=1,
+                offset=0,
+                ids=ids,
+            )
+        )[1]
+    else:
+        total = 0
     return [{k: v for k, v in r.items() if k != "total"} for r in rows], total
 
 
@@ -344,12 +372,12 @@ async def topic_cards(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
                     ELSE (SELECT count(*) FROM memberships m JOIN library l
                           ON l.paper_id = m.paper_id AND l.saved WHERE m.topic = t.slug) END
                    AS saved,
-               (SELECT count(*) FROM issue_entries e JOIN issues i ON i.id = e.issue_id
-                WHERE e.topic = t.slug AND i.built_at > coalesce(v.opened_at, t.created_at))
+               (SELECT count(*) FROM issue_entries e
+                WHERE e.topic = t.slug AND e.added_at > coalesce(v.opened_at, t.created_at))
                    AS new,
-               (SELECT count(*) FROM issue_entries e JOIN issues i ON i.id = e.issue_id
+               (SELECT count(*) FROM issue_entries e
                 JOIN library l ON l.paper_id = e.paper_id AND l.saved
-                WHERE e.topic = t.slug AND i.built_at > coalesce(v.opened_at, t.created_at))
+                WHERE e.topic = t.slug AND e.added_at > coalesce(v.opened_at, t.created_at))
                    AS new_saved
         FROM topics t LEFT JOIN topic_visits v ON v.topic = t.slug
         WHERE t.status <> 'draft'

@@ -209,3 +209,70 @@ async def test_the_status_line_counts_what_waits_for_the_owner(client, conn):
     await conn.execute("UPDATE runs SET error = 'boom'")
     status = (await client.get("/api/status")).json()
     assert status["state"] == "failed" and status["showing"] is not None
+
+
+async def test_a_paper_without_authors_still_reads(client, conn):
+    await conn.execute("UPDATE papers SET authors = 'null'::jsonb WHERE id = %s", (P.id,))
+    rows = (await client.get("/api/papers", params={"q": "hidden computation"})).json()["rows"]
+    assert rows[0]["authors"] == []
+    assert (await client.get(f"/api/papers/{P.id}")).json()["authors"] == []
+    assert "@misc" in (await client.post("/api/bibtex", json={"ids": [P.id]})).text
+
+
+async def test_reporting_a_miss_again_keeps_a_later_correction(client, conn):
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "not_relevant"})
+    again = await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    assert again.json()["message"] == "Already reported as missed for CoT faithfulness"
+    (label,) = await (await conn.execute("SELECT value FROM labels")).fetchall()
+    assert label["value"] == "not_relevant"
+    runs = await (await conn.execute("SELECT id FROM eval_runs WHERE kind = 'miss'")).fetchall()
+    assert len(runs) == 1
+
+
+async def test_a_miss_over_a_rejecting_verdict_takes_its_notes_from_the_trace(client, conn):
+    await grade(conn, Q, "none")
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    await night(conn)
+    (take,) = await (await conn.execute("SELECT source FROM takes")).fetchall()
+    assert take["source"] == "evaluation"
+
+
+async def test_a_trace_that_fails_is_recorded_on_the_miss(conn):
+    from litwatch.feedback import misses
+
+    def broken(config, journal):
+        raise RuntimeError("no provider")
+
+    for topic in TOPICS:
+        await topics_store.save(conn, topic)
+    await papers_store.upsert(conn, [Q])
+    miss_id, _, _ = await misses.report(conn, Q.id, FAITH.slug)
+    assert await misses.trace(conn, Config(), miss_id, gateway=broken) is None
+    row = await (await conn.execute("SELECT trace, trace_error FROM misses")).fetchone()
+    assert row["trace"] == "failed" and "no provider" in row["trace_error"]
+
+
+async def test_amendments_count_as_new_on_a_topic_opened_in_between(client, conn):
+    await grade(conn, P, "relevant")
+    await night(conn)
+    await client.post(f"/api/topics/{FAITH.slug}/visit")
+    await grade(conn, Q, "relevant")
+    await night(conn)  # the same day: the issue is amended
+    card = next(t for t in (await client.get("/api/topics")).json() if t["slug"] == FAITH.slug)
+    assert card["new"] == 1
+
+
+async def test_a_page_past_the_end_still_counts_the_filter(client, conn):
+    await grade(conn, P, "relevant")
+    page = (await client.get("/api/papers", params={"topic": FAITH.slug, "offset": 50})).json()
+    assert page == {"rows": [], "total": 1}
+
+
+async def test_the_cookie_is_secure_behind_https(client):
+    signed = await client.post(
+        "/api/session", json={"token": TOKEN}, headers={"x-forwarded-proto": "https"}
+    )
+    assert "secure" in signed.headers["set-cookie"].lower()
+    plain = await client.post("/api/session", json={"token": TOKEN})
+    assert "secure" not in plain.headers["set-cookie"].lower()

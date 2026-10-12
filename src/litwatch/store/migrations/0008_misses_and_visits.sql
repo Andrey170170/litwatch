@@ -9,6 +9,8 @@ CREATE TABLE misses (
     paper_id     text NOT NULL REFERENCES papers (id) ON DELETE CASCADE,
     topic        text NOT NULL,
     eval_run_id  bigint REFERENCES eval_runs (id) ON DELETE SET NULL,
+    trace        text NOT NULL DEFAULT 'pending' CHECK (trace IN ('pending', 'done', 'failed')),
+    trace_error  text,
     reported_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (paper_id, topic)
 );
@@ -17,3 +19,7 @@ CREATE TABLE topic_visits (
     topic      text PRIMARY KEY,
     opened_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- When each entry joined its issue: a same-day amendment is new to a topic page opened
+-- after the issue was first built.
+ALTER TABLE issue_entries ADD COLUMN added_at timestamptz NOT NULL DEFAULT now();

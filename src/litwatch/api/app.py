@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from litwatch.api import reading
-from litwatch.api.deps import COOKIE, Conn, authorised, token_ok
+from litwatch.api.deps import Conn, authorised, set_token_cookie, token_ok
 from litwatch.config import Config
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue, Status, TopicKind
 from litwatch.feedback import word
@@ -69,7 +69,7 @@ def create_app(
             # Straight on to the bare address, so the token does not stay in the address bar,
             # the history or a later referrer.
             response = RedirectResponse("/label", status_code=303)
-            response.set_cookie(COOKIE, given, httponly=True, samesite="strict", max_age=90 * 86400)
+            set_token_cookie(request, response, given)
             return response
         return HTMLResponse(
             resources.files("litwatch.api").joinpath("static/label.html").read_text()

@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 
 from litwatch import store
 from litwatch.api import schemas as s
-from litwatch.api.deps import COOKIE, Conn, token_ok
+from litwatch.api.deps import Conn, set_token_cookie, token_ok
 from litwatch.core import (
     Grade,
     Hand,
@@ -172,7 +172,7 @@ def _cited(row: Any) -> Cited:
     return Cited(
         id=row["id"],
         title=row["title"],
-        authors=list(row["authors"]),
+        authors=list(row["authors"] or []),
         year=published.year if published else None,
         primary_category=row.get("primary_category"),
     )
@@ -329,7 +329,9 @@ async def report_miss(
     if known is None or known.kind != TopicKind.WATCH:
         raise HTTPException(status_code=404, detail="not a Watch topic")
     await _known(c, body.paper_id)
-    miss_id, settled = await misses.report(c, body.paper_id, body.topic)
+    miss_id, settled, new = await misses.report(c, body.paper_id, body.topic)
+    if not new:
+        return _ack(f"Already reported as missed for {known.name}", settled)
     background.add_task(_trace, request.app.state, miss_id)
     return _ack(f"Reported as missed for {known.name}", settled)
 
@@ -349,4 +351,4 @@ async def sign_in(body: s.SessionIn, request: Request, response: Response) -> No
     """Exchange the token for the cookie the web app then rides on."""
     if not token_ok(request, body.token):
         raise HTTPException(status_code=401, detail="wrong token")
-    response.set_cookie(COOKIE, body.token, httponly=True, samesite="strict", max_age=90 * 86400)
+    set_token_cookie(request, response, body.token)

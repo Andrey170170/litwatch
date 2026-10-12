@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 import psycopg
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 
 from litwatch import store
 
@@ -34,3 +34,14 @@ def authorised(request: Request) -> None:
 
 
 Conn = Annotated[psycopg.AsyncConnection, Depends(_conn)]
+
+
+def set_token_cookie(request: Request, response: Response, token: str) -> None:
+    """The cookie the web app rides on: httpOnly, same-site, and Secure whenever the request
+    came over HTTPS (directly, or through a proxy that says so)."""
+    https = request.url.scheme == "https" or (
+        request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+    )
+    response.set_cookie(
+        COOKIE, token, httponly=True, samesite="strict", secure=https, max_age=90 * 86400
+    )
