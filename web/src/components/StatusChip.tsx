@@ -18,8 +18,7 @@ export function StatusText({ className, uppercase }: { className?: string; upper
   const line = statusLine(data);
   return (
     <Link
-      to="/settings/$page"
-      params={{ page: "quality" }}
+      to="/settings/quality"
       className={cn(
         "inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground hover:text-foreground",
         uppercase && "text-[11px] uppercase tracking-[.07em]",

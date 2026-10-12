@@ -243,6 +243,347 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/topics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Topics */
+        get: operations["topics_api_settings_topics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/topics/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Topic
+         * @description Create or edit a topic. Edits apply forward; a change of kind or content settles the
+         *     topic's papers again (see feedback.word.settle_topic).
+         */
+        put: operations["save_topic_api_settings_topics__slug__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/topics-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Order
+         * @description The owner's order: sections, cards and the Papers table's take column follow it. The
+         *     list must name every topic once. Rows are locked as a topic save locks them.
+         */
+        put: operations["order_api_settings_topics_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/topics/{slug}/keywords": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Keywords
+         * @description How many stored papers each keyword pattern matches; -1 for one Postgres rejects.
+         */
+        get: operations["keywords_api_settings_topics__slug__keywords_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/topics/{slug}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview
+         * @description Run a draft of the topic over its labelled papers and misses, as a dry run. Returns at
+         *     once; the evaluation's metrics appear under /evaluations/{id} when it finishes.
+         */
+        post: operations["preview_api_settings_topics__slug__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/topics/{slug}/reruns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rerun Estimates */
+        get: operations["rerun_estimates_api_settings_topics__slug__reruns_get"];
+        put?: never;
+        /** Rerun */
+        post: operations["rerun_api_settings_topics__slug__reruns_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/evaluations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Evaluations */
+        get: operations["evaluations_api_settings_evaluations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/evaluations/{eval_run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Evaluation */
+        get: operations["evaluation_api_settings_evaluations__eval_run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quality Page
+         * @description At the top, what last night left; below, how well the Watch topics are doing.
+         */
+        get: operations["quality_page_api_settings_quality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality/grade-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grade Now
+         * @description Grade an ungraded candidate now, under the run lock, and say what came of it.
+         */
+        post: operations["grade_now_api_settings_quality_grade_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/calibrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sessions */
+        get: operations["sessions_api_settings_calibrate_get"];
+        put?: never;
+        /**
+         * Draw
+         * @description Draw a session of about twenty papers. The seed is recorded with it.
+         */
+        post: operations["draw_api_settings_calibrate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/calibrate/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Session */
+        get: operations["session_api_settings_calibrate__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/calibrate/{session_id}/more": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * More
+         * @description Continue with the papers waiting for a word: splits and thumbed papers.
+         */
+        post: operations["more_api_settings_calibrate__session_id__more_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/calibrate/{session_id}/items/{position}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Answer */
+        put: operations["answer_api_settings_calibrate__session_id__items__position__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/misses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reported */
+        get: operations["reported_api_settings_misses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/misses/{miss_id}/trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retrace
+         * @description Trace a miss again, after a failure. The owner's word on it is untouched.
+         */
+        post: operations["retrace_api_settings_misses__miss_id__trace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runs */
+        get: operations["runs_api_settings_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Config
+         * @description The loaded configuration, secrets masked. Read-only: litwatch.toml is the source.
+         */
+        get: operations["config_api_settings_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -333,6 +674,24 @@ export interface components {
                 [key: string]: components["schemas"]["Grade"] | null;
             };
         };
+        /**
+         * Answer
+         * @description One paper's answers. Fit for the topic it was drawn or taken for is required.
+         */
+        Answer: {
+            /** Fit */
+            fit: {
+                [key: string]: components["schemas"]["Fit"];
+            };
+            /** Value */
+            value?: ("matters" | "fine" | "not_for_me") | null;
+            /** Note */
+            note?: string | null;
+            /** Takes */
+            takes?: {
+                [key: string]: boolean;
+            };
+        };
         /** BibtexIn */
         BibtexIn: {
             /** Ids */
@@ -369,7 +728,12 @@ export interface components {
             weekly?: components["schemas"]["IssueSummary"] | null;
             /** Issues */
             issues: components["schemas"]["IssueSummary"][];
-            status: components["schemas"]["Status"];
+            status: components["schemas"]["litwatch__api__schemas__Status"];
+        };
+        /** DrawIn */
+        DrawIn: {
+            /** Seed */
+            seed?: number | null;
         };
         /**
          * Entry
@@ -409,6 +773,11 @@ export interface components {
             saved: boolean;
             reaction?: components["schemas"]["ReactionValue"] | null;
             reaction_reason?: components["schemas"]["ReactionReason"] | null;
+        };
+        /** Fit */
+        Fit: {
+            value: components["schemas"]["LabelValue"];
+            grade?: components["schemas"]["Grade"] | null;
         };
         /**
          * Grade
@@ -556,6 +925,18 @@ export interface components {
             /** Model */
             model?: string | null;
         };
+        /** Order */
+        Order: {
+            /** Slugs */
+            slugs: string[];
+        };
+        /** Pair */
+        Pair: {
+            /** Paper Id */
+            paper_id: string;
+            /** Topic */
+            topic: string;
+        };
         /** Paper */
         Paper: {
             /** Id */
@@ -664,6 +1045,18 @@ export interface components {
          * @enum {string}
          */
         ReactionValue: "up" | "down";
+        /** RerunIn */
+        RerunIn: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "evidence" | "candidates" | "keywords" | "range";
+            /** Since */
+            since?: string | null;
+            /** Until */
+            until?: string | null;
+        };
         /**
          * Row
          * @description One paper in a table.
@@ -687,6 +1080,8 @@ export interface components {
             grading: boolean;
             /** Take */
             take?: string | null;
+            /** Take Topic */
+            take_topic?: string | null;
             /**
              * Saved
              * @default false
@@ -717,45 +1112,31 @@ export interface components {
             token: string;
         };
         /**
-         * Status
-         * @description The printer's line under the masthead.
+         * Topic
+         * @description Something the owner follows. `revision` is set by the store when the topic is saved.
          */
-        Status: {
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "none" | "running" | "failed" | "attention" | "quiet";
-            /** Run Id */
-            run_id?: number | null;
-            /** Started At */
-            started_at?: string | null;
-            /** Finished At */
-            finished_at?: string | null;
-            /**
-             * Read
-             * @default 0
-             */
-            read: number;
-            /** Error */
-            error?: string | null;
-            /** Showing */
-            showing?: string | null;
-            /**
-             * Splits
-             * @default 0
-             */
-            splits: number;
-            /**
-             * Ungraded
-             * @default 0
-             */
-            ungraded: number;
-            /**
-             * Awaiting Triage
-             * @default 0
-             */
-            awaiting_triage: number;
+        Topic: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            kind: components["schemas"]["TopicKind"];
+            /** Subject */
+            subject: string;
+            /** Rubric */
+            rubric?: string | null;
+            /** Interests */
+            interests?: string | null;
+            /** Keywords */
+            keywords?: string[];
+            /** @default active */
+            status: components["schemas"]["litwatch__core__types__Status"];
+            /** Revision */
+            revision?: number | null;
+            /** Position */
+            position?: number | null;
+            /** Colour */
+            colour?: string | null;
         };
         /** TopicCard */
         TopicCard: {
@@ -829,6 +1210,52 @@ export interface components {
             value: components["schemas"]["LabelValue"];
             grade?: components["schemas"]["Grade"] | null;
         };
+        /**
+         * Status
+         * @description The printer's line under the masthead.
+         */
+        litwatch__api__schemas__Status: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "none" | "running" | "failed" | "attention" | "quiet";
+            /** Run Id */
+            run_id?: number | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Read
+             * @default 0
+             */
+            read: number;
+            /** Error */
+            error?: string | null;
+            /** Showing */
+            showing?: string | null;
+            /**
+             * Splits
+             * @default 0
+             */
+            splits: number;
+            /**
+             * Ungraded
+             * @default 0
+             */
+            ungraded: number;
+            /**
+             * Awaiting Triage
+             * @default 0
+             */
+            awaiting_triage: number;
+        };
+        /**
+         * Status
+         * @enum {string}
+         */
+        litwatch__core__types__Status: "draft" | "active" | "paused";
     };
     responses: never;
     parameters: never;
@@ -853,7 +1280,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Status"];
+                    "application/json": components["schemas"]["litwatch__api__schemas__Status"];
                 };
             };
         };
@@ -1340,6 +1767,618 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    topics_api_settings_topics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Topic"][];
+                };
+            };
+        };
+    };
+    save_topic_api_settings_topics__slug__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Topic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    order_api_settings_topics_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Order"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    keywords_api_settings_topics__slug__keywords_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_api_settings_topics__slug__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_estimates_api_settings_topics__slug__reruns_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_api_settings_topics__slug__reruns_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RerunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evaluations_api_settings_evaluations_get: {
+        parameters: {
+            query?: {
+                kind?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evaluation_api_settings_evaluations__eval_run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quality_page_api_settings_quality_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    grade_now_api_settings_quality_grade_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Pair"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sessions_api_settings_calibrate_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    draw_api_settings_calibrate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DrawIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    session_api_settings_calibrate__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    more_api_settings_calibrate__session_id__more_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_api_settings_calibrate__session_id__items__position__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+                position: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Answer"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reported_api_settings_misses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    retrace_api_settings_misses__miss_id__trace_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                miss_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    runs_api_settings_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    config_api_settings_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

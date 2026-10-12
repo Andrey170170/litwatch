@@ -29,5 +29,7 @@ export function statusLine(s: Pick<Status, "state"> & Partial<Status>): StatusLi
     }
     case "quiet":
       return { tone: "green", text: `${s.read ?? 0} read · all quiet` };
+    default:
+      return { tone: "grey", text: "no run yet" };
   }
 }

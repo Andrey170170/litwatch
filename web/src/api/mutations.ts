@@ -17,6 +17,7 @@ function useAck() {
       void qc.invalidateQueries({ queryKey: ["papers"] });
       void qc.invalidateQueries({ queryKey: ["topics"] });
       void qc.invalidateQueries({ queryKey: ["lookup"] });
+      void qc.invalidateQueries({ queryKey: ["settings"] });
     },
     onError: (e: Error) => toast(e.message || "That did not save", "error"),
   };

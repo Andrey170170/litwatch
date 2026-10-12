@@ -3,7 +3,11 @@ import { Shell } from "@/components/Shell";
 import { DigestPage } from "@/routes/digest";
 import { PaperPage } from "@/routes/paper";
 import { PapersPage } from "@/routes/papers";
-import { SettingsIndex, SettingsPage, SettingsPlaceholder } from "@/routes/settings";
+import { SettingsIndex, SettingsLayout } from "@/routes/settings/index";
+import { TopicEditorPage, TopicsSettings } from "@/routes/settings/topics";
+import { QualityPage } from "@/routes/settings/quality";
+import { CalibratePage } from "@/routes/settings/calibrate";
+import { ConfigPage, IntegrationsPage, MissesPage, RunsPage } from "@/routes/settings/plain";
 import { TopicPage, TopicsIndex, TopicsLayout } from "@/routes/topics";
 import { bool, int, str, tableSearch, type TableSearch } from "@/lib/search";
 
@@ -49,16 +53,38 @@ export const papersRoute = createRoute({
   component: PapersPage,
 });
 
-export const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
+export const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsLayout });
 export const settingsIndexRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/", component: SettingsIndex });
-export const settingsPageRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/$page", component: SettingsPlaceholder });
+export const settingsTopicsRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/topics", component: TopicsSettings });
+export const settingsTopicRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/topics/$slug", component: TopicEditorPage });
+export const settingsQualityRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/quality", component: QualityPage });
+export const settingsCalibrateRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/calibrate/$id",
+  validateSearch: (s: Record<string, unknown>): { at?: number } => ({ at: int(s.at) }),
+  component: CalibratePage,
+});
+export const settingsMissesRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/misses", component: MissesPage });
+export const settingsRunsRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/runs", component: RunsPage });
+export const settingsIntegrationsRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/integrations", component: IntegrationsPage });
+export const settingsConfigRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/configuration", component: ConfigPage });
 
 const routeTree = rootRoute.addChildren([
   digestRoute,
   paperRoute,
   topicsRoute.addChildren([topicsIndexRoute, topicRoute]),
   papersRoute,
-  settingsRoute.addChildren([settingsIndexRoute, settingsPageRoute]),
+  settingsRoute.addChildren([
+    settingsIndexRoute,
+    settingsTopicsRoute,
+    settingsTopicRoute,
+    settingsQualityRoute,
+    settingsCalibrateRoute,
+    settingsMissesRoute,
+    settingsRunsRoute,
+    settingsIntegrationsRoute,
+    settingsConfigRoute,
+  ]),
 ]);
 
 // Plain query strings (`?paper=2505.17244`, not JSON-quoted), so share links stay readable;

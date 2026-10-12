@@ -230,7 +230,7 @@ export function TopicPage() {
 
 function EditGear() {
   return (
-    <Link to="/settings/$page" params={{ page: "topics" }} aria-label="Edit this topic in Settings" className="hit rounded-full text-muted-foreground hover:text-foreground">
+    <Link to="/settings/topics" aria-label="Edit this topic in Settings" className="hit rounded-full text-muted-foreground hover:text-foreground">
       <span className="grid size-[26px] place-items-center rounded-full border border-border">
         <Settings className="size-[14px]" strokeWidth={1.75} aria-hidden />
       </span>

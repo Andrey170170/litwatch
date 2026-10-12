@@ -6,7 +6,7 @@ import createClient, { type Middleware } from "openapi-fetch";
 import type { paths, components } from "./schema";
 
 export type Schemas = components["schemas"];
-export type Status = Schemas["Status"];
+export type Status = Schemas["litwatch__api__schemas__Status"];
 export type Digest = Schemas["Digest"];
 export type Issue = Schemas["Issue"];
 export type IssueSummary = Schemas["IssueSummary"];

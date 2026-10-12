@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Chosen, LabelValue, Paper, PaperTopic } from "@/api/client";
-import { useLabel, useUnlabel } from "@/api/mutations";
+import type { Chosen, Paper, PaperTopic } from "@/api/client";
 import { paperQuery } from "@/api/queries";
+import { LabelRow } from "@/components/LabelRow";
 import { Thumbs } from "@/components/Thumbs";
 import { BibtexCopy, GRADE_WORD, SaveToggle, TopicChip } from "@/components/paper-bits";
 import { fmt, plural } from "@/lib/format";
@@ -151,15 +151,7 @@ function HowChosen({ paper }: { paper: Paper }) {
 }
 
 function Verdict({ chosen, topic, paperId }: { chosen: Chosen; topic: PaperTopic | undefined; paperId: string }) {
-  const label = useLabel(paperId);
-  const unlabel = useUnlabel(paperId);
-  const current = topic?.label?.value;
   const colour = topicColour(topic?.colour);
-  const choices: { value: LabelValue; word: string }[] = [
-    { value: "relevant", word: "Relevant" },
-    { value: "adjacent", word: "Adjacent" },
-    { value: "not_relevant", word: "Not relevant" },
-  ];
   return (
     <div className="grid gap-x-3.5 gap-y-2 desk:grid-cols-2">
       <div className="col-span-full font-semibold" style={{ color: colour }}>
@@ -172,23 +164,8 @@ function Verdict({ chosen, topic, paperId }: { chosen: Chosen; topic: PaperTopic
       </div>
       {chosen.judge && <OpinionView role="judge" grade={chosen.judge.grade} model={chosen.judge.model} reason={chosen.judge.reason} />}
       {chosen.check && <OpinionView role="check" grade={chosen.check.grade} model={chosen.check.model} reason={chosen.check.reason} />}
-      <div className="col-span-full flex flex-wrap items-center gap-1.5">
-        <span className="text-muted-foreground">Your call, if you want to make one:</span>
-        {choices.map((c) => (
-          <button
-            key={c.value}
-            type="button"
-            aria-pressed={current === c.value}
-            onClick={() => (current === c.value ? unlabel.mutate(chosen.topic) : label.mutate({ topic: chosen.topic, value: c.value }))}
-            className={cn(
-              "min-h-[36px] rounded-full border border-border px-3 text-[13px] hover:bg-muted",
-              current === c.value && "border-foreground bg-foreground text-background hover:bg-foreground",
-            )}
-          >
-            {c.word}
-          </button>
-        ))}
-        {current === "unsure" && <span className="text-muted-foreground">(you said unsure)</span>}
+      <div className="col-span-full">
+        <LabelRow paperId={paperId} topic={chosen.topic} current={topic?.label?.value} />
       </div>
     </div>
   );
