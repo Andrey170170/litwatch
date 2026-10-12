@@ -529,13 +529,13 @@ topic version, paper version, paper revision, sources: any of triage, keyword an
 last error), `verdicts` (paper, topic, topic version,
 paper version, paper revision, grade, split, judge and check opinions, recorded at; each grading is its own
 row with its own id, so a re-run over the same versions adds a row, and the latest recorded
-is current), `takes` (paper, topic, paper revision, topic version, source: verdict, evaluation, migrated or label,
+is current), `takes` (id, paper, topic, paper revision, topic version, grade, source: verdict, evaluation, migrated or label,
 text, written at, failed runs), `due` (paper, topic, due for take, due for issue), `reviews`, `issues` (date, kind
 daily or weekly, lede, entries as paper, topic and take id in section order, so a rewritten take never replaces the
 one an old issue showed; review references), `labels` (paper, topic, value, grade, origin, provisional, at),
 `reactions` (paper, topic, value, reason, at), `appraisals` (paper, value: matters, fine or not for me, note, at),
-`take_ratings` (take, accurate or off, at), `calibration_sessions` (drawn at, seed, the papers in order and why each
-was drawn), `topic_visits` (topic, last opened at), `misses`, `publications`, `library` (paper, the owner's newest
+`take_ratings` (take, accurate or off, at), `calibration_sessions` (drawn at, seed, the papers in order, each with the topic and group it was drawn for
+or why it was taken, and the verdict current at the draw), `topic_visits` (topic, last opened at), `misses`, `publications`, `library` (paper, the owner's newest
 save or unsave, at), `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
 and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
