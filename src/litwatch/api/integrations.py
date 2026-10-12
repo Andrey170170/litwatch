@@ -36,7 +36,10 @@ def providers(request: Request) -> list[SearchProvider]:
 
 
 def answers_card_requests(integrations: list[events.Integration]) -> bool:
-    return any(i.wants(Event(type=events.CARD_REQUESTED)) for i in integrations)
+    """Whether an integration takes `card.requested` up. One that wants every event (a
+    catch-all webhook) only passes it on, and does not count."""
+    asked, anything = Event(type=events.CARD_REQUESTED), Event(type="litwatch.no-such-event")
+    return any(i.wants(asked) and not i.wants(anything) for i in integrations)
 
 
 # -- Settings → Integrations -----------------------------------------------------------------------

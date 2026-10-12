@@ -12,6 +12,7 @@ from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import SearchHit
 from litwatch.events import dispatch
+from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
@@ -134,7 +135,7 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
 
 
 async def test_a_card_request_needs_an_integration_that_answers_it(conn, make):
-    bare = await make()
+    bare = await make([Webhook("http://hook.test")])  # passes everything on, answers nothing
     assert (await bare.post(f"/api/papers/{P.id}/card")).status_code == 409
     paper_page = (await bare.get(f"/api/papers/{P.id}")).json()
     assert paper_page["card"] is None and paper_page["card_requestable"] is False
