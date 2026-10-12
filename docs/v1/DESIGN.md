@@ -69,7 +69,7 @@ on a row starts a miss report; "Look up an arXiv id or link" under the table fet
 **Settings.** An index on the left, plain pages on the right, in the interface sans. Topics (list and editor: subject,
 rubric, keywords with match counts; preview against labelled papers and misses; scoped re-runs after saving; pause,
 order and colour). Quality (at the top, last night: a failure summary linking to the run when it failed, the splits with
-both opinions and the label row, ungraded candidates with "grade it now", a review that failed; then **Calibrate**;
+both opinions and the label row, ungraded candidates with "grade it now", papers awaiting triage with Dismiss, Triage by hand and Fix the text, a review that failed; then **Calibrate**;
 below, recall and precision per Watch topic over evaluation runs, each number a link to its papers; correction rate
 from reactions; the "matters, no topic" list with its notes). Misses (the stage trace per report). Runs and cost. Integrations (one card per
 module: enabled, description, cursor lag, failures with last error, retry and skip, search provider statistics; the
@@ -142,7 +142,7 @@ More than eight topics cycle; a paused topic shows grey.
 **Status line** (the printer's line under the masthead; the chip in the header elsewhere): a dot and a sentence about
 the latest nightly run. Green: "530 read · all quiet", the count being papers triaged in that run. Amber, with a
 count, when the run finished but left something for Quality: "530 read · 2 disagreements" (split verdicts among the
-papers shown; which splits count is spec decision 14), "· 1 ungraded", "· interpretability review failed". Red: "last
+papers shown; which splits count is spec decision 14), "· 1 ungraded", "· 1 awaiting triage", "· interpretability review failed". Red: "last
 night's run failed · showing Tuesday", also when no run finished in the last 36 hours. Grey while running: "running
 since 06:02"; on a fresh install "no run yet". Red wins over amber. It always opens Quality, and opening an old issue
 does not change it.

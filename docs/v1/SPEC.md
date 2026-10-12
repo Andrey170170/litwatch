@@ -341,11 +341,24 @@ reconciled grade, writing nothing; `record(result)` stores the verdict in produc
 evaluation stores the same result in its own tables. `regrade(papers, topic)` re-grades a
 chosen set after a topic edit.
 
-A paper whose triage call fails is tried again on every run, after the new papers, so it
-never takes a new paper's place when a run is capped. Triage does not give up, because a
-paper it drops is seen by no one. A paper that has failed three runs in a row is counted as
-stuck in the run record (`triage_stuck`). Showing those papers to the owner, with a way to
-dismiss one, belongs to Settings → Runs and cost (M4) and is not built yet.
+A paper whose triage call fails is tried again on the next run, after the new papers, so it
+never takes a new paper's place when a run is capped. After three failed runs it is not retried
+by itself: a failure that repeats is usually in the paper's text (a broken character, a garbled
+abstract), and retrying it spends money for nothing. Since a paper triage never answered is seen
+by no one, it then waits for the owner as **awaiting triage**, listed at the top of Quality beside
+the ungraded candidates and counted on the status line. Three actions:
+
+- **Dismiss**: litwatch drops it. The paper stays in the collection, in search and in the archive
+  like any other, but is never triaged or graded.
+- **Triage by hand**: the owner gives triage's answers (for each Watch topic whether it could
+  belong, for each field whether it is in it), and the paper goes on through the keyword audit,
+  grading and the rest as usual. Its candidates carry source `owner`.
+- **Fix the text**: the owner corrects the title or abstract and triage runs again on the
+  correction. The correction is kept on the paper and used for every model call until arXiv
+  publishes a new revision, which replaces it.
+
+M2 built the retries and the `triage_stuck` count in the run record; the stop after three runs and
+the three actions are M4.
 
 Candidates are graded independently, so one failure stops nothing else. A verdict needs two
 valid opinions. If either call still fails after its retries, or comes back truncated or
@@ -461,7 +474,7 @@ three places and a gear: Digest, Topics, Papers, as a footer on the phone and th
 
 | Page | Purpose |
 | --- | --- |
-| Digest | A feed of issues, newest open, earlier ones folded to date and lede. A masthead with the **status line**, which reads the latest nightly run: red when that run failed or none finished in the last 36 hours ("last night's run failed · showing Tuesday"); amber when it finished but left something for Quality, with a count: split verdicts among the papers shown (section 9, decision 14), candidates still ungraded, a review that failed; green otherwise ("530 read · all quiet", the count being papers triaged in that run); "running since 06:02" while it runs; "no run yet" on a fresh install. It opens Quality, whose top shows the night's splits, ungraded candidates and a failure summary linking to the run. Opening an old issue does not change it. The most recent weekly issue is pinned as a row above the feed, labelled with its week, absent until one exists. On a day with no issue the last one is shown with "nothing new since"; before any issue exists the Digest says when the first run is |
+| Digest | A feed of issues, newest open, earlier ones folded to date and lede. A masthead with the **status line**, which reads the latest nightly run: red when that run failed or none finished in the last 36 hours ("last night's run failed · showing Tuesday"); amber when it finished but left something for Quality, with a count: split verdicts among the papers shown (section 9, decision 14), candidates still ungraded, papers awaiting triage, a review that failed; green otherwise ("530 read · all quiet", the count being papers triaged in that run); "running since 06:02" while it runs; "no run yet" on a fresh install. It opens Quality, whose top shows the night's splits, ungraded candidates, papers awaiting triage and a failure summary linking to the run. Opening an old issue does not change it. The most recent weekly issue is pinned as a row above the feed, labelled with its week, absent until one exists. On a day with no issue the last one is shown with "nothing new since"; before any issue exists the Digest says when the first run is |
 | Paper | Take, abstract, deep card when one is stored, else a request button while a deep-card integration is loaded, else nothing; links (arXiv, PDF, published version), BibTeX, save or unsave, history (versions seen, and when the paper became a candidate or was graded for each Watch topic); thumbs; "how this was chosen" folded at the end with the triage answer, both opinions by model name, the reconciled grade and an optional label row (origin `reader`) |
 | Topics | One screen of topic cards grouped Watch, Radar, Pulse, each with its colour, kind, one line of what is new (entries in issues since the topic was last opened, kept server-side in `topic_visits`) and counts; on a desktop a rail with the chosen topic open beside it. A topic page is the papers table with the topic fixed: by default the papers at an effective grade of `relevant` or above, adjacent on a toggle, nothing below that; for Radar and Pulse the picks, with the reviews above the table. The gear opens the editor in Settings |
 | Papers | The whole collection as one sortable table (title with authors, published, added, take of the first Watch topic by the owner's order, saved, links; a grade dot per row, an empty ring for a paper that is no topic's candidate, "grading" for a pending one, the take column empty where there is none) with a search box and filters for topic, saved, year and source; the archive's hits merged when it is connected; fetch an archive-only paper; report a miss from a row or by arXiv id; export BibTeX for the filter or selection. Saved is the filter that makes it the library |
@@ -493,7 +506,7 @@ The places a part can be replaced or tested alone:
 New or reshaped tables: `topics` (kind, subject, rubric, interests, keywords, version, status, colour, position),
 `topic_versions` (topic, revision, hash, the content at that revision, saved at),
 `memberships` (paper, topic, topic version, paper version), `candidates` (paper, topic,
-topic version, paper version, paper revision, sources: triage, keyword or both, reason, state, failed runs,
+topic version, paper version, paper revision, sources: any of triage, keyword and owner, reason, state, failed runs,
 last error), `verdicts` (paper, topic, topic version,
 paper version, paper revision, grade, split, judge and check opinions, recorded at; each grading is its own
 row with its own id, so a re-run over the same versions adds a row, and the latest recorded
@@ -507,7 +520,7 @@ was drawn), `topic_visits` (topic, last opened at), `misses`, `publications`, `l
 save or unsave, at), `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
 and `eval_results` (run, paper, paper version, topic, triage answer, keyword match, both
-opinions, reconciled grade, grading error), which hold replays, previews and miss traces. `papers` gains `revision`. Kept as they are: `runs`, `inference_calls`, intake checkpoints.
+opinions, reconciled grade, grading error), which hold replays, previews and miss traces. `papers` gains `revision` and the owner's correction of title and abstract, if any; the triage state records awaiting triage and dismissed. Kept as they are: `runs`, `inference_calls`, intake checkpoints.
 
 ### 4.4 Configuration
 
@@ -726,7 +739,7 @@ as mattering with no topic fit appears on the "matters, no topic" list.
 
 **M4 · Reviews and the weekly issue.** Weekly reviews for every Radar and Pulse topic and daily ones where the cadence
 asks, the daily reviews' sections in the daily issue, the Watch recaps, the weekly issue and the pinned row, the reviews on topic pages, in-process scheduler, Runs
-and cost under Settings (including the papers triage is stuck on). *Check:* the weekly job, run by hand over two past
+and cost under Settings, and papers awaiting triage with their three actions (section 4.1, watch). *Check:* the weekly job, run by hand over two past
 weeks, produces two weekly issues, and the owner prefers them to 0.14's digests or says what is missing; the scheduler
 starts each job at its cron time, shown with a test schedule rather than overnight.
 
@@ -837,6 +850,8 @@ Decided on 2026-10-12, reviewing the spec for the remaining milestones:
 21. **Writer model.** Opus 5.5 on the Anthropic API, on credits, compared once in M3 with one or two OpenRouter models.
 22. **No scheduled runs before cutover.** Jobs run by hand until the side-by-side week of M7; checks that mention a
     schedule are shown with a test schedule.
+24. **Triage stops after three failed nights.** The paper then awaits the owner, who dismisses it (litwatch drops it;
+    it stays in the collection and the archive), triages it by hand, or fixes its text and lets triage run again.
 23. **Daily and weekly issues are separate.** The daily issue carries the night: Watch entries and daily Radar
     reviews. The weekly issue on Monday is "what happened last week" for every topic: a written recap per Watch topic
     and a weekly review per Radar and Pulse topic, daily ones included. Cadence `daily` adds daily reviews; it never
