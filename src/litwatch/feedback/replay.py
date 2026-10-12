@@ -9,7 +9,7 @@ import psycopg
 
 from litwatch import screening, watch
 from litwatch.config import ROLES, Config
-from litwatch.core import LabelValue, Paper, Status, TopicKind
+from litwatch.core import LabelValue, Paper, Status, Topic, TopicKind
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
 from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
@@ -46,14 +46,22 @@ async def replay(
     note: str | None = None,
     params: dict[str, Any] | None = None,
     gateway: GatewayFactory = default_gateway,
+    draft: Topic | None = None,
 ) -> int:
     """Triage and audit `papers` under `config`, then grade those whose id is in `grade` for
     every Watch topic (all of them when `grade` is None). Returns the evaluation run's id.
 
-    One result row per paper and topic holds what each stage said.
+    With a `draft`, that topic as edited but not saved replaces the stored one, and only it is
+    graded: a preview of the edit. One result row per paper and topic holds what each stage
+    said.
     """
     topics = await topics_store.all(conn, Status.ACTIVE)
+    if draft is not None:
+        draft = draft.model_copy(update={"revision": 0})  # 0: never saved
+        topics = [t for t in topics if t.slug != draft.slug] + [draft]
     watched = [t for t in topics if t.kind == TopicKind.WATCH]
+    if draft is not None:
+        watched = [draft] if draft.kind == TopicKind.WATCH else []
     async with model_run(conn, config, "eval", gateway=gateway) as run:
         eval_run_id = await feedback_store.start_eval(
             conn,

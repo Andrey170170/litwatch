@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from litwatch.api import reading
+from litwatch.api import reading, settings
 from litwatch.api.deps import Conn, authorised, set_token_cookie, token_ok
 from litwatch.config import Config
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue, Status, TopicKind
@@ -54,6 +54,7 @@ def create_app(
     app.state.config, app.state.gateway = config or Config(), gateway
     protected = [Depends(authorised)]
     app.include_router(reading.router, dependencies=protected)
+    app.include_router(settings.router, dependencies=protected)
     app.include_router(reading.session)
 
     @app.get("/healthz", include_in_schema=False)

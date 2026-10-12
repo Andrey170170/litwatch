@@ -15,7 +15,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Status"
+                  "$ref": "#/components/schemas/litwatch__api__schemas__Status"
                 }
               }
             }
@@ -833,6 +833,560 @@
         }
       }
     },
+    "/api/settings/topics": {
+      "get": {
+        "summary": "Topics",
+        "operationId": "topics_api_settings_topics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Topic"
+                  },
+                  "type": "array",
+                  "title": "Response Topics Api Settings Topics Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics/{slug}": {
+      "put": {
+        "summary": "Save Topic",
+        "description": "Create or edit a topic. Edits apply forward; a change of kind settles the topic's\npapers again, so a topic that stops being Watch takes its grades with it.",
+        "operationId": "save_topic_api_settings_topics__slug__put",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Topic"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics-order": {
+      "put": {
+        "summary": "Order",
+        "description": "The owner's order: sections, cards and the Papers table's take column follow it.",
+        "operationId": "order_api_settings_topics_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Order"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics/{slug}/keywords": {
+      "get": {
+        "summary": "Keywords",
+        "description": "How many stored papers each keyword pattern matches; -1 for one Postgres rejects.",
+        "operationId": "keywords_api_settings_topics__slug__keywords_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Keywords Api Settings Topics  Slug  Keywords Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics/{slug}/preview": {
+      "post": {
+        "summary": "Preview",
+        "description": "Run a draft of the topic over its labelled papers and misses, as a dry run. Returns at\nonce; the evaluation's metrics appear under /evaluations/{id} when it finishes.",
+        "operationId": "preview_api_settings_topics__slug__preview_post",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Preview Api Settings Topics  Slug  Preview Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics/{slug}/reruns": {
+      "get": {
+        "summary": "Rerun Estimates",
+        "operationId": "rerun_estimates_api_settings_topics__slug__reruns_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Rerun Estimates Api Settings Topics  Slug  Reruns Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Rerun",
+        "operationId": "rerun_api_settings_topics__slug__reruns_post",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerunIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Rerun Api Settings Topics  Slug  Reruns Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/evaluations": {
+      "get": {
+        "summary": "Evaluations",
+        "operationId": "evaluations_api_settings_evaluations_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Evaluations Api Settings Evaluations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/evaluations/{eval_run_id}": {
+      "get": {
+        "summary": "Evaluation",
+        "operationId": "evaluation_api_settings_evaluations__eval_run_id__get",
+        "parameters": [
+          {
+            "name": "eval_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Eval Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Evaluation Api Settings Evaluations  Eval Run Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/quality": {
+      "get": {
+        "summary": "Quality Page",
+        "description": "At the top, what last night left; below, how well the Watch topics are doing.",
+        "operationId": "quality_page_api_settings_quality_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Quality Page Api Settings Quality Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/quality/grade-now": {
+      "post": {
+        "summary": "Grade Now",
+        "description": "Grade an ungraded candidate now, outside the nightly run.",
+        "operationId": "grade_now_api_settings_quality_grade_now_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Pair"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Grade Now Api Settings Quality Grade Now Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/misses": {
+      "get": {
+        "summary": "Reported",
+        "operationId": "reported_api_settings_misses_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Reported Api Settings Misses Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/runs": {
+      "get": {
+        "summary": "Runs",
+        "operationId": "runs_api_settings_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Runs Api Settings Runs Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/config": {
+      "get": {
+        "summary": "Config",
+        "description": "The loaded configuration, secrets masked. Read-only: litwatch.toml is the source.",
+        "operationId": "config_api_settings_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Config Api Settings Config Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/session": {
       "post": {
         "summary": "Sign In",
@@ -1158,7 +1712,7 @@
             "title": "Issues"
           },
           "status": {
-            "$ref": "#/components/schemas/Status"
+            "$ref": "#/components/schemas/litwatch__api__schemas__Status"
           }
         },
         "type": "object",
@@ -1627,6 +2181,40 @@
         ],
         "title": "Opinion"
       },
+      "Order": {
+        "properties": {
+          "slugs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Slugs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slugs"
+        ],
+        "title": "Order"
+      },
+      "Pair": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id",
+          "topic"
+        ],
+        "title": "Pair"
+      },
       "Paper": {
         "properties": {
           "id": {
@@ -1991,6 +2579,49 @@
         ],
         "title": "ReactionValue"
       },
+      "RerunIn": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "evidence",
+              "candidates",
+              "keywords",
+              "range"
+            ],
+            "title": "Scope"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope"
+        ],
+        "title": "RerunIn"
+      },
       "Row": {
         "properties": {
           "id": {
@@ -2131,60 +2762,28 @@
         ],
         "title": "SessionIn"
       },
-      "Status": {
+      "Topic": {
         "properties": {
-          "state": {
+          "slug": {
             "type": "string",
-            "enum": [
-              "none",
-              "running",
-              "failed",
-              "attention",
-              "quiet"
-            ],
-            "title": "State"
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "title": "Slug"
           },
-          "run_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Id"
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 2,
+            "title": "Name"
           },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
+          "kind": {
+            "$ref": "#/components/schemas/TopicKind"
           },
-          "finished_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Finished At"
+          "subject": {
+            "type": "string",
+            "minLength": 20,
+            "title": "Subject"
           },
-          "read": {
-            "type": "integer",
-            "title": "Read",
-            "default": 0
-          },
-          "error": {
+          "rubric": {
             "anyOf": [
               {
                 "type": "string"
@@ -2193,42 +2792,74 @@
                 "type": "null"
               }
             ],
-            "title": "Error"
+            "title": "Rubric"
           },
-          "showing": {
+          "interests": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Showing"
+            "title": "Interests"
           },
-          "splits": {
-            "type": "integer",
-            "title": "Splits",
-            "default": 0
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keywords"
           },
-          "ungraded": {
-            "type": "integer",
-            "title": "Ungraded",
-            "default": 0
+          "status": {
+            "$ref": "#/components/schemas/litwatch__core__types__Status",
+            "default": "active"
           },
-          "awaiting_triage": {
-            "type": "integer",
-            "title": "Awaiting Triage",
-            "default": 0
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "colour": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour"
           }
         },
         "type": "object",
         "required": [
-          "state"
+          "slug",
+          "name",
+          "kind",
+          "subject"
         ],
-        "title": "Status",
-        "description": "The printer's line under the masthead."
+        "title": "Topic",
+        "description": "Something the owner follows. `revision` is set by the store when the topic is saved."
       },
       "TopicCard": {
         "properties": {
@@ -2458,6 +3089,114 @@
           "value"
         ],
         "title": "LabelIn"
+      },
+      "litwatch__api__schemas__Status": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "running",
+              "failed",
+              "attention",
+              "quiet"
+            ],
+            "title": "State"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "read": {
+            "type": "integer",
+            "title": "Read",
+            "default": 0
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "showing": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Showing"
+          },
+          "splits": {
+            "type": "integer",
+            "title": "Splits",
+            "default": 0
+          },
+          "ungraded": {
+            "type": "integer",
+            "title": "Ungraded",
+            "default": 0
+          },
+          "awaiting_triage": {
+            "type": "integer",
+            "title": "Awaiting Triage",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "Status",
+        "description": "The printer's line under the masthead."
+      },
+      "litwatch__core__types__Status": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "active",
+          "paused"
+        ],
+        "title": "Status"
       }
     }
   }

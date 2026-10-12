@@ -65,6 +65,9 @@ async def metrics(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str, 
         raise ValueError(f"no evaluation run {eval_run_id}")
     # As the run saw them: a topic may have changed kind since.
     kinds = await topics_store.kinds_at(conn, run["topics"])
+    # A draft previewed under revision 0 has no stored version; it is read as it is now.
+    current = {t.slug: t.kind for t in await topics_store.all(conn, None)}
+    kinds = {slug: kinds.get(slug, current.get(slug)) for slug in run["topics"]}
     results = {
         (r["paper_id"], r["topic"]): r for r in await feedback_store.results(conn, eval_run_id)
     }
