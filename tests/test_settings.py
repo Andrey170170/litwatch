@@ -175,6 +175,14 @@ async def test_quality_lists_last_nights_splits_and_config_hides_secrets(client,
             check=Opinion(grade=Grade.NONE, reason="no"),
         ),
     )
+    # A review that failed this week waits on Quality too, as the status line counts it;
+    # one written since, or older than the window, does not.
+    await conn.execute(
+        "INSERT INTO reviews (topic, kind, period, day, state, error) VALUES "
+        "('interpretability', 'radar', 'week', current_date - 3, 'failed', 'timed out'), "
+        "('agents', 'pulse', 'week', current_date - 30, 'failed', 'old'), "
+        "('interpretability', 'radar', 'day', current_date, 'written', NULL)"
+    )
     page = (await client.get("/api/settings/quality")).json()
     (split,) = page["night"]["splits"]
     assert (split["paper_id"], split["judge"]["reason"], split["check"]["grade"]) == (
@@ -182,6 +190,13 @@ async def test_quality_lists_last_nights_splits_and_config_hides_secrets(client,
         "yes",
         "none",
     )
+    (failed,) = page["night"]["reviews_failed"]
+    assert (failed["topic_name"], failed["period"], failed["error"]) == (
+        "Interpretability",
+        "week",
+        "timed out",
+    )
+    assert (await client.get("/api/status")).json()["reviews_failed"] == 1
     config = (await client.get("/api/settings/config")).json()
     assert config["models"]["writer"]["model"] == "claude-opus-5-5"
 

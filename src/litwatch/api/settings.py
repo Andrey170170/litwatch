@@ -243,6 +243,7 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
             "splits": await quality.splits_since(c, since),
             "ungraded": await quality.ungraded(c, limits.grading_attempts),
             "awaiting_triage": await quality.awaiting_triage(c, limits.triage_stuck_after),
+            "reviews_failed": await quality.failed_reviews(c, since),
         },
         "evaluation": await metrics(c, latest_replay["id"]) if latest_replay else None,
         "calibration": await calibrate.precision(c),

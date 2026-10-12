@@ -9,7 +9,7 @@ const card = (slug: string, name: string, kind: string) => ({ slug, name, kind, 
 const topics = [card("cot", "CoT monitoring", "watch"), card("interp", "Interpretability", "radar")];
 const stuck = { paper_id: "2610.00009", failed_runs: 3, last_error: "invalid: not JSON", title: "Broken title" };
 const quality = {
-  night: { run: 1, error: null, splits: [], ungraded: [], awaiting_triage: [stuck] },
+  night: { run: 1, error: null, splits: [], ungraded: [], awaiting_triage: [stuck], reviews_failed: [] },
   evaluation: null,
   calibration: [],
   matters_no_topic: [],
@@ -17,11 +17,11 @@ const quality = {
   collected: [],
 };
 
-function script(topicsReply: () => unknown = () => json(topics)) {
+function script(topicsReply: () => unknown = () => json(topics), page: unknown = quality) {
   return scriptFetch({
     "GET /api/status": () => json({ state: "attention", read: 1, awaiting_triage: 1 }),
     "GET /api/topics": topicsReply,
-    "GET /api/settings/quality": () => json(quality),
+    "GET /api/settings/quality": () => json(page),
     "GET /api/settings/calibrate": () => json([]),
     "GET /api/papers/2610.00009": () => json({ id: "2610.00009", title: "Broken title", abstract: "Garbled abstract.", authors: [], categories: [], added: "2026-10-12T00:00:00Z", arxiv_url: "", pdf_url: "", topics: [], history: [], chosen: [] }),
     "PUT /api/settings/triage/2610.00009": () => json({ candidates: ["cot"] }),
@@ -82,5 +82,18 @@ describe("a paper awaiting triage", () => {
     expect(calls.some((c) => c.url.endsWith("/dismiss"))).toBe(false);
     await user.click(screen.getByRole("button", { name: "Dismiss, never triage" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/dismiss"))).toBe(true));
+  });
+});
+
+describe("a review that failed", () => {
+  it("is listed on Quality instead of all quiet, with the next run's retry noted", async () => {
+    const failed = { topic: "interp", topic_name: "Interpretability", kind: "radar", period: "week", day: "2026-10-05", error: "timed out" };
+    script(undefined, { ...quality, night: { ...quality.night, awaiting_triage: [], reviews_failed: [failed] } });
+    renderApp("/settings/quality");
+    expect(await screen.findByText(/1 review failed/)).toBeInTheDocument();
+    expect(screen.getByText(/review for the week of 5 October/)).toBeInTheDocument();
+    expect(screen.getByText("timed out")).toBeInTheDocument();
+    expect(screen.getByText(/the next run tries them again/)).toBeInTheDocument();
+    expect(screen.queryByText(/All quiet/)).not.toBeInTheDocument();
   });
 });

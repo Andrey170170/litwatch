@@ -24,6 +24,7 @@ export type Split = {
 };
 export type Ungraded = { paper_id: string; topic: string; failed_runs: number; last_error: string | null; updated_at: string; title: string };
 export type Awaiting = { paper_id: string; failed_runs: number; last_error: string | null; title: string };
+export type FailedReview = { topic: string; topic_name: string; kind: string; period: "day" | "week"; day: string; error: string | null };
 export type Recall = {
   n: number;
   triage: number | null;
@@ -55,7 +56,7 @@ export type Evaluation = {
   error?: string | null;
 };
 export type Quality = {
-  night: { run: number | null; error: string | null; splits: Split[]; ungraded: Ungraded[]; awaiting_triage: Awaiting[] };
+  night: { run: number | null; error: string | null; splits: Split[]; ungraded: Ungraded[]; awaiting_triage: Awaiting[]; reviews_failed: FailedReview[] };
   evaluation: Evaluation | null;
   calibration: { topic: string; precision?: number | null; precision_n?: number; dropped?: number | null; dropped_n?: number }[];
   matters_no_topic: { paper_id: string; note: string | null; at: string; title: string }[];

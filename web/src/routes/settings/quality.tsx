@@ -22,7 +22,8 @@ export function QualityPage() {
   if (q.isError || !q.data) return <Page title="Quality"><p className="text-destructive">Could not load.</p></Page>;
   const d = q.data;
   const n = d.night;
-  const quiet = !n.error && n.splits.length === 0 && n.ungraded.length === 0 && n.awaiting_triage.length === 0;
+  const failed = n.reviews_failed ?? [];
+  const quiet = !n.error && n.splits.length === 0 && n.ungraded.length === 0 && n.awaiting_triage.length === 0 && failed.length === 0;
 
   return (
     <Page title="Quality" sub="Last night first, then how well the Watch topics are doing. Nothing here is required reading.">
@@ -36,7 +37,33 @@ export function QualityPage() {
           </Link>
         </div>
       )}
-      {quiet && <Empty>All quiet: no disagreements, nothing ungraded, nothing awaiting triage.</Empty>}
+      {quiet && <Empty>All quiet: no disagreements, nothing ungraded, nothing awaiting triage, every review written.</Empty>}
+
+      {failed.length > 0 && (
+        <>
+          <h3 className="mt-4 mb-1 text-[13px] font-medium">
+            {failed.length} {failed.length === 1 ? "review" : "reviews"} failed{" "}
+            <span className="ml-2 font-normal text-muted-foreground">the issue says so in one line; the next run tries them again</span>
+          </h3>
+          <table className={TABLE}>
+            <tbody>
+              {failed.map((r) => (
+                <tr key={`${r.topic}-${r.period}-${r.day}`}>
+                  <td>
+                    <Link to="/topics/$slug" params={{ slug: r.topic }} className="font-medium hover:underline">
+                      {r.topic_name}
+                    </Link>
+                    <span className="ml-2 text-muted-foreground">
+                      {r.kind === "watch" ? "recap" : "review"} {r.period === "week" ? `for the ${fmt.week(r.day).replace(/^Week/, "week")}` : `for ${fmt.issueDay(r.day)}`}
+                    </span>
+                    {r.error && <div className="font-mono text-[11.5px] text-muted-foreground">{r.error}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
       {n.splits.length > 0 && (
         <>

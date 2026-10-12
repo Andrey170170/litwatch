@@ -37,7 +37,8 @@ export function DigestPage() {
   const issues = useMemo(() => feed.data?.pages.flatMap((p) => p.issues) ?? [], [feed.data]);
   const weekly = first?.weekly ?? null;
 
-  const newest = issues[0];
+  // The newest issue opens by default: the weekly one when no daily issue exists yet.
+  const newest = issues[0] ?? weekly ?? undefined;
   // The issue asked for is loaded by id, whether or not the feed's first page lists it.
   const openId = search.issue ?? newest?.id;
   const open = useQuery({ ...issueQuery(openId ?? 0), enabled: openId !== undefined });

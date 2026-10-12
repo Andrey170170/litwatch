@@ -1,6 +1,6 @@
 /** Topic colours and the words for kinds and cadences. */
 import type { TopicCard, TopicKind } from "@/api/client";
-import { fmt } from "./format";
+import { day, fmt } from "./format";
 
 export const PAUSED_COLOUR = "#9a9a94";
 
@@ -22,6 +22,7 @@ export function cadence(c: Pick<TopicCard, "kind" | "cadence">): string | null {
 /** "Reviewed Monday", or "Reviewed 6 October" when older than a week; null when never. */
 export function lastReview(c: Pick<TopicCard, "last_review">, today = new Date()): string | null {
   if (!c.last_review) return null;
-  const age = (today.getTime() - new Date(c.last_review).getTime()) / 86400000;
-  return `Reviewed ${age < 6 ? fmt.weekday(c.last_review) : fmt.published(c.last_review)}`;
+  // `last_review` is a calendar date; read it as a local day, not UTC midnight.
+  const age = (today.getTime() - day(c.last_review).getTime()) / 86400000;
+  return `Reviewed ${age < 6 ? fmt.weekday(c.last_review) : fmt.dayShort(c.last_review)}`;
 }

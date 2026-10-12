@@ -34,6 +34,11 @@ export const fmt = {
   },
   /** "8 October 2026" */
   full: (iso: string | null | undefined) => (iso ? DAY_YEAR.format(new Date(iso)) : ""),
+  /** A `YYYY-MM-DD` as "6 October", or "6 October 2025" when not this year: the local calendar, never shifted by the zone. */
+  dayShort: (iso: string) => {
+    const d = day(iso);
+    return d.getFullYear() === new Date().getFullYear() ? DAY_SHORT.format(d) : DAY_YEAR.format(d);
+  },
   /** "February 2025" */
   monthYear: (iso: string | null | undefined) => (iso ? MONTH_YEAR.format(new Date(iso)) : ""),
   /** "21 Aug 2026", for table cells. */

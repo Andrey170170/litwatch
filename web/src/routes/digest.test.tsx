@@ -93,6 +93,17 @@ describe("the weekly issue", () => {
     expect(screen.getByRole("button", { name: /Thumb down, set/ })).toBeInTheDocument();
   });
 
+  it("opens the weekly issue when no daily one exists yet", async () => {
+    scriptFetch({
+      "GET /api/status": () => json(status),
+      "GET /api/digest": () => json({ weekly: { id: 7, kind: "weekly", day: "2026-10-05", lede: weekly.lede }, issues: [], status }),
+      "GET /api/issues/7": () => json(weekly),
+    });
+    renderApp("/");
+    expect(await screen.findByText("Two papers were announced this week.")).toBeInTheDocument();
+    expect(screen.queryByText(/No issue yet/)).not.toBeInTheDocument();
+  });
+
   it("pins the latest weekly issue above the feed", async () => {
     scriptFetch({
       "GET /api/status": () => json(status),

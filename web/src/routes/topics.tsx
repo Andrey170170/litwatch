@@ -9,7 +9,7 @@ import { ReviewView } from "@/components/Review";
 import { Chip, PapersTable, SearchBox, SortSelect, YearChip } from "@/components/PapersTable";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useDesktop } from "@/hooks/useDesktop";
-import { fmt, plural } from "@/lib/format";
+import { fmt, localDay, plural } from "@/lib/format";
 import type { TableSearch } from "@/lib/search";
 import { KIND_LABEL, KIND_ORDER, cadence, lastReview, topicColour } from "@/lib/topics";
 import { cn } from "@/lib/utils";
@@ -32,7 +32,8 @@ export function newLine(c: Card): { text: string; quiet: boolean } {
     return reviewed ? { text: reviewed, quiet: false } : { text: "No review yet", quiet: true };
   }
   if (c.new === 0) return { text: "Nothing new", quiet: true };
-  const since = c.opened_at ? ` since ${fmt.weekday(c.opened_at.slice(0, 10))}` : "";
+  // `opened_at` is an instant: its weekday is the local one, not the UTC date's.
+  const since = c.opened_at ? ` since ${fmt.weekday(localDay(new Date(c.opened_at)))}` : "";
   const saved = c.new_saved ? `, ${c.new_saved} saved` : "";
   return { text: `${c.new} new${since}${saved}`, quiet: false };
 }
