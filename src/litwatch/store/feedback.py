@@ -64,6 +64,13 @@ async def delete_label(conn: psycopg.AsyncConnection, paper_id: str, topic: str)
     await conn.execute("DELETE FROM labels WHERE paper_id = %s AND topic = %s", (paper_id, topic))
 
 
+async def labels_for(conn: psycopg.AsyncConnection, paper_id: str) -> list[Label]:
+    rows = await (
+        await conn.execute("SELECT * FROM labels WHERE paper_id = %s", (paper_id,))
+    ).fetchall()
+    return [_label(r) for r in rows]
+
+
 async def labels(conn: psycopg.AsyncConnection, topic: str | None = None) -> list[Label]:
     rows = await (
         await conn.execute(

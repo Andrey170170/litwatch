@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from litwatch import store
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue, Status, TopicKind
+from litwatch.feedback import word
 from litwatch.store import feedback as feedback_store
 from litwatch.store import topics as topics_store
 
@@ -22,8 +23,8 @@ COOKIE = "litwatch_token"
 ORIGINS = {
     "rejects": LabelOrigin.REJECT_SAMPLE,
     "positives": LabelOrigin.LEGACY_POSITIVE,
-    "unsure": LabelOrigin.INBOX,
-    "adjacent": LabelOrigin.INBOX,
+    "unsure": LabelOrigin.READER,
+    "adjacent": LabelOrigin.READER,
 }
 
 
@@ -97,22 +98,23 @@ def create_app(dsn: str, token: str) -> FastAPI:
         if topic not in {t["slug"] for t in await watched(c)}:
             raise HTTPException(status_code=404, detail="not an active Watch topic")
         try:
-            return await feedback_store.set_label(
+            stored, _ = await word.label(
                 c,
                 Label(
                     paper_id=paper_id,
                     topic=topic,
                     value=body.value,
                     grade=body.grade if body.value == LabelValue.RELEVANT else None,
-                    origin=ORIGINS.get(body.queue, LabelOrigin.INBOX),
+                    origin=ORIGINS.get(body.queue, LabelOrigin.READER),
                     note=body.note,
                 ),
             )
+            return stored
         except psycopg.errors.ForeignKeyViolation as exc:
             raise HTTPException(status_code=404, detail="no such paper") from exc
 
     @app.delete("/api/labels/{topic}/{paper_id:path}", dependencies=protected, status_code=204)
     async def delete_label(topic: str, paper_id: str, c: Conn) -> None:
-        await feedback_store.delete_label(c, paper_id, topic)
+        await word.unlabel(c, paper_id, topic)
 
     return app

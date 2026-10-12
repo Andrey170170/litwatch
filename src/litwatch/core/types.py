@@ -207,13 +207,18 @@ class LabelValue(StrEnum):
 
 
 class LabelOrigin(StrEnum):
-    """How the labelled paper was chosen, which decides what its label can be evidence for."""
+    """How the labelled paper was chosen, which decides what its label can be evidence for.
 
-    CANDIDATE_SAMPLE = "candidate_sample"  # drawn at random from candidates
+    A label keeps the origin it was created with when the owner later changes its value, so a
+    change of mind never moves a paper out of the sample it was drawn in.
+    """
+
+    SAMPLE = "sample"  # drawn for this topic in a Calibrate session: production precision
+    CANDIDATE_SAMPLE = "candidate_sample"  # M2's random candidates; historical, never pooled
     REJECT_SAMPLE = "reject_sample"  # drawn at random from triage rejects
     LEGACY_POSITIVE = "legacy_positive"  # 0.14 placed it at tier 1 or 2
     GOLD = "gold"  # hand-labelled before v1
-    INBOX = "inbox"
+    READER = "reader"  # the owner's own choice: the paper page, or Calibrate off-sample
     MISS = "miss"
 
 
@@ -229,6 +234,57 @@ class Label(BaseModel):
     provisional: bool = False
     note: str | None = None
     labelled_at: datetime | None = None
+
+
+class Word(BaseModel):
+    """The owner's word on a paper for a Watch topic, from a label or a reaction."""
+
+    value: LabelValue
+    grade: Grade | None = None
+
+
+class ReactionValue(StrEnum):
+    UP = "up"
+    DOWN = "down"
+
+
+class ReactionReason(StrEnum):
+    # with a thumb down
+    NOT_FOR_ME = "not_for_me"
+    UNRELATED = "unrelated"  # unrelated to the topic: on a Watch topic, the word not relevant
+    ALREADY_KNEW = "already_knew"
+    OVERRATED = "overrated"
+    # with a thumb up
+    GREAT_FIND = "great_find"  # on a Watch topic, the word relevant
+
+    @property
+    def goes_with(self) -> ReactionValue:
+        return ReactionValue.UP if self == ReactionReason.GREAT_FIND else ReactionValue.DOWN
+
+
+class Reaction(BaseModel):
+    """A thumb on a paper for the topic it was shown under, or for none. Never a label."""
+
+    paper_id: str
+    topic: str | None = None
+    value: ReactionValue
+    reason: ReactionReason | None = None
+    reacted_at: datetime | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def _matches_thumb(cls, reason: ReactionReason | None, info: Any) -> ReactionReason | None:
+        value = info.data.get("value")
+        if reason is not None and value is not None and reason.goes_with != value:
+            raise ValueError(f"{reason.value!r} does not go with a thumb {value.value}")
+        return reason
+
+
+class Hand(StrEnum):
+    """The owner's newest use of the Save toggle."""
+
+    SAVE = "save"
+    UNSAVE = "unsave"
 
 
 class Event(BaseModel):

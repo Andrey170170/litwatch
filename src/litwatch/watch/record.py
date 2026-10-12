@@ -6,6 +6,7 @@ import psycopg
 
 from litwatch import events
 from litwatch.core import Verdict
+from litwatch.feedback import word
 from litwatch.store import verdicts
 from litwatch.watch.grade import Graded
 
@@ -50,4 +51,5 @@ async def record(
             split=verdict.split,
             verdict_id=verdict.id,
         )
+        await word.settle(conn, paper.id)
     return verdict

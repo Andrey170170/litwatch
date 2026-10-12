@@ -49,7 +49,7 @@ def label(value: str, grade: str | None = None) -> Label:
         topic="t",
         value=LabelValue(value),
         grade=Grade(grade) if grade else None,
-        origin=LabelOrigin.INBOX,
+        origin=LabelOrigin.READER,
     )
 
 

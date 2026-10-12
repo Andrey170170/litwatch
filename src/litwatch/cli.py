@@ -15,7 +15,7 @@ from rich.console import Console
 from litwatch import config as configuration
 from litwatch import feedback, seeds, store
 from litwatch.core import Topic
-from litwatch.feedback import seed
+from litwatch.feedback import seed, word
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs.lock import run_lock
@@ -28,9 +28,11 @@ app = typer.Typer(no_args_is_help=True, add_completion=False, help="litwatch")
 db_app = typer.Typer(no_args_is_help=True, help="Database migrations.")
 topics_app = typer.Typer(no_args_is_help=True, help="Topics as YAML, in and out.")
 eval_app = typer.Typer(no_args_is_help=True, help="Dry runs measured against the owner's labels.")
+library_app = typer.Typer(no_args_is_help=True, help="Effective grades and the library.")
 app.add_typer(db_app, name="db")
 app.add_typer(topics_app, name="topics")
 app.add_typer(eval_app, name="eval")
+app.add_typer(library_app, name="library")
 console = Console()
 
 ConfigPath = Annotated[
@@ -180,7 +182,7 @@ def eval_seed(
             counts |= await seed.from_label_file(conn, labels)
         if legacy:
             counts |= await seed.from_legacy_verdicts(conn)
-        return counts
+        return counts | {"settled": (await word.sync(conn))["papers"]}
 
     console.print_json(data=_run(work))
 
@@ -227,6 +229,16 @@ def eval_sample_rejects(
 def eval_report(eval_run_id: int) -> None:
     """The metrics of an evaluation run, against the labels as they are now."""
     console.print_json(data=_run(lambda conn: feedback.metrics(conn, eval_run_id)))
+
+
+# -- library ---------------------------------------------------------------------------------------
+
+
+@library_app.command("sync")
+def library_sync() -> None:
+    """Settle every paper with a verdict or the owner's word: effective grades, the library,
+    and their events. Run once on an adopted or seeded database."""
+    console.print_json(data=_run(word.sync))
 
 
 @app.command()
