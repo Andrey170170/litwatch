@@ -4,14 +4,28 @@
  * 07:00". The server computes the instant; the browser only formats it.
  */
 
-function parts(d: Date, zone: string): { day: string; time: string; weekday: string; date: string } {
-  const read = (opts: Intl.DateTimeFormatOptions, locale = "en-GB") => new Intl.DateTimeFormat(locale, { timeZone: zone, ...opts }).format(d);
+type Parts = { day: string; time: string; weekday: string; date: string };
+
+function parts(d: Date, zone: string): Parts {
+  const read = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-GB", { timeZone: zone, ...opts });
+  // The calendar date from its parts, since a locale's own pattern is not guaranteed.
+  const ymd = Object.fromEntries(
+    read({ year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(d)
+      .map((p) => [p.type, p.value]),
+  );
   return {
-    day: read({ year: "numeric", month: "2-digit", day: "2-digit" }, "en-CA"), // YYYY-MM-DD in the zone
-    time: read({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" }),
-    weekday: read({ weekday: "long" }),
-    date: read({ day: "numeric", month: "long" }),
+    day: `${ymd.year}-${ymd.month}-${ymd.day}`,
+    time: read({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d),
+    weekday: read({ weekday: "long" }).format(d),
+    date: read({ day: "numeric", month: "long" }).format(d),
   };
+}
+
+/** The UTC offset in minutes an ISO timestamp is written in ("-06:00" → -360, "Z" → 0). */
+function offsetOf(iso: string): number {
+  const m = /([+-])(\d{2}):?(\d{2})$/.exec(iso);
+  return m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
 }
 
 /** Calendar days from `a` to `b`, both `YYYY-MM-DD`. */
@@ -25,16 +39,17 @@ function daysBetween(a: string, b: string): number {
 
 export function fireWords(iso: string, zone: string, now = new Date()): string {
   const at = new Date(iso);
-  let fire: ReturnType<typeof parts>;
+  let fire: Parts;
   let today: string;
   try {
     fire = parts(at, zone);
     today = parts(now, zone).day;
   } catch {
-    // A zone Intl does not know (a fixed offset): the browser's own clock has to do.
-    const local = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    fire = parts(at, local);
-    today = parts(now, local).day;
+    // A zone Intl does not know (a bare offset): the server wrote the instant in that zone's
+    // offset, so shift by it and read the clock as UTC.
+    const shift = (d: Date) => new Date(d.getTime() + offsetOf(iso) * 60000);
+    fire = parts(shift(at), "UTC");
+    today = parts(shift(now), "UTC").day;
   }
   const days = daysBetween(today, fire.day);
   const when = days === 0 ? "today" : days === 1 ? "tomorrow" : days > 1 && days < 7 ? fire.weekday : fire.date;

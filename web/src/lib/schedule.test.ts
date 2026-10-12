@@ -23,4 +23,11 @@ describe("when a job next fires, in words", () => {
     // The fire's clock time is the zone's, whatever the browser's.
     expect(fireWords("2026-10-13T12:00:00Z", DENVER, monday)).toBe("tomorrow at 06:00");
   });
+
+  it("reads a fixed-offset zone Intl does not know through the timestamp's offset", () => {
+    // The server's zone is a bare offset ("UTC+05:30"): its clock, not the browser's.
+    // Monday 14:00 UTC is 19:30 Monday at +05:30.
+    expect(fireWords("2026-10-13T06:00:00+05:30", "UTC+05:30", monday)).toBe("tomorrow at 06:00");
+    expect(fireWords("2026-10-12T23:00:00+05:30", "UTC+05:30", monday)).toBe("today at 23:00");
+  });
 });
