@@ -264,6 +264,7 @@ function EntryView({ entry, open }: { entry: EntryT; open: boolean }) {
         <SaveToggle paperId={entry.paper_id} saved={!!entry.saved} />
         <BibtexCopy ids={[entry.paper_id]} />
         <Thumbs
+          key={`${entry.paper_id}:${entry.topic}`}
           className="ml-auto"
           paperId={entry.paper_id}
           topic={entry.topic}

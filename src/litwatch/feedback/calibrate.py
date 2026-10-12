@@ -211,10 +211,18 @@ async def answer(
                     origin=LabelOrigin.SAMPLE if drawn else LabelOrigin.READER,
                 ),
             )
-        if given.value or given.note:
+        # An appraisal changed, cleared included, is a new row; the same one sent again is not.
+        newest = await (
+            await conn.execute(
+                "SELECT value, note FROM appraisals WHERE paper_id = %s ORDER BY id DESC LIMIT 1",
+                (item["paper_id"],),
+            )
+        ).fetchone()
+        said = (given.value, given.note or None)
+        if said != ((newest["value"], newest["note"]) if newest else (None, None)):
             await conn.execute(
                 "INSERT INTO appraisals (paper_id, value, note) VALUES (%s, %s, %s)",
-                (item["paper_id"], given.value, given.note),
+                (item["paper_id"], *said),
             )
         for take_id, accurate in given.takes.items():
             await conn.execute(

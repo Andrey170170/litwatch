@@ -94,7 +94,7 @@ export function PaperView({ id, surfaceTopic, compact }: Props) {
       <HowChosen paper={p} />
 
       <div className="mt-4 flex items-center gap-2 border-t border-border pt-3">
-        <Thumbs paperId={p.id} topic={thumbsTopic} value={reactionOn ? reactionOn.reaction : p.reaction} reason={reactionOn ? reactionOn.reaction_reason : p.reaction_reason} />
+        <Thumbs key={`${p.id}:${thumbsTopic ?? ""}`} paperId={p.id} topic={thumbsTopic} value={reactionOn ? reactionOn.reaction : p.reaction} reason={reactionOn ? reactionOn.reaction_reason : p.reaction_reason} />
         <span className="meta">{thumbsTopic ? `for ${p.topics.find((t) => t.slug === thumbsTopic)?.name}` : ""}</span>
       </div>
     </article>
@@ -125,7 +125,10 @@ function HowChosen({ paper }: { paper: Paper }) {
   const triage = (paper.triage ?? {}) as Record<string, { yes?: boolean; why?: string | null }>;
   const names = Object.fromEntries(paper.topics.map((t) => [t.slug, t]));
   const triaged = Object.entries(triage).filter(([, a]) => a?.yes || a?.why);
-  if (paper.chosen.length === 0 && triaged.length === 0) return null;
+  // A label with no verdict (a miss, a Calibrate answer) still needs its row to be changed.
+  const chosenTopics = new Set(paper.chosen.map((c) => c.topic));
+  const labelOnly = paper.topics.filter((t) => t.kind === "watch" && t.label && !chosenTopics.has(t.slug));
+  if (paper.chosen.length === 0 && triaged.length === 0 && labelOnly.length === 0) return null;
   return (
     <div className="mt-[26px] border-t border-border pt-3 text-[13px] text-muted-foreground">
       <button type="button" className="min-h-[40px] underline decoration-border hover:text-foreground" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
@@ -146,6 +149,15 @@ function HowChosen({ paper }: { paper: Paper }) {
           )}
           {paper.chosen.map((c) => (
             <Verdict key={c.topic} chosen={c} topic={names[c.topic]} paperId={paper.id} />
+          ))}
+          {labelOnly.map((t) => (
+            <div key={t.slug}>
+              <div className="font-semibold" style={{ color: topicColour(t.colour) }}>
+                {t.name}
+              </div>
+              <p className="text-muted-foreground">Not graded; your word stands.</p>
+              <LabelRow paperId={paper.id} topic={t.slug} current={t.label?.value} />
+            </div>
           ))}
         </div>
       )}
