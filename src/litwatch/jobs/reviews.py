@@ -20,6 +20,9 @@ from litwatch.store import topics as topics_store
 
 log = logging.getLogger(__name__)
 
+# Reviews that failed this far back are tried again by the next run, daily or weekly.
+RETRY = timedelta(days=7)
+
 
 async def _review(
     conn: psycopg.AsyncConnection,
@@ -69,8 +72,23 @@ async def daily_reviews(
     conn: psycopg.AsyncConnection, config: Config, run: ModelRun, day: date | None = None
 ) -> int:
     """Review each daily Radar topic over the papers that joined it on the day. A review
-    already written for the day is kept; a failed or quiet one is tried again."""
+    already written for the day is kept; a failed or quiet one is tried again, and so are
+    the failed ones of the week before. Returns how many were written."""
     day = day or config.schedule.today()
+    done = 0
+    for earlier in await reviews_store.failed_days(conn, "day", day - RETRY, day):
+        done += await _review_day(conn, config, run, earlier, failed_only=True)
+    return done + await _review_day(conn, config, run, day)
+
+
+async def _review_day(
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    run: ModelRun,
+    day: date,
+    *,
+    failed_only: bool = False,
+) -> int:
     since, until = config.schedule.window(day)
     done = 0
     for topic in await topics_store.all(conn, Status.ACTIVE):
@@ -78,6 +96,8 @@ async def daily_reviews(
             continue
         existing = await reviews_store.get(conn, topic.slug, "day", day)
         if existing and existing["state"] == "written":
+            continue
+        if failed_only and not (existing and existing["state"] == "failed"):
             continue
         papers = await reviews_store.members(conn, topic.slug, since, until)
         if await _review(conn, run, topic, "day", day, papers) == "written":
@@ -92,8 +112,16 @@ async def weekly(
 ) -> int:
     """Review the week (Monday to Sunday, the last full one by default) for every topic and
     build the weekly issue. Running again amends it: what is written stays, failures are
-    tried again. Returns the weekly issue's id."""
-    monday = monday or config.schedule.week_of(config.schedule.today()) - timedelta(days=7)
+    tried again. The default run also retries what failed the week before. Returns the
+    weekly issue's id."""
+    if monday is None:
+        monday = config.schedule.week_of(config.schedule.today()) - timedelta(days=7)
+        for earlier in await reviews_store.failed_days(conn, "week", monday - RETRY, monday):
+            await _week(conn, config, run, earlier)
+    return await _week(conn, config, run, monday)
+
+
+async def _week(conn: psycopg.AsyncConnection, config: Config, run: ModelRun, monday: date) -> int:
     since, until = config.schedule.window(monday, 7)
     changed = False
     for topic in await topics_store.all(conn, Status.ACTIVE):

@@ -3,6 +3,7 @@ secret files for keys. Topics are not configuration; they live in the database."
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tomllib
 from datetime import date, datetime, time, timedelta, tzinfo
@@ -93,18 +94,16 @@ def system_zone() -> tzinfo:
     """The server's own zone with its daylight-saving rules: `TZ`, else the zone
     `/etc/localtime` links to, else the one `/etc/timezone` names. Only when none names one,
     the current fixed offset."""
-    name = os.environ.get("TZ", "").lstrip(":")
-    if not name:
-        _, _, name = os.path.realpath("/etc/localtime").partition("zoneinfo/")
-    if not name:
+    names = [os.environ.get("TZ", "").lstrip(":")]
+    names.append(os.path.realpath("/etc/localtime").partition("zoneinfo/")[2])
+    with contextlib.suppress(OSError):
+        names.append(Path("/etc/timezone").read_text().strip())
+    for name in filter(None, names):
         try:
-            name = Path("/etc/timezone").read_text().strip()
-        except OSError:
-            name = ""
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return datetime.now().astimezone().tzinfo
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError):
+            continue
+    return datetime.now().astimezone().tzinfo
 
 
 class Schedule(_Section):
