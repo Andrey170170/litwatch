@@ -1,4 +1,4 @@
-"""The nightly run: intake, triage with the keyword audit, grading."""
+"""The nightly run: intake, triage with the keyword audit, grading, takes and the issue."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import psycopg
 
 from litwatch import intake
 from litwatch.config import Config
+from litwatch.feedback import word
+from litwatch.jobs import digest as digest_jobs
 from litwatch.jobs import watch as watch_jobs
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
@@ -48,6 +50,12 @@ async def run(
                 intake=result.details,
             )
             run.counts["rewritten"] = len(result.rewritten)
+            # A rewritten text makes its takes stale whatever triage and grading do next.
+            for paper_id in result.rewritten:
+                await word.settle(conn, paper_id, announce=False)
         await watch_jobs.triage(conn, config, run, limit=limit)
         await watch_jobs.grade(conn, config, run)
+        await digest_jobs.write_takes(conn, config, run)
+        issue_id = await digest_jobs.build_daily(conn, config, run)
+        run.counts["issue"] = issue_id
         return run.run_id

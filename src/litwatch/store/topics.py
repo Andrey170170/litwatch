@@ -21,7 +21,31 @@ def _topic(row: dict[str, Any]) -> Topic:
         keywords=list(row["keywords"] or []),
         status=row["status"],
         revision=row["revision"],
+        position=row["position"],
+        colour=row["colour"],
     )
+
+
+# Each topic gets the first of these not in use (docs/v1/DESIGN.md, topic colours).
+COLOURS = (
+    "#2f5d50",
+    "#8a3b2e",
+    "#3b4f8a",
+    "#a2661e",
+    "#5a6b3a",
+    "#7a4f8a",
+    "#2f6b7a",
+    "#8a6a3b",
+)
+
+
+async def _placement(conn: psycopg.AsyncConnection, topic: Topic) -> tuple[int, str]:
+    """A new topic goes last, in the first colour not in use (cycling past eight)."""
+    rows = await (await conn.execute("SELECT position, colour FROM topics")).fetchall()
+    position = max((r["position"] or 0 for r in rows), default=0) + 1
+    used = {r["colour"] for r in rows}
+    free = [c for c in COLOURS if c not in used]
+    return position, free[0] if free else COLOURS[len(rows) % len(COLOURS)]
 
 
 async def save(conn: psycopg.AsyncConnection, topic: Topic) -> Topic:
@@ -38,16 +62,23 @@ async def save(conn: psycopg.AsyncConnection, topic: Topic) -> Topic:
         ).fetchone()
         changed = current is None or current["version"] != topic.version
         revision = (current["revision"] if current else 0) + int(changed)
-        await conn.execute(
+        position, colour = topic.position, topic.colour
+        if current is None and (position is None or colour is None):
+            placed = await _placement(conn, topic)
+            position, colour = position or placed[0], colour or placed[1]
+        cur = await conn.execute(
             """
             INSERT INTO topics (slug, name, kind, subject, rubric, interests, keywords, status,
-                                version, revision)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                version, revision, position, colour)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (slug) DO UPDATE SET
                 name = EXCLUDED.name, kind = EXCLUDED.kind, subject = EXCLUDED.subject,
                 rubric = EXCLUDED.rubric, interests = EXCLUDED.interests,
                 keywords = EXCLUDED.keywords, status = EXCLUDED.status,
-                version = EXCLUDED.version, revision = EXCLUDED.revision, updated_at = now()
+                version = EXCLUDED.version, revision = EXCLUDED.revision,
+                position = coalesce(EXCLUDED.position, topics.position),
+                colour = coalesce(EXCLUDED.colour, topics.colour), updated_at = now()
+            RETURNING position, colour
             """,
             (
                 topic.slug,
@@ -60,24 +91,32 @@ async def save(conn: psycopg.AsyncConnection, topic: Topic) -> Topic:
                 topic.status.value,
                 topic.version,
                 revision,
+                position,
+                colour,
             ),
         )
+        placed = await cur.fetchone()
         if changed:
-            content = topic.model_dump(mode="json", exclude={"revision", "status", "name"})
+            content = topic.model_dump(
+                mode="json", exclude={"revision", "status", "name", "position", "colour"}
+            )
             await conn.execute(
                 "INSERT INTO topic_versions (topic, revision, hash, content) "
                 "VALUES (%s, %s, %s, %s)",
                 (topic.slug, revision, topic.version, Jsonb(content)),
             )
-    return topic.model_copy(update={"revision": revision})
+    return topic.model_copy(
+        update={"revision": revision, "position": placed["position"], "colour": placed["colour"]}
+    )
 
 
 async def all(conn: psycopg.AsyncConnection, status: Status | None = Status.ACTIVE) -> list[Topic]:
-    """Topics with the given status (every topic for None), Watch first, then by slug."""
+    """Topics with the given status (every topic for None), Watch first, then in the owner's
+    order."""
     rows = await (
         await conn.execute(
             "SELECT * FROM topics WHERE %s::text IS NULL OR status = %s "
-            "ORDER BY array_position(ARRAY['watch', 'radar', 'pulse'], kind), slug",
+            "ORDER BY array_position(ARRAY['watch', 'radar', 'pulse'], kind), position, slug",
             (status.value if status else None, status.value if status else None),
         )
     ).fetchall()
@@ -113,3 +152,18 @@ async def kinds_at(
     return {
         r["topic"]: TopicKind(r["kind"]) for r in rows if revisions[r["topic"]] == r["revision"]
     }
+
+
+async def at_revision(conn: psycopg.AsyncConnection, slug: str, revision: int) -> Topic | None:
+    """The topic as a model saw it at that revision: its content then, its name now."""
+    current = await get(conn, slug)
+    row = await (
+        await conn.execute(
+            "SELECT content FROM topic_versions WHERE topic = %s AND revision = %s",
+            (slug, revision),
+        )
+    ).fetchone()
+    if current is None or row is None:
+        return current
+    content = {k: v for k, v in row["content"].items() if k in Topic.model_fields}
+    return Topic.model_validate(current.model_dump() | content | {"revision": revision})

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -16,9 +17,12 @@ from litwatch import config as configuration
 from litwatch import feedback, seeds, store
 from litwatch.core import Topic
 from litwatch.feedback import seed, word
+from litwatch.jobs import digest as digest_job
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
+from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
+from litwatch.store import digest as digest_store
 from litwatch.store import legacy as legacy_store
 from litwatch.store import runs
 from litwatch.store import topics as topics_store
@@ -29,10 +33,12 @@ db_app = typer.Typer(no_args_is_help=True, help="Database migrations.")
 topics_app = typer.Typer(no_args_is_help=True, help="Topics as YAML, in and out.")
 eval_app = typer.Typer(no_args_is_help=True, help="Dry runs measured against the owner's labels.")
 library_app = typer.Typer(no_args_is_help=True, help="Effective grades and the library.")
+issue_app = typer.Typer(no_args_is_help=True, help="The daily issue: build it, read it.")
 app.add_typer(db_app, name="db")
 app.add_typer(topics_app, name="topics")
 app.add_typer(eval_app, name="eval")
 app.add_typer(library_app, name="library")
+app.add_typer(issue_app, name="issue")
 console = Console()
 
 ConfigPath = Annotated[
@@ -129,15 +135,18 @@ def topics_list() -> None:
 
 
 async def _save_all(conn: psycopg.AsyncConnection, topics: list[Topic]) -> list[Topic]:
-    """Save the topics; one whose kind changed has its papers settled again."""
+    """Save the topics; one whose kind or model-visible content changed has its papers
+    settled again (a topic no longer Watch drops its grades; takes bound to the old rubric
+    become stale)."""
     saved = []
     for topic in topics:
         # The kind is read under the row lock the save takes, so a concurrent import cannot
         # make this one miss the transition.
         async with conn.transaction():
             before = await topics_store.kind_for_update(conn, topic.slug)
+            revision = (await topics_store.get(conn, topic.slug) or topic).revision
             saved.append(await topics_store.save(conn, topic))
-            if before is not None and before != topic.kind:
+            if before is not None and (before != topic.kind or saved[-1].revision != revision):
                 await word.settle_topic(conn, topic.slug)
     return saved
 
@@ -241,6 +250,28 @@ def eval_report(eval_run_id: int) -> None:
     console.print_json(data=_run(lambda conn: feedback.metrics(conn, eval_run_id)))
 
 
+@eval_app.command("writers")
+def eval_writers(
+    model: Annotated[
+        list[str], typer.Option(help="provider:model@effort to compare with the configured writer.")
+    ],
+    out: Annotated[Path, typer.Option(help="Directory for takes.md and key.json.")],
+    papers: Annotated[int, typer.Option(help="Pairs to write for.")] = 20,
+    seed_: Annotated[int, typer.Option("--seed", help="Shuffles the letters.")] = 1,
+    config: ConfigPath = None,
+) -> None:
+    """Takes from several models for the same papers, under shuffled letters, to read blind."""
+    from litwatch.review import compare  # noqa: PLC0415
+
+    cfg = configuration.load(config)
+
+    async def work(conn: psycopg.AsyncConnection) -> Path:
+        async with model_run(conn, cfg, "eval-writers") as run:
+            return await compare.compare(conn, cfg, run, model, papers, out, seed_)
+
+    console.print(f"wrote {_run(work)}/takes.md; the key is key.json beside it")
+
+
 # -- library ---------------------------------------------------------------------------------------
 
 
@@ -249,6 +280,74 @@ def library_sync() -> None:
     """Settle every paper with a verdict or the owner's word: effective grades, the library,
     and their events. Run once on an adopted or seeded database."""
     console.print_json(data=_run(word.sync))
+
+
+# -- the writer and issues ------------------------------------------------------------------------
+
+
+@app.command()
+def write(config: ConfigPath = None) -> None:
+    """Write a take for every pair owed one, as the nightly run does after grading."""
+    cfg = configuration.load(config)
+
+    async def work(conn: psycopg.AsyncConnection) -> dict[str, Any]:
+        async with run_lock(conn), model_run(conn, cfg, "writer") as run:
+            await digest_job.write_takes(conn, cfg, run)
+            return run.counts
+
+    console.print_json(data=_run(work))
+
+
+@issue_app.command("build")
+def issue_build(
+    day: Annotated[str | None, typer.Option(help="YYYY-MM-DD; default today.")] = None,
+    config: ConfigPath = None,
+) -> None:
+    """Take every pair ready for an issue into the day's issue and write its lede."""
+    cfg = configuration.load(config)
+    when = date.fromisoformat(day) if day else None
+
+    async def work(conn: psycopg.AsyncConnection) -> int | None:
+        async with run_lock(conn), model_run(conn, cfg, "issue") as run:
+            return await digest_job.build_daily(conn, cfg, run, when)
+
+    issue_id = _run(work)
+    console.print(f"issue {issue_id}" if issue_id else "nothing for an issue")
+
+
+@issue_app.command("show")
+def issue_show(
+    day: Annotated[str | None, typer.Argument(help="YYYY-MM-DD; default the latest.")] = None,
+) -> None:
+    """Print a daily issue as the reader would read it."""
+
+    async def work(conn: psycopg.AsyncConnection) -> tuple[Any, list[Any]] | None:
+        found = (
+            await digest_store.issue(conn, "daily", date.fromisoformat(day))
+            if day
+            else next(iter(await digest_store.issues(conn, 1)), None)
+        )
+        return (found, await digest_store.entries(conn, found["id"])) if found else None
+
+    found = _run(work)
+    if found is None:
+        raise SystemExit("no such issue")
+    issue, entries = found
+    console.print(f"[bold]LITWATCH[/bold] · {issue['day']:%A %-d %B %Y}\n")
+    console.print((issue["lede"] or "[dim](no lede yet)[/dim]") + "\n")
+    section = None
+    for e in entries:
+        if e["topic_name"] != section:
+            section = e["topic_name"]
+            console.print(f"[bold]{section}[/bold]")
+        mark = "■" if e["grade"] == "must_read" else "·"
+        aside = (
+            "  [dim](set aside)[/dim]" if e["grade_now"] not in ("must_read", "relevant") else ""
+        )
+        console.print(f"  {mark} {e['title']}{aside}")
+        console.print(f"    {e['take'] or '[dim](no take)[/dim]'}", highlight=False)
+    for topic, n in issue["folds"].items():
+        console.print(f"[dim]{n} more near {topic}[/dim]")
 
 
 @app.command()
