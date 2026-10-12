@@ -82,7 +82,7 @@ function LookupBand({ q, watch }: { q: string; watch: ReturnType<typeof useLooku
           <div>
             <p className="meta text-[12px] uppercase tracking-[.05em]">{look.data.fetched ? "Fetched into the collection just now" : "Already in the collection"}</p>
             <h3 className="font-serif text-[16.5px] leading-[1.3] font-semibold">
-              <Link to="/paper/$" params={{ _splat: look.data.row.id }}>
+              <Link to="/paper/$" params={{ _splat: look.data.row.id }} search={{ topic: "none" }}>
                 {look.data.row.title}
               </Link>
             </h3>

@@ -9,7 +9,7 @@ import { StatusText } from "@/components/StatusChip";
 import { Thumbs } from "@/components/Thumbs";
 import { BibtexCopy, SaveToggle, arxivUrl, pdfUrl } from "@/components/paper-bits";
 import { useDesktop } from "@/hooks/useDesktop";
-import { authorsLine, day, fmt } from "@/lib/format";
+import { authorsLine, day, fmt, localDay } from "@/lib/format";
 import { topicColour } from "@/lib/topics";
 import { cn } from "@/lib/utils";
 
@@ -35,13 +35,15 @@ export function DigestPage() {
   const weekly = first?.weekly ?? null;
 
   const newest = issues[0];
-  const openSummary = (search.issue && [weekly, ...issues].find((i) => i?.id === search.issue)) || newest;
-  const open = useQuery({ ...issueQuery(openSummary?.id ?? 0), enabled: !!openSummary });
+  // The issue asked for is loaded by id, whether or not the feed's first page lists it.
+  const openId = search.issue ?? newest?.id;
+  const open = useQuery({ ...issueQuery(openId ?? 0), enabled: openId !== undefined });
+  const openDay = open.data?.day ?? [weekly, ...issues].find((i) => i?.id === openId)?.day;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDay(new Date());
   // "nothing new since" when the newest issue is older than today and no older one was asked for.
   const stale = newest && !search.issue && newest.day < today ? newest.day : null;
-  const mastDate = stale ? today : openSummary?.day;
+  const mastDate = stale ? today : openDay;
 
   return (
     <div className={cn(desktop && "grid min-h-[calc(100dvh-49px)] grid-cols-2")}>
@@ -56,7 +58,7 @@ export function DigestPage() {
               {stale && <span className="ml-3 font-sans text-[13px] font-normal text-muted-foreground">nothing new since {fmt.weekday(stale)}</span>}
             </h1>
           )}
-          {weekly && <WeeklyRow weekly={weekly} open={openSummary?.id === weekly.id} />}
+          {weekly && <WeeklyRow weekly={weekly} open={openId === weekly.id} />}
 
           {feed.isPending && <p className="meta mt-6">Opening the paper…</p>}
           {feed.isError && <p className="mt-6 text-destructive">The Digest could not be loaded.</p>}
@@ -65,13 +67,14 @@ export function DigestPage() {
               No issue yet. The first one is written after the first nightly run.
             </p>
           )}
+          {open.isError && <p className="mt-6 text-destructive">No such issue.</p>}
           {open.data && <IssueView issue={open.data} openPaper={desktop ? search.paper : undefined} />}
 
-          {issues.filter((i) => i.id !== openSummary?.id).length > 0 && (
+          {issues.filter((i) => i.id !== openId).length > 0 && (
             <>
               <p className="mt-8 mb-1 text-[12px] tracking-[.06em] text-muted-foreground uppercase">Earlier</p>
               {issues
-                .filter((i) => i.id !== openSummary?.id)
+                .filter((i) => i.id !== openId)
                 .map((i) => (
                   <FoldedIssue key={i.id} issue={i} />
                 ))}

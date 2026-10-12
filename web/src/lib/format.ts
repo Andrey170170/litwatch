@@ -14,6 +14,11 @@ export function day(iso: string): Date {
   return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
 }
 
+/** A Date as the local calendar day `YYYY-MM-DD`, comparable with an issue's day. */
+export function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export const fmt = {
   /** "Wednesday 8 October" */
   issueDay: (iso: string) => DAY.format(day(iso)),
