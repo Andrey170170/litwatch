@@ -24,6 +24,8 @@ export const fmt = {
   issueDay: (iso: string) => DAY.format(day(iso)),
   /** "Wednesday" */
   weekday: (iso: string) => WEEKDAY.format(day(iso)),
+  /** "Wednesday", from a Date in the browser's clock. */
+  weekdayOf: (d: Date) => WEEKDAY.format(d),
   /** "8 October" or "8 October 2025" when not this year. */
   published: (iso: string | null | undefined) => {
     if (!iso) return "";

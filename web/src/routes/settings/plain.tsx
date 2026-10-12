@@ -1,9 +1,10 @@
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { configQuery, missesQuery, runsQuery, useRetrace, type Miss } from "@/api/settings";
+import { configQuery, missesQuery, runsQuery, scheduleOf, useRetrace, type Miss } from "@/api/settings";
 import { topicsQuery } from "@/api/queries";
 import { GRADE_WORD } from "@/components/paper-bits";
 import { modelName } from "@/components/PaperView";
+import { cronWords, nextFire } from "@/lib/cron";
 import { fmt } from "@/lib/format";
 import { BTN, Empty, Page, TABLE, money } from "@/routes/settings/index";
 
@@ -86,11 +87,41 @@ function Stage({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** Runs and cost: a row per run. */
+/** The schedule in one line: on, with the next fires; or off, with what it would be. */
+export function ScheduleLine() {
+  const config = useQuery(configQuery);
+  const s = scheduleOf(config.data);
+  if (!s) return null;
+  const zone = s.timezone ? ` (${s.timezone})` : "";
+  const when = `nightly ${cronWords(s.nightly)}, weekly ${cronWords(s.weekly)}${zone}`;
+  const next = [
+    ["nightly", nextFire(s.nightly)],
+    ["weekly", nextFire(s.weekly)],
+  ]
+    .filter((x): x is [string, Date] => x[1] instanceof Date)
+    .map(([kind, at]) => `${kind} ${fmt.weekday(at.toISOString().slice(0, 10)) === fmt.weekday(new Date().toISOString().slice(0, 10)) ? "today" : fmt.weekdayOf(at)} at ${fmt.time(at.toISOString())}`);
+  return (
+    <p className="mb-4 rounded-lg border border-border px-3.5 py-2.5 text-[13px]">
+      {s.enabled ? (
+        <>
+          <b className="font-medium">On a schedule:</b> {when}.{next.length > 0 && <span className="text-muted-foreground"> Next: {next.join(", ")}.</span>}
+        </>
+      ) : (
+        <>
+          <b className="font-medium">No schedule:</b> runs are started by hand until cutover.{" "}
+          <span className="text-muted-foreground">Once enabled, {when}.</span>
+        </>
+      )}
+    </p>
+  );
+}
+
+/** Runs and cost: the schedule, then a row per run. */
 export function RunsPage() {
   const runs = useQuery(runsQuery);
   return (
     <Page title="Runs and cost" sub="Every run, newest first: what it did and what it cost.">
+      <ScheduleLine />
       {runs.data?.length === 0 && <Empty>No runs yet.</Empty>}
       {runs.data && runs.data.length > 0 && (
         <div className="overflow-x-auto">
