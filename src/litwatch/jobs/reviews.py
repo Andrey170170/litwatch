@@ -9,7 +9,7 @@ from datetime import date, timedelta
 
 import psycopg
 
-from litwatch.config import Config
+from litwatch.config import Config, Schedule
 from litwatch.core import Cadence, Paper, Status, Topic, TopicKind
 from litwatch.jobs.context import ModelRun
 from litwatch.llm import CallError
@@ -22,6 +22,16 @@ log = logging.getLogger(__name__)
 
 # Reviews that failed this far back are tried again by the next run, daily or weekly.
 RETRY = timedelta(days=7)
+
+
+def will_retry(schedule: Schedule, period: str, day: date) -> bool:
+    """Whether the next scheduled run tries a failed review of this day or week again: the
+    nightly run (tomorrow) the days of the week before it, the Monday run the week before
+    the last full one. Days and weeks are the schedule's, in its zone."""
+    today = schedule.today()
+    if period == "day":
+        return day >= today + timedelta(days=1) - RETRY
+    return day >= schedule.week_of(today) - timedelta(days=7)
 
 
 async def _review(

@@ -8,7 +8,7 @@ import type { Listed, Pick as PickT, Recap, Review, TopicRef } from "@/api/clien
 import { SaveToggle } from "@/components/paper-bits";
 import { Thumbs } from "@/components/Thumbs";
 import { useDesktop } from "@/hooks/useDesktop";
-import { authorsLine, day, fmt, localDay, plural } from "@/lib/format";
+import { authorsLine, fmt, plural } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** Where a paper opens from here: the Digest's reading pane on a desktop, else its page. */
@@ -46,28 +46,8 @@ function PaperLink({ id, title, topic, surface, className }: { id: string; title
 
 const QUIET = "mt-1.5 text-[14px] text-muted-foreground";
 
-/**
- * What a failed review's line says next. Runs try failures again only while they are recent
- * (jobs/reviews.py): the nightly run a day from the past week; the Monday weekly run the week
- * before the last full one, so a failed week is still due while it began no earlier than the
- * week before this one. An older one waits for `litwatch weekly --week` by hand.
- */
-export function retryNote(period: "day" | "week", start: string | null | undefined, now = new Date()): string {
-  if (start) {
-    const today = day(localDay(now));
-    const begun = day(start);
-    const ageDays = (today.getTime() - begun.getTime()) / 86400000;
-    if (period === "day" && ageDays <= 7) return "; litwatch tries again on the next run.";
-    if (period === "week") {
-      const thisMonday = new Date(today);
-      thisMonday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-      const lastMonday = new Date(thisMonday);
-      lastMonday.setDate(thisMonday.getDate() - 7);
-      if (begun >= lastMonday) return "; litwatch tries again on the next run.";
-    }
-  }
-  return ".";
-}
+/** How a failed review's line ends: a retry is promised only when the next run will make it. */
+const retryNote = (willRetry: boolean | undefined) => (willRetry ? "; litwatch tries again on the next run." : ".");
 
 /** A Radar or Pulse review: the prose, then the picks with why each was picked. */
 export function ReviewView({ review, topic, surface }: { review: Review; topic: TopicRef; surface: Surface }) {
@@ -75,7 +55,7 @@ export function ReviewView({ review, topic, surface }: { review: Review; topic: 
   if (review.state === "failed")
     return (
       <p className={QUIET}>
-        The {span}'s review of {plural(review.members ?? 0, "paper")} did not get written{retryNote(review.period, review.day)}
+        The {span}'s review of {plural(review.members ?? 0, "paper")} did not get written{retryNote(review.will_retry)}
       </p>
     );
   if (review.state === "quiet" || !review.text)
@@ -127,21 +107,11 @@ function PickView({ pick, topic, surface }: { pick: PickT; topic: string; surfac
  * A Watch topic's weekly recap: the prose, then what was announced, set aside and missed.
  * A quiet week announced nothing, but can still have set-asides and misses to list.
  */
-export function RecapView({
-  recap,
-  topic,
-  surface,
-  week,
-}: {
-  recap: Recap;
-  topic: TopicRef;
-  surface: Surface;
-  week?: string; // the issue's Monday, which decides whether a run still retries it
-}) {
+export function RecapView({ recap, topic, surface }: { recap: Recap; topic: TopicRef; surface: Surface }) {
   if (recap.state === "failed")
     return (
       <p className={QUIET}>
-        The week's recap of {topic.name} did not get written{retryNote("week", week)}
+        The week's recap of {topic.name} did not get written{retryNote(recap.will_retry)}
       </p>
     );
   const quiet = recap.state === "quiet" || !recap.text;

@@ -174,7 +174,7 @@ function IssueView({ issue, openPaper }: { issue: Issue; openPaper: string | und
     <article>
       {issue.lede && <p className="mt-3 font-serif text-[16px] leading-[1.45] text-body desk:text-[17px]">{issue.lede}</p>}
       {issue.sections.map((s) => (
-        <Section key={s.topic.slug} section={s} kind={issue.kind} day={issue.day} openPaper={openPaper} />
+        <Section key={s.topic.slug} section={s} kind={issue.kind} openPaper={openPaper} />
       ))}
       {issue.sections.length === 0 && (
         <p className="mt-6 font-serif text-[16px] text-body">Nothing new for any topic.</p>
@@ -189,17 +189,7 @@ function IssueView({ issue, openPaper }: { issue: Issue; openPaper: string | und
 }
 
 /** One topic's section: entries for Watch, a review for Radar and Pulse, a recap in a weekly issue. */
-function Section({
-  section,
-  kind,
-  day,
-  openPaper,
-}: {
-  section: SectionT;
-  kind: Issue["kind"];
-  day: string;
-  openPaper: string | undefined;
-}) {
+function Section({ section, kind, openPaper }: { section: SectionT; kind: Issue["kind"]; openPaper: string | undefined }) {
   const colour = topicColour(section.topic.colour);
   const near = section.near ?? 0;
   const review = section.review ?? null;
@@ -217,7 +207,7 @@ function Section({
         {kind === "daily" && review && <small className="font-sans text-[13px] font-normal" style={{ color: colour }}>today's review</small>}
       </h2>
       {empty && <p className="mt-1.5 text-[14px] text-muted-foreground">Nothing new for {section.topic.name}.</p>}
-      {recap && <RecapView recap={recap} topic={section.topic} surface="digest" week={day} />}
+      {recap && <RecapView recap={recap} topic={section.topic} surface="digest" />}
       {review && <ReviewView review={review} topic={section.topic} surface="digest" />}
       {section.entries.map((e) => (
         <EntryView key={e.paper_id} entry={e} open={openPaper === e.paper_id} />

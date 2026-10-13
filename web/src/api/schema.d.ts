@@ -89,6 +89,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/papers/{paper_id}/publication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Publication
+         * @description The owner names the published version by DBLP key or DOI, or says there is none.
+         *     A lookup never overwrites it. A DOI DBLP does not know is kept with the arXiv entry.
+         */
+        put: operations["set_publication_api_papers__paper_id__publication_put"];
+        post?: never;
+        /**
+         * Forget Publication
+         * @description Drop the stored version, the owner's choice included; the paper is looked up again.
+         */
+        delete: operations["forget_publication_api_papers__paper_id__publication_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/bibtex": {
         parameters: {
             query?: never;
@@ -104,7 +129,8 @@ export interface paths {
         put?: never;
         /**
          * Bibtex Selection
-         * @description BibTeX for chosen papers. M5 brings published records; until then, arXiv entries.
+         * @description BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the
+         *     published version as soon as DBLP has it; several use what is stored.
          */
         post: operations["bibtex_selection_api_bibtex_post"];
         delete?: never;
@@ -1139,6 +1165,12 @@ export interface components {
             } | null;
             /** Chosen */
             chosen: components["schemas"]["Chosen"][];
+            publication?: components["schemas"]["Publication"] | null;
+            /**
+             * Publication By Owner
+             * @default false
+             */
+            publication_by_owner: boolean;
         };
         /**
          * PaperTopic
@@ -1199,6 +1231,54 @@ export interface components {
             reaction?: components["schemas"]["ReactionValue"] | null;
             reaction_reason?: components["schemas"]["ReactionReason"] | null;
         };
+        /**
+         * Publication
+         * @description The published record of a paper: what a BibTeX entry needs, as DBLP has it.
+         */
+        Publication: {
+            /** Dblp Key */
+            dblp_key?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Authors */
+            authors?: string[];
+            /**
+             * Kind
+             * @default misc
+             */
+            kind: string;
+            /** Venue */
+            venue?: string | null;
+            /** Container */
+            container?: string | null;
+            /** Volume */
+            volume?: string | null;
+            /** Number */
+            number?: string | null;
+            /** Pages */
+            pages?: string | null;
+            /** Year */
+            year?: number | null;
+            /** Doi */
+            doi?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /**
+         * PublicationIn
+         * @description The owner's correction: a DBLP key, a DOI, or that there is no published version.
+         */
+        PublicationIn: {
+            /** Dblp Key */
+            dblp_key?: string | null;
+            /** Doi */
+            doi?: string | null;
+            /**
+             * None
+             * @default false
+             */
+            none: boolean;
+        };
         /** ReactionIn */
         ReactionIn: {
             /** Topic */
@@ -1235,6 +1315,11 @@ export interface components {
             set_aside?: components["schemas"]["Listed"][];
             /** Misses */
             misses?: components["schemas"]["Listed"][];
+            /**
+             * Will Retry
+             * @default false
+             */
+            will_retry: boolean;
         };
         /** RerunIn */
         RerunIn: {
@@ -1278,6 +1363,11 @@ export interface components {
              * @default 0
              */
             members: number;
+            /**
+             * Will Retry
+             * @default false
+             */
+            will_retry: boolean;
         };
         /**
          * Row
@@ -1657,6 +1747,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Paper"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_publication_api_papers__paper_id__publication_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Publication"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_publication_api_papers__paper_id__publication_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

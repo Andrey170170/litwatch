@@ -424,3 +424,12 @@ async def test_a_topics_reviews_run_newest_span_first_whatever_was_rewritten_las
         ("week", monday),
         ("week", monday - timedelta(days=7)),
     ]
+
+
+def test_a_failed_review_is_promised_a_retry_only_while_the_next_run_makes_it():
+    schedule = Config().schedule
+    today, monday = schedule.today(), schedule.week_of(schedule.today())
+    assert reviews.will_retry(schedule, "day", today - timedelta(days=6))
+    assert not reviews.will_retry(schedule, "day", today - timedelta(days=7))
+    assert reviews.will_retry(schedule, "week", monday - timedelta(days=7))
+    assert not reviews.will_retry(schedule, "week", monday - timedelta(days=14))
