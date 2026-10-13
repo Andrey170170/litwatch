@@ -34,18 +34,20 @@ async def members(
     """Papers that joined the topic's field in the window, found by triage, plus the owner's
     additions ("Important for <field>"): those made in the window, or, for a daily review,
     every one still pending whenever it was made (`pending_additions`), so none falls
-    between two days. Ordered by the time that brought each in, then id."""
+    between two days. The window's own test is triage's alone: an owner-only row's creation
+    time is its addition, which a retried earlier day may already have covered. Ordered by
+    the time that brought each in, then id."""
     owners = (
         "(m.by_owner AND m.owner_reviewed_at IS NULL)"
         if pending_additions
         else "(m.owner_added_at >= %s AND m.owner_added_at < %s)"
     )
+    triage = "(m.by_triage AND m.created_at >= %s AND m.created_at < %s)"
     rows = await (
         await conn.execute(
             f"SELECT {COLUMNS} FROM memberships m JOIN papers p ON p.id = m.paper_id "
-            f"WHERE m.topic = %s AND ((m.created_at >= %s AND m.created_at < %s) OR {owners}) "
-            "ORDER BY CASE WHEN m.created_at >= %s AND m.created_at < %s THEN m.created_at "
-            "ELSE m.owner_added_at END, p.id",
+            f"WHERE m.topic = %s AND ({triage} OR {owners}) "
+            f"ORDER BY CASE WHEN {triage} THEN m.created_at ELSE m.owner_added_at END, p.id",
             (topic, since, until, *([] if pending_additions else [since, until]), since, until),
         )
     ).fetchall()

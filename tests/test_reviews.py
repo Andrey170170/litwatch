@@ -420,6 +420,34 @@ async def test_a_review_that_failed_on_an_earlier_day_is_tried_again(db):
     assert row["state"] == "written"
 
 
+async def test_an_addition_a_retried_day_covered_is_not_reviewed_again_the_same_night(db):
+    # The owner adds a paper today; tonight's run first retries yesterday's failed review,
+    # which takes the pending addition, so today's review must not take it by its time too.
+    from litwatch.store import fields as fields_store
+
+    models = Models()
+    yesterday = Config().schedule.today() - timedelta(days=1)
+    # One member of the field, so the paper is within a review's five picks.
+    await db.execute(
+        "DELETE FROM memberships WHERE topic = %s AND paper_id <> %s", (DAILY.slug, FIELD[0].id)
+    )
+    await db.execute(
+        "UPDATE memberships SET created_at = %s WHERE topic = %s",
+        (Config().schedule.window(yesterday)[0] + timedelta(hours=1), DAILY.slug),
+    )
+    models.down = True
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run, yesterday))
+    models.down = False
+    await fields_store.add(db, P.id, DAILY.slug, 1)
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
+    rows = await db.execute(
+        "SELECT r.day FROM review_picks k JOIN reviews r ON r.id = k.review_id "
+        "WHERE k.paper_id = %s",
+        (P.id,),
+    )
+    assert [r["day"] for r in await rows.fetchall()] == [yesterday]
+
+
 async def test_the_default_weekly_run_retries_the_week_before(db):
     models = Models()
     last = Config().schedule.week_of(Config().schedule.today()) - timedelta(days=7)
