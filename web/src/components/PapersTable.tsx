@@ -55,7 +55,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
   /** An export covers the outside band too: hits are cited as they are (SPEC decision 6). */
   async function exportBibtex() {
     try {
-      const cite = (r: Row): CitedHit => ({ id: r.id, title: r.title, authors: r.authors, year: r.published ? new Date(r.published).getFullYear() : null });
+      const cite = (r: Row): CitedHit => ({ id: r.id, title: r.title, authors: r.authors, year: r.published ? new Date(r.published).getUTCFullYear() : null });
       let text: string;
       if (selected.size) {
         const chosen = outside.filter((r) => selected.has(r.id));
@@ -93,7 +93,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
           {q.isPending ? "…" : total === 0 ? "No papers match." : `${page * PAGE_SIZE + 1}–${Math.min(total, (page + 1) * PAGE_SIZE)} of ${total}`}
           {selected.size > 0 && ` · ${selected.size} selected`}
         </span>
-        <button type="button" onClick={() => void exportBibtex()} className="min-h-[36px] underline decoration-border hover:text-foreground" disabled={total === 0 && !selected.size}>
+        <button type="button" onClick={() => void exportBibtex()} className="min-h-[36px] underline decoration-border hover:text-foreground" disabled={total === 0 && !selected.size && outside.length === 0}>
           {selected.size ? `BibTeX for ${selected.size} selected` : "Export BibTeX"}
         </button>
       </div>

@@ -46,6 +46,29 @@ describe("a search with providers", () => {
     });
   });
 
+  it("exports a search that found only outside papers, dated by their UTC year", async () => {
+    stubDownloads();
+    // Published early on 1 January in UTC: still the previous year west of Greenwich.
+    const early = { ...row("2610.00003", "New year's paper", "archive"), published: "2026-01-01T03:00:00Z" };
+    const calls = scriptFetch({
+      "GET /api/status": () => json(status),
+      "GET /api/topics": () => json([]),
+      "GET /api/papers": () => json({ rows: [], total: 0, outside: [early], left_out: [] }),
+      "GET /api/bibtex": () => new Response("", { headers: { "content-type": "application/x-bibtex" } }),
+      "POST /api/bibtex": () => new Response("@misc{outside}", { headers: { "content-type": "application/x-bibtex" } }),
+    });
+    const user = userEvent.setup();
+    renderApp("/papers?q=traces");
+    await screen.findByText(/Outside the collection · 1/);
+    const exportButton = screen.getByRole("button", { name: "Export BibTeX" });
+    expect(exportButton).toBeEnabled();
+    await user.click(exportButton);
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")).toBeTruthy());
+    expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")!.body).toMatchObject({
+      cited: [{ id: "2610.00003", year: 2026 }],
+    });
+  });
+
   it("bands the papers found outside the collection, fetches one, and notes who was left out", async () => {
     const calls = scriptFetch({
       "GET /api/status": () => json(status),
