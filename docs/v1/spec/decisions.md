@@ -60,7 +60,8 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
     topic page it is that topic's grade.
 36. **Facets, not more scores.** Contribution kind, code released, weights released are facts on a paper; nothing else
     is scored.
-37. **Assurance by depth.** A paper is graded per nearest followed topic at or above its classes; Focus by two labs,
+37. **Assurance by depth.** A paper is graded per nearest followed topic at or above each class it is a direct member
+    of; Focus by two labs,
     Area by a strong grader checked by a decision model and escalated on doubt, Field by one cheap model. A parent
     topic shows a child topic's papers at the child's grade.
 38. **A full-text queue.** Briefs, Weight re-checks of Area pick candidates, and Deep cards wait for the text and run

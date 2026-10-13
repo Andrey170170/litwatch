@@ -6,9 +6,10 @@ and never asks for it; Calibrate, on the Quality page, asks, because the owner o
 
 ## The owner's word
 
-The owner's word on a paper for a topic outranks every verdict for that topic. It comes from a label, a
-word-carrying reaction, or a reported miss, whichever is newest; an unsure label is no word. The effective grade
-(see [pipeline.md](pipeline.md), section 4) is the owner's word where there is one.
+The owner's word on a paper for a topic is a Fit, and it outranks every verdict for that topic. It comes from a label,
+a word-carrying reaction, or a reported miss, whichever is newest; an unsure label is no word, and a provisional label
+(the first v1's bulk-accepted positives) is older than any other. The effective Fit and effective grade follow from it
+([pipeline.md](pipeline.md), section 4). Clearing or changing a reaction takes back its word and nothing else.
 
 ## Reactions
 
@@ -18,12 +19,12 @@ mistake, so corrections become per-stage error rates instead of one mixed signal
 
 | Thumb | Reason | Points at | Effect |
 | --- | --- | --- | --- |
-| down | wrong topic | classification | on a Focus topic, the owner's word: not a member (Fit none); elsewhere collected |
+| down | wrong topic | classification | on a Focus topic, the owner's word: Fit none; elsewhere collected |
 | down | overrated | grading or Weight | collected |
 | down | not interesting | nothing (correct, but not for the owner) | collected |
 | down | already knew it | nothing | collected, never counted as a correction |
 | up | underrated | grading or Weight | collected |
-| up | great find | nothing | on a Focus topic, the owner's word: relevant; elsewhere collected |
+| up | great find | nothing | on a Focus topic, the owner's word: the verdict's Fit if central or related, else related; elsewhere collected |
 
 A reaction never writes a label (first v1, decision 12). The acknowledgement says what happened ("Marked not on CoT
 monitoring; it leaves the library"). Collected reactions are shown on Quality per topic and stage over the trailing
@@ -42,13 +43,16 @@ A miss is a paper the owner found elsewhere that litwatch should have surfaced. 
 (the phone's share target, first v1 decision 4) and the topic it belongs to, which is asked at once:
 
 1. The owner's answer takes effect immediately: it is the owner's word (Fit central or related, the owner chooses) and
-   a class membership for that topic's class, and the paper is saved.
+   a class membership with source `miss` for that topic's class, and the paper is saved. Reporting a miss counts as
+   the owner's newest Save, so it outranks an earlier Unsave of the same paper.
 2. In parallel the paper goes through the pipeline as any new paper (classification, analysis, grading for every
-   followed topic it lands in), with source `miss`.
-3. The miss record keeps what each stage concluded for the owner's topic: the class probability, the uncertain band
-   and keyword check, each grader's Fit. Where the pipeline disagrees with the owner, the owner's answer stands and
-   the disagreement is shown on the miss under Settings and counted on Quality. That record is what says whether
-   classification or grading missed it.
+   followed topic it lands in), blind to the owner's answer: the classifier's outcome is computed and recorded apart
+   from the owner's membership, grading for the reported topic runs whatever classification said, and the graders
+   are not shown the owner's answer.
+3. The miss record keeps what each stage concluded for the owner's topic: the class probability, whether the class's
+   threshold, the uncertain band and the keyword check would each have admitted it, and each grader's Fit. Where the
+   pipeline disagrees with the owner, the owner's answer stands and the disagreement is shown on the miss under
+   Settings and counted on Quality. That record is what says whether classification or grading missed it.
 
 ## The library
 
@@ -89,9 +93,17 @@ only to evaluation tables, and reports per Focus topic over the papers the owner
 - **grading recall**: graded related or above when graded;
 - **end-to-end recall**: a member and graded related or above.
 
-Classification recall judges the classifier on its own; the band and the keyword check must not hide its misses.
-Precision at relevant comes from Calibrate's drawn samples only. Papers whose grading failed count as misses. These
-are the first v1's four numbers with triage replaced by classification.
+Classification recall judges the classifier on its own; the band and the keyword check must not hide its misses, and
+the owner's own memberships (source `owner` or `miss`) never count as the classifier's. Papers whose grading failed
+count as misses. These are the first v1's four numbers with triage replaced by classification.
 
-The old CoT verdicts, the provisional positives and every label given so far are the first evaluation set
-([milestones.md](milestones.md), N2).
+**Precision at relevant** comes from Calibrate's drawn samples only. A drawn paper records the pipeline's effective
+Fit and grade for its topic at the draw (excluding any owner's word), so a later re-grade or replay never changes the
+sample. Precision is, over the drawn papers of the upper group (grade relevant or above at the draw) that were answered
+and not unsure, the share the owner answered central or related; the lower group reports how often grading dropped a
+paper the owner wanted, the share answered central or related there. Both pool every draw from the trailing 90 days. A
+drawn paper left unanswered counts nowhere (first v1, carried).
+
+The first evaluation set ([milestones.md](milestones.md), N2) is reported as separate cohorts, never pooled: the
+owner's labels; the first v1's provisional positives (bulk-accepted, not the owner's word on each paper); and the
+regression set of 0.14's CoT verdicts.

@@ -15,8 +15,10 @@ intake ─▶ classification ─▶ analysis ─▶ grading ─▶ rarity
 ## 1. Intake
 
 Unchanged from the first v1: OAI-PMH for the configured categories, arXiv pacing, revision handling (section 8).
-Every paper intake stores is registered with the archive at once, which fetches its LaTeX source and, by the storage
-policy, its PDF (see [archive.md](archive.md)). Intake emits `paper.added` and `paper.revised`.
+Every paper intake stores is registered with the archive, which fetches its LaTeX source and, by the storage
+policy, its PDF (see [archive.md](archive.md)). Registration is delivered through the outbox like an integration's
+work (durable, retried with backoff, idempotent on the archive's side), so an archive outage delays registration and
+never loses it; intake's checkpoint does not wait for it. Intake emits `paper.added` and `paper.revised`.
 
 Every paper intake stores is processed by classification and analysis, so the collection is exactly what intake
 stored plus papers the owner added (a miss, a paper processed on demand from the archive).
@@ -30,10 +32,15 @@ Decisions, Jev and Haiku 5.5). The request carries the paper's title and abstrac
   probability;
 - one choice question for the primary class among all classes.
 
-A paper is a member of a class when its probability is at or above the class's threshold (default 0.5); it is then a
-member of every ancestor too. The primary class is the choice answer; if the primary class's own yes/no answer fell
-below its threshold, the paper is a member of it anyway (the choice is the stronger statement). A paper whose every
-answer is below threshold gets the primary class only.
+A paper is a **direct member** of a class when its probability is at or above the class's threshold (default 0.5),
+and of its primary class, which is the choice answer, whatever that class's own yes/no probability (the choice is the
+stronger statement). It is an **inherited member** of every ancestor of a class it is a direct member of. Only direct
+memberships are stored; inherited ones follow from the tree. A paper can be a direct member of a class and of its
+ancestor at once (both passed their thresholds); that is two direct memberships.
+
+A response is **valid** only if it answers every question, every probability is in [0, 1], and the choice names a
+class of the current tree. An invalid response is a failed call: retried like any failed call, and after three
+failed runs the paper is awaiting classification (section 9).
 
 Decision models choose by the option's name more than by the definition attached to it ("Type-Safe Is Not
 Error-Free", arXiv 2609.26758), so class names must say what they mean on their own; [taxonomy.md](taxonomy.md)
@@ -69,13 +76,21 @@ Analysis is bound to the paper revision. A rewrite (section 8) analyses the pape
 
 ## 4. Grading
 
-A paper is graded once **per followed topic that is the nearest followed class at or above one of its classes**. A
-paper in Interpretability › Sparse autoencoders, with Interpretability followed as an Area and nothing below it
-followed, is graded once for Interpretability. A paper in CoT faithfulness (a Focus topic under Interpretability) is
-graded for CoT faithfulness, and that membership does not also get it graded for Interpretability: a parent topic
-shows a child topic's papers with the child's grade. (A paper that is in CoT faithfulness and also, separately, in
-Sparse autoencoders is graded for both topics.) A paper in no followed subtree is not graded. Memberships from the
-uncertain band and the keyword check count only for the Focus topic they were made for.
+**Which topics grade a paper.** For each of the paper's direct memberships, take the nearest followed class at or above
+that class; the paper is graded once for each distinct topic found this way. Inherited memberships never add a topic.
+Examples, with Interpretability followed as an Area and CoT faithfulness as a Focus topic under it:
+
+- direct member of Sparse autoencoders only: graded for Interpretability;
+- direct member of CoT faithfulness only: graded for CoT faithfulness, not for Interpretability;
+- direct member of CoT faithfulness and of Sparse autoencoders: graded for both;
+- direct member of CoT faithfulness and of Interpretability itself: graded for both.
+
+Memberships from the uncertain band and the keyword check are direct memberships of the Focus topic's class and
+count for that topic only. A paper with no direct membership under any followed class is not graded.
+
+**What a parent topic shows.** A parent topic's page, digests and pick candidates include every paper in its subtree.
+A paper the parent graded itself shows the parent's grade; otherwise the highest grade among the followed
+descendants that graded it; otherwise it is ungraded there (its Weight gives its colour, section 5).
 
 Grading judges **Fit**: central, related, adjacent or none, with one sentence why, for that topic, from title,
 abstract, the topic's subject and, for a Focus topic, its rubric. How it is checked depends on the topic's depth
@@ -84,10 +99,11 @@ abstract, the topic's subject and, for a Focus topic, its rubric. How it is chec
 | Depth | Graders | Disagreement |
 | --- | --- | --- |
 | Focus | `judge` and `check`, from different labs, concurrently | the more inclusive Fit stands; the verdict is marked split and shown on Quality |
-| Area | `judge`, then the `area_check` decision model asked whether the Fit holds | on a "no", `check` (the other lab) grades too, and the Focus rule applies |
+| Area | `judge`, then the `area_check` decision model asked whether the Fit holds | on a "no", or a "yes" below `[grading] area_check_min_confidence` (default 0.7), `check` (the other lab) grades too, and the Focus rule applies |
 | Field | `field_grade`, one cheap model | none |
 
-A verdict needs every grader it calls to answer. If one fails, comes back truncated or refuses, no verdict is made:
+A verdict needs every grader it calls to answer validly (a Fit from the four, a reason; for `area_check`, a yes or no
+with its probability). If one fails, comes back truncated or invalid, or refuses, no verdict is made:
 the grading stays pending, is retried next run, and after three failed runs is listed on Quality as ungraded with a
 button to grade it now (carried from the first v1).
 
@@ -102,10 +118,13 @@ The grade for a topic is derived from Fit there and the paper's Weight:
 | adjacent | adjacent | adjacent | adjacent |
 | none | none | none | none |
 
-This table is a starting point, tuned in N2 against the owner's labels. Two rules do not depend on it: a Focus topic's
-digest lists every central paper whatever its grade (see [digests.md](digests.md)), and the owner's word outranks the
-verdict (see [feedback.md](feedback.md)). The **effective grade** is the one every surface, export and integration
-uses.
+This table is a starting point, tuned in N2 against the owner's labels. A paper whose analysis has not produced a
+Weight yet is treated as solid. A Focus topic's digest lists papers by Fit, not grade (see [digests.md](digests.md)).
+
+**Effective Fit and effective grade.** The owner's word is always a Fit (see [feedback.md](feedback.md)). The
+**effective Fit** is the owner's word where there is one, otherwise the verdict's. The **effective grade** is the
+table applied to the effective Fit and the current Weight, with one floor: an owner's word of central or related never
+yields less than relevant. Every surface, export and integration uses the effective Fit and grade.
 
 ## 5. Rarity
 
@@ -120,7 +139,8 @@ floor (landmark → rare, solid → uncommon, incremental → common), which is 
 the collection has no rarity and shows none.
 
 Like the grade table, the depth offsets are tuned in N2. Rarity is recomputed whenever a grade, Weight or the owner's
-word changes, and stored, so lists sort and filter by it without recomputing.
+word changes, and when the tree or the followed topics change, and stored, so lists sort and filter by it without
+recomputing.
 
 The badges a paper shows in a mixed list are its followed topics, the one giving the highest level first.
 
@@ -148,8 +168,16 @@ the Brief's place (a Radar or Field paper, an adjacent Focus paper, or a pass st
 **Weight from the full text** replaces Weight from the abstract (source `full_text`) and the grade, rarity and
 library follow. A digest already written does not change (it is a record, [digests.md](digests.md)).
 
-A pass that fails is retried on the next run; after three failed runs it is listed on Quality with the error and a
-button to run it now. A pass awaiting text for more than seven days is listed there too.
+**What a pass read.** A pass is queued for one paper revision and records what it read: the arXiv version of the
+text, its source (LaTeX or PDF) and a hash of it. When the archive cannot say which arXiv version its text is, the
+version is recorded as unknown. A pass that finishes after its paper got a new revision stores its result labelled
+with the old revision (section 8), does not replace the current Weight, and a pass for the new revision is queued. A
+running pass holds a lease (default 30 minutes); when the lease runs out, because the worker died, the pass goes back
+to ready.
+
+A pass that fails, including a model response that is truncated or invalid, is retried on the next run; after three
+failed runs it is listed on Quality with the error and a button to run it now. A pass awaiting text for more than
+seven days is listed there too. Both count as terminal for the digest wait ([digests.md](digests.md), timing).
 
 ## 7. The library
 
@@ -185,6 +213,14 @@ by itself (first v1, decision 7).
 
 Moving a class in the tree, splitting or merging classes, or following a different class changes which topic grades a
 paper only for papers classified or graded after the change, unless a re-run is asked for.
+
+**How older records read under the current tree.** Memberships are stored per class; inheritance, grading topics,
+topic pages and digest selection always use the current tree and the current followed topics. A verdict belongs to
+its topic and stays valid there whatever version of the tree it was made under. A paper whose memberships now lead to
+a topic that has no verdict for it shows ungraded there (its Weight colours it) until a re-run grades it. A retired
+class (deleted, or replaced by a split or merge) keeps its memberships in the data, but they lead nowhere; papers
+reach the new classes only through a re-run. Rarity is recomputed from the current tree and the existing verdicts.
+Published digests are records and are never re-projected.
 
 ## 11. Volumes and cost
 

@@ -50,6 +50,9 @@ _Avoid_: Issue, review, recap, briefing
 **Pick**:
 A paper a digest puts forward by name, as opposed to papers its prose only mentions.
 
+**Due**:
+Eligible for a topic's next digest and not yet in a published one; a late paper is due in the next digest.
+
 ## Judging a paper
 
 **Fit**:
@@ -79,13 +82,14 @@ A topic's icon on a paper, saying which followed topics it belongs to.
 **Facet**:
 A fact about a paper that is not a judgement: its kind of contribution, and whether it released code or weights.
 
-**Effective grade**:
-The grade every page, export and integration uses: the owner's word where there is one, otherwise the verdict's.
+**Effective Fit**, **effective grade**:
+The Fit and grade every page, export and integration uses: the owner's word on Fit where there is one, otherwise the
+verdict's, with the grade derived from that Fit and the current Weight.
 
 ## The owner's corrections
 
 **Owner's word**:
-The owner's own statement of a paper's place in a topic, from a label, a reaction that carries one, or a reported
+The owner's own statement of a paper's Fit for a topic, from a label, a reaction that carries one, or a reported
 miss; it outranks any verdict.
 
 **Reaction**:

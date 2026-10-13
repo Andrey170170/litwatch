@@ -47,5 +47,11 @@ the collection (its own search-only token, built in M7). Its prior-work entries,
 where one is known, become links to paper pages. An integration acting on a grade checks the effective grade and the
 library when it handles the event (first v1).
 
+A card's automatic reasons are its own, not the library's: picks are not saved (decision 3) and still get cards. When
+the pass is about to start, `deep` checks its reason still holds: for a Focus must read, the effective grade is still
+must read; for a pick, the digest that picked it is published. Either way the paper must not be unsaved: an Unsave
+cancels automatic card passes that have not started. A card the owner asked for is never cancelled by an Unsave, and a
+card already made is kept.
+
 Notion stays outside the built-in set: a documented n8n workflow subscribes by webhook and reads the API. The PI's
 Notion view carries Focus topics only until the owner has talked to her (first v1, decision 5).

@@ -36,29 +36,36 @@ evaluation calls the same functions and writes only to evaluation tables.
   subject and rubric are what the graders read.
 - `classifications` (paper, paper revision, taxonomy revision, primary class, the decision response with every class's
   probability, model, at) and `memberships` (paper, class, paper revision, class version, source classifier |
-  uncertain | keyword | owner | miss, probability).
+  uncertain | keyword | owner | miss, probability): direct memberships only; inherited ones come from the tree, and
+  the classifier's raw outcome stays in `classifications` whatever the owner says.
 - `analyses` (paper, paper revision, gist, weight, weight reason, facets, model, at).
 - `weights` (paper, paper revision, weight, source abstract | full_text, reason, at): the current Weight is the newest
   from full text, else from the abstract.
 - `verdicts` (paper, topic, topic version, paper revision, fit, reason, opinions per grader, split, escalated, at),
   one row per grading as before; the grade is derived, not stored here.
-- `effective_grades` (paper, topic, grade) and `rarities` (paper, mixed-list level, best topic): kept current so every
-  surface reads one answer and lists sort by it.
-- `briefs` (paper, paper revision, text, overstatement line, text source latex | pdf, model, at).
-- `fulltext_passes` (paper, kind brief | weight | deep, reason, state awaiting_text | ready | running | done |
-  failed, priority, queued at, text arrived at, failed runs, last error).
-- `digests` (topic, period day | week, day, state written | failed | nothing_new, gist, text, counts, best rarity,
-  written at) and `digest_papers` (digest, paper, role pick | listed | mentioned, order, why).
+- `effective_grades` (paper, topic, fit, grade) and `rarities` (paper, mixed-list level, best topic): kept current so
+  every surface reads one answer and lists sort by it.
+- `briefs` (paper, paper revision, arXiv version or unknown, text, overstatement line, text source latex | pdf, text
+  hash, model, at).
+- `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
+  done | failed, priority, queued at, text arrived at, arXiv version read, text hash, lease until, failed runs, last
+  error).
+- `due` is reshaped: (topic, paper, due since, daily digest, weekly digest), the durable record of what a digest still
+  has to cover ([digests.md](digests.md)).
+- `digests` (topic, period day | week, day, state pending | written | nothing_new | failed, gist, text, counts, best
+  rarity, written at; published means written or nothing_new) and `digest_papers` (digest, paper, role pick | listed
+  | mentioned, order, why, and frozen at writing: paper revision, gist, fit, grade, rarity).
 - `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`.
 
-**Removed:** `triage`, `candidates`, `due`, `takes`, `take_ratings`, `issues`, `issue_entries`, `reviews`,
+**Removed:** `triage`, `candidates`, `takes`, `take_ratings`, `issues`, `issue_entries`, `reviews`,
 `review_picks`; the first v1's `memberships` (paper in a field) is replaced by the new one. `set_asides` is kept for
 digests (a listed paper the owner later set below relevant). `regression` and the M2 labelling tables stay as
 evaluation history.
 
 **Kept as they are:** `papers`, `intake_checkpoints`, `intake_snapshots`, `runs`, `inference_calls`, `labels` (plus
-class labels), `reactions` (reason values changed), `appraisals`, `calibration_sessions`, `calibration_items`,
-`topic_visits`, `misses` (plus the per-stage record), `publications`, `library`, `outbox`, `integration_cursors`,
+class labels), `reactions` (reason values changed), `appraisals`, `calibration_sessions`,
+`topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
+the draw), `publications`, `library`, `outbox`, `integration_cursors`,
 `zotero_items`, `webdav_files`, `deep_cards`, `deep_attempts`, `deep_waiting`, `eval_runs`, `eval_results` (columns
 for classification instead of triage), `eval_samples`, `schema_migrations`.
 
@@ -66,6 +73,22 @@ The restart ([milestones.md](milestones.md), N6) is a new migration on a copy of
 outside the restart set and their dependent rows are dropped; labels, reactions, appraisals, misses, library state,
 publications, Zotero and WebDAV state and Deep cards are kept for every paper that has them, and those papers are part
 of the restart set.
+
+The first v1's feedback is mapped onto the new terms. Every mapped row keeps its first-v1 value in a `legacy` column,
+so nothing is lost if a mapping turns out wrong:
+
+| First v1 | Becomes |
+| --- | --- |
+| label relevant (with or without a grade) on a Watch topic | label Fit central on the Focus topic for the same class; the old grade is kept only in `legacy` |
+| label adjacent / not relevant / unsure | Fit adjacent / none / unsure |
+| provisional label | stays provisional, in its own cohort ([feedback.md](feedback.md), evaluation) |
+| reaction reason unrelated to the topic / not for me / overrated / already knew it / great find | wrong topic / not interesting / overrated / already knew it / great find |
+| reaction on a Radar or Pulse field | the same reaction on the Area or Field topic whose class matches the field, or on no topic if none does |
+| a label origin (gold, reader, sample, miss) | kept as it is |
+| take rating | not mapped (takes are gone); exported with the takes to `evals/` before they are dropped |
+
+A label of relevant whose grade was must read can show as relevant after the restart when the paper's Weight is
+incremental; the restart's report lists those papers for the owner to look at.
 
 ## Configuration
 
@@ -111,6 +134,9 @@ uncertain_floor = 0.2
 [archive]                  # required
 url = "http://archive:8787"
 pdfs = "followed"          # "followed" (the storage policy) or "all"
+
+[grading]
+area_check_min_confidence = 0.7
 
 [digests]
 wait_minutes = 120

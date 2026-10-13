@@ -10,7 +10,7 @@ Rules the draft follows:
   choose by the name more than by the description.
 - At most three levels. A class has a description of one or two sentences here; the followed classes reuse their
   topic's subject. Descriptions say what is out as well as what is in, where a neighbour is close.
-- **Topics** are marked: [Focus], [Area, daily], [Area, weekly], [Field, weekly]. Today's seven 0.14 selections map
+- **Topics** are marked: [Focus], [Area], [Field]. Today's seven 0.14 selections map
   onto them (CoT faithfulness and CoT monitoring were Watch; interpretability and alignment-and-safety were Radar;
   agents, efficiency-and-architecture and reasoning-and-rl were Pulse).
 - "Other" exists once, at the top, for papers that fit nothing (stat.ME and similar strays).
@@ -27,16 +27,16 @@ top-level class.
 | --- | --- |
 | Pretraining, data and scaling | Pretraining objectives and recipes, training data curation, tokenization, scaling laws. |
 | Instruction tuning and preference training | Supervised fine-tuning, RLHF, DPO and other preference optimization for general helpfulness. Reasoning-specific RL is under Reasoning; safety-motivated alignment is under Alignment and safety. |
-| **Reasoning and RL post-training** [Field, weekly] | Training and using language models to reason: RL from verifiable rewards, GRPO-style post-training, reasoning models and thinking budgets, test-time scaling and search, self-verification, distillation of reasoning. |
+| **Reasoning and RL post-training** [Field] | Training and using language models to reason: RL from verifiable rewards, GRPO-style post-training, reasoning models and thinking budgets, test-time scaling and search, self-verification, distillation of reasoning. |
 | › Chain-of-thought prompting and test-time compute | Prompting methods, sampling and search at inference, thinking budgets. |
 | › Reinforcement learning for reasoning | RL from verifiable rewards, reward models for reasoning, policy optimization methods. |
 | › Analyses of reasoning models | What reasoning training changes, how reasoning traces behave, length and overthinking. |
-| **Agents and tool use** [Field, weekly] | Language models acting over multiple steps: agent architectures, tool and function calling, planning and memory for agents, agent training. Papers using an off-the-shelf agent only as a baseline are out. |
+| **Agents and tool use** [Field] | Language models acting over multiple steps: agent architectures, tool and function calling, planning and memory for agents, agent training. Papers using an off-the-shelf agent only as a baseline are out. |
 | › Coding and software engineering agents | Repository-level coding, SWE-bench-style tasks, debugging agents. |
 | › Web, GUI and computer-use agents | Browser and desktop control, screen understanding. |
 | › Multi-agent systems | Several language-model agents interacting, cooperating or debating. |
 | › Agent benchmarks and evaluation | Environments, benchmarks and metrics for agents. |
-| **Efficiency and architecture** [Field, weekly] | How language models are built and run: architectures beyond the standard transformer, mixture of experts, long context, KV cache, quantization, pruning, distillation, speculative decoding, training and inference systems. Hardware kernels with no modelling change are out. |
+| **Efficiency and architecture** [Field] | How language models are built and run: architectures beyond the standard transformer, mixture of experts, long context, KV cache, quantization, pruning, distillation, speculative decoding, training and inference systems. Hardware kernels with no modelling change are out. |
 | › Model architectures | Transformer variants, state-space and recurrent models, mixture of experts, looped and recursive models. |
 | › Long context and memory | Context extension, memory mechanisms, context compression. |
 | › Inference efficiency | Quantization, pruning, KV-cache methods, speculative decoding, serving. |
@@ -48,7 +48,7 @@ top-level class.
 | Multilingual and low-resource languages | Cross-lingual transfer, languages other than English, low-resource settings. |
 | Language tasks and applications | Machine translation, summarization, information extraction, dialogue, question answering, domain applications of language models (law, medicine, education). |
 
-## 2. Interpretability [Area, daily]
+## 2. Interpretability [Area]
 
 Understanding the internal mechanisms, representations or circuits of neural networks, mostly language models:
 probes, sparse autoencoders, attribution, activation patching, steering, feature and circuit discovery, and the methods
@@ -66,7 +66,7 @@ study is out.
 | Training dynamics and mechanisms of learning | How mechanisms form during training: grokking, phase changes, developmental interpretability. |
 | **Chain-of-thought faithfulness** [Focus] | The topic's subject: whether a model's reasoning trace omits or contradicts a computation the model actually performed (BonaFide's definition). |
 
-## 3. Alignment and safety [Area, weekly]
+## 3. Alignment and safety [Area]
 
 Making AI systems behave as intended and knowing whether they do. Narrow domain benchmarks without a methodological
 contribution are out.
@@ -116,6 +116,8 @@ Papers in the configured categories that fit none of the above.
 
 - Chain-of-thought faithfulness sits under Interpretability and Chain-of-thought monitoring under Alignment and safety,
   as now. A paper on both gets both classes.
-- Alignment and safety is an Area with a weekly digest today; Interpretability is the only daily Area.
+- Alignment and safety is drafted as an Area, so it gets a daily digest and a weekly one, as every Area does (a depth
+  carries no cadence setting). The first draft had it as a weekly-only Area; if a daily digest is too much, make it a
+  Field (weekly overview, 3 picks).
 - Whether "Language models" itself should be followed as a Field (a weekly overview of everything LLM), with Agents,
   Efficiency and Reasoning as its followed children.

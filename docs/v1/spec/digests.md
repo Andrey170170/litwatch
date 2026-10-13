@@ -7,30 +7,51 @@ holds depends on the topic's depth, because the depth is how closely the owner r
 
 | Depth | Daily digest | Weekly digest |
 | --- | --- | --- |
-| Focus | Every paper at Fit central that day, each with its Gist; papers at Fit related as one line each; a short text on what the day brought | What the week was about: the thread through the week's papers, with the chance to bring back an earlier paper the owner may have forgotten; then the week's central papers |
-| Area | A short text on what happened in the area that day, which may mention any of the day's papers by name; 1–2 picks | The week's main trends; 5 picks |
+| Focus | Every due paper at Fit central, each with its Gist; due papers at Fit related as one line each; a short text on what the day brought | What the week was about: the thread through the week's papers, with the chance to bring back an earlier paper the owner may have forgotten; then the week's central papers |
+| Area | A short text on what happened in the area that day, which may mention any due paper by name; 1–2 picks | The week's main trends; 5 picks |
 | Field | none | A high-level overview of the week; 3 picks |
 
-**Focus.** The list is driven by Fit, not by grade: a central paper is listed even when its grade is relevant because
-its Weight is incremental, so nothing central is ever hidden. Rarity only colours it. Adjacent papers are never in a
-digest; they are on the topic page.
+Every Area topic gets both, every Field topic the weekly only; a depth has no other cadence setting.
 
-**Area picks.** The candidates are the day's papers in the topic's subtree whose grade is must read after the
-full-text Weight re-check ([pipeline.md](pipeline.md), section 6). The writer names the one or two that matter most
-and is asked to keep it to that, with no hard cap and no quota: a day with no candidate has no pick. The text may
-cover more of the day's papers in prose. Weekly picks (5 for Area, 3 for Field) are chosen from the whole week's
-members by the writer.
+**Focus.** The list is driven by the effective Fit, not by grade: a central paper is listed even when its grade is
+relevant because its Weight is incremental, so nothing central is ever hidden. Rarity only colours it. Adjacent papers
+are never in a digest; they are on the topic page.
+
+**Area picks.** The candidates are the due papers in the topic's subtree whose grade is must read after the full-text
+Weight re-check ([pipeline.md](pipeline.md), section 6). The writer names the one or two that matter most and is asked
+to keep it to that, with no hard cap and no quota: a day with no candidate has no pick. The text may cover more of the
+due papers in prose. Weekly picks (5 for Area, 3 for Field) are chosen by the writer from the papers that became due
+during the week.
 
 **Children of a followed topic.** A parent topic's digest covers its subtree, including a child topic's papers, at the
-child's grade. A CoT faithfulness paper that is must read appears among Interpretability's pick candidates at its
-CoT faithfulness grade; Interpretability's text discusses it only if it matters to the area as a whole.
+grade a parent shows ([pipeline.md](pipeline.md), section 4). A CoT faithfulness paper that is must read appears among
+Interpretability's pick candidates at its CoT faithfulness grade; Interpretability's text discusses it only if it
+matters to the area as a whole.
+
+## Which papers a digest covers
+
+A paper is **due** for a topic once the pipeline has made it eligible there, and stays due until a published daily
+digest of that topic includes it. Eligible means:
+
+| Depth | Eligible |
+| --- | --- |
+| Focus | graded for the topic with effective Fit central or related |
+| Area | a member of the subtree that grading has finished for; a paper graded must read from the abstract only once its Weight re-check is done or terminal (below) |
+| Field | a member of the subtree that grading has finished for |
+
+A **daily digest** covers the topic's due papers at the time it is written. Normally those are the day's papers; a
+paper that became eligible late (its grading failed on Friday and succeeded on Monday, its re-check finished after the
+wait) is in the next daily digest, shown with its announcement date. A **weekly digest** covers the papers that became
+due for the topic during its week; for a Field topic, which has no daily digest, writing the weekly is what clears
+them. The owner's word never makes a paper due: the owner already knows it.
 
 ## Quiet days
 
 - A day on which arXiv announced nothing (every Saturday and Sunday, and holidays) has no digests, only one line for
   the whole day: "No papers released."
-- A day on which arXiv announced papers but a topic got none (or none central, for Focus) gives that topic a digest
-  that says "Nothing new". It is a real digest, so the owner can see that the run happened and the topic was looked at.
+- A day on which arXiv announced papers but a topic has nothing due (for Focus: no central and no related paper) gives
+  that topic a digest that says "Nothing new". It is a real digest, so the owner can see that the run happened and the
+  topic was looked at. A Focus day with related papers and no central one is an ordinary digest whose text says so.
 
 ## Writing
 
@@ -44,18 +65,31 @@ digests are read a day. It is written in the same call.
 
 ## Timing
 
-The nightly run ends with grading. Digests are written after a **bounded wait** for the full-text passes the digest
-depends on: Focus Briefs and the Area Weight re-checks. The wait ends when they are all done, or after
-`[digests] wait_minutes` (default 120), whichever comes first. A pass that finishes later updates its paper, not the
-digest. Weekly digests are written on Monday after that night's daily digests, for the Monday-to-Sunday week before,
-in the configured timezone.
+The nightly run ends with grading. Digests are written after a **bounded wait**, which starts when that run's grading
+ends, for the full-text passes the night queued that digests depend on: Focus Briefs and the Area Weight re-checks.
+The wait ends when they have all finished or become terminal (three failed runs; text awaited for more than seven
+days), or after `[digests] wait_minutes` (default 120), whichever comes first.
+
+- A Focus paper without its Brief at that point is listed anyway; the writer reads its abstract instead.
+- An Area paper whose re-check has not finished is not due yet: it becomes due when the re-check finishes, and is a
+  pick candidate in the next daily digest if it is still must read. A re-check that becomes terminal makes the paper
+  due on its abstract Weight, so a failure never hides a paper.
+- A pass that finishes later updates its paper, not a digest already published.
+
+Weekly digests are written on Monday after that night's daily digests, for the Monday-to-Sunday week before, in the
+configured timezone.
 
 ## A digest is a record
 
-A digest stays as it was written. When the owner later sets one of its papers below relevant, the paper stays in it,
-shown struck through as set aside. A paper is listed as new in a topic's daily digest once: a re-run of the same day
-amends the digest and never repeats a paper, and a later night does not announce it again (first v1, decisions 15
-and 19). A digest whose writer call failed says so in one line and is filled in when the job runs again.
+A digest is **published** when it is written or says "Nothing new". A published digest is final: a re-run of the
+same day does not rewrite it, and papers that become due afterwards go into the next one. Each of its papers is frozen
+as it was shown: paper revision, Gist, effective Fit, grade, rarity, and its role (pick, listed or mentioned). The one
+live element is the set-aside mark: when the owner later sets a paper below relevant, it stays in the digest, shown
+struck through. A paper is announced as new in a topic's daily digests once (first v1, decisions 15 and 19).
+
+A digest whose writer call fails, or returns text that does not parse, is **failed**, not published: the day shows
+one line saying that topic's digest could not be written, it is listed on Quality, and the next run writes it again
+over the papers due then. Its papers stay due meanwhile, so nothing is lost or announced twice.
 
 ## What the Digest tab shows
 
