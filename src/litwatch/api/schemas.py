@@ -169,6 +169,7 @@ class PaperTopic(TopicRef):
     reaction_reason: ReactionReason | None = None
     member: bool = False  # in a Radar or Pulse field
     by_owner: bool = False  # the owner put it in the field themselves
+    missed: bool = False  # reported as missed for this Watch topic, and that word stands
     grading: bool = False
 
 

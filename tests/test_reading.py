@@ -460,7 +460,8 @@ async def test_important_for_a_field_saves_reacts_and_makes_the_owners_member(cl
     q = await papers_store.get(conn, Q.id)
     fields = {t.slug: t.revision for t in TOPICS if t.kind != TopicKind.WATCH}
     await triage_store.set_memberships(conn, q, fields, set())
-    assert (await (await conn.execute("SELECT count(*) AS n FROM memberships")).fetchone())["n"] == 1
+    (row,) = await (await conn.execute("SELECT * FROM memberships")).fetchall()
+    assert (row["by_owner"], row["by_triage"]) == (True, False)
     # A Watch topic is not a field.
     assert (await client.put(f"/api/papers/{Q.id}/fields/{FAITH.slug}")).status_code == 404
     # Taking it back: no membership, no thumb; the library keeps the paper.
@@ -469,3 +470,107 @@ async def test_important_for_a_field_saves_reacts_and_makes_the_owners_member(cl
     assert await (await conn.execute("SELECT * FROM memberships")).fetchall() == []
     page = (await client.get(f"/api/papers/{Q.id}")).json()
     assert page["saved"] and all(t["slug"] != INTERP.slug for t in page["topics"])
+
+
+async def test_triage_and_the_owner_each_hold_their_own_membership(client, conn):
+    """Who put a paper in a field is recorded per contributor: triage's answer never takes
+    the owner's addition away, and taking the addition back never takes triage's answer."""
+    from litwatch.core import TopicKind
+    from litwatch.store import triage as triage_store
+    from tests.conftest import INTERP
+
+    async def membership():
+        return await (
+            await conn.execute("SELECT by_triage, by_owner FROM memberships WHERE paper_id = %s", (Q.id,))
+        ).fetchone()
+
+    q = await papers_store.get(conn, Q.id)
+    fields = {t.slug: 1 for t in TOPICS if t.kind != TopicKind.WATCH}  # the saved revision
+    # Triage first, then the owner, then triage changes its mind: the owner's addition stays.
+    await triage_store.set_memberships(conn, q, fields, {INTERP.slug})
+    await client.put(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
+    assert dict(await membership()) == {"by_triage": True, "by_owner": True}
+    await triage_store.set_memberships(conn, q, fields, set())
+    assert dict(await membership()) == {"by_triage": False, "by_owner": True}
+    await client.delete(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
+    assert await membership() is None
+    # The owner first, then triage says yes, then the owner takes theirs back: triage's stays.
+    await client.put(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
+    await triage_store.set_memberships(conn, q, fields, {INTERP.slug})
+    assert dict(await membership()) == {"by_triage": True, "by_owner": True}
+    await client.delete(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
+    assert dict(await membership()) == {"by_triage": True, "by_owner": False}
+    page = (await client.get(f"/api/papers/{Q.id}")).json()
+    interp = next(t for t in page["topics"] if t["slug"] == INTERP.slug)
+    assert interp["member"] and not interp["by_owner"]
+
+
+async def test_marking_an_old_member_important_brings_it_into_the_next_review(client, conn):
+    from datetime import UTC, datetime, timedelta
+
+    from litwatch.store import reviews as reviews_store
+    from tests.conftest import INTERP
+
+    await conn.execute(
+        "INSERT INTO memberships (paper_id, topic, topic_revision, created_at) "
+        "VALUES (%s, %s, 1, '2020-01-01')",
+        (Q.id, INTERP.slug),
+    )
+    now = datetime.now(UTC)
+    window = (now - timedelta(hours=1), now + timedelta(hours=1))
+    assert await reviews_store.members(conn, INTERP.slug, *window) == []
+    await client.put(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
+    assert [p.id for p in await reviews_store.members(conn, INTERP.slug, *window)] == [Q.id]
+    # Taken back, it is an old member again.
+    await client.delete(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
+    assert await reviews_store.members(conn, INTERP.slug, *window) == []
+
+
+async def test_taking_important_back_waits_for_an_action_in_flight(client, conn):
+    """An undo arriving while the action is mid-way waits for the paper's lock, so it sees
+    all of the action and takes all of it back; never half (the thumb without the membership)."""
+    import asyncio
+
+    from litwatch import store
+    from litwatch.core import Reaction, ReactionValue
+    from litwatch.feedback import word as word_feedback
+    from litwatch.store import fields as fields_store
+    from litwatch.store import word as word_store
+    from tests.conftest import INTERP
+
+    async with await store.sibling(conn) as other:
+        async with other.transaction():
+            await word_feedback.lock(other, Q.id)  # the action, part way through
+            undo = asyncio.create_task(client.delete(f"/api/papers/{Q.id}/fields/{INTERP.slug}"))
+            await asyncio.sleep(0.5)
+            assert not undo.done()
+            await fields_store.add(other, Q.id, INTERP.slug, 1)
+            await word_store.set_reaction(
+                other, Reaction(paper_id=Q.id, topic=INTERP.slug, value=ReactionValue.UP)
+            )
+        assert (await undo).status_code == 200
+    assert await (await conn.execute("SELECT * FROM memberships")).fetchall() == []
+    assert await (await conn.execute("SELECT * FROM reactions")).fetchall() == []
+
+
+async def test_a_miss_taken_back_can_be_reported_again(client, conn):
+    """Taking a miss back withdraws the owner's word; reporting again gives it back, keeping
+    the miss and its trace, and never over a correction the owner made since."""
+    async def faith():
+        # A topic with nothing to say about the paper is left off the page.
+        page = (await client.get(f"/api/papers/{Q.id}")).json()
+        return next((t for t in page["topics"] if t["slug"] == FAITH.slug), {"missed": False})
+
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    (miss,) = await (await conn.execute("SELECT id FROM misses")).fetchall()
+    assert (await faith())["missed"]
+    await client.delete(f"/api/word/{FAITH.slug}/{Q.id}")
+    assert not (await faith())["missed"]
+    ack = await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    assert ack.json()["message"].startswith("Already reported as missed")
+    assert (await faith())["missed"] and (await faith())["label"]["origin"] == "miss"
+    assert [m["id"] for m in await (await conn.execute("SELECT id FROM misses")).fetchall()] == [miss["id"]]
+    # A correction since stands: the owner said it is not relevant after all.
+    await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "not_relevant"})
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    assert (await faith())["label"]["value"] == "not_relevant" and not (await faith())["missed"]

@@ -213,7 +213,9 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         s.PaperTopic(
             **{
                 k: t[k]
-                for k in ("slug", "name", "kind", "colour", "grade", "take", "member", "by_owner")
+                for k in (
+                    "slug", "name", "kind", "colour", "grade", "take", "member", "by_owner", "missed"
+                )
             },
             grading=t["grading"] and t["grade"] is None,
             label=s.LabelState(**t["label"]) if t["label"] else None,
@@ -476,10 +478,13 @@ async def _field(c: psycopg.AsyncConnection, slug: str) -> Any:
 async def important_for(paper_id: str, slug: str, c: Conn) -> s.Ack:
     """The paper matters for the field: it joins the library, gets a thumb up for the
     field, and becomes a member as the owner's own addition, which the field's next review
-    sees and its page lists as added by the owner. Never a Watch miss."""
-    topic = await _field(c, slug)
+    sees and its page lists as added by the owner. Never a Watch miss. The whole action is
+    one transaction under the paper's lock (topics first, as every settle), so an undo in
+    flight waits for all of it and the topic is read as it is then."""
     await _known(c, paper_id)
     async with c.transaction():
+        await word.lock(c, paper_id)
+        topic = await _field(c, slug)
         await fields_store.add(c, paper_id, slug, topic.revision)
         settled = await word.toggle(c, paper_id, Hand.SAVE)
         await word.react(c, Reaction(paper_id=paper_id, topic=slug, value=ReactionValue.UP))
@@ -489,10 +494,11 @@ async def important_for(paper_id: str, slug: str, c: Conn) -> s.Ack:
 @router.delete("/papers/{paper_id:path}/fields/{slug}")
 async def not_important_for(paper_id: str, slug: str, c: Conn) -> s.Ack:
     """Take it back: the owner's membership and the thumb go; the library is left as it is,
-    since the Save toggle is the owner's word on that."""
-    topic = await _field(c, slug)
+    since the Save toggle is the owner's word on that. Under the same lock as the action."""
     await _known(c, paper_id)
     async with c.transaction():
+        await word.lock(c, paper_id)
+        topic = await _field(c, slug)
         await fields_store.remove(c, paper_id, slug)
         settled = await word.unreact(c, paper_id, slug)
     return _ack(f"No longer marked important for {topic.name}", settled)

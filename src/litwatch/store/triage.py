@@ -99,18 +99,26 @@ async def store_failed(conn: psycopg.AsyncConnection, paper: Paper, error: str) 
 async def set_memberships(
     conn: psycopg.AsyncConnection, paper: Paper, asked: dict[str, int], member_of: set[str]
 ) -> None:
-    """Replace the paper's memberships among the field topics that were asked about. One
-    the owner made ("Important for <field>") is theirs and stays."""
+    """Replace triage's memberships among the field topics that were asked about. Triage
+    writes only its own flag: a membership the owner made ("Important for <field>") keeps
+    theirs, and a row goes only when neither holds."""
+    dropped = [slug for slug in asked if slug not in member_of]
     await conn.execute(
-        "DELETE FROM memberships WHERE paper_id = %s AND topic = ANY(%s) AND NOT by_owner",
-        (paper.id, [slug for slug in asked if slug not in member_of]),
+        "UPDATE memberships SET by_triage = false WHERE paper_id = %s AND topic = ANY(%s)",
+        (paper.id, dropped),
+    )
+    await conn.execute(
+        "DELETE FROM memberships WHERE paper_id = %s AND topic = ANY(%s) "
+        "AND NOT by_triage AND NOT by_owner",
+        (paper.id, dropped),
     )
     for slug in sorted(member_of):
         await conn.execute(
             """
-            INSERT INTO memberships (paper_id, topic, topic_revision, paper_version)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO memberships (paper_id, topic, topic_revision, paper_version, by_triage)
+            VALUES (%s, %s, %s, %s, true)
             ON CONFLICT (paper_id, topic) DO UPDATE SET
+                by_triage = true,
                 topic_revision = EXCLUDED.topic_revision, paper_version = EXCLUDED.paper_version
             """,
             (paper.id, slug, asked[slug], paper.version),

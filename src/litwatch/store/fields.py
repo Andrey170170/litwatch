@@ -1,40 +1,41 @@
 """Papers the owner put into a Radar or Pulse field themselves: "Important for <field>"
-(spec, M7). The row is a membership like any other, marked `by_owner`, so the field's next
-review sees it and its page lists it; triage never takes it away."""
+(spec, M7). The row is a membership like any other, so the field's next review sees it and
+its page lists it; the owner's flag is theirs alone, as triage's is triage's, and the row
+goes only when neither holds."""
 
 from __future__ import annotations
 
 import psycopg
 
 
-async def add(conn: psycopg.AsyncConnection, paper_id: str, topic: str, revision: int) -> bool:
-    """Make the paper a member of the field as the owner's own addition. A membership triage
-    already made stays as it is. Returns whether a row was added."""
-    cur = await conn.execute(
+async def add(conn: psycopg.AsyncConnection, paper_id: str, topic: str, revision: int) -> None:
+    """Make the paper a member as the owner's own addition, now. A membership triage made
+    keeps triage's flag; one the owner added before keeps its time."""
+    await conn.execute(
         """
-        INSERT INTO memberships (paper_id, topic, topic_revision, by_owner)
-        VALUES (%s, %s, %s, true)
-        ON CONFLICT (paper_id, topic) DO NOTHING
+        INSERT INTO memberships (paper_id, topic, topic_revision, by_triage, by_owner,
+                                 owner_added_at)
+        VALUES (%s, %s, %s, false, true, now())
+        ON CONFLICT (paper_id, topic) DO UPDATE SET
+            by_owner = true,
+            owner_added_at = CASE WHEN memberships.by_owner THEN memberships.owner_added_at
+                                  ELSE now() END
         """,
         (paper_id, topic, revision),
     )
-    return cur.rowcount > 0
 
 
 async def remove(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> bool:
-    """Take back the owner's addition: only a membership the owner made is dropped."""
+    """Take back the owner's addition. What triage decided stands; the row goes only when
+    triage never made it a member. Returns whether the owner's flag was set."""
     cur = await conn.execute(
-        "DELETE FROM memberships WHERE paper_id = %s AND topic = %s AND by_owner",
+        "UPDATE memberships SET by_owner = false, owner_added_at = NULL "
+        "WHERE paper_id = %s AND topic = %s AND by_owner",
+        (paper_id, topic),
+    )
+    await conn.execute(
+        "DELETE FROM memberships WHERE paper_id = %s AND topic = %s "
+        "AND NOT by_triage AND NOT by_owner",
         (paper_id, topic),
     )
     return cur.rowcount > 0
-
-
-async def is_owners(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> bool:
-    row = await (
-        await conn.execute(
-            "SELECT by_owner FROM memberships WHERE paper_id = %s AND topic = %s",
-            (paper_id, topic),
-        )
-    ).fetchone()
-    return bool(row and row["by_owner"])

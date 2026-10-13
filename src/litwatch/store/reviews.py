@@ -26,13 +26,15 @@ PICKS = """coalesce((SELECT jsonb_agg(jsonb_build_object(
 async def members(
     conn: psycopg.AsyncConnection, topic: str, since: datetime, until: datetime
 ) -> list[Paper]:
-    """Papers that joined the topic's field in the window, oldest first."""
+    """Papers that joined the topic's field in the window, oldest first: found by triage
+    then, or marked important by the owner then (an older member brought in again)."""
     rows = await (
         await conn.execute(
             f"SELECT {COLUMNS} FROM memberships m JOIN papers p ON p.id = m.paper_id "
-            "WHERE m.topic = %s AND m.created_at >= %s AND m.created_at < %s "
-            "ORDER BY m.created_at, p.id",
-            (topic, since, until),
+            "WHERE m.topic = %s AND ((m.created_at >= %s AND m.created_at < %s) "
+            "OR (m.owner_added_at >= %s AND m.owner_added_at < %s)) "
+            "ORDER BY least(m.created_at, coalesce(m.owner_added_at, m.created_at)), p.id",
+            (topic, since, until, since, until),
         )
     ).fetchall()
     return [row_to_paper(r) for r in rows]

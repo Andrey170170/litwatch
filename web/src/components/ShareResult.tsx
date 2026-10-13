@@ -79,7 +79,8 @@ function Actions({ paperId, saved, states, topics }: { paperId: string; saved: b
       {watch.map((t) => {
         const st = state(t.slug);
         const relevant = st?.grade === "must_read" || st?.grade === "relevant";
-        const reported = st?.label?.origin === "miss" && st.label.value === "relevant";
+        // `missed` is the API's word: a miss stands for this topic, whatever labelled it before.
+        const reported = !!st?.missed;
         if (relevant && !reported)
           return <p key={t.slug} className="px-1 text-[13px] text-muted-foreground">Already relevant for {t.name}.</p>;
         return (
@@ -98,7 +99,9 @@ function Actions({ paperId, saved, states, topics }: { paperId: string; saved: b
       })}
       {fields.map((t) => {
         const st = state(t.slug);
-        const done = !!st?.by_owner || (!!st?.member && st.reaction === "up");
+        // Done means the owner's own addition; a member triage found, or a plain thumb, is not.
+        const done = !!st?.by_owner;
+        const note = done ? `in the field as your addition; ${saved ? "saved" : "not in the library"}` : st?.member ? "already in the field by triage" : undefined;
         return (
           <ActionRow
             key={t.slug}
@@ -107,7 +110,7 @@ function Actions({ paperId, saved, states, topics }: { paperId: string; saved: b
             pending={important.isPending || unimportant.isPending}
             label={`Important for ${t.name}`}
             doneLabel={`Important for ${t.name}`}
-            note={done ? (st?.by_owner ? "in the field as your addition; saved" : "already in the field; saved") : undefined}
+            note={note}
             onDo={() => important.mutate({ paper_id: paperId, topic: t.slug })}
             onUndo={() => unimportant.mutate({ paper_id: paperId, topic: t.slug })}
             undoLabel="Take back"
@@ -141,7 +144,10 @@ function ActionRow({ label, doneLabel, undoLabel, done, pending, note, colour, o
         className="flex min-h-[46px] w-full items-center gap-3 rounded-[10px] border border-border bg-background px-3.5 text-left text-[15px] hover:border-foreground disabled:opacity-50"
       >
         {colour && <span className="size-2.5 shrink-0 rounded-full" style={{ background: colour }} aria-hidden />}
-        {label}
+        <span className="min-w-0 flex-1">
+          {label}
+          {note && <span className="block text-[12.5px] text-muted-foreground">{note}</span>}
+        </span>
       </button>
     );
   return (
@@ -151,7 +157,13 @@ function ActionRow({ label, doneLabel, undoLabel, done, pending, note, colour, o
         <span className="font-semibold">{doneLabel}</span>
         {note && <span className="block text-[12.5px] font-normal text-muted-foreground">{note}</span>}
       </span>
-      <button type="button" disabled={pending} onClick={onUndo} className="hit shrink-0 text-[13px] text-muted-foreground underline decoration-border hover:text-foreground disabled:opacity-50">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={onUndo}
+        aria-label={`${undoLabel}: ${doneLabel}`}
+        className="hit shrink-0 text-[13px] text-muted-foreground underline decoration-border hover:text-foreground disabled:opacity-50"
+      >
         {undoLabel}
       </button>
     </div>

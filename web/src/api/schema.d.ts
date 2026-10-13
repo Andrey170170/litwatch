@@ -288,14 +288,16 @@ export interface paths {
          * Important For
          * @description The paper matters for the field: it joins the library, gets a thumb up for the
          *     field, and becomes a member as the owner's own addition, which the field's next review
-         *     sees and its page lists as added by the owner. Never a Watch miss.
+         *     sees and its page lists as added by the owner. Never a Watch miss. The whole action is
+         *     one transaction under the paper's lock (topics first, as every settle), so an undo in
+         *     flight waits for all of it and the topic is read as it is then.
          */
         put: operations["important_for_api_papers__paper_id__fields__slug__put"];
         post?: never;
         /**
          * Not Important For
          * @description Take it back: the owner's membership and the thumb go; the library is left as it is,
-         *     since the Save toggle is the owner's word on that.
+         *     since the Save toggle is the owner's word on that. Under the same lock as the action.
          */
         delete: operations["not_important_for_api_papers__paper_id__fields__slug__delete"];
         options?: never;
@@ -1485,6 +1487,11 @@ export interface components {
              * @default false
              */
             by_owner: boolean;
+            /**
+             * Missed
+             * @default false
+             */
+            missed: boolean;
             /**
              * Grading
              * @default false

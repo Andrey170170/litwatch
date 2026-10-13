@@ -49,9 +49,13 @@ async def report(
     conn: psycopg.AsyncConnection, paper_id: str, topic: str
 ) -> tuple[int, Settled, bool, bool]:
     """File the miss and give the owner's word on it. Returns the miss id, what settled,
-    whether it is new, and whether it needs a trace. Reporting again changes nothing (a
-    correction made since stands), except that a trace never finished is asked for again:
+    whether it is new, and whether it needs a trace. Reporting again keeps the miss and its
+    trace: the owner's word is given again only where none stands (it was taken back), and
+    never over a label the owner gave since; a trace never finished is asked for again, since
     one cut off by a restart would otherwise stay pending. The trace is `trace`'s job."""
+    word_on_it = Label(
+        paper_id=paper_id, topic=topic, value=LabelValue.RELEVANT, origin=LabelOrigin.MISS
+    )
     async with conn.transaction():
         row = await (
             await conn.execute(
@@ -67,14 +71,17 @@ async def report(
                     (paper_id, topic),
                 )
             ).fetchone()
-            settled = await word.settle(conn, paper_id)
+            labelled = await (
+                await conn.execute(
+                    "SELECT 1 FROM labels WHERE paper_id = %s AND topic = %s", (paper_id, topic)
+                )
+            ).fetchone()
+            if labelled:
+                settled = await word.settle(conn, paper_id)
+            else:
+                _, settled = await word.label(conn, word_on_it)
             return existing["id"], settled, False, await _traceable(conn, existing["id"])
-        _, settled = await word.label(
-            conn,
-            Label(
-                paper_id=paper_id, topic=topic, value=LabelValue.RELEVANT, origin=LabelOrigin.MISS
-            ),
-        )
+        _, settled = await word.label(conn, word_on_it)
     return row["id"], settled, True, True
 
 
