@@ -3613,6 +3613,11 @@
             },
             "type": "array",
             "title": "Misses"
+          },
+          "will_retry": {
+            "type": "boolean",
+            "title": "Will Retry",
+            "default": false
           }
         },
         "type": "object",
@@ -3711,6 +3716,11 @@
             "type": "integer",
             "title": "Members",
             "default": 0
+          },
+          "will_retry": {
+            "type": "boolean",
+            "title": "Will Retry",
+            "default": false
           }
         },
         "type": "object",

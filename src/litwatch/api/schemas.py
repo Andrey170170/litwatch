@@ -97,6 +97,7 @@ class Review(BaseModel):
     text: str | None = None
     picks: list[Pick] = Field(default_factory=list)
     members: int = 0
+    will_retry: bool = False  # failed, and the next scheduled run tries it again
 
 
 class Listed(BaseModel):
@@ -117,6 +118,7 @@ class Recap(BaseModel):
     papers: list[Listed] = Field(default_factory=list)
     set_aside: list[Listed] = Field(default_factory=list)
     misses: list[Listed] = Field(default_factory=list)
+    will_retry: bool = False  # failed, and the next scheduled run tries it again
 
 
 class Section(BaseModel):

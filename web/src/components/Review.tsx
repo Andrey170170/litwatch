@@ -46,13 +46,16 @@ function PaperLink({ id, title, topic, surface, className }: { id: string; title
 
 const QUIET = "mt-1.5 text-[14px] text-muted-foreground";
 
+/** How a failed review's line ends: a retry is promised only when the next run will make it. */
+const retryNote = (willRetry: boolean | undefined) => (willRetry ? "; litwatch tries again on the next run." : ".");
+
 /** A Radar or Pulse review: the prose, then the picks with why each was picked. */
 export function ReviewView({ review, topic, surface }: { review: Review; topic: TopicRef; surface: Surface }) {
   const span = review.period === "day" ? "day" : "week";
   if (review.state === "failed")
     return (
       <p className={QUIET}>
-        The {span}'s review of {plural(review.members ?? 0, "paper")} did not get written; litwatch tries again on the next run.
+        The {span}'s review of {plural(review.members ?? 0, "paper")} did not get written{retryNote(review.will_retry)}
       </p>
     );
   if (review.state === "quiet" || !review.text)
@@ -106,7 +109,11 @@ function PickView({ pick, topic, surface }: { pick: PickT; topic: string; surfac
  */
 export function RecapView({ recap, topic, surface }: { recap: Recap; topic: TopicRef; surface: Surface }) {
   if (recap.state === "failed")
-    return <p className={QUIET}>The week's recap of {topic.name} did not get written; litwatch tries again on the next run.</p>;
+    return (
+      <p className={QUIET}>
+        The week's recap of {topic.name} did not get written{retryNote(recap.will_retry)}
+      </p>
+    );
   const quiet = recap.state === "quiet" || !recap.text;
   return (
     <div className={quiet ? undefined : "mt-2.5"}>

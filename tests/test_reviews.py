@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from litwatch.api import create_app
-from litwatch.config import Config
+from litwatch.config import Config, Schedule
 from litwatch.core import (
     Cadence,
     Grade,
@@ -20,12 +20,13 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.feedback import word
-from litwatch.jobs import digest, reviews
+from litwatch.jobs import digest, reviews, scheduler
 from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, ProviderError
 from litwatch.review import reviews as review_calls
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
+from litwatch.store import reviews as reviews_store
 from litwatch.store import topics as topics_store
 from litwatch.store import verdicts
 from tests.conftest import AGENTS, FAITH, INTERP, paper
@@ -403,3 +404,41 @@ def test_a_posix_tz_rule_is_honoured_as_the_process_honours_it(monkeypatch):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+async def test_a_topics_reviews_run_newest_span_first_whatever_was_rewritten_last(db):
+    monday = date(2026, 10, 5)
+    for period, day, written in [
+        ("week", monday, "2026-10-12 08:00"),  # the week of 5 October
+        ("day", monday + timedelta(days=8), "2026-10-13 07:00"),  # Tuesday 13 October
+        ("week", monday - timedelta(days=7), "2026-10-13 09:00"),  # an old week, retried last
+    ]:
+        await db.execute(
+            "INSERT INTO reviews (topic, kind, period, day, state, written_at) "
+            "VALUES (%s, 'radar', %s, %s, 'quiet', %s)",
+            (DAILY.slug, period, day, written),
+        )
+    rows = await reviews_store.for_topic(db, DAILY.slug)
+    assert [(r["period"], r["day"]) for r in rows] == [
+        ("day", monday + timedelta(days=8)),
+        ("week", monday),
+        ("week", monday - timedelta(days=7)),
+    ]
+
+
+def test_a_failed_review_is_promised_a_retry_only_while_the_next_run_makes_it():
+    schedule = Config(schedule=Schedule(timezone="America/Denver")).schedule
+    zone = schedule.zone
+
+    def retried(period, day, at):
+        return scheduler.will_retry(schedule, period, date.fromisoformat(day), at)
+
+    early = datetime(2026, 10, 12, 5, tzinfo=zone)  # Monday, before the 06:00 and 07:00 runs
+    late = datetime(2026, 10, 12, 8, tzinfo=zone)  # the same Monday, after both
+    # The nightly at 06:00 today retries the days from 5 October; tomorrow's from 6 October.
+    assert retried("day", "2026-10-05", early) and not retried("day", "2026-10-04", early)
+    assert not retried("day", "2026-10-05", late) and retried("day", "2026-10-06", late)
+    # Today's weekly run reviews the week of 5 October and retries 28 September's.
+    assert retried("week", "2026-09-28", early) and not retried("week", "2026-09-21", early)
+    # After it, the next (19 October) retries 5 October's week and no longer 28 September's.
+    assert retried("week", "2026-10-05", late) and not retried("week", "2026-09-28", late)

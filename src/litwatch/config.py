@@ -130,6 +130,17 @@ class Schedule(_Section):
             raise ValueError(f"not a cron expression: {value!r}")
         return value
 
+    @field_validator("timezone")
+    @classmethod
+    def _zone(cls, value: str | None) -> str | None:
+        # Checked at load too: a zone that cannot be found would fail every tick.
+        if value is not None:
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError(f"not a time zone: {value!r}") from exc
+        return value
+
     @property
     def zone(self) -> tzinfo:
         return ZoneInfo(self.timezone) if self.timezone else system_zone()

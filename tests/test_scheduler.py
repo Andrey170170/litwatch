@@ -116,3 +116,5 @@ def test_a_bad_cron_expression_is_refused_at_load():
     for job in ("nightly", "weekly", "publications"):
         with pytest.raises(ValidationError, match="not a cron expression"):
             Schedule(**{job: "every night"})
+    with pytest.raises(ValidationError, match="not a time zone"):
+        Schedule(timezone="Mars/Olympus_Mons")
