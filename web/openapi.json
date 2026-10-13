@@ -2047,7 +2047,7 @@
     "/api/events": {
       "get": {
         "summary": "Changes",
-        "description": "The outbox in order, from after the given event id: for a client that polls instead of\ntaking webhooks. Pass the last id seen as `after` to read on.",
+        "description": "The outbox in order, from after a position: for a client that polls instead of taking\nwebhooks. Start without `after`, then pass the `next` of each answer to read on. Only\nevents whose transactions are settled are listed, so reading on never misses one that\ncommitted late.",
         "operationId": "changes_api_events_get",
         "parameters": [
           {
@@ -2055,8 +2055,8 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "default": 0,
+              "type": "string",
+              "default": "0.0",
               "title": "After"
             }
           },
@@ -2079,11 +2079,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Event"
-                  },
-                  "title": "Response Changes Api Events Get"
+                  "$ref": "#/components/schemas/Changes"
                 }
               }
             }
@@ -2475,6 +2471,28 @@
         ],
         "title": "CardRequested"
       },
+      "Changes": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "next": {
+            "type": "string",
+            "title": "Next"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events",
+          "next"
+        ],
+        "title": "Changes",
+        "description": "A page of the changes feed, and the position to read on from."
+      },
       "Chosen": {
         "properties": {
           "topic": {
@@ -2795,6 +2813,17 @@
               }
             ],
             "title": "Created At"
+          },
+          "xid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xid"
           }
         },
         "type": "object",
