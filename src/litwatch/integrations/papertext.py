@@ -175,7 +175,11 @@ class BodyFetcher:
                 if pdf is None:
                     return None  # the archive is still fetching it; never a second download
         if pdf is None:
-            pdf = await self._get(f"https://arxiv.org/pdf/{identity}")
+            try:
+                pdf = await self._get(f"https://arxiv.org/pdf/{identity}")
+            except httpx.HTTPError as exc:
+                log.warning("%s: PDF request failed (%s)", paper.id, type(exc).__name__)
+                return None
             if pdf is None or not pdf.startswith(b"%PDF-"):
                 return None
         md = await asyncio.to_thread(pdf_to_markdown, pdf)

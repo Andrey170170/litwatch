@@ -14,12 +14,15 @@ topics ask for, and returns the validated card with a trace and token counts.
 Every submission that may reach the service is recorded as an attempt before it is sent, and
 the job it starts is recorded once accepted. A failed poll or a restart then follows that
 job rather than paying for another; a submission whose answer never came counts all the same.
-A job that ends in failure is recorded and not retried by itself. A paper gets at most three
-automatic submissions, and any one event at most three, a request included. At most
-`max_per_day` automatic submissions are made in any 24 hours, to protect the subscription
-from a loose rubric; the owner's requests do not count. A paper past the cap is passed over
-with the reason recorded, and the owner can ask for its card. (Waiting instead would hold
-the owner's requests behind it.)
+A job that ends in failure is recorded and not retried by itself. A paper whose text cannot
+be had yet (no HTML rendering, the archive still fetching the PDF, arXiv failing) waits: up to
+three waiting papers are tried again before each event, each at most hourly, for a day, after
+which the reason is recorded. The event itself goes on, so one paper never holds up the rest.
+A paper gets at most three automatic submissions, and any one event at most three, a request
+included; a paper stopped by that limit says so. At most `max_per_day` automatic submissions
+are made in any 24 hours, to protect the subscription from a loose rubric; the owner's
+requests do not count. A paper past the cap is passed over with the reason recorded, and the
+owner can ask for its card. (Waiting instead would hold the owner's requests behind it.)
 
 Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `max_per_day`
 (10), `poll_seconds` (15) and `timeout_minutes` (45).
@@ -53,6 +56,12 @@ log = logging.getLogger(__name__)
 EXTENSIONS = {"cot-faithfulness": "faithfulness", "cot-monitoring": "monitoring"}
 MAX_AUTOMATIC_ATTEMPTS = 3  # automatic submissions per paper, ever
 MAX_SUBMISSIONS = 3  # per event: a request, too, stops after this many unanswered submissions
+# A paper whose text could not be had is tried again, while other events are handled: this
+# many per event, each at most once in this long, until it has waited this long.
+WAIT_RETRIES_PER_EVENT = 3
+WAIT_RETRY_EVERY = timedelta(hours=1)
+WAIT_AT_MOST = timedelta(days=1)
+WAITING = "waiting"
 
 
 @dataclass
@@ -165,41 +174,74 @@ class Deep:
         await self.fetcher.aclose()
 
     async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
-        paper_id = event.paper_id
+        await self._retry_waiting(conn)
+        automatic = event.type != events.CARD_REQUESTED
+        if await self._make(conn, event.paper_id, event.id, automatic) != WAITING:
+            await state.stop_waiting(conn, event.paper_id)
+
+    async def _retry_waiting(self, conn: psycopg.AsyncConnection) -> None:
+        """Try again, a few at a time, for papers whose text was not to be had. Their trouble
+        is their own: a failure here is logged and never fails the event in hand."""
+        now = datetime.now(UTC)
+        for row in await state.waiting(conn, now - WAIT_RETRY_EVERY, WAIT_RETRIES_PER_EVENT):
+            paper_id = row["paper_id"]
+            if now - row["since"] > WAIT_AT_MOST:
+                await state.stop_waiting(conn, paper_id)
+                await state.card_failed(conn, paper_id, "no paper text came within a day")
+                continue
+            try:
+                outcome = await self._make(conn, paper_id, row["event_id"], row["automatic"])
+            except Exception:
+                log.exception("%s: retrying the deep card failed", paper_id)
+                await state.touch_waiting(conn, paper_id)
+                continue
+            if outcome != WAITING:
+                await state.stop_waiting(conn, paper_id)
+
+    async def _make(
+        self, conn: psycopg.AsyncConnection, paper_id: str, event_id: int, automatic: bool
+    ) -> str | None:
+        """Get the paper its card, if it should have one now. Returns `WAITING` when its text
+        could not be had, which is recorded so it is tried again later."""
         found = await state.card(conn, paper_id)
         if found and found["card"]:
-            return
+            return None
         if found and found["job_id"]:
             # Submitted before a failure or a restart: follow that job, never pay for another.
             await self._follow(conn, paper_id, found["job_id"], found["job_since"])
-            return
-        automatic = event.type != events.CARD_REQUESTED
+            return None
         if automatic:
             if not await must_read_and_saved(conn, paper_id):
-                return
+                return None
             if await state.attempts(conn, paper_id, automatic=True) >= MAX_AUTOMATIC_ATTEMPTS:
-                return
+                reason = (
+                    f"stopped: {MAX_AUTOMATIC_ATTEMPTS} automatic submissions came to nothing; "
+                    "ask for the card to try again"
+                )
+                await state.card_failed(conn, paper_id, reason)
+                return None
             since = datetime.now(UTC) - timedelta(days=1)
             if await state.automatic_attempts_since(conn, since) >= self.max_per_day:
                 reason = f"passed over: {self.max_per_day} automatic cards in the last 24 hours"
                 await state.card_failed(conn, paper_id, reason)
                 log.warning("%s: deep card %s", paper_id, reason)
-                return
-        if await state.attempts(conn, paper_id, event_id=event.id) >= MAX_SUBMISSIONS:
+                return None
+        if await state.attempts(conn, paper_id, event_id=event_id) >= MAX_SUBMISSIONS:
             await state.card_failed(
                 conn, paper_id, f"gave up after {MAX_SUBMISSIONS} submissions went unanswered"
             )
-            return
+            return None
         paper = await papers_store.get(conn, paper_id)
         if paper is None:
-            return
+            return None
         topics = await self._topics(conn, paper_id, not automatic)
         body = await self._body(conn, paper)
         if body is None:
-            await state.card_failed(conn, paper_id, "no paper text available")
-            return
+            await state.wait_for_text(conn, paper_id, event_id, automatic)
+            await state.card_failed(conn, paper_id, "waiting for the paper's text")
+            return WAITING
         # Counted before it is sent: the service may accept a job whose answer never arrives.
-        await state.add_attempt(conn, paper_id, event.id, automatic)
+        await state.add_attempt(conn, paper_id, event_id, automatic)
         job_id = await self.client.submit(
             _paper(paper, *body),
             extensions=sorted(
@@ -209,6 +251,7 @@ class Deep:
         )
         await state.job_started(conn, paper_id, job_id)
         await self._follow(conn, paper_id, job_id, datetime.now(UTC))
+        return None
 
     async def _follow(
         self, conn: psycopg.AsyncConnection, paper_id: str, job_id: str, since: datetime

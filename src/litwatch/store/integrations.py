@@ -133,15 +133,24 @@ async def card_failed(
     stats: dict[str, Any] | None = None,
     trace: list[Any] | None = None,
 ) -> None:
-    """Record why a paper has no card; any job for it is over. A card written earlier stays."""
+    """Record why a paper has no card; any job for it is over. A card written earlier stays,
+    and so do the last job's stats and trace unless new ones are given."""
     await conn.execute(
         """
-        INSERT INTO deep_cards (paper_id, stats, trace, error) VALUES (%s, %s, %s, %s)
+        INSERT INTO deep_cards (paper_id, stats, trace, error)
+        VALUES (%(p)s, coalesce(%(stats)s::jsonb, '{}'), coalesce(%(trace)s::jsonb, '[]'),
+                %(error)s)
         ON CONFLICT (paper_id) DO UPDATE SET
-            stats = EXCLUDED.stats, trace = EXCLUDED.trace, error = EXCLUDED.error,
-            job_id = NULL, job_since = NULL
+            stats = coalesce(%(stats)s::jsonb, deep_cards.stats),
+            trace = coalesce(%(trace)s::jsonb, deep_cards.trace),
+            error = EXCLUDED.error, job_id = NULL, job_since = NULL
         """,
-        (paper_id, Jsonb(stats or {}), Jsonb(trace or []), error),
+        {
+            "p": paper_id,
+            "stats": Jsonb(stats) if stats is not None else None,
+            "trace": Jsonb(trace) if trace is not None else None,
+            "error": error,
+        },
     )
 
 
@@ -195,3 +204,36 @@ async def automatic_attempts_since(conn: psycopg.AsyncConnection, since: datetim
         )
     ).fetchone()
     return row["n"]
+
+
+async def wait_for_text(
+    conn: psycopg.AsyncConnection, paper_id: str, event_id: int, automatic: bool
+) -> None:
+    """The paper's text could not be had now: try again later. A paper already waiting keeps
+    the time it began to."""
+    await conn.execute(
+        "INSERT INTO deep_waiting (paper_id, event_id, automatic) VALUES (%s, %s, %s) "
+        "ON CONFLICT (paper_id) DO UPDATE SET tried_at = now()",
+        (paper_id, event_id, automatic),
+    )
+
+
+async def waiting(
+    conn: psycopg.AsyncConnection, tried_before: datetime, limit: int
+) -> list[dict[str, Any]]:
+    """Papers waiting for their text, last tried before then, the longest-waiting first."""
+    return await (
+        await conn.execute(
+            "SELECT paper_id, event_id, automatic, since FROM deep_waiting "
+            "WHERE tried_at < %s ORDER BY since, paper_id LIMIT %s",
+            (tried_before, limit),
+        )
+    ).fetchall()
+
+
+async def touch_waiting(conn: psycopg.AsyncConnection, paper_id: str) -> None:
+    await conn.execute("UPDATE deep_waiting SET tried_at = now() WHERE paper_id = %s", (paper_id,))
+
+
+async def stop_waiting(conn: psycopg.AsyncConnection, paper_id: str) -> None:
+    await conn.execute("DELETE FROM deep_waiting WHERE paper_id = %s", (paper_id,))

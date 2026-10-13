@@ -69,6 +69,20 @@ CREATE TABLE deep_attempts (
 CREATE INDEX deep_attempts_paper_idx ON deep_attempts (paper_id);
 CREATE INDEX deep_attempts_at_idx ON deep_attempts (at) WHERE automatic;
 
+-- deep: papers whose text could not be had yet (no HTML rendering, the archive still fetching
+-- the PDF, arXiv failing). Retried a few at a time while other events are handled, so one
+-- paper never holds up the rest; given up after a day.
+CREATE TABLE deep_waiting (
+    paper_id  text PRIMARY KEY REFERENCES papers(id),
+    event_id  bigint NOT NULL,           -- the event that asked, for its attempt count
+    automatic boolean NOT NULL,
+    since     timestamptz NOT NULL DEFAULT now(),
+    tried_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- The paper revision a fetched full text belongs to: a rewrite makes it stale.
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS body_revision integer;
+
 -- An adopted 0.x database brings its cards along on the paper rows.
 DO $$
 BEGIN
