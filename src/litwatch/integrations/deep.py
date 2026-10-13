@@ -6,15 +6,20 @@ topic and in the library (`grade.changed` to `must_read`, `paper.saved`), and fo
 the owner asks about by hand (`card.requested`), whatever its grade or topic. A paper gets
 one card; a stored card is never replaced by an automatic event.
 
-litwatch owns all state; the service is a stateless job runner. It gets the paper's text,
-the Watch topics that make the paper `must_read` (all active Watch topics for a request on
-a paper that is `must_read` nowhere) and the card extensions those topics ask for, and
-returns the validated card with a trace and token counts. A job that fails is recorded and
-not retried by itself; a paper whose automatic attempts failed three times is left alone
-until the owner asks. A service that cannot be reached is retried by the dispatcher. To
-protect the subscription from a loose rubric, at most `max_per_day` automatic cards are
-attempted in any 24 hours; a paper past the cap is passed over with the reason recorded, and
-the owner can ask for its card. (Waiting instead would hold the owner's requests behind it.)
+litwatch owns all state; the service is a stateless job runner that does not deduplicate.
+It gets the paper's text, the Watch topics that make the paper `must_read` (all active Watch
+topics for a request on a paper that is `must_read` nowhere) and the card extensions those
+topics ask for, and returns the validated card with a trace and token counts.
+
+Every submission that may reach the service is recorded as an attempt before it is sent, and
+the job it starts is recorded once accepted. A failed poll or a restart then follows that
+job rather than paying for another; a submission whose answer never came counts all the same.
+A job that ends in failure is recorded and not retried by itself. A paper gets at most three
+automatic submissions, and any one event at most three, a request included. At most
+`max_per_day` automatic submissions are made in any 24 hours, to protect the subscription
+from a loose rubric; the owner's requests do not count. A paper past the cap is passed over
+with the reason recorded, and the owner can ask for its card. (Waiting instead would hold
+the owner's requests behind it.)
 
 Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `max_per_day`
 (10), `poll_seconds` (15) and `timeout_minutes` (45).
@@ -46,7 +51,8 @@ log = logging.getLogger(__name__)
 
 # Card extensions per Watch topic; the names are the deep service's EXTENSIONS.
 EXTENSIONS = {"cot-faithfulness": "faithfulness", "cot-monitoring": "monitoring"}
-MAX_AUTOMATIC_ATTEMPTS = 3
+MAX_AUTOMATIC_ATTEMPTS = 3  # automatic submissions per paper, ever
+MAX_SUBMISSIONS = 3  # per event: a request, too, stops after this many unanswered submissions
 
 
 @dataclass
@@ -73,20 +79,25 @@ class DeepClient:
         self.poll_seconds = poll_seconds
         self.timeout_seconds = timeout_seconds
 
-    async def process(
+    async def submit(
         self,
         paper: dict[str, Any],
         extensions: list[str] | None = None,
         selections: list[dict[str, Any]] | None = None,
-    ) -> Outcome:
-        """Runs one paper to completion. Progress is logged whenever the job advances."""
+    ) -> str:
+        """Submit one paper; returns the job's id. The service does not deduplicate, so a
+        caller records the attempt before and the job after, and never submits twice."""
         resp = await self.http.post(
             f"{self.base_url}/process",
             json={"paper": paper, "extensions": extensions or [], "selections": selections or []},
         )
         resp.raise_for_status()
-        job_id = resp.json()["id"]
-        deadline = asyncio.get_running_loop().time() + self.timeout_seconds
+        return str(resp.json()["id"])
+
+    async def follow(self, job_id: str, since: datetime, label: str = "") -> Outcome:
+        """Poll a job until it ends, or until `timeout_seconds` after `since` (when it was
+        submitted). A failed poll raises, and the job can be followed again later."""
+        deadline = since + timedelta(seconds=self.timeout_seconds)
         seen = ""
         while True:
             await asyncio.sleep(self.poll_seconds)
@@ -100,7 +111,7 @@ class DeepClient:
             if mark != seen:
                 log.info(
                     "%s: %s turns=%s tokens=%s/%s list_cost=$%.2f %ss",
-                    paper["id"],
+                    label,
                     mark,
                     stats.get("turns", 0),
                     stats.get("input", 0),
@@ -117,12 +128,13 @@ class DeepClient:
                     job.get("model") or "",
                     job.get("error"),
                 )
-            if asyncio.get_running_loop().time() > deadline:
+            if datetime.now(UTC) > deadline:
                 return Outcome(None, [], stats, "", "litwatch gave up waiting for the deep job")
 
 
 class Deep:
     name = "deep"
+    makes_cards = True  # it answers `card.requested`
     description = (
         "Asks the deep service for a reading card on every must-read library paper, and on "
         "any paper the owner asks about."
@@ -157,33 +169,51 @@ class Deep:
         found = await state.card(conn, paper_id)
         if found and found["card"]:
             return
-        requested = event.type == events.CARD_REQUESTED
-        if not requested:
+        if found and found["job_id"]:
+            # Submitted before a failure or a restart: follow that job, never pay for another.
+            await self._follow(conn, paper_id, found["job_id"], found["job_since"])
+            return
+        automatic = event.type != events.CARD_REQUESTED
+        if automatic:
             if not await must_read_and_saved(conn, paper_id):
                 return
-            if found and found["attempts"] >= MAX_AUTOMATIC_ATTEMPTS:
+            if await state.attempts(conn, paper_id, automatic=True) >= MAX_AUTOMATIC_ATTEMPTS:
                 return
             since = datetime.now(UTC) - timedelta(days=1)
-            if await state.cards_attempted_since(conn, since) >= self.max_per_day:
+            if await state.automatic_attempts_since(conn, since) >= self.max_per_day:
                 reason = f"passed over: {self.max_per_day} automatic cards in the last 24 hours"
-                await state.card_failed(conn, paper_id, reason, attempt=False)
+                await state.card_failed(conn, paper_id, reason)
                 log.warning("%s: deep card %s", paper_id, reason)
                 return
+        if await state.attempts(conn, paper_id, event_id=event.id) >= MAX_SUBMISSIONS:
+            await state.card_failed(
+                conn, paper_id, f"gave up after {MAX_SUBMISSIONS} submissions went unanswered"
+            )
+            return
         paper = await papers_store.get(conn, paper_id)
         if paper is None:
             return
-        topics = await self._topics(conn, paper_id, requested)
+        topics = await self._topics(conn, paper_id, not automatic)
         body = await self._body(conn, paper)
         if body is None:
             await state.card_failed(conn, paper_id, "no paper text available")
             return
-        outcome = await self.client.process(
+        # Counted before it is sent: the service may accept a job whose answer never arrives.
+        await state.add_attempt(conn, paper_id, event.id, automatic)
+        job_id = await self.client.submit(
             _paper(paper, *body),
             extensions=sorted(
                 {self.extensions[t.slug] for t in topics if t.slug in self.extensions}
             ),
             selections=[{"name": t.name, "subject": t.subject, "rubric": t.rubric} for t in topics],
         )
+        await state.job_started(conn, paper_id, job_id)
+        await self._follow(conn, paper_id, job_id, datetime.now(UTC))
+
+    async def _follow(
+        self, conn: psycopg.AsyncConnection, paper_id: str, job_id: str, since: datetime
+    ) -> None:
+        outcome = await self.client.follow(job_id, since, label=paper_id)
         if outcome.error or outcome.result is None:
             error = outcome.error or "no result"
             await state.card_failed(conn, paper_id, error, outcome.stats, outcome.trace)

@@ -17,13 +17,17 @@ def mock(handler: Any) -> httpx.AsyncClient:
 
 
 class FakeZotero:
-    """Enough of api.zotero.org: collections, items, children, PATCH with versions."""
+    """Enough of api.zotero.org: collections, items, children, PATCH with versions, pages
+    (`start`, `limit`) and write tokens (a token used before answers 412). `lose_answers`
+    makes the next creates happen and then answer 502, as a proxy losing the answer would."""
 
     def __init__(self) -> None:
         self.collections: dict[str, dict[str, Any]] = {}
         self.items: dict[str, dict[str, Any]] = {}
         self.version = 100
         self.calls: list[str] = []
+        self.tokens: set[str] = set()
+        self.lose_answers = 0
 
     def _key(self) -> str:
         return f"K{len(self.collections) + len(self.items) + 1:07d}"
@@ -36,12 +40,20 @@ class FakeZotero:
         path = req.url.path.removeprefix("/users/1")
         self.calls.append(f"{req.method} {path}")
         query = parse_qs(req.url.query.decode())
+        if req.method == "POST":
+            token = req.headers["Zotero-Write-Token"]
+            assert len(token) == 32 and token.isalnum()
+            if token in self.tokens:
+                return httpx.Response(412)
+            self.tokens.add(token)
+            target = self.collections if path == "/collections" else self.items
+            created = self._create(target, json.loads(req.content))
+            if self.lose_answers:
+                self.lose_answers -= 1
+                return httpx.Response(502)
+            return created
         if path == "/collections":
-            if req.method == "GET":
-                return httpx.Response(200, json=list(self.collections.values()))
-            return self._create(self.collections, json.loads(req.content))
-        if path == "/items" and req.method == "POST":
-            return self._create(self.items, json.loads(req.content))
+            return self._page(list(self.collections.values()), query)
         if path == "/items/top":
             q = query["q"][0].lower()
             rows = [
@@ -53,7 +65,7 @@ class FakeZotero:
         if path.endswith("/children"):
             parent = path.split("/")[2]
             rows = [i for i in self.items.values() if i["data"].get("parentItem") == parent]
-            return httpx.Response(200, json=rows)
+            return self._page(rows, query)
         key = path.split("/")[2]
         if key not in self.items:
             return httpx.Response(404)
@@ -66,6 +78,11 @@ class FakeZotero:
         item["data"] = {**item["data"], **json.loads(req.content)}
         item["version"] = self.version
         return httpx.Response(204)
+
+    @staticmethod
+    def _page(rows: list[Any], query: dict[str, list[str]]) -> httpx.Response:
+        start, limit = int(query.get("start", ["0"])[0]), int(query.get("limit", ["25"])[0])
+        return httpx.Response(200, json=rows[start : start + min(limit, 100)])
 
     def _create(self, store: dict[str, Any], objects: list[dict[str, Any]]) -> httpx.Response:
         successful = {}
@@ -108,12 +125,18 @@ class FakeZotero:
 
 
 class FakeDAV:
+    """A WebDAV share; `fail` names files whose next PUT fails."""
+
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
+        self.fail: set[str] = set()
 
     def handle(self, req: httpx.Request) -> httpx.Response:
         name = req.url.path.rsplit("/", 1)[-1]
         if req.method == "PUT":
+            if any(name.endswith(f) for f in self.fail):
+                self.fail = {f for f in self.fail if not name.endswith(f)}
+                return httpx.Response(507)
             self.files[name] = req.content
             return httpx.Response(201)
         return httpx.Response(200 if name in self.files else 404)
@@ -175,21 +198,32 @@ class FakeArchive:
 
 
 class FakeDeep:
-    """The deep service's job protocol: a job that needs two polls to finish."""
+    """The deep service's job protocol: a job that needs two polls to finish. It can fail the
+    next polls (`fail_polls`), keep a job running (`hold`), or accept a submission and then
+    lose the answer (`lose_answers`), as a dropped connection would."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         self.outcome = outcome
         self.polls = 0
         self.requests: list[dict[str, Any]] = []
+        self.fail_polls = 0
+        self.hold = False
+        self.lose_answers = 0
 
     def handle(self, req: httpx.Request) -> httpx.Response:
         if req.method == "POST" and req.url.path == "/process":
             self.requests.append(json.loads(req.content))
             self.polls = 0
+            if self.lose_answers:
+                self.lose_answers -= 1
+                raise httpx.ReadTimeout("the answer never came", request=req)
             return httpx.Response(202, json={"id": "job-1", "status": "queued"})
         if req.url.path == "/jobs/job-1":
+            if self.fail_polls:
+                self.fail_polls -= 1
+                return httpx.Response(503)
             self.polls += 1
-            if self.polls < 2:
+            if self.polls < 2 or self.hold:
                 return httpx.Response(200, json={"status": "running", "stats": {"cells": 3}})
             return httpx.Response(200, json={"status": "done", **self.outcome})
         return httpx.Response(404)

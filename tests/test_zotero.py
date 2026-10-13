@@ -8,7 +8,6 @@ import pytest
 
 from litwatch import events
 from litwatch.core import Grade, Hand, Label, LabelOrigin, LabelValue, Opinion, Publication, Verdict
-from litwatch.events import dispatch
 from litwatch.feedback import word
 from litwatch.integrations import webdav as webdav_mod
 from litwatch.integrations.webdav import WebDav, WebDAVWriter
@@ -18,7 +17,7 @@ from litwatch.store import integrations as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
-from tests.conftest import FAITH, TOPICS, paper
+from tests.conftest import FAITH, TOPICS, deliver, paper, start
 from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
 from tests.test_reading import night
 
@@ -79,13 +78,17 @@ async def say(conn, value: LabelValue, g: Grade | None = None) -> None:
     )
 
 
+def client(fake: FakeZotero) -> ZoteroClient:
+    return ZoteroClient("1", "key", http=mock(fake.handle), retry_seconds=0)
+
+
 def zotero(fake: FakeZotero, **kw) -> Zotero:
-    return Zotero(ZoteroClient("1", "key", http=mock(fake.handle)), **kw)
+    return Zotero(client(fake), **kw)
 
 
 async def run(conn, *integrations) -> None:
     for integration in integrations:
-        await dispatch.deliver(conn, integration)
+        await deliver(conn, integration)
 
 
 # -- zotero ----------------------------------------------------------------------------------------
@@ -94,7 +97,7 @@ async def run(conn, *integrations) -> None:
 async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_deleted(world):
     conn, fake = world, FakeZotero()
     z = zotero(fake)
-    await dispatch.start(conn, z)
+    await start(conn, z)
 
     await grade(conn, "must_read")
     await run(conn, z)
@@ -143,7 +146,7 @@ async def test_an_item_0x_made_is_taken_over_not_made_again(world):
     )
     fake.items["OLDITEM1"]["data"]["tags"].append({"tag": "read-later"})
     z = zotero(fake)
-    await dispatch.start(conn, z)
+    await start(conn, z)
     await grade(conn, "must_read")
     await run(conn, z)
 
@@ -158,7 +161,7 @@ async def test_an_item_0x_made_is_taken_over_not_made_again(world):
 async def test_takes_published_versions_and_cards_reach_the_notes(world):
     conn, fake = world, FakeZotero()
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
-    await dispatch.start(conn, z)
+    await start(conn, z)
     await grade(conn, "must_read")
     await run(conn, z)
     (item,) = fake.tops()
@@ -183,10 +186,60 @@ async def test_takes_published_versions_and_cards_reach_the_notes(world):
     assert "INBOX" in fake.items[key]["data"]["collections"]
 
 
+async def test_a_create_whose_answer_was_lost_is_made_once(world):
+    conn, fake = world, FakeZotero()
+    fake.lose_answers = 100  # every create happens, then answers 502
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    assert (await outbox.cursor(conn, z.name)).failing is None
+    (item,) = fake.tops()
+    assert sorted(c["data"]["name"] for c in fake.collections.values()) == [
+        "Litwatch",
+        "Tier 1",
+        "Tier 2",
+    ]
+    assert len(fake.notes(item["key"])) == 1
+    assert await state.zotero_item(conn, P.id) == item["key"]
+
+
+async def test_whats_there_is_looked_for_past_the_first_page(world):
+    conn, fake = world, FakeZotero()
+    # Many collections before litwatch's own, and an 0.x item with many notes before its own.
+    for i in range(120):
+        fake.add_item(f"COL{i:05d}", {})
+        fake.collections[f"COL{i:05d}"] = fake.items.pop(f"COL{i:05d}")
+        fake.collections[f"COL{i:05d}"]["data"]["name"] = f"Reading {i}"
+    fake.collections["COL00119"]["data"]["name"] = "Litwatch"  # on the second page
+    await conn.execute("ALTER TABLE papers ADD COLUMN zotero_key text")
+    await conn.execute("UPDATE papers SET zotero_key = 'OLDITEM1' WHERE id = %s", (P.id,))
+    fake.add_item("OLDITEM1", {"itemType": "preprint", "title": "T", "collections": []})
+    for i in range(130):
+        fake.add_item(f"N{i:05d}", {"itemType": "note", "parentItem": "OLDITEM1", "note": "mine"})
+    fake.add_item(
+        "OLDNOTE1",
+        {
+            "itemType": "note",
+            "parentItem": "OLDITEM1",
+            "note": "<!-- litwatch:screen schema=1 --><p>0.x</p>",
+        },
+    )
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+
+    names = [c["data"]["name"] for c in fake.collections.values()]
+    assert names.count("Litwatch") == 1 and "Litwatch" in fake.collection_names("OLDITEM1")
+    screens = [n for n in fake.notes("OLDITEM1") if "litwatch:screen" in n]
+    assert len(screens) == 1 and "schema=2" in screens[0]
+
+
 async def test_a_paper_never_in_the_library_gets_no_item(world):
     conn, fake = world, FakeZotero()
     z = zotero(fake)
-    await dispatch.start(conn, z)
+    await start(conn, z)
     await grade(conn, "adjacent")
     await run(conn, z)
     assert fake.items == {} and fake.calls == []
@@ -200,7 +253,7 @@ def pdfs(monkeypatch):
     monkeypatch.setattr(webdav_mod, "ARXIV_PACING_SECONDS", 0)
     fake, dav, arxiv = FakeZotero(), FakeDAV(), FakeArxiv()
     w = WebDav(
-        ZoteroClient("1", "key", http=mock(fake.handle)),
+        client(fake),
         WebDAVWriter("https://dav.test/zotero", "u", "p", http=mock(dav.handle)),
         http=mock(arxiv.handle),
     )
@@ -212,7 +265,7 @@ async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, pdf
     fake, dav, arxiv, w = pdfs
     z = zotero(fake)
     for integration in (z, w):
-        await dispatch.start(conn, integration)
+        await start(conn, integration)
     await grade(conn, "must_read")
 
     await run(conn, w)  # before zotero made the item: retried later
@@ -223,14 +276,15 @@ async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, pdf
 
     (item,) = fake.tops()
     (attachment,) = fake.attachments(item["key"])
-    assert await state.webdav_file(conn, P.id) == attachment
+    assert await state.webdav_file(conn, P.id) == {"attachment_key": attachment, "state": "stored"}
+    assert "litwatch:pdf" in fake.tags(attachment)
     with zipfile.ZipFile(io.BytesIO(dav.files[f"{attachment}.zip"])) as zf:
         assert zf.read(attachment_filename(P)) == PDF
     assert f"{attachment}.prop" in dav.files
     assert arxiv.calls == [f"/pdf/{P.id}"]
 
     # Handled again (a restart mid-way, say): nothing is fetched or attached twice.
-    for event in await outbox.after(conn, 0, 100):
+    for event in await outbox.after(conn, outbox.START, 100):
         if w.wants(event):
             await w.handle(conn, event)
     assert len(fake.attachments(item["key"])) == 1 and len(arxiv.calls) == 1
@@ -241,7 +295,7 @@ async def test_an_overruled_or_unsaved_must_read_fetches_no_pdf_until_it_is_back
     fake, dav, arxiv, w = pdfs
     z = zotero(fake)
     for integration in (z, w):
-        await dispatch.start(conn, integration)
+        await start(conn, integration)
 
     # The verdict says must read; the owner says relevant before webdav gets to it.
     await grade(conn, "must_read")
@@ -259,3 +313,61 @@ async def test_an_overruled_or_unsaved_must_read_fetches_no_pdf_until_it_is_back
     await word.toggle(conn, P.id, Hand.SAVE)
     await run(conn, z, w)
     assert arxiv.calls == [f"/pdf/{P.id}"] and await state.webdav_file(conn, P.id)
+
+
+async def test_an_interrupted_upload_is_finished_not_taken_for_done(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    dav.fail = {".prop"}  # the zip arrives, the prop does not
+    await run(conn, w)
+    (item,) = fake.tops()
+    (attachment,) = fake.attachments(item["key"])
+    assert (await state.webdav_file(conn, P.id))["state"] == "pending"
+    assert (await outbox.cursor(conn, w.name)).failing is not None
+
+    await outbox.retry(conn, w.name)
+    await run(conn, w)
+    assert fake.attachments(item["key"]) == [attachment]
+    assert {f"{attachment}.zip", f"{attachment}.prop"} <= set(dav.files)
+    assert (await state.webdav_file(conn, P.id))["state"] == "stored"
+
+
+async def test_an_attachment_made_by_a_lost_create_is_found_and_finished(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    fake.lose_answers = 1  # the attachment is made; its answer is lost
+    await run(conn, w)
+    await outbox.retry(conn, w.name)
+    await run(conn, w)
+    (item,) = fake.tops()
+    (attachment,) = fake.attachments(item["key"])
+    assert await state.webdav_file(conn, P.id) == {"attachment_key": attachment, "state": "stored"}
+    assert f"{attachment}.prop" in dav.files
+
+
+async def test_the_owners_own_pdf_is_left_alone(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    (item,) = fake.tops()
+    fake.add_item(
+        "OWNERPDF",
+        {"itemType": "attachment", "parentItem": item["key"], "contentType": "application/pdf"},
+    )
+    await run(conn, w)
+    assert await state.webdav_file(conn, P.id) == {"attachment_key": "OWNERPDF", "state": "owner"}
+    assert arxiv.calls == [] and dav.files == {}

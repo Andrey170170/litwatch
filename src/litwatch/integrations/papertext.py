@@ -143,7 +143,10 @@ class BodyFetcher:
         self._lock = asyncio.Lock()  # arXiv asks for one request at a time
 
     async def aclose(self) -> None:
+        """Close its clients, the archive's included: each integration gets one of its own."""
         await self.http.aclose()
+        if self.archive is not None:
+            await self.archive.aclose()
 
     async def fetch(self, paper: Paper) -> tuple[str, str] | None:
         """(markdown, `html` or `pdf`), or None when there is no usable text yet."""

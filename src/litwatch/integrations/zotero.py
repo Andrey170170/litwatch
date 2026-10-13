@@ -28,6 +28,7 @@ import hashlib
 import io
 import logging
 import re
+import secrets
 import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -57,6 +58,7 @@ COLLECTION = "Litwatch"
 SUBCOLLECTIONS = {Grade.MUST_READ: "Tier 1", Grade.RELEVANT: "Tier 2"}
 WATCH_TAG_PREFIX = "litwatch:watch:"
 DROPPED_TAG = "litwatch:dropped"
+PDF_TAG = "litwatch:pdf"  # on the PDF attachments litwatch made
 # 0.x's per-tier and per-selection tags, replaced the first time v1 updates an item.
 LEGACY_PREFIXES = ("litwatch:tier:", "litwatch:sel:")
 MANAGED_PREFIXES = (WATCH_TAG_PREFIX, DROPPED_TAG, *LEGACY_PREFIXES)
@@ -92,6 +94,21 @@ class GoneError(ZoteroError):
     """The item is no longer in the library."""
 
 
+class AlreadyWrittenError(ZoteroError):
+    """A create's write token was used before: an earlier try made the object, though its
+    answer was lost. Find the object rather than make it again."""
+
+
+PAGE = 100  # the API's largest page
+
+
+def write_token(*parts: str) -> str:
+    """A `Zotero-Write-Token` for one create: 32 characters, the same for every try of that
+    create, so Zotero makes the object once however often the request is sent (it remembers
+    a token for about 12 hours)."""
+    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:32]
+
+
 @dataclass(frozen=True)
 class Collections:
     """Keys of the managed collection tree, resolved once per client."""
@@ -115,25 +132,31 @@ class ZoteroClient:
         http: httpx.AsyncClient | None = None,
         max_retries: int = 4,
         subcollections: dict[Grade, str] | None = None,
+        retry_seconds: float = 1.0,
     ) -> None:
         self.base = f"{API}/users/{user_id}"
         self.http = http or httpx.AsyncClient(timeout=60.0)
         self.http.headers.update({"Zotero-API-Key": api_key, "Zotero-API-Version": "3"})
         self.max_retries = max_retries
+        self.retry_seconds = retry_seconds
         self.subcollections = subcollections or SUBCOLLECTIONS
         self._collections: Collections | None = None
+        # Collections are made at most once per run; the tokens are new each run.
+        self._run = secrets.token_hex(8)
 
     async def aclose(self) -> None:
         await self.http.aclose()
 
-    async def _request(self, method: str, path: str, **kw: Any) -> httpx.Response:
+    async def _request(
+        self, method: str, path: str, retry: set[int] = RETRY_STATUSES, **kw: Any
+    ) -> httpx.Response:
         """One request with backoff on rate limits and transient failures."""
         for attempt in range(self.max_retries):
             resp = await self.http.request(method, f"{self.base}{path}", **kw)
-            if resp.status_code not in RETRY_STATUSES or attempt == self.max_retries - 1:
+            if resp.status_code not in retry or attempt == self.max_retries - 1:
                 return resp
             wait = float(resp.headers.get("Retry-After") or resp.headers.get("Backoff") or 0)
-            await asyncio.sleep(max(wait, 2.0**attempt))
+            await asyncio.sleep(max(wait, self.retry_seconds * 2.0**attempt))
         raise AssertionError("unreachable")
 
     async def _get(self, path: str, **params: Any) -> Any:
@@ -144,9 +167,28 @@ class ZoteroClient:
             raise ZoteroError(f"GET {path}: {resp.status_code} {resp.text[:200]}")
         return resp.json()
 
-    async def _create(self, path: str, objects: list[dict[str, Any]]) -> list[str]:
-        """POST new objects; returns their keys in input order."""
-        resp = await self._request("POST", path, json=objects)
+    async def _get_all(self, path: str, **params: Any) -> list[Any]:
+        """Every result, page by page: absence is only known after the last page."""
+        found: list[Any] = []
+        while True:
+            page = await self._get(path, start=len(found), limit=PAGE, **params)
+            found += page
+            if len(page) < PAGE:
+                return found
+
+    async def _create(self, path: str, objects: list[dict[str, Any]], token: str) -> list[str]:
+        """POST new objects under a write token; returns their keys in input order. A 502
+        or a timeout may hide a create that happened; sent again with the same token, it
+        answers 412, raised as `AlreadyWrittenError`."""
+        resp = await self._request(
+            "POST",
+            path,
+            retry=RETRY_STATUSES - {412},
+            json=objects,
+            headers={"Zotero-Write-Token": token},
+        )
+        if resp.status_code == 412:
+            raise AlreadyWrittenError(f"POST {path}: write token already used")
         if resp.status_code != 200:
             raise ZoteroError(f"POST {path}: {resp.status_code} {resp.text[:200]}")
         body = resp.json()
@@ -158,7 +200,7 @@ class ZoteroClient:
         return await self._get(f"/items/{key}")
 
     async def children(self, key: str) -> list[dict[str, Any]]:
-        return await self._get(f"/items/{key}/children", limit=100)
+        return await self._get_all(f"/items/{key}/children")
 
     async def patch_item(self, key: str, mutate: Any) -> dict[str, Any]:
         """Apply `mutate(data)` to a fresh copy and PATCH it; retries on version conflicts."""
@@ -177,7 +219,7 @@ class ZoteroClient:
                 return data
             if resp.status_code not in RETRY_STATUSES:
                 raise ZoteroError(f"PATCH {key}: {resp.status_code} {resp.text[:200]}")
-            await asyncio.sleep(2.0**attempt)
+            await asyncio.sleep(self.retry_seconds * 2.0**attempt)
         raise ZoteroError(f"PATCH {key}: gave up after {self.max_retries} conflicts")
 
     # -- collections ------------------------------------------------------------------------
@@ -186,26 +228,31 @@ class ZoteroClient:
         """Resolve (creating if needed) `Litwatch` and its per-grade subcollections."""
         if self._collections:
             return self._collections
-        existing = await self._get("/collections", limit=100)
-        by_name = {
-            (c["data"]["name"], c["data"].get("parentCollection") or None): c["key"]
-            for c in existing
-        }
-        root = by_name.get((COLLECTION, None))
-        if not root:
-            (root,) = await self._create("/collections", [{"name": COLLECTION}])
-            log.info("created Zotero collection %s (%s)", COLLECTION, root)
-        by_grade: dict[Grade, str] = {}
-        for grade, name in self.subcollections.items():
-            key = by_name.get((name, root))
-            if not key:
-                (key,) = await self._create(
-                    "/collections", [{"name": name, "parentCollection": root}]
-                )
-                log.info("created Zotero subcollection %s (%s)", name, key)
-            by_grade[grade] = key
+        root = await self._collection(COLLECTION, None)
+        by_grade = {g: await self._collection(n, root) for g, n in self.subcollections.items()}
         self._collections = Collections(root=root, by_grade=by_grade)
         return self._collections
+
+    async def _collection(self, name: str, parent: str | None) -> str:
+        """The collection's key, made when there is none."""
+
+        async def find() -> str | None:
+            for c in await self._get_all("/collections"):
+                if (c["data"]["name"], c["data"].get("parentCollection") or None) == (name, parent):
+                    return c["key"]
+            return None
+
+        if key := await find():
+            return key
+        token = write_token(self._run, "collection", name, parent or "")
+        data = {"name": name, **({"parentCollection": parent} if parent else {})}
+        try:
+            (key,) = await self._create("/collections", [data], token)
+        except AlreadyWrittenError:
+            if not (key := await find()):
+                raise
+        log.info("created Zotero collection %s (%s)", name, key)
+        return key
 
     # -- items --------------------------------------------------------------------------------
 
@@ -222,17 +269,25 @@ class ZoteroClient:
         return None
 
     async def ensure_item(
-        self, paper: Paper, key: str | None, grade: Grade | None, tags: list[str]
+        self, paper: Paper, key: str | None, grade: Grade | None, tags: list[str], attempt: str
     ) -> str:
         """Find or create the item, then converge its collections and managed tags. `grade`
-        is the paper's best Watch grade, which picks the subcollection."""
+        is the paper's best Watch grade, which picks the subcollection. `attempt` names this
+        try (the event being handled), so a create sent twice makes one item."""
         cols = await self.collections()
         wanted = {cols.root} | ({cols.by_grade[grade]} if grade in cols.by_grade else set())
         if key is None:
             key = await self.find_item(paper)
         if key is None:
-            (key,) = await self._create("/items", [item_data(paper, sorted(wanted))])
-            log.info("created Zotero item %s for %s", key, paper.id)
+            token = write_token(paper.id, "item", attempt)
+            try:
+                (key,) = await self._create("/items", [item_data(paper, sorted(wanted))], token)
+                log.info("created Zotero item %s for %s", key, paper.id)
+            except AlreadyWrittenError as exc:
+                if not (key := await self.find_item(paper)):
+                    raise ZoteroError(
+                        f"{paper.id}: the item was made but is not found yet"
+                    ) from exc
 
         def mutate(data: dict[str, Any]) -> None:
             kept = [c for c in data.get("collections", []) if c not in cols.managed]
@@ -253,18 +308,28 @@ class ZoteroClient:
 
         await self.patch_item(key, mutate)
 
-    async def upsert_note(self, parent_key: str, html: str, find: str, tag: str) -> str:
+    async def upsert_note(
+        self, parent_key: str, html: str, find: str, tag: str, attempt: str
+    ) -> str:
         """One note per marker per item, replaced in place. `html` must contain `find`."""
-        for child in await self.children(parent_key):
-            data = child["data"]
-            if data.get("itemType") == "note" and find in data.get("note", ""):
-                if data["note"] != html:
-                    await self.patch_item(child["key"], lambda d: d.__setitem__("note", html))
-                return child["key"]
-        (key,) = await self._create(
-            "/items",
-            [{"itemType": "note", "parentItem": parent_key, "note": html, "tags": [{"tag": tag}]}],
-        )
+
+        async def update() -> str | None:
+            for child in await self.children(parent_key):
+                data = child["data"]
+                if data.get("itemType") == "note" and find in data.get("note", ""):
+                    if data["note"] != html:
+                        await self.patch_item(child["key"], lambda d: d.__setitem__("note", html))
+                    return child["key"]
+            return None
+
+        if key := await update():
+            return key
+        note = {"itemType": "note", "parentItem": parent_key, "note": html, "tags": [{"tag": tag}]}
+        try:
+            (key,) = await self._create("/items", [note], write_token(parent_key, tag, attempt))
+        except AlreadyWrittenError:
+            if not (key := await update()):
+                raise
         return key
 
     async def set_tags(self, key: str, tags: list[str], prefixes: tuple[str, ...]) -> None:
@@ -282,15 +347,21 @@ class ZoteroClient:
 
         await self.patch_item(key, mutate)
 
-    async def pdf_attachment(self, parent_key: str) -> str | None:
-        for child in await self.children(parent_key):
-            if child["data"].get("contentType") == "application/pdf":
-                return child["key"]
-        return None
+    async def pdf_attachments(self, parent_key: str) -> list[dict[str, Any]]:
+        """The item's PDF attachments, as the API returns them."""
+        return [
+            c
+            for c in await self.children(parent_key)
+            if c["data"].get("contentType") == "application/pdf"
+        ]
 
-    async def create_attachment(self, parent_key: str, paper: Paper, pdf: bytes) -> str:
-        """Register an imported PDF attachment whose bytes will live on WebDAV."""
-        (key,) = await self._create("/items", [attachment_data(parent_key, paper, pdf)])
+    async def create_attachment(
+        self, parent_key: str, paper: Paper, pdf: bytes, attempt: str
+    ) -> str:
+        """Register an imported PDF attachment whose bytes will live on WebDAV. It carries
+        `litwatch:pdf`, which tells litwatch's attachments from the owner's."""
+        token = write_token(parent_key, "attachment", attempt)
+        (key,) = await self._create("/items", [attachment_data(parent_key, paper, pdf)], token)
         return key
 
 
@@ -350,14 +421,16 @@ class Zotero:
         watch = [t for t in seen["topics"] if t["kind"] == "watch" and _shown(t["grade"])]
         best = min((Grade(t["grade"]) for t in watch), key=lambda g: g.rank, default=None)
         tags = [f"{WATCH_TAG_PREFIX}{t['slug']}:{t['grade']}" for t in watch]
+        attempt = str(event.id)
         try:
-            key = await self.zotero.ensure_item(paper, key, best, tags)
+            key = await self.zotero.ensure_item(paper, key, best, tags, attempt)
         except GoneError:
             # The owner removed the item; a library paper gets one again, as in 0.x.
-            key = await self.zotero.ensure_item(paper, None, best, tags)
+            key = await self.zotero.ensure_item(paper, None, best, tags, attempt)
         await state.set_zotero_item(conn, paper_id, key)
         record = (await publications_store.found(conn, [paper_id])).get(paper_id)
-        await self.zotero.upsert_note(key, screen_note(paper, watch, record), NOTE_FIND, NOTE_TAG)
+        note = screen_note(paper, watch, record)
+        await self.zotero.upsert_note(key, note, NOTE_FIND, NOTE_TAG, attempt)
         card = await state.card(conn, paper_id)
         if card and card["card"]:
             await self.zotero.upsert_note(
@@ -365,6 +438,7 @@ class Zotero:
                 enrichment_note(paper, card["card"], card["model"], card["stats"]),
                 ENRICH_MARKER,
                 ENRICH_TAG,
+                attempt,
             )
             await self.zotero.set_tags(key, enrichment_tags(card["card"]), CARD_PREFIXES)
             if self.inbox_collection and any(
@@ -454,7 +528,7 @@ def attachment_data(parent_key: str, paper: Paper, pdf: bytes) -> dict[str, Any]
         "filename": attachment_filename(paper),
         "md5": hashlib.md5(pdf).hexdigest(),  # noqa: S324 - Zotero's file hash, not security
         "mtime": pdf_mtime(paper),
-        "tags": [],
+        "tags": [{"tag": PDF_TAG}],
     }
 
 

@@ -1,6 +1,8 @@
 """Loading integrations from the configuration, and the archive, deep and webhook
 integrations against in-memory fakes. Nothing here reaches a real service."""
 
+import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -24,14 +26,14 @@ from litwatch.events import dispatch
 from litwatch.feedback import word
 from litwatch.integrations import IntegrationError, papertext
 from litwatch.integrations.archive import Archive, ArchiveClient
-from litwatch.integrations.deep import Deep, DeepClient
+from litwatch.integrations.deep import MAX_SUBMISSIONS, Deep, DeepClient
 from litwatch.integrations.papertext import BodyFetcher, html_to_markdown
 from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
-from tests.conftest import FAITH, TOPICS, paper
+from tests.conftest import FAITH, TOPICS, deliver, paper, settled, start
 from tests.fakes_http import FakeArchive, FakeArxiv, FakeDeep, mock
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=3)
@@ -129,10 +131,10 @@ def archive(fake: FakeArchive) -> Archive:
 async def test_every_new_paper_is_registered_with_its_pdf_and_source(world):
     conn, fake = world, FakeArchive()
     a = archive(fake)
-    await dispatch.start(conn, a)
+    await start(conn, a)
     unknown = paper("2610.00002")  # no arXiv version, and none the archive knows
     await papers_store.upsert(conn, [P, unknown])
-    await dispatch.deliver(conn, a)
+    await deliver(conn, a)
 
     assert fake.records[P.id]["latest_version"] == 3
     assert "revision" not in fake.records[P.id]["metadata"]
@@ -167,17 +169,20 @@ async def test_the_archive_answers_searches_by_arxiv_id_with_its_rank_as_score()
 # -- deep ------------------------------------------------------------------------------------------
 
 
+def make_deep(fake: FakeDeep, arxiv: FakeArxiv, **kw) -> Deep:
+    return Deep(
+        DeepClient("http://deep.test", http=mock(fake.handle), poll_seconds=0),
+        BodyFetcher(http=mock(arxiv.handle)),
+        **{"max_per_day": 10, **kw},
+    )
+
+
 @pytest.fixture
 def deep(monkeypatch):
     monkeypatch.setattr(papertext, "ARXIV_PACING_SECONDS", 0)
     fake = FakeDeep({"result": CARD, "stats": {"cells": 4}, "model": "deep-model", "trace": []})
-    arxiv = FakeArxiv(html={P.id: HTML, "2610.00009": HTML})
-    d = Deep(
-        DeepClient("http://deep.test", http=mock(fake.handle), poll_seconds=0),
-        BodyFetcher(http=mock(arxiv.handle)),
-        max_per_day=10,
-    )
-    return fake, arxiv, d
+    arxiv = FakeArxiv(html={P.id: HTML, "2610.00009": HTML, "2610.00010": HTML})
+    return fake, arxiv, make_deep(fake, arxiv)
 
 
 def test_the_html_rendering_becomes_markdown_with_its_math():
@@ -189,9 +194,9 @@ async def test_a_must_read_library_paper_gets_a_card_and_card_ready(world, deep)
     conn = world
     fake, arxiv, d = deep
     await papers_store.upsert(conn, [P])
-    await dispatch.start(conn, d)
+    await start(conn, d)
     await grade(conn, "must_read")
-    await dispatch.deliver(conn, d)
+    await deliver(conn, d)
 
     (sent,) = fake.requests
     assert sent["extensions"] == ["faithfulness"]
@@ -200,13 +205,13 @@ async def test_a_must_read_library_paper_gets_a_card_and_card_ready(world, deep)
     stored = await state.card(conn, P.id)
     assert stored["card"] == CARD and stored["model"] == "deep-model"
     assert (await papers_store.body(conn, P.id))[1] == "html"
-    ready = [e for e in await outbox.after(conn, 0, 100) if e.type == events.CARD_READY]
+    ready = [e for e in await outbox.after(conn, outbox.START, 100) if e.type == events.CARD_READY]
     assert [(e.paper_id, e.payload) for e in ready] == [(P.id, {"model": "deep-model"})]
 
     # Heard again, or saved again: one card per paper.
     await word.toggle(conn, P.id, Hand.UNSAVE)
     await word.toggle(conn, P.id, Hand.SAVE)
-    await dispatch.deliver(conn, d)
+    await deliver(conn, d)
     assert len(fake.requests) == 1 and arxiv.calls == [f"/html/{P.id}v3"]
 
 
@@ -214,7 +219,7 @@ async def test_an_overruled_must_read_requests_no_card_but_the_owner_can_ask(wor
     conn = world
     fake, _, d = deep
     await papers_store.upsert(conn, [P])
-    await dispatch.start(conn, d)
+    await start(conn, d)
     await grade(conn, "must_read")
     await word.label(
         conn,
@@ -225,29 +230,93 @@ async def test_an_overruled_must_read_requests_no_card_but_the_owner_can_ask(wor
             origin=LabelOrigin.READER,
         ),
     )
-    await dispatch.deliver(conn, d)
+    await deliver(conn, d)
     assert fake.requests == []
 
     # Asked by hand, whatever the grade: every active Watch topic is the card's context.
     await events.emit(conn, events.CARD_REQUESTED, P.id)
-    await dispatch.deliver(conn, d)
+    await deliver(conn, d)
     (sent,) = fake.requests
     assert [s["name"] for s in sent["selections"]] == [FAITH.name]
     assert (await state.card(conn, P.id))["card"] == CARD
 
 
-async def test_past_the_daily_cap_a_paper_is_passed_over_and_requests_still_go_through(world, deep):
+async def test_the_daily_cap_counts_automatic_submissions_and_never_the_owners(world, deep):
     conn = world
     fake, _, d = deep
-    d.max_per_day = 0
-    other = paper("2610.00009", version=1)
-    await papers_store.upsert(conn, [P, other])
-    await dispatch.start(conn, d)
-    await grade(conn, "must_read")
+    d.max_per_day = 1
+    asked, other = paper("2610.00009", version=1), paper("2610.00010", version=1)
+    await papers_store.upsert(conn, [P, asked, other])
+    await start(conn, d)
+    await events.emit(conn, events.CARD_REQUESTED, asked.id)  # the owner's: not counted
+    await grade(conn, "must_read")  # automatic: the day's one
+    await grade(conn, "must_read", other.id)  # automatic: past the cap
+    await deliver(conn, d)
+    assert [r["paper"]["id"] for r in fake.requests] == [asked.id, P.id]
+    assert "passed over" in (await state.card(conn, other.id))["error"]
+    assert (await outbox.cursor(conn, d.name)).failing is None
+    # The owner can still ask for the one passed over.
     await events.emit(conn, events.CARD_REQUESTED, other.id)
-    await dispatch.deliver(conn, d)
-    assert [r["paper"]["id"] for r in fake.requests] == [other.id]
-    assert "passed over" in (await state.card(conn, P.id))["error"]
+    await deliver(conn, d)
+    assert [r["paper"]["id"] for r in fake.requests][-1] == other.id
+
+
+async def test_a_failed_poll_is_followed_up_not_submitted_again(world, deep):
+    conn = world
+    fake, _, d = deep
+    fake.fail_polls = 1
+    await papers_store.upsert(conn, [P])
+    await start(conn, d)
+    await grade(conn, "must_read")
+    await deliver(conn, d)
+    assert (await outbox.cursor(conn, d.name)).failing is not None
+    assert (await state.card(conn, P.id))["job_id"] == "job-1"
+
+    await outbox.retry(conn, d.name)
+    await deliver(conn, d)
+    assert len(fake.requests) == 1
+    stored = await state.card(conn, P.id)
+    assert stored["card"] == CARD and stored["job_id"] is None
+
+
+async def test_after_a_restart_the_running_job_is_followed_not_paid_for_twice(world, deep):
+    conn = world
+    fake, arxiv, d = deep
+    fake.hold = True
+    d.client.poll_seconds = 0.01
+    await papers_store.upsert(conn, [P])
+    await start(conn, d)
+    await grade(conn, "must_read")
+    await settled(conn)
+    running = asyncio.create_task(dispatch.deliver(conn, d))
+    for _ in range(500):
+        if fake.requests and (await state.card(conn, P.id) or {}).get("job_id"):
+            break
+        await asyncio.sleep(0.01)
+    running.cancel()  # the service stops mid-job
+    with contextlib.suppress(asyncio.CancelledError):
+        await running
+
+    fake.hold = False
+    restarted = make_deep(fake, arxiv)
+    await deliver(conn, restarted)
+    assert len(fake.requests) == 1
+    assert (await state.card(conn, P.id))["card"] == CARD
+
+
+async def test_a_submission_without_an_answer_counts_and_is_not_repeated_forever(world, deep):
+    conn = world
+    fake, _, d = deep
+    fake.lose_answers = 10
+    await papers_store.upsert(conn, [P])
+    await start(conn, d)
+    await events.emit(conn, events.CARD_REQUESTED, P.id)
+    for _ in range(4):
+        await deliver(conn, d)
+        await outbox.retry(conn, d.name)
+    assert len(fake.requests) == MAX_SUBMISSIONS
+    assert await state.attempts(conn, P.id) == MAX_SUBMISSIONS
+    assert "gave up" in (await state.card(conn, P.id))["error"]
     assert (await outbox.cursor(conn, d.name)).failing is None
 
 
@@ -256,9 +325,9 @@ async def test_a_failed_job_is_recorded_and_not_retried_by_itself(world, deep):
     fake, _, d = deep
     fake.outcome = {"error": "the model gave up", "stats": {}, "trace": []}
     await papers_store.upsert(conn, [P])
-    await dispatch.start(conn, d)
+    await start(conn, d)
     await grade(conn, "must_read")
-    await dispatch.deliver(conn, d)
+    await deliver(conn, d)
     stored = await state.card(conn, P.id)
     assert stored["card"] is None and stored["error"] == "the model gave up"
     assert (await outbox.cursor(conn, d.name)).failing is None
@@ -277,15 +346,15 @@ async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(con
     hook = Webhook(
         "http://n8n.test/hook", patterns=("paper.*",), secret="s3cret", http=mock(receive)
     )
-    await dispatch.start(conn, hook)
+    await start(conn, hook)
     await papers_store.upsert(conn, [P])
     saved = await events.emit(conn, events.PAPER_SAVED, P.id)
-    await dispatch.deliver(conn, hook)
+    await deliver(conn, hook)
     assert (await outbox.cursor(conn, hook.name)).failing is not None  # the 500
 
     status[0] = 204
     await outbox.retry(conn, hook.name)
-    await dispatch.deliver(conn, hook)
+    await deliver(conn, hook)
     assert [json.loads(r.content)["type"] for r in received] == ["paper.added"] * 2 + [
         "paper.saved"
     ]
