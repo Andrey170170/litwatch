@@ -48,13 +48,23 @@ const QUIET = "mt-1.5 text-[14px] text-muted-foreground";
 
 /**
  * What a failed review's line says next. Runs try failures again only while they are recent
- * (jobs/reviews.py): a day from the past week, a week from the one before the last full week.
- * An older one waits for `litwatch weekly --week` or a rerun by hand.
+ * (jobs/reviews.py): the nightly run a day from the past week; the Monday weekly run the week
+ * before the last full one, so a failed week is still due while it began no earlier than the
+ * week before this one. An older one waits for `litwatch weekly --week` by hand.
  */
 export function retryNote(period: "day" | "week", start: string | null | undefined, now = new Date()): string {
   if (start) {
-    const ageDays = (day(localDay(now)).getTime() - day(start).getTime()) / 86400000;
-    if (ageDays <= (period === "day" ? 7 : 14)) return "; litwatch tries again on the next run.";
+    const today = day(localDay(now));
+    const begun = day(start);
+    const ageDays = (today.getTime() - begun.getTime()) / 86400000;
+    if (period === "day" && ageDays <= 7) return "; litwatch tries again on the next run.";
+    if (period === "week") {
+      const thisMonday = new Date(today);
+      thisMonday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+      const lastMonday = new Date(thisMonday);
+      lastMonday.setDate(thisMonday.getDate() - 7);
+      if (begun >= lastMonday) return "; litwatch tries again on the next run.";
+    }
   }
   return ".";
 }

@@ -9,6 +9,7 @@ describe("a failed review's line", () => {
     expect(retryNote("day", "2026-09-30", now)).toBe(".");
     expect(retryNote("week", "2026-10-05", now)).toBe("; litwatch tries again on the next run.");
     expect(retryNote("week", "2026-09-21", now)).toBe(".");
+    expect(retryNote("week", "2026-09-28", now)).toBe("."); // the next Monday retries 5 October only
     expect(retryNote("week", undefined, now)).toBe(".");
   });
 });
