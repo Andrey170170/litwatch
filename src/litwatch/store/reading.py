@@ -207,7 +207,9 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
                        AND m.topic = t.slug AND m.by_owner) AS by_owner,
                EXISTS (SELECT 1 FROM misses ms WHERE ms.paper_id = %(p)s AND ms.topic = t.slug)
                    AND EXISTS (SELECT 1 FROM labels lb WHERE lb.paper_id = %(p)s
-                               AND lb.topic = t.slug AND lb.value = 'relevant') AS missed,
+                               AND lb.topic = t.slug AND lb.value = 'relevant')
+                   -- and the owner's current word still says so (a newer thumb can withdraw it)
+                   AND coalesce(g.grade IN ('must_read', 'relevant'), false) AS missed,
                EXISTS (SELECT 1 FROM candidates c WHERE c.paper_id = %(p)s AND c.topic = t.slug
                        AND c.state = 'pending' {LIVE}) AS grading
         FROM topics t

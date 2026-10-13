@@ -584,6 +584,12 @@ async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     assert [m["id"] for m in await (await conn.execute("SELECT id FROM misses")).fetchall()] == [
         miss["id"]
     ]
+    # A newer thumb withdraws it as the owner's word, though the relevant label is still stored.
+    body = {"topic": FAITH.slug, "value": "down", "reason": "unrelated"}
+    await client.put(f"/api/reactions/{Q.id}", json=body)
+    assert not (await faith())["missed"]
+    await client.delete(f"/api/reactions/{Q.id}", params={"topic": FAITH.slug})
+    assert (await faith())["missed"]
     # A correction since stands: the owner said it is not relevant after all.
     await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "not_relevant"})
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
