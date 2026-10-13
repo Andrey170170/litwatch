@@ -112,6 +112,33 @@ async def test_a_daily_review_picks_from_its_members_and_makes_an_issue_alone(db
     assert "lede" in models.calls
 
 
+async def test_an_addition_after_todays_review_is_in_tomorrows(db):
+    """ "Important for <field>" after the day's review is written is not lost between two
+    days: the next daily review takes the owner's additions since the last written one."""
+    from litwatch.store import fields as fields_store
+
+    models = Models()
+    today = Config().schedule.today()
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
+    assert models.reviewed == [len(FIELD)]
+    await fields_store.add(db, P.id, DAILY.slug, 1)  # after today's review was written
+    tomorrow = today + timedelta(days=1)
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run, tomorrow))
+    assert models.reviewed == [len(FIELD), 1]
+    picked = await (
+        await db.execute(
+            "SELECT k.paper_id FROM review_picks k JOIN reviews r ON r.id = k.review_id "
+            "WHERE r.period = 'day' AND r.day = %s",
+            (tomorrow,),
+        )
+    ).fetchall()
+    assert [k["paper_id"] for k in picked] == [P.id]
+    # Written into tomorrow's, it is not written into the day after as well.
+    day_after = tomorrow + timedelta(days=1)
+    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run, day_after))
+    assert models.reviewed == [len(FIELD), 1]  # a quiet day asks nothing
+
+
 async def test_a_quiet_day_makes_no_issue_and_a_failed_review_is_tried_again(db):
     models = Models()
     await db.execute("DELETE FROM memberships")

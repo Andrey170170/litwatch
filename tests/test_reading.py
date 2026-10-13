@@ -521,11 +521,20 @@ async def test_marking_an_old_member_important_brings_it_into_the_next_review(cl
     now = datetime.now(UTC)
     window = (now - timedelta(hours=1), now + timedelta(hours=1))
     assert await reviews_store.members(conn, INTERP.slug, *window) == []
+    # A member triage found just now comes first: the old one is ordered by when the owner
+    # marked it, which is what brought it into the window, not by when triage once did.
+    await conn.execute(
+        "INSERT INTO memberships (paper_id, topic, topic_revision) VALUES (%s, %s, 1)",
+        (P.id, INTERP.slug),
+    )
     await client.put(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
-    assert [p.id for p in await reviews_store.members(conn, INTERP.slug, *window)] == [Q.id]
+    assert [p.id for p in await reviews_store.members(conn, INTERP.slug, *window)] == [
+        P.id,
+        Q.id,
+    ]
     # Taken back, it is an old member again.
     await client.delete(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
-    assert await reviews_store.members(conn, INTERP.slug, *window) == []
+    assert [p.id for p in await reviews_store.members(conn, INTERP.slug, *window)] == [P.id]
 
 
 async def test_taking_important_back_waits_for_an_action_in_flight(client, conn):
@@ -579,3 +588,37 @@ async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "not_relevant"})
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     assert (await faith())["label"]["value"] == "not_relevant" and not (await faith())["missed"]
+
+
+async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, conn):
+    """Looking for the owner's standing word and giving it again happen under the paper's
+    lock, so a correction being written meanwhile is seen, and stands."""
+    import asyncio
+
+    from litwatch import store
+    from litwatch.core import Label, LabelOrigin, LabelValue
+    from litwatch.feedback import word as word_feedback
+    from litwatch.store import feedback as feedback_store
+
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+    await client.delete(f"/api/word/{FAITH.slug}/{Q.id}")
+    async with await store.sibling(conn) as other:
+        async with other.transaction():
+            await word_feedback.lock(other, Q.id)  # a correction, part way through
+            again = asyncio.create_task(
+                client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
+            )
+            await asyncio.sleep(0.5)
+            assert not again.done()
+            await feedback_store.set_label(
+                other,
+                Label(
+                    paper_id=Q.id,
+                    topic=FAITH.slug,
+                    value=LabelValue.NOT_RELEVANT,
+                    origin=LabelOrigin.READER,
+                ),
+            )
+        assert (await again).status_code == 200
+    (label,) = await (await conn.execute("SELECT value, origin FROM labels")).fetchall()
+    assert (label["value"], label["origin"]) == ("not_relevant", "reader")

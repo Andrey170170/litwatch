@@ -57,6 +57,9 @@ async def report(
         paper_id=paper_id, topic=topic, value=LabelValue.RELEVANT, origin=LabelOrigin.MISS
     )
     async with conn.transaction():
+        # The paper's lock first, so looking for a standing label and giving the word again
+        # are one step against any label being written meanwhile.
+        await word.lock(conn, paper_id)
         row = await (
             await conn.execute(
                 "INSERT INTO misses (paper_id, topic) VALUES (%s, %s) "

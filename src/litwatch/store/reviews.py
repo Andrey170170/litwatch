@@ -24,20 +24,43 @@ PICKS = """coalesce((SELECT jsonb_agg(jsonb_build_object(
 
 
 async def members(
-    conn: psycopg.AsyncConnection, topic: str, since: datetime, until: datetime
+    conn: psycopg.AsyncConnection,
+    topic: str,
+    since: datetime,
+    until: datetime,
+    owner_since: datetime | None = None,
 ) -> list[Paper]:
     """Papers that joined the topic's field in the window, oldest first: found by triage
-    then, or marked important by the owner then (an older member brought in again)."""
+    then, or marked important by the owner since `owner_since` (the window's start unless
+    given: a daily review takes additions made since the last one was written, so one made
+    after today's review is not lost between two days)."""
     rows = await (
         await conn.execute(
             f"SELECT {COLUMNS} FROM memberships m JOIN papers p ON p.id = m.paper_id "
             "WHERE m.topic = %s AND ((m.created_at >= %s AND m.created_at < %s) "
             "OR (m.owner_added_at >= %s AND m.owner_added_at < %s)) "
-            "ORDER BY least(m.created_at, coalesce(m.owner_added_at, m.created_at)), p.id",
-            (topic, since, until, since, until),
+            # By the time that brought the paper into the window: an old member the owner
+            # marked important stands where the marking put it, not where triage once did.
+            "ORDER BY CASE WHEN m.created_at >= %s AND m.created_at < %s THEN m.created_at "
+            "ELSE m.owner_added_at END, p.id",
+            (topic, since, until, owner_since or since, until, since, until),
         )
     ).fetchall()
     return [row_to_paper(r) for r in rows]
+
+
+async def last_written_at(
+    conn: psycopg.AsyncConnection, topic: str, period: str, before: date
+) -> datetime | None:
+    """When the topic's latest written review of the period before `before` was written."""
+    row = await (
+        await conn.execute(
+            "SELECT max(written_at) AS at FROM reviews WHERE topic = %s AND period = %s "
+            "AND day < %s AND state = 'written'",
+            (topic, period, before),
+        )
+    ).fetchone()
+    return row["at"] if row else None
 
 
 async def put(

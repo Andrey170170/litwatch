@@ -99,7 +99,11 @@ async def _review_day(
             continue
         if failed_only and not (existing and existing["state"] == "failed"):
             continue
-        papers = await reviews_store.members(conn, topic.slug, since, until)
+        # The owner's additions count from the last written daily review: one made after
+        # today's review was written belongs to tomorrow's, not to no one's.
+        last = await reviews_store.last_written_at(conn, topic.slug, "day", day)
+        owner_since = min(since, last) if last else None
+        papers = await reviews_store.members(conn, topic.slug, since, until, owner_since)
         if await _review(conn, run, topic, "day", day, papers) == "written":
             done += 1
     if done and (issue := await digest_store.issue(conn, "daily", day)):
