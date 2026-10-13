@@ -404,7 +404,12 @@ async def test_a_row_says_whose_take_it_shows_and_leaves_that_topic_out_of_also_
 async def test_bibtex_covers_papers_a_provider_found_outside_the_collection(client, conn):
     """A search hit the collection lacks gets an arXiv entry from what the hit carries,
     beside the collection's papers, without being fetched (decision 6)."""
-    hit = {"id": "2610.99901", "title": "Found by the archive", "authors": ["Ada Lovelace"], "year": 2026}
+    hit = {
+        "id": "2610.99901",
+        "title": "Found by the archive",
+        "authors": ["Ada Lovelace"],
+        "year": 2026,
+    }
     text = (await client.post("/api/bibtex", json={"ids": [P.id], "cited": [hit]})).text
     assert text.count("@misc") == 2
     assert "eprint = {2610.99901}" in text and "year = {2026}" in text
