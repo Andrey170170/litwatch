@@ -80,8 +80,10 @@ CREATE TABLE deep_waiting (
     tried_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- The paper revision a fetched full text belongs to: a rewrite makes it stale.
-ALTER TABLE papers ADD COLUMN IF NOT EXISTS body_revision integer;
+-- The paper revision and arXiv version a fetched full text belongs to: a rewrite or a new
+-- version makes it stale (a new version can change the body without touching the abstract).
+ALTER TABLE papers ADD COLUMN IF NOT EXISTS body_revision integer,
+    ADD COLUMN IF NOT EXISTS body_version integer;
 
 -- An adopted 0.x database brings its cards along on the paper rows.
 DO $$

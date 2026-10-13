@@ -232,12 +232,14 @@ async def correct(
 
 async def body(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str, str | None] | None:
     """The fetched full text and where it came from (`html` or `pdf`), when there is one for
-    the paper's current revision. A text from before a rewrite is stale and not returned; one
-    fetched by 0.x, which kept no revision, counts as the first."""
+    the paper's current revision and arXiv version. A text from before a rewrite or a new
+    version is stale and not returned; one fetched by 0.x, which kept neither, counts as the
+    first revision of whatever version is known."""
     row = await (
         await conn.execute(
             "SELECT body, body_source FROM papers WHERE id = %s AND body IS NOT NULL "
-            "AND coalesce(body_revision, 1) = revision",
+            "AND coalesce(body_revision, 1) = revision "
+            "AND (body_version IS NULL OR body_version IS NOT DISTINCT FROM version)",
             (paper_id,),
         )
     ).fetchone()
@@ -245,9 +247,9 @@ async def body(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str, str |
 
 
 async def set_body(conn: psycopg.AsyncConnection, paper_id: str, text: str, source: str) -> None:
-    """Store the full text, for the paper's revision as it is now."""
+    """Store the full text, for the paper's revision and version as they are now."""
     await conn.execute(
         "UPDATE papers SET body = %s, body_source = %s, body_fetched_at = now(), "
-        "body_revision = revision WHERE id = %s",
+        "body_revision = revision, body_version = version WHERE id = %s",
         (text, source, paper_id),
     )

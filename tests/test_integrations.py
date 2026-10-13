@@ -418,7 +418,7 @@ async def test_the_automatic_limit_says_why_a_paper_got_no_card(world, deep):
     assert "stopped" in (await state.card(conn, P.id))["error"]
 
 
-async def test_a_text_fetched_before_a_rewrite_is_not_used(world):
+async def test_a_text_fetched_before_a_rewrite_or_a_new_version_is_not_used(world):
     conn = world
     await papers_store.upsert(conn, [P])
     await papers_store.set_body(conn, P.id, "the old text", "html")
@@ -427,6 +427,11 @@ async def test_a_text_fetched_before_a_rewrite_is_not_used(world):
     assert await papers_store.body(conn, P.id) is None
     await papers_store.set_body(conn, P.id, "the new text", "html")
     assert await papers_store.body(conn, P.id) == ("the new text", "html")
+    # A new arXiv version can change the body while the abstract stays: also stale.
+    await conn.execute(
+        "UPDATE papers SET version = coalesce(version, 1) + 1 WHERE id = %s", (P.id,)
+    )
+    assert await papers_store.body(conn, P.id) is None
 
 
 async def test_a_failed_pdf_request_means_no_text_yet():
