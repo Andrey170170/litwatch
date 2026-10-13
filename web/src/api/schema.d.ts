@@ -1717,6 +1717,11 @@ export interface components {
              * @default false
              */
             by_owner: boolean;
+            /**
+             * Picked
+             * @default false
+             */
+            picked: boolean;
             /** Score */
             score?: number | null;
         };

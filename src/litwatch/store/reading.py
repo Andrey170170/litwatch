@@ -287,6 +287,8 @@ async def papers(
     the whole collection, each row with its best Watch grade and the take of the first Watch
     topic, by the owner's order, that has one. `also_in` names the other topics the paper is
     relevant to, leaving out the one whose take is shown. A search sorts by published date.
+    A field topic's members are every paper triage or the owner put in it; `picked` marks
+    those its reviews picked, which come first unless a sort or a search is asked for.
     """
     kind = None
     if topic:
@@ -318,14 +320,9 @@ async def papers(
         )
         take_params = [topic]
     else:
-        if kind:  # a field topic's table is its picks, and what the owner put in the field
-            scope = sql.SQL(
-                "JOIN (SELECT k.paper_id FROM review_picks k "
-                "JOIN reviews r ON r.id = k.review_id WHERE r.topic = %s "
-                "UNION SELECT m.paper_id FROM memberships m WHERE m.topic = %s AND m.by_owner) "
-                "m ON m.paper_id = p.id"
-            )
-            scope_params = [topic, topic]
+        if kind:  # a field topic's table is its members, by triage or the owner
+            scope = sql.SQL("JOIN memberships m ON m.paper_id = p.id AND m.topic = %s")
+            scope_params = [topic]
         else:
             scope, scope_params = sql.SQL(""), []
         grade = sql.SQL(
@@ -340,6 +337,8 @@ async def papers(
         )
         take_params = []
     order = SORTS.get(sort or ("published" if q else "added"), SORTS["added"])
+    if kind and kind != "watch" and not sort and not q:
+        order = sql.SQL("picked DESC, {}").format(order)
     query = sql.SQL(
         """
         SELECT p.id, p.title, {authors}, p.published,
@@ -348,6 +347,8 @@ async def papers(
                coalesce(l.saved, false) AS saved,
                EXISTS (SELECT 1 FROM memberships mo WHERE mo.paper_id = p.id
                        AND mo.topic = %s AND mo.by_owner) AS by_owner,
+               EXISTS (SELECT 1 FROM review_picks k JOIN reviews r ON r.id = k.review_id
+                       WHERE k.paper_id = p.id AND r.topic = %s) AS picked,
                EXISTS (SELECT 1 FROM candidates c WHERE c.paper_id = p.id
                        AND c.state = 'pending' {live}) AS grading,
                (SELECT coalesce(array_agg(t2.name ORDER BY t2.position), '{{}}')
@@ -374,7 +375,9 @@ async def papers(
     shown = topic if kind == "watch" else None
     owners_field = topic if kind and kind != "watch" else None  # by_owner is a field's mark
     rows = await _all(
-        conn, query, [owners_field, shown, *scope_params, *take_params, *params, limit, offset]
+        conn,
+        query,
+        [owners_field, owners_field, shown, *scope_params, *take_params, *params, limit, offset],
     )
     if rows:
         total = rows[0]["total"]
@@ -413,17 +416,14 @@ async def topic_cards(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
                CASE WHEN t.kind = 'watch'
                     THEN (SELECT count(*) FROM effective_grades g WHERE g.topic = t.slug
                           AND g.grade IN ('must_read', 'relevant'))
-                    ELSE (SELECT count(DISTINCT k.paper_id) FROM review_picks k
-                          JOIN reviews r ON r.id = k.review_id WHERE r.topic = t.slug) END
+                    ELSE (SELECT count(*) FROM memberships m WHERE m.topic = t.slug) END
                    AS papers,
                CASE WHEN t.kind = 'watch'
                     THEN (SELECT count(*) FROM effective_grades g JOIN library l
                           ON l.paper_id = g.paper_id AND l.saved
                           WHERE g.topic = t.slug AND g.grade IN ('must_read', 'relevant'))
-                    ELSE (SELECT count(DISTINCT k.paper_id) FROM review_picks k
-                          JOIN reviews r ON r.id = k.review_id
-                          JOIN library l ON l.paper_id = k.paper_id AND l.saved
-                          WHERE r.topic = t.slug) END
+                    ELSE (SELECT count(*) FROM memberships m JOIN library l
+                          ON l.paper_id = m.paper_id AND l.saved WHERE m.topic = t.slug) END
                    AS saved,
                CASE WHEN t.kind = 'watch'
                     THEN (SELECT count(*) FROM issue_entries e

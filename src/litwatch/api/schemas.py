@@ -234,6 +234,7 @@ class Row(BaseModel):
     also_in: list[str] = Field(default_factory=list)  # other topics it is relevant to
     source: str = "collection"  # or the search provider that found it outside the collection
     by_owner: bool = False  # on a field topic's page: the owner put it in the field
+    picked: bool = False  # on a field topic's page: one of its reviews picked it
     score: float | None = None  # the provider's, for its "best match" order
 
 

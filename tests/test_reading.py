@@ -438,6 +438,47 @@ async def test_bibtex_covers_papers_a_provider_found_outside_the_collection(clie
     assert "eprint = {2610.00001}" in text and "eprint = {2610.99902}" not in text
 
 
+async def test_a_field_table_lists_its_members_with_the_picks_first(client, conn):
+    """A Radar or Pulse page holds every paper triage put in the field; what its reviews
+    picked comes first under the default order, and an asked-for sort orders them all."""
+    from datetime import date
+
+    from litwatch.store import reading as reading_store
+    from litwatch.store import reviews as reviews_store
+    from tests.conftest import INTERP
+
+    r = paper("2610.00003", title="Bold claims about features")
+    await papers_store.upsert(conn, [r])
+    for days_ago, p in ((3, P), (2, Q), (1, r)):
+        await conn.execute(
+            "UPDATE papers SET fetched_at = now() - make_interval(days => %s) WHERE id = %s",
+            (days_ago, p.id),
+        )
+        await conn.execute(
+            "INSERT INTO memberships (paper_id, topic, topic_revision) VALUES (%s, %s, 1)",
+            (p.id, INTERP.slug),
+        )
+    await reviews_store.put(
+        conn,
+        INTERP.slug,
+        "week",
+        date(2026, 10, 5),
+        kind="radar",
+        state="written",
+        text="A week.",
+        picks=[(P.id, "The oldest, picked.")],
+    )
+
+    async def table(**params):
+        found = await client.get("/api/papers", params={"topic": INTERP.slug, **params})
+        return [(row["id"], row["picked"]) for row in found.json()["rows"]]
+
+    assert await table() == [(P.id, True), (r.id, False), (Q.id, False)]
+    assert await table(sort="title") == [(Q.id, False), (r.id, False), (P.id, True)]
+    cards = {c["slug"]: c for c in await reading_store.topic_cards(conn)}
+    assert cards[INTERP.slug]["papers"] == 3
+
+
 async def test_important_for_a_field_saves_reacts_and_makes_the_owners_member(client, conn):
     """ "Important for <field>" (M7): the paper joins the library, gets a thumb up for the
     field, and is the field's member as the owner's addition; triage leaves it alone, the

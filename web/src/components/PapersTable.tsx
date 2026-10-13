@@ -239,6 +239,11 @@ function AddedByYou() {
   return <span className="ml-2 inline-block rounded-full border border-border px-2 py-[1px] align-middle font-sans text-[11px] font-normal text-muted-foreground">added by you</span>;
 }
 
+/** On a field's page: one of the field's reviews picked the paper. */
+function Picked() {
+  return <span className="ml-2 inline-block rounded-full border border-border px-2 py-[1px] align-middle font-sans text-[11px] font-normal text-muted-foreground">pick</span>;
+}
+
 function Select({ checked, onChange, title }: { checked: boolean; onChange: () => void; title: string }) {
   return (
     <label className="hit cursor-pointer" aria-label={`Select ${title}`}>
@@ -277,7 +282,8 @@ function DesktopRow({ row: r, picks, selected, onSelect, miss, surface }: RowPro
         <Link to="/paper/$" params={{ _splat: r.id }} search={{ topic: surface }} className="hover:underline decoration-border">
           {r.title}
         </Link>
-        {r.by_owner && <AddedByYou />}
+        {r.picked && <Picked />}
+          {r.by_owner && <AddedByYou />}
         <small className="meta mt-0.5 block text-[12.5px] font-normal">{adjacent ? "near the topic" : authorsLine(r.authors, 5)}</small>
       </td>
       <td className="tabular py-[11px] pr-2.5 whitespace-nowrap text-muted-foreground">{fmt.cell(r.published)}</td>
@@ -310,6 +316,7 @@ function PhoneRow({ row: r, picks, selected, onSelect, miss, surface }: RowProps
           <Link to="/paper/$" params={{ _splat: r.id }} search={{ topic: surface }}>
             {r.title}
           </Link>
+          {r.picked && <Picked />}
           {r.by_owner && <AddedByYou />}
         </h3>
         <p className="meta mt-0.5">{adjacent ? "near the topic" : authorsLine(r.authors)}</p>
