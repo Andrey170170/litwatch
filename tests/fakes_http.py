@@ -28,9 +28,11 @@ class FakeZotero:
         self.calls: list[str] = []
         self.tokens: set[str] = set()
         self.lose_answers = 0
+        self.made = 0
 
     def _key(self) -> str:
-        return f"K{len(self.collections) + len(self.items) + 1:07d}"
+        self.made += 1  # never reused, as in Zotero
+        return f"K{self.made:07d}"
 
     def add_item(self, key: str, data: dict[str, Any]) -> None:
         self.version += 1
@@ -61,7 +63,7 @@ class FakeZotero:
                 for i in self.items.values()
                 if not i["data"].get("parentItem") and q in i["data"].get("title", "").lower()
             ]
-            return httpx.Response(200, json=rows)
+            return self._page(rows, query)
         if path.endswith("/children"):
             parent = path.split("/")[2]
             rows = [i for i in self.items.values() if i["data"].get("parentItem") == parent]
@@ -113,6 +115,13 @@ class FakeZotero:
         return [
             i["data"]["note"]
             for i in self.items.values()
+            if i["data"].get("parentItem") == key and i["data"].get("itemType") == "note"
+        ]
+
+    def notes_keys(self, key: str) -> list[str]:
+        return [
+            k
+            for k, i in self.items.items()
             if i["data"].get("parentItem") == key and i["data"].get("itemType") == "note"
         ]
 

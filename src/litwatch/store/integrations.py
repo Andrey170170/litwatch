@@ -57,23 +57,26 @@ async def seed_zotero(conn: psycopg.AsyncConnection) -> int:
 
 
 async def webdav_file(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
-    """The paper's PDF attachment and its state: `pending` until litwatch's upload is known to
-    be complete, `stored` after, `owner` for one litwatch leaves alone."""
+    """The paper's PDF attachment, the Zotero item it hangs on, and its state: `pending` until
+    litwatch's upload is known to be complete, `stored` after, `owner` for one litwatch leaves
+    alone."""
     return await (
         await conn.execute(
-            "SELECT attachment_key, state FROM webdav_files WHERE paper_id = %s", (paper_id,)
+            "SELECT item_key, attachment_key, state FROM webdav_files WHERE paper_id = %s",
+            (paper_id,),
         )
     ).fetchone()
 
 
 async def set_webdav_file(
-    conn: psycopg.AsyncConnection, paper_id: str, key: str, state: str
+    conn: psycopg.AsyncConnection, paper_id: str, item: str, key: str, state: str
 ) -> None:
     await conn.execute(
-        "INSERT INTO webdav_files (paper_id, attachment_key, state) VALUES (%s, %s, %s) "
-        "ON CONFLICT (paper_id) DO UPDATE SET attachment_key = EXCLUDED.attachment_key, "
+        "INSERT INTO webdav_files (paper_id, item_key, attachment_key, state) "
+        "VALUES (%s, %s, %s, %s) ON CONFLICT (paper_id) DO UPDATE SET "
+        "item_key = EXCLUDED.item_key, attachment_key = EXCLUDED.attachment_key, "
         "state = EXCLUDED.state, updated_at = now()",
-        (paper_id, key, state),
+        (paper_id, item, key, state),
     )
 
 
@@ -82,9 +85,10 @@ async def seed_webdav(conn: psycopg.AsyncConnection) -> int:
     if not await _has_column(conn, "papers", "zotero_attachment_key"):
         return 0
     cur = await conn.execute(
-        "INSERT INTO webdav_files (paper_id, attachment_key, state) "
-        "SELECT id, zotero_attachment_key, 'stored' FROM papers "
-        "WHERE zotero_attachment_key IS NOT NULL ON CONFLICT (paper_id) DO NOTHING"
+        "INSERT INTO webdav_files (paper_id, item_key, attachment_key, state) "
+        "SELECT id, zotero_key, zotero_attachment_key, 'stored' FROM papers "
+        "WHERE zotero_key IS NOT NULL AND zotero_attachment_key IS NOT NULL "
+        "ON CONFLICT (paper_id) DO NOTHING"
     )
     return cur.rowcount
 

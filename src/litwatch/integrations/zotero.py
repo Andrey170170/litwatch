@@ -258,8 +258,8 @@ class ZoteroClient:
 
     async def find_item(self, paper: Paper) -> str | None:
         """An existing top-level item for this paper, by arXiv id or exact title."""
-        rows = await self._get(
-            "/items/top", q=paper.title, qmode="titleCreatorYear", limit=25, itemType="-note"
+        rows = await self._get_all(
+            "/items/top", q=paper.title, qmode="titleCreatorYear", itemType="-note"
         )
         for row in rows:
             data = row["data"]

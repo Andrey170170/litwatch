@@ -236,6 +236,20 @@ async def test_whats_there_is_looked_for_past_the_first_page(world):
     assert len(screens) == 1 and "schema=2" in screens[0]
 
 
+async def test_an_item_is_found_past_the_first_page_of_matches(world):
+    conn, fake = world, FakeZotero()
+    # Thirty other items whose titles contain the paper's, then the paper's own.
+    for i in range(30):
+        fake.add_item(f"REPLY{i:03d}", {"itemType": "preprint", "title": f"{P.title}: reply {i}"})
+    fake.add_item("THEITEM1", {"itemType": "preprint", "title": P.title})
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    assert len(fake.tops()) == 31
+    assert await state.zotero_item(conn, P.id) == "THEITEM1"
+
+
 async def test_a_paper_never_in_the_library_gets_no_item(world):
     conn, fake = world, FakeZotero()
     z = zotero(fake)
@@ -276,7 +290,11 @@ async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, pdf
 
     (item,) = fake.tops()
     (attachment,) = fake.attachments(item["key"])
-    assert await state.webdav_file(conn, P.id) == {"attachment_key": attachment, "state": "stored"}
+    assert await state.webdav_file(conn, P.id) == {
+        "item_key": item["key"],
+        "attachment_key": attachment,
+        "state": "stored",
+    }
     assert "litwatch:pdf" in fake.tags(attachment)
     with zipfile.ZipFile(io.BytesIO(dav.files[f"{attachment}.zip"])) as zf:
         assert zf.read(attachment_filename(P)) == PDF
@@ -351,7 +369,11 @@ async def test_an_attachment_made_by_a_lost_create_is_found_and_finished(world, 
     await run(conn, w)
     (item,) = fake.tops()
     (attachment,) = fake.attachments(item["key"])
-    assert await state.webdav_file(conn, P.id) == {"attachment_key": attachment, "state": "stored"}
+    assert await state.webdav_file(conn, P.id) == {
+        "item_key": item["key"],
+        "attachment_key": attachment,
+        "state": "stored",
+    }
     assert f"{attachment}.prop" in dav.files
 
 
@@ -369,5 +391,37 @@ async def test_the_owners_own_pdf_is_left_alone(world, pdfs):
         {"itemType": "attachment", "parentItem": item["key"], "contentType": "application/pdf"},
     )
     await run(conn, w)
-    assert await state.webdav_file(conn, P.id) == {"attachment_key": "OWNERPDF", "state": "owner"}
+    assert await state.webdav_file(conn, P.id) == {
+        "item_key": item["key"],
+        "attachment_key": "OWNERPDF",
+        "state": "owner",
+    }
     assert arxiv.calls == [] and dav.files == {}
+
+
+async def test_an_item_made_again_gets_its_pdf_again(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+    await run(conn, z, w)
+    (first,) = fake.tops()
+    assert (await state.webdav_file(conn, P.id))["state"] == "stored"
+
+    # The owner deletes the item in Zotero; unsaving and saving makes litwatch a new one.
+    for key in [first["key"], *fake.attachments(first["key"]), *fake.notes_keys(first["key"])]:
+        del fake.items[key]
+    await word.toggle(conn, P.id, Hand.UNSAVE)
+    await word.toggle(conn, P.id, Hand.SAVE)
+    await run(conn, z, w)
+    (second,) = fake.tops()
+    assert second["key"] != first["key"]
+    (attachment,) = fake.attachments(second["key"])
+    assert await state.webdav_file(conn, P.id) == {
+        "item_key": second["key"],
+        "attachment_key": attachment,
+        "state": "stored",
+    }
+    assert f"{attachment}.prop" in dav.files

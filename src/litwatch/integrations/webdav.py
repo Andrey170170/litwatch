@@ -143,11 +143,13 @@ class WebDav:
     async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
         paper_id = event.paper_id
         row = await state.webdav_file(conn, paper_id)
+        item = await state.zotero_item(conn, paper_id)
+        if row and row["item_key"] != item:
+            row = None  # the item was made again: what hung on the old one does not count
         if row and row["state"] in ("stored", "owner"):
             return
         if not await must_read_and_saved(conn, paper_id):
             return
-        item = await state.zotero_item(conn, paper_id)
         if item is None:
             raise NotYetError("the zotero integration has not made the item yet")
         paper = await papers_store.get(conn, paper_id)
@@ -155,15 +157,15 @@ class WebDav:
             attachments = await self.zotero.pdf_attachments(item)
             ours = [a for a in attachments if PDF_TAG in _tags(a)]
             if not ours and attachments:
-                await state.set_webdav_file(conn, paper_id, attachments[0]["key"], "owner")
+                await state.set_webdav_file(conn, paper_id, item, attachments[0]["key"], "owner")
                 return
             if ours:  # made by a try that stopped before recording it
-                await state.set_webdav_file(conn, paper_id, ours[0]["key"], "pending")
+                await state.set_webdav_file(conn, paper_id, item, ours[0]["key"], "pending")
             else:
                 await self._attach(conn, item, paper, str(event.id))
                 return
             row = await state.webdav_file(conn, paper_id)
-        await self._finish(conn, row["attachment_key"], paper)
+        await self._finish(conn, item, row["attachment_key"], paper)
 
     async def _attach(
         self, conn: psycopg.AsyncConnection, item: str, paper: Paper, attempt: str
@@ -175,28 +177,30 @@ class WebDav:
             key = await self.zotero.create_attachment(item, paper, pdf, attempt)
         except AlreadyWrittenError as exc:
             raise NotYetError("the attachment was made; it is finished on the next try") from exc
-        await state.set_webdav_file(conn, paper.id, key, "pending")
-        await self._upload(conn, key, paper, pdf)
+        await state.set_webdav_file(conn, paper.id, item, key, "pending")
+        await self._upload(conn, item, key, paper, pdf)
 
-    async def _finish(self, conn: psycopg.AsyncConnection, key: str, paper: Paper) -> None:
+    async def _finish(
+        self, conn: psycopg.AsyncConnection, item: str, key: str, paper: Paper
+    ) -> None:
         """Complete an upload that stopped half-way: the files again, from a fresh download,
         with the attachment's hash set to match them."""
         if await self.webdav.exists(key):
-            await state.set_webdav_file(conn, paper.id, key, "stored")
+            await state.set_webdav_file(conn, paper.id, item, key, "stored")
             return
         pdf = await self._download(paper)
         if pdf is None:
             raise NotYetError("the PDF is not available yet")
         digest = hashlib.md5(pdf).hexdigest()  # noqa: S324 - Zotero's file hash, not security
         await self.zotero.patch_item(key, lambda d: d.update(md5=digest, mtime=pdf_mtime(paper)))
-        await self._upload(conn, key, paper, pdf)
+        await self._upload(conn, item, key, paper, pdf)
 
     async def _upload(
-        self, conn: psycopg.AsyncConnection, key: str, paper: Paper, pdf: bytes
+        self, conn: psycopg.AsyncConnection, item: str, key: str, paper: Paper, pdf: bytes
     ) -> None:
         archive, prop = webdav_payload(paper, pdf)
         await self.webdav.put_attachment(key, archive, prop)
-        await state.set_webdav_file(conn, paper.id, key, "stored")
+        await state.set_webdav_file(conn, paper.id, item, key, "stored")
         log.info("%s: attached PDF %s (%d bytes)", paper.id, key, len(pdf))
 
     async def _download(self, paper: Paper) -> bytes | None:

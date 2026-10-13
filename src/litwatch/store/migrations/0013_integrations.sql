@@ -37,6 +37,7 @@ CREATE TABLE zotero_items (
 -- not make, which it leaves alone. Seeded from 0.x's `papers.zotero_attachment_key`.
 CREATE TABLE webdav_files (
     paper_id       text PRIMARY KEY REFERENCES papers(id),
+    item_key       text NOT NULL,              -- the Zotero item it is attached to
     attachment_key text NOT NULL,
     state          text NOT NULL CHECK (state IN ('pending', 'stored', 'owner')),
     updated_at     timestamptz NOT NULL DEFAULT now()
