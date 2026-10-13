@@ -4,7 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useQuery } from "@tanstack/react-query";
 import { Check, ExternalLink, FileText } from "lucide-react";
 import type { Row, TopicCard } from "@/api/client";
-import { bibtexFor, bibtexForFilter, download, useMiss } from "@/api/mutations";
+import { bibtexFor, bibtexForFilter, download, useFetchPaper, useMiss } from "@/api/mutations";
 import { papersQuery } from "@/api/queries";
 import { GradeDot } from "@/components/paper-bits";
 import { useDesktop } from "@/hooks/useDesktop";
@@ -130,6 +130,12 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
           ))}
         </div>
       )}
+      {(q.data?.outside?.length ?? 0) > 0 && <OutsideBand rows={q.data!.outside!} />}
+      {(q.data?.left_out?.length ?? 0) > 0 && (
+        <p className="meta mt-2 text-[12.5px]">
+          {q.data!.left_out!.join(" and ")} did not answer this search in time, so {q.data!.left_out!.length === 1 ? "its" : "their"} papers are not here.
+        </p>
+      )}
       {total > PAGE_SIZE && (
         <div className="mt-2.5 flex justify-between text-[13px] text-muted-foreground">
           <button type="button" disabled={page === 0} onClick={() => onFilter({ page: page - 1 || undefined })} className="min-h-[36px] underline decoration-border disabled:no-underline disabled:opacity-40">
@@ -140,6 +146,46 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Papers a search provider found that the collection lacks, in their own band under the
+ * collection's rows (DESIGN.md "Papers"): title, authors, date, who found it, arXiv, and
+ * Fetch, which brings the paper into the collection where Save and the rest apply.
+ */
+function OutsideBand({ rows }: { rows: Row[] }) {
+  const fetch = useFetchPaper();
+  return (
+    <div className="mt-5">
+      <p className="mb-1 text-[11.5px] tracking-[.06em] text-muted-foreground uppercase">Outside the collection · {rows.length}</p>
+      <div className="border-t border-border">
+        {rows.map((r) => (
+          <div key={r.id} className="grid grid-cols-[1fr_auto] items-start gap-x-3 border-b border-border py-[11px]">
+            <div className="min-w-0">
+              <h3 className="font-serif text-[15.5px] leading-[1.3] font-semibold desk:text-[16.5px]">
+                <a href={`https://arxiv.org/abs/${r.id}`} target="_blank" rel="noreferrer" className="hover:underline decoration-border">
+                  {r.title}
+                </a>
+              </h3>
+              <p className="meta mt-0.5 flex flex-wrap items-center gap-x-3">
+                <span>{[authorsLine(r.authors, 5), fmt.cell(r.published)].filter(Boolean).join(" · ")}</span>
+                <span>found by {r.source}</span>
+                <Links id={r.id} />
+              </p>
+            </div>
+            <button
+              type="button"
+              className="min-h-[36px] rounded-full border border-border px-3.5 text-[13px] font-semibold text-primary hover:bg-muted disabled:opacity-50"
+              disabled={fetch.isPending}
+              onClick={() => fetch.mutate(r.id)}
+            >
+              Fetch
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

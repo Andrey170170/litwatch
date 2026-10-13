@@ -3,7 +3,7 @@
  * changed. Every write returns `{message, saved, grades}`.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, ok, type Ack, type LabelValue, type ReactionReason, type ReactionValue } from "./client";
+import { ApiError, api, ok, type Ack, type LabelValue, type ReactionReason, type ReactionValue } from "./client";
 import { toast } from "@/lib/toast";
 import { invalidateAfterWrite } from "./invalidate";
 
@@ -87,6 +87,75 @@ export function useVisit() {
     },
     // A visit moves only the "new since" counts.
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["topics"] }),
+  });
+}
+
+/** What the server said about a correction that failed, in plain words (SPEC §6). */
+export function publicationError(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.status === 404) return "DBLP has no record with that key.";
+    if (e.status === 502) return "DBLP did not answer; try again in a while.";
+    if (e.status === 422) return e.message || "That is not a DOI or a DBLP key.";
+  }
+  return e instanceof Error && e.message ? e.message : "That did not save";
+}
+
+/** The owner names the published version: a DBLP key, a DOI, or that there is none. */
+export function usePublication(paperId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { dblp_key?: string; doi?: string; none?: boolean }) =>
+      ok(
+        await api.PUT("/api/papers/{paper_id}/publication", {
+          params: { path: { paper_id: paperId } },
+          body: { dblp_key: v.dblp_key ?? null, doi: v.doi ?? null, none: v.none ?? false },
+        }),
+      ),
+    onSuccess: (record) => {
+      toast(record ? `Published version set: ${[record.venue, record.year].filter(Boolean).join(" ") || "a record"}` : "Noted: no published version");
+      void qc.invalidateQueries({ queryKey: ["paper", paperId] });
+    },
+    onError: (e: Error) => toast(publicationError(e), "error"),
+  });
+}
+
+/** Back to automatic lookup: the stored version, the owner's choice included, is dropped. */
+export function useForgetPublication(paperId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => ok(await api.DELETE("/api/papers/{paper_id}/publication", { params: { path: { paper_id: paperId } } })),
+    onSuccess: () => {
+      toast("Back to automatic lookup");
+      void qc.invalidateQueries({ queryKey: ["paper", paperId] });
+    },
+    onError: (e: Error) => toast(e.message || "That did not save", "error"),
+  });
+}
+
+/** Ask for a deep card; the card shows on the paper once an integration has written it. */
+export function useRequestCard(paperId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => ok(await api.POST("/api/papers/{paper_id}/card", { params: { path: { paper_id: paperId } } })),
+    onSuccess: () => toast("Deep card requested"),
+    onError: (e: Error & { status?: number }) => {
+      // 409: a card arrived meanwhile, or nothing makes cards any more; the page tells.
+      if (e.status === 409) void qc.invalidateQueries({ queryKey: ["paper", paperId] });
+      toast(e.status === 409 ? e.message : e.message || "The request did not go through", "error");
+    },
+  });
+}
+
+/** Fetch a paper a provider found into the collection (the lookup, by arXiv id). */
+export function useFetchPaper() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => ok(await api.POST("/api/lookup", { body: { q: id } })),
+    onSuccess: (r) => {
+      toast(r.fetched ? "Fetched into the collection" : "Already in the collection");
+      void qc.invalidateQueries({ queryKey: ["papers"] });
+    },
+    onError: (e: Error) => toast(e.message || "Could not fetch it", "error"),
   });
 }
 

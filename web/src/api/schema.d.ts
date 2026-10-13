@@ -62,7 +62,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Papers */
+        /**
+         * Papers
+         * @description The table. A search also asks the search providers, on its first page, for papers the
+         *     collection lacks: the `outside` band. Topic and saved belong to the collection, so with
+         *     either filter set there is no outside band; `source` keeps one band only.
+         */
         get: operations["papers_api_papers_get"];
         put?: never;
         post?: never;
@@ -709,6 +714,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Status
+         * @description One card per loaded integration, then one per configured section that is turned off
+         *     (its cursor kept, so its lag shows what turning it on again would hand it).
+         */
+        get: operations["status_api_settings_integrations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/integrations/{name}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry
+         * @description Try the failing event again now, without waiting out its backoff.
+         */
+        post: operations["retry_api_settings_integrations__name__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/integrations/{name}/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skip
+         * @description Give up on the failing event; the integration goes on with the next. Returns the
+         *     event skipped.
+         */
+        post: operations["skip_api_settings_integrations__name__skip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Changes
+         * @description The outbox in order, from after a position: for a client that polls instead of taking
+         *     webhooks. Start without `after`, then pass the `next` of each answer to read on. Only
+         *     events whose transactions are settled are listed, so reading on never misses one that
+         *     committed late.
+         */
+        get: operations["changes_api_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/papers/{paper_id}/card": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Card
+         * @description Ask for a deep card on this paper, whatever its grade. Honoured by whichever loaded
+         *     integration answers `card.requested`; the card shows on the paper once it is stored.
+         */
+        post: operations["request_card_api_papers__paper_id__card_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -836,6 +947,21 @@ export interface components {
          * @enum {string}
          */
         Cadence: "weekly" | "daily";
+        /** CardRequested */
+        CardRequested: {
+            /** Event Id */
+            event_id: number;
+        };
+        /**
+         * Changes
+         * @description A page of the changes feed, and the position to read on from.
+         */
+        Changes: {
+            /** Events */
+            events: components["schemas"]["Event"][];
+            /** Next */
+            next: string;
+        };
         /**
          * Chosen
          * @description The folded "how this was chosen" for one Watch topic.
@@ -865,6 +991,20 @@ export interface components {
             title?: string | null;
             /** Abstract */
             abstract?: string | null;
+        };
+        /**
+         * DeepCard
+         * @description A deep card: the reading card the deep service wrote, as it wrote it.
+         */
+        DeepCard: {
+            /** Card */
+            card: {
+                [key: string]: unknown;
+            };
+            /** Model */
+            model?: string | null;
+            /** Written At */
+            written_at?: string | null;
         };
         /**
          * Digest
@@ -920,6 +1060,44 @@ export interface components {
             reaction?: components["schemas"]["ReactionValue"] | null;
             reaction_reason?: components["schemas"]["ReactionReason"] | null;
         };
+        /**
+         * Event
+         * @description A fact written to the outbox in the same transaction as the data it describes.
+         */
+        Event: {
+            /** Id */
+            id?: number | null;
+            /** Type */
+            type: string;
+            /** Paper Id */
+            paper_id?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at?: string | null;
+            /** Xid */
+            xid?: number | null;
+        };
+        /**
+         * Failing
+         * @description The event an integration is stuck on; its later events wait behind it.
+         */
+        Failing: {
+            /** Event Id */
+            event_id: number;
+            /** Type */
+            type?: string | null;
+            /** Paper Id */
+            paper_id?: string | null;
+            /** Failures */
+            failures: number;
+            /** Retry At */
+            retry_at?: string | null;
+            /** Error */
+            error?: string | null;
+        };
         /** Fit */
         Fit: {
             value: components["schemas"]["LabelValue"];
@@ -957,6 +1135,39 @@ export interface components {
              */
             at: string;
             grade?: components["schemas"]["Grade"] | null;
+        };
+        /**
+         * IntegrationCard
+         * @description One integration under Settings → Integrations.
+         */
+        IntegrationCard: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Lag
+             * @default 0
+             */
+            lag: number;
+            failing?: components["schemas"]["Failing"] | null;
+            /** Last Error */
+            last_error?: string | null;
+            /** Failed At */
+            failed_at?: string | null;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Answers Card Requests
+             * @default false
+             */
+            answers_card_requests: boolean;
+            search?: components["schemas"]["SearchStats"] | null;
         };
         /** Issue */
         Issue: {
@@ -1171,6 +1382,12 @@ export interface components {
              * @default false
              */
             publication_by_owner: boolean;
+            card?: components["schemas"]["DeepCard"] | null;
+            /**
+             * Card Requestable
+             * @default false
+             */
+            card_requestable: boolean;
         };
         /**
          * PaperTopic
@@ -1201,12 +1418,21 @@ export interface components {
              */
             grading: boolean;
         };
-        /** Papers */
+        /**
+         * Papers
+         * @description A page of the table. A search also brings the papers search providers found that the
+         *     collection lacks, as a second band under the first; a provider that failed or was too
+         *     slow is named in `left_out`.
+         */
         Papers: {
             /** Rows */
             rows: components["schemas"]["Row"][];
             /** Total */
             total: number;
+            /** Outside */
+            outside?: components["schemas"]["Row"][];
+            /** Left Out */
+            left_out?: string[];
         };
         /**
          * Pick
@@ -1401,6 +1627,13 @@ export interface components {
             saved: boolean;
             /** Also In */
             also_in?: string[];
+            /**
+             * Source
+             * @default collection
+             */
+            source: string;
+            /** Score */
+            score?: number | null;
         };
         /** SaveIn */
         SaveIn: {
@@ -1419,6 +1652,26 @@ export interface components {
             zone: string;
             /** Jobs */
             jobs: components["schemas"]["NextFire"][];
+        };
+        /**
+         * SearchStats
+         * @description How a search provider has answered since the service started.
+         */
+        SearchStats: {
+            /**
+             * Queries
+             * @default 0
+             */
+            queries: number;
+            /**
+             * Left Out
+             * @default 0
+             */
+            left_out: number;
+            /** Last Error */
+            last_error?: string | null;
+            /** Last Error At */
+            last_error_at?: string | null;
         };
         /** Section */
         Section: {
@@ -1699,6 +1952,7 @@ export interface operations {
                 saved?: boolean | null;
                 year?: number | null;
                 sort?: string | null;
+                source?: ("collection" | "outside") | null;
                 limit?: number;
                 offset?: number;
             };
@@ -2937,6 +3191,149 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    status_api_settings_integrations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationCard"][];
+                };
+            };
+        };
+    };
+    retry_api_settings_integrations__name__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skip_api_settings_integrations__name__skip_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Failing"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    changes_api_events_get: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Changes"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_card_api_papers__paper_id__card_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardRequested"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
