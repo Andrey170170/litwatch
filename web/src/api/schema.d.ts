@@ -135,7 +135,9 @@ export interface paths {
         /**
          * Bibtex Selection
          * @description BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the
-         *     published version as soon as DBLP has it; several use what is stored.
+         *     published version as soon as DBLP has it; several use what is stored. `cited` are
+         *     papers a search provider found outside the collection: they get arXiv entries from
+         *     what the hit carries, with no fetch, no lookup and nothing written.
          */
         post: operations["bibtex_selection_api_bibtex_post"];
         delete?: never;
@@ -939,6 +941,8 @@ export interface components {
         BibtexIn: {
             /** Ids */
             ids: string[];
+            /** Cited */
+            cited?: components["schemas"]["CitedIn"][];
         };
         /**
          * Cadence
@@ -984,6 +988,20 @@ export interface components {
             migrated: boolean;
             /** Recorded At */
             recorded_at?: string | null;
+        };
+        /**
+         * CitedIn
+         * @description A paper outside the collection, as a search hit gives it: enough for an arXiv entry.
+         */
+        CitedIn: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Authors */
+            authors?: string[];
+            /** Year */
+            year?: number | null;
         };
         /** CorrectionIn */
         CorrectionIn: {

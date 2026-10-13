@@ -298,8 +298,18 @@ class MissIn(BaseModel):
     topic: str
 
 
+class CitedIn(BaseModel):
+    """A paper outside the collection, as a search hit gives it: enough for an arXiv entry."""
+
+    id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = None
+
+
 class BibtexIn(BaseModel):
-    ids: list[str]
+    ids: list[str]  # papers in the collection
+    cited: list[CitedIn] = Field(default_factory=list)  # provider hits the collection lacks
 
 
 class PublicationIn(BaseModel):

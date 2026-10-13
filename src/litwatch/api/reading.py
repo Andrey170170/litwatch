@@ -296,10 +296,20 @@ async def _bibtex(c: psycopg.AsyncConnection, ids: list[str]) -> str:
 @router.post("/bibtex", response_class=PlainTextResponse)
 async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
     """BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the
-    published version as soon as DBLP has it; several use what is stored."""
-    if len(body.ids) == 1 and await papers_store.get(c, body.ids[0]):
+    published version as soon as DBLP has it; several use what is stored. `cited` are
+    papers a search provider found outside the collection: they get arXiv entries from
+    what the hit carries, with no fetch, no lookup and nothing written."""
+    if len(body.ids) == 1 and not body.cited and await papers_store.get(c, body.ids[0]):
         await lookups.for_copy(c, request.app.state.publications, body.ids[0])
-    return await _bibtex(c, body.ids)
+    text = await _bibtex(c, body.ids)
+    outside = [
+        Cited(id=h.id, title=h.title, authors=list(h.authors), year=h.year)
+        for h in body.cited
+        if h.id not in body.ids
+    ]
+    if outside:
+        text = "\n".join(part for part in (text, entries(outside)) if part)
+    return text
 
 
 @router.get("/bibtex", response_class=PlainTextResponse)

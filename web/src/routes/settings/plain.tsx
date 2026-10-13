@@ -216,10 +216,12 @@ export function IntegrationsPage() {
   );
 }
 
-function IntegrationView({ c }: { c: IntegrationCard }) {
+export function IntegrationView({ c }: { c: IntegrationCard }) {
   const retry = useRetryIntegration();
   const skip = useSkipIntegration();
-  const [arming, setArming] = useState(false);
+  // The skip is armed for one event: when the failing event changes under it, it disarms.
+  const [armedFor, setArmedFor] = useState<number | null>(null);
+  const arming = c.failing !== null && c.failing !== undefined && armedFor === c.failing.event_id;
   const tone = !c.enabled ? "grey" : c.failing ? "amber" : "green";
   const status = !c.enabled
     ? `off${c.lag ? `, ${c.lag} ${c.lag === 1 ? "event" : "events"} waiting` : ""}`
@@ -259,8 +261,8 @@ function IntegrationView({ c }: { c: IntegrationCard }) {
             type="button"
             className={cn(BTN, arming && "border-destructive text-destructive")}
             disabled={skip.isPending}
-            onBlur={() => setArming(false)}
-            onClick={() => (arming ? skip.mutate(c.name, { onSettled: () => setArming(false) }) : setArming(true))}
+            onBlur={() => setArmedFor(null)}
+            onClick={() => (arming ? skip.mutate(c.name, { onSettled: () => setArmedFor(null) }) : setArmedFor(c.failing!.event_id))}
           >
             {skip.isPending ? "Skipping…" : arming ? "Skip it, really" : "Skip this event"}
           </button>

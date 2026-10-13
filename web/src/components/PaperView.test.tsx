@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, renderApp, scriptFetch } from "@/test/harness";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 const status = { state: "quiet", read: 1, splits: 0, ungraded: 0, awaiting_triage: 0, reviews_failed: 0 };
 const record = { dblp_key: "conf/iclr/Demo26", title: "A Paper", kind: "inproceedings", venue: "ICLR", container: "ICLR 2026", year: 2026, doi: "10.1/demo", url: null };
@@ -111,5 +114,60 @@ describe("the paper page", () => {
     await user.click(await screen.findByRole("button", { name: "Request a deep card" }));
     expect(await screen.findByText(/The card appears here once it is written/)).toBeInTheDocument();
     expect(calls.some((c) => c.method === "POST" && c.url === "/api/papers/2610.00001/card")).toBe(true);
+  });
+});
+
+describe("a requested deep card", () => {
+  it("is polled for until it arrives, without a reload", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let requested = false;
+    let reads = 0;
+    const card = { card: { summary: "The card, written." }, model: "m", written_at: "2026-10-09T08:00:00Z" };
+    const calls = scriptFetch({
+      "GET /api/status": () => json(status),
+      "GET /api/topics": () => json([]),
+      "GET /api/papers/2610.00001": () => {
+        reads += 1;
+        return json({ ...paper, card_requestable: true, card: requested && reads > 1 ? card : null });
+      },
+      "POST /api/papers/2610.00001/card": () => {
+        requested = true;
+        return json({ event_id: 9 }, 202);
+      },
+    });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderApp("/paper/2610.00001");
+    await user.click(await screen.findByRole("button", { name: "Request a deep card" }));
+    expect(await screen.findByText(/The card appears here once it is written/)).toBeInTheDocument();
+    const before = calls.filter((c) => c.method === "GET" && c.url === "/api/papers/2610.00001").length;
+    await vi.advanceTimersByTimeAsync(13_000);
+    expect(await screen.findByText("The card, written.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "GET" && c.url === "/api/papers/2610.00001").length).toBeGreaterThan(before);
+    // With the card there, the polling stops.
+    const after = calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls.length).toBe(after);
+  });
+
+  it("keeps a request and a correction draft to the paper they were made on", async () => {
+    const other = { ...paper, id: "2610.00002", title: "Another paper", card_requestable: true };
+    scriptFetch({
+      "GET /api/status": () => json(status),
+      "GET /api/topics": () => json([]),
+      "GET /api/papers/2610.00001": () => json({ ...paper, card_requestable: true }),
+      "GET /api/papers/2610.00002": () => json(other),
+      "POST /api/papers/2610.00001/card": () => json({ event_id: 9 }, 202),
+    });
+    const user = userEvent.setup();
+    const { router } = renderApp("/paper/2610.00001");
+    await user.click(await screen.findByRole("button", { name: "Request a deep card" }));
+    await screen.findByText(/The card appears here once it is written/);
+    await user.click(screen.getByRole("button", { name: "Know it?" }));
+    await user.type(screen.getByLabelText("DOI or DBLP key"), "10.1/draft");
+    await router.navigate({ to: "/paper/$", params: { _splat: "2610.00002" }, search: {} });
+    expect(await screen.findByRole("heading", { name: "Another paper" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request a deep card" })).toBeInTheDocument();
+    expect(screen.queryByText(/The card appears here/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("DOI or DBLP key")).not.toBeInTheDocument();
   });
 });

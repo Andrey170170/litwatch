@@ -159,9 +159,12 @@ export function useFetchPaper() {
   });
 }
 
-/** BibTeX for chosen papers, as text. */
-export async function bibtexFor(ids: string[]): Promise<string> {
-  const r = await api.POST("/api/bibtex", { body: { ids }, parseAs: "text" });
+/** A paper a provider found outside the collection, as an arXiv entry is built from it. */
+export type CitedHit = { id: string; title: string; authors: string[]; year: number | null };
+
+/** BibTeX for chosen papers, as text: collection ids, and hits outside it cited as they are. */
+export async function bibtexFor(ids: string[], cited: CitedHit[] = []): Promise<string> {
+  const r = await api.POST("/api/bibtex", { body: { ids, cited }, parseAs: "text" });
   return ok(r);
 }
 

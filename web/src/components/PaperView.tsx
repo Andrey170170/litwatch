@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Chosen, Paper, PaperTopic, Publication } from "@/api/client";
 import { publicationError, useForgetPublication, usePublication, useRequestCard } from "@/api/mutations";
 import { paperQuery } from "@/api/queries";
+import { publicationBody } from "@/lib/publication";
 import { DeepCardView } from "@/components/DeepCard";
 import { LabelRow } from "@/components/LabelRow";
 import { Thumbs } from "@/components/Thumbs";
@@ -23,8 +24,25 @@ type Props = {
 };
 
 /** Everything about one paper, in reading order (DESIGN.md "Paper"). */
-export function PaperView({ id, surfaceTopic, compact }: Props) {
-  const q = useQuery(paperQuery(id));
+export function PaperView(props: Props) {
+  // Keyed by the paper: a card request or a correction draft never follows a navigation.
+  return <PaperBody key={props.id} {...props} />;
+}
+
+/** How long a requested card is waited for, refetching the paper meanwhile. */
+const CARD_POLL_MS = 12_000;
+const CARD_WAIT_MS = 10 * 60_000;
+
+function PaperBody({ id, surfaceTopic, compact }: Props) {
+  // Set when a card was requested: the paper is refetched until the card arrives or the wait is up.
+  const [requestedAt, setRequestedAt] = useState<number | null>(null);
+  const q = useQuery({
+    ...paperQuery(id),
+    refetchInterval: (query) => {
+      if (requestedAt === null || query.state.data?.card) return false;
+      return Date.now() - requestedAt < CARD_WAIT_MS ? CARD_POLL_MS : false;
+    },
+  });
   if (q.isPending) return <p className="meta">Opening…</p>;
   if (q.isError || !q.data) return <p className="text-destructive">This paper could not be loaded.</p>;
   const p = q.data;
@@ -80,7 +98,7 @@ export function PaperView({ id, surfaceTopic, compact }: Props) {
           <DeepCardView card={p.card} />
         </>
       ) : (
-        p.card_requestable && <RequestCard paperId={p.id} />
+        p.card_requestable && <RequestCard paperId={p.id} requestedAt={requestedAt} onRequested={() => setRequestedAt(Date.now())} />
       )}
 
       <H3>Published version</H3>
@@ -125,10 +143,8 @@ function PublishedVersion({ paper: p }: { paper: Paper }) {
   const busy = set.isPending || forget.isPending;
 
   function submit() {
-    const v = draft.trim();
-    if (!v) return;
-    // A DOI starts with "10."; anything else is read as a DBLP key.
-    const body = /^(https?:\/\/(dx\.)?doi\.org\/)?10\./i.test(v) ? { doi: v.replace(/^https?:\/\/(dx\.)?doi\.org\//i, "") } : { dblp_key: v.replace(/^https?:\/\/dblp\.org\/rec\//i, "").replace(/\.html$/, "") };
+    const body = publicationBody(draft);
+    if (!body) return;
     set.mutate(body, {
       onSuccess: () => {
         setDraft("");
@@ -217,15 +233,29 @@ function PublishedVersion({ paper: p }: { paper: Paper }) {
   );
 }
 
-/** "Request a deep card", only while an integration answers requests; pending after the 202. */
-function RequestCard({ paperId }: { paperId: string }) {
+/**
+ * "Request a deep card", only while an integration answers requests. After the 202 the paper
+ * is refetched every few seconds for ten minutes; past that, a quiet line says it is still
+ * being written (a card can take longer; it shows on the next visit).
+ */
+function RequestCard({ paperId, requestedAt, onRequested }: { paperId: string; requestedAt: number | null; onRequested: () => void }) {
   const request = useRequestCard(paperId);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    // Re-render once the wait is up, so the line changes without another request.
+    if (requestedAt === null) return;
+    const t = window.setTimeout(() => tick((n) => n + 1), CARD_WAIT_MS - (Date.now() - requestedAt) + 1);
+    return () => window.clearTimeout(t);
+  }, [requestedAt]);
+  const waiting = requestedAt !== null && Date.now() - requestedAt < CARD_WAIT_MS;
   return (
     <div className="mt-[22px]">
-      {request.isSuccess ? (
-        <p className="text-[13.5px] text-muted-foreground">Requested. The card appears here once it is written, usually within the hour.</p>
+      {requestedAt !== null ? (
+        <p className="text-[13.5px] text-muted-foreground">
+          {waiting ? "Requested. The card appears here once it is written, usually within minutes." : "Requested a while ago and still being written; it shows here when it is done."}
+        </p>
       ) : (
-        <button type="button" className="min-h-[40px] rounded-full border border-border px-4 text-[13.5px] hover:bg-muted disabled:opacity-50" disabled={request.isPending} onClick={() => request.mutate()}>
+        <button type="button" className="min-h-[40px] rounded-full border border-border px-4 text-[13.5px] hover:bg-muted disabled:opacity-50" disabled={request.isPending} onClick={() => request.mutate(undefined, { onSuccess: onRequested })}>
           {request.isPending ? "Requesting…" : "Request a deep card"}
         </button>
       )}

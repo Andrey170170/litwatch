@@ -1,7 +1,10 @@
-import { screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { json, renderApp, scriptFetch } from "@/test/harness";
+import { freshClient, json, renderApp, scriptFetch } from "@/test/harness";
+import { IntegrationView } from "@/routes/settings/plain";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -42,6 +45,19 @@ describe("Settings → Integrations", () => {
     // The search provider's statistics.
     expect(screen.getByText(/Searches since start: 12, left out 1/)).toBeInTheDocument();
     expect(screen.getByText("up to date")).toBeInTheDocument();
+  });
+
+  it("disarms the skip when the failing event changes under it", async () => {
+    scriptFetch({});
+    const user = userEvent.setup();
+    const client = freshClient();
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const view = render(<IntegrationView c={failing} />, { wrapper });
+    await user.click(screen.getByRole("button", { name: "Skip this event" }));
+    expect(screen.getByRole("button", { name: "Skip it, really" })).toBeInTheDocument();
+    view.rerender(<IntegrationView c={{ ...failing, failing: { ...failing.failing, event_id: 43, type: "paper.saved" } }} />);
+    expect(screen.getByRole("button", { name: "Skip this event" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip it, really" })).not.toBeInTheDocument();
   });
 
   it("points to the docs when nothing is configured", async () => {

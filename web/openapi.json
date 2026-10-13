@@ -416,7 +416,7 @@
     "/api/bibtex": {
       "post": {
         "summary": "Bibtex Selection",
-        "description": "BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the\npublished version as soon as DBLP has it; several use what is stored.",
+        "description": "BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the\npublished version as soon as DBLP has it; several use what is stored. `cited` are\npapers a search provider found outside the collection: they get arXiv entries from\nwhat the hit carries, with no fetch, no lookup and nothing written.",
         "operationId": "bibtex_selection_api_bibtex_post",
         "requestBody": {
           "required": true,
@@ -2441,6 +2441,13 @@
             },
             "type": "array",
             "title": "Ids"
+          },
+          "cited": {
+            "items": {
+              "$ref": "#/components/schemas/CitedIn"
+            },
+            "type": "array",
+            "title": "Cited"
           }
         },
         "type": "object",
@@ -2552,6 +2559,43 @@
         ],
         "title": "Chosen",
         "description": "The folded \"how this was chosen\" for one Watch topic."
+      },
+      "CitedIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "CitedIn",
+        "description": "A paper outside the collection, as a search hit gives it: enough for an arXiv entry."
       },
       "CorrectionIn": {
         "properties": {

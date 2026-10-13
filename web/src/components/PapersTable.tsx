@@ -4,7 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useQuery } from "@tanstack/react-query";
 import { Check, ExternalLink, FileText } from "lucide-react";
 import type { Row, TopicCard } from "@/api/client";
-import { bibtexFor, bibtexForFilter, download, useFetchPaper, useMiss } from "@/api/mutations";
+import { bibtexFor, bibtexForFilter, download, useFetchPaper, useMiss, type CitedHit } from "@/api/mutations";
 import { papersQuery } from "@/api/queries";
 import { GradeDot } from "@/components/paper-bits";
 import { useDesktop } from "@/hooks/useDesktop";
@@ -40,6 +40,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const rows = q.data?.rows ?? [];
   const total = q.data?.total ?? 0;
+  const outside = q.data?.outside ?? [];
   const picks = fixedTopic ? fixedTopic.kind !== "watch" : false;
 
   function toggle(id: string) {
@@ -51,9 +52,19 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
     });
   }
 
+  /** An export covers the outside band too: hits are cited as they are (SPEC decision 6). */
   async function exportBibtex() {
     try {
-      const text = selected.size ? await bibtexFor([...selected]) : await bibtexForFilter(filter);
+      const cite = (r: Row): CitedHit => ({ id: r.id, title: r.title, authors: r.authors, year: r.published ? new Date(r.published).getFullYear() : null });
+      let text: string;
+      if (selected.size) {
+        const chosen = outside.filter((r) => selected.has(r.id));
+        const ids = [...selected].filter((id) => !chosen.some((r) => r.id === id));
+        text = await bibtexFor(ids, chosen.map(cite));
+      } else {
+        text = await bibtexForFilter(filter);
+        if (outside.length) text = [text, await bibtexFor([], outside.map(cite))].filter(Boolean).join("\n");
+      }
       download(text, `litwatch${fixedTopic ? `-${fixedTopic.slug}` : ""}.bib`);
     } catch (e) {
       toast(e instanceof Error && e.message ? e.message : "Could not fetch the BibTeX", "error");
@@ -130,7 +141,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
           ))}
         </div>
       )}
-      {(q.data?.outside?.length ?? 0) > 0 && <OutsideBand rows={q.data!.outside!} />}
+      {outside.length > 0 && <OutsideBand rows={outside} selected={selected} onSelect={toggle} />}
       {(q.data?.left_out?.length ?? 0) > 0 && (
         <p className="meta mt-2 text-[12.5px]">
           {q.data!.left_out!.join(" and ")} did not answer this search in time, so {q.data!.left_out!.length === 1 ? "its" : "their"} papers are not here.
@@ -155,14 +166,17 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
  * collection's rows (DESIGN.md "Papers"): title, authors, date, who found it, arXiv, and
  * Fetch, which brings the paper into the collection where Save and the rest apply.
  */
-function OutsideBand({ rows }: { rows: Row[] }) {
+function OutsideBand({ rows, selected, onSelect }: { rows: Row[]; selected: Set<string>; onSelect: (id: string) => void }) {
   const fetch = useFetchPaper();
   return (
     <div className="mt-5">
       <p className="mb-1 text-[11.5px] tracking-[.06em] text-muted-foreground uppercase">Outside the collection · {rows.length}</p>
       <div className="border-t border-border">
         {rows.map((r) => (
-          <div key={r.id} className="grid grid-cols-[1fr_auto] items-start gap-x-3 border-b border-border py-[11px]">
+          <div key={r.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-x-2 border-b border-border py-[11px]">
+            <div className="-ml-2.5 -mt-2">
+              <Select checked={selected.has(r.id)} onChange={() => onSelect(r.id)} title={r.title} />
+            </div>
             <div className="min-w-0">
               <h3 className="font-serif text-[15.5px] leading-[1.3] font-semibold desk:text-[16.5px]">
                 <a href={`https://arxiv.org/abs/${r.id}`} target="_blank" rel="noreferrer" className="hover:underline decoration-border">
