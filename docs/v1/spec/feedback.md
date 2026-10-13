@@ -67,7 +67,7 @@ Quality, behind the settings gear, holds what needs the owner and how well the p
 
 - Focus splits, Area escalations, papers awaiting classification, ungraded topic memberships, failed or stuck
   full-text passes, failed digests, with actions;
-- recall and precision per Focus topic over evaluation runs; collected reactions per topic and stage;
+- recall per Focus topic from the latest `replay`, and precision from Calibrate's draws (both defined below); collected reactions per topic and stage;
 - the "matters, no topic" list (papers the owner said matter that fit no followed topic: a missing topic or a narrow
   class);
 - cost against budget ([models.md](models.md)).
@@ -104,6 +104,7 @@ and not unsure, the share the owner answered central or related; the lower group
 paper the owner wanted, the share answered central or related there. Both pool every draw from the trailing 90 days. A
 drawn paper left unanswered counts nowhere (first v1, carried).
 
-The first evaluation set ([milestones.md](milestones.md), N2) is reported as separate cohorts, never pooled: the
-owner's labels; the first v1's provisional positives (bulk-accepted, not the owner's word on each paper); and the
-regression set of 0.14's CoT verdicts.
+The first evaluation set ([milestones.md](milestones.md), N2) is reported as separate cohorts, never pooled, each with
+its own positives: the owner's labels (positives: labelled central or related); the first v1's provisional positives
+(bulk-accepted, not the owner's word on each paper; all of them positives); and the regression set of 0.14's CoT
+verdicts and the silver labels (positives: papers 0.14 put at tier 1 or 2 on a CoT selection).

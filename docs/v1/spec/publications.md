@@ -15,7 +15,7 @@ DBLP's dump or a self-hosted dblp SPARQL instance.
 
 ## Matching
 
-A DOI the authors gave arXiv names the published record. Otherwise locate the preprint record by its arXiv DOI; take
+A DOI the authors gave arXiv names the published record, unless DBLP files it under CoRR. Otherwise locate the preprint record by its arXiv DOI; take
 DBLP's title and author list from it; find records with that title, or the paper's current arXiv title, and at least
 one shared author; choose the non-CoRR one, the latest if several (a poster or workshop version comes before the full
 paper). A paper retitled only at publication is not found this way; the paper page lets the owner paste a DOI or DBLP

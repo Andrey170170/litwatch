@@ -19,7 +19,7 @@ litwatch db migrate
 litwatch topics import --starter                # or a directory of your own YAML topics
 ```
 
-Models, categories and limits are set in `litwatch.toml` (see section 4.4 of the spec); with
+Models, categories and limits are set in `litwatch.toml` (see `docs/v1/spec/data.md`, configuration); with
 no file the defaults apply. `litwatch ping judge` sends one small request through a role.
 
 ## Commands
@@ -31,7 +31,7 @@ litwatch mark-triaged                # count stored papers as triaged, so runs s
 litwatch topics list | import | export
 litwatch eval seed | replay | sample-rejects | report    # dry runs against your labels
 litwatch serve                       # the API and web app; needs LITWATCH_API_TOKEN
-litwatch db adopt | migrate-0x       # turn a copy of a 0.14 database into v1's (spec section 7)
+litwatch db adopt | migrate-0x       # turn a copy of a 0.14 database into v1's (first spec at e6940ea, section 7)
 litwatch db import-feedback --source <dsn>   # the owner's feedback from another v1 database
 ```
 

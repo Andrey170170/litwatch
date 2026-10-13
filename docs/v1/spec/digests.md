@@ -31,7 +31,8 @@ matters to the area as a whole.
 ## Which papers a digest covers
 
 A paper is **due** for a topic once the pipeline has made it eligible there, and stays due until a published daily
-digest of that topic includes it. Eligible means:
+digest of that topic includes it, or until it stops being eligible (the owner's word sets it below related, a class
+label takes it out of the subtree). Eligible means:
 
 | Depth | Eligible |
 | --- | --- |
@@ -49,7 +50,7 @@ them. The owner's word never makes a paper due: the owner already knows it.
 
 - A day on which arXiv announced nothing (every Saturday and Sunday, and holidays) has no digests, only one line for
   the whole day: "No papers released."
-- A day on which arXiv announced papers but a topic has nothing due (for Focus: no central and no related paper) gives
+- A day on which arXiv announced papers but a Focus or Area topic has nothing due (for Focus: no central and no related paper) gives
   that topic a digest that says "Nothing new". It is a real digest, so the owner can see that the run happened and the
   topic was looked at. A Focus day with related papers and no central one is an ordinary digest whose text says so.
 
@@ -67,11 +68,11 @@ digests are read a day. It is written in the same call.
 
 The nightly run ends with grading. Digests are written after a **bounded wait**, which starts when that run's grading
 ends, for the full-text passes the night queued that digests depend on: Focus Briefs and the Area Weight re-checks.
-The wait ends when they have all finished or become terminal (three failed runs; text awaited for more than seven
-days), or after `[digests] wait_minutes` (default 120), whichever comes first.
+The wait ends when each of them has finished, has failed in this run (it is retried on the next run, so waiting longer
+gains nothing), or is terminal (three failed runs; text awaited for more than seven days), or after `[digests] wait_minutes` (default 120), whichever comes first.
 
 - A Focus paper without its Brief at that point is listed anyway; the writer reads its abstract instead.
-- An Area paper whose re-check has not finished is not due yet: it becomes due when the re-check finishes, and is a
+- An Area paper whose re-check has not finished, or failed in this run, is not due yet: it becomes due when the re-check finishes, and is a
   pick candidate in the next daily digest if it is still must read. A re-check that becomes terminal makes the paper
   due on its abstract Weight, so a failure never hides a paper.
 - A pass that finishes later updates its paper, not a digest already published.

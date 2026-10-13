@@ -30,7 +30,8 @@ and for the owner's (whose payload disk has 2.0 TB free):
 
 - **LaTeX text** for every paper intake registers;
 - **PDFs** only for papers that are members of a followed topic's subtree with a grade of relevant or above, or
-  saved, or opened by the owner; others are fetched when opened.
+  saved, or opened by the owner, or with a full-text pass queued and no LaTeX source; others are fetched when
+  opened.
 
 The policy is configuration (an instance can keep every PDF), and changing it does not delete files already stored.
 

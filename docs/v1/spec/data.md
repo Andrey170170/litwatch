@@ -36,7 +36,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   subject and rubric are what the graders read.
 - `classifications` (paper, paper revision, taxonomy revision, primary class, the decision response with every class's
   probability, model, at) and `memberships` (paper, class, paper revision, class version, source classifier |
-  uncertain | keyword | owner | miss, probability): direct memberships only; inherited ones come from the tree, and
+  uncertain | keyword | owner | miss, member yes | no, probability): direct memberships only, a "no" being the
+  owner's class label removing the paper from a class; inherited ones come from the tree, and
   the classifier's raw outcome stays in `classifications` whatever the owner says.
 - `analyses` (paper, paper revision, gist, weight, weight reason, facets, model, at).
 - `weights` (paper, paper revision, weight, source abstract | full_text, reason, at): the current Weight is the newest

@@ -27,7 +27,7 @@ carries Fit, Weight and the derived grade; new `digest.written` (topic, period, 
 
 | Integration | Reacts to | Does |
 | --- | --- | --- |
-| `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `brief.written`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step; on unsave it tags the item as dropped and never deletes it |
+| `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `gist.written`, `brief.written`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step; on unsave it tags the item as dropped and never deletes it |
 | `webdav` | `grade.changed` to must read, `paper.saved` | Stores the PDF for Zotero's file sync, read from the archive |
 | `deep` | see below | Requests a Deep card; emits `card.ready` |
 | `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off it |

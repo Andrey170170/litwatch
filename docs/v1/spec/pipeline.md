@@ -42,6 +42,10 @@ A response is **valid** only if it answers every question, every probability is 
 class of the current tree. An invalid response is a failed call: retried like any failed call, and after three
 failed runs the paper is awaiting classification (section 9).
 
+The owner's class label outranks the classifier for that class: member adds a direct membership (source `owner`),
+not removes the paper from the class, whatever its probability. Inheritance and grading topics follow from what
+remains.
+
 Decision models choose by the option's name more than by the definition attached to it ("Type-Safe Is Not
 Error-Free", arXiv 2609.26758), so class names must say what they mean on their own; [taxonomy.md](taxonomy.md)
 holds to that.
@@ -99,7 +103,7 @@ abstract, the topic's subject and, for a Focus topic, its rubric. How it is chec
 | Depth | Graders | Disagreement |
 | --- | --- | --- |
 | Focus | `judge` and `check`, from different labs, concurrently | the more inclusive Fit stands; the verdict is marked split and shown on Quality |
-| Area | `judge`, then the `area_check` decision model asked whether the Fit holds | on a "no", or a "yes" below `[grading] area_check_min_confidence` (default 0.7), `check` (the other lab) grades too, and the Focus rule applies |
+| Area | `judge`, then the `area_check` decision model asked whether the Fit holds | on a "no", or a "yes" below `[grading] area_check_min_confidence` (default 0.7), `check` (the other lab) grades too; if the two Fits differ, the less inclusive stands and the verdict is marked split, since an Area's risk is a false pick, not a miss |
 | Field | `field_grade`, one cheap model | none |
 
 A verdict needs every grader it calls to answer validly (a Fit from the four, a reason; for `area_check`, a yes or no
@@ -150,11 +154,12 @@ A **full-text pass** reads the paper's text, not its abstract. Three kinds:
 
 | Pass | For which papers | Does |
 | --- | --- | --- |
-| Brief | Focus papers at Fit central or related | writes the Brief; also re-checks Weight |
+| Brief | Focus papers at effective Fit central or related | writes the Brief; also re-checks Weight |
 | Weight re-check | Area papers whose grade from the abstract is must read (the pick candidates) | judges Weight again from the full text, and writes a Brief |
-| Deep card | Focus papers at must read; Area picks; any paper on request | asks the `deep` integration for a card (see [integrations.md](integrations.md)) |
+| Deep card | Focus papers at an effective grade of must read; Area picks; any paper on request | asks the `deep` integration for a card (see [integrations.md](integrations.md)) |
 
-A pass is queued when its paper qualifies. It is **awaiting text** until the archive has the paper's text, then runs at
+A pass is queued when its paper qualifies, judged on the effective Fit and grade, so the owner's word can queue one
+too (a label or miss that makes a Focus paper central gets it a Brief). It is **awaiting text** until the archive has the paper's text, then runs at
 once, not at the next night. Text comes from the archive: the LaTeX source's text first, the PDF's text when the paper
 has no source (see [archive.md](archive.md)). For a pass queued by the nightly run, litwatch asks the archive to fetch
 the source at **urgent** priority, so the papers that matter arrive within minutes rather than behind a night's
@@ -193,6 +198,10 @@ says which revision it was made from. A revision whose earlier text held a grade
 classification no longer puts it in that topic's subtree, so a grade on text that no longer exists cannot stay
 current. A Brief or Deep card made from an older revision is kept and labelled with it until a new one exists.
 
+A new arXiv version that leaves title and abstract close enough does not raise the revision, but its body may have
+changed: a paper that has a Brief or a Weight from the full text gets those passes queued again for the new version.
+A Deep card is labelled with the version it read and is remade only on request.
+
 ## 9. Failures that need the owner
 
 Classification is the gate for everything after it, so a paper whose classification fails three runs in a row is
@@ -211,8 +220,9 @@ app offers scoped re-runs, each with paper count and estimated cost: the owner's
 edit help), the topic's existing members, papers matching the topic's keywords, a date range. Nothing retroactive runs
 by itself (first v1, decision 7).
 
-Moving a class in the tree, splitting or merging classes, or following a different class changes which topic grades a
-paper only for papers classified or graded after the change, unless a re-run is asked for.
+Moving a class in the tree, splitting or merging classes, or following a different class changes at once how existing
+memberships resolve (below), but runs no classification or grading: papers are graded under the new shape only when
+classified or graded after the change, or by a re-run.
 
 **How older records read under the current tree.** Memberships are stored per class; inheritance, grading topics,
 topic pages and digest selection always use the current tree and the current followed topics. A verdict belongs to

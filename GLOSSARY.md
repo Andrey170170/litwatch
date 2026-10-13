@@ -60,7 +60,7 @@ How central a paper is to one class it belongs to: central, related, adjacent.
 
 **Weight**:
 How significant a paper is regardless of class: landmark, solid, incremental. Judged from the abstract for every
-paper, and judged again from the full text whenever a full-text pass reads it.
+paper, and judged again from the full text by a Brief or a Weight re-check.
 
 **Full-text pass**:
 Any work that reads a paper's full text rather than its abstract (a Brief, a Weight re-check, a Deep card); it runs
