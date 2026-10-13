@@ -370,11 +370,13 @@ export function useRetryIntegration() {
 export function useSkipIntegration() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (name: string) => ok(await api.POST(`${S}/integrations/{name}/skip`, { params: { path: { name } } })),
+    // The event the owner confirmed: the server skips nothing if another is failing by then.
+    mutationFn: async ({ name, eventId }: { name: string; eventId: number }) =>
+      ok(await api.POST(`${S}/integrations/{name}/skip`, { params: { path: { name }, query: { event_id: eventId } } })),
     onSuccess: (skipped) => {
       toast(`Skipped ${skipped.type ?? "the event"}${skipped.paper_id ? ` on ${skipped.paper_id}` : ""}`);
       void qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
     },
-    onError: (e: Error & { status?: number }) => toast(e.status === 409 ? "Nothing is failing any more" : e.message, "error"),
+    onError: (e: Error & { status?: number }) => toast(e.status === 409 ? "That event is no longer the one failing; nothing was skipped" : e.message, "error"),
   });
 }

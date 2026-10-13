@@ -280,9 +280,12 @@ def _cited(row: Any) -> Cited:
     )
 
 
-async def _bibtex(c: psycopg.AsyncConnection, ids: list[str]) -> str:
-    """Entries from the stored published records, arXiv ones for the rest. Never waits on
-    a lookup (decision 25)."""
+async def _bibtex(
+    c: psycopg.AsyncConnection, ids: list[str], outside: list[Cited] | None = None
+) -> str:
+    """Entries from the stored published records, arXiv ones for the rest, then `outside`
+    hits as they are, all keyed in one namespace so no two entries share a key. Never
+    waits on a lookup (decision 25)."""
     rows = await (
         await c.execute(
             "SELECT id, title, authors, published, primary_category FROM papers "
@@ -290,7 +293,8 @@ async def _bibtex(c: psycopg.AsyncConnection, ids: list[str]) -> str:
             (ids, ids),
         )
     ).fetchall()
-    return entries((_cited(r) for r in rows), await publications_store.found(c, ids))
+    held = [_cited(r) for r in rows]
+    return entries([*held, *(outside or [])], await publications_store.found(c, ids))
 
 
 @router.post("/bibtex", response_class=PlainTextResponse)
@@ -299,17 +303,23 @@ async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
     published version as soon as DBLP has it; several use what is stored. `cited` are
     papers a search provider found outside the collection: they get arXiv entries from
     what the hit carries, with no fetch, no lookup and nothing written."""
-    if len(body.ids) == 1 and not body.cited and await papers_store.get(c, body.ids[0]):
+    if (
+        len(body.ids) == 1
+        and not body.cited
+        and body.filter is None
+        and await papers_store.get(c, body.ids[0])
+    ):
         await lookups.for_copy(c, request.app.state.publications, body.ids[0])
-    text = await _bibtex(c, body.ids)
+    ids = list(body.ids)
+    if body.filter is not None:
+        rows, _ = await reading.papers(c, **body.filter.model_dump(), limit=None)
+        ids += [r["id"] for r in rows if r["id"] not in ids]
     outside = [
         Cited(id=h.id, title=h.title, authors=list(h.authors), year=h.year)
         for h in body.cited
-        if h.id not in body.ids
+        if h.id not in ids
     ]
-    if outside:
-        text = "\n".join(part for part in (text, entries(outside)) if part)
-    return text
+    return await _bibtex(c, ids, outside)
 
 
 @router.get("/bibtex", response_class=PlainTextResponse)

@@ -262,7 +262,7 @@ export function IntegrationView({ c }: { c: IntegrationCard }) {
             className={cn(BTN, arming && "border-destructive text-destructive")}
             disabled={skip.isPending}
             onBlur={() => setArmedFor(null)}
-            onClick={() => (arming ? skip.mutate(c.name, { onSettled: () => setArmedFor(null) }) : setArmedFor(c.failing!.event_id))}
+            onClick={() => (arming ? skip.mutate({ name: c.name, eventId: c.failing!.event_id }, { onSettled: () => setArmedFor(null) }) : setArmedFor(c.failing!.event_id))}
           >
             {skip.isPending ? "Skipping…" : arming ? "Skip it, really" : "Skip this event"}
           </button>

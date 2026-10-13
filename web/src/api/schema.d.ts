@@ -769,7 +769,8 @@ export interface paths {
         /**
          * Skip
          * @description Give up on the failing event; the integration goes on with the next. Returns the
-         *     event skipped.
+         *     event skipped. `event_id` names the event the owner confirmed: when another one is
+         *     failing by then, nothing is skipped (409).
          */
         post: operations["skip_api_settings_integrations__name__skip_post"];
         delete?: never;
@@ -937,10 +938,30 @@ export interface components {
                 [key: string]: boolean;
             };
         };
+        /**
+         * BibtexFilter
+         * @description A papers-table filter, as `GET /api/papers` takes it.
+         */
+        BibtexFilter: {
+            /** Q */
+            q?: string | null;
+            /** Topic */
+            topic?: string | null;
+            /**
+             * Adjacent
+             * @default false
+             */
+            adjacent: boolean;
+            /** Saved */
+            saved?: boolean | null;
+            /** Year */
+            year?: number | null;
+        };
         /** BibtexIn */
         BibtexIn: {
             /** Ids */
-            ids: string[];
+            ids?: string[];
+            filter?: components["schemas"]["BibtexFilter"] | null;
             /** Cited */
             cited?: components["schemas"]["CitedIn"][];
         };
@@ -3264,7 +3285,9 @@ export interface operations {
     };
     skip_api_settings_integrations__name__skip_post: {
         parameters: {
-            query?: never;
+            query?: {
+                event_id?: number | null;
+            };
             header?: never;
             path: {
                 name: string;

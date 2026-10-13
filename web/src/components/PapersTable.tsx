@@ -4,7 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useQuery } from "@tanstack/react-query";
 import { Check, ExternalLink, FileText } from "lucide-react";
 import type { Row, TopicCard } from "@/api/client";
-import { bibtexFor, bibtexForFilter, download, useFetchPaper, useMiss, type CitedHit } from "@/api/mutations";
+import { bibtexFor, download, useFetchPaper, useMiss, type CitedHit } from "@/api/mutations";
 import { papersQuery } from "@/api/queries";
 import { GradeDot } from "@/components/paper-bits";
 import { useDesktop } from "@/hooks/useDesktop";
@@ -38,6 +38,9 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
   const page = filter.page ?? 0;
   const q = useQuery(papersQuery({ ...filter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }));
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Outside hits chosen, kept with what they carry: they leave `outside` when the query or
+  // page changes, but stay selected and are still cited as they were.
+  const [held, setHeld] = useState<Map<string, Row>>(new Map());
   const rows = q.data?.rows ?? [];
   const total = q.data?.total ?? 0;
   const outside = q.data?.outside ?? [];
@@ -58,12 +61,12 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
       const cite = (r: Row): CitedHit => ({ id: r.id, title: r.title, authors: r.authors, year: r.published ? new Date(r.published).getUTCFullYear() : null });
       let text: string;
       if (selected.size) {
-        const chosen = outside.filter((r) => selected.has(r.id));
-        const ids = [...selected].filter((id) => !chosen.some((r) => r.id === id));
+        const ids = [...selected].filter((id) => !held.has(id));
+        const chosen = [...selected].flatMap((id) => (held.has(id) ? [held.get(id)!] : []));
         text = await bibtexFor(ids, chosen.map(cite));
       } else {
-        text = await bibtexForFilter(filter);
-        if (outside.length) text = [text, await bibtexFor([], outside.map(cite))].filter(Boolean).join("\n");
+        // The filter's collection papers and the band shown, in one request.
+        text = await bibtexFor([], outside.map(cite), filter);
       }
       download(text, `litwatch${fixedTopic ? `-${fixedTopic.slug}` : ""}.bib`);
     } catch (e) {
@@ -90,7 +93,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
     <div>
       <div className="mt-2 flex items-center justify-between gap-3 text-[13px] text-muted-foreground">
         <span className="tabular">
-          {q.isPending ? "…" : total === 0 ? "No papers match." : `${page * PAGE_SIZE + 1}–${Math.min(total, (page + 1) * PAGE_SIZE)} of ${total}`}
+          {q.isPending ? "…" : total === 0 ? (outside.length ? "Nothing in the collection matches." : "No papers match.") : `${page * PAGE_SIZE + 1}–${Math.min(total, (page + 1) * PAGE_SIZE)} of ${total}`}
           {selected.size > 0 && ` · ${selected.size} selected`}
         </span>
         <button type="button" onClick={() => void exportBibtex()} className="min-h-[36px] underline decoration-border hover:text-foreground" disabled={total === 0 && !selected.size && outside.length === 0}>
@@ -141,7 +144,22 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
           ))}
         </div>
       )}
-      {outside.length > 0 && <OutsideBand rows={outside} selected={selected} onSelect={toggle} />}
+      {outside.length > 0 && (
+        <OutsideBand
+          rows={outside}
+          selected={selected}
+          onSelect={(id) => {
+            const hit = outside.find((r) => r.id === id);
+            setHeld((h) => {
+              const n = new Map(h);
+              if (selected.has(id)) n.delete(id);
+              else if (hit) n.set(id, hit);
+              return n;
+            });
+            toggle(id);
+          }}
+        />
+      )}
       {(q.data?.left_out?.length ?? 0) > 0 && (
         <p className="meta mt-2 text-[12.5px]">
           {q.data!.left_out!.join(" and ")} did not answer this search in time, so {q.data!.left_out!.length === 1 ? "its" : "their"} papers are not here.

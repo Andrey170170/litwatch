@@ -163,23 +163,15 @@ export function useFetchPaper() {
 export type CitedHit = { id: string; title: string; authors: string[]; year: number | null };
 
 /** BibTeX for chosen papers, as text: collection ids, and hits outside it cited as they are. */
-export async function bibtexFor(ids: string[], cited: CitedHit[] = []): Promise<string> {
-  const r = await api.POST("/api/bibtex", { body: { ids, cited }, parseAs: "text" });
-  return ok(r);
-}
-
-/** BibTeX for everything a table filter matches, as text. */
-export async function bibtexForFilter(f: {
-  q?: string;
-  topic?: string;
-  adjacent?: boolean;
-  saved?: boolean;
-  year?: number;
-}): Promise<string> {
-  const r = await api.GET("/api/bibtex", {
-    params: { query: { q: f.q || undefined, topic: f.topic || undefined, adjacent: f.adjacent || undefined, saved: f.saved, year: f.year } },
-    parseAs: "text",
-  });
+/** BibTeX for chosen collection papers, provider hits cited as they are, and optionally
+ * everything a table filter matches; one request, so every entry's key is unique. */
+export async function bibtexFor(
+  ids: string[],
+  cited: CitedHit[] = [],
+  filter?: { q?: string; topic?: string; adjacent?: boolean; saved?: boolean; year?: number },
+): Promise<string> {
+  const f = filter && { q: filter.q || null, topic: filter.topic || null, adjacent: !!filter.adjacent, saved: filter.saved ?? null, year: filter.year ?? null };
+  const r = await api.POST("/api/bibtex", { body: { ids, cited, ...(f ? { filter: f } : {}) }, parseAs: "text" });
   return ok(r);
 }
 

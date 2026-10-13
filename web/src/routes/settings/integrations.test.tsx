@@ -39,9 +39,10 @@ describe("Settings → Integrations", () => {
     await user.click(screen.getByRole("button", { name: "Retry now" }));
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/notion/retry"))).toBe(true));
     await user.click(screen.getByRole("button", { name: "Skip this event" }));
-    expect(calls.some((c) => c.url.endsWith("/notion/skip"))).toBe(false);
+    expect(calls.some((c) => c.url.includes("/notion/skip"))).toBe(false);
     await user.click(screen.getByRole("button", { name: "Skip it, really" }));
-    await waitFor(() => expect(calls.some((c) => c.url.endsWith("/notion/skip"))).toBe(true));
+    // The skip names the event the owner confirmed, so a different one is never skipped.
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith("/notion/skip?event_id=42"))).toBe(true));
     // The search provider's statistics.
     expect(screen.getByText(/Searches since start: 12, left out 1/)).toBeInTheDocument();
     expect(screen.getByText("up to date")).toBeInTheDocument();

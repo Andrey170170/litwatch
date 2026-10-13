@@ -29,11 +29,13 @@ describe("a search with providers", () => {
     await screen.findByText(/Outside the collection · 1/);
     // With nothing selected: the filter's export, then the band shown, cited as it is.
     await user.click(screen.getByRole("button", { name: "Export BibTeX" }));
+    // One request: the filter is resolved on the server beside the band's hits, keyed together.
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")).toBeTruthy());
-    expect(calls.some((c) => c.method === "GET" && c.url.startsWith("/api/bibtex"))).toBe(true);
-    expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")!.body).toEqual({
+    expect(calls.some((c) => c.method === "GET" && c.url.startsWith("/api/bibtex"))).toBe(false);
+    expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")!.body).toMatchObject({
       ids: [],
       cited: [{ id: "2610.00002", title: "Found by the archive", authors: ["Ada Lovelace"], year: 2026 }],
+      filter: { q: "traces" },
     });
     // An outside row can be selected and goes out as a citation beside the collection's ids.
     await user.click(screen.getByRole("checkbox", { name: "Select Found by the archive" }));

@@ -307,8 +307,19 @@ class CitedIn(BaseModel):
     year: int | None = None
 
 
+class BibtexFilter(BaseModel):
+    """A papers-table filter, as `GET /api/papers` takes it."""
+
+    q: str | None = None
+    topic: str | None = None
+    adjacent: bool = False
+    saved: bool | None = None
+    year: int | None = None
+
+
 class BibtexIn(BaseModel):
-    ids: list[str]  # papers in the collection
+    ids: list[str] = Field(default_factory=list)  # papers in the collection
+    filter: BibtexFilter | None = None  # every collection paper a table filter matches, too
     cited: list[CitedIn] = Field(default_factory=list)  # provider hits the collection lacks
 
 
