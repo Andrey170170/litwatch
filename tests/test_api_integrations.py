@@ -1,6 +1,7 @@
 """The API's side of integrations: their cards under Settings, retry and skip, card requests,
 the stored card on the paper page, and search providers merged into search."""
 
+import threading
 import time
 from datetime import UTC, datetime
 
@@ -48,6 +49,7 @@ class Shelf:
 
     def __init__(self, name, hits=(), delay=0.0, error=None):
         self.name, self.hits, self.delay, self.error = name, list(hits), delay, error
+        self.threads: list[str] = []
 
     def wants(self, event):
         return False
@@ -56,6 +58,7 @@ class Shelf:
         pass
 
     def search(self, query, filters):
+        self.threads.append(threading.current_thread().name)
         time.sleep(self.delay)
         if self.error:
             raise self.error
@@ -173,6 +176,8 @@ async def test_search_adds_what_providers_find_outside_the_collection(conn, make
         ("2609.00002", "archive"),
     ]
     assert found["left_out"] == ["slow", "broken"]
+    # On search's own pool: a provider stuck in its thread holds none of the default pool's.
+    assert archive.threads and all(t.startswith("search") for t in archive.threads)
     cards = {c["name"]: c for c in (await client.get("/api/settings/integrations")).json()}
     assert cards["slow"]["search"]["left_out"] == 1
     assert "no answer within" in cards["slow"]["search"]["last_error"]

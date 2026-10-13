@@ -338,7 +338,7 @@ class Event(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
     # The writing transaction's id. With `id` it is the event's place in the outbox: readers
-    # go by (xid, id), which keeps commit order where ids alone would not.
+    # go by (xid, id), the order transactions began in, so none that commits late is missed.
     xid: int | None = None
 
 

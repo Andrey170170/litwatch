@@ -1,16 +1,19 @@
 """webhook: POSTs every event that matches a filter to a URL, as JSON. n8n workflows, and
 through them the Notion export, hang off this.
 
-The body is the event: `{"id", "type", "paper_id", "payload", "created_at"}`. A receiver reads
-anything more through litwatch's API. The event id is also sent as `X-Litwatch-Event`, so a
-receiver can drop the repeat it may get after a failure; with a secret configured the body
-is signed, `X-Litwatch-Signature: sha256=<HMAC-SHA256 of the body, hex>`. Any answer but a
-2xx is a failure and the event is sent again after a backoff.
+The body is the event: `{"id", "type", "paper_id", "payload", "created_at", "xid"}`. A
+receiver reads anything more through litwatch's API. The event id is also sent as
+`X-Litwatch-Event`, so a receiver can drop the repeat it may get after a failure; with a
+secret configured the body is signed, `X-Litwatch-Signature: sha256=<HMAC-SHA256 of the body,
+hex>`. Any answer but a 2xx, or none within the timeout, is a failure and the event is sent
+again after a backoff.
 
 Several webhooks are several sections with `use = "webhook"`.
 
-Options: `url` (or $LITWATCH_WEBHOOK_URL), `events` (patterns such as "paper.*"; default
-every event) and `secret_env`, the environment variable holding the signing secret.
+Options: `url` (or $LITWATCH_WEBHOOK_URL), `events` (a list of patterns such as "paper.*";
+default every event), `secret_env`, the environment variable holding the signing secret, and
+`timeout` (seconds to wait for the answer, 30; raise it for a receiver that answers only once
+its work is done).
 """
 
 from __future__ import annotations
@@ -45,13 +48,14 @@ class Webhook:
         name: str = "webhook",
         patterns: tuple[str, ...] = ("*",),
         secret: str | None = None,
+        timeout: float = 30.0,
         http: httpx.AsyncClient | None = None,
     ) -> None:
         self.name = name
         self.url = url
         self.patterns = patterns
         self.secret = secret
-        self.http = http or httpx.AsyncClient(timeout=30.0)
+        self.http = http or httpx.AsyncClient(timeout=timeout)
         self.description = f"POSTs {', '.join(patterns)} events to a URL."
 
     def wants(self, event: Event) -> bool:
@@ -73,12 +77,20 @@ class Webhook:
 
 def load(name: str, options: dict[str, Any], config: Config) -> Webhook:
     patterns = options.get("events", ["*"])
-    if isinstance(patterns, str) or not patterns:
-        raise IntegrationError("`events` is a list of event-type patterns")
+    if (
+        not isinstance(patterns, list)
+        or not patterns
+        or not all(isinstance(p, str) and p for p in patterns)
+    ):
+        raise IntegrationError('`events` is a list of event-type patterns, e.g. ["paper.*"]')
+    timeout = options.get("timeout", 30)
+    if isinstance(timeout, bool) or not isinstance(timeout, int | float) or timeout <= 0:
+        raise IntegrationError("`timeout` is a number of seconds above zero")
     secret_env = options.get("secret_env")
     return Webhook(
         required(options, "url", env="LITWATCH_WEBHOOK_URL"),
         name=name,
         patterns=tuple(patterns),
         secret=required_secret(secret_env) if secret_env else None,
+        timeout=float(timeout),
     )

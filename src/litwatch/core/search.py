@@ -11,6 +11,10 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
+# How long a search waits for each provider before leaving it out of the response. A provider
+# should give up on its own well before this, since its thread cannot be stopped from outside.
+SEARCH_TIMEOUT_SECONDS = 5.0
+
 
 class SearchFilters(BaseModel):
     """What a provider is asked to honour. Topic and saved are litwatch's own and are not

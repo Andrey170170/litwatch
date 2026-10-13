@@ -15,7 +15,8 @@ instead of taking it for done or making a second. A PDF attachment without that 
 owner's: it is recorded and left alone, so no paper gets two.
 
 Options: `url`, `username` (or $WEBDAV_URL, $WEBDAV_USERNAME) and the password in
-$WEBDAV_PASSWORD; the Zotero account is the `zotero` section's.
+$WEBDAV_PASSWORD; the Zotero account is that of the section using `zotero`, whatever its
+name.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from litwatch.config import Config
 from litwatch.core import Event, Paper
 from litwatch.integrations import (
     IntegrationError,
+    enabled_using,
     must_read_and_saved,
     required,
     required_secret,
@@ -217,9 +219,9 @@ class WebDav:
 
 
 def load(name: str, options: dict[str, Any], config: Config) -> WebDav:
-    zotero_options = config.integrations.get("zotero")
+    zotero_options = enabled_using(config, "zotero")
     if zotero_options is None:
-        raise IntegrationError("webdav attaches to Zotero items: configure [integrations.zotero]")
+        raise IntegrationError("webdav attaches to Zotero items: enable a zotero integration")
     return WebDav(
         zotero_mod.client(zotero_options),
         WebDAVWriter(

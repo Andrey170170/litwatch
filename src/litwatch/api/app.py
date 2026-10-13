@@ -20,7 +20,15 @@ from litwatch.api import integrations as integrations_api
 from litwatch.api import reading, settings
 from litwatch.api.deps import Conn, authorised, set_token_cookie, token_ok
 from litwatch.config import Config
-from litwatch.core import Grade, Label, LabelOrigin, LabelValue, Status, TopicKind
+from litwatch.core import (
+    SEARCH_TIMEOUT_SECONDS,
+    Grade,
+    Label,
+    LabelOrigin,
+    LabelValue,
+    Status,
+    TopicKind,
+)
 from litwatch.events import Integration, dispatch
 from litwatch.feedback import word
 from litwatch.jobs import scheduler
@@ -73,6 +81,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        app.state.search_pool.shutdown(wait=False, cancel_futures=True)
 
 
 def create_app(
@@ -92,7 +101,8 @@ def create_app(
     app.state.config, app.state.gateway = config or Config(), gateway
     app.state.publications = publications or Dblp()
     app.state.integrations = integrations or []
-    app.state.search_timeout = integrations_api.SEARCH_TIMEOUT_SECONDS
+    app.state.search_timeout = SEARCH_TIMEOUT_SECONDS
+    app.state.search_pool = integrations_api.search_pool()
     app.state.search_stats = {}
     protected = [Depends(authorised)]
     app.include_router(reading.router, dependencies=protected)

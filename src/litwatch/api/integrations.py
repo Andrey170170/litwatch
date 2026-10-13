@@ -8,6 +8,7 @@ loaded integrations, which it sees only through the contracts in `events` and `c
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,8 +24,9 @@ from litwatch.store import papers as papers_store
 
 router = APIRouter(prefix="/api")
 
-# How long a search waits for each provider before leaving it out of the response.
-SEARCH_TIMEOUT_SECONDS = 5.0
+# Searches run on a pool of their own: a provider whose thread hangs past its timeout (the
+# thread cannot be stopped) ties up a worker here, never the default pool `to_thread` uses.
+SEARCH_WORKERS = 4
 
 
 def loaded(request: Request) -> list[events.Integration]:
@@ -172,10 +174,19 @@ async def card(request: Request, c: Any, paper_id: str) -> tuple[s.DeepCard | No
 # -- search providers ------------------------------------------------------------------------------
 
 
+def search_pool() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=SEARCH_WORKERS, thread_name_prefix="search")
+
+
 async def _ask(
-    provider: SearchProvider, query: str, filters: SearchFilters, timeout: float
+    pool: ThreadPoolExecutor,
+    provider: SearchProvider,
+    query: str,
+    filters: SearchFilters,
+    timeout: float,
 ) -> list[SearchHit]:
-    return await asyncio.wait_for(asyncio.to_thread(provider.search, query, filters), timeout)
+    running = asyncio.get_running_loop().run_in_executor(pool, provider.search, query, filters)
+    return await asyncio.wait_for(running, timeout)
 
 
 async def search_outside(
@@ -192,7 +203,8 @@ async def search_outside(
         return [], []
     timeout = request.app.state.search_timeout
     answers = await asyncio.gather(
-        *(_ask(p, query, filters, timeout) for p in asked), return_exceptions=True
+        *(_ask(request.app.state.search_pool, p, query, filters, timeout) for p in asked),
+        return_exceptions=True,
     )
     stats = request.app.state.search_stats
     hits: dict[str, tuple[str, SearchHit]] = {}

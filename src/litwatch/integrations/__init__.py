@@ -42,9 +42,25 @@ def _module(use: str) -> Any:
         ) from exc
 
 
+def enabled_using(config: Config, use: str) -> dict[str, Any] | None:
+    """The options of the enabled section that loads the module `use`, whatever the section
+    is called (`[integrations.library] use = "zotero"`); None when there is none. Several
+    are refused: which one another integration means would be a guess."""
+    found = [
+        options
+        for name, options in config.integrations.items()
+        if options.get("use", name) == use and options.get("enabled", True)
+    ]
+    if len(found) > 1:
+        raise IntegrationError(f"more than one enabled integration uses {use!r}")
+    return found[0] if found else None
+
+
 def load(config: Config) -> list[Integration]:
-    """The integrations the configuration enables, in its order."""
+    """The integrations the configuration enables, in its order. `requires` may name another
+    integration by its name or by the module it uses."""
     loaded: list[Integration] = []
+    uses: set[str] = set()
     for name, section in config.integrations.items():
         options = dict(section)
         if not options.pop("enabled", True):
@@ -57,12 +73,13 @@ def load(config: Config) -> list[Integration]:
         if not isinstance(integration, Integration):
             raise IntegrationError(f"{use}.load did not return an Integration")
         loaded.append(integration)
+        uses.add(use)
     names = [i.name for i in loaded]
     if len(set(names)) != len(names):
         raise IntegrationError(f"two integrations share a name: {names}")
     for integration in loaded:
         for needed in getattr(integration, "requires", ()):
-            if needed not in names:
+            if needed not in names and needed not in uses:
                 raise IntegrationError(f"{integration.name} needs the {needed} integration too")
     return loaded
 

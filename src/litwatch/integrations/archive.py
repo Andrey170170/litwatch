@@ -13,7 +13,8 @@ adds the papers litwatch never ingested. Other integrations (webdav, deep) read 
 
 Options: `url` (or $LITWATCH_ARCHIVE_URL), the bearer token in $LITWATCH_ARCHIVE_TOKEN,
 `wait_seconds` (60: how long a reader waits for a PDF the archive is still fetching) and
-`search_timeout_seconds` (4).
+`search_timeout_seconds` (4, kept below search's own wait for a provider, so the archive's
+request gives up first and frees its thread).
 """
 
 from __future__ import annotations
@@ -30,8 +31,14 @@ import psycopg
 
 from litwatch import events
 from litwatch.config import Config
-from litwatch.core import Event, Paper, SearchFilters, SearchHit
-from litwatch.integrations import IntegrationError, option, required, required_secret
+from litwatch.core import SEARCH_TIMEOUT_SECONDS, Event, Paper, SearchFilters, SearchHit
+from litwatch.integrations import (
+    IntegrationError,
+    enabled_using,
+    option,
+    required,
+    required_secret,
+)
 from litwatch.store import papers as papers_store
 
 log = logging.getLogger(__name__)
@@ -218,11 +225,9 @@ def client(options: dict[str, Any]) -> ArchiveClient:
 
 
 def reader(config: Config) -> ArchiveClient | None:
-    """A client for reading PDFs when the archive integration is configured and enabled."""
-    section = config.integrations.get("archive")
-    if not section or not section.get("enabled", True):
-        return None
-    return client(section)
+    """A client for reading PDFs when an archive integration is configured and enabled."""
+    section = enabled_using(config, "archive")
+    return client(section) if section else None
 
 
 def _authors(value: Any) -> list[str]:
@@ -315,6 +320,9 @@ class Archive:
 
 def load(name: str, options: dict[str, Any], config: Config) -> Archive:
     timeout = float(option(options, "search_timeout_seconds") or 4.0)
-    if timeout <= 0:
-        raise IntegrationError("search_timeout_seconds must be positive")
+    if not 0 < timeout < SEARCH_TIMEOUT_SECONDS:
+        raise IntegrationError(
+            f"search_timeout_seconds must be above zero and below {SEARCH_TIMEOUT_SECONDS:g}, "
+            "how long search waits for a provider"
+        )
     return Archive(client(options), name=name, search_timeout=timeout)

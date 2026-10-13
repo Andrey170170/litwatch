@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -102,7 +103,7 @@ def test_built_ins_load_by_short_name_and_a_section_may_name_its_module(secrets)
 
 
 def test_a_configuration_that_cannot_work_is_refused_with_its_section(secrets, monkeypatch):
-    with pytest.raises(IntegrationError, match="webdav needs the zotero"):
+    with pytest.raises(IntegrationError, match="enable a zotero integration"):
         integrations.load(
             Config(
                 integrations={
@@ -116,6 +117,47 @@ def test_a_configuration_that_cannot_work_is_refused_with_its_section(secrets, m
     monkeypatch.delenv("ZOTERO_API_KEY")
     with pytest.raises(IntegrationError, match=r"\[integrations.zotero\].*ZOTERO_API_KEY"):
         integrations.load(Config(integrations={"zotero": {"user_id": "1"}}))
+
+
+def test_webdav_finds_its_zotero_by_module_whatever_the_section_is_called(secrets):
+    config = Config(
+        integrations={
+            "library": {"use": "zotero", "user_id": "4242"},
+            "webdav": {"url": "https://dav.test/zotero", "username": "u"},
+            "papers": {"use": "archive", "url": "http://archive.test"},
+        }
+    )
+    library, webdav, _ = integrations.load(config)
+    assert library.name == "library"
+    assert webdav.zotero.base.endswith("/users/4242")
+    assert webdav.archive is not None  # found as `papers`, by the module it uses
+
+
+def test_the_archive_gives_up_on_a_search_before_search_gives_up_on_it(secrets):
+    with pytest.raises(IntegrationError, match="below 5"):
+        integrations.load(
+            Config(integrations={"archive": {"url": "http://a.test", "search_timeout_seconds": 5}})
+        )
+
+
+def test_webhook_events_must_be_a_list_of_patterns(secrets):
+    for events_ in ({"paper": "saved"}, "paper.*", [], ["paper.*", 3]):
+        with pytest.raises(IntegrationError, match="list of event-type patterns"):
+            integrations.load(
+                Config(
+                    integrations={
+                        "hook": {"use": "webhook", "url": "http://h.test", "events": events_}
+                    }
+                )
+            )
+    with pytest.raises(IntegrationError, match="seconds above zero"):
+        integrations.load(
+            Config(integrations={"hook": {"use": "webhook", "url": "http://h.test", "timeout": 0}})
+        )
+    (hook,) = integrations.load(
+        Config(integrations={"hook": {"use": "webhook", "url": "http://h.test", "timeout": 300}})
+    )
+    assert hook.http.timeout.read == 300
 
 
 # -- archive ---------------------------------------------------------------------------------------
@@ -318,6 +360,88 @@ async def test_a_submission_without_an_answer_counts_and_is_not_repeated_forever
     assert await state.attempts(conn, P.id) == MAX_SUBMISSIONS
     assert "gave up" in (await state.card(conn, P.id))["error"]
     assert (await outbox.cursor(conn, d.name)).failing is None
+
+
+async def test_a_paper_without_text_waits_and_gets_its_card_once_the_text_comes(world, deep):
+    conn = world
+    fake, arxiv, d = deep
+    arxiv.html.pop(P.id)  # no HTML rendering yet, and the PDF gives no usable text
+    asked = paper("2610.00009", version=1)
+    await papers_store.upsert(conn, [P, asked])
+    await start(conn, d)
+    await grade(conn, "must_read")
+    await deliver(conn, d)
+    assert fake.requests == []
+    assert (await state.card(conn, P.id))["error"] == "waiting for the paper's text"
+    assert (await outbox.cursor(conn, d.name)).failing is None  # nothing held up
+
+    # An hour on the text is there; the next event, about another paper, tries again first.
+    arxiv.html[P.id] = HTML
+    await conn.execute("UPDATE deep_waiting SET tried_at = now() - interval '2 hours'")
+    await events.emit(conn, events.CARD_REQUESTED, asked.id)
+    await deliver(conn, d)
+    assert [r["paper"]["id"] for r in fake.requests] == [P.id, asked.id]
+    assert (await state.card(conn, P.id))["card"] == CARD
+    assert await state.waiting(conn, datetime.now(UTC), 10) == []
+
+
+async def test_a_paper_whose_text_never_comes_is_given_up_after_a_day(world, deep):
+    conn = world
+    fake, arxiv, d = deep
+    arxiv.html.pop(P.id)
+    asked = paper("2610.00009", version=1)
+    await papers_store.upsert(conn, [P, asked])
+    await start(conn, d)
+    await grade(conn, "must_read")
+    await deliver(conn, d)
+    await conn.execute(
+        "UPDATE deep_waiting SET since = now() - interval '2 days', "
+        "tried_at = now() - interval '2 hours'"
+    )
+    await events.emit(conn, events.CARD_REQUESTED, asked.id)
+    await deliver(conn, d)
+    assert [r["paper"]["id"] for r in fake.requests] == [asked.id]
+    assert "within a day" in (await state.card(conn, P.id))["error"]
+    assert await state.waiting(conn, datetime.now(UTC), 10) == []
+
+
+async def test_the_automatic_limit_says_why_a_paper_got_no_card(world, deep):
+    conn = world
+    fake, _, d = deep
+    await papers_store.upsert(conn, [P])
+    for event_id in (1, 2, 3):
+        await state.add_attempt(conn, P.id, event_id, True)
+    await start(conn, d)
+    await grade(conn, "must_read")
+    await deliver(conn, d)
+    assert fake.requests == []
+    assert "stopped" in (await state.card(conn, P.id))["error"]
+
+
+async def test_a_text_fetched_before_a_rewrite_is_not_used(world):
+    conn = world
+    await papers_store.upsert(conn, [P])
+    await papers_store.set_body(conn, P.id, "the old text", "html")
+    assert await papers_store.body(conn, P.id) == ("the old text", "html")
+    await papers_store.correct(conn, P.id, "A rewritten title", None)  # revision 2
+    assert await papers_store.body(conn, P.id) is None
+    await papers_store.set_body(conn, P.id, "the new text", "html")
+    assert await papers_store.body(conn, P.id) == ("the new text", "html")
+
+
+async def test_a_failed_pdf_request_means_no_text_yet():
+    def arxiv(req: httpx.Request) -> httpx.Response:
+        if "/pdf/" in req.url.path:
+            raise httpx.ConnectError("arXiv is down", request=req)
+        return httpx.Response(404)
+
+    fetcher = BodyFetcher(http=mock(arxiv))
+    papertext.ARXIV_PACING_SECONDS, pacing = 0, papertext.ARXIV_PACING_SECONDS
+    try:
+        assert await fetcher.fetch(P) is None
+    finally:
+        papertext.ARXIV_PACING_SECONDS = pacing
+        await fetcher.aclose()
 
 
 async def test_a_failed_job_is_recorded_and_not_retried_by_itself(world, deep):
