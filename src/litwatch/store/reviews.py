@@ -28,39 +28,28 @@ async def members(
     topic: str,
     since: datetime,
     until: datetime,
-    owner_since: datetime | None = None,
+    *,
+    pending_additions: bool = False,
 ) -> list[Paper]:
-    """Papers that joined the topic's field in the window, oldest first: found by triage
-    then, or marked important by the owner since `owner_since` (the window's start unless
-    given: a daily review takes additions made since the last one was written, so one made
-    after today's review is not lost between two days)."""
+    """Papers that joined the topic's field in the window, found by triage, plus the owner's
+    additions ("Important for <field>"): those made in the window, or, for a daily review,
+    every one still pending whenever it was made (`pending_additions`), so none falls
+    between two days. Ordered by the time that brought each in, then id."""
+    owners = (
+        "(m.by_owner AND m.owner_reviewed_at IS NULL)"
+        if pending_additions
+        else "(m.owner_added_at >= %s AND m.owner_added_at < %s)"
+    )
     rows = await (
         await conn.execute(
             f"SELECT {COLUMNS} FROM memberships m JOIN papers p ON p.id = m.paper_id "
-            "WHERE m.topic = %s AND ((m.created_at >= %s AND m.created_at < %s) "
-            "OR (m.owner_added_at >= %s AND m.owner_added_at < %s)) "
-            # By the time that brought the paper into the window: an old member the owner
-            # marked important stands where the marking put it, not where triage once did.
+            f"WHERE m.topic = %s AND ((m.created_at >= %s AND m.created_at < %s) OR {owners}) "
             "ORDER BY CASE WHEN m.created_at >= %s AND m.created_at < %s THEN m.created_at "
             "ELSE m.owner_added_at END, p.id",
-            (topic, since, until, owner_since or since, until, since, until),
+            (topic, since, until, *([] if pending_additions else [since, until]), since, until),
         )
     ).fetchall()
     return [row_to_paper(r) for r in rows]
-
-
-async def last_written_at(
-    conn: psycopg.AsyncConnection, topic: str, period: str, before: date
-) -> datetime | None:
-    """When the topic's latest written review of the period before `before` was written."""
-    row = await (
-        await conn.execute(
-            "SELECT max(written_at) AS at FROM reviews WHERE topic = %s AND period = %s "
-            "AND day < %s AND state = 'written'",
-            (topic, period, before),
-        )
-    ).fetchone()
-    return row["at"] if row else None
 
 
 async def put(
@@ -76,8 +65,11 @@ async def put(
     error: str | None = None,
     members: int = 0,
     picks: list[tuple[str, str]] | None = None,
+    reviewed: list[str] | None = None,
 ) -> int:
-    """Store the period's review, replacing an earlier attempt and its picks."""
+    """Store the period's review, replacing an earlier attempt and its picks. `reviewed`
+    names the papers it covered: the owner's additions among them stop being pending, in
+    the same transaction, so an addition made meanwhile waits for the next review."""
     async with conn.transaction():
         row = await (
             await conn.execute(
@@ -94,6 +86,12 @@ async def put(
                 (topic, kind, period, day, topic_revision, text, state, error, members),
             )
         ).fetchone()
+        if reviewed:
+            await conn.execute(
+                "UPDATE memberships SET owner_reviewed_at = now() WHERE topic = %s "
+                "AND paper_id = ANY(%s) AND by_owner AND owner_reviewed_at IS NULL",
+                (topic, reviewed),
+            )
         await conn.execute("DELETE FROM review_picks WHERE review_id = %s", (row["id"],))
         for position, (paper_id, why) in enumerate(picks or [], 1):
             await conn.execute(

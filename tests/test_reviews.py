@@ -112,31 +112,60 @@ async def test_a_daily_review_picks_from_its_members_and_makes_an_issue_alone(db
     assert "lede" in models.calls
 
 
-async def test_an_addition_after_todays_review_is_in_tomorrows(db):
-    """ "Important for <field>" after the day's review is written is not lost between two
-    days: the next daily review takes the owner's additions since the last written one."""
+async def test_an_owner_addition_waits_for_the_next_daily_review_whenever_it_comes(db, monkeypatch):
+    """ "Important for <field>" stays pending until a daily review, written or quiet, covers
+    it: after a quiet first review, after a review that was already running, and after one
+    that failed; it is covered once, not again the day after."""
     from litwatch.store import fields as fields_store
+    from litwatch.store import reviews as reviews_store
 
     models = Models()
     today = Config().schedule.today()
-    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run))
-    assert models.reviewed == [len(FIELD)]
-    await fields_store.add(db, P.id, DAILY.slug, 1)  # after today's review was written
-    tomorrow = today + timedelta(days=1)
-    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run, tomorrow))
-    assert models.reviewed == [len(FIELD), 1]
-    picked = await (
-        await db.execute(
+    day = lambda n: today - timedelta(days=n)  # noqa: E731
+
+    async def reviewed_on(d):
+        rows = await db.execute(
             "SELECT k.paper_id FROM review_picks k JOIN reviews r ON r.id = k.review_id "
-            "WHERE r.period = 'day' AND r.day = %s",
-            (tomorrow,),
+            "WHERE r.period = 'day' AND r.day = %s ORDER BY k.position",
+            (d,),
         )
-    ).fetchall()
-    assert [k["paper_id"] for k in picked] == [P.id]
-    # Written into tomorrow's, it is not written into the day after as well.
-    day_after = tomorrow + timedelta(days=1)
-    await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run, day_after))
-    assert models.reviewed == [len(FIELD), 1]  # a quiet day asks nothing
+        return [k["paper_id"] for k in await rows.fetchall()]
+
+    async def review(d):
+        await job(db, models, lambda run: reviews.daily_reviews(db, Config(), run, d))
+        return (await reviews_store.get(db, DAILY.slug, "day", d))["state"]
+
+    # A first review that comes back quiet, then an addition: the next review takes it.
+    assert await review(day(6)) == "quiet"
+    await fields_store.add(db, P.id, DAILY.slug, 1)
+    assert await review(day(5)) == "written" and await reviewed_on(day(5)) == [P.id]
+    assert await review(day(4)) == "quiet"  # covered once, not again
+
+    # An addition made after the members were read and before the review was stored.
+    await fields_store.remove(db, P.id, DAILY.slug)
+    read = reviews_store.members
+
+    async def members_then_add(*args, **kwargs):
+        found = await read(*args, **kwargs)
+        await fields_store.add(db, P.id, DAILY.slug, 1)  # while the review runs
+        return found
+
+    monkeypatch.setattr(reviews_store, "members", members_then_add)
+    assert await review(day(3)) == "quiet" and await reviewed_on(day(3)) == []
+    monkeypatch.setattr(reviews_store, "members", read)
+    assert await review(day(2)) == "written" and await reviewed_on(day(2)) == [P.id]
+
+    # A failed review marks nothing: the retry covers the addition. (Another paper: the
+    # gateway would answer the same review of P from its journal without calling anyone.)
+    other = paper("2610.00009", title="Another the owner added")
+    await papers_store.upsert(db, [other])
+    await fields_store.add(db, other.id, DAILY.slug, 1)
+    models.down = True
+    assert await review(day(1)) == "failed"
+    models.down = False
+    assert await review(day(1)) == "written" and await reviewed_on(day(1)) == [other.id]
+    await review(today)  # today's review has the field's own members; the additions are done
+    assert not {P.id, other.id} & set(await reviewed_on(today))
 
 
 async def test_a_quiet_day_makes_no_issue_and_a_failed_review_is_tried_again(db):

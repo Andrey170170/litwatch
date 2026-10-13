@@ -14,12 +14,14 @@ async def add(conn: psycopg.AsyncConnection, paper_id: str, topic: str, revision
     await conn.execute(
         """
         INSERT INTO memberships (paper_id, topic, topic_revision, by_triage, by_owner,
-                                 owner_added_at)
-        VALUES (%s, %s, %s, false, true, now())
+                                 owner_added_at, owner_reviewed_at)
+        VALUES (%s, %s, %s, false, true, now(), NULL)
         ON CONFLICT (paper_id, topic) DO UPDATE SET
             by_owner = true,
             owner_added_at = CASE WHEN memberships.by_owner THEN memberships.owner_added_at
-                                  ELSE now() END
+                                  ELSE now() END,
+            owner_reviewed_at = CASE WHEN memberships.by_owner THEN memberships.owner_reviewed_at
+                                     ELSE NULL END
         """,
         (paper_id, topic, revision),
     )
@@ -29,8 +31,8 @@ async def remove(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> bo
     """Take back the owner's addition. What triage decided stands; the row goes only when
     triage never made it a member. Returns whether the owner's flag was set."""
     cur = await conn.execute(
-        "UPDATE memberships SET by_owner = false, owner_added_at = NULL "
-        "WHERE paper_id = %s AND topic = %s AND by_owner",
+        "UPDATE memberships SET by_owner = false, owner_added_at = NULL, "
+        "owner_reviewed_at = NULL WHERE paper_id = %s AND topic = %s AND by_owner",
         (paper_id, topic),
     )
     await conn.execute(

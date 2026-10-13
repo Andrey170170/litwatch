@@ -32,7 +32,10 @@ async def _review(
     day: date,
     papers: list[Paper],
 ) -> str:
-    """Review the topic's members for the period and store it. Returns the review's state."""
+    """Review the topic's members for the period and store it. Returns the review's state.
+    A daily review, written or quiet, marks the owner's additions it covered as reviewed; a
+    failed one marks nothing, so its retry covers them again."""
+    covered = [p.id for p in papers] if period == "day" else None
     if not papers:
         await reviews_store.put(conn, topic.slug, period, day, kind=topic.kind, state="quiet")
         return "quiet"
@@ -63,6 +66,7 @@ async def _review(
         text=written.text,
         members=len(papers),
         picks=[(p.id, p.why) for p in written.picks],
+        reviewed=covered,
     )
     run.add("reviews")
     return "written"
@@ -99,11 +103,9 @@ async def _review_day(
             continue
         if failed_only and not (existing and existing["state"] == "failed"):
             continue
-        # The owner's additions count from the last written daily review: one made after
-        # today's review was written belongs to tomorrow's, not to no one's.
-        last = await reviews_store.last_written_at(conn, topic.slug, "day", day)
-        owner_since = min(since, last) if last else None
-        papers = await reviews_store.members(conn, topic.slug, since, until, owner_since)
+        # Triage's members by the day; the owner's additions by what is still pending, so
+        # one made after a review (or while it ran) is in the next, never in none.
+        papers = await reviews_store.members(conn, topic.slug, since, until, pending_additions=True)
         if await _review(conn, run, topic, "day", day, papers) == "written":
             done += 1
     if done and (issue := await digest_store.issue(conn, "daily", day)):
