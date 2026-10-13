@@ -428,7 +428,7 @@ Grading the non-candidates is what keeps a triage miss from being counted as a g
 there is no separate label file.
 
 **events.** A transactional outbox: a pipeline step writes its event in the same transaction as
-its data. `Integration` protocol: `name`, `wants(event)`, `handle(event)`, idempotent. A
+its data. `Integration` protocol: `name`, `wants(event)`, `handle(conn, event)`, idempotent (the connection lets it read through the repositories and emit events of its own). A
 dispatcher delivers per integration with its own cursor, retries with backoff, and exposes
 failures to the API.
 

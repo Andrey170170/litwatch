@@ -11,7 +11,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from litwatch import events
 from litwatch.api import schemas as s
@@ -120,6 +120,16 @@ async def skip(name: str, request: Request, c: Conn) -> s.Failing:
         failures=cursor.failures,
         error=cursor.last_error,
     )
+
+
+# -- the changes feed ------------------------------------------------------------------------------
+
+
+@router.get("/events")
+async def changes(c: Conn, after: int = 0, limit: int = Query(100, ge=1, le=1000)) -> list[Event]:
+    """The outbox in order, from after the given event id: for a client that polls instead of
+    taking webhooks. Pass the last id seen as `after` to read on."""
+    return await outbox.after(c, after, limit)
 
 
 # -- deep cards ------------------------------------------------------------------------------------

@@ -10,8 +10,9 @@ import pytest
 from litwatch import events
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import SearchHit
+from litwatch.core import Hand, SearchHit
 from litwatch.events import dispatch
+from litwatch.feedback import word
 from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox
@@ -188,3 +189,14 @@ async def test_best_match_orders_the_outside_band_by_score(make):
     client = await make([scored])
     found = (await client.get("/api/papers", params={"q": "x", "sort": "best"})).json()
     assert [r["id"] for r in found["outside"]] == ["2609.00002", "2609.00003"]
+
+
+async def test_the_changes_feed_reads_the_outbox_in_order_from_a_position(conn, make):
+    client = await make()
+    first = (await client.get("/api/events")).json()
+    assert [e["type"] for e in first][:1] == ["paper.added"]  # the fixture's paper
+    last = first[-1]["id"]
+    await word.toggle(conn, P.id, Hand.SAVE)
+    newer = (await client.get("/api/events", params={"after": last})).json()
+    assert [e["type"] for e in newer] == ["paper.saved"]
+    assert (await client.get("/api/events", params={"limit": 0})).status_code == 422
