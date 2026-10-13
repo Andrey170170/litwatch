@@ -790,10 +790,17 @@ reading the outbox from its current end, so the events of an initial `library sy
 written from `docs/integrations.md` without editing any other package.
 
 **M7 · Migration and cutover.** Data migration, a week side by side, switch production.
-*Check:* the cutover rule in section 7.
+Decided 2026-10-12 while building M6: the Zotero subcollections keep 0.x's names ("Tier 1",
+"Tier 2", which hold the existing items) until cutover, and are renamed or moved to the v1 grades
+during or after it; the deep-card service gets its own token, valid only for search, before deep
+is enabled (its 0.x search callback has no v1 route, and the archive will grow into a larger
+service of its own). *Check:* the cutover rule in section 7.
 
 **M8 · Release.** Compose file, install and configuration docs, repository clean-up, MIT
-licence, `v1.0.0`. The clean-up, decided 2026-10-12:
+licence, `v1.0.0`. The optional `pdf` extra (`pymupdf4llm`, PDF text for deep cards) is AGPL:
+the repository stays MIT, the README says that installing the extra puts a build under AGPL
+terms (source must be offered to anyone it is distributed or served to), and the default image
+leaves it out. The clean-up, decided 2026-10-12:
 
 - `evals/` (the owner's labels, trial reports, paper lists) moves out of the repository to private storage.
 - Homelab specifics go: the 0.x `docs/ARCHIVE-*.md` notes, server paths, internal host names and addresses, and any
