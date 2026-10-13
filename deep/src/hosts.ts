@@ -1,5 +1,5 @@
 /**
- * Host functions the isolate may call: litwatch's own index, Semantic Scholar, and an
+ * Host functions the isolate may call: litwatch's search, Semantic Scholar, and an
  * allowlisted fetch. Everything returns JSON-able values; errors become exceptions in the cell.
  */
 
@@ -7,8 +7,50 @@ import type { HostFn } from "./repl.ts";
 
 export interface HostConfig {
   litwatchUrl: string;
+  /** litwatch's read token, which may only search and read papers. */
+  litwatchToken?: string;
   s2ApiKey?: string;
   maxFetchChars: number;
+}
+
+/** One `store.search` hit, as the agent has always been given it. */
+export interface StoreHit {
+  id: string;
+  title: string;
+  authors: string[];
+  published: string | null;
+  /** 1 must read, 2 relevant, 3 adjacent, 4 not about it; null when no Watch topic graded it. */
+  tier: number | null;
+  /** litwatch's take on the paper, if it wrote one. */
+  reason: string | null;
+  /** false for a paper litwatch never ingested, found by a search provider (the archive). */
+  in_collection: boolean;
+}
+
+interface PaperRow {
+  id: string;
+  title: string;
+  authors?: string[];
+  published?: string | null;
+  grade?: string | null;
+  take?: string | null;
+}
+
+const TIERS: Record<string, number> = { must_read: 1, relevant: 2, adjacent: 3, none: 4 };
+
+/** v1's `GET /api/papers` answer as `store.search` hits: the collection first, then the
+ * papers only a search provider holds. */
+export function storeHits(body: { rows?: PaperRow[]; outside?: PaperRow[] }): StoreHit[] {
+  const hit = (row: PaperRow, inCollection: boolean): StoreHit => ({
+    id: row.id,
+    title: row.title,
+    authors: row.authors ?? [],
+    published: row.published ?? null,
+    tier: (row.grade && TIERS[row.grade]) || null,
+    reason: row.take ?? null,
+    in_collection: inCollection,
+  });
+  return [...(body.rows ?? []).map((r) => hit(r, true)), ...(body.outside ?? []).map((r) => hit(r, false))];
 }
 
 const ALLOWED_HOSTS = [
@@ -76,10 +118,15 @@ async function getJson(url: string, headers: Record<string, string> = {}): Promi
 
 export function buildHosts(cfg: HostConfig): Record<string, HostFn> {
   const s2Headers: Record<string, string> = cfg.s2ApiKey ? { "x-api-key": cfg.s2ApiKey } : {};
+  const litwatchHeaders: Record<string, string> = cfg.litwatchToken
+    ? { authorization: `Bearer ${cfg.litwatchToken}` }
+    : {};
   return {
     "store.search": async ([query, limit]) => {
-      const q = new URLSearchParams({ q: String(query), limit: String(Number(limit) || 10) });
-      return getJson(`${cfg.litwatchUrl}/papers/search?${q}`);
+      const n = Math.min(Math.max(Number(limit) || 10, 1), 50);
+      const q = new URLSearchParams({ q: String(query), limit: String(n) });
+      const body = await getJson(`${cfg.litwatchUrl}/api/papers?${q}`, litwatchHeaders);
+      return storeHits(body as Parameters<typeof storeHits>[0]).slice(0, n);
     },
     "s2.lookup": async ([q]) => {
       const text = String(q).trim();

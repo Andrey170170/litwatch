@@ -26,6 +26,7 @@ const config = {
   authFile: env("DEEP_AUTH_FILE", "/var/lib/litwatch-deep/auth.json"),
   hosts: {
     litwatchUrl: env("LITWATCH_URL", "http://litwatch:8080"),
+    litwatchToken: secret("LITWATCH_TOKEN"),
     s2ApiKey: secret("S2_API_KEY"),
     maxFetchChars: Number(env("DEEP_MAX_FETCH_CHARS", "200000")),
   } satisfies HostConfig,
