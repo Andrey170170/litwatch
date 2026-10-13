@@ -21,6 +21,7 @@ from croniter import croniter
 
 from litwatch import store
 from litwatch.config import Config, Schedule
+from litwatch.core import Cadence, Status, Topic, TopicKind
 from litwatch.jobs import nightly, publications, reviews
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
 from litwatch.jobs.lock import BusyError, run_lock
@@ -57,15 +58,28 @@ def next_fire(cron: str, now: datetime) -> datetime:
     return croniter(cron, after).get_next(datetime)
 
 
-def will_retry(schedule: Schedule, period: str, day: date, now: datetime | None = None) -> bool:
+def will_retry(
+    schedule: Schedule,
+    period: str,
+    day: date,
+    now: datetime | None = None,
+    topic: Topic | None = None,
+) -> bool:
     """Whether the next scheduled run tries a failed review of this day or week again. The
-    nightly run at date `r` retries the days from `r - RETRY`; the weekly run at `r` reviews
-    the last full week and retries the one before, so weeks from two Mondays before `r`'s.
-    The next run may be later today."""
+    nightly run at date `r` reviews `r` and retries the days from `r - RETRY`; the weekly run
+    at `r` reviews the last full week and retries the one before. The next run may be later
+    today. Only active topics are reviewed, and only a daily Radar topic day by day."""
+    if topic is not None and (
+        topic.status != Status.ACTIVE
+        or (period == "day" and (topic.kind != TopicKind.RADAR or topic.cadence != Cadence.DAILY))
+    ):
+        return False
     now = now or datetime.now(schedule.zone)
     if period == "day":
-        return day >= next_fire(schedule.nightly, now).date() - reviews.RETRY
-    return day >= schedule.week_of(next_fire(schedule.weekly, now).date()) - timedelta(days=14)
+        run = next_fire(schedule.nightly, now).date()
+        return run - reviews.RETRY <= day <= run
+    target = schedule.week_of(next_fire(schedule.weekly, now).date()) - timedelta(days=7)
+    return target - timedelta(days=7) <= day <= target
 
 
 def is_due(cron: str, now: datetime, last_run: datetime | None) -> bool:

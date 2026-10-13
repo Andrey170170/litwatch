@@ -442,3 +442,11 @@ def test_a_failed_review_is_promised_a_retry_only_while_the_next_run_makes_it():
     assert retried("week", "2026-09-28", early) and not retried("week", "2026-09-21", early)
     # After it, the next (19 October) retries 5 October's week and no longer 28 September's.
     assert retried("week", "2026-10-05", late) and not retried("week", "2026-09-28", late)
+    # Nor a week or a day later than the next run's own (a `--week` run by hand ahead of it).
+    assert not retried("week", "2026-10-19", late) and not retried("day", "2026-10-20", late)
+    # Nor a topic the runs no longer review that way: paused, or no longer daily.
+    when = date(2026, 10, 12)
+    assert scheduler.will_retry(schedule, "day", when, late, DAILY)
+    assert not scheduler.will_retry(schedule, "day", when, late, AGENTS)  # weekly Pulse
+    paused = DAILY.model_copy(update={"status": "paused"})
+    assert not scheduler.will_retry(schedule, "week", date(2026, 10, 5), late, paused)

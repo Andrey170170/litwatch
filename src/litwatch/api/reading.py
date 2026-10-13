@@ -103,10 +103,11 @@ async def issue(issue_id: int, request: Request, c: Conn) -> s.Issue:
         section = sections.setdefault(
             row["topic"], s.Section(topic=_ref(topics[row["topic"]]), entries=[])
         )
+        topic, schedule = topics[row["topic"]], _config(request).schedule
         if row["kind"] == "watch":
-            section.recap = await _recap(c, row, found["day"], _config(request).schedule)
+            section.recap = await _recap(c, row, found["day"], schedule, topic)
         else:
-            section.review = _review(row, _config(request).schedule)
+            section.review = _review(row, schedule, topic)
     order = {slug: i for i, slug in enumerate(topics)}
     return s.Issue(
         id=found["id"],
@@ -117,10 +118,10 @@ async def issue(issue_id: int, request: Request, c: Conn) -> s.Issue:
     )
 
 
-def _review(row: Any, schedule: Any) -> s.Review:
+def _review(row: Any, schedule: Any, topic: Any) -> s.Review:
     return s.Review(
         will_retry=row["state"] == "failed"
-        and scheduler.will_retry(schedule, row["period"], row["day"]),
+        and scheduler.will_retry(schedule, row["period"], row["day"], topic=topic),
         period=row["period"],
         day=row["day"],
         state=row["state"],
@@ -130,14 +131,17 @@ def _review(row: Any, schedule: Any) -> s.Review:
     )
 
 
-async def _recap(c: psycopg.AsyncConnection, row: Any, monday: date, schedule: Any) -> s.Recap:
+async def _recap(
+    c: psycopg.AsyncConnection, row: Any, monday: date, schedule: Any, topic: Any
+) -> s.Recap:
     since, until = schedule.window(monday, 7)  # the week, in the configured zone
     topic = row["topic"]
     entries = await reviews_store.week_entries(c, topic, monday)
     set_aside = await reviews_store.week_set_aside(c, topic, since, until)
     missed = await reviews_store.week_misses(c, topic, since, until)
     return s.Recap(
-        will_retry=row["state"] == "failed" and scheduler.will_retry(schedule, "week", monday),
+        will_retry=row["state"] == "failed"
+        and scheduler.will_retry(schedule, "week", monday, topic=topic),
         state=row["state"],
         text=row["text"],
         papers=[s.Listed(**{k: e[k] for k in s.Listed.model_fields}) for e in entries],
@@ -319,8 +323,8 @@ async def topics(c: Conn) -> list[s.TopicCard]:
 @router.get("/topics/{slug}/reviews")
 async def topic_reviews(slug: str, request: Request, c: Conn) -> list[s.Review]:
     """A Radar or Pulse topic's reviews, newest first, shown above its picks."""
-    schedule = _config(request).schedule
-    return [_review(r, schedule) for r in await reviews_store.for_topic(c, slug)]
+    schedule, topic = _config(request).schedule, await topics_store.get(c, slug)
+    return [_review(r, schedule, topic) for r in await reviews_store.for_topic(c, slug)]
 
 
 @router.post("/topics/{slug}/visit", status_code=204)
