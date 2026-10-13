@@ -1,5 +1,6 @@
 """Shared fixtures: a migrated database in a throwaway schema, and a few topics and papers."""
 
+import asyncio
 import os
 from uuid import uuid4
 
@@ -7,6 +8,7 @@ import pytest
 
 from litwatch import store
 from litwatch.core import Paper, Topic, TopicKind
+from litwatch.events import dispatch
 
 FAITH = Topic(
     slug="cot-faithfulness",
@@ -61,3 +63,29 @@ async def conn():
                 yield c
         finally:
             await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+
+
+async def settled(conn, timeout: float = 20.0) -> None:
+    """Wait until every event in the outbox is settled. The test cluster is shared: another
+    session's open transaction holds back delivery of every event written after it began."""
+    query = (
+        "SELECT NOT EXISTS (SELECT 1 FROM outbox "
+        "WHERE xid >= pg_snapshot_xmin(pg_current_snapshot())) AS ok"
+    )
+    for _ in range(int(timeout / 0.05)):
+        if (await (await conn.execute(query)).fetchone())["ok"]:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("events stayed unsettled: a transaction on the cluster is held open")
+
+
+async def start(conn, integration) -> None:
+    """`dispatch.start`, once what came before is settled, so it is all behind the cursor."""
+    await settled(conn)
+    await dispatch.start(conn, integration)
+
+
+async def deliver(conn, integration, now=None) -> int:
+    """`dispatch.deliver`, once the events written so far are settled."""
+    await settled(conn)
+    return await dispatch.deliver(conn, integration, now)

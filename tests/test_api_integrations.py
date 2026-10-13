@@ -7,18 +7,16 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from litwatch import events
+from litwatch import events, store
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Hand, SearchHit
-from litwatch.events import dispatch
-from litwatch.feedback import word
+from litwatch.core import SearchHit
 from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
-from tests.conftest import TOPICS, paper
+from tests.conftest import TOPICS, deliver, paper, settled, start
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -30,6 +28,7 @@ class Carder:
 
     name = "carder"
     description = "Makes cards on request."
+    makes_cards = True
 
     def __init__(self):
         self.fail: set[int] = set()
@@ -100,11 +99,11 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
     carder = Carder()
     config = Config(integrations={"carder": {"use": "x.y"}, "old": {"enabled": False}})
     client = await make([carder, Shelf("shelf")], config)
-    await dispatch.start(conn, carder)
+    await start(conn, carder)
     first = await events.emit(conn, events.CARD_REQUESTED, P.id)
     await events.emit(conn, events.PAPER_SAVED, P.id)
     carder.fail = {first}
-    await dispatch.deliver(conn, carder)
+    await deliver(conn, carder)
 
     cards = {c["name"]: c for c in (await client.get("/api/settings/integrations")).json()}
     assert list(cards) == ["carder", "shelf", "old"]
@@ -130,13 +129,16 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
     assert (await client.post("/api/settings/integrations/carder/skip")).status_code == 409
     assert (await client.post("/api/settings/integrations/carder/retry")).status_code == 409
     assert (await client.post("/api/settings/integrations/nobody/retry")).status_code == 404
-    await dispatch.deliver(conn, carder)
+    await deliver(conn, carder)
     cards = {c["name"]: c for c in (await client.get("/api/settings/integrations")).json()}
     assert cards["carder"]["failing"] is None and cards["carder"]["skipped"] == 1
 
 
 async def test_a_card_request_needs_an_integration_that_answers_it(conn, make):
-    bare = await make([Webhook("http://hook.test")])  # passes everything on, answers nothing
+    # Webhooks pass card requests on, even one filtered to them; neither makes a card.
+    bare = await make(
+        [Webhook("http://hook.test"), Webhook("http://h.test", name="cards", patterns=("card.*",))]
+    )
     assert (await bare.post(f"/api/papers/{P.id}/card")).status_code == 409
     paper_page = (await bare.get(f"/api/papers/{P.id}")).json()
     assert paper_page["card"] is None and paper_page["card_requestable"] is False
@@ -191,12 +193,23 @@ async def test_best_match_orders_the_outside_band_by_score(make):
     assert [r["id"] for r in found["outside"]] == ["2609.00002", "2609.00003"]
 
 
-async def test_the_changes_feed_reads_the_outbox_in_order_from_a_position(conn, make):
+async def test_the_changes_feed_reads_on_from_a_position_and_misses_no_late_commit(conn, make):
     client = await make()
+    await settled(conn)
     first = (await client.get("/api/events")).json()
-    assert [e["type"] for e in first][:1] == ["paper.added"]  # the fixture's paper
-    last = first[-1]["id"]
-    await word.toggle(conn, P.id, Hand.SAVE)
-    newer = (await client.get("/api/events", params={"after": last})).json()
-    assert [e["type"] for e in newer] == ["paper.saved"]
+    assert [e["type"] for e in first["events"]][:1] == ["paper.added"]  # the fixture's paper
+    other = await store.sibling(conn)
+    try:
+        async with other.transaction():
+            early = await events.emit(other, events.PAPER_SAVED, P.id)  # not yet committed
+            late = await events.emit(conn, events.PAPER_UNSAVED, P.id)
+            held = (await client.get("/api/events", params={"after": first["next"]})).json()
+            assert held == {"events": [], "next": first["next"]}
+    finally:
+        await other.close()
+    await settled(conn)
+    newer = (await client.get("/api/events", params={"after": first["next"]})).json()
+    assert [e["id"] for e in newer["events"]] == [early, late]
+    assert newer["next"] != first["next"]
+    assert (await client.get("/api/events", params={"after": "12"})).status_code == 422
     assert (await client.get("/api/events", params={"limit": 0})).status_code == 422

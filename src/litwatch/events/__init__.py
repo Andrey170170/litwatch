@@ -53,7 +53,8 @@ class Integration(Protocol):
 
     Optional hooks, used when present: `setup(conn)`, awaited once whenever the dispatcher
     starts; `aclose()`, awaited when it stops; `requires`, names of integrations that must
-    be loaded too.
+    be loaded too; `makes_cards = True` for one that answers `card.requested` by storing a
+    deep card, which is what makes the paper page offer the request.
     """
 
     name: str

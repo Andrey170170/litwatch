@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from litwatch.core import (
+    Event,
     Grade,
     Hand,
     LabelValue,
@@ -359,3 +360,10 @@ class IntegrationCard(BaseModel):
 
 class CardRequested(BaseModel):
     event_id: int
+
+
+class Changes(BaseModel):
+    """A page of the changes feed, and the position to read on from."""
+
+    events: list[Event]
+    next: str

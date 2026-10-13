@@ -1,18 +1,28 @@
 -- Integrations: where each has read the outbox to, and the state each keeps of its own.
 
+-- An event's place is (xid, id): the id of the transaction that wrote it, then its own id.
+-- Ids are handed out in insert order, not commit order, so a reader going by id alone would
+-- pass over an event whose transaction commits after a later one's. A reader takes only events
+-- whose transaction is older than every transaction still running; any event yet to commit
+-- then sorts after everything read. On an adopted database the rows already there share this
+-- migration's xid.
+ALTER TABLE outbox ADD COLUMN xid xid8 NOT NULL DEFAULT pg_current_xact_id();
+CREATE INDEX outbox_order_idx ON outbox (xid, id);
+
 -- One row per integration, made the first time it is loaded at the outbox's end then, so an
 -- integration enabled late is not woken by everything that happened before it.
 CREATE TABLE integration_cursors (
-    name        text PRIMARY KEY,
-    position    bigint NOT NULL,             -- the last event handled, passed over or skipped
-    failing     bigint,                      -- the event after it, while that one fails
-    failures    integer NOT NULL DEFAULT 0,  -- how many times in a row it failed
-    retry_at    timestamptz,                 -- the failing event is not tried before this
-    last_error  text,                        -- kept after a recovery, for the record
-    failed_at   timestamptz,
-    skipped     integer NOT NULL DEFAULT 0,  -- events the owner skipped
-    created_at  timestamptz NOT NULL DEFAULT now(),
-    updated_at  timestamptz NOT NULL DEFAULT now()
+    name         text PRIMARY KEY,
+    position_xid xid8 NOT NULL,               -- with `position`, the place of the last event
+    position     bigint NOT NULL,             -- handled, passed over or skipped
+    failing      bigint,                      -- the event after it, while that one fails
+    failures     integer NOT NULL DEFAULT 0,  -- how many times in a row it failed
+    retry_at     timestamptz,                 -- the failing event is not tried before this
+    last_error   text,                        -- kept after a recovery, for the record
+    failed_at    timestamptz,
+    skipped      integer NOT NULL DEFAULT 0,  -- events the owner skipped
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    updated_at   timestamptz NOT NULL DEFAULT now()
 );
 
 -- zotero: the item that carries each paper. Seeded from 0.x's `papers.zotero_key`.
@@ -22,16 +32,19 @@ CREATE TABLE zotero_items (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- webdav: the PDF attachment stored for a paper's Zotero item. Seeded from 0.x's
--- `papers.zotero_attachment_key`.
+-- webdav: the PDF attachment of a paper's Zotero item. `pending` while litwatch's upload of
+-- its file is not known to be complete; `owner` when the item already had a PDF litwatch did
+-- not make, which it leaves alone. Seeded from 0.x's `papers.zotero_attachment_key`.
 CREATE TABLE webdav_files (
     paper_id       text PRIMARY KEY REFERENCES papers(id),
     attachment_key text NOT NULL,
-    stored_at      timestamptz NOT NULL DEFAULT now()
+    state          text NOT NULL CHECK (state IN ('pending', 'stored', 'owner')),
+    updated_at     timestamptz NOT NULL DEFAULT now()
 );
 
 -- deep: one deep card per paper, or the last failure to get one. The card is shown on the
--- paper page whether or not the integration is still loaded.
+-- paper page whether or not the integration is still loaded. `job_id` is the deep service's
+-- job while one is running, so a retry or a restart follows it instead of paying for another.
 CREATE TABLE deep_cards (
     paper_id     text PRIMARY KEY REFERENCES papers(id),
     card         jsonb,                     -- the validated result; null until one is written
@@ -39,21 +52,31 @@ CREATE TABLE deep_cards (
     stats        jsonb NOT NULL DEFAULT '{}',
     trace        jsonb NOT NULL DEFAULT '[]',
     error        text,                      -- the last attempt's failure
-    attempts     integer NOT NULL DEFAULT 0,
-    attempted_at timestamptz,
+    job_id       text,
+    job_since    timestamptz,               -- when that job was submitted
     written_at   timestamptz
 );
+
+-- deep: every submission that may have reached the service, for the attempt limits and the
+-- daily cap on automatic cards. `automatic` is false for the owner's requests.
+CREATE TABLE deep_attempts (
+    id        bigserial PRIMARY KEY,
+    paper_id  text NOT NULL REFERENCES papers(id),
+    event_id  bigint NOT NULL,
+    automatic boolean NOT NULL,
+    at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX deep_attempts_paper_idx ON deep_attempts (paper_id);
+CREATE INDEX deep_attempts_at_idx ON deep_attempts (at) WHERE automatic;
 
 -- An adopted 0.x database brings its cards along on the paper rows.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
                AND table_name = 'papers' AND column_name = 'enrichment') THEN
-        INSERT INTO deep_cards (paper_id, card, model, stats, trace, error, attempts,
-                                attempted_at, written_at)
+        INSERT INTO deep_cards (paper_id, card, model, stats, trace, error, written_at)
         SELECT id, enrichment, enrichment_model, coalesce(deep_stats, '{}'),
-               coalesce(deep_trace, '[]'), enrichment_error, deep_attempts, enriched_at,
-               enriched_at
+               coalesce(deep_trace, '[]'), enrichment_error, enriched_at
         FROM papers WHERE enrichment IS NOT NULL;
     END IF;
 END $$;

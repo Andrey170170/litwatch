@@ -337,6 +337,9 @@ class Event(BaseModel):
     paper_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
+    # The writing transaction's id. With `id` it is the event's place in the outbox: readers
+    # go by (xid, id), which keeps commit order where ids alone would not.
+    xid: int | None = None
 
 
 class Publication(BaseModel):

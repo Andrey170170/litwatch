@@ -11,12 +11,12 @@ import pytest
 from litwatch import integrations
 from litwatch.config import Config
 from litwatch.core import Grade, Hand, Opinion, Verdict
-from litwatch.events import Integration, dispatch
+from litwatch.events import Integration
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
 from litwatch.store import verdicts
-from tests.conftest import FAITH, TOPICS, paper
+from tests.conftest import FAITH, TOPICS, deliver, paper, start
 
 GUIDE = Path(__file__).parent.parent / "docs" / "integrations.md"
 P = paper("2610.00001", title="Traces that hide steps")
@@ -66,14 +66,14 @@ async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):
 
     await phone.http.aclose()
     phone.http = httpx.AsyncClient(transport=httpx.MockTransport(ntfy))
-    await dispatch.start(conn, phone)
+    await start(conn, phone)
 
     await grade(conn, "relevant")  # saved, but not must read: nothing
-    await dispatch.deliver(conn, phone)
+    await deliver(conn, phone)
     assert sent == []
 
     await grade(conn, "must_read")
-    await dispatch.deliver(conn, phone)
+    await deliver(conn, phone)
     assert sent == [
         (
             "https://ntfy.sh/litwatch-must-read",
@@ -84,9 +84,9 @@ async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):
 
     # Unsaved by the owner, then saved again: told again, as the guide says.
     await word.toggle(conn, P.id, Hand.UNSAVE)
-    await dispatch.deliver(conn, phone)
+    await deliver(conn, phone)
     assert len(sent) == 1
     await word.toggle(conn, P.id, Hand.SAVE)
-    await dispatch.deliver(conn, phone)
+    await deliver(conn, phone)
     assert len(sent) == 2
     await phone.aclose()

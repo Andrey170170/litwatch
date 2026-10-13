@@ -43,9 +43,10 @@ def _describe(exc: BaseException) -> str:
 async def deliver(
     conn: psycopg.AsyncConnection, integration: Integration, now: datetime | None = None
 ) -> int:
-    """One pass: hand over the events after the cursor, up to a batch, stopping at the first
-    failure. Returns how many events the cursor moved past, wanted or not."""
-    now = now or datetime.now(UTC)
+    """One pass: hand over the settled events after the cursor, up to a batch, stopping at the
+    first failure. Returns how many events the cursor moved past, wanted or not. `now` fixes
+    the clock, for tests; otherwise a failure's backoff runs from the moment it failed."""
+    clock = (lambda: now) if now else (lambda: datetime.now(UTC))
     key = (DISPATCH_LOCK, integration.name)
     row = await (
         await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS locked", key)
@@ -54,7 +55,7 @@ async def deliver(
         return 0
     try:
         cursor = await outbox.cursor(conn, integration.name)
-        if cursor.retry_at and cursor.retry_at > now:
+        if cursor.retry_at and cursor.retry_at > clock():
             return 0
         position, passed = cursor.position, 0
         for event in await outbox.after(conn, cursor.position, BATCH):
@@ -64,24 +65,27 @@ async def deliver(
                 except Exception as exc:
                     await outbox.advance(conn, integration.name, position)
                     failures = cursor.failures + 1 if cursor.failing == event.id else 1
-                    await outbox.failed(
+                    at = clock()
+                    recorded = await outbox.failed(
                         conn,
                         integration.name,
-                        event.id,
+                        event,
                         failures,
                         _describe(exc),
-                        now + backoff(failures),
+                        at,
+                        at + backoff(failures),
                     )
                     log.warning(
-                        "%s: event %s (%s) failed %d time(s): %s",
+                        "%s: event %s (%s) failed %d time(s)%s: %s",
                         integration.name,
                         event.id,
                         event.type,
                         failures,
+                        "" if recorded else ", but the owner skipped it meanwhile",
                         _describe(exc),
                     )
                     return passed
-            position, passed = event.id, passed + 1
+            position, passed = outbox.Position.of(event), passed + 1
         await outbox.advance(conn, integration.name, position)
         return passed
     finally:
@@ -89,7 +93,8 @@ async def deliver(
 
 
 async def start(conn: psycopg.AsyncConnection, integration: Integration) -> None:
-    """Make the integration's cursor (at the outbox's end, the first time) and run its setup."""
+    """Make the integration's cursor (at the last settled event, the first time) and run its
+    setup."""
     await outbox.cursor(conn, integration.name)
     if setup := getattr(integration, "setup", None):
         await setup(conn)

@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from litwatch import events
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn
-from litwatch.core import Event, SearchFilters, SearchHit, SearchProvider
+from litwatch.core import SearchFilters, SearchHit, SearchProvider
 from litwatch.store import integrations as integrations_store
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
@@ -36,10 +36,9 @@ def providers(request: Request) -> list[SearchProvider]:
 
 
 def answers_card_requests(integrations: list[events.Integration]) -> bool:
-    """Whether an integration takes `card.requested` up. One that wants every event (a
-    catch-all webhook) only passes it on, and does not count."""
-    asked, anything = Event(type=events.CARD_REQUESTED), Event(type="litwatch.no-such-event")
-    return any(i.wants(asked) and not i.wants(anything) for i in integrations)
+    """Whether a loaded integration makes deep cards (says `makes_cards = True`). Wanting
+    `card.requested` is not enough: a webhook may pass it on without any card coming back."""
+    return any(getattr(i, "makes_cards", False) for i in integrations)
 
 
 # -- Settings → Integrations -----------------------------------------------------------------------
@@ -126,10 +125,20 @@ async def skip(name: str, request: Request, c: Conn) -> s.Failing:
 
 
 @router.get("/events")
-async def changes(c: Conn, after: int = 0, limit: int = Query(100, ge=1, le=1000)) -> list[Event]:
-    """The outbox in order, from after the given event id: for a client that polls instead of
-    taking webhooks. Pass the last id seen as `after` to read on."""
-    return await outbox.after(c, after, limit)
+async def changes(
+    c: Conn, after: str = outbox.START.token, limit: int = Query(100, ge=1, le=1000)
+) -> s.Changes:
+    """The outbox in order, from after a position: for a client that polls instead of taking
+    webhooks. Start without `after`, then pass the `next` of each answer to read on. Only
+    events whose transactions are settled are listed, so reading on never misses one that
+    committed late."""
+    try:
+        position = outbox.Position.parse(after)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    found = await outbox.after(c, position, limit)
+    following = outbox.Position.of(found[-1]) if found else position
+    return s.Changes(events=found, next=following.token)
 
 
 # -- deep cards ------------------------------------------------------------------------------------
