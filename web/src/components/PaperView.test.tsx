@@ -80,7 +80,13 @@ describe("the paper page", () => {
   it("renders a stored deep card as prose", async () => {
     script({
       card: {
-        card: { summary: "First paragraph.\n\nSecond paragraph.", key_claim: "The claim.", limitations: ["One.", "Two."], code_available: true },
+        card: {
+          summary: "First paragraph.\n\nSecond paragraph.",
+          key_claim: "The claim.",
+          limitations: ["Labels are inherited; some are unverified.", "The benchmark is static."],
+          models: ["Qwen3.5-4B", "GPT-5 Nano"],
+          code_available: true,
+        },
         model: "openai/gpt-6.1-sol",
         written_at: "2026-10-09T08:00:00Z",
       },
@@ -90,7 +96,10 @@ describe("the paper page", () => {
     expect(screen.getByText("Second paragraph.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Key claim" })).toBeInTheDocument();
     expect(screen.getByText("The claim.")).toBeInTheDocument();
-    expect(screen.getByText("One., Two.")).toBeInTheDocument();
+    // Sentences are a list of their own; short names run together.
+    expect(screen.getByText("Labels are inherited; some are unverified.").closest("li")).not.toBeNull();
+    expect(screen.getByText("The benchmark is static.").closest("li")).not.toBeNull();
+    expect(screen.getByText("Qwen3.5-4B, GPT-5 Nano")).toBeInTheDocument();
     expect(screen.getByText(/Code available: yes/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Request a deep card" })).not.toBeInTheDocument();
   });

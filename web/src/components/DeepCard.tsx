@@ -54,6 +54,15 @@ function yesNo(v: unknown): string {
   return typeof v === "boolean" ? (v ? "yes" : "no") : String(v);
 }
 
+/** Strings short enough to run together as a comma list (tasks, models, targets); anything
+ * sentence-like (limitations, caveats) reads better as a list of its own. */
+function terse(items: string[]): boolean {
+  return items.every((s) => {
+    const t = s.trim();
+    return t.length <= 60 && !/[.!?]$/.test(t) && !/[.;:!?]\s/.test(t);
+  });
+}
+
 /** A value as prose: paragraphs for text, a list for arrays, labelled lines for objects. */
 function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
   if (typeof value === "string")
@@ -70,7 +79,8 @@ function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
     );
   if (typeof value === "number" || typeof value === "boolean") return <p className="text-[15px] text-body">{yesNo(value)}</p>;
   if (Array.isArray(value)) {
-    if (value.every((v) => typeof v === "string")) return <p className="text-[15px] text-body">{(value as string[]).join(", ")}</p>;
+    if (value.every((v) => typeof v === "string") && terse(value as string[]))
+      return <p className="text-[15px] text-body">{(value as string[]).join(", ")}</p>;
     return (
       <ul className="space-y-2">
         {value.map((v, i) => (
@@ -95,7 +105,7 @@ function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
               <span className="text-muted-foreground">{label(k)}: </span>
               {typeof v === "string" || typeof v === "number" || typeof v === "boolean" ? (
                 yesNo(v)
-              ) : Array.isArray(v) && v.every((x) => typeof x === "string") ? (
+              ) : Array.isArray(v) && v.every((x) => typeof x === "string") && terse(v as string[]) ? (
                 (v as string[]).join(", ")
               ) : (
                 <div className="mt-1 pl-3">
