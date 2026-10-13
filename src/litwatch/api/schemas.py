@@ -315,6 +315,7 @@ class BibtexFilter(BaseModel):
     adjacent: bool = False
     saved: bool | None = None
     year: int | None = None
+    source: Literal["collection", "outside"] | None = None  # one band only, as the table
 
 
 class BibtexIn(BaseModel):

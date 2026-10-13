@@ -311,13 +311,15 @@ async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
     ):
         await lookups.for_copy(c, request.app.state.publications, body.ids[0])
     ids = list(body.ids)
-    if body.filter is not None:
-        rows, _ = await reading.papers(c, **body.filter.model_dump(), limit=None)
+    source = body.filter.source if body.filter else None
+    if body.filter is not None and source != "outside":
+        found = body.filter.model_dump(exclude={"source"})
+        rows, _ = await reading.papers(c, **found, limit=None)
         ids += [r["id"] for r in rows if r["id"] not in ids]
     outside = [
         Cited(id=h.id, title=h.title, authors=list(h.authors), year=h.year)
         for h in body.cited
-        if h.id not in ids
+        if h.id not in ids and source != "collection"
     ]
     return await _bibtex(c, ids, outside)
 

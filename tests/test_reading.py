@@ -429,3 +429,10 @@ async def test_bibtex_covers_papers_a_provider_found_outside_the_collection(clie
     body = {"filter": {"q": "hidden computation"}, "cited": [twin]}
     text = (await client.post("/api/bibtex", json=body)).text
     assert "eprint = {2610.00001}" in text and "eprint = {2610.99902}" in text
+    # A filter kept to one band exports that band only, as the table shows it.
+    body["filter"]["source"] = "outside"
+    text = (await client.post("/api/bibtex", json=body)).text
+    assert "eprint = {2610.00001}" not in text and "eprint = {2610.99902}" in text
+    body["filter"]["source"] = "collection"
+    text = (await client.post("/api/bibtex", json=body)).text
+    assert "eprint = {2610.00001}" in text and "eprint = {2610.99902}" not in text

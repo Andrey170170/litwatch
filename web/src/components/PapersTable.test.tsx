@@ -64,7 +64,7 @@ describe("a search with providers", () => {
     const user = userEvent.setup();
     renderApp("/papers?q=traces&page=1");
     await screen.findByText("Page two paper");
-    await waitFor(() => expect(calls.some((c) => c.url.includes("offset=0"))).toBe(true));
+    // Exported at once, before the first page's band has necessarily come in: it is awaited.
     await user.click(screen.getByRole("button", { name: "Export BibTeX" }));
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")).toBeTruthy());
     expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")!.body).toMatchObject({

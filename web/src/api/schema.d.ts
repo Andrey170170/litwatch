@@ -956,6 +956,8 @@ export interface components {
             saved?: boolean | null;
             /** Year */
             year?: number | null;
+            /** Source */
+            source?: ("collection" | "outside") | null;
         };
         /** BibtexIn */
         BibtexIn: {

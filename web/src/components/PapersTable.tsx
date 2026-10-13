@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ExternalLink, FileText } from "lucide-react";
 import type { Row, TopicCard } from "@/api/client";
 import { bibtexFor, download, useFetchPaper, useMiss, type CitedHit } from "@/api/mutations";
@@ -45,8 +45,11 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
   const total = q.data?.total ?? 0;
   const outside = q.data?.outside ?? [];
   // Providers answer only on the first page; an export from a later one still cites that
-  // band (the first page's query is usually cached, so this asks nothing new).
-  const first = useQuery({ ...papersQuery({ ...filter, limit: PAGE_SIZE, offset: 0 }), enabled: page > 0 });
+  // band. The first page's own query (no page in its key) is usually cached already.
+  const qc = useQueryClient();
+  const { page: _page, ...unpaged } = filter;
+  const firstPage = papersQuery({ ...unpaged, limit: PAGE_SIZE, offset: 0 });
+  const first = useQuery({ ...firstPage, enabled: page > 0 });
   const band = page > 0 ? (first.data?.outside ?? []) : outside;
   const picks = fixedTopic ? fixedTopic.kind !== "watch" : false;
 
@@ -65,12 +68,17 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
       const cite = (r: Row): CitedHit => ({ id: r.id, title: r.title, authors: r.authors, year: r.published ? new Date(r.published).getUTCFullYear() : null });
       let text: string;
       if (selected.size) {
-        const ids = [...selected].filter((id) => !held.has(id));
-        const chosen = [...selected].flatMap((id) => (held.has(id) ? [held.get(id)!] : []));
+        // A held hit that has since entered the collection is cited from the collection.
+        const inCollection = new Set(rows.map((r) => r.id));
+        const asHit = (id: string) => held.has(id) && !inCollection.has(id);
+        const ids = [...selected].filter((id) => !asHit(id));
+        const chosen = [...selected].flatMap((id) => (asHit(id) ? [held.get(id)!] : []));
         text = await bibtexFor(ids, chosen.map(cite));
       } else {
-        // The filter's collection papers and the band shown, in one request.
-        text = await bibtexFor([], band.map(cite), filter);
+        // The filter's collection papers and the band, in one request; on a later page the
+        // first page's band is awaited, so it is never empty or from another filter.
+        const shown = page > 0 ? ((await qc.ensureQueryData(firstPage)).outside ?? []) : outside;
+        text = await bibtexFor([], shown.map(cite), filter);
       }
       download(text, `litwatch${fixedTopic ? `-${fixedTopic.slug}` : ""}.bib`);
     } catch (e) {
