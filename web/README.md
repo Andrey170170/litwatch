@@ -1,7 +1,7 @@
 # litwatch web
 
 The user side of litwatch: the Digest, paper pages, Topics, Papers and the Settings gear
-(`docs/v1/DESIGN.md` is the design, `docs/v1/SPEC.md` §4.1 the contract).
+(`docs/v1/DESIGN.md` is the first design, being redone; `docs/v1/spec/` is the contract).
 
 - `pnpm dev` runs Vite on 5173 and proxies `/api` to `litwatch serve --port 8766`; set `LITWATCH_API` to
   proxy elsewhere (`LITWATCH_API=http://127.0.0.1:8767 pnpm dev`).

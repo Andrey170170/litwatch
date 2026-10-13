@@ -1,5 +1,9 @@
 # litwatch v1 web app design
 
+**Superseded (2026-10-13).** This is the first v1 design, which the built web app follows. The owner found it too
+editorial and hard to scan; it is being redone in a second pass after the core redesign (`docs/v1/spec/`). Keep it as a
+record of what was built until that pass replaces it.
+
 Agreed with the owner on 2026-10-11. The drawings are `docs/v1/design.html`; this file is the part a builder needs
 without opening them: the principles, the pages, the look's tokens and the anatomy of each repeated element. Where this
 file and `SPEC.md` differ, the spec wins.

@@ -5,9 +5,9 @@ the configured categories is stored; a cheap model triages each one against your
 keyword audit catches what the model drops, and two models from different labs grade every
 candidate for a Watch topic.
 
-This branch is v1 in progress. The design is in `docs/v1/SPEC.md`; milestones 0 to 2 are
-built (collection, model gateway, Watch pipeline and its evaluation). The web app, weekly
-reviews, published versions and integrations are not. Release 0.14 lives on `main`.
+This branch is v1 in progress. The specification is in `docs/v1/spec/` and the terms in
+`GLOSSARY.md`; milestones M0 to M6 of the first v1 design are built, and the core is being
+redesigned (classes, detail levels, digests per depth) before the switch. Release 0.14 lives on `main`.
 
 ## Setup
 
@@ -19,7 +19,7 @@ litwatch db migrate
 litwatch topics import --starter                # or a directory of your own YAML topics
 ```
 
-Models, categories and limits are set in `litwatch.toml` (see section 4.4 of the spec); with
+Models, categories and limits are set in `litwatch.toml` (see `docs/v1/spec/data.md`, configuration); with
 no file the defaults apply. `litwatch ping judge` sends one small request through a role.
 
 ## Commands
@@ -31,7 +31,7 @@ litwatch mark-triaged                # count stored papers as triaged, so runs s
 litwatch topics list | import | export
 litwatch eval seed | replay | sample-rejects | report    # dry runs against your labels
 litwatch serve                       # the API and web app; needs LITWATCH_API_TOKEN
-litwatch db adopt | migrate-0x       # turn a copy of a 0.14 database into v1's (spec section 7)
+litwatch db adopt | migrate-0x       # turn a copy of a 0.14 database into v1's (first spec at e6940ea, section 7)
 litwatch db import-feedback --source <dsn>   # the owner's feedback from another v1 database
 ```
 
