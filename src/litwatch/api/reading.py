@@ -135,10 +135,10 @@ async def _recap(
     c: psycopg.AsyncConnection, row: Any, monday: date, schedule: Any, topic: Any
 ) -> s.Recap:
     since, until = schedule.window(monday, 7)  # the week, in the configured zone
-    topic = row["topic"]
-    entries = await reviews_store.week_entries(c, topic, monday)
-    set_aside = await reviews_store.week_set_aside(c, topic, since, until)
-    missed = await reviews_store.week_misses(c, topic, since, until)
+    slug = row["topic"]
+    entries = await reviews_store.week_entries(c, slug, monday)
+    set_aside = await reviews_store.week_set_aside(c, slug, since, until)
+    missed = await reviews_store.week_misses(c, slug, since, until)
     return s.Recap(
         will_retry=row["state"] == "failed"
         and scheduler.will_retry(schedule, "week", monday, topic=topic),
