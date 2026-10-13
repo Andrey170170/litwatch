@@ -54,7 +54,7 @@ and cadence, one line of what is new since last opened, counts. Paused topics si
 same list and the chosen topic open beside it; the tab lands on the topic last open. A topic page is the papers table
 with the topic fixed, the subject as its intro line with two counts, filters All / Saved / Also adjacent / year, search
 within, Export BibTeX, and a gear to the editor in Settings. A Radar or Pulse topic shows its reviews as dated prose
-above the table, which holds the picks.
+above the table, which holds the whole field with the picks first and marked.
 
 **Papers.** The whole collection as the same table with a search box and filters for topic, saved, year and source.
 Saved is the filter that makes it the library. Export BibTeX acts on the filter or selection and covers collection rows,

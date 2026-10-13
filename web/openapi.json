@@ -4605,6 +4605,11 @@
             "title": "By Owner",
             "default": false
           },
+          "picked": {
+            "type": "boolean",
+            "title": "Picked",
+            "default": false
+          },
           "score": {
             "anyOf": [
               {

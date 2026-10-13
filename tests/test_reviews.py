@@ -279,11 +279,13 @@ async def test_the_weekly_issue_reviews_every_field_and_recaps_every_watch_topic
         assert all(p["reaction"] is None for p in rest)
         listed = (await c.get(f"/api/topics/{AGENTS.slug}/reviews")).json()
         assert listed[0]["picks"][0]["reaction"] == "down"
-        # A field topic's page lists its picks; its card says when it was last reviewed.
+        # A field topic's page lists its members, the picks first; its card says when it was
+        # last reviewed.
         table = (await c.get("/api/papers", params={"topic": AGENTS.slug})).json()
-        assert table["total"] == 3
+        assert table["total"] == 7
+        assert [r["picked"] for r in table["rows"]] == [True] * 3 + [False] * 4
         card = next(t for t in (await c.get("/api/topics")).json() if t["slug"] == AGENTS.slug)
-        assert card["last_review"] == monday.isoformat() and card["papers"] == 3
+        assert card["last_review"] == monday.isoformat() and card["papers"] == 7
         assert card["new"] == 3  # picks since the page was last opened (never)
         listed = (await c.get(f"/api/topics/{AGENTS.slug}/reviews")).json()
         assert listed[0]["period"] == "week"
