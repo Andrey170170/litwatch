@@ -122,7 +122,7 @@ class Schedule(_Section):
     # Decides which calendar date an issue belongs to. None is the server's own zone.
     timezone: str | None = None
 
-    @field_validator("nightly", "weekly")
+    @field_validator("nightly", "weekly", "publications")
     @classmethod
     def _cron(cls, value: str) -> str:
         # Checked at load, so one bad expression stops the start rather than one job.

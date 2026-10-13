@@ -98,5 +98,6 @@ async def test_shutdown_waits_for_the_job_in_progress_to_finish_its_record(monke
 
 
 def test_a_bad_cron_expression_is_refused_at_load():
-    with pytest.raises(ValidationError, match="not a cron expression"):
-        Schedule(nightly="every night")
+    for job in ("nightly", "weekly", "publications"):
+        with pytest.raises(ValidationError, match="not a cron expression"):
+            Schedule(**{job: "every night"})
