@@ -168,6 +168,42 @@ async def test_feedback_carries_with_its_times_and_a_second_run_adds_nothing(con
     assert len(await rows(conn, "SELECT id FROM takes")) == 1
 
 
+async def test_the_newest_appraisal_is_the_last_given_not_the_last_stored(conn, source):
+    async def appraise(db, p, value, day: int) -> None:
+        await db.execute(
+            "INSERT INTO appraisals (paper_id, value, at) VALUES (%s, %s, %s)",
+            (p.id, value, datetime(2026, 10, day, tzinfo=UTC)),
+        )
+
+    # Here: P1 not for me on the 10th; P2 matters on the 1st, cleared on the 10th; P3 fine.
+    await appraise(conn, P1, "not_for_me", 10)
+    await appraise(conn, P2, "matters", 1)
+    await appraise(conn, P2, None, 10)
+    await appraise(conn, P3, "fine", 1)
+    # There: older words on P1 and P2, a newer one on P3.
+    await appraise(source, P1, "matters", 1)
+    await appraise(source, P2, "matters", 5)
+    await appraise(source, P3, "matters", 10)
+
+    assert (await carry.import_feedback(conn, source))["appraisals"] == 3
+    assert [r["paper_id"] for r in await calibrate.matters_no_topic(conn)] == [P3.id]
+
+    # Answering P1 as it already stands adds no row, though the imported one has the newest id.
+    session = (await rows(conn, "INSERT INTO calibration_sessions (seed) VALUES (1) RETURNING id"))[
+        0
+    ]
+    await conn.execute(
+        "INSERT INTO calibration_items (session_id, position, paper_id, topic, why) "
+        "VALUES (%s, 1, %s, %s, 'above')",
+        (session["id"], P1.id, FAITH.slug),
+    )
+    fit = {FAITH.slug: calibrate.Fit(value=LabelValue.NOT_RELEVANT)}
+    await calibrate.answer(conn, session["id"], 1, calibrate.Answer(fit=fit, value="not_for_me"))
+    assert len(await rows(conn, "SELECT id FROM appraisals WHERE paper_id = %s", P1.id)) == 2
+    shown = await calibrate.session(conn, session["id"])
+    assert shown["items"][0]["appraisal"] == {"value": "not_for_me", "note": None}
+
+
 async def test_the_source_must_be_a_v1_database(conn, source):
     await source.execute(
         "DELETE FROM schema_migrations WHERE version >= %s", (carry.SOURCE_AT_LEAST,)

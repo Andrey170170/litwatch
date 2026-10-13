@@ -213,9 +213,11 @@ async def answer(
                 ),
             )
         # An appraisal changed, cleared included, is a new row; the same one sent again is not.
+        # The newest is the last given (`at`): an imported one keeps its time, not its id.
         newest = await (
             await conn.execute(
-                "SELECT value, note FROM appraisals WHERE paper_id = %s ORDER BY id DESC LIMIT 1",
+                "SELECT value, note FROM appraisals WHERE paper_id = %s "
+                "ORDER BY at DESC, id DESC LIMIT 1",
                 (item["paper_id"],),
             )
         ).fetchone()
@@ -260,7 +262,7 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
                     'grade', l.grade)), '{}') FROM labels l
                 WHERE l.paper_id = i.paper_id AND NOT l.provisional) AS fit,
                (SELECT row_to_json(a) FROM (SELECT value, note FROM appraisals
-                WHERE paper_id = i.paper_id ORDER BY id DESC LIMIT 1) a) AS appraisal
+                WHERE paper_id = i.paper_id ORDER BY at DESC, id DESC LIMIT 1) a) AS appraisal
         FROM calibration_items i JOIN papers p ON p.id = i.paper_id
         WHERE i.session_id = %s ORDER BY i.position
         """,
@@ -305,7 +307,8 @@ async def matters_no_topic(conn: psycopg.AsyncConnection) -> list[dict[str, Any]
         conn,
         """
         SELECT a.paper_id, a.note, a.at, p.title FROM (
-            SELECT DISTINCT ON (paper_id) * FROM appraisals ORDER BY paper_id, id DESC) a
+            SELECT DISTINCT ON (paper_id) * FROM appraisals
+            ORDER BY paper_id, at DESC, id DESC) a
         JOIN papers p ON p.id = a.paper_id
         WHERE a.value = 'matters'
           AND NOT EXISTS (SELECT 1 FROM effective_grades g JOIN topics t ON t.slug = g.topic
