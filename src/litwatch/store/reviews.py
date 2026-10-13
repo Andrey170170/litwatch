@@ -115,7 +115,10 @@ async def for_topic(conn: psycopg.AsyncConnection, topic: str, limit: int = 20) 
             SELECT r.*,
                    {PICKS}
             FROM reviews r WHERE r.topic = %s AND r.kind <> 'watch'
-            ORDER BY r.written_at DESC LIMIT %s
+            -- Newest by the end of the span reviewed, not by when it was (re)written: a week
+            -- ends after its days, and a retried old week stays where its week is.
+            ORDER BY r.day + CASE r.period WHEN 'week' THEN 7 ELSE 1 END DESC,
+                     r.period = 'week' DESC, r.day DESC LIMIT %s
             """,
             (topic, limit),
         )

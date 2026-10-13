@@ -26,6 +26,7 @@ from litwatch.llm import Gateway, ProviderError
 from litwatch.review import reviews as review_calls
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
+from litwatch.store import reviews as reviews_store
 from litwatch.store import topics as topics_store
 from litwatch.store import verdicts
 from tests.conftest import AGENTS, FAITH, INTERP, paper
@@ -403,3 +404,23 @@ def test_a_posix_tz_rule_is_honoured_as_the_process_honours_it(monkeypatch):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+async def test_a_topics_reviews_run_newest_span_first_whatever_was_rewritten_last(db):
+    monday = date(2026, 10, 5)
+    for period, day, written in [
+        ("week", monday, "2026-10-12 08:00"),  # the week of 5 October
+        ("day", monday + timedelta(days=8), "2026-10-13 07:00"),  # Tuesday 13 October
+        ("week", monday - timedelta(days=7), "2026-10-13 09:00"),  # an old week, retried last
+    ]:
+        await db.execute(
+            "INSERT INTO reviews (topic, kind, period, day, state, written_at) "
+            "VALUES (%s, 'radar', %s, %s, 'quiet', %s)",
+            (DAILY.slug, period, day, written),
+        )
+    rows = await reviews_store.for_topic(db, DAILY.slug)
+    assert [(r["period"], r["day"]) for r in rows] == [
+        ("day", monday + timedelta(days=8)),
+        ("week", monday),
+        ("week", monday - timedelta(days=7)),
+    ]
