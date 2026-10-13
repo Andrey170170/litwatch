@@ -398,7 +398,8 @@ def serve(
     config: ConfigPath = None,
 ) -> None:
     """Serve the API, the web app and the labelling page, with the integrations the
-    configuration enables. Needs LITWATCH_API_TOKEN."""
+    configuration enables. Needs LITWATCH_API_TOKEN; LITWATCH_READ_TOKEN, if set, is a
+    second token that may only search and read papers (for the deep service)."""
     import uvicorn  # noqa: PLC0415
 
     from litwatch.api import create_app  # noqa: PLC0415
@@ -415,7 +416,13 @@ def serve(
     except integrations.IntegrationError as exc:
         raise SystemExit(str(exc)) from exc
     _run(store.migrate, migrate=False)
-    app_ = create_app(configuration.database_url(), token, cfg, integrations=loaded)
+    app_ = create_app(
+        configuration.database_url(),
+        token,
+        cfg,
+        integrations=loaded,
+        read_token=configuration.secret("LITWATCH_READ_TOKEN"),
+    )
     uvicorn.run(app_, host=host, port=port)
 
 

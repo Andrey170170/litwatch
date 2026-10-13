@@ -91,13 +91,15 @@ def create_app(
     gateway: GatewayFactory = default_gateway,
     publications: PublicationSource | None = None,
     integrations: list[Integration] | None = None,
+    read_token: str | None = None,
 ) -> FastAPI:
     """The app over one database. Every request but the health check and signing in needs
     the shared token, as a bearer header or the cookie (set by `/api/session`, or by opening
-    the labelling page once with `?token=`). `integrations` are the loaded ones: the
-    dispatcher delivers to them and search asks those that are search providers."""
+    the labelling page once with `?token=`); `read_token`, when given, may only read papers
+    (`deps.READABLE`). `integrations` are the loaded ones: the dispatcher delivers to them and
+    search asks those that are search providers."""
     app = FastAPI(title="litwatch", docs_url=None, redoc_url=None, lifespan=_lifespan)
-    app.state.dsn, app.state.token = dsn, token
+    app.state.dsn, app.state.token, app.state.read_token = dsn, token, read_token
     app.state.config, app.state.gateway = config or Config(), gateway
     app.state.publications = publications or Dblp()
     app.state.integrations = integrations or []

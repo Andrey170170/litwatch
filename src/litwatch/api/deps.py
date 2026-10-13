@@ -1,4 +1,4 @@
-"""What every route needs: a connection, and the shared token."""
+"""What every route needs: a connection, and the shared token (or the read token)."""
 
 from __future__ import annotations
 
@@ -13,24 +13,37 @@ from litwatch import store
 
 COOKIE = "litwatch_token"
 
+# What the read token may do: search and read papers, as the deep service's agent does.
+READABLE = {"/api/papers", "/api/papers/{paper_id:path}"}
+
 
 async def _conn(request: Request) -> AsyncIterator[psycopg.AsyncConnection]:
     async with await store.connect(request.app.state.dsn) as conn:
         yield conn
 
 
+def _same(given: str | None, token: str | None) -> bool:
+    return bool(given) and bool(token) and hmac.compare_digest(given.encode(), token.encode())
+
+
 def token_ok(request: Request, given: str | None) -> bool:
-    token = request.app.state.token.encode()
-    return bool(given) and hmac.compare_digest(given.encode(), token)
+    return _same(given, request.app.state.token)
 
 
 def authorised(request: Request) -> None:
     """The token as a bearer header or the cookie. Either is enough, so a stale cookie does
-    not block a good header."""
+    not block a good header. The read token, as a bearer header only, is good for reading
+    papers (`READABLE`, GET) and answers 403 everywhere else."""
     scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
-    given = [request.cookies.get(COOKIE), bearer if scheme.lower() == "bearer" else None]
-    if not any(token_ok(request, g) for g in given):
-        raise HTTPException(status_code=401, detail="missing or wrong token")
+    bearer = bearer if scheme.lower() == "bearer" else None
+    if any(token_ok(request, g) for g in (request.cookies.get(COOKIE), bearer)):
+        return
+    if _same(bearer, request.app.state.read_token):
+        route = request.scope.get("route")
+        if request.method == "GET" and getattr(route, "path", None) in READABLE:
+            return
+        raise HTTPException(status_code=403, detail="the read token only reads papers")
+    raise HTTPException(status_code=401, detail="missing or wrong token")
 
 
 Conn = Annotated[psycopg.AsyncConnection, Depends(_conn)]
