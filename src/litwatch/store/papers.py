@@ -246,10 +246,15 @@ async def body(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str, str |
     return (row["body"], row["body_source"]) if row else None
 
 
-async def set_body(conn: psycopg.AsyncConnection, paper_id: str, text: str, source: str) -> None:
-    """Store the full text, for the paper's revision and version as they are now."""
-    await conn.execute(
+async def set_body(conn: psycopg.AsyncConnection, paper: Paper, text: str, source: str) -> bool:
+    """Store the full text fetched for `paper`, stamped with that paper's revision and
+    version. Stored only if the paper is still at both: intake may have revised it while the
+    text was being fetched, and then the text belongs to nothing current. Returns whether it
+    was stored."""
+    cur = await conn.execute(
         "UPDATE papers SET body = %s, body_source = %s, body_fetched_at = now(), "
-        "body_revision = revision, body_version = version WHERE id = %s",
-        (text, source, paper_id),
+        "body_revision = %s, body_version = %s "
+        "WHERE id = %s AND revision = %s AND version IS NOT DISTINCT FROM %s",
+        (text, source, paper.revision, paper.version, paper.id, paper.revision, paper.version),
     )
+    return cur.rowcount > 0

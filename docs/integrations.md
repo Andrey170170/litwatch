@@ -66,6 +66,10 @@ class Integration(Protocol):
     otherwise.
   - `makes_cards = True`: it answers `card.requested` by storing a deep card. Only then does the
     paper page offer to request one. Wanting the event is not enough (a webhook may pass it on).
+  - `async def idle(self, conn)`: awaited when the integration has no event to be handed, at
+    most about once a minute, under the same lock as `handle`, for work no event brings
+    (`deep` retries papers still waiting for their text there). A failure is logged and changes
+    nothing else; keep it short and bounded, since events wait while it runs.
 
 `Event` is `litwatch.core.Event`:
 

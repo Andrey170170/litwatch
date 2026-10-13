@@ -210,10 +210,20 @@ async def wait_for_text(
     conn: psycopg.AsyncConnection, paper_id: str, event_id: int, automatic: bool
 ) -> None:
     """The paper's text could not be had now: try again later. A paper already waiting keeps
-    the time it began to."""
+    the time it began to, unless the owner now asks for a card it was waiting for by itself:
+    their request takes over, with its own event and a fresh day, so later tries go by the
+    request (no grade or library check, nothing counted toward the daily cap)."""
     await conn.execute(
-        "INSERT INTO deep_waiting (paper_id, event_id, automatic) VALUES (%s, %s, %s) "
-        "ON CONFLICT (paper_id) DO UPDATE SET tried_at = now()",
+        """
+        INSERT INTO deep_waiting (paper_id, event_id, automatic) VALUES (%s, %s, %s)
+        ON CONFLICT (paper_id) DO UPDATE SET
+            tried_at = now(),
+            event_id = CASE WHEN deep_waiting.automatic AND NOT EXCLUDED.automatic
+                            THEN EXCLUDED.event_id ELSE deep_waiting.event_id END,
+            since = CASE WHEN deep_waiting.automatic AND NOT EXCLUDED.automatic
+                         THEN now() ELSE deep_waiting.since END,
+            automatic = deep_waiting.automatic AND EXCLUDED.automatic
+        """,
         (paper_id, event_id, automatic),
     )
 

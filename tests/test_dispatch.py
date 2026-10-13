@@ -203,3 +203,36 @@ async def test_run_forever_delivers_in_the_background(conn, monkeypatch):
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+class Idler(Recorder):
+    """Has idle work of its own; the first try of it fails."""
+
+    def __init__(self):
+        super().__init__("idler")
+        self.idled = 0
+
+    async def idle(self, conn):
+        self.idled += 1
+        if self.idled == 1:
+            raise RuntimeError("idle work failed once")
+
+
+async def test_an_integration_with_nothing_to_handle_gets_its_idle_call(conn, monkeypatch):
+    monkeypatch.setattr(dispatch, "IDLE_SECONDS", 0.01)
+    monkeypatch.setattr(dispatch, "IDLE_HOOK_SECONDS", 0.05)
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    idler = Idler()
+    task = asyncio.create_task(dispatch.run_forever(dsn, [idler]))
+    try:
+        for _ in range(500):
+            if idler.idled >= 3:
+                break
+            await asyncio.sleep(0.01)
+        # Called again after its first call failed: a failure there does not stick.
+        assert idler.idled >= 3
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    assert not await dispatch.idle(conn, Recorder())  # no hook, nothing to call

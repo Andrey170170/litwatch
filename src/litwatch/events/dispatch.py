@@ -8,6 +8,10 @@ event is tried again after a backoff that doubles up to an hour; the integration
 events wait behind it, since they may depend on it. The owner can retry the event at once
 or skip it. A restart neither loses an event nor hands over one already done, apart from
 the one in hand when it stopped, which is why `handle` must be idempotent.
+
+An integration with work of its own that no event brings (deep's papers waiting for their
+text) gets an `idle(conn)` call when it has nothing to be handed, at most once a minute,
+under the same lock. A failing `idle` is logged and changes nothing else.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ log = logging.getLogger(__name__)
 
 BATCH = 100
 IDLE_SECONDS = 5.0
+IDLE_HOOK_SECONDS = 60.0  # the least time between two `idle` calls to one integration
 # Held per integration while delivering, so two services never hand over one event twice.
 DISPATCH_LOCK = 7213914
 
@@ -100,8 +105,31 @@ async def start(conn: psycopg.AsyncConnection, integration: Integration) -> None
         await setup(conn)
 
 
+async def idle(conn: psycopg.AsyncConnection, integration: Integration) -> bool:
+    """Call the integration's `idle` hook, if it has one, under its delivery lock. A failure is
+    logged and goes no further. Returns whether the hook ran."""
+    hook = getattr(integration, "idle", None)
+    if hook is None:
+        return False
+    key = (DISPATCH_LOCK, integration.name)
+    row = await (
+        await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS locked", key)
+    ).fetchone()
+    if not row["locked"]:
+        return False
+    try:
+        await hook(conn)
+    except Exception:
+        log.exception("%s: idle work failed", integration.name)
+    finally:
+        await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", key)
+    return True
+
+
 async def _loop(dsn: str, integration: Integration) -> None:
     started = False
+    clock = asyncio.get_running_loop().time
+    idled = clock() - IDLE_HOOK_SECONDS
     while True:
         try:
             async with await store.connect(dsn) as conn:
@@ -110,6 +138,9 @@ async def _loop(dsn: str, integration: Integration) -> None:
                     started = True
                 while True:
                     if not await deliver(conn, integration):
+                        if clock() - idled >= IDLE_HOOK_SECONDS:
+                            idled = clock()
+                            await idle(conn, integration)
                         await asyncio.sleep(IDLE_SECONDS)
         except asyncio.CancelledError:
             raise

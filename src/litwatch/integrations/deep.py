@@ -16,8 +16,10 @@ the job it starts is recorded once accepted. A failed poll or a restart then fol
 job rather than paying for another; a submission whose answer never came counts all the same.
 A job that ends in failure is recorded and not retried by itself. A paper whose text cannot
 be had yet (no HTML rendering, the archive still fetching the PDF, arXiv failing) waits: up to
-three waiting papers are tried again before each event, each at most hourly, for a day, after
-which the reason is recorded. The event itself goes on, so one paper never holds up the rest.
+three waiting papers are tried again before each event, and whenever the dispatcher finds
+nothing to hand over, each at most hourly, for a day, after which the reason is recorded. The
+event itself goes on, so one paper never holds up the rest. An owner's request for a paper
+that was waiting by itself takes the wait over.
 A paper gets at most three automatic submissions, and any one event at most three, a request
 included; a paper stopped by that limit says so. At most `max_per_day` automatic submissions
 are made in any 24 hours, to protect the subscription from a loose rubric; the owner's
@@ -179,6 +181,11 @@ class Deep:
         if await self._make(conn, event.paper_id, event.id, automatic) != WAITING:
             await state.stop_waiting(conn, event.paper_id)
 
+    async def idle(self, conn: psycopg.AsyncConnection) -> None:
+        """With no event to handle, papers waiting for their text are still tried again and,
+        after a day, given up."""
+        await self._retry_waiting(conn)
+
     async def _retry_waiting(self, conn: psycopg.AsyncConnection) -> None:
         """Try again, a few at a time, for papers whose text was not to be had. Their trouble
         is their own: a failure here is logged and never fails the event in hand."""
@@ -284,9 +291,14 @@ class Deep:
         if stored := await papers_store.body(conn, paper.id):
             return stored[0], stored[1] or "unknown"
         fetched = await self.fetcher.fetch(paper)
-        if fetched is not None:
-            await papers_store.set_body(conn, paper.id, *fetched)
-            log.info("%s: stored %s text (%d chars)", paper.id, fetched[1], len(fetched[0]))
+        if fetched is None:
+            return None
+        if not await papers_store.set_body(conn, paper, *fetched):
+            # Revised while the text was fetched: that text is of an old version or wording.
+            # The paper waits, and the next try fetches the text as it now is.
+            log.info("%s: revised while its text was fetched; fetching again later", paper.id)
+            return None
+        log.info("%s: stored %s text (%d chars)", paper.id, fetched[1], len(fetched[0]))
         return fetched
 
 

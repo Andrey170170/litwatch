@@ -54,7 +54,9 @@ class Integration(Protocol):
     Optional hooks, used when present: `setup(conn)`, awaited once whenever the dispatcher
     starts; `aclose()`, awaited when it stops; `requires`, names of integrations that must
     be loaded too; `makes_cards = True` for one that answers `card.requested` by storing a
-    deep card, which is what makes the paper page offer the request.
+    deep card, which is what makes the paper page offer the request; `idle(conn)`, awaited
+    when it has no event to be handed, at most about once a minute, for work no event brings
+    (a failure there is logged and changes nothing else).
     """
 
     name: str

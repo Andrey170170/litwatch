@@ -421,17 +421,98 @@ async def test_the_automatic_limit_says_why_a_paper_got_no_card(world, deep):
 async def test_a_text_fetched_before_a_rewrite_or_a_new_version_is_not_used(world):
     conn = world
     await papers_store.upsert(conn, [P])
-    await papers_store.set_body(conn, P.id, "the old text", "html")
+    first = await papers_store.get(conn, P.id)
+    assert await papers_store.set_body(conn, first, "the old text", "html")
     assert await papers_store.body(conn, P.id) == ("the old text", "html")
     await papers_store.correct(conn, P.id, "A rewritten title", None)  # revision 2
     assert await papers_store.body(conn, P.id) is None
-    await papers_store.set_body(conn, P.id, "the new text", "html")
+    rewritten = await papers_store.get(conn, P.id)
+    assert await papers_store.set_body(conn, rewritten, "the new text", "html")
     assert await papers_store.body(conn, P.id) == ("the new text", "html")
     # A new arXiv version can change the body while the abstract stays: also stale.
     await conn.execute(
         "UPDATE papers SET version = coalesce(version, 1) + 1 WHERE id = %s", (P.id,)
     )
     assert await papers_store.body(conn, P.id) is None
+
+
+async def test_a_text_fetched_while_the_paper_was_revised_is_not_stored(world):
+    conn = world
+    await papers_store.upsert(conn, [P])
+    fetched_for = await papers_store.get(conn, P.id)
+    await papers_store.correct(conn, P.id, "Rewritten during the fetch", None)
+    assert not await papers_store.set_body(conn, fetched_for, "the old text", "html")
+    assert await papers_store.body(conn, P.id) is None
+
+
+async def test_a_card_is_not_made_from_text_of_an_older_revision(world, deep):
+    conn = world
+    fake, _, d = deep
+    real = d.fetcher
+
+    class Revising:
+        """Fetches the text while intake rewrites the paper."""
+
+        async def fetch(self, paper):
+            await papers_store.correct(conn, paper.id, "Rewritten during the fetch", None)
+            return await real.fetch(paper)
+
+        async def aclose(self):
+            await real.aclose()
+
+    d.fetcher = Revising()
+    await papers_store.upsert(conn, [P])
+    await start(conn, d)
+    await events.emit(conn, events.CARD_REQUESTED, P.id)
+    await deliver(conn, d)
+    assert fake.requests == []
+    assert (await state.card(conn, P.id))["error"] == "waiting for the paper's text"
+
+    d.fetcher = real  # the next try fetches the text as it now is
+    await conn.execute("UPDATE deep_waiting SET tried_at = now() - interval '2 hours'")
+    await dispatch.idle(conn, d)
+    (sent,) = fake.requests
+    assert sent["paper"]["title"] == "Rewritten during the fetch"
+
+
+async def test_with_no_new_event_a_waiting_paper_gets_its_card_once_the_text_comes(world, deep):
+    conn = world
+    fake, arxiv, d = deep
+    arxiv.html.pop(P.id)
+    await papers_store.upsert(conn, [P])
+    await start(conn, d)
+    await grade(conn, "must_read")
+    await deliver(conn, d)
+    assert fake.requests == []
+
+    arxiv.html[P.id] = HTML
+    await conn.execute("UPDATE deep_waiting SET tried_at = now() - interval '2 hours'")
+    assert await deliver(conn, d) == 0  # nothing new in the outbox
+    assert await dispatch.idle(conn, d)
+    assert (await state.card(conn, P.id))["card"] == CARD
+
+
+async def test_the_owners_request_takes_over_an_automatic_wait(world, deep):
+    conn = world
+    fake, arxiv, d = deep
+    arxiv.html.pop(P.id)
+    await papers_store.upsert(conn, [P])
+    await start(conn, d)
+    await grade(conn, "must_read")
+    await deliver(conn, d)  # waits, as an automatic card
+    asked = await events.emit(conn, events.CARD_REQUESTED, P.id)
+    await deliver(conn, d)  # still no text: the request waits in its place
+    (row,) = await state.waiting(conn, datetime.now(UTC), 10)
+    assert (row["event_id"], row["automatic"]) == (asked, False)
+
+    # Now unsaved, with the day's automatic cards used up: the request is still honoured.
+    await word.toggle(conn, P.id, Hand.UNSAVE)
+    d.max_per_day = 0
+    arxiv.html[P.id] = HTML
+    await conn.execute("UPDATE deep_waiting SET tried_at = now() - interval '2 hours'")
+    await dispatch.idle(conn, d)
+    assert (await state.card(conn, P.id))["card"] == CARD
+    assert await state.attempts(conn, P.id, automatic=False) == 1
 
 
 async def test_a_failed_pdf_request_means_no_text_yet():
