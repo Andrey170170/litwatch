@@ -113,7 +113,6 @@ export function TopicsIndex() {
 function TopicCardView({ card: c }: { card: Card }) {
   const line = newLine(c);
   const paused = c.status !== "active";
-  const unit = c.kind === "watch" ? "paper" : "pick";
   return (
     <Link
       to="/topics/$slug"
@@ -133,7 +132,7 @@ function TopicCardView({ card: c }: { card: Card }) {
         <div className={cn("mt-[3px] text-[13.5px] text-body", line.quiet && "text-muted-foreground")}>{line.text}</div>
       </div>
       <div className="tabular text-right text-[12.5px] leading-[1.4] whitespace-nowrap text-muted-foreground">
-        {plural(c.papers, unit)}
+        {plural(c.papers, "paper")}
         {c.saved > 0 && (
           <>
             <br />
@@ -209,7 +208,7 @@ export function TopicPage() {
               onClick={() => setMore(true)}
               title={more ? undefined : "Show the whole subject"}
             >
-              {card.subject} <span className="text-muted-foreground">{plural(card.papers, picks ? "pick" : "paper")}, {card.saved} saved.</span>
+              {card.subject} <span className="text-muted-foreground">{plural(card.papers, "paper")}, {card.saved} saved.</span>
             </p>
           )}
         </div>
@@ -231,7 +230,7 @@ export function TopicPage() {
   );
 }
 
-/** A Radar or Pulse topic's reviews as dated prose above its picks: the newest open, earlier ones folded. */
+/** A Radar or Pulse topic's reviews as dated prose above the field's papers: the newest open, earlier ones folded. */
 function TopicReviews({ card }: { card: Card }) {
   const reviews = useQuery(topicReviewsQuery(card.slug));
   const list = reviews.data ?? [];
@@ -273,7 +272,7 @@ function TopicReviews({ card }: { card: Card }) {
           ))}
         </div>
       )}
-      <p className="mt-6 mb-[-6px] text-[11.5px] tracking-[.06em] text-muted-foreground uppercase">Picks</p>
+      <p className="mt-6 mb-[-6px] text-[11.5px] tracking-[.06em] text-muted-foreground uppercase">The field, picks first</p>
     </section>
   );
 }
