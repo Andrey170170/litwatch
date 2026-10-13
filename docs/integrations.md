@@ -13,8 +13,12 @@ what an integration may read, how it is configured and loaded, and a worked exam
 Every pipeline step writes an **event** to the **outbox** (a table) in the same transaction as
 the data the event describes, so an event exists exactly when its change does. A
 **dispatcher** runs inside `litwatch serve` and hands each loaded integration the events after
-its own **cursor**, in id order:
+its own **cursor**, in order:
 
+- The order is the order of commit. An event's place is its writing transaction's id, then its
+  own id; only events whose transactions are older than every transaction still running are
+  handed over, so an event that commits late is never passed over. A long-open transaction
+  anywhere on the database server delays delivery until it ends; nothing is lost.
 - An integration enabled for the first time starts at the outbox's current end: it is not woken
   by anything that happened before it was turned on. Turning it off keeps its cursor, and
   turning it on again resumes from there.
@@ -50,16 +54,19 @@ class Integration(Protocol):
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.
+  - `makes_cards = True`: it answers `card.requested` by storing a deep card. Only then does the
+    paper page offer to request one. Wanting the event is not enough (a webhook may pass it on).
 
 `Event` is `litwatch.core.Event`:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `id` | int | Increasing; the order events happened in |
+| `id` | int | Unique, increasing in the order of insertion (not of commit) |
 | `type` | str | One of the types below |
 | `paper_id` | str or None | The version-stripped arXiv id, e.g. `2610.01234` or `cs/9901001` |
 | `payload` | dict | Per type, below |
 | `created_at` | datetime | When it was written |
+| `xid` | int | The writing transaction's id; `(xid, id)` is the event's place in commit order |
 
 ### Rules
 
@@ -201,14 +208,23 @@ Each module's docstring lists its options and environment variables.
 ```json
 {"id": 4512, "type": "grade.changed", "paper_id": "2610.01234",
  "payload": {"topic": "cot-faithfulness", "before": "adjacent", "after": "relevant"},
- "created_at": "2026-10-12T06:41:09.312Z"}
+ "created_at": "2026-10-12T06:41:09.312Z", "xid": 508211}
 ```
 
 Headers: `X-Litwatch-Event: <id>`, so a receiver can drop a repeat; with `secret_env` set, also
 `X-Litwatch-Signature: sha256=<hex HMAC-SHA256 of the raw body, keyed by the secret>`. Any answer
 other than 2xx is a failure and the event is sent again after the backoff. The receiver reads
 anything else it needs from litwatch's API with the shared token, e.g. `GET /api/papers/<id>`.
-`integrations/n8n/` has a workflow that exports Watch papers to Notion this way.
+`integrations/n8n/` has a workflow that exports Watch papers to Notion this way. Answer only
+once the work is done: litwatch sends a webhook's events one at a time and waits for each
+answer, so answering early turns a failed write into a lost event.
+
+### The changes feed
+
+A client that would rather poll than take webhooks reads `GET /api/events?after=<position>`
+(with the shared token). It returns `{"events": [...], "next": "<position>"}`: the settled events
+after the position, in commit order, up to `limit` (100, at most 1000). Start without `after`,
+then pass each answer's `next`. A position is opaque; one that is not a position answers 422.
 
 ## Worked example: a phone notification for every must-read paper
 

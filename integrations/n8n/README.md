@@ -6,7 +6,7 @@ puts at `relevant` or above for a Watch topic. Notion is not a built-in integrat
 and creates or updates its Notion page. Only Watch topics are exported; Radar and Pulse picks
 are not.
 
-What it does with each event: reads `GET /api/papers/<paper_id>`, keeps the Watch topics at
+What it does with each event, before it answers: reads `GET /api/papers/<paper_id>`, keeps the Watch topics at
 `relevant` or above, finds the page whose `arXiv` property is the paper's id, and updates it, or
 creates it when the paper is in the library. A paper that leaves the library keeps its page with
 `In library` unticked; nothing is deleted.
@@ -39,9 +39,15 @@ creates it when the paper is in the library. A paper that leaves the library kee
 
 ## Notes
 
+- The workflow answers litwatch only when its last node has run, so a failure anywhere (litwatch's
+  API, Notion) answers an error. litwatch's webhook integration then sends the event again after
+  a backoff (30 seconds, doubling, at most an hour), and the owner can retry or skip it under
+  Settings → Integrations. Later events wait behind a failing one.
 - Events can repeat after a failure, and several arrive for one change (`grade.changed`,
   `paper.saved`, then `take.written`). Each run reads the paper as it is now and writes the same
-  page, so repeats are harmless.
+  page, so repeats are harmless. A page is created only when no page carries the paper's arXiv
+  id, and litwatch sends one event at a time and waits for the answer, so two runs never race to
+  create the same page. Keep the `arXiv` property unique: the workflow updates the first match.
 - With `secret_env` set, each request carries `X-Litwatch-Signature: sha256=<hex HMAC-SHA256 of
   the raw body>`. To check it, add a Code node after the webhook that recomputes it (n8n must
   allow the `crypto` module: `NODE_FUNCTION_ALLOW_BUILTIN=crypto`) and stops on a mismatch.

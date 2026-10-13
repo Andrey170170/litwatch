@@ -11,7 +11,8 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "litwatch-CHANGE-ME-TO-SOMETHING-UNGUESSABLE",
-        "responseMode": "onReceived",
+        "responseMode": "lastNode",
+        "responseData": "noData",
         "options": {}
       }
     },
