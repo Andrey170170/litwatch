@@ -24,6 +24,17 @@ const failing = {
 const archive = { name: "archive", description: "Registers papers.", enabled: true, lag: 0, failing: null, last_error: null, failed_at: null, skipped: 0, answers_card_requests: false, search: { queries: 12, left_out: 1, last_error: "no answer within 5s", last_error_at: "2026-10-12T06:00:00Z" } };
 
 describe("Settings → Integrations", () => {
+  it("offers no retry or skip on an integration that is turned off", async () => {
+    scriptFetch({
+      "GET /api/status": () => json(status),
+      "GET /api/settings/integrations": () => json([{ ...failing, enabled: false }]),
+    });
+    renderApp("/settings/integrations");
+    expect(await screen.findByText(/HTTP 500/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip this event" })).not.toBeInTheDocument();
+  });
+
   it("shows a failing card with its error, retries at once, and skips on a second click", async () => {
     const calls = scriptFetch({
       "GET /api/status": () => json(status),

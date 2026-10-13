@@ -48,6 +48,30 @@ describe("a search with providers", () => {
     });
   });
 
+  it("exports the first page's outside band from a later page", async () => {
+    stubDownloads();
+    const hit = row("2610.00002", "Found by the archive", "archive");
+    const calls = scriptFetch({
+      "GET /api/status": () => json(status),
+      "GET /api/topics": () => json([]),
+      // Providers answer on the first page only.
+      "GET /api/papers": (call) => {
+        const first = /[?&]offset=0(&|$)/.test(call.url);
+        return json({ rows: [row("2610.00051", "Page two paper")], total: 60, outside: first ? [hit] : [], left_out: [] });
+      },
+      "POST /api/bibtex": () => new Response("@misc{x}", { headers: { "content-type": "application/x-bibtex" } }),
+    });
+    const user = userEvent.setup();
+    renderApp("/papers?q=traces&page=1");
+    await screen.findByText("Page two paper");
+    await waitFor(() => expect(calls.some((c) => c.url.includes("offset=0"))).toBe(true));
+    await user.click(screen.getByRole("button", { name: "Export BibTeX" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")).toBeTruthy());
+    expect(calls.find((c) => c.method === "POST" && c.url === "/api/bibtex")!.body).toMatchObject({
+      cited: [{ id: "2610.00002" }],
+    });
+  });
+
   it("exports a search that found only outside papers, dated by their UTC year", async () => {
     stubDownloads();
     // Published early on 1 January in UTC: still the previous year west of Greenwich.

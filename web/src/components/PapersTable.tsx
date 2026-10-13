@@ -44,6 +44,10 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
   const rows = q.data?.rows ?? [];
   const total = q.data?.total ?? 0;
   const outside = q.data?.outside ?? [];
+  // Providers answer only on the first page; an export from a later one still cites that
+  // band (the first page's query is usually cached, so this asks nothing new).
+  const first = useQuery({ ...papersQuery({ ...filter, limit: PAGE_SIZE, offset: 0 }), enabled: page > 0 });
+  const band = page > 0 ? (first.data?.outside ?? []) : outside;
   const picks = fixedTopic ? fixedTopic.kind !== "watch" : false;
 
   function toggle(id: string) {
@@ -66,7 +70,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
         text = await bibtexFor(ids, chosen.map(cite));
       } else {
         // The filter's collection papers and the band shown, in one request.
-        text = await bibtexFor([], outside.map(cite), filter);
+        text = await bibtexFor([], band.map(cite), filter);
       }
       download(text, `litwatch${fixedTopic ? `-${fixedTopic.slug}` : ""}.bib`);
     } catch (e) {
@@ -96,7 +100,7 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
           {q.isPending ? "…" : total === 0 ? (outside.length ? "Nothing in the collection matches." : "No papers match.") : `${page * PAGE_SIZE + 1}–${Math.min(total, (page + 1) * PAGE_SIZE)} of ${total}`}
           {selected.size > 0 && ` · ${selected.size} selected`}
         </span>
-        <button type="button" onClick={() => void exportBibtex()} className="min-h-[36px] underline decoration-border hover:text-foreground" disabled={total === 0 && !selected.size && outside.length === 0}>
+        <button type="button" onClick={() => void exportBibtex()} className="min-h-[36px] underline decoration-border hover:text-foreground" disabled={total === 0 && !selected.size && band.length === 0}>
           {selected.size ? `BibTeX for ${selected.size} selected` : "Export BibTeX"}
         </button>
       </div>

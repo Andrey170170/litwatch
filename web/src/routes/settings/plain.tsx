@@ -252,7 +252,7 @@ export function IntegrationView({ c }: { c: IntegrationCard }) {
           {!c.failing && c.failed_at && <span className="text-muted-foreground"> (recovered; failed {fmt.cell(c.failed_at)} {fmt.time(c.failed_at)})</span>}
         </pre>
       )}
-      {c.failing && (
+      {c.failing && c.enabled && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           <button type="button" className={BTN} disabled={retry.isPending} onClick={() => retry.mutate(c.name)}>
             {retry.isPending ? "Retrying…" : "Retry now"}
