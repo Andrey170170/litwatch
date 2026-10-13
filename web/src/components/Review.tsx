@@ -8,7 +8,7 @@ import type { Listed, Pick as PickT, Recap, Review, TopicRef } from "@/api/clien
 import { SaveToggle } from "@/components/paper-bits";
 import { Thumbs } from "@/components/Thumbs";
 import { useDesktop } from "@/hooks/useDesktop";
-import { authorsLine, fmt, plural } from "@/lib/format";
+import { authorsLine, day, fmt, localDay, plural } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** Where a paper opens from here: the Digest's reading pane on a desktop, else its page. */
@@ -46,13 +46,26 @@ function PaperLink({ id, title, topic, surface, className }: { id: string; title
 
 const QUIET = "mt-1.5 text-[14px] text-muted-foreground";
 
+/**
+ * What a failed review's line says next. Runs try failures again only while they are recent
+ * (jobs/reviews.py): a day from the past week, a week from the one before the last full week.
+ * An older one waits for `litwatch weekly --week` or a rerun by hand.
+ */
+export function retryNote(period: "day" | "week", start: string | null | undefined, now = new Date()): string {
+  if (start) {
+    const ageDays = (day(localDay(now)).getTime() - day(start).getTime()) / 86400000;
+    if (ageDays <= (period === "day" ? 7 : 14)) return "; litwatch tries again on the next run.";
+  }
+  return ".";
+}
+
 /** A Radar or Pulse review: the prose, then the picks with why each was picked. */
 export function ReviewView({ review, topic, surface }: { review: Review; topic: TopicRef; surface: Surface }) {
   const span = review.period === "day" ? "day" : "week";
   if (review.state === "failed")
     return (
       <p className={QUIET}>
-        The {span}'s review of {plural(review.members ?? 0, "paper")} did not get written; litwatch tries again on the next run.
+        The {span}'s review of {plural(review.members ?? 0, "paper")} did not get written{retryNote(review.period, review.day)}
       </p>
     );
   if (review.state === "quiet" || !review.text)
@@ -104,9 +117,23 @@ function PickView({ pick, topic, surface }: { pick: PickT; topic: string; surfac
  * A Watch topic's weekly recap: the prose, then what was announced, set aside and missed.
  * A quiet week announced nothing, but can still have set-asides and misses to list.
  */
-export function RecapView({ recap, topic, surface }: { recap: Recap; topic: TopicRef; surface: Surface }) {
+export function RecapView({
+  recap,
+  topic,
+  surface,
+  week,
+}: {
+  recap: Recap;
+  topic: TopicRef;
+  surface: Surface;
+  week?: string; // the issue's Monday, which decides whether a run still retries it
+}) {
   if (recap.state === "failed")
-    return <p className={QUIET}>The week's recap of {topic.name} did not get written; litwatch tries again on the next run.</p>;
+    return (
+      <p className={QUIET}>
+        The week's recap of {topic.name} did not get written{retryNote("week", week)}
+      </p>
+    );
   const quiet = recap.state === "quiet" || !recap.text;
   return (
     <div className={quiet ? undefined : "mt-2.5"}>
