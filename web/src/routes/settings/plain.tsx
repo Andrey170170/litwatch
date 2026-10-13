@@ -1,6 +1,10 @@
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { configQuery, missesQuery, runsQuery, scheduleQuery, useRetrace, type Miss } from "@/api/settings";
+import { useState } from "react";
+import type { IntegrationCard } from "@/api/client";
+import { configQuery, integrationsQuery, missesQuery, runsQuery, scheduleQuery, useRetrace, useRetryIntegration, useSkipIntegration, type Miss } from "@/api/settings";
+import { TONE_DOT } from "@/components/StatusChip";
+import { cn } from "@/lib/utils";
 import { topicsQuery } from "@/api/queries";
 import { GRADE_WORD } from "@/components/paper-bits";
 import { modelName } from "@/components/PaperView";
@@ -189,10 +193,93 @@ export function ConfigPage() {
   );
 }
 
+/** Integrations: one card per configured module (DESIGN.md "Integration card"). */
 export function IntegrationsPage() {
+  const cards = useQuery(integrationsQuery);
   return (
-    <Page title="Integrations" sub="One card per module, with its outbox under them.">
-      <Empty>None are built yet. Zotero, the archive, deep cards, Nextcloud and the webhook arrive with M6.</Empty>
+    <Page title="Integrations" sub="What reacts to litwatch's events: each one a module, off unless configured. Litwatch works fully with none of them.">
+      {cards.isError && <p className="text-destructive">Could not load the integrations.</p>}
+      {cards.data?.length === 0 && (
+        <Empty>
+          None configured. Add an <code className="font-mono">[integrations.&lt;name&gt;]</code> section to litwatch.toml and restart the service;{" "}
+          <code className="font-mono">docs/integrations.md</code> describes the built-in ones and how to write another.
+        </Empty>
+      )}
+      {cards.data && cards.data.length > 0 && (
+        <div className="grid gap-3 desk:grid-cols-2">
+          {cards.data.map((c) => (
+            <IntegrationView key={c.name} c={c} />
+          ))}
+        </div>
+      )}
     </Page>
+  );
+}
+
+export function IntegrationView({ c }: { c: IntegrationCard }) {
+  const retry = useRetryIntegration();
+  const skip = useSkipIntegration();
+  // The skip is armed for one event: when the failing event changes under it, it disarms.
+  const [armedFor, setArmedFor] = useState<number | null>(null);
+  const arming = c.failing !== null && c.failing !== undefined && armedFor === c.failing.event_id;
+  const tone = !c.enabled ? "grey" : c.failing ? "amber" : "green";
+  const status = !c.enabled
+    ? `off${c.lag ? `, ${c.lag} ${c.lag === 1 ? "event" : "events"} waiting` : ""}`
+    : c.failing
+      ? `stuck on ${c.failing.type ?? "an event"}${c.failing.paper_id ? ` for ${c.failing.paper_id}` : ""}, ${c.failing.failures} ${c.failing.failures === 1 ? "try" : "tries"}${c.failing.retry_at ? `, again ${fmt.time(c.failing.retry_at)}` : ""}`
+      : c.lag
+        ? `${c.lag} ${c.lag === 1 ? "event" : "events"} behind`
+        : "up to date";
+  const tags = [c.answers_card_requests ? "makes deep cards" : null, c.search ? "answers searches" : null].filter(Boolean);
+  return (
+    <div className={cn("rounded-xl border border-border px-4 py-3.5", !c.enabled && "opacity-70")}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <h2 className="font-serif text-[17px] font-semibold">{c.name}</h2>
+        <span className="text-[12.5px] text-muted-foreground">
+          {c.enabled ? "on" : "off"}
+          {tags.length > 0 && ` · ${tags.join(" · ")}`}
+        </span>
+      </div>
+      {c.description && <p className="mt-0.5 text-[13px] text-muted-foreground">{c.description}</p>}
+      <p className="mt-2 inline-flex items-center gap-1.5 text-[13px]">
+        <span aria-hidden className={cn("inline-block size-[7px] shrink-0 rounded-full", TONE_DOT[tone])} />
+        {status}
+        {c.skipped > 0 && <span className="text-muted-foreground"> · {c.skipped} skipped</span>}
+      </p>
+      {(c.failing?.error ?? c.last_error) && (
+        <pre className="mt-1.5 whitespace-pre-wrap font-mono text-[11.5px] leading-[1.45] text-destructive">
+          {c.failing?.error ?? c.last_error}
+          {!c.failing && c.failed_at && <span className="text-muted-foreground"> (recovered; failed {fmt.cell(c.failed_at)} {fmt.time(c.failed_at)})</span>}
+        </pre>
+      )}
+      {c.failing && c.enabled && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <button type="button" className={BTN} disabled={retry.isPending} onClick={() => retry.mutate(c.name)}>
+            {retry.isPending ? "Retrying…" : "Retry now"}
+          </button>
+          <button
+            type="button"
+            className={cn(BTN, arming && "border-destructive text-destructive")}
+            disabled={skip.isPending}
+            onBlur={() => setArmedFor(null)}
+            onClick={() => (arming ? skip.mutate({ name: c.name, eventId: c.failing!.event_id }, { onSettled: () => setArmedFor(null) }) : setArmedFor(c.failing!.event_id))}
+          >
+            {skip.isPending ? "Skipping…" : arming ? "Skip it, really" : "Skip this event"}
+          </button>
+        </div>
+      )}
+      {c.search && (
+        <p className="mt-2 text-[12.5px] text-muted-foreground">
+          Searches since start: {c.search.queries ?? 0}, left out {c.search.left_out ?? 0}
+          {c.search.last_error && (
+            <>
+              {" · "}
+              <span className="font-mono text-[11.5px]">{c.search.last_error}</span>
+              {c.search.last_error_at && ` at ${fmt.time(c.search.last_error_at)}`}
+            </>
+          )}
+        </p>
+      )}
+    </div>
   );
 }

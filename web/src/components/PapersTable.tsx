@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ExternalLink, FileText } from "lucide-react";
 import type { Row, TopicCard } from "@/api/client";
-import { bibtexFor, bibtexForFilter, download, useMiss } from "@/api/mutations";
+import { bibtexFor, download, useFetchPaper, useMiss, type CitedHit } from "@/api/mutations";
 import { papersQuery } from "@/api/queries";
 import { GradeDot } from "@/components/paper-bits";
 import { useDesktop } from "@/hooks/useDesktop";
@@ -38,8 +38,19 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
   const page = filter.page ?? 0;
   const q = useQuery(papersQuery({ ...filter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }));
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Outside hits chosen, kept with what they carry: they leave `outside` when the query or
+  // page changes, but stay selected and are still cited as they were.
+  const [held, setHeld] = useState<Map<string, Row>>(new Map());
   const rows = q.data?.rows ?? [];
   const total = q.data?.total ?? 0;
+  const outside = q.data?.outside ?? [];
+  // Providers answer only on the first page; an export from a later one still cites that
+  // band. The first page's own query (no page in its key) is usually cached already.
+  const qc = useQueryClient();
+  const { page: _page, ...unpaged } = filter;
+  const firstPage = papersQuery({ ...unpaged, limit: PAGE_SIZE, offset: 0 });
+  const first = useQuery({ ...firstPage, enabled: page > 0 });
+  const band = page > 0 ? (first.data?.outside ?? []) : outside;
   const picks = fixedTopic ? fixedTopic.kind !== "watch" : false;
 
   function toggle(id: string) {
@@ -51,9 +62,24 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
     });
   }
 
+  /** An export covers the outside band too: hits are cited as they are (SPEC decision 6). */
   async function exportBibtex() {
     try {
-      const text = selected.size ? await bibtexFor([...selected]) : await bibtexForFilter(filter);
+      const cite = (r: Row): CitedHit => ({ id: r.id, title: r.title, authors: r.authors, year: r.published ? new Date(r.published).getUTCFullYear() : null });
+      let text: string;
+      if (selected.size) {
+        // A held hit that has since entered the collection is cited from the collection.
+        const inCollection = new Set(rows.map((r) => r.id));
+        const asHit = (id: string) => held.has(id) && !inCollection.has(id);
+        const ids = [...selected].filter((id) => !asHit(id));
+        const chosen = [...selected].flatMap((id) => (asHit(id) ? [held.get(id)!] : []));
+        text = await bibtexFor(ids, chosen.map(cite));
+      } else {
+        // The filter's collection papers and the band, in one request; on a later page the
+        // first page's band is awaited, so it is never empty or from another filter.
+        const shown = page > 0 ? ((await qc.ensureQueryData(firstPage)).outside ?? []) : outside;
+        text = await bibtexFor([], shown.map(cite), filter);
+      }
       download(text, `litwatch${fixedTopic ? `-${fixedTopic.slug}` : ""}.bib`);
     } catch (e) {
       toast(e instanceof Error && e.message ? e.message : "Could not fetch the BibTeX", "error");
@@ -79,10 +105,10 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
     <div>
       <div className="mt-2 flex items-center justify-between gap-3 text-[13px] text-muted-foreground">
         <span className="tabular">
-          {q.isPending ? "…" : total === 0 ? "No papers match." : `${page * PAGE_SIZE + 1}–${Math.min(total, (page + 1) * PAGE_SIZE)} of ${total}`}
+          {q.isPending ? "…" : total === 0 ? (outside.length ? "Nothing in the collection matches." : "No papers match.") : `${page * PAGE_SIZE + 1}–${Math.min(total, (page + 1) * PAGE_SIZE)} of ${total}`}
           {selected.size > 0 && ` · ${selected.size} selected`}
         </span>
-        <button type="button" onClick={() => void exportBibtex()} className="min-h-[36px] underline decoration-border hover:text-foreground" disabled={total === 0 && !selected.size}>
+        <button type="button" onClick={() => void exportBibtex()} className="min-h-[36px] underline decoration-border hover:text-foreground" disabled={total === 0 && !selected.size && band.length === 0}>
           {selected.size ? `BibTeX for ${selected.size} selected` : "Export BibTeX"}
         </button>
       </div>
@@ -130,6 +156,27 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
           ))}
         </div>
       )}
+      {outside.length > 0 && (
+        <OutsideBand
+          rows={outside}
+          selected={selected}
+          onSelect={(id) => {
+            const hit = outside.find((r) => r.id === id);
+            setHeld((h) => {
+              const n = new Map(h);
+              if (selected.has(id)) n.delete(id);
+              else if (hit) n.set(id, hit);
+              return n;
+            });
+            toggle(id);
+          }}
+        />
+      )}
+      {(q.data?.left_out?.length ?? 0) > 0 && (
+        <p className="meta mt-2 text-[12.5px]">
+          {q.data!.left_out!.join(" and ")} did not answer this search in time, so {q.data!.left_out!.length === 1 ? "its" : "their"} papers are not here.
+        </p>
+      )}
       {total > PAGE_SIZE && (
         <div className="mt-2.5 flex justify-between text-[13px] text-muted-foreground">
           <button type="button" disabled={page === 0} onClick={() => onFilter({ page: page - 1 || undefined })} className="min-h-[36px] underline decoration-border disabled:no-underline disabled:opacity-40">
@@ -140,6 +187,49 @@ export function PapersTable({ filter, onFilter, watchTopics, fixedTopic, showMis
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Papers a search provider found that the collection lacks, in their own band under the
+ * collection's rows (DESIGN.md "Papers"): title, authors, date, who found it, arXiv, and
+ * Fetch, which brings the paper into the collection where Save and the rest apply.
+ */
+function OutsideBand({ rows, selected, onSelect }: { rows: Row[]; selected: Set<string>; onSelect: (id: string) => void }) {
+  const fetch = useFetchPaper();
+  return (
+    <div className="mt-5">
+      <p className="mb-1 text-[11.5px] tracking-[.06em] text-muted-foreground uppercase">Outside the collection · {rows.length}</p>
+      <div className="border-t border-border">
+        {rows.map((r) => (
+          <div key={r.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-x-2 border-b border-border py-[11px]">
+            <div className="-ml-2.5 -mt-2">
+              <Select checked={selected.has(r.id)} onChange={() => onSelect(r.id)} title={r.title} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-serif text-[15.5px] leading-[1.3] font-semibold desk:text-[16.5px]">
+                <a href={`https://arxiv.org/abs/${r.id}`} target="_blank" rel="noreferrer" className="hover:underline decoration-border">
+                  {r.title}
+                </a>
+              </h3>
+              <p className="meta mt-0.5 flex flex-wrap items-center gap-x-3">
+                <span>{[authorsLine(r.authors, 5), fmt.cell(r.published)].filter(Boolean).join(" · ")}</span>
+                <span>found by {r.source}</span>
+                <Links id={r.id} />
+              </p>
+            </div>
+            <button
+              type="button"
+              className="min-h-[36px] rounded-full border border-border px-3.5 text-[13px] font-semibold text-primary hover:bg-muted disabled:opacity-50"
+              disabled={fetch.isPending}
+              onClick={() => fetch.mutate(r.id)}
+            >
+              Fetch
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -156,15 +156,18 @@ async def retry(conn: psycopg.AsyncConnection, name: str) -> bool:
     return cur.rowcount > 0
 
 
-async def skip(conn: psycopg.AsyncConnection, name: str) -> int | None:
-    """Give up on the failing event and go on after it. Returns its id."""
+async def skip(conn: psycopg.AsyncConnection, name: str, expected: int | None = None) -> int | None:
+    """Give up on the failing event and go on after it, only if it is `expected` when one
+    is given (the event the owner confirmed). Returns its id, or None when nothing was
+    skipped."""
     row = await (
         await conn.execute(
             "UPDATE integration_cursors c SET position_xid = o.xid, position = o.id, "
             "failing = NULL, failures = 0, retry_at = NULL, skipped = skipped + 1, "
             "updated_at = now() FROM outbox o "
-            "WHERE c.name = %s AND o.id = c.failing RETURNING o.id",
-            (name,),
+            "WHERE c.name = %s AND o.id = c.failing "
+            "AND (%s::bigint IS NULL OR c.failing = %s) RETURNING o.id",
+            (name, expected, expected),
         )
     ).fetchone()
     return row["id"] if row else None

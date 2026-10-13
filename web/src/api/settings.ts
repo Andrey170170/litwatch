@@ -176,6 +176,13 @@ export const runsQuery = queryOptions({
   queryKey: ["settings", "runs"],
   queryFn: async () => typed<Run[]>(ok(await api.GET(`${S}/runs`))),
 });
+/** One card per integration (DESIGN.md "Integration card"); polled while one is failing. */
+export const integrationsQuery = queryOptions({
+  queryKey: ["settings", "integrations"],
+  queryFn: async () => ok(await api.GET(`${S}/integrations`)),
+  refetchInterval: (q) => (q.state.data?.some((c) => c.failing) ? 5000 : 30_000),
+});
+
 export const configQuery = queryOptions({
   queryKey: ["settings", "config"],
   queryFn: async () => ok(await api.GET(`${S}/config`)),
@@ -343,5 +350,33 @@ export function useCorrect() {
       refresh();
     },
     onError,
+  });
+}
+
+// -- integrations ------------------------------------------------------------------------------
+
+export function useRetryIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => ok(await api.POST(`${S}/integrations/{name}/retry`, { params: { path: { name } } })),
+    onSuccess: () => {
+      toast("Trying the event again now");
+      void qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+    },
+    onError: (e: Error & { status?: number }) => toast(e.status === 409 ? "Nothing is failing any more" : e.message, "error"),
+  });
+}
+
+export function useSkipIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    // The event the owner confirmed: the server skips nothing if another is failing by then.
+    mutationFn: async ({ name, eventId }: { name: string; eventId: number }) =>
+      ok(await api.POST(`${S}/integrations/{name}/skip`, { params: { path: { name }, query: { event_id: eventId } } })),
+    onSuccess: (skipped) => {
+      toast(`Skipped ${skipped.type ?? "the event"}${skipped.paper_id ? ` on ${skipped.paper_id}` : ""}`);
+      void qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+    },
+    onError: (e: Error & { status?: number }) => toast(e.status === 409 ? "That event is no longer the one failing; nothing was skipped" : e.message, "error"),
   });
 }

@@ -30,6 +30,9 @@ export type ReactionValue = Schemas["ReactionValue"];
 export type ReactionReason = Schemas["ReactionReason"];
 export type LabelValue = Schemas["LabelValue"];
 export type Lookup = Schemas["Lookup"];
+export type Publication = Schemas["Publication"];
+export type DeepCard = Schemas["DeepCard"];
+export type IntegrationCard = Schemas["IntegrationCard"];
 
 export class ApiError extends Error {
   constructor(

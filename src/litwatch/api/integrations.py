@@ -105,13 +105,16 @@ async def retry(name: str, request: Request, c: Conn) -> None:
 
 
 @router.post("/settings/integrations/{name}/skip")
-async def skip(name: str, request: Request, c: Conn) -> s.Failing:
+async def skip(name: str, request: Request, c: Conn, event_id: int | None = None) -> s.Failing:
     """Give up on the failing event; the integration goes on with the next. Returns the
-    event skipped."""
+    event skipped. `event_id` names the event the owner confirmed: when another one is
+    failing by then, nothing is skipped (409)."""
     _known(request, name)
     cursor = (await outbox.cursors(c, [name])).get(name)
-    skipped = await outbox.skip(c, name)
+    skipped = await outbox.skip(c, name, event_id)
     if skipped is None or cursor is None:
+        if cursor is not None and cursor.failing is not None and event_id is not None:
+            raise HTTPException(status_code=409, detail="another event is failing now")
         raise HTTPException(status_code=409, detail="nothing is failing")
     event = await outbox.event(c, skipped)
     return s.Failing(

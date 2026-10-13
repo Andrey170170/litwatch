@@ -1,6 +1,7 @@
 """The reading API: issues, papers, the owner's word with its acknowledgements, and misses."""
 
 import json
+import re
 
 import httpx
 import pytest
@@ -399,3 +400,39 @@ async def test_a_row_says_whose_take_it_shows_and_leaves_that_topic_out_of_also_
     await night(conn)
     (row,) = (await client.get("/api/papers", params={"q": "hidden computation"})).json()["rows"]
     assert (row["take"], row["take_topic"], row["also_in"]) == ("A take.", FAITH.slug, [])
+
+
+async def test_bibtex_covers_papers_a_provider_found_outside_the_collection(client, conn):
+    """A search hit the collection lacks gets an arXiv entry from what the hit carries,
+    beside the collection's papers, without being fetched (decision 6)."""
+    hit = {
+        "id": "2610.99901",
+        "title": "Found by the archive",
+        "authors": ["Ada Lovelace"],
+        "year": 2026,
+    }
+    text = (await client.post("/api/bibtex", json={"ids": [P.id], "cited": [hit]})).text
+    assert text.count("@misc") == 2
+    assert "eprint = {2610.99901}" in text and "year = {2026}" in text
+    assert "author = {Ada Lovelace}" in text
+    assert await papers_store.get(conn, "2610.99901") is None
+    # A hit that is also chosen from the collection is not cited twice.
+    hit["id"] = P.id
+    text = (await client.post("/api/bibtex", json={"ids": [P.id], "cited": [hit]})).text
+    assert text.count("@misc") == 1
+    # The collection's entries and the hits share one key namespace: no duplicate keys.
+    twin = {"id": "2610.99902", "title": "Traces elsewhere", "authors": P.authors, "year": None}
+    text = (await client.post("/api/bibtex", json={"ids": [P.id], "cited": [twin]})).text
+    keys = re.findall(r"^@\w+\{([^,]+),", text, re.MULTILINE)
+    assert len(keys) == 2 and len(set(keys)) == 2
+    # A table filter is resolved on the server, in the same request as the band's hits.
+    body = {"filter": {"q": "hidden computation"}, "cited": [twin]}
+    text = (await client.post("/api/bibtex", json=body)).text
+    assert "eprint = {2610.00001}" in text and "eprint = {2610.99902}" in text
+    # A filter kept to one band exports that band only, as the table shows it.
+    body["filter"]["source"] = "outside"
+    text = (await client.post("/api/bibtex", json=body)).text
+    assert "eprint = {2610.00001}" not in text and "eprint = {2610.99902}" in text
+    body["filter"]["source"] = "collection"
+    text = (await client.post("/api/bibtex", json=body)).text
+    assert "eprint = {2610.00001}" in text and "eprint = {2610.99902}" not in text

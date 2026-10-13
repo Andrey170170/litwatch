@@ -127,7 +127,14 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
     # Retry: the backoff is waived. Skip: the cursor moves past it.
     assert (await client.post("/api/settings/integrations/carder/retry")).status_code == 204
     assert (await outbox.cursor(conn, "carder")).retry_at is None
-    skipped = await client.post("/api/settings/integrations/carder/skip")
+    # A skip confirmed for another event skips nothing.
+    stale = await client.post(
+        "/api/settings/integrations/carder/skip", params={"event_id": first + 1000}
+    )
+    assert stale.status_code == 409 and stale.json()["detail"] == "another event is failing now"
+    skipped = await client.post(
+        "/api/settings/integrations/carder/skip", params={"event_id": first}
+    )
     assert skipped.json()["event_id"] == first
     assert (await client.post("/api/settings/integrations/carder/skip")).status_code == 409
     assert (await client.post("/api/settings/integrations/carder/retry")).status_code == 409

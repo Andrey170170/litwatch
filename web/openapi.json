@@ -416,7 +416,7 @@
     "/api/bibtex": {
       "post": {
         "summary": "Bibtex Selection",
-        "description": "BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the\npublished version as soon as DBLP has it; several use what is stored.",
+        "description": "BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the\npublished version as soon as DBLP has it; several use what is stored. `cited` are\npapers a search provider found outside the collection: they get arXiv entries from\nwhat the hit carries, with no fetch, no lookup and nothing written.",
         "operationId": "bibtex_selection_api_bibtex_post",
         "requestBody": {
           "required": true,
@@ -2007,7 +2007,7 @@
     "/api/settings/integrations/{name}/skip": {
       "post": {
         "summary": "Skip",
-        "description": "Give up on the failing event; the integration goes on with the next. Returns the\nevent skipped.",
+        "description": "Give up on the failing event; the integration goes on with the next. Returns the\nevent skipped. `event_id` names the event the owner confirmed: when another one is\nfailing by then, nothing is skipped (409).",
         "operationId": "skip_api_settings_integrations__name__skip_post",
         "parameters": [
           {
@@ -2017,6 +2017,22 @@
             "schema": {
               "type": "string",
               "title": "Name"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Id"
             }
           }
         ],
@@ -2433,6 +2449,77 @@
         ],
         "title": "AnswersIn"
       },
+      "BibtexFilter": {
+        "properties": {
+          "q": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "adjacent": {
+            "type": "boolean",
+            "title": "Adjacent",
+            "default": false
+          },
+          "saved": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "collection",
+                  "outside"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "title": "BibtexFilter",
+        "description": "A papers-table filter, as `GET /api/papers` takes it."
+      },
       "BibtexIn": {
         "properties": {
           "ids": {
@@ -2441,12 +2528,26 @@
             },
             "type": "array",
             "title": "Ids"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BibtexFilter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cited": {
+            "items": {
+              "$ref": "#/components/schemas/CitedIn"
+            },
+            "type": "array",
+            "title": "Cited"
           }
         },
         "type": "object",
-        "required": [
-          "ids"
-        ],
         "title": "BibtexIn"
       },
       "Cadence": {
@@ -2552,6 +2653,43 @@
         ],
         "title": "Chosen",
         "description": "The folded \"how this was chosen\" for one Watch topic."
+      },
+      "CitedIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "CitedIn",
+        "description": "A paper outside the collection, as a search hit gives it: enough for an arXiv entry."
       },
       "CorrectionIn": {
         "properties": {
