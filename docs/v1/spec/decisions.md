@@ -101,5 +101,5 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 
 ## Open
 
-- The tree's open points ([taxonomy.md](taxonomy.md)).
+- The Focus topics' subjects, rubrics and keywords, and the tree's last edits, in N0 ([taxonomy.md](taxonomy.md)).
 - The grade table and rarity offsets are starting points, tuned in N2.

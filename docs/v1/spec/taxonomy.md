@@ -18,7 +18,7 @@ Rules the draft follows:
 About 55 classes. The decision request asks one yes/no question per class plus the primary choice, well under the
 200 questions a Luna Decisions request allows.
 
-## 1. Language models
+## 1. Language models [Field]
 
 Research whose main subject is large language models or other text foundation models, not covered by a more specific
 top-level class.
@@ -59,7 +59,7 @@ study is out.
 | --- | --- |
 | Features and representations | Probes, representation geometry, linear representations, superposition, neurons and directions. |
 | Sparse autoencoders and dictionary learning | SAEs, transcoders, crosscoders, their training and evaluation. |
-| Circuits and causal analysis | Circuit discovery, activation and path patching, causal tracing, attribution graphs. |
+| **Circuits and causal analysis** [Focus] | Circuit discovery, activation and path patching, causal tracing, attribution graphs. |
 | Steering and model editing | Activation steering, representation engineering, knowledge and behaviour editing. |
 | Automated interpretability | Model-written explanations, automated circuit discovery, interpretability agents and tooling. |
 | Interpretability methodology and evaluation | Benchmarks, ground truth, faithfulness of explanations to the model, best practices. |
@@ -112,10 +112,11 @@ Shallow on purpose: these classes are not followed, so they only give a paper a 
 
 Papers in the configured categories that fit none of the above.
 
-## Open points for the owner
+## Decided with the owner
 
 - Agreed 2026-10-13: Chain-of-thought faithfulness sits under Interpretability and Chain-of-thought monitoring under
   Alignment and safety, as now; a paper on both gets both classes. Alignment and safety is an Area (daily and weekly
-  digests). The owner is still reading the whole tree.
-- Open: whether "Language models" itself should be followed as a Field (a weekly overview of everything LLM), with Agents,
-  Efficiency and Reasoning as its followed children.
+  digests).
+- Agreed 2026-10-13: Language models is followed as a Field (a weekly overview of all LLM research, 3 picks), with
+  Reasoning, Agents and Efficiency as its followed children; Circuits and causal analysis is a new Focus topic, whose
+  subject, rubric and keywords are written in N0.
