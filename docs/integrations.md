@@ -15,10 +15,11 @@ the data the event describes, so an event exists exactly when its change does. A
 **dispatcher** runs inside `litwatch serve` and hands each loaded integration the events after
 its own **cursor**, in order:
 
-- The order is the order of commit. An event's place is its writing transaction's id, then its
-  own id; only events whose transactions are older than every transaction still running are
-  handed over, so an event that commits late is never passed over. A long-open transaction
-  anywhere on the database server delays delivery until it ends; nothing is lost.
+- The order is the order of transactions, then of events within one: an event's place is its
+  writing transaction's id, then its own id. Only events whose transactions are older than every
+  transaction still running are handed over, so an event that commits late is never passed
+  over. A long-open transaction anywhere on the database server delays delivery until it ends;
+  nothing is lost.
 - An integration enabled for the first time starts at the outbox's current end: it is not woken
   by anything that happened before it was turned on. Turning it off keeps its cursor, and
   turning it on again resumes from there.
@@ -29,6 +30,15 @@ its own **cursor**, in order:
   and `/skip`).
 - After a failure or a restart, the event in hand is handed over again. **`handle` must be
   idempotent.**
+
+Delivery is therefore **at least once, and in transaction order, not commit order**: of two
+transactions, the one that began first is delivered first even if it committed second, and an
+event may arrive twice. A handler should not rely on events arriving in the order their changes
+took effect. Read the paper's current state when handling an event, through the store (or
+litwatch's API, for a webhook receiver), and do not trust a payload's `before` and `after` to be
+the latest: a later change may already be in place. Every built-in integration, and the n8n
+workflow, brings its target in line with the paper as it is now, so order does not change the
+result.
 
 ## The `Integration` contract
 
@@ -66,7 +76,7 @@ class Integration(Protocol):
 | `paper_id` | str or None | The version-stripped arXiv id, e.g. `2610.01234` or `cs/9901001` |
 | `payload` | dict | Per type, below |
 | `created_at` | datetime | When it was written |
-| `xid` | int | The writing transaction's id; `(xid, id)` is the event's place in commit order |
+| `xid` | int | The writing transaction's id; `(xid, id)` is the event's place in delivery order |
 
 ### Rules
 
@@ -115,7 +125,7 @@ Through the repositories in `litwatch.store`. Each function takes the connection
 | Call | Returns |
 | --- | --- |
 | `store.papers.get(conn, paper_id)` | `core.Paper` (title, abstract, authors, categories, published, url, version, doi, ...) or None |
-| `store.papers.body(conn, paper_id)` | `(text, "html" or "pdf")` when the full text was fetched, else None |
+| `store.papers.body(conn, paper_id)` | `(text, "html" or "pdf")` when the full text was fetched for the paper's current revision, else None |
 | `store.word.effective_for(conn, paper_id)` | `{topic slug: core.Grade}` for the Watch topics that have one |
 | `store.word.library_row(conn, paper_id)` | a dict with `saved` (bool) and `hand` (`save`, `unsave` or None), or None |
 | `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug`, `name`, `kind` (`watch`, `radar`, `pulse`), `grade` and the current `take` |
@@ -223,7 +233,7 @@ answer, so answering early turns a failed write into a lost event.
 
 A client that would rather poll than take webhooks reads `GET /api/events?after=<position>`
 (with the shared token). It returns `{"events": [...], "next": "<position>"}`: the settled events
-after the position, in commit order, up to `limit` (100, at most 1000). Start without `after`,
+after the position, in transaction order, up to `limit` (100, at most 1000). Start without `after`,
 then pass each answer's `next`. A position is opaque; one that is not a position answers 422.
 
 ## Worked example: a phone notification for every must-read paper

@@ -30,6 +30,7 @@ creates it when the paper is in the library. A paper that leaves the library kee
    use = "webhook"
    url = "https://n8n.example.org/webhook/<the path you chose>"
    events = ["grade.changed", "take.written", "paper.saved", "paper.unsaved", "publication.found"]
+   timeout = 120   # seconds; the workflow answers only after its last node has run
    # secret_env = "LITWATCH_NOTION_HOOK_SECRET"   # to sign each request
    ```
 
@@ -42,7 +43,10 @@ creates it when the paper is in the library. A paper that leaves the library kee
 - The workflow answers litwatch only when its last node has run, so a failure anywhere (litwatch's
   API, Notion) answers an error. litwatch's webhook integration then sends the event again after
   a backoff (30 seconds, doubling, at most an hour), and the owner can retry or skip it under
-  Settings → Integrations. Later events wait behind a failing one.
+  Settings → Integrations. Later events wait behind a failing one. Because of that, the webhook
+  waits longer for an answer than its default 30 seconds: `timeout = 120` above leaves room for
+  three API calls and a slow Notion; an answer that does not come in time counts as a failure
+  and the event is sent again.
 - Events can repeat after a failure, and several arrive for one change (`grade.changed`,
   `paper.saved`, then `take.written`). Each run reads the paper as it is now and writes the same
   page, so repeats are harmless. A page is created only when no page carries the paper's arXiv
