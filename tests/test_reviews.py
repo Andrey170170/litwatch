@@ -442,3 +442,36 @@ def test_a_failed_review_is_promised_a_retry_only_while_the_next_run_makes_it():
     assert retried("week", "2026-09-28", early) and not retried("week", "2026-09-21", early)
     # After it, the next (19 October) retries 5 October's week and no longer 28 September's.
     assert retried("week", "2026-10-05", late) and not retried("week", "2026-09-28", late)
+    # Nor a week or a day later than the next run's own (a `--week` run by hand ahead of it).
+    assert not retried("week", "2026-10-19", late) and not retried("day", "2026-10-20", late)
+    # Nor a topic the runs no longer review that way: paused, or no longer daily.
+    when = date(2026, 10, 12)
+    assert scheduler.will_retry(schedule, "day", when, late, DAILY)
+    assert not scheduler.will_retry(schedule, "day", when, late, AGENTS)  # weekly Pulse
+    paused = DAILY.model_copy(update={"status": "paused"})
+    assert not scheduler.will_retry(schedule, "week", date(2026, 10, 5), late, paused)
+
+
+async def test_a_weekly_issue_with_a_failed_recap_says_so(db):
+    monday = Config().schedule.week_of(Config().schedule.today()) - timedelta(days=7)
+    await db.execute(
+        "INSERT INTO reviews (topic, kind, period, day, state, error) "
+        "VALUES (%s, 'watch', 'week', %s, 'failed', 'down')",
+        (FAITH.slug, monday),
+    )
+    issue_id = (
+        await (
+            await db.execute(
+                "INSERT INTO issues (kind, day) VALUES ('weekly', %s) RETURNING id", (monday,)
+            )
+        ).fetchone()
+    )["id"]
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    app = create_app(dsn, TOKEN, Config())
+    headers = {"authorization": f"Bearer {TOKEN}"}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+        response = await c.get(f"/api/issues/{issue_id}")
+    assert response.status_code == 200
+    faith = next(s for s in response.json()["sections"] if s["topic"]["slug"] == FAITH.slug)
+    assert faith["recap"]["state"] == "failed" and faith["recap"]["will_retry"] is True
