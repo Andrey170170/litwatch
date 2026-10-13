@@ -190,6 +190,27 @@ async def test_every_new_paper_is_registered_with_its_pdf_and_source(world):
     assert unknown.id in fake.records  # its metadata, and nothing to fetch yet
 
 
+async def test_an_archive_that_does_not_register_only_answers_searches(world, secrets):
+    with pytest.raises(IntegrationError, match="register must be true or false"):
+        integrations.load(
+            Config(integrations={"archive": {"url": "http://a.test", "register": "no"}})
+        )
+    (loaded,) = integrations.load(
+        Config(integrations={"archive": {"url": "http://a.test", "register": False}})
+    )
+    assert loaded.register is False
+
+    conn, fake = world, FakeArchive()
+    a = archive(fake)
+    a.register = False
+    await start(conn, a)
+    await papers_store.upsert(conn, [P])
+    await deliver(conn, a)
+    assert fake.records == {} and fake.jobs == []
+    fake.search_items = [{"id": "2401.00001", "title": "First", "authors": "", "published": ""}]
+    assert [h.id for h in a.search("q", SearchFilters(limit=5))] == ["2401.00001"]
+
+
 async def test_the_archive_answers_searches_by_arxiv_id_with_its_rank_as_score():
     fake = FakeArchive()
     fake.search_items = [

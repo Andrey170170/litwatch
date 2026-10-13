@@ -12,9 +12,11 @@ adds the papers litwatch never ingested. Other integrations (webdav, deep) read 
 `ArchiveClient` when this one is configured, with arXiv as the fallback.
 
 Options: `url` (or $LITWATCH_ARCHIVE_URL), the bearer token in $LITWATCH_ARCHIVE_TOKEN,
-`wait_seconds` (60: how long a reader waits for a PDF the archive is still fetching) and
+`wait_seconds` (60: how long a reader waits for a PDF the archive is still fetching),
 `search_timeout_seconds` (4, kept below search's own wait for a provider, so the archive's
-request gives up first and frees its thread).
+request gives up first and frees its thread) and `register` (true; false registers nothing,
+neither metadata nor PDF and source, leaving search and PDF reads: for running beside another
+litwatch that registers the same papers).
 """
 
 from __future__ import annotations
@@ -276,13 +278,15 @@ class Archive:
         name: str = "archive",
         search_http: httpx.Client | None = None,
         search_timeout: float = 4.0,
+        register: bool = True,
     ) -> None:
         self.name = name
         self.archive = archive
         self.search_http = search_http or httpx.Client(timeout=search_timeout)
+        self.register = register
 
     def wants(self, event: Event) -> bool:
-        return event.type in (events.PAPER_ADDED, events.PAPER_REVISED)
+        return self.register and event.type in (events.PAPER_ADDED, events.PAPER_REVISED)
 
     async def aclose(self) -> None:
         await self.archive.aclose()
@@ -325,4 +329,7 @@ def load(name: str, options: dict[str, Any], config: Config) -> Archive:
             f"search_timeout_seconds must be above zero and below {SEARCH_TIMEOUT_SECONDS:g}, "
             "how long search waits for a provider"
         )
-    return Archive(client(options), name=name, search_timeout=timeout)
+    register = options.get("register", True)
+    if not isinstance(register, bool):
+        raise IntegrationError("register must be true or false")
+    return Archive(client(options), name=name, search_timeout=timeout, register=register)
