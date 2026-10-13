@@ -16,9 +16,10 @@ from rich.console import Console
 from litwatch import config as configuration
 from litwatch import feedback, seeds, store
 from litwatch.core import Topic
-from litwatch.feedback import seed, word
+from litwatch.feedback import carry, seed, word
 from litwatch.jobs import digest as digest_job
 from litwatch.jobs import intake as intake_job
+from litwatch.jobs import migrate as migrate_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
 from litwatch.jobs import reviews as review_jobs
@@ -83,6 +84,49 @@ def db_adopt(
         typer.confirm("This renames 0.x tables. Is this database a copy?", abort=True)
     applied = _run(store.adopt_0x, migrate=False)
     console.print("adopted; applied: " + ", ".join(applied))
+
+
+@db_app.command("migrate-0x")
+def db_migrate_0x(
+    leave_behind: Annotated[
+        bool, typer.Option(help="Migrate even though some 0.x selections have no v1 topic.")
+    ] = False,
+    config: ConfigPath = None,
+) -> None:
+    """Carry 0.14's verdicts into v1, once, after `db adopt` and `topics import`: Watch tiers
+    become migrated verdicts with a take for each positive, Radar and Pulse tiers 1 to 3 become
+    memberships, every stored paper counts as triaged. Nothing is announced in an issue.
+    Running it again adds nothing."""
+    cfg = configuration.load(config)
+    try:
+        console.print_json(
+            data=_run(lambda conn: migrate_job.from_0x(conn, cfg, leave_behind=leave_behind))
+        )
+    except migrate_job.MigrationError as exc:
+        raise SystemExit(str(exc)) from exc
+
+
+@db_app.command("import-feedback")
+def db_import_feedback(
+    source: Annotated[
+        str, typer.Option("--source", help="DSN of the v1 database the feedback was given in.")
+    ],
+) -> None:
+    """Copy the owner's feedback from another v1 database into this one: labels (not
+    provisional), reactions, appraisals, take ratings, Calibrate sessions, saves and unsaves,
+    and reported misses, for papers this database holds, with their original times. The
+    source is only read. Running it again adds nothing. It does NOT carry topics: use
+    `litwatch topics export` there and `litwatch topics import` here first."""
+
+    async def work(conn: psycopg.AsyncConnection) -> dict[str, int]:
+        async with await store.connect(source) as other:
+            await other.execute("SET default_transaction_read_only = on")
+            return await carry.import_feedback(conn, other)
+
+    try:
+        console.print_json(data=_run(work))
+    except carry.SourceError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 @app.command()
@@ -398,7 +442,8 @@ def serve(
     config: ConfigPath = None,
 ) -> None:
     """Serve the API, the web app and the labelling page, with the integrations the
-    configuration enables. Needs LITWATCH_API_TOKEN."""
+    configuration enables. Needs LITWATCH_API_TOKEN; LITWATCH_READ_TOKEN, if set, is a
+    second token that may only search and read papers (for the deep service)."""
     import uvicorn  # noqa: PLC0415
 
     from litwatch.api import create_app  # noqa: PLC0415
@@ -415,7 +460,13 @@ def serve(
     except integrations.IntegrationError as exc:
         raise SystemExit(str(exc)) from exc
     _run(store.migrate, migrate=False)
-    app_ = create_app(configuration.database_url(), token, cfg, integrations=loaded)
+    app_ = create_app(
+        configuration.database_url(),
+        token,
+        cfg,
+        integrations=loaded,
+        read_token=configuration.secret("LITWATCH_READ_TOKEN"),
+    )
     uvicorn.run(app_, host=host, port=port)
 
 

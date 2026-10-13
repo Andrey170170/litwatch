@@ -1,6 +1,6 @@
 """What an adopted 0.x database still holds: its selections and its tiered verdicts.
 
-Read by the topic import and the evaluation seeding now, and by the data migration later.
+Read by the topic import, the evaluation seeding and the data migration (`jobs.migrate`).
 """
 
 from __future__ import annotations
@@ -69,3 +69,81 @@ async def verdicts(
             (slugs, max_tier),
         )
     ).fetchall()
+
+
+# -- the data migration (spec section 7) -----------------------------------------------------------
+
+_GRADE = "(ARRAY['must_read', 'relevant', 'adjacent', 'none'])[v.tier]"
+
+
+async def migrate_verdicts(conn: psycopg.AsyncConnection) -> dict[str, int]:
+    """Keep each 0.x verdict on a Watch topic as a verdict marked `migrated`: its tier as the
+    grade, and a single opinion carrying 0.x's reason and model. It is recorded when 0.x
+    screened it and bound to the topic's current revision and the paper's current text. A
+    pair that already has a migrated verdict is left alone. Returns the count per grade."""
+    rows = await (
+        await conn.execute(
+            f"""
+            INSERT INTO verdicts (paper_id, topic, topic_revision, paper_version, paper_revision,
+                                  grade, judge, migrated, recorded_at)
+            SELECT v.paper_id, v.selection, t.revision, p.version, p.revision, {_GRADE},
+                   jsonb_build_object('grade', {_GRADE}, 'reason', v.reason, 'model', v.model),
+                   true, v.screened_at
+            FROM legacy_verdicts v
+            JOIN papers p ON p.id = v.paper_id
+            JOIN topics t ON t.slug = v.selection AND t.kind = 'watch'
+            WHERE v.tier BETWEEN 1 AND 4
+              AND NOT EXISTS (SELECT 1 FROM verdicts m WHERE m.migrated
+                              AND m.paper_id = v.paper_id AND m.topic = v.selection)
+            RETURNING grade
+            """
+        )
+    ).fetchall()
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["grade"]] = counts.get(row["grade"], 0) + 1
+    return counts
+
+
+async def migrate_memberships(conn: psycopg.AsyncConnection) -> int:
+    """A 0.x verdict at tier 3 or better on a Radar or Pulse topic becomes a membership, dated
+    when 0.x screened it (a review takes the members that joined in its period); the tier is
+    dropped. A membership already there is kept."""
+    cur = await conn.execute(
+        """
+        INSERT INTO memberships (paper_id, topic, topic_revision, paper_version, created_at)
+        SELECT v.paper_id, v.selection, t.revision, p.version, v.screened_at
+        FROM legacy_verdicts v
+        JOIN papers p ON p.id = v.paper_id
+        JOIN topics t ON t.slug = v.selection AND t.kind IN ('radar', 'pulse')
+        WHERE v.tier BETWEEN 1 AND 3
+        ON CONFLICT (paper_id, topic) DO NOTHING
+        """
+    )
+    return cur.rowcount
+
+
+async def migrate_regression(conn: psycopg.AsyncConnection) -> int:
+    """0.x's tier 1 to 3 on the Watch topics join the regression set, as `eval seed --legacy`
+    puts them there; model output kept to catch a regression, never the owner's word."""
+    cur = await conn.execute(
+        """
+        INSERT INTO regression (paper_id, topic, tier, source)
+        SELECT v.paper_id, v.selection, v.tier, 'legacy' FROM legacy_verdicts v
+        JOIN topics t ON t.slug = v.selection AND t.kind = 'watch'
+        WHERE v.tier BETWEEN 1 AND 3
+        ON CONFLICT (paper_id, topic) DO NOTHING
+        """
+    )
+    return cur.rowcount
+
+
+async def unmatched(conn: psycopg.AsyncConnection) -> list[str]:
+    """0.x selections with verdicts but no v1 topic of the same slug: left behind."""
+    rows = await (
+        await conn.execute(
+            "SELECT DISTINCT selection FROM legacy_verdicts v "
+            "WHERE NOT EXISTS (SELECT 1 FROM topics t WHERE t.slug = v.selection) ORDER BY 1"
+        )
+    ).fetchall()
+    return [r["selection"] for r in rows]

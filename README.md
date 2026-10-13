@@ -30,8 +30,13 @@ litwatch intake --days 1             # intake alone
 litwatch mark-triaged                # count stored papers as triaged, so runs start from new ones
 litwatch topics list | import | export
 litwatch eval seed | replay | sample-rejects | report    # dry runs against your labels
-litwatch serve                       # the labelling page; needs LITWATCH_API_TOKEN
+litwatch serve                       # the API and web app; needs LITWATCH_API_TOKEN
+litwatch db adopt | migrate-0x       # turn a copy of a 0.14 database into v1's (spec section 7)
+litwatch db import-feedback --source <dsn>   # the owner's feedback from another v1 database
 ```
+
+`LITWATCH_READ_TOKEN`, when set, is a second token that may only search and read papers
+(`GET /api/papers` and `/api/papers/{id}`); the deep service uses it.
 
 Evaluation runs never write to candidates, verdicts or the outbox. Results are in `evals/`.
 

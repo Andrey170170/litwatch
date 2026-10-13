@@ -209,7 +209,7 @@ The built-in `archive` integration is a search provider.
 | --- | --- | --- |
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `take.written`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it |
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
-| `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source); answers searches |
+| `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source); answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers |
 | `deep` | `grade.changed` to `must_read`, `paper.saved`, `card.requested` | Asks the deep service for a reading card; emits `card.ready` |
 | `webhook` | any, by pattern | POSTs the event as JSON to a URL |
 

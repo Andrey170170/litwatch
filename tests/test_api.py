@@ -13,6 +13,9 @@ from tests.conftest import FAITH, TOPICS, paper
 TOKEN = "s3cret"
 
 
+READ_TOKEN = "r3ad"
+
+
 @pytest.fixture
 async def client(conn):
     for topic in TOPICS:
@@ -20,12 +23,33 @@ async def client(conn):
     await papers_store.upsert(conn, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
     # The app opens its own connections; point them at the test schema.
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN))
+    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN, read_token=READ_TOKEN))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
 AUTH = {"authorization": f"Bearer {TOKEN}"}
+READ = {"authorization": f"Bearer {READ_TOKEN}"}
+
+
+async def test_the_read_token_only_searches_and_reads_papers(client):
+    found = await client.get("/api/papers", params={"q": "canonical", "limit": 5}, headers=READ)
+    assert found.status_code == 200 and len(found.json()["rows"]) == 3
+    assert (await client.get("/api/papers/2609.1", headers=READ)).json()["id"] == "2609.1"
+    for method, path in [
+        ("GET", "/api/status"),
+        ("GET", "/api/labelling"),
+        ("GET", "/api/settings/config"),
+        ("PUT", "/api/library/2609.1"),
+        ("POST", "/api/papers/2609.1/card"),
+        ("PUT", "/api/papers/2609.1/publication"),
+    ]:
+        answer = await client.request(method, path, headers=READ, json={})
+        assert answer.status_code == 403, (method, path)
+    # Not a way in for the web app: no session and no cookie.
+    assert (await client.post("/api/session", json={"token": READ_TOKEN})).status_code == 401
+    client.cookies.set("litwatch_token", READ_TOKEN)
+    assert (await client.get("/api/papers")).status_code == 401
 
 
 async def test_everything_but_the_health_check_needs_the_token(client):

@@ -8,6 +8,7 @@ same transaction.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import psycopg
@@ -33,6 +34,9 @@ from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
+
+log = logging.getLogger(__name__)
+SYNC_PROGRESS = 2000  # `sync` logs its progress every this many papers
 
 
 @dataclass
@@ -272,9 +276,12 @@ async def sync(conn: psycopg.AsyncConnection) -> dict[str, int]:
     writer still owes each shown pair a take.
     """
     counts = {"papers": 0, "grades_changed": 0, "saved": 0, "unsaved": 0}
-    for paper_id in await word_store.touched(conn):
+    touched = await word_store.touched(conn)
+    for paper_id in touched:
         settled = await settle(conn, paper_id, announce=False)
         counts["papers"] += 1
+        if counts["papers"] % SYNC_PROGRESS == 0:
+            log.info("settled %s of %s papers", counts["papers"], len(touched))
         counts["grades_changed"] += len(settled.grades)
         if settled.saved != settled.was_saved:
             counts["saved" if settled.saved else "unsaved"] += 1
