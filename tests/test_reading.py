@@ -436,3 +436,36 @@ async def test_bibtex_covers_papers_a_provider_found_outside_the_collection(clie
     body["filter"]["source"] = "collection"
     text = (await client.post("/api/bibtex", json=body)).text
     assert "eprint = {2610.00001}" in text and "eprint = {2610.99902}" not in text
+
+
+async def test_important_for_a_field_saves_reacts_and_makes_the_owners_member(client, conn):
+    """"Important for <field>" (M7): the paper joins the library, gets a thumb up for the
+    field, and is the field's member as the owner's addition; triage leaves it alone, the
+    page and the table say so, and taking it back drops the membership and the thumb only."""
+    from litwatch.core import TopicKind
+    from litwatch.store import triage as triage_store
+    from tests.conftest import INTERP
+
+    ack = await client.put(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
+    assert ack.json()["message"] == "Important for Interpretability; it joins the library"
+    (row,) = await (await conn.execute("SELECT * FROM memberships")).fetchall()
+    assert (row["topic"], row["by_owner"], row["topic_revision"]) == (INTERP.slug, True, 1)
+    page = (await client.get(f"/api/papers/{Q.id}")).json()
+    interp = next(t for t in page["topics"] if t["slug"] == INTERP.slug)
+    assert page["saved"] and interp["member"] and interp["by_owner"]
+    assert interp["reaction"] == "up"
+    table = (await client.get("/api/papers", params={"topic": INTERP.slug})).json()
+    assert [(r["id"], r["by_owner"]) for r in table["rows"]] == [(Q.id, True)]
+    # Triage asked again about the fields keeps the owner's membership.
+    q = await papers_store.get(conn, Q.id)
+    fields = {t.slug: t.revision for t in TOPICS if t.kind != TopicKind.WATCH}
+    await triage_store.set_memberships(conn, q, fields, set())
+    assert (await (await conn.execute("SELECT count(*) AS n FROM memberships")).fetchone())["n"] == 1
+    # A Watch topic is not a field.
+    assert (await client.put(f"/api/papers/{Q.id}/fields/{FAITH.slug}")).status_code == 404
+    # Taking it back: no membership, no thumb; the library keeps the paper.
+    ack = await client.delete(f"/api/papers/{Q.id}/fields/{INTERP.slug}")
+    assert ack.json()["message"] == "No longer marked important for Interpretability"
+    assert await (await conn.execute("SELECT * FROM memberships")).fetchall() == []
+    page = (await client.get(f"/api/papers/{Q.id}")).json()
+    assert page["saved"] and all(t["slug"] != INTERP.slug for t in page["topics"])

@@ -21,7 +21,9 @@ from litwatch.core import (
     Publication,
     Reaction,
     ReactionReason,
+    ReactionValue,
     SearchFilters,
+    Status,
     TopicKind,
 )
 from litwatch.feedback import misses, word
@@ -30,6 +32,7 @@ from litwatch.jobs import publications as lookups
 from litwatch.jobs import scheduler
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
+from litwatch.store import fields as fields_store
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import reading
@@ -208,7 +211,10 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         raise HTTPException(status_code=404, detail="no such paper")
     topics = [
         s.PaperTopic(
-            **{k: t[k] for k in ("slug", "name", "kind", "colour", "grade", "take", "member")},
+            **{
+                k: t[k]
+                for k in ("slug", "name", "kind", "colour", "grade", "take", "member", "by_owner")
+            },
             grading=t["grading"] and t["grade"] is None,
             label=s.LabelState(**t["label"]) if t["label"] else None,
             reaction=(t["reaction"] or {}).get("value"),
@@ -454,6 +460,42 @@ async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn) -> s.Ack:
 @router.delete("/word/{topic}/{paper_id:path}")
 async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
     return _ack("Taken back", await word.unlabel(c, paper_id, topic))
+
+
+# -- "Important for <field>" (M7): the owner puts a paper into a Radar or Pulse field ---------
+
+
+async def _field(c: psycopg.AsyncConnection, slug: str) -> Any:
+    topic = (await _topics(c)).get(slug)
+    if topic is None or topic.kind == TopicKind.WATCH or topic.status != Status.ACTIVE:
+        raise HTTPException(status_code=404, detail="not an active Radar or Pulse topic")
+    return topic
+
+
+@router.put("/papers/{paper_id:path}/fields/{slug}")
+async def important_for(paper_id: str, slug: str, c: Conn) -> s.Ack:
+    """The paper matters for the field: it joins the library, gets a thumb up for the
+    field, and becomes a member as the owner's own addition, which the field's next review
+    sees and its page lists as added by the owner. Never a Watch miss."""
+    topic = await _field(c, slug)
+    await _known(c, paper_id)
+    async with c.transaction():
+        await fields_store.add(c, paper_id, slug, topic.revision)
+        settled = await word.toggle(c, paper_id, Hand.SAVE)
+        await word.react(c, Reaction(paper_id=paper_id, topic=slug, value=ReactionValue.UP))
+    return _ack(f"Important for {topic.name}", settled)
+
+
+@router.delete("/papers/{paper_id:path}/fields/{slug}")
+async def not_important_for(paper_id: str, slug: str, c: Conn) -> s.Ack:
+    """Take it back: the owner's membership and the thumb go; the library is left as it is,
+    since the Save toggle is the owner's word on that."""
+    topic = await _field(c, slug)
+    await _known(c, paper_id)
+    async with c.transaction():
+        await fields_store.remove(c, paper_id, slug)
+        settled = await word.unreact(c, paper_id, slug)
+    return _ack(f"No longer marked important for {topic.name}", settled)
 
 
 @router.post("/misses")

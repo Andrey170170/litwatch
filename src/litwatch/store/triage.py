@@ -99,9 +99,10 @@ async def store_failed(conn: psycopg.AsyncConnection, paper: Paper, error: str) 
 async def set_memberships(
     conn: psycopg.AsyncConnection, paper: Paper, asked: dict[str, int], member_of: set[str]
 ) -> None:
-    """Replace the paper's memberships among the field topics that were asked about."""
+    """Replace the paper's memberships among the field topics that were asked about. One
+    the owner made ("Important for <field>") is theirs and stays."""
     await conn.execute(
-        "DELETE FROM memberships WHERE paper_id = %s AND topic = ANY(%s)",
+        "DELETE FROM memberships WHERE paper_id = %s AND topic = ANY(%s) AND NOT by_owner",
         (paper.id, [slug for slug in asked if slug not in member_of]),
     )
     for slug in sorted(member_of):

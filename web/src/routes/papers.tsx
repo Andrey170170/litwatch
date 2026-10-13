@@ -1,14 +1,11 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { api, ok } from "@/api/client";
 import { topicsQuery } from "@/api/queries";
-import { Chip, MissLink, PapersTable, SearchBox, SortSelect, YearChip, type TableFilter } from "@/components/PapersTable";
-import { GradeDot } from "@/components/paper-bits";
+import { Chip, PapersTable, SearchBox, SortSelect, YearChip, type TableFilter } from "@/components/PapersTable";
+import { ShareResult } from "@/components/ShareResult";
 import { FilterSheet } from "@/routes/topics";
 import { useDesktop } from "@/hooks/useDesktop";
-import { authorsLine, fmt } from "@/lib/format";
-import { Link } from "@tanstack/react-router";
 
 /** The whole collection as one table, with the miss flow under it (DESIGN.md "Papers"). */
 export function PapersPage() {
@@ -56,51 +53,11 @@ export function PapersPage() {
         watchTopics={watch}
         showMiss={!!search.q}
         surfaceTopic={null}
-        above={search.lookup ? <LookupBand q={search.lookup} watch={watch} /> : null}
+        above={search.lookup ? <ShareResult q={search.lookup} topics={topics.data ?? []} /> : null}
       />
       <LookupPrompt onLookup={(q) => onFilter({ lookup: q })} initial={search.lookup} />
     </div>
   );
-}
-
-/** The looked-up paper in its own band above the table, with the miss report offered. */
-function LookupBand({ q, watch }: { q: string; watch: ReturnType<typeof useLookupTopics> }) {
-  const look = useQuery({
-    queryKey: ["lookup", q],
-    queryFn: async () => ok(await api.POST("/api/lookup", { body: { q } })),
-    retry: false,
-  });
-  return (
-    <div className="mt-3 rounded-[10px] border border-border bg-muted px-3.5 py-3">
-      {look.isPending && <p className="meta">Looking up {q}…</p>}
-      {look.isError && <p className="text-[13.5px] text-destructive">Nothing found for “{q}”. An arXiv id or link is what works here.</p>}
-      {look.data && (
-        <div className="grid grid-cols-[14px_1fr] gap-x-2.5">
-          <div className="pt-[7px]">
-            <GradeDot grade={look.data.row.grade} grading={look.data.row.grading} />
-          </div>
-          <div>
-            <p className="meta text-[12px] uppercase tracking-[.05em]">{look.data.fetched ? "Fetched into the collection just now" : "Already in the collection"}</p>
-            <h3 className="font-serif text-[16.5px] leading-[1.3] font-semibold">
-              <Link to="/paper/$" params={{ _splat: look.data.row.id }} search={{ topic: "none" }}>
-                {look.data.row.title}
-              </Link>
-            </h3>
-            <p className="meta">
-              {authorsLine(look.data.row.authors)} · {fmt.cell(look.data.row.published)}
-              {look.data.row.saved && <span className="font-semibold text-success"> · Saved</span>}
-            </p>
-            {look.data.row.take && <p className="mt-1 text-[13.5px] text-body">{look.data.row.take}</p>}
-            <MissLink paperId={look.data.row.id} topics={watch} />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function useLookupTopics() {
-  return useQuery(topicsQuery).data?.filter((t) => t.kind === "watch") ?? [];
 }
 
 function LookupPrompt({ onLookup, initial }: { onLookup: (q: string) => void; initial: string | undefined }) {

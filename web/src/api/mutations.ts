@@ -72,6 +72,24 @@ export function useUnlabel(paperId: string) {
   });
 }
 
+/** "Important for <field>": saves the paper, thumbs it up for the field, and puts it in the field. */
+export function useImportant() {
+  return useMutation({
+    mutationFn: async (v: { paper_id: string; topic: string }) =>
+      ok(await api.PUT("/api/papers/{paper_id}/fields/{slug}", { params: { path: { paper_id: v.paper_id, slug: v.topic } } })),
+    ...useAck(),
+  });
+}
+
+/** Takes "Important for <field>" back: the membership and the thumb; the library is left alone. */
+export function useUnimportant() {
+  return useMutation({
+    mutationFn: async (v: { paper_id: string; topic: string }) =>
+      ok(await api.DELETE("/api/papers/{paper_id}/fields/{slug}", { params: { path: { paper_id: v.paper_id, slug: v.topic } } })),
+    ...useAck(),
+  });
+}
+
 export function useMiss() {
   return useMutation({
     mutationFn: async (v: { paper_id: string; topic: string }) => ok(await api.POST("/api/misses", { body: v })),
