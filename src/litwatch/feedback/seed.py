@@ -76,9 +76,18 @@ async def from_legacy_verdicts(conn: psycopg.AsyncConnection) -> dict[str, int]:
 
     Tier 1 and 2 are accepted in bulk as provisional positives: the owner broadly agrees
     with them and corrects any he notices. Tier 1 to 3 join the regression set.
+
+    For M2's evaluation database. Production goes through `db migrate-0x` instead, which
+    keeps the tiers as migrated verdicts: refused there, where the provisional labels would
+    stand as the owner's word over every later verdict (`jobs.migrate`).
     """
     if not await legacy.adopted(conn):
         raise RuntimeError("this database has no 0.x verdicts; it was not adopted from 0.x")
+    found = await (
+        await conn.execute("SELECT EXISTS (SELECT 1 FROM verdicts WHERE migrated) AS m")
+    ).fetchone()
+    if found["m"]:
+        raise RuntimeError("this database was migrated with `db migrate-0x`; nothing to seed")
     counts = {"provisional": 0, "regression": 0}
     for row in await legacy.verdicts(conn, await _watched(conn), 3):
         await feedback_store.add_regression(

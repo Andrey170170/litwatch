@@ -19,6 +19,7 @@ from litwatch.core import Topic
 from litwatch.feedback import seed, word
 from litwatch.jobs import digest as digest_job
 from litwatch.jobs import intake as intake_job
+from litwatch.jobs import migrate as migrate_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
 from litwatch.jobs import reviews as review_jobs
@@ -83,6 +84,19 @@ def db_adopt(
         typer.confirm("This renames 0.x tables. Is this database a copy?", abort=True)
     applied = _run(store.adopt_0x, migrate=False)
     console.print("adopted; applied: " + ", ".join(applied))
+
+
+@db_app.command("migrate-0x")
+def db_migrate_0x(config: ConfigPath = None) -> None:
+    """Carry 0.14's verdicts into v1, once, after `db adopt` and `topics import`: Watch tiers
+    become migrated verdicts with a take for each positive, Radar and Pulse tiers 1 to 3 become
+    memberships, every stored paper counts as triaged. Nothing is announced in an issue.
+    Running it again adds nothing."""
+    cfg = configuration.load(config)
+    try:
+        console.print_json(data=_run(lambda conn: migrate_job.from_0x(conn, cfg)))
+    except migrate_job.MigrationError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 @app.command()

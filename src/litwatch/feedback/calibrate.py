@@ -30,7 +30,8 @@ async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> l
 
 
 async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[dict[str, Any]]:
-    """The current verdicts of the trailing days on one side of the line, with no firm label."""
+    """The current verdicts of the trailing days on one side of the line, with no firm label.
+    A verdict migrated from 0.14 is not v1's grading, so precision never judges one."""
     return await _all(
         conn,
         f"""
@@ -38,7 +39,7 @@ async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[
             SELECT DISTINCT ON (paper_id) * FROM verdicts WHERE topic = %s
             ORDER BY paper_id, paper_revision DESC, topic_revision DESC, recorded_at DESC, id DESC
         ) v
-        WHERE recorded_at >= now() - make_interval(days => %s)
+        WHERE recorded_at >= now() - make_interval(days => %s) AND NOT migrated
           AND grade {"IN" if above else "NOT IN"} ('must_read', 'relevant')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = v.paper_id
                           AND l.topic = v.topic AND NOT l.provisional)
