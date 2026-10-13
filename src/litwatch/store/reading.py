@@ -203,6 +203,13 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
                 WHERE paper_id = %(p)s AND topic = t.slug) r) AS reaction,
                EXISTS (SELECT 1 FROM memberships m WHERE m.paper_id = %(p)s
                        AND m.topic = t.slug) AS member,
+               EXISTS (SELECT 1 FROM memberships m WHERE m.paper_id = %(p)s
+                       AND m.topic = t.slug AND m.by_owner) AS by_owner,
+               EXISTS (SELECT 1 FROM misses ms WHERE ms.paper_id = %(p)s AND ms.topic = t.slug)
+                   AND EXISTS (SELECT 1 FROM labels lb WHERE lb.paper_id = %(p)s
+                               AND lb.topic = t.slug AND lb.value = 'relevant')
+                   -- and the owner's current word still says so (a newer thumb can withdraw it)
+                   AND coalesce(g.grade IN ('must_read', 'relevant'), false) AS missed,
                EXISTS (SELECT 1 FROM candidates c WHERE c.paper_id = %(p)s AND c.topic = t.slug
                        AND c.state = 'pending' {LIVE}) AS grading
         FROM topics t
@@ -311,12 +318,14 @@ async def papers(
         )
         take_params = [topic]
     else:
-        if kind:  # a field topic's table is its picks
+        if kind:  # a field topic's table is its picks, and what the owner put in the field
             scope = sql.SQL(
-                "JOIN (SELECT DISTINCT k.paper_id FROM review_picks k "
-                "JOIN reviews r ON r.id = k.review_id WHERE r.topic = %s) m ON m.paper_id = p.id"
+                "JOIN (SELECT k.paper_id FROM review_picks k "
+                "JOIN reviews r ON r.id = k.review_id WHERE r.topic = %s "
+                "UNION SELECT m.paper_id FROM memberships m WHERE m.topic = %s AND m.by_owner) "
+                "m ON m.paper_id = p.id"
             )
-            scope_params = [topic]
+            scope_params = [topic, topic]
         else:
             scope, scope_params = sql.SQL(""), []
         grade = sql.SQL(
@@ -337,6 +346,8 @@ async def papers(
                p.fetched_at AS added,
                {grade} AS grade, tk.text AS take, tk.topic AS take_topic,
                coalesce(l.saved, false) AS saved,
+               EXISTS (SELECT 1 FROM memberships mo WHERE mo.paper_id = p.id
+                       AND mo.topic = %s AND mo.by_owner) AS by_owner,
                EXISTS (SELECT 1 FROM candidates c WHERE c.paper_id = p.id
                        AND c.state = 'pending' {live}) AS grading,
                (SELECT coalesce(array_agg(t2.name ORDER BY t2.position), '{{}}')
@@ -361,7 +372,10 @@ async def papers(
     )
     # The topic a row's take belongs to: the Watch topic of the page, else the take's own.
     shown = topic if kind == "watch" else None
-    rows = await _all(conn, query, [shown, *scope_params, *take_params, *params, limit, offset])
+    owners_field = topic if kind and kind != "watch" else None  # by_owner is a field's mark
+    rows = await _all(
+        conn, query, [owners_field, shown, *scope_params, *take_params, *params, limit, offset]
+    )
     if rows:
         total = rows[0]["total"]
     elif offset:  # past the last page: count the filter on its own

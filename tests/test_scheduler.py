@@ -92,6 +92,10 @@ async def test_a_job_another_scheduler_is_deciding_on_is_left_to_it(conn):
             "SELECT pg_advisory_lock(%s, hashtext('nightly'))", (scheduler.SCHEDULE_LOCK,)
         )
         assert await scheduler.tick(conn, todo, at(6, 1)) == []
+        # Released before the connection closes: a closing backend lets go of its locks late.
+        await other.execute(
+            "SELECT pg_advisory_unlock(%s, hashtext('nightly'))", (scheduler.SCHEDULE_LOCK,)
+        )
     assert await scheduler.tick(conn, todo, at(6, 1)) == ["nightly"]
 
 

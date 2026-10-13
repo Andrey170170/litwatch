@@ -168,6 +168,8 @@ class PaperTopic(TopicRef):
     reaction: ReactionValue | None = None
     reaction_reason: ReactionReason | None = None
     member: bool = False  # in a Radar or Pulse field
+    by_owner: bool = False  # the owner put it in the field themselves
+    missed: bool = False  # reported as missed for this Watch topic, and that word stands
     grading: bool = False
 
 
@@ -231,6 +233,7 @@ class Row(BaseModel):
     saved: bool = False
     also_in: list[str] = Field(default_factory=list)  # other topics it is relevant to
     source: str = "collection"  # or the search provider that found it outside the collection
+    by_owner: bool = False  # on a field topic's page: the owner put it in the field
     score: float | None = None  # the provider's, for its "best match" order
 
 

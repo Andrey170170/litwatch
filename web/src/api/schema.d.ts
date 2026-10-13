@@ -276,6 +276,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/papers/{paper_id}/fields/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Important For
+         * @description The paper matters for the field: it joins the library, gets a thumb up for the
+         *     field, and becomes a member as the owner's own addition, which the field's next review
+         *     sees and its page lists as added by the owner. Never a Watch miss. The whole action is
+         *     one transaction under the paper's lock (topics first, as every settle), so an undo in
+         *     flight waits for all of it and the topic is read as it is then.
+         */
+        put: operations["important_for_api_papers__paper_id__fields__slug__put"];
+        post?: never;
+        /**
+         * Not Important For
+         * @description Take it back: the owner's membership and the thumb go; the library is left as it is,
+         *     since the Save toggle is the owner's word on that. Under the same lock as the action.
+         */
+        delete: operations["not_important_for_api_papers__paper_id__fields__slug__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/misses": {
         parameters: {
             query?: never;
@@ -1454,6 +1483,16 @@ export interface components {
              */
             member: boolean;
             /**
+             * By Owner
+             * @default false
+             */
+            by_owner: boolean;
+            /**
+             * Missed
+             * @default false
+             */
+            missed: boolean;
+            /**
              * Grading
              * @default false
              */
@@ -1673,6 +1712,11 @@ export interface components {
              * @default collection
              */
             source: string;
+            /**
+             * By Owner
+             * @default false
+             */
+            by_owner: boolean;
             /** Score */
             score?: number | null;
         };
@@ -2445,6 +2489,70 @@ export interface operations {
             path: {
                 topic: string;
                 paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    important_for_api_papers__paper_id__fields__slug__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    not_important_for_api_papers__paper_id__fields__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+                slug: string;
             };
             cookie?: never;
         };

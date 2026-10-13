@@ -948,6 +948,102 @@
         }
       }
     },
+    "/api/papers/{paper_id}/fields/{slug}": {
+      "put": {
+        "summary": "Important For",
+        "description": "The paper matters for the field: it joins the library, gets a thumb up for the\nfield, and becomes a member as the owner's own addition, which the field's next review\nsees and its page lists as added by the owner. Never a Watch miss. The whole action is\none transaction under the paper's lock (topics first, as every settle), so an undo in\nflight waits for all of it and the topic is read as it is then.",
+        "operationId": "important_for_api_papers__paper_id__fields__slug__put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Not Important For",
+        "description": "Take it back: the owner's membership and the thumb go; the library is left as it is,\nsince the Save toggle is the owner's word on that. Under the same lock as the action.",
+        "operationId": "not_important_for_api_papers__paper_id__fields__slug__delete",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/misses": {
       "post": {
         "summary": "Report Miss",
@@ -3904,6 +4000,16 @@
             "title": "Member",
             "default": false
           },
+          "by_owner": {
+            "type": "boolean",
+            "title": "By Owner",
+            "default": false
+          },
+          "missed": {
+            "type": "boolean",
+            "title": "Missed",
+            "default": false
+          },
           "grading": {
             "type": "boolean",
             "title": "Grading",
@@ -4493,6 +4599,11 @@
             "type": "string",
             "title": "Source",
             "default": "collection"
+          },
+          "by_owner": {
+            "type": "boolean",
+            "title": "By Owner",
+            "default": false
           },
           "score": {
             "anyOf": [
