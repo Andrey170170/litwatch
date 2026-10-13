@@ -91,7 +91,7 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 48. **Restart rather than migrate.** The last week runs through the new pipeline, plus the evaluation papers and every
     paper the owner's feedback touches; the rest of the side-by-side collection is dropped. Backfill comes after v1.
 49. **The archive's code moves into this repository** as `archive/`, with history, deployed as its own container(s);
-    its read-only web interface is retired once litwatch covers it. **Open: proposed, waiting for the owner.**
+    its read-only web interface is retired once litwatch covers it. (Agreed by the owner 2026-10-13.)
 50. **Costs.** Month-to-date spend per provider; amber against a monthly budget; nightly runs never downgraded; hard
     ceilings on re-runs and backfills.
 51. **The library.** Focus papers at relevant or above are saved automatically; everything else by hand. Zotero's
@@ -101,6 +101,5 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 
 ## Open
 
-- Decision 49, where the archive's code lives.
 - The tree's open points ([taxonomy.md](taxonomy.md)).
 - The grade table and rarity offsets are starting points, tuned in N2.

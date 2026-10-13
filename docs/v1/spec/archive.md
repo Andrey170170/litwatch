@@ -59,11 +59,11 @@ same, then a Deep card). Reporting it as a miss does the same with the owner's w
 litwatch keeps only the papers it processed, each with the text exactly as it was judged. That copy is a record of
 what was judged, not a second source of truth: the archive holds the current paper.
 
-## Where the archive's code lives (open)
+## Where the archive's code lives
 
 The archive is today a separate repository (`Andrey170170/arxiv-archive`, 21 commits) with its own runbooks. One of
-v1's aims is one place for papers, so the proposal is to bring it into this repository as `archive/`, beside `deep/`,
+v1's aims is one place for papers, so it moves into this repository as `archive/`, beside `deep/`,
 importing its history with `git subtree`, deployed as its own container or containers. A submodule would keep two
-repositories and make every cross-cutting change two commits. Its read-only web interface would be retired once
+repositories and make every cross-cutting change two commits. Its read-only web interface is retired once
 litwatch's Papers tab and paper pages cover search and paper pages, keeping its API. Decision 49 in
-[decisions.md](decisions.md); open until the owner confirms.
+[decisions.md](decisions.md), agreed 2026-10-13.

@@ -114,10 +114,8 @@ Papers in the configured categories that fit none of the above.
 
 ## Open points for the owner
 
-- Chain-of-thought faithfulness sits under Interpretability and Chain-of-thought monitoring under Alignment and safety,
-  as now. A paper on both gets both classes.
-- Alignment and safety is drafted as an Area, so it gets a daily digest and a weekly one, as every Area does (a depth
-  carries no cadence setting). The first draft had it as a weekly-only Area; if a daily digest is too much, make it a
-  Field (weekly overview, 3 picks).
-- Whether "Language models" itself should be followed as a Field (a weekly overview of everything LLM), with Agents,
+- Agreed 2026-10-13: Chain-of-thought faithfulness sits under Interpretability and Chain-of-thought monitoring under
+  Alignment and safety, as now; a paper on both gets both classes. Alignment and safety is an Area (daily and weekly
+  digests). The owner is still reading the whole tree.
+- Open: whether "Language models" itself should be followed as a Field (a weekly overview of everything LLM), with Agents,
   Efficiency and Reasoning as its followed children.
