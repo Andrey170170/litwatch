@@ -117,10 +117,12 @@ class Schedule(_Section):
     enabled: bool = False
     nightly: str = "0 6 * * *"
     weekly: str = "0 7 * * 1"
+    # Publication lookup for library papers: new saves, and monthly re-checks (spec section 3).
+    publications: str = "30 9 * * *"
     # Decides which calendar date an issue belongs to. None is the server's own zone.
     timezone: str | None = None
 
-    @field_validator("nightly", "weekly")
+    @field_validator("nightly", "weekly", "publications")
     @classmethod
     def _cron(cls, value: str) -> str:
         # Checked at load, so one bad expression stops the start rather than one job.

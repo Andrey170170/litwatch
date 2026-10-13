@@ -303,10 +303,99 @@
         }
       }
     },
+    "/api/papers/{paper_id}/publication": {
+      "put": {
+        "summary": "Set Publication",
+        "description": "The owner names the published version by DBLP key or DOI, or says there is none.\nA lookup never overwrites it. A DOI DBLP does not know is kept with the arXiv entry.",
+        "operationId": "set_publication_api_papers__paper_id__publication_put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Publication"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Set Publication Api Papers  Paper Id  Publication Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Forget Publication",
+        "description": "Drop the stored version, the owner's choice included; the paper is looked up again.",
+        "operationId": "forget_publication_api_papers__paper_id__publication_delete",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/bibtex": {
       "post": {
         "summary": "Bibtex Selection",
-        "description": "BibTeX for chosen papers. M5 brings published records; until then, arXiv entries.",
+        "description": "BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the\npublished version as soon as DBLP has it; several use what is stored.",
         "operationId": "bibtex_selection_api_bibtex_post",
         "requestBody": {
           "required": true,
@@ -1581,6 +1670,134 @@
         }
       }
     },
+    "/api/settings/triage/{paper_id}/dismiss": {
+      "post": {
+        "summary": "Dismiss",
+        "description": "Litwatch drops the paper; it stays in the collection and the archive.",
+        "operationId": "dismiss_api_settings_triage__paper_id__dismiss_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/triage/{paper_id}": {
+      "put": {
+        "summary": "Triage By Hand",
+        "description": "The owner's own triage answers; the paper goes on to the keyword audit and grading.",
+        "operationId": "triage_by_hand_api_settings_triage__paper_id__put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswersIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Triage By Hand Api Settings Triage  Paper Id  Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/triage/{paper_id}/correction": {
+      "post": {
+        "summary": "Correct",
+        "description": "Fix the text triage choked on; the next run triages the corrected paper.",
+        "operationId": "correct_api_settings_triage__paper_id__correction_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/misses": {
       "get": {
         "summary": "Reported",
@@ -1972,6 +2189,22 @@
         "title": "Answer",
         "description": "One paper's answers. Fit for the topic it was drawn or taken for is required."
       },
+      "AnswersIn": {
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Answers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "title": "AnswersIn"
+      },
       "BibtexIn": {
         "properties": {
           "ids": {
@@ -2056,6 +2289,34 @@
         ],
         "title": "Chosen",
         "description": "The folded \"how this was chosen\" for one Watch topic."
+      },
+      "CorrectionIn": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstract"
+          }
+        },
+        "type": "object",
+        "title": "CorrectionIn"
       },
       "Digest": {
         "properties": {
@@ -2815,6 +3076,21 @@
             },
             "type": "array",
             "title": "Chosen"
+          },
+          "publication": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Publication"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publication_by_owner": {
+            "type": "boolean",
+            "title": "Publication By Owner",
+            "default": false
           }
         },
         "type": "object",
@@ -2996,6 +3272,169 @@
         ],
         "title": "Pick",
         "description": "A paper a review picked, with its sentence on why."
+      },
+      "Publication": {
+        "properties": {
+          "dblp_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dblp Key"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "misc"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          },
+          "container": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Container"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "title": "Publication",
+        "description": "The published record of a paper: what a BibTeX entry needs, as DBLP has it."
+      },
+      "PublicationIn": {
+        "properties": {
+          "dblp_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dblp Key"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "none": {
+            "type": "boolean",
+            "title": "None",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "PublicationIn",
+        "description": "The owner's correction: a DBLP key, a DOI, or that there is no published version."
       },
       "ReactionIn": {
         "properties": {

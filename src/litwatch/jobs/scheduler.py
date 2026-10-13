@@ -1,6 +1,6 @@
-"""The in-process scheduler: the nightly and weekly runs at their cron times, in the
-configured timezone. Off unless `[schedule] enabled = true`; nothing runs on a schedule
-before cutover (spec decision 22).
+"""The in-process scheduler: the nightly and weekly runs and the publication lookup at their
+cron times, in the configured timezone. Off unless `[schedule] enabled = true`; nothing runs
+on a schedule before cutover (spec decision 22).
 
 It keeps no state of its own. A job is due when its cron expression fired after the job's
 latest run on record, so a restart neither repeats a run nor forgets one. A fire missed by
@@ -21,9 +21,10 @@ from croniter import croniter
 
 from litwatch import store
 from litwatch.config import Config
-from litwatch.jobs import nightly, reviews
+from litwatch.jobs import nightly, publications, reviews
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
 from litwatch.jobs.lock import BusyError, run_lock
+from litwatch.publications import Dblp, PublicationSource
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +56,11 @@ def is_due(cron: str, now: datetime, last_run: datetime | None) -> bool:
     return last_run is None or last_run.astimezone(UTC) < fired
 
 
-def jobs(config: Config, gateway: GatewayFactory = default_gateway) -> list[Job]:
+def jobs(
+    config: Config,
+    gateway: GatewayFactory = default_gateway,
+    source: PublicationSource | None = None,
+) -> list[Job]:
     async def run_nightly(conn: psycopg.AsyncConnection) -> object:
         return await nightly.run(conn, config, gateway=gateway)
 
@@ -63,9 +68,14 @@ def jobs(config: Config, gateway: GatewayFactory = default_gateway) -> list[Job]
         async with run_lock(conn), model_run(conn, config, "weekly", gateway=gateway) as run:
             return await reviews.weekly(conn, config, run)
 
+    async def run_publications(conn: psycopg.AsyncConnection) -> object:
+        # No model calls and no run lock: it only reads DBLP and writes publications.
+        return await publications.run(conn, source or Dblp())
+
     return [
         Job("nightly", config.schedule.nightly, run_nightly),
         Job("weekly", config.schedule.weekly, run_weekly),
+        Job("publications", config.schedule.publications, run_publications),
     ]
 
 
@@ -104,11 +114,16 @@ async def tick(conn: psycopg.AsyncConnection, todo: list[Job], now: datetime) ->
     return ran
 
 
-async def run_forever(dsn: str, config: Config, gateway: GatewayFactory = default_gateway) -> None:
+async def run_forever(
+    dsn: str,
+    config: Config,
+    gateway: GatewayFactory = default_gateway,
+    source: PublicationSource | None = None,
+) -> None:
     """Tick until cancelled. Each tick opens its own connection, so a lost database is
     retried rather than fatal."""
-    todo = jobs(config, gateway)
-    log.info("scheduler on: nightly %r, weekly %r", config.schedule.nightly, config.schedule.weekly)
+    todo = jobs(config, gateway, source)
+    log.info("scheduler on: %s", ", ".join(f"{j.kind} {j.cron!r}" for j in todo))
     while True:
         try:
             async with await store.connect(dsn) as conn:

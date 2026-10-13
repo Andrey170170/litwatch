@@ -5,9 +5,17 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from litwatch.core import Grade, Hand, LabelValue, ReactionReason, ReactionValue, TopicKind
+from litwatch.core import (
+    Grade,
+    Hand,
+    LabelValue,
+    Publication,
+    ReactionReason,
+    ReactionValue,
+    TopicKind,
+)
 
 
 class Status(BaseModel):
@@ -185,6 +193,8 @@ class Paper(BaseModel):
     versions: list[dict[str, Any]] = Field(default_factory=list)  # arXiv versions seen
     triage: dict[str, Any] | None = None  # topic slug -> what triage said
     chosen: list[Chosen]
+    publication: Publication | None = None  # the published version, when one is known
+    publication_by_owner: bool = False  # the owner chose it (or chose "none")
 
 
 class Row(BaseModel):
@@ -263,6 +273,20 @@ class MissIn(BaseModel):
 
 class BibtexIn(BaseModel):
     ids: list[str]
+
+
+class PublicationIn(BaseModel):
+    """The owner's correction: a DBLP key, a DOI, or that there is no published version."""
+
+    dblp_key: str | None = None
+    doi: str | None = None
+    none: bool = False
+
+    @model_validator(mode="after")
+    def _one(self) -> PublicationIn:
+        if sum((bool(self.dblp_key), bool(self.doi), self.none)) != 1:
+            raise ValueError("give one of dblp_key, doi or none")
+        return self
 
 
 class SessionIn(BaseModel):

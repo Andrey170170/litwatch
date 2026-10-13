@@ -395,8 +395,9 @@ result (a miss), a migrated opinion, or the owner's word alone, and `lede(day)` 
 structured issues; the web app and exports render them.
 
 **publications.** `PublicationSource` protocol with a DBLP implementation over its SPARQL
-endpoint: find the preprint record by arXiv DOI, then records sharing its title and an author,
-and prefer the one that is not CoRR. `bibtex(paper)` renders either record. A wrong or missing
+endpoint: the record a DOI the authors gave arXiv names; else find the preprint record by arXiv
+DOI, then records sharing its title (DBLP's or the current arXiv one) and an author, and prefer
+the latest that is not CoRR. `bibtex(paper)` renders either record. A wrong or missing
 match can be corrected by hand and is then never overwritten.
 
 **feedback.** Stores labels, reactions, appraisals, take ratings, saves and unsaves, and misses, and resolves the
@@ -537,7 +538,7 @@ daily or weekly, lede, entries as paper, topic and take id in section order, so 
 one an old issue showed; review references), `labels` (paper, topic, value, grade, origin, provisional, at),
 `reactions` (paper, topic, value, reason, at), `appraisals` (paper, value: matters, fine or not for me, note, at),
 `take_ratings` (take, accurate or off, at), `calibration_sessions` (drawn at, seed, the papers in order, each with the topic and group it was drawn for
-or why it was taken, and the verdict current at the draw), `topic_visits` (topic, last opened at), `misses`, `publications`, `library` (paper, the owner's newest
+or why it was taken, and the verdict current at the draw), `topic_visits` (topic, last opened at), `misses`, `publications` (paper, the published record or none, whether the owner set it, first and last looked up), `library` (paper, the owner's newest
 save or unsave, at, whether it is saved now), `effective_grades` (paper, Watch topic, grade: kept so a change is
 noticed and every surface reads one answer), `outbox`,
 `integration_cursors`, `eval_runs` (when, the configuration and models used, topic versions)
@@ -649,10 +650,15 @@ saved and monthly after, a single paper on Copy BibTeX), so it sends one query a
 a User-Agent naming litwatch. If that access closes or the volume grows, the fallback is a local index built from
 DBLP's dump, or a self-hosted dblp SPARQL instance as dblp suggests.
 
-Matching: locate the preprint record by its arXiv DOI; take DBLP's own title and author list
-from it; find other records with that title and at least one shared author; choose the
-non-CoRR one, the earliest if several. A paper retitled at publication is not found this way;
-the Paper page lets the owner paste a DOI or DBLP key instead.
+Matching: a DOI the authors gave arXiv names the published record directly. Otherwise locate
+the preprint record by its arXiv DOI; take DBLP's own title and author list from it; find other
+records with that title, or the paper's current arXiv title, and at least one shared author;
+choose the non-CoRR one, the latest if several (a poster or workshop version comes before the
+full paper). CoRR keeps the first version's title, and authors often retitle a later version to
+match the publication, hence the second title. A paper retitled only at publication is not found
+this way; the Paper page lets the owner paste a DOI or DBLP key instead. Checked 2026-10-12 on
+50 cs.CL preprints from 2024 whose own DOI DBLP knows, matching alone: 45 right, 5 missed
+(4 retitled at publication, 1 DBLP author identity split), none wrong.
 
 ## 7. Moving from 0.14
 

@@ -337,3 +337,20 @@ class Event(BaseModel):
     paper_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
+
+
+class Publication(BaseModel):
+    """The published record of a paper: what a BibTeX entry needs, as DBLP has it."""
+
+    dblp_key: str | None = None  # e.g. conf/nips/VaswaniSPUJGKP17
+    title: str | None = None
+    authors: list[str] = Field(default_factory=list)
+    kind: str = "misc"  # the BibTeX type: inproceedings, article, ...
+    venue: str | None = None  # the short name: NeurIPS, TMLR
+    container: str | None = None  # the proceedings' title or the journal's name
+    volume: str | None = None
+    number: str | None = None
+    pages: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    url: str | None = None
