@@ -214,7 +214,15 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
             **{
                 k: t[k]
                 for k in (
-                    "slug", "name", "kind", "colour", "grade", "take", "member", "by_owner", "missed"
+                    "slug",
+                    "name",
+                    "kind",
+                    "colour",
+                    "grade",
+                    "take",
+                    "member",
+                    "by_owner",
+                    "missed",
                 )
             },
             grading=t["grading"] and t["grade"] is None,

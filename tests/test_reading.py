@@ -439,7 +439,7 @@ async def test_bibtex_covers_papers_a_provider_found_outside_the_collection(clie
 
 
 async def test_important_for_a_field_saves_reacts_and_makes_the_owners_member(client, conn):
-    """"Important for <field>" (M7): the paper joins the library, gets a thumb up for the
+    """ "Important for <field>" (M7): the paper joins the library, gets a thumb up for the
     field, and is the field's member as the owner's addition; triage leaves it alone, the
     page and the table say so, and taking it back drops the membership and the thumb only."""
     from litwatch.core import TopicKind
@@ -481,7 +481,9 @@ async def test_triage_and_the_owner_each_hold_their_own_membership(client, conn)
 
     async def membership():
         return await (
-            await conn.execute("SELECT by_triage, by_owner FROM memberships WHERE paper_id = %s", (Q.id,))
+            await conn.execute(
+                "SELECT by_triage, by_owner FROM memberships WHERE paper_id = %s", (Q.id,)
+            )
         ).fetchone()
 
     q = await papers_store.get(conn, Q.id)
@@ -556,6 +558,7 @@ async def test_taking_important_back_waits_for_an_action_in_flight(client, conn)
 async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     """Taking a miss back withdraws the owner's word; reporting again gives it back, keeping
     the miss and its trace, and never over a correction the owner made since."""
+
     async def faith():
         # A topic with nothing to say about the paper is left off the page.
         page = (await client.get(f"/api/papers/{Q.id}")).json()
@@ -569,7 +572,9 @@ async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     ack = await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     assert ack.json()["message"].startswith("Already reported as missed")
     assert (await faith())["missed"] and (await faith())["label"]["origin"] == "miss"
-    assert [m["id"] for m in await (await conn.execute("SELECT id FROM misses")).fetchall()] == [miss["id"]]
+    assert [m["id"] for m in await (await conn.execute("SELECT id FROM misses")).fetchall()] == [
+        miss["id"]
+    ]
     # A correction since stands: the owner said it is not relevant after all.
     await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "not_relevant"})
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
