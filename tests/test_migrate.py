@@ -12,8 +12,10 @@ from litwatch.feedback import calibrate, seed
 from litwatch.jobs import migrate
 from litwatch.llm import Gateway
 from litwatch.store import feedback as feedback_store
+from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
-from tests.conftest import TOPICS
+from litwatch.store import triage as triage_store
+from tests.conftest import TOPICS, paper
 from tests.fakes import ScriptedProvider
 
 LONG_AGO = datetime(2026, 9, 1, tzinfo=UTC)
@@ -155,9 +157,26 @@ async def test_tiers_become_migrated_verdicts_memberships_and_two_takes(adopted)
     assert session["items"] == []
 
     again = await migrate.from_0x(conn, Config(), writer.gateway)
-    assert again["verdicts"] == {} and again["memberships"] == again["regression"] == 0
-    assert (again["triaged"], again["takes"]) == (0, 0)
+    assert "verdicts" not in again and "triaged" not in again and again["takes"] == 0
     assert again["settled"]["grades_changed"] == 0
+    assert len(await rows(conn, "SELECT id FROM verdicts")) == 4
+
+
+async def test_a_run_cut_off_before_the_writer_resumes_without_triaging_new_papers(adopted):
+    conn, writer = adopted, Writer()
+
+    def down(config, journal):
+        raise RuntimeError("cut off")
+
+    with pytest.raises(RuntimeError, match="cut off"):
+        await migrate.from_0x(conn, Config(), down)
+    # Tonight's intake lands before the retry.
+    await papers_store.upsert(conn, [paper("2610.99999")])
+
+    counts = await migrate.from_0x(conn, Config(), writer.gateway)
+    assert "resumed_after_run" in counts and counts["takes"] == 2
+    assert await rows(conn, "SELECT * FROM triage WHERE paper_id = '2610.99999'") == []
+    assert [p.id for p in await triage_store.untriaged(conn)] == ["2610.99999"]
     assert len(await rows(conn, "SELECT id FROM verdicts")) == 4
 
 
