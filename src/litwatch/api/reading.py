@@ -25,7 +25,7 @@ from litwatch.core import (
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
 from litwatch.jobs import publications as lookups
-from litwatch.jobs import reviews as review_jobs
+from litwatch.jobs import scheduler
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
@@ -120,7 +120,7 @@ async def issue(issue_id: int, request: Request, c: Conn) -> s.Issue:
 def _review(row: Any, schedule: Any) -> s.Review:
     return s.Review(
         will_retry=row["state"] == "failed"
-        and review_jobs.will_retry(schedule, row["period"], row["day"]),
+        and scheduler.will_retry(schedule, row["period"], row["day"]),
         period=row["period"],
         day=row["day"],
         state=row["state"],
@@ -137,7 +137,7 @@ async def _recap(c: psycopg.AsyncConnection, row: Any, monday: date, schedule: A
     set_aside = await reviews_store.week_set_aside(c, topic, since, until)
     missed = await reviews_store.week_misses(c, topic, since, until)
     return s.Recap(
-        will_retry=row["state"] == "failed" and review_jobs.will_retry(schedule, "week", monday),
+        will_retry=row["state"] == "failed" and scheduler.will_retry(schedule, "week", monday),
         state=row["state"],
         text=row["text"],
         papers=[s.Listed(**{k: e[k] for k in s.Listed.model_fields}) for e in entries],

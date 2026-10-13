@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from litwatch.api import create_app
-from litwatch.config import Config
+from litwatch.config import Config, Schedule
 from litwatch.core import (
     Cadence,
     Grade,
@@ -20,7 +20,7 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.feedback import word
-from litwatch.jobs import digest, reviews
+from litwatch.jobs import digest, reviews, scheduler
 from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, ProviderError
 from litwatch.review import reviews as review_calls
@@ -427,9 +427,18 @@ async def test_a_topics_reviews_run_newest_span_first_whatever_was_rewritten_las
 
 
 def test_a_failed_review_is_promised_a_retry_only_while_the_next_run_makes_it():
-    schedule = Config().schedule
-    today, monday = schedule.today(), schedule.week_of(schedule.today())
-    assert reviews.will_retry(schedule, "day", today - timedelta(days=6))
-    assert not reviews.will_retry(schedule, "day", today - timedelta(days=7))
-    assert reviews.will_retry(schedule, "week", monday - timedelta(days=7))
-    assert not reviews.will_retry(schedule, "week", monday - timedelta(days=14))
+    schedule = Config(schedule=Schedule(timezone="America/Denver")).schedule
+    zone = schedule.zone
+
+    def retried(period, day, at):
+        return scheduler.will_retry(schedule, period, date.fromisoformat(day), at)
+
+    early = datetime(2026, 10, 12, 5, tzinfo=zone)  # Monday, before the 06:00 and 07:00 runs
+    late = datetime(2026, 10, 12, 8, tzinfo=zone)  # the same Monday, after both
+    # The nightly at 06:00 today retries the days from 5 October; tomorrow's from 6 October.
+    assert retried("day", "2026-10-05", early) and not retried("day", "2026-10-04", early)
+    assert not retried("day", "2026-10-05", late) and retried("day", "2026-10-06", late)
+    # Today's weekly run reviews the week of 5 October and retries 28 September's.
+    assert retried("week", "2026-09-28", early) and not retried("week", "2026-09-21", early)
+    # After it, the next (19 October) retries 5 October's week and no longer 28 September's.
+    assert retried("week", "2026-10-05", late) and not retried("week", "2026-09-28", late)
