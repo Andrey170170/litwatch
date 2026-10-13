@@ -5,9 +5,9 @@ the configured categories is stored; a cheap model triages each one against your
 keyword audit catches what the model drops, and two models from different labs grade every
 candidate for a Watch topic.
 
-This branch is v1 in progress. The design is in `docs/v1/SPEC.md`; milestones 0 to 2 are
-built (collection, model gateway, Watch pipeline and its evaluation). The web app, weekly
-reviews, published versions and integrations are not. Release 0.14 lives on `main`.
+This branch is v1 in progress. The specification is in `docs/v1/spec/` and the terms in
+`GLOSSARY.md`; milestones M0 to M6 of the first v1 design are built, and the core is being
+redesigned (classes, detail levels, digests per depth) before the switch. Release 0.14 lives on `main`.
 
 ## Setup
 
