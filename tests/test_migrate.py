@@ -113,7 +113,7 @@ async def rows(conn, query: str, *params):
 
 async def test_tiers_become_migrated_verdicts_memberships_and_two_takes(adopted):
     conn, writer = adopted, Writer()
-    counts = await migrate.from_0x(conn, Config(), writer.gateway)
+    counts = await migrate.from_0x(conn, Config(), writer.gateway, leave_behind=True)
 
     assert counts["verdicts"] == {"must_read": 1, "relevant": 1, "adjacent": 1, "none": 1}
     assert (counts["memberships"], counts["regression"], counts["triaged"]) == (2, 3, 7)
@@ -156,7 +156,7 @@ async def test_tiers_become_migrated_verdicts_memberships_and_two_takes(adopted)
     session = await calibrate.session(conn, await calibrate.draw(conn, seed=1))
     assert session["items"] == []
 
-    again = await migrate.from_0x(conn, Config(), writer.gateway)
+    again = await migrate.from_0x(conn, Config(), writer.gateway, leave_behind=True)
     assert "verdicts" not in again and "triaged" not in again and again["takes"] == 0
     assert again["settled"]["grades_changed"] == 0
     assert len(await rows(conn, "SELECT id FROM verdicts")) == 4
@@ -169,11 +169,11 @@ async def test_a_run_cut_off_before_the_writer_resumes_without_triaging_new_pape
         raise RuntimeError("cut off")
 
     with pytest.raises(RuntimeError, match="cut off"):
-        await migrate.from_0x(conn, Config(), down)
+        await migrate.from_0x(conn, Config(), down, leave_behind=True)
     # Tonight's intake lands before the retry.
     await papers_store.upsert(conn, [paper("2610.99999")])
 
-    counts = await migrate.from_0x(conn, Config(), writer.gateway)
+    counts = await migrate.from_0x(conn, Config(), writer.gateway, leave_behind=True)
     assert "resumed_after_run" in counts and counts["takes"] == 2
     assert await rows(conn, "SELECT * FROM triage WHERE paper_id = '2610.99999'") == []
     assert [p.id for p in await triage_store.untriaged(conn)] == ["2610.99999"]
@@ -192,17 +192,26 @@ async def test_it_will_not_leave_provisional_labels_beside_the_migrated_verdicts
         ),
     )
     with pytest.raises(migrate.MigrationError, match="provisional labels"):
-        await migrate.from_0x(conn, Config(), Writer().gateway)
+        await migrate.from_0x(conn, Config(), Writer().gateway, leave_behind=True)
     await conn.execute("DELETE FROM labels")
 
-    await migrate.from_0x(conn, Config(), Writer().gateway)
+    await migrate.from_0x(conn, Config(), Writer().gateway, leave_behind=True)
     with pytest.raises(RuntimeError, match="migrate-0x"):
         await seed.from_legacy_verdicts(conn)
 
 
 async def test_it_needs_an_adopted_database_with_watch_topics(conn):
     with pytest.raises(migrate.MigrationError, match="db adopt"):
-        await migrate.from_0x(conn, Config(), Writer().gateway)
+        await migrate.from_0x(conn, Config(), Writer().gateway, leave_behind=True)
     await as_0x(conn)
     with pytest.raises(migrate.MigrationError, match="topics import"):
-        await migrate.from_0x(conn, Config(), Writer().gateway)
+        await migrate.from_0x(conn, Config(), Writer().gateway, leave_behind=True)
+
+
+async def test_a_selection_without_a_v1_topic_stops_the_migration_until_left_behind(adopted):
+    conn, writer = adopted, Writer()
+    with pytest.raises(migrate.MigrationError, match="old-selection"):
+        await migrate.from_0x(conn, Config(), writer.gateway)
+    assert await rows(conn, "SELECT * FROM verdicts") == []  # nothing migrated, no marker
+    counts = await migrate.from_0x(conn, Config(), writer.gateway, leave_behind=True)
+    assert counts["left_behind"] == ["old-selection"]

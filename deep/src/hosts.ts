@@ -46,7 +46,7 @@ export function storeHits(body: { rows?: PaperRow[]; outside?: PaperRow[] }): St
     title: row.title,
     authors: row.authors ?? [],
     published: row.published ?? null,
-    tier: (row.grade && TIERS[row.grade]) || null,
+    tier: row.grade && Object.hasOwn(TIERS, row.grade) ? TIERS[row.grade]! : null,
     reason: row.take ?? null,
     in_collection: inCollection,
   });
@@ -107,7 +107,14 @@ async function getJson(url: string, headers: Record<string, string> = {}): Promi
   const host = new URL(url).host;
   return paced(host, () =>
     withRetry(async () => {
-      const resp = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+      // A request carrying a token refuses redirects, so the token never goes anywhere else.
+      const carriesToken = Object.keys(headers).some((h) => h.toLowerCase() === "authorization");
+      const resp = await fetch(url, {
+        headers,
+        redirect: carriesToken ? "manual" : "follow",
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (resp.status >= 300 && resp.status < 400) throw new Error(`${url}: redirected (HTTP ${resp.status})`);
       if (resp.status === 429 || resp.status >= 500)
         throw new RetryableError(`${host} answered ${resp.status}`);
       if (!resp.ok) throw new Error(`${url}: HTTP ${resp.status}`);
@@ -126,6 +133,7 @@ export function buildHosts(cfg: HostConfig): Record<string, HostFn> {
       const n = Math.min(Math.max(Number(limit) || 10, 1), 50);
       const q = new URLSearchParams({ q: String(query), limit: String(n) });
       const body = await getJson(`${cfg.litwatchUrl}/api/papers?${q}`, litwatchHeaders);
+      if (!body || typeof body !== "object") throw new Error("litwatch's papers answer is not an object");
       return storeHits(body as Parameters<typeof storeHits>[0]).slice(0, n);
     },
     "s2.lookup": async ([q]) => {

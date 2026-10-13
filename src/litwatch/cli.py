@@ -87,14 +87,21 @@ def db_adopt(
 
 
 @db_app.command("migrate-0x")
-def db_migrate_0x(config: ConfigPath = None) -> None:
+def db_migrate_0x(
+    leave_behind: Annotated[
+        bool, typer.Option(help="Migrate even though some 0.x selections have no v1 topic.")
+    ] = False,
+    config: ConfigPath = None,
+) -> None:
     """Carry 0.14's verdicts into v1, once, after `db adopt` and `topics import`: Watch tiers
     become migrated verdicts with a take for each positive, Radar and Pulse tiers 1 to 3 become
     memberships, every stored paper counts as triaged. Nothing is announced in an issue.
     Running it again adds nothing."""
     cfg = configuration.load(config)
     try:
-        console.print_json(data=_run(lambda conn: migrate_job.from_0x(conn, cfg)))
+        console.print_json(
+            data=_run(lambda conn: migrate_job.from_0x(conn, cfg, leave_behind=leave_behind))
+        )
     except migrate_job.MigrationError as exc:
         raise SystemExit(str(exc)) from exc
 

@@ -53,7 +53,11 @@ async def _data_run(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
 
 
 async def from_0x(
-    conn: psycopg.AsyncConnection, config: Config, gateway: GatewayFactory = default_gateway
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    gateway: GatewayFactory = default_gateway,
+    *,
+    leave_behind: bool = False,
 ) -> dict[str, Any]:
     """Migrate an adopted 0.x database whose topics are imported.
 
@@ -78,6 +82,12 @@ async def from_0x(
         )
     async with run_lock(conn):
         done = await _data_run(conn)
+        if not done and not leave_behind and (missing := await legacy.unmatched(conn)):
+            # The data phase runs once: a selection skipped now is never migrated later.
+            raise MigrationError(
+                f"0.x selections with no v1 topic: {', '.join(missing)}; import their topics, "
+                "or pass --leave-behind to drop them for good"
+            )
         if done:
             counts: dict[str, Any] = {"resumed_after_run": done["id"]}
         else:
