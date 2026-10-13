@@ -228,3 +228,32 @@ async def correct(
         await conn.execute("DELETE FROM triage WHERE paper_id = %s", (paper_id,))
         await events.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
     return True
+
+
+async def body(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str, str | None] | None:
+    """The fetched full text and where it came from (`html` or `pdf`), when there is one for
+    the paper's current revision and arXiv version. A text from before a rewrite or a new
+    version is stale and not returned; one fetched by 0.x, which kept neither, counts as the
+    first revision of whatever version is known."""
+    row = await (
+        await conn.execute(
+            "SELECT body, body_source FROM papers WHERE id = %s AND body IS NOT NULL "
+            "AND body_revision = revision AND body_version IS NOT DISTINCT FROM version",
+            (paper_id,),
+        )
+    ).fetchone()
+    return (row["body"], row["body_source"]) if row else None
+
+
+async def set_body(conn: psycopg.AsyncConnection, paper: Paper, text: str, source: str) -> bool:
+    """Store the full text fetched for `paper`, stamped with that paper's revision and
+    version. Stored only if the paper is still at both: intake may have revised it while the
+    text was being fetched, and then the text belongs to nothing current. Returns whether it
+    was stored."""
+    cur = await conn.execute(
+        "UPDATE papers SET body = %s, body_source = %s, body_fetched_at = now(), "
+        "body_revision = %s, body_version = %s "
+        "WHERE id = %s AND revision = %s AND version IS NOT DISTINCT FROM %s",
+        (text, source, paper.revision, paper.version, paper.id, paper.revision, paper.version),
+    )
+    return cur.rowcount > 0

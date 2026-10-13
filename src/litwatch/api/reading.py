@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import psycopg
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 
 from litwatch import store
+from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, set_token_cookie, token_ok
 from litwatch.core import (
@@ -20,6 +21,7 @@ from litwatch.core import (
     Publication,
     Reaction,
     ReactionReason,
+    SearchFilters,
     TopicKind,
 )
 from litwatch.feedback import misses, word
@@ -159,6 +161,7 @@ def _ref(topic: Any) -> s.TopicRef:
 
 @router.get("/papers")
 async def papers(
+    request: Request,
     c: Conn,
     q: str | None = None,
     topic: str | None = None,
@@ -166,21 +169,32 @@ async def papers(
     saved: bool | None = None,
     year: int | None = None,
     sort: str | None = None,
+    source: Literal["collection", "outside"] | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> s.Papers:
-    rows, total = await reading.papers(
-        c,
-        q=q,
-        topic=topic,
-        adjacent=adjacent,
-        saved=saved,
-        year=year,
-        sort=sort,
-        limit=limit,
-        offset=offset,
-    )
-    return s.Papers(rows=[s.Row(**r) for r in rows], total=total)
+    """The table. A search also asks the search providers, on its first page, for papers the
+    collection lacks: the `outside` band. Topic and saved belong to the collection, so with
+    either filter set there is no outside band; `source` keeps one band only."""
+    rows, total = [], 0
+    if source != "outside":
+        found, total = await reading.papers(
+            c,
+            q=q,
+            topic=topic,
+            adjacent=adjacent,
+            saved=saved,
+            year=year,
+            sort=None if sort == "best" else sort,
+            limit=limit,
+            offset=offset,
+        )
+        rows = [s.Row(**r) for r in found]
+    outside, left_out = [], []
+    if q and offset == 0 and source != "collection" and not topic and saved is not True:
+        filters = SearchFilters(year=year, limit=limit)
+        outside, left_out = await integrations_api.search_outside(request, c, q, filters, sort)
+    return s.Papers(rows=rows, total=total, outside=outside, left_out=left_out)
 
 
 # Paper fields built below rather than copied from the row.
@@ -188,7 +202,7 @@ _SET_HERE = {"topics", "reaction", "reaction_reason", "history", "triage", "chos
 
 
 @router.get("/papers/{paper_id:path}")
-async def paper(paper_id: str, c: Conn) -> s.Paper:
+async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
     found = await reading.paper(c, paper_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such paper")
@@ -205,6 +219,7 @@ async def paper(paper_id: str, c: Conn) -> s.Paper:
     ]
     answers = (found["triage"] or {}).get("answers") or None
     published = await publications_store.get(c, paper_id)
+    card, card_requestable = await integrations_api.card(request, c, paper_id)
     return s.Paper(
         **{k: found[k] for k in s.Paper.model_fields if k in found and k not in _SET_HERE},
         arxiv_url=f"https://arxiv.org/abs/{paper_id}",
@@ -218,6 +233,8 @@ async def paper(paper_id: str, c: Conn) -> s.Paper:
         chosen=[s.Chosen(**v) for v in found["verdicts"]],
         publication=published["record"] if published else None,
         publication_by_owner=bool(published and published["by_owner"]),
+        card=card,
+        card_requestable=card_requestable,
     )
 
 

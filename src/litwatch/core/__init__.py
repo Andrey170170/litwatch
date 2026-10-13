@@ -9,6 +9,12 @@ from litwatch.core.rules import (
     reconcile,
     rewritten,
 )
+from litwatch.core.search import (
+    SEARCH_TIMEOUT_SECONDS,
+    SearchFilters,
+    SearchHit,
+    SearchProvider,
+)
 from litwatch.core.types import (
     Cadence,
     Candidate,
@@ -36,6 +42,7 @@ from litwatch.core.types import (
 )
 
 __all__ = [
+    "SEARCH_TIMEOUT_SECONDS",
     "Cadence",
     "Candidate",
     "CandidateState",
@@ -52,6 +59,9 @@ __all__ = [
     "Reaction",
     "ReactionReason",
     "ReactionValue",
+    "SearchFilters",
+    "SearchHit",
+    "SearchProvider",
     "Status",
     "Take",
     "TakeSource",

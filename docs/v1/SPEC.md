@@ -428,7 +428,7 @@ Grading the non-candidates is what keeps a triage miss from being counted as a g
 there is no separate label file.
 
 **events.** A transactional outbox: a pipeline step writes its event in the same transaction as
-its data. `Integration` protocol: `name`, `wants(event)`, `handle(event)`, idempotent. A
+its data. `Integration` protocol: `name`, `wants(event)`, `handle(conn, event)`, idempotent (the connection lets it read through the repositories and emit events of its own). A
 dispatcher delivers per integration with its own cursor, retries with backoff, and exposes
 failures to the API.
 
@@ -790,10 +790,21 @@ reading the outbox from its current end, so the events of an initial `library sy
 written from `docs/integrations.md` without editing any other package.
 
 **M7 · Migration and cutover.** Data migration, a week side by side, switch production.
-*Check:* the cutover rule in section 7.
+Decided 2026-10-12 while building M6: the Zotero subcollections keep 0.x's names ("Tier 1",
+"Tier 2", which hold the existing items) until cutover, and are renamed or moved to the v1 grades
+during or after it; the deep-card service gets its own token, valid only for search, before deep
+is enabled (its 0.x search callback has no v1 route, and the archive will grow into a larger
+service of its own). Two things to watch at cutover, from M6: integrations deliver only events
+below the cluster's oldest open transaction, so v1's Postgres should not be shared with services
+that hold transactions open (the stall shows as lag on the integration cards); and a resumed WebDAV
+upload patches the Zotero attachment's md5 and mtime, which is checked once against the real
+library. *Check:* the cutover rule in section 7.
 
 **M8 · Release.** Compose file, install and configuration docs, repository clean-up, MIT
-licence, `v1.0.0`. The clean-up, decided 2026-10-12:
+licence, `v1.0.0`. The optional `pdf` extra (`pymupdf4llm`, PDF text for deep cards) is AGPL:
+the repository stays MIT, the README says that installing the extra puts a build under AGPL
+terms (source must be offered to anyone it is distributed or served to), and the default image
+leaves it out. The clean-up, decided 2026-10-12:
 
 - `evals/` (the owner's labels, trial reports, paper lists) moves out of the repository to private storage.
 - Homelab specifics go: the 0.x `docs/ARCHIVE-*.md` notes, server paths, internal host names and addresses, and any
