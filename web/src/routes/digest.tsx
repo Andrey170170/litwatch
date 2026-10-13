@@ -3,7 +3,10 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api, ok, type Entry as EntryT, type Issue, type IssueSummary, type Section as SectionT } from "@/api/client";
 import { issueQuery } from "@/api/queries";
+import { scheduleQuery } from "@/api/settings";
+import { fireWords } from "@/lib/schedule";
 import { PaperView } from "@/components/PaperView";
+import { RecapView, ReviewView } from "@/components/Review";
 import { GearLink } from "@/components/Shell";
 import { StatusText } from "@/components/StatusChip";
 import { Thumbs } from "@/components/Thumbs";
@@ -34,27 +37,30 @@ export function DigestPage() {
   const issues = useMemo(() => feed.data?.pages.flatMap((p) => p.issues) ?? [], [feed.data]);
   const weekly = first?.weekly ?? null;
 
-  const newest = issues[0];
+  // The newest issue opens by default: the weekly one when no daily issue exists yet.
+  const newest = issues[0] ?? weekly ?? undefined;
   // The issue asked for is loaded by id, whether or not the feed's first page lists it.
   const openId = search.issue ?? newest?.id;
   const open = useQuery({ ...issueQuery(openId ?? 0), enabled: openId !== undefined });
   const openDay = open.data?.day ?? [weekly, ...issues].find((i) => i?.id === openId)?.day;
 
   const today = localDay(new Date());
-  // "nothing new since" when the newest issue is older than today and no older one was asked for.
-  const stale = newest && !search.issue && newest.day < today ? newest.day : null;
+  // "nothing new since" when the newest daily issue is older than today and no older one was
+  // asked for. A weekly issue opened for want of a daily one keeps its week as its heading.
+  const stale = newest && newest.kind !== "weekly" && !search.issue && newest.day < today ? newest.day : null;
   const mastDate = stale ? today : openDay;
+  // A weekly issue is headed by its week, not the Monday it was built on.
+  const openWeekly = !stale && (open.data?.kind ?? [weekly, ...issues].find((i) => i?.id === openId)?.kind) === "weekly";
+  const mastText = mastDate ? (openWeekly ? fmt.week(mastDate) : fmt.issueDay(mastDate)) : "";
 
   return (
     <div className={cn(desktop && "grid min-h-[calc(100dvh-49px)] grid-cols-2")}>
       <div className={cn(desktop && "border-r border-border")}>
-        {!desktop && (
-          <Masthead date={mastDate} stale={stale} />
-        )}
+        {!desktop && <Masthead text={mastText} stale={stale} />}
         <div className="mx-auto max-w-[700px] px-4 pt-4 pb-10 desk:px-7 desk:pt-6">
           {desktop && mastDate && (
             <h1 className="font-serif text-[30px] leading-[1.1] font-semibold tracking-[-.015em]">
-              {fmt.issueDay(mastDate)}
+              {mastText}
               {stale && <span className="ml-3 font-sans text-[13px] font-normal text-muted-foreground">nothing new since {fmt.weekday(stale)}</span>}
             </h1>
           )}
@@ -62,11 +68,7 @@ export function DigestPage() {
 
           {feed.isPending && <p className="meta mt-6">Opening the paper…</p>}
           {feed.isError && <p className="mt-6 text-destructive">The Digest could not be loaded.</p>}
-          {first && !newest && !weekly && (
-            <p className="mt-8 font-serif text-[17px] text-body">
-              No issue yet. The first one is written after the first nightly run.
-            </p>
-          )}
+          {first && !newest && !weekly && <FirstIssue />}
           {open.isError && <p className="mt-6 text-destructive">No such issue.</p>}
           {open.data && <IssueView issue={open.data} openPaper={desktop ? search.paper : undefined} />}
 
@@ -102,19 +104,32 @@ export function DigestPage() {
   );
 }
 
+/** Before any issue exists: when the first run is, if one is scheduled. */
+function FirstIssue() {
+  const schedule = useQuery(scheduleQuery);
+  const s = schedule.data;
+  const nightly = s?.enabled ? s.jobs.find((j) => j.kind === "nightly") : undefined;
+  return (
+    <p className="mt-8 font-serif text-[17px] text-body">
+      No issue yet. The first one is written after the first nightly run
+      {nightly ? `, ${fireWords(nightly.next, s!.zone)}` : ""}.
+    </p>
+  );
+}
+
 function paperTopic(issue: Issue | undefined, paperId: string): string | undefined {
   return issue?.sections.find((s) => s.entries.some((e) => e.paper_id === paperId))?.topic.slug;
 }
 
 /** The masthead on the phone: brand, a double rule, and the printer's line. */
-function Masthead({ date, stale }: { date: string | undefined; stale: string | null }) {
+function Masthead({ text, stale }: { text: string; stale: string | null }) {
   return (
     <div className="relative border-b-[3px] border-double border-foreground px-4 pt-[18px] pb-2.5 text-center">
       <span className="block font-serif text-[28px] leading-none font-bold tracking-[.06em]">Litwatch</span>
       <GearLink className="absolute top-2 right-2" />
       <div className="mt-2 flex flex-wrap justify-between gap-x-2.5 text-[11px] tracking-[.07em] text-muted-foreground uppercase">
         <span className="whitespace-nowrap">
-          {date ? fmt.issueDay(date) : ""}
+          {text}
           {stale && ` · nothing new since ${fmt.weekday(stale)}`}
         </span>
         <StatusText uppercase />
@@ -159,7 +174,7 @@ function IssueView({ issue, openPaper }: { issue: Issue; openPaper: string | und
     <article>
       {issue.lede && <p className="mt-3 font-serif text-[16px] leading-[1.45] text-body desk:text-[17px]">{issue.lede}</p>}
       {issue.sections.map((s) => (
-        <Section key={s.topic.slug} section={s} openPaper={openPaper} />
+        <Section key={s.topic.slug} section={s} kind={issue.kind} openPaper={openPaper} />
       ))}
       {issue.sections.length === 0 && (
         <p className="mt-6 font-serif text-[16px] text-body">Nothing new for any topic.</p>
@@ -173,9 +188,13 @@ function IssueView({ issue, openPaper }: { issue: Issue; openPaper: string | und
   );
 }
 
-function Section({ section, openPaper }: { section: SectionT; openPaper: string | undefined }) {
+/** One topic's section: entries for Watch, a review for Radar and Pulse, a recap in a weekly issue. */
+function Section({ section, kind, openPaper }: { section: SectionT; kind: Issue["kind"]; openPaper: string | undefined }) {
   const colour = topicColour(section.topic.colour);
   const near = section.near ?? 0;
+  const review = section.review ?? null;
+  const recap = section.recap ?? null;
+  const empty = section.entries.length === 0 && !review && !recap;
   return (
     <section className="mt-[26px]">
       <h2
@@ -185,11 +204,11 @@ function Section({ section, openPaper }: { section: SectionT; openPaper: string 
         <Link to="/topics/$slug" params={{ slug: section.topic.slug }}>
           {section.topic.name}
         </Link>
-        {section.topic.kind !== "watch" && <small className="font-sans text-[13px] font-normal" style={{ color: colour }}>daily</small>}
+        {kind === "daily" && review && <small className="font-sans text-[13px] font-normal" style={{ color: colour }}>today's review</small>}
       </h2>
-      {section.entries.length === 0 && (
-        <p className="mt-1.5 text-[14px] text-muted-foreground">Nothing new for {section.topic.name}.</p>
-      )}
+      {empty && <p className="mt-1.5 text-[14px] text-muted-foreground">Nothing new for {section.topic.name}.</p>}
+      {recap && <RecapView recap={recap} topic={section.topic} surface="digest" />}
+      {review && <ReviewView review={review} topic={section.topic} surface="digest" />}
       {section.entries.map((e) => (
         <EntryView key={e.paper_id} entry={e} open={openPaper === e.paper_id} />
       ))}

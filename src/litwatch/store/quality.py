@@ -59,6 +59,23 @@ async def ungraded(conn: psycopg.AsyncConnection, attempts: int) -> list[dict[st
     )
 
 
+async def failed_reviews(conn: psycopg.AsyncConnection, since: Any) -> list[dict[str, Any]]:
+    """Reviews and recaps that failed and have not been written since, for a day or week in
+    the seven days before `since`: the same window the status line counts (reading.status).
+    The next run tries them again."""
+    return await _all(
+        conn,
+        """
+        SELECT r.topic, t.name AS topic_name, r.kind, r.period, r.day, r.error
+        FROM reviews r JOIN topics t ON t.slug = r.topic
+        WHERE r.state = 'failed'
+          AND r.day >= %s::date - CASE r.period WHEN 'week' THEN 13 ELSE 7 END
+        ORDER BY r.day DESC, t.position
+        """,
+        (since,),
+    )
+
+
 async def awaiting_triage(conn: psycopg.AsyncConnection, attempts: int) -> list[dict[str, Any]]:
     return await _all(
         conn,

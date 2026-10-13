@@ -1888,6 +1888,24 @@
         }
       }
     },
+    "/api/settings/schedule": {
+      "get": {
+        "summary": "Schedule",
+        "operationId": "schedule_api_settings_schedule_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/config": {
       "get": {
         "summary": "Config",
@@ -2778,6 +2796,26 @@
           "title": {
             "type": "string",
             "title": "Title"
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reaction_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -2785,7 +2823,8 @@
           "paper_id",
           "title"
         ],
-        "title": "Listed"
+        "title": "Listed",
+        "description": "A paper named in a recap, with the owner's thumb on it for the recap's topic."
       },
       "Lookup": {
         "properties": {
@@ -2835,6 +2874,30 @@
           "topic"
         ],
         "title": "MissIn"
+      },
+      "NextFire": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "cron": {
+            "type": "string",
+            "title": "Cron"
+          },
+          "next": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "cron",
+          "next"
+        ],
+        "title": "NextFire"
       },
       "Opinion": {
         "properties": {
@@ -3262,6 +3325,26 @@
             "type": "boolean",
             "title": "Saved",
             "default": false
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reaction_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3751,6 +3834,33 @@
           "saved"
         ],
         "title": "SaveIn"
+      },
+      "ScheduleOut": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "zone": {
+            "type": "string",
+            "title": "Zone"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/NextFire"
+            },
+            "type": "array",
+            "title": "Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "zone",
+          "jobs"
+        ],
+        "title": "ScheduleOut",
+        "description": "The schedule as the Runs page shows it: whether it is on, the zone the cron times are\nread in, and when each job next fires (or would, if it were on)."
       },
       "Section": {
         "properties": {

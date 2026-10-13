@@ -1,13 +1,16 @@
+import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { qualityQuery, sessionsQuery, useDraw, useGradeNow, type Split } from "@/api/settings";
-import { topicsQuery } from "@/api/queries";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import type { TopicCard } from "@/api/client";
+import { qualityQuery, sessionsQuery, useCorrect, useDismiss, useDraw, useGradeNow, useTriageByHand, type Awaiting, type Split } from "@/api/settings";
+import { paperQuery, topicsQuery } from "@/api/queries";
 import { LabelRow } from "@/components/LabelRow";
 import { GRADE_WORD } from "@/components/paper-bits";
 import { modelName } from "@/components/PaperView";
 import { fmt } from "@/lib/format";
-import { BTN, BTN_PRIMARY, Empty, H2, Page, TABLE, pct } from "@/routes/settings/index";
+import { BTN, BTN_PRIMARY, Empty, FIELD, H2, Page, TABLE, pct } from "@/routes/settings/index";
 import { MetricsView } from "@/routes/settings/topics";
+import { cn } from "@/lib/utils";
 
 /** Quality: what last night left at the top, then Calibrate and how the Watch topics are doing. */
 export function QualityPage() {
@@ -19,7 +22,8 @@ export function QualityPage() {
   if (q.isError || !q.data) return <Page title="Quality"><p className="text-destructive">Could not load.</p></Page>;
   const d = q.data;
   const n = d.night;
-  const quiet = !n.error && n.splits.length === 0 && n.ungraded.length === 0 && n.awaiting_triage.length === 0;
+  const failed = n.reviews_failed ?? [];
+  const quiet = !n.error && n.splits.length === 0 && n.ungraded.length === 0 && n.awaiting_triage.length === 0 && failed.length === 0;
 
   return (
     <Page title="Quality" sub="Last night first, then how well the Watch topics are doing. Nothing here is required reading.">
@@ -33,7 +37,33 @@ export function QualityPage() {
           </Link>
         </div>
       )}
-      {quiet && <Empty>All quiet: no disagreements, nothing ungraded, nothing awaiting triage.</Empty>}
+      {quiet && <Empty>All quiet: no disagreements, nothing ungraded, nothing awaiting triage, every review written.</Empty>}
+
+      {failed.length > 0 && (
+        <>
+          <h3 className="mt-4 mb-1 text-[13px] font-medium">
+            {failed.length} {failed.length === 1 ? "review" : "reviews"} failed{" "}
+            <span className="ml-2 font-normal text-muted-foreground">the issue says so in one line; the next run tries them again</span>
+          </h3>
+          <table className={TABLE}>
+            <tbody>
+              {failed.map((r) => (
+                <tr key={`${r.topic}-${r.period}-${r.day}`}>
+                  <td>
+                    <Link to="/topics/$slug" params={{ slug: r.topic }} className="font-medium hover:underline">
+                      {r.topic_name}
+                    </Link>
+                    <span className="ml-2 text-muted-foreground">
+                      {r.kind === "watch" ? "recap" : "review"} {r.period === "week" ? `for the ${fmt.week(r.day).replace(/^Week/, "week")}` : `for ${fmt.issueDay(r.day)}`}
+                    </span>
+                    {r.error && <div className="font-mono text-[11.5px] text-muted-foreground">{r.error}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
       {n.splits.length > 0 && (
         <>
@@ -67,23 +97,14 @@ export function QualityPage() {
       {n.awaiting_triage.length > 0 && (
         <>
           <h3 className="mt-5 mb-1 text-[13px] font-medium">
-            {n.awaiting_triage.length} awaiting triage <span className="ml-2 font-normal text-muted-foreground">triage stopped after three failed nights; dismiss, triage by hand and fix the text arrive later</span>
+            {n.awaiting_triage.length} awaiting triage{" "}
+            <span className="ml-2 font-normal text-muted-foreground">triage stopped after three failed nights; dismiss it, triage it yourself, or fix the text it choked on</span>
           </h3>
-          <table className={TABLE}>
-            <tbody>
-              {n.awaiting_triage.map((a) => (
-                <tr key={a.paper_id}>
-                  <td>
-                    <Link to="/paper/$" params={{ _splat: a.paper_id }} className="font-medium hover:underline">
-                      {a.title}
-                    </Link>
-                    {a.last_error && <div className="font-mono text-[11.5px] text-muted-foreground">{a.last_error}</div>}
-                  </td>
-                  <td className="tabular text-right whitespace-nowrap text-muted-foreground">{a.failed_runs} nights</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="divide-y divide-border">
+            {n.awaiting_triage.map((a) => (
+              <AwaitingView key={a.paper_id} a={a} topics={topics} names={names} />
+            ))}
+          </div>
         </>
       )}
 
@@ -264,6 +285,156 @@ function UngradedRow({ u, topicName }: { u: { paper_id: string; topic: string; f
         </button>
       </td>
     </tr>
+  );
+}
+
+/** A paper triage kept failing on, with its three ways out (spec decision 24). */
+function AwaitingView({ a, topics, names }: { a: Awaiting; topics: UseQueryResult<TopicCard[]>; names: Record<string, string> }) {
+  const [open, setOpen] = useState<"triage" | "fix" | null>(null);
+  const [arming, setArming] = useState(false);
+  const dismiss = useDismiss();
+  const toggle = (which: "triage" | "fix") => setOpen((o) => (o === which ? null : which));
+  return (
+    <div className="py-3">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <Link to="/paper/$" params={{ _splat: a.paper_id }} className="font-medium hover:underline">
+            {a.title}
+          </Link>
+          <div className="text-[12.5px] text-muted-foreground">
+            {a.failed_runs} failed {a.failed_runs === 1 ? "night" : "nights"}
+          </div>
+          {a.last_error && <div className="font-mono text-[11.5px] text-muted-foreground">{a.last_error}</div>}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button type="button" className={cn(BTN, open === "triage" && "border-foreground")} aria-expanded={open === "triage"} onClick={() => toggle("triage")}>
+            Triage by hand
+          </button>
+          <button type="button" className={cn(BTN, open === "fix" && "border-foreground")} aria-expanded={open === "fix"} onClick={() => toggle("fix")}>
+            Fix the text
+          </button>
+          <button
+            type="button"
+            className={cn(BTN, arming && "border-destructive text-destructive")}
+            disabled={dismiss.isPending}
+            onBlur={() => setArming(false)}
+            onClick={() => (arming ? dismiss.mutate(a.paper_id) : setArming(true))}
+          >
+            {dismiss.isPending ? "Dismissing…" : arming ? "Dismiss, never triage" : "Dismiss"}
+          </button>
+        </div>
+      </div>
+      {open === "triage" && <TriageByHand paperId={a.paper_id} topics={topics} names={names} />}
+      {open === "fix" && <FixText paperId={a.paper_id} />}
+    </div>
+  );
+}
+
+/**
+ * Triage's answers, given by the owner: a chip per active topic, off unless pressed. Nothing
+ * is sent until the topics are known: an empty answer would drop the paper as belonging nowhere.
+ */
+function TriageByHand({ paperId, topics, names }: { paperId: string; topics: UseQueryResult<TopicCard[]>; names: Record<string, string> }) {
+  const [yes, setYes] = useState<Set<string>>(new Set());
+  const send = useTriageByHand(names);
+  const active = (topics.data ?? []).filter((t) => t.status === "active");
+  const watch = active.filter((t) => t.kind === "watch");
+  const fields = active.filter((t) => t.kind !== "watch");
+  const flip = (slug: string) =>
+    setYes((s) => {
+      const n = new Set(s);
+      if (n.has(slug)) n.delete(slug);
+      else n.add(slug);
+      return n;
+    });
+  const group = (label: string, list: TopicCard[]) =>
+    list.length > 0 && (
+      <div role="group" aria-label={label} className="mt-2">
+        <p className="mb-1 text-[12.5px] text-muted-foreground">{label}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {list.map((t) => (
+            <button
+              key={t.slug}
+              type="button"
+              aria-pressed={yes.has(t.slug)}
+              onClick={() => flip(t.slug)}
+              className={cn("min-h-[36px] rounded-full border border-border px-3 text-[13px]", yes.has(t.slug) ? "border-foreground bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  return (
+    <div className="mt-3 rounded-lg border border-border px-3.5 py-3">
+      {topics.isPending && <p className="text-[12.5px] text-muted-foreground">Loading the topics…</p>}
+      {topics.isError && (
+        <p className="text-[13px] text-destructive">
+          The topics could not be loaded, so nothing can be sent.{" "}
+          <button type="button" className="underline decoration-destructive/50" onClick={() => void topics.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
+      {group("Could it belong to a Watch topic?", watch)}
+      {group("Is it in a field?", fields)}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className={BTN_PRIMARY}
+          disabled={send.isPending || !topics.isSuccess}
+          onClick={() => send.mutate({ paperId, answers: Object.fromEntries(active.map((t) => [t.slug, yes.has(t.slug)])) })}
+        >
+          {send.isPending ? "Sending…" : "Send it on"}
+        </button>
+        <span className="text-[12.5px] text-muted-foreground">
+          {yes.size === 0 ? "With nothing pressed, it belongs nowhere and is left alone." : "The keyword audit and grading follow on the next run."}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** The title and abstract as stored, to correct; the fix counts as a rewrite and triage runs again. */
+function FixText({ paperId }: { paperId: string }) {
+  const paper = useQuery(paperQuery(paperId));
+  const correct = useCorrect();
+  const [title, setTitle] = useState<string | null>(null);
+  const [abstract, setAbstract] = useState<string | null>(null);
+  if (paper.isPending) return <p className="mt-2 text-[12.5px] text-muted-foreground">Opening the text…</p>;
+  if (!paper.data) return <p className="mt-2 text-[12.5px] text-destructive">The paper could not be loaded.</p>;
+  const t = title ?? paper.data.title;
+  const ab = abstract ?? paper.data.abstract;
+  const changed = (t.trim() !== paper.data.title && t.trim() !== "") || (ab.trim() !== paper.data.abstract && ab.trim() !== "");
+  return (
+    <div className="mt-3 grid gap-3 rounded-lg border border-border px-3.5 py-3">
+      <label className="block">
+        <span className="mb-1 block text-[12.5px] font-medium">Title</span>
+        <input className={FIELD} value={t} onChange={(e) => setTitle(e.target.value)} />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-[12.5px] font-medium">Abstract</span>
+        <textarea className={cn(FIELD, "min-h-[140px]")} value={ab} onChange={(e) => setAbstract(e.target.value)} />
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className={BTN_PRIMARY}
+          disabled={!changed || correct.isPending}
+          onClick={() =>
+            correct.mutate({
+              paperId,
+              title: t.trim() !== paper.data.title ? t.trim() : null,
+              abstract: ab.trim() !== paper.data.abstract ? ab.trim() : null,
+            })
+          }
+        >
+          {correct.isPending ? "Saving…" : "Save and triage again"}
+        </button>
+        <span className="text-[12.5px] text-muted-foreground">Kept for every model call until arXiv publishes a newer version.</span>
+      </div>
+    </div>
   );
 }
 

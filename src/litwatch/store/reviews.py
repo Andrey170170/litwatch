@@ -10,13 +10,16 @@ import psycopg
 from litwatch.core import Paper
 from litwatch.store.papers import COLUMNS, row_to_paper
 
-# A review's picks as a JSON list, in order, with what the reading side shows of each paper.
+# A review's picks as a JSON list, in order, with what the reading side shows of each paper,
+# including the owner's thumb on it for the review's topic (spec decision 17).
 PICKS = """coalesce((SELECT jsonb_agg(jsonb_build_object(
                 'paper_id', k.paper_id, 'why', k.why, 'title', p.title,
                 'authors', CASE WHEN jsonb_typeof(p.authors) = 'array' THEN p.authors ELSE '[]' END,
-                'published', p.published, 'saved', coalesce(l.saved, false)) ORDER BY k.position)
+                'published', p.published, 'saved', coalesce(l.saved, false),
+                'reaction', x.value, 'reaction_reason', x.reason) ORDER BY k.position)
             FROM review_picks k JOIN papers p ON p.id = k.paper_id
             LEFT JOIN library l ON l.paper_id = k.paper_id
+            LEFT JOIN reactions x ON x.paper_id = k.paper_id AND x.topic = r.topic
             WHERE k.review_id = r.id), '[]') AS picks"""
 
 
@@ -140,9 +143,11 @@ async def week_entries(
     return await (
         await conn.execute(
             """
-            SELECT e.paper_id, e.grade, p.title, k.text AS take, i.day
+            SELECT e.paper_id, e.grade, p.title, k.text AS take, i.day,
+                   x.value AS reaction, x.reason AS reaction_reason
             FROM issue_entries e JOIN issues i ON i.id = e.issue_id AND i.kind = 'daily'
             JOIN papers p ON p.id = e.paper_id LEFT JOIN takes k ON k.id = e.take_id
+            LEFT JOIN reactions x ON x.paper_id = e.paper_id AND x.topic = e.topic
             WHERE e.topic = %s AND i.day >= %s AND i.day < %s::date + 7
             ORDER BY i.day, e.position
             """,
@@ -159,8 +164,10 @@ async def week_set_aside(
     return await (
         await conn.execute(
             """
-            SELECT DISTINCT p.id AS paper_id, p.title FROM set_asides a
-            JOIN papers p ON p.id = a.paper_id
+            SELECT DISTINCT p.id AS paper_id, p.title,
+                   x.value AS reaction, x.reason AS reaction_reason
+            FROM set_asides a JOIN papers p ON p.id = a.paper_id
+            LEFT JOIN reactions x ON x.paper_id = a.paper_id AND x.topic = a.topic
             WHERE a.topic = %s AND a.at >= %s AND a.at < %s
             """,
             (topic, since, until),
@@ -173,7 +180,9 @@ async def week_misses(
 ) -> list[dict[str, Any]]:
     return await (
         await conn.execute(
-            "SELECT m.paper_id, p.title FROM misses m JOIN papers p ON p.id = m.paper_id "
+            "SELECT m.paper_id, p.title, x.value AS reaction, x.reason AS reaction_reason "
+            "FROM misses m JOIN papers p ON p.id = m.paper_id "
+            "LEFT JOIN reactions x ON x.paper_id = m.paper_id AND x.topic = m.topic "
             "WHERE m.topic = %s AND m.reported_at >= %s AND m.reported_at < %s "
             "ORDER BY m.reported_at",
             (topic, since, until),

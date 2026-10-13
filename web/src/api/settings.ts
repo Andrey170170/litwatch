@@ -24,6 +24,7 @@ export type Split = {
 };
 export type Ungraded = { paper_id: string; topic: string; failed_runs: number; last_error: string | null; updated_at: string; title: string };
 export type Awaiting = { paper_id: string; failed_runs: number; last_error: string | null; title: string };
+export type FailedReview = { topic: string; topic_name: string; kind: string; period: "day" | "week"; day: string; error: string | null };
 export type Recall = {
   n: number;
   triage: number | null;
@@ -55,7 +56,7 @@ export type Evaluation = {
   error?: string | null;
 };
 export type Quality = {
-  night: { run: number | null; error: string | null; splits: Split[]; ungraded: Ungraded[]; awaiting_triage: Awaiting[] };
+  night: { run: number | null; error: string | null; splits: Split[]; ungraded: Ungraded[]; awaiting_triage: Awaiting[]; reviews_failed: FailedReview[] };
   evaluation: Evaluation | null;
   calibration: { topic: string; precision?: number | null; precision_n?: number; dropped?: number | null; dropped_n?: number }[];
   matters_no_topic: { paper_id: string; note: string | null; at: string; title: string }[];
@@ -112,6 +113,7 @@ export type Run = {
   inserted: number | null;
   updated: number | null;
 };
+export type Schedule = Schemas["ScheduleOut"];
 export type RerunScope = Schemas["RerunIn"]["scope"];
 export type RerunEstimate = { scope: RerunScope; papers: number; cost: number | null; known: boolean };
 export type EvalSummary = { id: number; kind: string; note: string | null; params: Record<string, unknown>; started_at: string; finished_at: string | null; cost: string | null };
@@ -177,6 +179,12 @@ export const runsQuery = queryOptions({
 export const configQuery = queryOptions({
   queryKey: ["settings", "config"],
   queryFn: async () => ok(await api.GET(`${S}/config`)),
+});
+/** Whether the schedule is on, its zone, and when each job next fires (computed by the server). */
+export const scheduleQuery = queryOptions({
+  queryKey: ["settings", "schedule"],
+  queryFn: async () => ok(await api.GET(`${S}/schedule`)),
+  staleTime: 60_000,
 });
 
 function useRefresh() {
@@ -287,6 +295,51 @@ export function useRetrace() {
     mutationFn: async (id: number) => ok(await api.POST(`${S}/misses/{miss_id}/trace`, { params: { path: { miss_id: id } } })),
     onSuccess: () => {
       toast("Tracing again; this takes a minute");
+      refresh();
+    },
+    onError,
+  });
+}
+
+// -- papers triage kept failing on (spec decision 24) ------------------------------------------
+
+export function useDismiss() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (paperId: string) =>
+      ok(await api.POST(`${S}/triage/{paper_id}/dismiss`, { params: { path: { paper_id: paperId } } })),
+    onSuccess: () => {
+      toast("Dismissed; it stays in the collection, never triaged");
+      refresh();
+    },
+    onError,
+  });
+}
+
+/** The owner's own triage answers: for each active topic, could it belong (Watch) or is it in the field. */
+export function useTriageByHand(names: Record<string, string>) {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (v: { paperId: string; answers: Record<string, boolean> }) =>
+      typed<{ candidates: string[] }>(
+        ok(await api.PUT(`${S}/triage/{paper_id}`, { params: { path: { paper_id: v.paperId } }, body: { answers: v.answers } })),
+      ),
+    onSuccess: (r) => {
+      const named = r.candidates.map((slug) => names[slug] ?? slug);
+      toast(named.length ? `Sent on: a candidate for ${named.join(" and ")}, graded on the next run` : "Sent on with no Watch candidate");
+      refresh();
+    },
+    onError,
+  });
+}
+
+export function useCorrect() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (v: { paperId: string; title: string | null; abstract: string | null }) =>
+      ok(await api.POST(`${S}/triage/{paper_id}/correction`, { params: { path: { paper_id: v.paperId } }, body: { title: v.title, abstract: v.abstract } })),
+    onSuccess: () => {
+      toast("Text fixed; it is triaged again on the next run");
       refresh();
     },
     onError,

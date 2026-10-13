@@ -25,6 +25,7 @@ export function statusLine(s: Pick<Status, "state"> & Partial<Status>): StatusLi
       if (s.splits) parts.push(`${s.splits} ${s.splits === 1 ? "disagreement" : "disagreements"}`);
       if (s.ungraded) parts.push(`${s.ungraded} ungraded`);
       if (s.awaiting_triage) parts.push(`${s.awaiting_triage} awaiting triage`);
+      if (s.reviews_failed) parts.push(`${s.reviews_failed} ${s.reviews_failed === 1 ? "review" : "reviews"} failed`);
       return { tone: "amber", text: parts.join(" · ") };
     }
     case "quiet":

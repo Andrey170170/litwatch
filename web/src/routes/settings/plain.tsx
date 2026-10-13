@@ -1,10 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { configQuery, missesQuery, runsQuery, useRetrace, type Miss } from "@/api/settings";
+import { configQuery, missesQuery, runsQuery, scheduleQuery, useRetrace, type Miss } from "@/api/settings";
 import { topicsQuery } from "@/api/queries";
 import { GRADE_WORD } from "@/components/paper-bits";
 import { modelName } from "@/components/PaperView";
 import { fmt } from "@/lib/format";
+import { fireWords } from "@/lib/schedule";
 import { BTN, Empty, Page, TABLE, money } from "@/routes/settings/index";
 
 /** Misses: each report with what triage, the keyword audit and both graders said. */
@@ -86,11 +87,41 @@ function Stage({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** Runs and cost: a row per run. */
+/** The schedule in one line: on, with when each job next fires; or off, with when each would. */
+export function ScheduleLine() {
+  const schedule = useQuery(scheduleQuery);
+  const s = schedule.data;
+  if (!s) return null;
+  const fires = s.jobs.map((j) => (
+    <span key={j.kind} title={j.cron}>
+      {j.kind} {fireWords(j.next, s.zone)}
+    </span>
+  ));
+  const list = fires.flatMap((f, i) => (i === 0 ? [f] : [i === fires.length - 1 ? " and " : ", ", f]));
+  return (
+    <p className="mb-4 rounded-lg border border-border px-3.5 py-2.5 text-[13px]">
+      {s.enabled ? (
+        <>
+          <b className="font-medium">On a schedule:</b> {list} <span className="text-muted-foreground">({s.zone}).</span>
+        </>
+      ) : (
+        <>
+          <b className="font-medium">No schedule:</b> runs are started by hand until cutover.{" "}
+          <span className="text-muted-foreground">
+            Once enabled, the next would be {list} ({s.zone}).
+          </span>
+        </>
+      )}
+    </p>
+  );
+}
+
+/** Runs and cost: the schedule, then a row per run. */
 export function RunsPage() {
   const runs = useQuery(runsQuery);
   return (
     <Page title="Runs and cost" sub="Every run, newest first: what it did and what it cost.">
+      <ScheduleLine />
       {runs.data?.length === 0 && <Empty>No runs yet.</Empty>}
       {runs.data && runs.data.length > 0 && (
         <div className="overflow-x-auto">
@@ -134,14 +165,15 @@ function took(a: string, b: string | null): string {
   return s < 90 ? `${s}s` : `${Math.round(s / 60)} min`;
 }
 
-const COUNT_ORDER = ["triaged", "candidates", "graded", "split", "takes", "issue_entries", "reviews", "rewritten", "triage_failed", "grading_failed"];
+const COUNT_ORDER = ["triaged", "candidates", "graded", "split", "takes", "issue_entries", "reviews", "reviews_failed", "rewritten", "triage_failed", "grading_failed"];
+const ONE: Record<string, string> = { candidates: "candidate", takes: "take", issue_entries: "issue entry", reviews: "review", reviews_failed: "review failed" };
 
 function countsLine(counts: Record<string, unknown> | null, fetched: number | null): string {
   const parts: string[] = [];
   if (fetched) parts.push(`${fetched} fetched`);
   for (const k of COUNT_ORDER) {
     const v = counts?.[k];
-    if (typeof v === "number" && v > 0) parts.push(`${v} ${k.replace("_", " ")}`);
+    if (typeof v === "number" && v > 0) parts.push(`${v} ${v === 1 && ONE[k] ? ONE[k] : k.replaceAll("_", " ")}`);
   }
   if (!parts.length && counts && typeof counts.topic === "string") parts.push(String(counts.topic));
   return parts.join(" · ");

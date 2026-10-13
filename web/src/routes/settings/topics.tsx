@@ -81,7 +81,10 @@ export function TopicsSettings() {
                   </Link>
                   <div className="text-[12px] text-muted-foreground">{t.slug}</div>
                 </td>
-                <td>{KIND_LABEL[t.kind]}</td>
+                <td>
+                  {KIND_LABEL[t.kind]}
+                  {t.kind === "radar" && t.cadence === "daily" && <span className="text-muted-foreground"> · daily</span>}
+                </td>
                 <td>{t.status}</td>
                 <td className="tabular text-right">{t.revision ?? "–"}</td>
               </tr>
@@ -93,7 +96,7 @@ export function TopicsSettings() {
   );
 }
 
-const BLANK: Topic = { slug: "", name: "", kind: "watch", subject: "", rubric: null, interests: null, keywords: [], status: "active", colour: null };
+const BLANK: Topic = { slug: "", name: "", kind: "watch", subject: "", rubric: null, interests: null, keywords: [], status: "active", colour: null, cadence: "weekly" };
 
 function slugify(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
@@ -162,14 +165,31 @@ function TopicEditor({ stored, base, isNew }: { stored: Topic | undefined; base:
             <input className={cn(FIELD, "font-mono text-[13px]")} value={draft.slug} disabled={!isNew} onChange={(e) => { setSlugTouched(true); set("slug", e.target.value); }} />
           </Field>
         </div>
-        <div className="grid gap-4 desk:grid-cols-3">
+        <div className={cn("grid gap-4", draft.kind === "radar" ? "desk:grid-cols-4" : "desk:grid-cols-3")}>
           <Field label="Kind" hint={KIND_HINT[draft.kind]}>
-            <select className={FIELD} value={draft.kind} onChange={(e) => set("kind", e.target.value as TopicKind)}>
+            <select
+              className={FIELD}
+              value={draft.kind}
+              onChange={(e) => {
+                const kind = e.target.value as TopicKind;
+                set("kind", kind);
+                // Only Radar can be daily (spec decision 23).
+                if (kind !== "radar") set("cadence", "weekly");
+              }}
+            >
               <option value="watch">Watch</option>
               <option value="radar">Radar</option>
               <option value="pulse">Pulse</option>
             </select>
           </Field>
+          {draft.kind === "radar" && (
+            <Field label="Cadence" hint="Daily adds a review after each nightly run; the weekly one stays.">
+              <select className={FIELD} value={draft.cadence ?? "weekly"} onChange={(e) => set("cadence", e.target.value as Topic["cadence"])}>
+                <option value="weekly">Weekly</option>
+                <option value="daily">Daily</option>
+              </select>
+            </Field>
+          )}
           <Field label="Status">
             <select className={FIELD} value={draft.status ?? "active"} onChange={(e) => set("status", e.target.value as Topic["status"])}>
               <option value="active">Active</option>

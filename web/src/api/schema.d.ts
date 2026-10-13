@@ -150,6 +150,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/topics/{slug}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Topic Reviews
+         * @description A Radar or Pulse topic's reviews, newest first, shown above its picks.
+         */
+        get: operations["topic_reviews_api_topics__slug__reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/topics/{slug}/visit": {
         parameters: {
             query?: never;
@@ -486,7 +506,7 @@ export interface paths {
         put?: never;
         /**
          * More
-         * @description Continue with the papers waiting for a word: splits and thumbed papers.
+         * @description Continue with the papers waiting for a word: splits, misses and thumbed papers.
          */
         post: operations["more_api_settings_calibrate__session_id__more_post"];
         delete?: never;
@@ -506,6 +526,66 @@ export interface paths {
         /** Answer */
         put: operations["answer_api_settings_calibrate__session_id__items__position__put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/triage/{paper_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss
+         * @description Litwatch drops the paper; it stays in the collection and the archive.
+         */
+        post: operations["dismiss_api_settings_triage__paper_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/triage/{paper_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Triage By Hand
+         * @description The owner's own triage answers; the paper goes on to the keyword audit and grading.
+         */
+        put: operations["triage_by_hand_api_settings_triage__paper_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/triage/{paper_id}/correction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correct
+         * @description Fix the text triage choked on; the next run triages the corrected paper.
+         */
+        post: operations["correct_api_settings_triage__paper_id__correction_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -558,6 +638,23 @@ export interface paths {
         };
         /** Runs */
         get: operations["runs_api_settings_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Schedule */
+        get: operations["schedule_api_settings_schedule_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -694,11 +791,25 @@ export interface components {
                 [key: string]: boolean;
             };
         };
+        /** AnswersIn */
+        AnswersIn: {
+            /** Answers */
+            answers: {
+                [key: string]: boolean;
+            };
+        };
         /** BibtexIn */
         BibtexIn: {
             /** Ids */
             ids: string[];
         };
+        /**
+         * Cadence
+         * @description How often a Radar or Pulse topic is reviewed. Weekly always; daily adds a review after
+         *     each nightly run, for a Radar field followed closely.
+         * @enum {string}
+         */
+        Cadence: "weekly" | "daily";
         /**
          * Chosen
          * @description The folded "how this was chosen" for one Watch topic.
@@ -721,6 +832,13 @@ export interface components {
             migrated: boolean;
             /** Recorded At */
             recorded_at?: string | null;
+        };
+        /** CorrectionIn */
+        CorrectionIn: {
+            /** Title */
+            title?: string | null;
+            /** Abstract */
+            abstract?: string | null;
         };
         /**
          * Digest
@@ -898,6 +1016,18 @@ export interface components {
          * @enum {string}
          */
         LabelValue: "relevant" | "adjacent" | "not_relevant" | "unsure";
+        /**
+         * Listed
+         * @description A paper named in a recap, with the owner's thumb on it for the recap's topic.
+         */
+        Listed: {
+            /** Paper Id */
+            paper_id: string;
+            /** Title */
+            title: string;
+            reaction?: components["schemas"]["ReactionValue"] | null;
+            reaction_reason?: components["schemas"]["ReactionReason"] | null;
+        };
         /** Lookup */
         Lookup: {
             row: components["schemas"]["Row"];
@@ -918,6 +1048,18 @@ export interface components {
             paper_id: string;
             /** Topic */
             topic: string;
+        };
+        /** NextFire */
+        NextFire: {
+            /** Kind */
+            kind: string;
+            /** Cron */
+            cron: string;
+            /**
+             * Next
+             * Format: date-time
+             */
+            next: string;
         };
         /** Opinion */
         Opinion: {
@@ -1034,6 +1176,29 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * Pick
+         * @description A paper a review picked, with its sentence on why.
+         */
+        Pick: {
+            /** Paper Id */
+            paper_id: string;
+            /** Title */
+            title: string;
+            /** Authors */
+            authors?: string[];
+            /** Published */
+            published?: string | null;
+            /** Why */
+            why: string;
+            /**
+             * Saved
+             * @default false
+             */
+            saved: boolean;
+            reaction?: components["schemas"]["ReactionValue"] | null;
+            reaction_reason?: components["schemas"]["ReactionReason"] | null;
+        };
         /** ReactionIn */
         ReactionIn: {
             /** Topic */
@@ -1051,6 +1216,26 @@ export interface components {
          * @enum {string}
          */
         ReactionValue: "up" | "down";
+        /**
+         * Recap
+         * @description A Watch topic's week: prose over its entries, then the entries as one-liners, what
+         *     the owner set aside and the misses reported.
+         */
+        Recap: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "written" | "failed" | "quiet";
+            /** Text */
+            text?: string | null;
+            /** Papers */
+            papers?: components["schemas"]["Listed"][];
+            /** Set Aside */
+            set_aside?: components["schemas"]["Listed"][];
+            /** Misses */
+            misses?: components["schemas"]["Listed"][];
+        };
         /** RerunIn */
         RerunIn: {
             /**
@@ -1062,6 +1247,37 @@ export interface components {
             since?: string | null;
             /** Until */
             until?: string | null;
+        };
+        /**
+         * Review
+         * @description A Radar or Pulse topic's review of a day or a week. A failed one says so in one line;
+         *     a quiet one had no papers to read.
+         */
+        Review: {
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "day" | "week";
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "written" | "failed" | "quiet";
+            /** Text */
+            text?: string | null;
+            /** Picks */
+            picks?: components["schemas"]["Pick"][];
+            /**
+             * Members
+             * @default 0
+             */
+            members: number;
         };
         /**
          * Row
@@ -1101,6 +1317,19 @@ export interface components {
             /** Saved */
             saved: boolean;
         };
+        /**
+         * ScheduleOut
+         * @description The schedule as the Runs page shows it: whether it is on, the zone the cron times are
+         *     read in, and when each job next fires (or would, if it were on).
+         */
+        ScheduleOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Zone */
+            zone: string;
+            /** Jobs */
+            jobs: components["schemas"]["NextFire"][];
+        };
         /** Section */
         Section: {
             topic: components["schemas"]["TopicRef"];
@@ -1111,6 +1340,8 @@ export interface components {
              * @default 0
              */
             near: number;
+            review?: components["schemas"]["Review"] | null;
+            recap?: components["schemas"]["Recap"] | null;
         };
         /** SessionIn */
         SessionIn: {
@@ -1143,6 +1374,8 @@ export interface components {
             position?: number | null;
             /** Colour */
             colour?: string | null;
+            /** @default weekly */
+            cadence: components["schemas"]["Cadence"];
         };
         /** TopicCard */
         TopicCard: {
@@ -1155,6 +1388,14 @@ export interface components {
             colour?: string | null;
             /** Status */
             status: string;
+            /**
+             * Cadence
+             * @default weekly
+             * @enum {string}
+             */
+            cadence: "weekly" | "daily";
+            /** Last Review */
+            last_review?: string | null;
             /** Position */
             position?: number | null;
             /** Subject */
@@ -1256,6 +1497,11 @@ export interface components {
              * @default 0
              */
             awaiting_triage: number;
+            /**
+             * Reviews Failed
+             * @default 0
+             */
+            reviews_failed: number;
         };
         /**
          * Status
@@ -1540,6 +1786,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TopicCard"][];
+                };
+            };
+        };
+    };
+    topic_reviews_api_topics__slug__reviews_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Review"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2292,6 +2569,105 @@ export interface operations {
             };
         };
     };
+    dismiss_api_settings_triage__paper_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    triage_by_hand_api_settings_triage__paper_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswersIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_api_settings_triage__paper_id__correction_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reported_api_settings_misses_get: {
         parameters: {
             query?: never;
@@ -2365,6 +2741,26 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+        };
+    };
+    schedule_api_settings_schedule_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOut"];
                 };
             };
         };

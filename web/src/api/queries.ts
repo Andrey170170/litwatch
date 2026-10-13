@@ -32,6 +32,13 @@ export const topicsQuery = queryOptions({
   staleTime: 30_000,
 });
 
+/** A Radar or Pulse topic's reviews, newest first. */
+export const topicReviewsQuery = (slug: string) =>
+  queryOptions({
+    queryKey: ["topics", "reviews", slug],
+    queryFn: async () => ok(await api.GET("/api/topics/{slug}/reviews", { params: { path: { slug } } })),
+  });
+
 export type PapersFilter = {
   q?: string;
   topic?: string;

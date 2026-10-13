@@ -194,8 +194,34 @@ async def test_the_weekly_issue_reviews_every_field_and_recaps_every_watch_topic
         assert faith["recap"]["text"] == "The week was about hidden steps."
         assert [p["paper_id"] for p in faith["recap"]["papers"]] == [P.id]
         assert [p["paper_id"] for p in faith["recap"]["set_aside"]] == [P.id]
+        # A thumb on the paper for the Watch topic shows on every list that names it.
+        await c.put(f"/api/reactions/{P.id}", json={"topic": FAITH.slug, "value": "up"})
+        faith = next(
+            s
+            for s in (await c.get(f"/api/issues/{issue_id}")).json()["sections"]
+            if s["topic"]["slug"] == FAITH.slug
+        )
+        assert faith["recap"]["papers"][0]["reaction"] == "up"
+        assert faith["recap"]["set_aside"][0]["reaction"] == "up"
+        await c.delete(f"/api/reactions/{P.id}", params={"topic": FAITH.slug})
         agents = next(s for s in issue["sections"] if s["topic"]["slug"] == AGENTS.slug)
         assert len(agents["review"]["picks"]) == 3
+        # A thumb on a pick, for the field it was picked for, comes back with the pick
+        # wherever the review is shown (decision 17); a thumb for another topic does not.
+        picked = agents["review"]["picks"][0]["paper_id"]
+        r = await c.put(
+            f"/api/reactions/{picked}",
+            json={"topic": AGENTS.slug, "value": "down", "reason": "already_knew"},
+        )
+        assert r.status_code == 200 and r.json()["message"] == "Remembered for Agents"
+        await c.put(f"/api/reactions/{picked}", json={"topic": FAITH.slug, "value": "up"})
+        issue = (await c.get(f"/api/issues/{issue_id}")).json()
+        agents = next(s for s in issue["sections"] if s["topic"]["slug"] == AGENTS.slug)
+        first, *rest = agents["review"]["picks"]
+        assert (first["reaction"], first["reaction_reason"]) == ("down", "already_knew")
+        assert all(p["reaction"] is None for p in rest)
+        listed = (await c.get(f"/api/topics/{AGENTS.slug}/reviews")).json()
+        assert listed[0]["picks"][0]["reaction"] == "down"
         # A field topic's page lists its picks; its card says when it was last reviewed.
         table = (await c.get("/api/papers", params={"topic": AGENTS.slug})).json()
         assert table["total"] == 3

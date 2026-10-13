@@ -16,6 +16,7 @@ describe("the printer's line", () => {
     expect(statusLine({ ...base, state: "attention", splits: 1, awaiting_triage: 3 }).text).toBe(
       "530 read · 1 disagreement · 3 awaiting triage",
     );
+    expect(statusLine({ ...base, state: "attention", reviews_failed: 1 }).text).toBe("530 read · 1 review failed");
   });
 
   it("is red on a failed run and names the day shown", () => {

@@ -4,13 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Settings, SlidersHorizontal } from "lucide-react";
 import type { TopicCard as Card, TopicKind } from "@/api/client";
 import { useVisit } from "@/api/mutations";
-import { topicsQuery } from "@/api/queries";
+import { topicReviewsQuery, topicsQuery } from "@/api/queries";
+import { ReviewView } from "@/components/Review";
 import { Chip, PapersTable, SearchBox, SortSelect, YearChip } from "@/components/PapersTable";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useDesktop } from "@/hooks/useDesktop";
-import { fmt, plural } from "@/lib/format";
+import { fmt, localDay, plural } from "@/lib/format";
 import type { TableSearch } from "@/lib/search";
-import { KIND_LABEL, KIND_ORDER, cadence, topicColour } from "@/lib/topics";
+import { KIND_LABEL, KIND_ORDER, cadence, lastReview, topicColour } from "@/lib/topics";
 import { cn } from "@/lib/utils";
 
 const LAST_OPEN = "litwatch.topic";
@@ -23,11 +24,16 @@ function grouped(cards: Card[]) {
   return by;
 }
 
-/** What is new on a card: entries in issues since the topic was last opened. */
+/** What is new on a card: entries in issues since the topic was last opened; for a field, its last review. */
 export function newLine(c: Card): { text: string; quiet: boolean } {
   if (c.status !== "active") return { text: "Paused", quiet: true };
+  if (c.kind !== "watch" && c.new === 0) {
+    const reviewed = lastReview(c);
+    return reviewed ? { text: reviewed, quiet: false } : { text: "No review yet", quiet: true };
+  }
   if (c.new === 0) return { text: "Nothing new", quiet: true };
-  const since = c.opened_at ? ` since ${fmt.weekday(c.opened_at.slice(0, 10))}` : "";
+  // `opened_at` is an instant: its weekday is the local one, not the UTC date's.
+  const since = c.opened_at ? ` since ${fmt.weekday(localDay(new Date(c.opened_at)))}` : "";
   const saved = c.new_saved ? `, ${c.new_saved} saved` : "";
   return { text: `${c.new} new${since}${saved}`, quiet: false };
 }
@@ -72,7 +78,7 @@ function RailEntry({ card: c }: { card: Card }) {
       {c.new > 0 ? (
         <span className="tabular text-[12px] font-semibold">{c.new} new</span>
       ) : (
-        <span className="text-[12px] font-normal text-muted-foreground">{cadence(c.kind) ?? "nightly"}</span>
+        <span className="text-[12px] font-normal text-muted-foreground">{cadence(c) ?? "nightly"}</span>
       )}
     </Link>
   );
@@ -120,7 +126,7 @@ function TopicCardView({ card: c }: { card: Card }) {
           {c.name}
           <small className="ml-2 font-sans text-[12px] font-normal tracking-[.02em] text-muted-foreground">
             {KIND_LABEL[c.kind]}
-            {cadence(c.kind) ? ` · ${cadence(c.kind)}` : ""}
+            {cadence(c) ? ` · ${cadence(c)}` : ""}
             {paused ? " · paused" : ""}
           </small>
         </div>
@@ -209,11 +215,7 @@ export function TopicPage() {
         </div>
         {desktop && <EditGear />}
       </div>
-      {picks && (
-        <p className="mt-4 rounded-lg border border-dashed border-border px-3.5 py-2.5 text-[13px] text-muted-foreground">
-          Reviews arrive with a later stage; the picks are below.
-        </p>
-      )}
+      {picks && card && <TopicReviews card={card} />}
       <div className="mt-[18px] flex flex-wrap items-center gap-2 text-[13px]">
         <SearchBox value={search.q} onChange={(q) => onFilter({ q })} placeholder={`Search within ${card?.name ?? "the topic"}`} />
         {desktop ? (
@@ -226,6 +228,53 @@ export function TopicPage() {
         <PapersTable filter={{ ...search, topic: slug }} onFilter={onFilter} watchTopics={watch} fixedTopic={card} surfaceTopic={slug} />
       )}
     </div>
+  );
+}
+
+/** A Radar or Pulse topic's reviews as dated prose above its picks: the newest open, earlier ones folded. */
+function TopicReviews({ card }: { card: Card }) {
+  const reviews = useQuery(topicReviewsQuery(card.slug));
+  const list = reviews.data ?? [];
+  const title = (r: (typeof list)[number]) => (r.period === "week" ? fmt.week(r.day) : fmt.issueDay(r.day));
+  if (reviews.isPending) return null;
+  if (reviews.isError)
+    return (
+      <p className="mt-4 text-[14px] text-destructive">
+        The reviews could not be loaded.{" "}
+        <button type="button" className="underline decoration-destructive/50" onClick={() => void reviews.refetch()}>
+          Try again
+        </button>
+      </p>
+    );
+  if (list.length === 0)
+    return <p className="mt-4 text-[14px] text-muted-foreground">No review yet; the first comes with the {cadence(card) === "daily" ? "next nightly run" : "next weekly run"}.</p>;
+  const [newest, ...earlier] = list;
+  return (
+    <section className="mt-5 max-w-[700px]">
+      <h2 className="flex items-baseline gap-2.5 border-t-2 border-foreground pt-2 font-serif text-[20px] font-semibold">
+        {title(newest!)}
+        <small className="font-sans text-[13px] font-normal text-muted-foreground">{newest!.period === "week" ? "the week's review" : "the day's review"}</small>
+      </h2>
+      <ReviewView review={newest!} topic={card} surface="topic" />
+      {earlier.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-1 text-[11.5px] tracking-[.06em] text-muted-foreground uppercase">Earlier reviews</p>
+          {earlier.map((r) => (
+            <details key={`${r.period}-${r.day}`} className="border-t border-border py-2">
+              <summary className="cursor-pointer font-serif text-[16px] font-semibold">
+                {title(r)}
+                <small className="ml-2 font-sans text-[12.5px] font-normal text-muted-foreground">
+                  {r.period === "week" ? "weekly" : "daily"}
+                  {r.state !== "written" && ` · ${r.state}`}
+                </small>
+              </summary>
+              <ReviewView review={r} topic={card} surface="topic" />
+            </details>
+          ))}
+        </div>
+      )}
+      <p className="mt-6 mb-[-6px] text-[11.5px] tracking-[.06em] text-muted-foreground uppercase">Picks</p>
+    </section>
   );
 }
 
