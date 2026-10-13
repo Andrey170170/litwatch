@@ -47,7 +47,8 @@ describe("the paper page", () => {
     renderApp("/paper/2610.00001");
     const link = await screen.findByRole("link", { name: "ICLR 2026" });
     expect(link).toHaveAttribute("href", "https://doi.org/10.1/demo");
-    expect(screen.getByText(/ICLR 2026, 2026/)).toBeInTheDocument();
+    // The container already names the year, so it is not repeated.
+    expect(screen.getByText(/^ICLR 2026 ·$/)).toBeInTheDocument();
     expect(screen.queryByText("set by you")).not.toBeInTheDocument();
   });
 

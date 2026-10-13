@@ -142,7 +142,7 @@ function PublishedVersion({ paper: p }: { paper: Paper }) {
       {r ? (
         <p className="text-[15px] text-body">
           {r.title && r.title !== p.title && <span className="font-serif font-semibold">{r.title}. </span>}
-          {[r.container ?? r.venue, r.year].filter(Boolean).join(", ")}
+          {[r.container ?? r.venue, r.year && !(r.container ?? "").includes(String(r.year)) ? r.year : null].filter(Boolean).join(", ")}
           {r.doi && (
             <>
               {" · "}
