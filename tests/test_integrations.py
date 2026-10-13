@@ -6,7 +6,9 @@ import contextlib
 import hashlib
 import hmac
 import json
+import re
 from datetime import UTC, datetime
+from importlib import resources
 
 import httpx
 import pytest
@@ -37,6 +39,7 @@ from litwatch.store import topics as topics_store
 from tests.conftest import FAITH, TOPICS, deliver, paper, settled, start
 from tests.fakes_http import FakeArchive, FakeArxiv, FakeDeep, mock
 
+MIGRATIONS = resources.files("litwatch.store").joinpath("migrations")
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=3)
 CARD = {"summary": "S.", "key_claim": "K.", "paper_kind": "method"}
 # An arXiv HTML rendering long enough to count as the paper.
@@ -436,6 +439,22 @@ async def test_a_text_fetched_before_a_rewrite_or_a_new_version_is_not_used(worl
     assert await papers_store.body(conn, P.id) is None
 
 
+async def test_a_text_0x_fetched_is_stamped_on_adoption_and_matches_its_version_only(world):
+    conn = world
+    await papers_store.upsert(conn, [P])  # version 3
+    await conn.execute(
+        "UPDATE papers SET body = 'the 0.x text', body_source = 'html', body_revision = NULL, "
+        "body_version = NULL WHERE id = %s",
+        (P.id,),
+    )
+    assert await papers_store.body(conn, P.id) is None  # no stamp matches nothing
+    migration = (MIGRATIONS / "0013_integrations.sql").read_text()
+    await conn.execute(re.search(r"UPDATE papers SET body_revision.*?;", migration, re.S)[0])
+    assert await papers_store.body(conn, P.id) == ("the 0.x text", "html")
+    await conn.execute("UPDATE papers SET version = 4 WHERE id = %s", (P.id,))
+    assert await papers_store.body(conn, P.id) is None  # a later version is not a match
+
+
 async def test_a_text_fetched_while_the_paper_was_revised_is_not_stored(world):
     conn = world
     await papers_store.upsert(conn, [P])
@@ -473,6 +492,30 @@ async def test_a_card_is_not_made_from_text_of_an_older_revision(world, deep):
     await dispatch.idle(conn, d)
     (sent,) = fake.requests
     assert sent["paper"]["title"] == "Rewritten during the fetch"
+
+
+async def test_a_card_made_for_text_the_paper_no_longer_has_is_made_again(world, deep):
+    conn = world
+    fake, _, d = deep
+    fake.fail_polls = 1  # the job is accepted, then a poll fails: it is followed up later
+    await papers_store.upsert(conn, [P])
+    await start(conn, d)
+    asked = await events.emit(conn, events.CARD_REQUESTED, P.id)
+    await deliver(conn, d)
+    assert len(fake.requests) == 1
+    await papers_store.correct(conn, P.id, "Rewritten while the card was made", None)
+
+    await outbox.retry(conn, d.name)
+    await deliver(conn, d)  # the job ends; its card is of the old text and is dropped
+    assert (await state.card(conn, P.id))["card"] is None
+    (row,) = await state.waiting(conn, datetime.now(UTC), 10)
+    assert (row["event_id"], row["automatic"]) == (asked, False)  # still the owner's request
+
+    await dispatch.idle(conn, d)  # first in line: made again from the text as it is
+    assert [r["paper"]["title"] for r in fake.requests][-1] == "Rewritten while the card was made"
+    assert (await state.card(conn, P.id))["card"] == CARD
+    ready = [e for e in await outbox.after(conn, outbox.START, 100) if e.type == events.CARD_READY]
+    assert len(ready) == 1
 
 
 async def test_with_no_new_event_a_waiting_paper_gets_its_card_once_the_text_comes(world, deep):

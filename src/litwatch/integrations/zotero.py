@@ -18,7 +18,8 @@ over from `papers.zotero_key` at start-up, so none is made twice.
 Options: `user_id` (or $LITWATCH_ZOTERO_USER_ID), the API key in $ZOTERO_API_KEY,
 `subcollections` ({grade: name}, default 0.x's "Tier 1" and "Tier 2"), and `inbox_collection`
 with `inbox_topics`: a paper whose card is ready and that is `must_read` for one of those
-topics also joins that collection (a reading app picks it up there).
+topics is in that collection too (a reading app picks it up there), and leaves it when that no
+longer holds or the paper leaves the library.
 """
 
 from __future__ import annotations
@@ -297,13 +298,15 @@ class ZoteroClient:
         await self.patch_item(key, mutate)
         return key
 
-    async def drop_item(self, key: str) -> None:
-        """Out of the managed collections, its grade tags replaced by `litwatch:dropped`. The
-        item itself stays: deleting is the owner's call, and it may carry a PDF."""
+    async def drop_item(self, key: str, also: tuple[str, ...] = ()) -> None:
+        """Out of the managed collections and those named in `also` (the inbox), its grade tags
+        replaced by `litwatch:dropped`. The item itself stays: deleting is the owner's call,
+        and it may carry a PDF."""
         cols = await self.collections()
+        leave = cols.managed | set(also)
 
         def mutate(data: dict[str, Any]) -> None:
-            data["collections"] = [c for c in data.get("collections", []) if c not in cols.managed]
+            data["collections"] = [c for c in data.get("collections", []) if c not in leave]
             data["tags"] = _retag(data.get("tags", []), MANAGED_PREFIXES, [DROPPED_TAG])
 
         await self.patch_item(key, mutate)
@@ -340,10 +343,13 @@ class ZoteroClient:
 
         await self.patch_item(key, mutate)
 
-    async def add_to_collection(self, key: str, collection_key: str) -> None:
+    async def set_in_collection(self, key: str, collection_key: str, member: bool) -> None:
+        """Put the item in the collection, or take it out; nothing is written if it already
+        is where it should be."""
+
         def mutate(data: dict[str, Any]) -> None:
-            if collection_key not in data.get("collections", []):
-                data["collections"] = [*data.get("collections", []), collection_key]
+            others = [c for c in data.get("collections", []) if c != collection_key]
+            data["collections"] = [*others, collection_key] if member else others
 
         await self.patch_item(key, mutate)
 
@@ -413,7 +419,7 @@ class Zotero:
         if not seen["saved"]:
             if key:
                 try:
-                    await self.zotero.drop_item(key)
+                    await self.zotero.drop_item(key, also=self._inbox)
                 except GoneError:
                     await state.set_zotero_item(conn, paper_id, None)
             return
@@ -441,10 +447,17 @@ class Zotero:
                 attempt,
             )
             await self.zotero.set_tags(key, enrichment_tags(card["card"]), CARD_PREFIXES)
-            if self.inbox_collection and any(
+        if self.inbox_collection:
+            # In the inbox exactly while its card is ready and it is `must_read` for an inbox
+            # topic: a paper that drops below that leaves the inbox again.
+            inbox = bool(card and card["card"]) and any(
                 t["grade"] == Grade.MUST_READ and t["slug"] in self.inbox_topics for t in watch
-            ):
-                await self.zotero.add_to_collection(key, self.inbox_collection)
+            )
+            await self.zotero.set_in_collection(key, self.inbox_collection, inbox)
+
+    @property
+    def _inbox(self) -> tuple[str, ...]:
+        return (self.inbox_collection,) if self.inbox_collection else ()
 
 
 def load(name: str, options: dict[str, Any], config: Config) -> Zotero:

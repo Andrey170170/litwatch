@@ -55,6 +55,10 @@ CREATE TABLE deep_cards (
     error        text,                      -- the last attempt's failure
     job_id       text,
     job_since    timestamptz,               -- when that job was submitted
+    job_revision integer,                   -- the paper revision and arXiv version it was
+    job_version  integer,                   -- submitted for: a card for older text is not kept
+    job_event    bigint,                    -- the event that asked, and whether it was
+    job_automatic boolean,                  -- automatic, should the paper have to wait again
     written_at   timestamptz
 );
 
@@ -85,6 +89,16 @@ CREATE TABLE deep_waiting (
 -- version makes it stale (a new version can change the body without touching the abstract).
 ALTER TABLE papers ADD COLUMN IF NOT EXISTS body_revision integer,
     ADD COLUMN IF NOT EXISTS body_version integer;
+-- A text 0.x fetched belongs to the paper as it is when adopted; from here on it is stale
+-- like any other once the paper is rewritten or gets a new version.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+               AND table_name = 'papers' AND column_name = 'body') THEN
+        UPDATE papers SET body_revision = coalesce(body_revision, revision), body_version = version
+        WHERE body IS NOT NULL AND body_revision IS NULL;
+    END IF;
+END $$;
 
 -- An adopted 0.x database brings its cards along on the paper rows.
 DO $$

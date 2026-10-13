@@ -186,6 +186,32 @@ async def test_takes_published_versions_and_cards_reach_the_notes(world):
     assert "INBOX" in fake.items[key]["data"]["collections"]
 
 
+async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(world):
+    conn, fake = world, FakeZotero()
+    z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await state.put_card(conn, P.id, CARD, "deep-model", {}, [])
+    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await run(conn, z)
+    (item,) = fake.tops()
+    key = item["key"]
+
+    def inbox() -> bool:
+        return "INBOX" in fake.items[key]["data"]["collections"]
+
+    assert inbox()
+    await say(conn, LabelValue.RELEVANT, Grade.RELEVANT)  # below must read: out of the inbox
+    await run(conn, z)
+    assert not inbox() and "Tier 2" in fake.collection_names(key)
+    await say(conn, LabelValue.RELEVANT, Grade.MUST_READ)  # back
+    await run(conn, z)
+    assert inbox()
+    await word.toggle(conn, P.id, Hand.UNSAVE)  # unsaved: out with the other collections
+    await run(conn, z)
+    assert not inbox() and fake.collection_names(key) == set()
+
+
 async def test_a_create_whose_answer_was_lost_is_made_once(world):
     conn, fake = world, FakeZotero()
     fake.lose_answers = 100  # every create happens, then answers 502

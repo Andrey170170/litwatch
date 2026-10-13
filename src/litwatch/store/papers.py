@@ -238,8 +238,7 @@ async def body(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str, str |
     row = await (
         await conn.execute(
             "SELECT body, body_source FROM papers WHERE id = %s AND body IS NOT NULL "
-            "AND coalesce(body_revision, 1) = revision "
-            "AND (body_version IS NULL OR body_version IS NOT DISTINCT FROM version)",
+            "AND body_revision = revision AND body_version IS NOT DISTINCT FROM version",
             (paper_id,),
         )
     ).fetchone()

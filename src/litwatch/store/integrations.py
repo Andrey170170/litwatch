@@ -8,6 +8,8 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from litwatch.core import Paper
+
 
 async def _has_column(conn: psycopg.AsyncConnection, table: str, column: str) -> bool:
     row = await (
@@ -101,8 +103,9 @@ async def card(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] |
     while a job is running for it."""
     return await (
         await conn.execute(
-            "SELECT paper_id, card, model, stats, error, job_id, job_since, written_at "
-            "FROM deep_cards WHERE paper_id = %s",
+            "SELECT paper_id, card, model, stats, error, job_id, job_since, job_revision, "
+            "job_version, job_event, job_automatic, written_at FROM deep_cards "
+            "WHERE paper_id = %s",
             (paper_id,),
         )
     ).fetchone()
@@ -158,16 +161,26 @@ async def card_failed(
     )
 
 
-async def job_started(conn: psycopg.AsyncConnection, paper_id: str, job_id: str) -> None:
+async def job_started(
+    conn: psycopg.AsyncConnection,
+    paper: Paper,
+    job_id: str,
+    event_id: int,
+    automatic: bool,
+) -> None:
     """The service accepted a job for the paper: it is followed until it ends, across
     retries and restarts, and never submitted again meanwhile."""
     await conn.execute(
         """
-        INSERT INTO deep_cards (paper_id, job_id, job_since) VALUES (%s, %s, now())
+        INSERT INTO deep_cards (paper_id, job_id, job_since, job_revision, job_version, job_event,
+                                job_automatic)
+        VALUES (%s, %s, now(), %s, %s, %s, %s)
         ON CONFLICT (paper_id) DO UPDATE SET
-            job_id = EXCLUDED.job_id, job_since = EXCLUDED.job_since, error = NULL
+            job_id = EXCLUDED.job_id, job_since = EXCLUDED.job_since,
+            job_revision = EXCLUDED.job_revision, job_version = EXCLUDED.job_version,
+            job_event = EXCLUDED.job_event, job_automatic = EXCLUDED.job_automatic, error = NULL
         """,
-        (paper_id, job_id),
+        (paper.id, job_id, paper.revision, paper.version, event_id, automatic),
     )
 
 
@@ -211,24 +224,31 @@ async def automatic_attempts_since(conn: psycopg.AsyncConnection, since: datetim
 
 
 async def wait_for_text(
-    conn: psycopg.AsyncConnection, paper_id: str, event_id: int, automatic: bool
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    event_id: int,
+    automatic: bool,
+    *,
+    due: bool = False,
 ) -> None:
     """The paper's text could not be had now: try again later. A paper already waiting keeps
     the time it began to, unless the owner now asks for a card it was waiting for by itself:
     their request takes over, with its own event and a fresh day, so later tries go by the
-    request (no grade or library check, nothing counted toward the daily cap)."""
+    request (no grade or library check, nothing counted toward the daily cap). `due` makes
+    it the first to be tried again, rather than after the usual hour."""
     await conn.execute(
         """
-        INSERT INTO deep_waiting (paper_id, event_id, automatic) VALUES (%s, %s, %s)
+        INSERT INTO deep_waiting (paper_id, event_id, automatic, tried_at)
+        VALUES (%s, %s, %s, CASE WHEN %s THEN '-infinity'::timestamptz ELSE now() END)
         ON CONFLICT (paper_id) DO UPDATE SET
-            tried_at = now(),
+            tried_at = EXCLUDED.tried_at,
             event_id = CASE WHEN deep_waiting.automatic AND NOT EXCLUDED.automatic
                             THEN EXCLUDED.event_id ELSE deep_waiting.event_id END,
             since = CASE WHEN deep_waiting.automatic AND NOT EXCLUDED.automatic
                          THEN now() ELSE deep_waiting.since END,
             automatic = deep_waiting.automatic AND EXCLUDED.automatic
         """,
-        (paper_id, event_id, automatic),
+        (paper_id, event_id, automatic, due),
     )
 
 

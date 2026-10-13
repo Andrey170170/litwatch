@@ -14,7 +14,9 @@ topics ask for, and returns the validated card with a trace and token counts.
 Every submission that may reach the service is recorded as an attempt before it is sent, and
 the job it starts is recorded once accepted. A failed poll or a restart then follows that
 job rather than paying for another; a submission whose answer never came counts all the same.
-A job that ends in failure is recorded and not retried by itself. A paper whose text cannot
+A job that ends in failure is recorded and not retried by itself. A card whose job was
+submitted for a revision or arXiv version the paper no longer has is not kept: the paper
+waits again, first in line, as the same request or automatic card it was. A paper whose text cannot
 be had yet (no HTML rendering, the archive still fetching the PDF, arXiv failing) waits: up to
 three waiting papers are tried again before each event, and whenever the dispatcher finds
 nothing to hand over, each at most hourly, for a day, after which the reason is recorded. The
@@ -215,8 +217,7 @@ class Deep:
             return None
         if found and found["job_id"]:
             # Submitted before a failure or a restart: follow that job, never pay for another.
-            await self._follow(conn, paper_id, found["job_id"], found["job_since"])
-            return None
+            return await self._follow(conn, paper_id, found)
         if automatic:
             if not await must_read_and_saved(conn, paper_id):
                 return None
@@ -256,19 +257,34 @@ class Deep:
             ),
             selections=[{"name": t.name, "subject": t.subject, "rubric": t.rubric} for t in topics],
         )
-        await state.job_started(conn, paper_id, job_id)
-        await self._follow(conn, paper_id, job_id, datetime.now(UTC))
-        return None
+        await state.job_started(conn, paper, job_id, event_id, automatic)
+        return await self._follow(conn, paper_id, await state.card(conn, paper_id))
 
     async def _follow(
-        self, conn: psycopg.AsyncConnection, paper_id: str, job_id: str, since: datetime
-    ) -> None:
-        outcome = await self.client.follow(job_id, since, label=paper_id)
+        self, conn: psycopg.AsyncConnection, paper_id: str, job: dict[str, Any]
+    ) -> str | None:
+        """Follow the job to its end and keep its card, if the card is still of the paper as
+        it is: one made from text that intake has since rewritten or replaced with a new
+        version is dropped, and the paper waits to be tried again, first in line."""
+        outcome = await self.client.follow(job["job_id"], job["job_since"], label=paper_id)
         if outcome.error or outcome.result is None:
             error = outcome.error or "no result"
             await state.card_failed(conn, paper_id, error, outcome.stats, outcome.trace)
             log.warning("%s: deep card failed: %s", paper_id, error)
-            return
+            return None
+        paper = await papers_store.get(conn, paper_id)
+        if paper is not None and (paper.revision, paper.version) != (
+            job["job_revision"],
+            job["job_version"],
+        ):
+            await state.card_failed(
+                conn, paper_id, "the paper changed while its card was made; making it again"
+            )
+            await state.wait_for_text(
+                conn, paper_id, job["job_event"], bool(job["job_automatic"]), due=True
+            )
+            log.info("%s: deep card dropped: made for text the paper no longer has", paper_id)
+            return WAITING
         async with conn.transaction():
             await state.put_card(
                 conn, paper_id, outcome.result, outcome.model, outcome.stats, outcome.trace
@@ -280,6 +296,7 @@ class Deep:
             outcome.stats.get("cells"),
             outcome.stats.get("list_cost", 0.0),
         )
+        return None
 
     async def _topics(self, conn: psycopg.AsyncConnection, paper_id: str, requested: bool) -> list:
         grades = await word_store.effective_for(conn, paper_id)
