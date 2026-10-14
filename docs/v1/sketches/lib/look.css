@@ -1,0 +1,72 @@
+/* Round 5, the look: each option is a data attribute on the frame. Defaults (chakra, same, s, all, stripe, now)
+   reproduce the rounds so far exactly; every other value changes one thing. */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+/* ── UI face: Chakra Petch (as now) or IBM Plex Sans; the Rajdhani caps and the mono stay ── */
+.frame[data-ui="plex"] { font-family: "IBM Plex Sans", sans-serif; }
+html .frame[data-ui="plex"] .drawer .it.subit { font-family: "IBM Plex Sans", sans-serif; }
+
+/* ── text size: one factor for the interface (--k), a second for the reading face (--kr) ── */
+.frame { --k: 1; --kr: 1; }
+.frame[data-size="m"] { --k: 1.1; }
+.frame[data-read="serif"] { --kr: 1.1; }
+.frame[data-size] .side .it .nm { font-size: calc(15px * var(--k)); }
+.frame[data-size] .drawer .nm { font-size: calc(14px * var(--k)); }
+.frame[data-size] .prow .t { font-size: calc(13.5px * var(--k)); }
+.frame[data-size] .prow .d, .frame[data-size] .dt { font-size: calc(12px * var(--k)); }
+.frame[data-size] .dblock .hd .n { font-size: calc(15.5px * var(--k)); }
+.frame[data-size] .br .ti { font-size: calc(14px * var(--k)); }
+.frame[data-size] .br .m { font-size: calc(11.5px * var(--k)); }
+.frame[data-size] .tbl .ti, .frame[data-size] .orow .ti { font-size: calc(13.5px * var(--k)); }
+.frame[data-size].desk .tbl .tr { height: calc(34px * var(--k)); }
+.frame[data-size] .h1 { font-size: calc(25px * var(--k)); }
+.frame[data-size].phone .pghead .h1 { font-size: calc(21px * var(--k)); }
+.frame[data-size].phone .tbl .ti { font-size: calc(14px * var(--k)); }
+.frame[data-size] .tsub { font-size: calc(13.5px * var(--k)); }
+.frame[data-size] .tcard2 .nm2 { font-size: calc(12.5px * var(--k)); }
+.frame[data-size] .pghead .au, .frame[data-size] .tprow, .frame[data-size] .pw { font-size: calc(13px * var(--k)); }
+.frame[data-size] .pghead .facts, .frame[data-size] .facts .lnk { font-size: calc(12px * var(--k)); }
+.frame[data-size] .kv { font-size: calc(13.5px * var(--k)); }
+.frame[data-size] .kv.sm { font-size: calc(12.5px * var(--k)); }
+/* the reading face: Gists, takes, the Brief and the Deep card's prose */
+.frame[data-size] .prose { font-size: calc(14.5px * var(--k) * var(--kr)); }
+.frame[data-size] .dblock .body2 .prose { font-size: calc(14px * var(--k) * var(--kr)); }
+.frame[data-size] .prose.gist { font-size: calc(16px * var(--k) * var(--kr)); }
+.frame[data-size] .dblock .p { font-size: calc(13.5px * var(--k) * var(--kr)); }
+.frame[data-size] .prow .g, .frame[data-size] .br .g { font-size: calc(13px * var(--k) * var(--kr)); }
+.frame[data-size] .rgist p { font-size: calc(14px * var(--k) * var(--kr)); }
+.frame[data-size] .claim { font-size: calc(15.5px * var(--k) * var(--kr)); }
+.frame[data-size] .overst, .frame[data-size] .lim { font-size: calc(13.5px * var(--k) * var(--kr)); }
+
+/* ── reading face: the same as the UI, or Newsreader for the written text only ── */
+.frame[data-read="serif"] :is(.prose, .dblock .p, .prow .g, .br .g, .rgist p, .claim, .overst, .lim, .kv:not(.sm) > div:not(:has(.tag))) {
+  font-family: Newsreader, Georgia, serif; letter-spacing: 0;
+}
+.frame[data-read="serif"] .prose { line-height: 1.55; }
+.frame[data-read="serif"] .claim { font-weight: 600; }
+
+/* ── topic badges: coloured everywhere (as now), coloured only where the topic is the subject (nav, topic and
+   digest heads, the paper's topic rows), or grey everywhere; the depth shapes (filled, tinted, outlined) stay ── */
+.frame[data-badge="rows"] :is(.prow, .br, .tbl .tr, .pghead, .mbar) .badge,
+.frame[data-badge="mono"] .badge { --tc: var(--fg3) !important; }
+html[data-theme="dark"] .frame[data-badge="rows"] :is(.prow, .br, .tbl .tr, .pghead, .mbar) .badge,
+html[data-theme="dark"] .frame[data-badge="mono"] .badge { --tc: var(--fg2) !important; }
+.frame[data-badge="rows"] :is(.prow, .br, .tbl .tr, .pghead, .mbar) .badge:not(.area):not(.field),
+.frame[data-badge="mono"] .badge:not(.area):not(.field) { color: var(--bg); }
+
+/* ── rarity on rows: the stripe (as now), or the stripe plus a glow of the rarity colour fading to the right ── */
+.frame[data-rar="glow"] :is(.prow, .br, .tbl .tr, .drow:not(.quiet), .tprow, .pghead) {
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--rc) 15%, transparent), transparent min(60%, 460px));
+}
+html[data-theme="dark"] .frame[data-rar="glow"] :is(.prow, .br, .tbl .tr, .drow:not(.quiet), .tprow, .pghead) {
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--rc) 20%, transparent), transparent min(60%, 460px));
+}
+
+/* ── Night City detail: as now, or plainer (square corners, grey section names, no // and no glitch) ── */
+.frame[data-chrome="plain"] :is(.list, .dblock, .btn, .badge, .mday, .mweek, .grid .cell) { clip-path: none !important; }
+.frame[data-chrome="plain"] :is(.sec, .cap)::before { content: none; }
+.frame[data-chrome="plain"] :is(.sec, .cap) { color: var(--fg3); }
+.frame[data-chrome="plain"] .rung .rl, .frame[data-chrome="plain"] .rgist .rl { color: var(--fg2); }
+.frame[data-chrome="plain"] .rung.sub .rl { color: var(--fg3); }
+.frame[data-chrome="plain"] .wm:hover { animation: none; }
+.frame[data-chrome="plain"] .prow:hover::before, .frame[data-chrome="plain"] .drow:hover::before { box-shadow: none; }

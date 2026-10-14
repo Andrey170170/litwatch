@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 5 · the look</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<link rel="stylesheet" href="lib/papers.css">
+<link rel="stylesheet" href="lib/paper.css">
+<link rel="stylesheet" href="lib/look.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<script src="lib/papers.js"></script>
+<script src="lib/topicpage.js"></script>
+<script src="lib/paper.js"></script>
+<style>
+  .sw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+  .sw button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px; color: var(--fg2); }
+  .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+  @media (max-width: 640px) { .sw > span { display: none; } }
+  .states { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .states button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; color: var(--fg2); }
+  .states button:hover { color: var(--fg); border-color: var(--fg2); }
+  .pbar .ttl2 { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .pbar .ttl2 .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
+  .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
+  .frame { position: relative; }
+  /* the look switches: a panel above the frames on desktop, a dropdown in the top bar on a phone */
+  .lookp { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: center; margin: 0 0 14px; font-size: 12.5px; }
+  .lookp > span { color: var(--fg2); }
+  .lookp .sw { flex-wrap: wrap; }
+  .lookm { display: none; position: relative; }
+  .lookm summary { list-style: none; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+  .lookm summary::-webkit-details-marker { display: none; }
+  .lookm .lookp { position: fixed; left: 8px; right: 8px; top: 46px; z-index: 40; background: var(--page); border: 1px solid var(--line); border-radius: 8px; padding: 12px; grid-template-columns: 1fr; gap: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, .4); }
+  .lookm .lookp > span { margin-top: 6px; }
+  @media (max-width: 640px) { .lookm { display: block; } }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 5 · the look</h1>
+  <span class="sp"></span>
+  <details class="lookm"><summary>Look ▾</summary><div class="lookp" data-look></div></details>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">The screens chosen so far, in one app, with the look as switches. Each switch changes one thing; the first option of each is the look as it stands. They apply to the desktop and the phone together, and work in Light as well as Dark. Jump to:</p>
+  <div class="states">
+    <button data-jump="digest">Digest</button>
+    <button data-jump="topic">A topic page</button>
+    <button data-jump="paper">A paper</button>
+    <button data-jump="papers">Papers</button>
+    <button data-jump="topics">Topics</button>
+  </div>
+  <div class="lookp" data-look></div>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" id="M"></div>
+    <div class="notes">
+      <p><b>The switches</b></p>
+      <ul>
+        <li><b>UI face</b>: Chakra Petch (now) or IBM Plex Sans for everything that is not a heading. Headings and caps stay Rajdhani, numbers stay mono.</li>
+        <li><b>Reading face</b>: the written text (Gists, digest takes, the Brief, the Deep card's prose) in the UI face, or in Newsreader, a serif made for screen reading.</li>
+        <li><b>Text</b>: as now, or one step (10%) larger with the same spacing.</li>
+        <li><b>Topic badges</b>: coloured everywhere (now); coloured only where the topic is the subject (the sidebar, topic and digest heads, the paper's topic rows) and grey on paper rows, where colour means rarity; or grey everywhere. Filled, tinted and outlined still tell Focus, Area and Field apart.</li>
+        <li><b>Rarity on rows</b>: the stripe (now), or the stripe plus a glow of its colour fading across the row.</li>
+        <li><b>Night City detail</b>: as now (cut corners, red section names, //), or plainer.</li>
+      </ul>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Type: which UI face, and which reading face for the Brief and the Deep card?</li>
+        <li>Text size: as now or a step up, on the desktop and on the phone?</li>
+        <li>Topic badges: coloured everywhere, only where the topic is the subject, or grey?</li>
+        <li>Rarity on rows: the stripe alone, or with the glow?</li>
+        <li>Night City detail: as now, or plainer?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const SW = { v: "C", bar: "inline", cards: "rich", acts: "grid" };
+// the look options, first value = the look as it stands; stored apart from the app's own switches
+const LOOK = [
+  ["ui", "UI face", [["chakra", "Chakra Petch"], ["plex", "IBM Plex Sans"]]],
+  ["read", "Reading face", [["same", "the UI face"], ["serif", "Newsreader serif"]]],
+  ["size", "Text", [["s", "as now"], ["m", "a step up"]]],
+  ["badge", "Topic badges", [["all", "coloured"], ["rows", "coloured where the topic is the subject"], ["mono", "grey"]]],
+  ["rar", "Rarity on rows", [["stripe", "stripe"], ["glow", "stripe and glow"]]],
+  ["chrome", "Night City detail", [["now", "as now"], ["plain", "plainer"]]],
+];
+const LK = Object.assign(Object.fromEntries(LOOK.map(([k, , o]) => [k, o[0][0]])), JSON.parse(localStorage.getItem("lw-r5") || "{}"));
+let gistUp = false;
+const PG = { pick: null, pickth: null, lab: null, rs: null, rsT: null, ps: false, pgopen: [] };
+
+function toast(frame, msg) {
+  frame.querySelectorAll(".toast").forEach((t) => t.remove());
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; frame.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+// the paper's place in the list it was opened from, in the order the list shows: shelf by shelf, sorted inside each
+function inList(st) {
+  if (!st.paper || !(st.topic || st.tab === "Papers")) return null;
+  const shelf = (p) => Math.min(lvOf(p, st.topic), 4);
+  const L = listFor(st, st.topic).sort((a, b) => shelf(b) - shelf(a)), i = L.findIndex((p) => p.id === st.paper);
+  return i < 0 ? null : { L, i };
+}
+const surface = (st, pd) => (st.topic && pd.lv[st.topic] ? st.topic : pd.tp[0]);
+
+function pgBody(pd, st, phone) {
+  if (phone) return `<div class="pg B">${pgHead(pd)}${pgLadder(pd, st, { nopaper: true })}</div>`;
+  return `<div class="pg B track${gistUp ? " gistup" : ""}">${pgHead(pd, { acts: SW.acts === "head" })}<div class="pgcols"><div class="pgmain">${pgLadder(pd, st)}</div><aside class="pgrail">${pgRail(pd, st, { acts: SW.acts })}</aside></div></div>`;
+}
+// the phone's bottom bar and its two sheets (the reasons for a thumb, and the paper); a sheet animates only as it opens
+let lastSheet = null;
+function pgFoot(pd, st) {
+  const cur = st.rs ? "rs" : st.ps ? "ps" : null, enter = cur && cur !== lastSheet;
+  lastSheet = cur;
+  const more = `<a data-ps="open" title="The paper: links, BibTeX, labels">⋯</a>`;
+  if (pd.arch) return `<div class="pfoot pgf"><a data-process="${pd.id}"><small>Process</small></a><a data-deep="${pd.id}"><small>Deep read</small></a>${more}</div>${st.ps ? pgSheet(pd, enter) : ""}`;
+  const t = st.rsT || surface(st, pd), re = REACT[pd.id + "|" + t], at = inList(st);
+  const rs = !st.rs ? "" : `<div class="fsheet${enter ? " enter" : ""}"><div class="shade2" data-rs="x"></div><div class="sheetp">
+    ${pd.tp.length > 1 ? `<div class="cap2">Topic</div><div class="row">${pd.tp.map((x) => `<a class="fchip2${x === t ? " on" : ""}" data-rst="${x}">${badge(x)} ${T[x].n}</a>`).join("")}</div>` : ""}
+    <div class="cap2">${st.rs === "up" ? "👍 Why" : "👎 Why"} · ${T[t].n}</div><div class="why big">${REASONS[st.rs].map(([w, n]) => `<a class="${re && re.why === w ? "on" : ""}" data-why="${pd.id}|${t}|${st.rs}|${w}">${n}</a>`).join("")}${re ? `<a class="clr" data-why="${pd.id}|${t}|-|-">Clear</a>` : ""}</div>
+    <button class="done" data-rs="x">Cancel</button></div></div>`;
+  return `<div class="pfoot pgf"><a class="${pd.sv ? "on" : ""}" data-save="${pd.id}">${pd.sv ? "★" : "☆"}</a><a class="${re && re.thumb === "up" ? "on" : "dim"}" data-rs="up">👍</a>
+    <span class="lbl">${at ? `${at.i + 1}/${at.L.length}` : ""}</span><a class="${re && re.thumb === "down" ? "on" : "dim"}" data-rs="down">👎</a>${more}</div>${rs}${st.ps ? pgSheet(pd, enter) : ""}`;
+}
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, dg: null, ...FD, ...PG },
+    view(st) {
+      const pd = st.paper && paperData(st.paper);
+      if (pd) return phone ? { body: pgBody(pd, st, true), title: st.topic ? T[st.topic].n : "Paper", foot: pgFoot(pd, st) } : { body: pgBody(pd, st, false), title: pd.t };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      const v = st.topic ? topicV(st, phone) : st.tab === "Papers" ? papersV(st, phone) : st.tab === "Topics" ? topicsV()
+        : { body: daystrip(TODAY, false) + dayBody(TODAY, DG, { weekly: false }), title: "Digest" };
+      if (phone) return v;
+      const ov = st.dg ? digestPage(st.dg) : null;
+      return { ...v, overlay: ov && `<a class="back" data-back>‹ Close</a>${ov}` };
+    },
+    swipe(st) {
+      const at = inList(st);
+      if (!at) return null;
+      const to = (p) => p && { paper: p.id, ...PG };
+      return { older: to(at.L[at.i - 1]), newer: to(at.L[at.i + 1]) };
+    },
+    click(e, nav) {
+      const f = (s) => e.target.closest(s), st = nav.st, fr = e.currentTarget; let n;
+      const toggle = (a, x) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]);
+      if ((n = f("[data-save]"))) { const p = P[n.dataset.save]; p.sv = !p.sv; nav.set({}); if (st.paper) toast(fr, p.sv ? "Saved: it joins the library." : "Unsaved: it leaves the library until you save it again."); return true; }
+      if ((n = f("[data-process]"))) { toast(fr, `Processing ${n.dataset.process}: classified, analysed and graded like a new paper.`); return true; }
+      if ((n = f("[data-deep]"))) { REQ.add(n.dataset.deep); nav.set({}); toast(fr, "Deep card asked for. It starts as soon as the archive has the text."); return true; }
+      if (f("[data-miss]")) { toast(fr, "Report as a miss: you pick its topic, and it is saved at once."); return true; }
+      if ((n = f("[data-bib]"))) { const pd = paperData(n.dataset.bib); toast(fr, `BibTeX copied${pd.pub ? ` (${pd.pub})` : " (arXiv entry)"}.`); return true; }
+      if ((n = f("[data-copy]"))) { toast(fr, `Copied ${n.dataset.copy}.`); return true; }
+      if (f("[data-doi]")) { toast(fr, "Paste a DOI or DBLP key; litwatch never overwrites it."); return true; }
+      if ((n = f("[data-au]"))) { const a = n.closest(".au"); a.textContent = a.dataset.auall; return true; }
+      if ((n = f("[data-th]"))) { const [id, t, th] = n.dataset.th.split("|"), k = id + "|" + t; nav.set(st.pick === k && st.pickth === th ? { pick: null } : { pick: k, pickth: th, lab: null }); return true; }
+      if ((n = f("[data-why]"))) {
+        const [id, t, th, why] = n.dataset.why.split("|"), k = id + "|" + t, pd = paperData(id);
+        if (th === "-") { delete REACT[k]; toast(fr, "Reaction cleared; its word is taken back."); }
+        else { REACT[k] = { thumb: th, why }; if (why === "wrong" && T[t].depth === "focus") P[id].sv = false; toast(fr, reactAck(pd, t, th, why)); }
+        nav.set({ pick: null, rs: null, rsT: null }); return true;
+      }
+      if ((n = f("[data-labopen]"))) { const k = n.dataset.labopen; nav.set({ lab: st.lab === k ? null : k, pick: null }); return true; }
+      if ((n = f("[data-lab]"))) { const [id, t, fit] = n.dataset.lab.split("|"), k = id + "|" + t; if (LABEL[k] === fit) delete LABEL[k]; else LABEL[k] = fit;
+        nav.set({ lab: null }); toast(fr, LABEL[k] ? `Labelled ${fit} on ${T[t].n}${fit === "unsure" ? "; unsure counts nowhere" : ""}.` : "Label removed."); return true; }
+      if ((n = f("[data-rate]"))) { const [id, r, v] = n.dataset.rate.split("|"), k = id + "|" + r; RATE[k] = RATE[k] === v ? undefined : v; nav.set({}); return true; }
+      if ((n = f("[data-rs]"))) { nav.set(n.dataset.rs === "x" ? { rs: null, rsT: null } : { rs: n.dataset.rs, ps: false }); return true; }
+      if ((n = f("[data-rst]"))) { nav.set({ rsT: n.dataset.rst }); return true; }
+      if ((n = f("[data-ps]"))) { nav.set({ ps: n.dataset.ps !== "x", rs: null }); return true; }
+      if ((n = f(".pg [data-paper]"))) { nav.go({ paper: n.dataset.paper, ...PG }); return true; }
+      if (f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-topic]")) && !f("[data-paper], [data-cell]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
+      else if ((n = f("[data-rl]"))) nav.set({ rset: toggle(st.rset, +n.dataset.rl), n: 40 });
+      else if ((n = f("[data-chip]"))) nav.set({ [n.dataset.chip]: !st[n.dataset.chip], n: 40 });
+      else if ((n = f("[data-sort]"))) nav.set({ sort: n.dataset.sort });
+      else if ((n = f("[data-tf]"))) nav.set({ tf: toggle(st.tf, n.dataset.tf), n: 40 });
+      else if ((n = f("[data-unfold]"))) nav.set({ open: toggle(st.open, +n.dataset.unfold) });
+      else if (f("[data-clear]")) nav.set({ ...FD });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else if ((n = f("[data-paper]"))) nav.go({ paper: n.dataset.paper, ...PG });
+      else return false;
+      return true;
+    },
+  };
+}
+
+const D = document.getElementById("D"), M = document.getElementById("M");
+const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
+[[D, navs[0]], [M, navs[1]]].forEach(([f, n]) => { autoLoad(f, n); liveSearch(f, n); });
+function openPaper(topic, id) { navs.forEach((n) => { n.top(topic ? { tab: null, topic } : { tab: "Papers" }); n.go({ paper: id, ...PG }); }); }
+const JUMP = {
+  digest: () => navs.forEach((n) => n.top({ tab: "Digest", topic: null })),
+  topic: () => navs.forEach((n) => n.top({ tab: null, topic: "cotf" })),
+  paper: () => openPaper("cotf", "2610.04321"),
+  papers: () => navs.forEach((n) => n.top({ tab: "Papers", topic: null })),
+  topics: () => navs.forEach((n) => n.top({ tab: "Topics", topic: null })),
+};
+document.querySelectorAll("[data-jump]").forEach((b) => b.onclick = () => JUMP[b.dataset.jump]());
+// the Gist is "up" once the reading column's Gist has scrolled out of view; checked on scroll and after each redraw
+function checkGist() {
+  const g = D.querySelector(".pgmain .gistr"), m = D.querySelector(".main"), pg = D.querySelector(".pg.track");
+  if (!g || !pg) return;
+  gistUp = g.getBoundingClientRect().bottom < m.getBoundingClientRect().top + 8;
+  pg.classList.toggle("gistup", gistUp);
+}
+D.addEventListener("scroll", checkGist, true);
+new MutationObserver(checkGist).observe(D, { childList: true });
+// the look switches set data attributes on both frames; nothing is redrawn, so scroll and state stay put
+document.querySelectorAll("[data-look]").forEach((p) => p.innerHTML = LOOK.map(([k, name, opts]) =>
+  `<span>${name}</span><span class="sw">${opts.map(([v, l]) => `<button data-lk="${k}:${v}">${l}</button>`).join("")}</span>`).join(""));
+function applyLook() {
+  [D, M].forEach((f) => Object.entries(LK).forEach(([k, v]) => (f.dataset[k] = v)));
+  document.querySelectorAll("[data-lk]").forEach((b) => { const [k, v] = b.dataset.lk.split(":"); b.classList.toggle("on", LK[k] === v); });
+}
+document.addEventListener("click", (e) => {
+  const lm = document.querySelector(".lookm");
+  if (lm.open && !e.target.closest(".lookm")) lm.open = false;
+  const b = e.target.closest("[data-lk]");
+  if (!b) return;
+  const [k, v] = b.dataset.lk.split(":"); LK[k] = v;
+  localStorage.setItem("lw-r5", JSON.stringify(LK)); applyLook();
+});
+applyLook();
+</script>
+</body></html>
