@@ -27,7 +27,8 @@ the results through its own web app. It is single-user and self-hosted. Branch `
 
 ## Checks
 
-CI (`.github/workflows/ci.yaml`) runs these; run the ones your change touches before committing.
+Run the ones your change touches before committing. CI (`.github/workflows/ci.yaml`) runs the Python and `deep/`
+checks; the `web/` ones run only locally.
 
 - `uv run ruff check src tests`, `uv run ruff format --check src tests`
 - `uv run pytest --strict-markers`. Tests that need PostgreSQL create and drop their own schema in
