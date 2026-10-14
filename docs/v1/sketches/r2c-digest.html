@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 2c · the Digest, slimmed</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<style>
+  .segbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .segbar .sp { flex: 1; }
+  .seg { display: inline-flex; border: 1px solid var(--line); background: var(--surface); }
+  .seg a { padding: 5px 16px; font-size: 12.5px; font-weight: 600; color: var(--fg2); cursor: pointer; text-align: center; }
+  .seg a:hover { color: var(--fg); }
+  .seg a.on { background: var(--sel); color: var(--sel-fg, var(--fg)); }
+  .seg.sm a { padding: 4px 10px; }
+  .frame[data-dir="nc"] .seg { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+  .frame[data-dir="nc"] .seg a { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; font-size: 13.5px; }
+  .frame[data-dir="nc"] .seg.sm a { font-size: 12.5px; letter-spacing: .08em; }
+  /* List / Calendar: plain icons, the active one in the accent, no second filled control */
+  .modes { display: inline-flex; gap: 2px; }
+  .modes a { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; color: var(--fg3); cursor: pointer; }
+  .modes a:hover { color: var(--fg); }
+  .modes a.on { color: var(--acc, var(--fg)); }
+  .wkline { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 13px; cursor: pointer;
+    border: 1px solid color-mix(in srgb, var(--acc, var(--fg)) 45%, transparent); color: var(--acc, var(--fg)); }
+  .wkline:hover { background: color-mix(in srgb, var(--acc, var(--fg)) 8%, transparent); }
+  .frame[data-dir="nc"] .wkline { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .weeksub { font-size: 12px; color: var(--fg3); margin: -6px 0 12px; }
+  .grp .k { margin-left: auto; font-size: 11px; color: var(--fg3); }
+  .calnote { font-size: 12px; color: var(--fg3); margin-top: 10px; max-width: 60ch; }
+  /* phone: the control row (P1) and the header stepper (P2, P3) */
+  .ctl { display: flex; align-items: center; gap: 6px; margin: -4px 0 12px; }
+  .ctl .sp { flex: 1; }
+  .stp { display: inline-flex; align-items: center; min-width: 0; }
+  .stp .ib { width: 30px; }
+  .stp .ib[disabled] { opacity: .3; cursor: default; }
+  .stp .lbl { font: 600 13px "JetBrains Mono", monospace; white-space: nowrap; }
+  .pbar .stp .lbl { font-size: 14px; }
+  .frame[data-dir="nc"] .stp .lbl, .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; font-size: 15px; }
+  .pbar .ttl2 { font-weight: 600; font-size: 15px; }
+  .pbar .st { margin-left: 4px; }
+  .frame[data-dir="nc"] .pbar > .st { color: var(--cy); }
+  .pfoot .seg { display: flex; width: 100%; }
+  .pfoot .seg a { flex: 1; padding: 8px 0; }
+  /* sketch switches */
+  .sw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+  .sw button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px; color: var(--fg2); }
+  .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+  @media (max-width: 640px) { .sw > span { display: none; } .sw button { padding: 3px 6px; } }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 2c · the Digest, slimmed</h1>
+  <span class="sp"></span>
+  <span class="sw"><span>Phone</span><button data-sw="pv:1">P1</button><button data-sw="pv:2">P2</button><button data-sw="pv:3">P3</button></span>
+  <span class="sw"><span>Calendar</span><button data-sw="cal:month">Month</button><button data-sw="cal:rows">Rows</button></span>
+  <span class="sw"><span>Run</span><button data-sw="run:ok">ok</button><button data-sw="run:running">running</button><button data-sw="run:failed">failed</button></span>
+  <label class="tune" style="font-size:12px;color:var(--fg2)"><input type="checkbox" id="showedge"> edge</label>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">Fixes from 2b. A digest card opens as a whole; its foot says only "+N papers" when it holds more than it shows. History's List / Calendar is two icons, so only one control is ever filled. The calendar comes in two shapes: <b>Month</b>, a row per week where a day stacks its daily digests as colour bars and the W cell holds the weeklies (Fields included, in a second column), and <b>Rows</b>, 2b's grid made larger. The phone gets three ways to slim its controls (switch at the top). The 530 changes with the run: try <i>Run</i>.</p>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" id="M"></div>
+    <div class="notes">
+      <p><b>The phone variants</b></p>
+      <ul>
+        <li><b>P1</b>: one control row under the header: Day · Week · History on the left, the ‹ date › on the right (or the list and calendar icons in History).</li>
+        <li><b>P2</b>: the date moves into the header, "☰ ‹ TUE 13 OCT › 530 ⚙"; Day · Week · History live in the drawer under Digest.</li>
+        <li><b>P3</b>: P2's header, with Day · Week · History pinned at the bottom where the thumb is.</li>
+      </ul>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Phone controls: P1, P2 or P3?</li>
+        <li>Calendar: Month or Rows on desktop? The phone only gets Month; Rows does not fit it.</li>
+        <li>Month on desktop shows each bar's badge and count. Keep them, or colours only as on the phone?</li>
+        <li>The status: "530" when all is well, "212/530" pulsing amber while the run goes, "2 failed" in red after a failure. Right? And should tapping "2 failed" open Quality?</li>
+        <li>History reaches back six weeks here. Should it scroll back indefinitely (loading older weeks), or stop at a fixed depth with the rest under Papers?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const WEEKS = NEWEST.filter((d) => d.week).map((d) => d.key); // Mondays that wrote weeklies, newest first
+const SW = Object.assign({ pv: "1", cal: "month", run: "ok" }, JSON.parse(localStorage.getItem("lw-r2c") || "{}"));
+SHELL_RUN = SW.run;
+
+const VIEWS = [["day", "Day"], ["week", "Week"], ["history", "History"]];
+const viewSeg = (st, cls = "") => `<div class="seg ${cls}">${VIEWS.map(([k, n]) => `<a class="${st.view === k ? "on" : ""}" data-view="${k}">${n}</a>`).join("")}</div>`;
+const modes = (st) => `<span class="modes">${[["list", "☰", "List"], ["cal", "▦", "Calendar"]].map(([k, i, n]) => `<a class="${st.hmode === k ? "on" : ""}" data-hmode="${k}" title="${n}">${i}</a>`).join("")}</span>`;
+const short = (day) => day.split(" ").slice(1).join(" ");
+// ‹ label › for the current day or week
+function stepper(st, long) {
+  if (st.view === "day") {
+    const i = NEWEST.findIndex((d) => d.key === st.day);
+    return `<span class="stp"><button class="ib" data-step="1">‹</button><span class="lbl">${long ? st.day : (st.day === TODAY ? "Today" : short(st.day))}</span><button class="ib" data-step="-1" ${i === 0 ? "disabled" : ""}>›</button></span>`;
+  }
+  const i = WEEKS.indexOf(st.week);
+  return `<span class="stp"><button class="ib" data-wstep="1" ${i === WEEKS.length - 1 ? "disabled" : ""}>‹</button><span class="lbl">${long ? "Week " : ""}${DAY[st.week].week.range}</span><button class="ib" data-wstep="-1" ${i === 0 ? "disabled" : ""}>›</button></span>`;
+}
+
+function dayView(day, strip) {
+  const d = DAY[day];
+  const wk = d.week ? `<div class="wkline" data-goweek="${day}">Weekly digests for ${d.week.range} are out <span style="margin-left:auto">›</span></div>` : "";
+  return (strip ? daystrip(day, false) : "") + wk + dayBody(day, DG, { weekly: false });
+}
+function weekView(mon, strip) {
+  const i = WEEKS.indexOf(mon), w = DAY[mon].week;
+  return (strip ? `<div class="daystrip"><button class="ib" data-wstep="1" ${i === WEEKS.length - 1 ? "disabled" : ""}>‹</button><span class="day">${i === 0 ? "<small>Last week</small>" : ""}${w.range}</span><button class="ib" data-wstep="-1" ${i === 0 ? "disabled" : ""}>›</button></div>` : "") +
+    `<div class="weeksub">Written ${mon}</div>` + TOPICS.map((t) => gistBlock(`${mon}|${t.id}|w`, DG)).join("");
+}
+// History as a list: newest first, a weekend as one line, each week's weeklies closing the week they cover
+function historyList() {
+  let h = "";
+  for (let i = 0; i < NEWEST.length; i++) {
+    const d = NEWEST[i];
+    if (d.none) {
+      const sat = NEWEST[i + 1] && NEWEST[i + 1].none ? NEWEST[++i] : null;
+      h += `<div class="grp"><span class="t">${sat ? `${sat.key.split(" ")[0]} – ${d.key}` : d.key}</span><span class="s">No papers released</span></div>`;
+      continue;
+    }
+    h += `<div class="grp click" data-day="${d.key}"><span class="t">${d.key}</span>${d.key === TODAY ? '<span class="s">today</span>' : ""}<span class="k">open the day ›</span></div>`;
+    h += `<div class="list">${DAILY.map((id) => markRow(`${d.key}|${id}`, id, d.marks[id], DG)).join("")}</div>`;
+    if (d.week) h += `<div class="grp click pin" data-week="${d.key}"><span class="t">Week ${d.week.range}</span><span class="s">weekly digests</span><span class="k">open the week ›</span></div>
+      <div class="list">${TOPICS.map((t) => markRow(`${d.key}|${t.id}|w`, t.id, d.week.marks[t.id], DG)).join("")}</div>`;
+  }
+  return h;
+}
+function historyCal(phone) {
+  const cal = phone || SW.cal === "month" ? monthView({ weeks: 6, text: !phone }) : gridView(null, { weeks: 6, lg: true });
+  return `<div class="wideview">${cal}</div><p class="calnote">${phone ? "A day opens its Day, a W cell opens its Week." : `A date opens its Day, a W opens its Week, a ${SW.cal === "month" ? "bar" : "cell"} opens that digest.`}</p>`;
+}
+const historyBody = (st, phone) => (st.hmode === "cal" ? historyCal(phone) : historyList());
+
+function deskView(st) {
+  const bar = `<div class="segbar">${viewSeg(st)}<span class="sp"></span>${st.view === "history" ? modes(st) : ""}</div>`;
+  const body = bar + (st.view === "day" ? dayView(st.day, true) : st.view === "week" ? weekView(st.week, true) : historyBody(st, false));
+  const ov = st.paper ? paperView(st.paper) : st.dg ? digestPage(st.dg) : null;
+  return { body, overlay: ov && `<a class="back" data-back>‹ ${st.paper && st.dg ? "Digest" : "Close"}</a>${ov}` };
+}
+function phoneView(st) {
+  const title = st.view === "day" ? st.day : st.view === "week" ? "Week " + DAY[st.week].week.range : "History";
+  const content = st.view === "day" ? dayView(st.day, false) : st.view === "week" ? weekView(st.week, false) : historyBody(st, true);
+  if (SW.pv === "1") {
+    const right = st.view === "history" ? modes(st) : stepper(st, false);
+    return { body: `<div class="ctl">${viewSeg(st, "sm")}<span class="sp"></span>${right}</div>` + content, title };
+  }
+  const bar = st.view === "history" ? `<span class="ttl2">History</span>` : stepper(st, true);
+  const barRight = st.view === "history" ? modes(st) : "";
+  return { body: content, title, bar, barRight, foot: SW.pv === "3" ? `<div class="pfoot">${viewSeg(st)}</div>` : "" };
+}
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, view: "day", day: TODAY, week: WEEKS[0], hmode: "list", dg: null },
+    view(st) {
+      const slide = !phone && st.tab === "Digest" && !st.topic;
+      if (st.paper && !slide) return { body: paperView(st.paper), title: "" };
+      if (st.topic) return { body: phone ? topicPage(st.topic).replace(/<div style="display:flex;gap:10px[^]*?<\/div>\s*<\/div>/, "") : topicPage(st.topic), title: T[st.topic].n };
+      if (st.tab === "Topics") return { body: topicsView() };
+      if (st.tab === "Papers") return { body: papersView() };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      return phone ? phoneView(st) : deskView(st);
+    },
+    // P2: Day · Week · History under Digest in the drawer
+    sub: phone ? (st) => (SW.pv === "2" ? VIEWS.map(([k, n]) => `<div class="it subit${st.tab === "Digest" && !st.topic && st.view === k ? " on" : ""}" data-subview="${k}">${n}</div>`).join("") : "") : null,
+    click(e, nav) {
+      const f = (s) => e.target.closest(s); let n;
+      if ((n = f("[data-subview]"))) { nav.top({ tab: "Digest", view: n.dataset.subview }); return true; }
+      if (f(".st.bad")) { alert("Would open Quality: the two failed digests and why."); return true; }
+      if (f("[data-paper]") || f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-view]"))) nav.set({ view: n.dataset.view });
+      else if ((n = f("[data-hmode]"))) {
+        nav.set({ hmode: n.dataset.hmode });
+        // the calendar runs oldest to newest, so it opens at the bottom, on this week
+        if (n.dataset.hmode === "cal") { const sc = e.currentTarget.querySelector(".screen .scroll, .main"); sc.scrollTop = sc.scrollHeight; }
+      }
+      else if ((n = f("[data-step]"))) nav.set({ day: stepDay(nav.st.day, +n.dataset.step) });
+      else if ((n = f("[data-wstep]"))) { const i = WEEKS.indexOf(nav.st.week) + +n.dataset.wstep; if (WEEKS[i]) nav.set({ week: WEEKS[i] }); }
+      else if ((n = f("[data-day], [data-gday]"))) nav.go({ view: "day", day: n.dataset.day || n.dataset.gday });
+      else if ((n = f("[data-week], [data-gweek], [data-goweek]"))) nav.go({ view: "week", week: n.dataset.week || n.dataset.gweek || n.dataset.goweek });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else return false;
+      return true;
+    },
+  };
+}
+const navs = [mountDesk(document.getElementById("D"), makeApp(false)), mountPhone(document.getElementById("M"), makeApp(true))];
+function markSwitches() { document.querySelectorAll("[data-sw]").forEach((b) => { const [k, v] = b.dataset.sw.split(":"); b.classList.toggle("on", SW[k] === v); }); }
+document.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => {
+  const [k, v] = b.dataset.sw.split(":"); SW[k] = v; SHELL_RUN = SW.run;
+  localStorage.setItem("lw-r2c", JSON.stringify(SW)); markSwitches(); navs.forEach((n) => n.set({}));
+});
+markSwitches();
+document.getElementById("showedge").onchange = (e) => document.getElementById("M").classList.toggle("show-edge", e.target.checked);
+</script>
+</body></html>

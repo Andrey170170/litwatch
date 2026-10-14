@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 3 · topic page and Papers</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<link rel="stylesheet" href="lib/papers.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<script src="lib/papers.js"></script>
+<script src="lib/topicpage.js"></script>
+<style>
+  .sw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+  .sw button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px; color: var(--fg2); }
+  .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+  @media (max-width: 640px) { .sw > span { display: none; } .sw button { padding: 3px 6px; } }
+  .pbar .ttl2 { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .pbar .ttl2 .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
+  .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 3 · topic page and Papers</h1>
+  <span class="sp"></span>
+  <span class="sw"><span>Rows</span><button data-sw="v:A">A</button><button data-sw="v:B">B</button><button data-sw="v:C">C shelves</button></span>
+  <span class="sw"><span>Rarity bar</span><button data-sw="bar:inline">inline</button><button data-sw="bar:row">own row</button></span>
+  <span class="sw"><span>Topic cards</span><button data-sw="cards:plain">plain</button><button data-sw="cards:rich">rich</button></span>
+  <label class="tune" style="font-size:12px;color:var(--fg2)"><input type="checkbox" id="showedge"> edge</label>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">A topic page, the Papers tab and the Topics tab, on the chosen shell. All three tabs share one set of controls: a <b>rarity bar</b> (five segments, sized by count; tap one or more to filter), Saved, Code, a search box and the sort order. On the phone these sit in the bottom bar and in a sheet that bar opens. The rows come in three forms: <b>A</b> a dense table, one line per paper; <b>B</b> a reading list of title and Gist, grouped by week; <b>C</b> shelves by rarity, with the top shelves open and the rest folded to a count. A topic page also shows its recent digests as a strip of squares. Papers searches the collection and, once you type, the archive, whose papers sit in their own band with Process. This page opens on Interpretability; the sidebar and drawer reach the other topics. The ★ on a row saves the paper; the Digest tab here is a placeholder.</p>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" id="M"></div>
+    <div class="notes">
+      <p><b>3b</b>: C shelves chosen, sorted inside each shelf (in search too). The phone header's topic name ends in "…", and the digest strip stays on one line, cutting the oldest squares when narrow. The filter sheet no longer replays its animation on every tap. Two switches at the top: the rarity bar <i>inline</i> with the other controls or on its <i>own row</i> (desktop), and the Topics tab's cards <i>plain</i> or <i>rich</i>.</p>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Rarity bar inline or on its own row?</li>
+        <li>Topics tab (the Topics item in the sidebar or drawer): plain cards, or rich ones with the topic's levels as a thin bar and its newest must read?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const SW = Object.assign({ v: "C", bar: "inline", cards: "rich" }, JSON.parse(localStorage.getItem("lw-r3") || "{}"));
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, dg: null, ...FD },
+    view(st) {
+      if (phone && st.paper) return { body: paperView(st.paper), title: "" };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      const v = st.topic ? topicV(st, phone) : st.tab === "Papers" ? papersV(st, phone) : st.tab === "Topics" ? topicsV()
+        : { body: daystrip(TODAY, false) + dayBody(TODAY, DG, { weekly: false }), title: "Digest" };
+      if (phone) return v;
+      const ov = st.paper ? paperView(st.paper) : st.dg ? digestPage(st.dg) : null;
+      return { ...v, overlay: ov && `<a class="back" data-back>‹ ${st.paper && st.dg ? "Digest" : "Close"}</a>${ov}` };
+    },
+    click(e, nav) {
+      const f = (s) => e.target.closest(s), st = nav.st; let n;
+      const toggle = (a, x) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]);
+      if ((n = f("[data-save]"))) { const p = P[n.dataset.save]; p.sv = !p.sv; nav.set({}); return true; }
+      if ((n = f("[data-process]"))) { alert(`Would process ${n.dataset.process}: classify, analyse and grade it like a new paper.`); return true; }
+      if (f("[data-fs]")) { nav.set({ fs: !st.fs }); return true; }
+      if (f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-topic]")) && !f("[data-paper], [data-cell]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
+      else if ((n = f("[data-rl]"))) nav.set({ rset: toggle(st.rset, +n.dataset.rl), n: 40 });
+      else if ((n = f("[data-chip]"))) nav.set({ [n.dataset.chip]: !st[n.dataset.chip], n: 40 });
+      else if ((n = f("[data-sort]"))) nav.set({ sort: n.dataset.sort });
+      else if ((n = f("[data-tf]"))) nav.set({ tf: toggle(st.tf, n.dataset.tf), n: 40 });
+      else if ((n = f("[data-unfold]"))) nav.set({ open: toggle(st.open, +n.dataset.unfold) });
+      else if (f("[data-clear]")) nav.set({ ...FD });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else if (f("[data-paper]")) return false;
+      else if (f("[data-step]")) return true;
+      else return false;
+      return true;
+    },
+  };
+}
+
+const D = document.getElementById("D"), M = document.getElementById("M");
+const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
+[[D, navs[0]], [M, navs[1]]].forEach(([f, n]) => { autoLoad(f, n); liveSearch(f, n); n.top({ tab: null, topic: "interp" }); });
+function markSwitches() { document.querySelectorAll("[data-sw]").forEach((b) => { const [k, v] = b.dataset.sw.split(":"); b.classList.toggle("on", SW[k] === v); }); }
+document.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => {
+  const [k, v] = b.dataset.sw.split(":"); SW[k] = v;
+  localStorage.setItem("lw-r3", JSON.stringify(SW)); markSwitches(); navs.forEach((n) => n.set({}));
+});
+markSwitches();
+document.getElementById("showedge").onchange = (e) => M.classList.toggle("show-edge", e.target.checked);
+</script>
+</body></html>

@@ -52,6 +52,7 @@ graph (they belong to the archive, later). Sources other than arXiv. Mobile apps
 | [milestones.md](milestones.md) | Build order and checks; what changes for M7 and M8 |
 | [decisions.md](decisions.md) | Numbered decisions, old and new, and what is still open |
 
-The web app's pages, look and components are not in this spec. They are the second pass (sketches in chat, then
-`docs/v1/DESIGN.md` rewritten); the first v1 design (`DESIGN.md`, `design.html`) is superseded by it. What the
-reading side must do is stated here where the mechanics need it (detail levels, rarity, digest order).
+The web app's pages, look and components are not in this spec. They are [`DESIGN.md`](../DESIGN.md), the second
+pass, drawn as live sketches in `docs/v1/sketches/`; it replaces the first v1 design (`DESIGN.md` and `design.html`
+before 2026-10-13, in git history). What the reading side must do is stated here where the mechanics need it
+(detail levels, rarity, digest order).

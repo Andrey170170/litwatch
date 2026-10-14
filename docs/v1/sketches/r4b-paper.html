@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 4b · the paper page</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<link rel="stylesheet" href="lib/papers.css">
+<link rel="stylesheet" href="lib/paper.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<script src="lib/papers.js"></script>
+<script src="lib/topicpage.js"></script>
+<script src="lib/paper.js"></script>
+<style>
+  .states { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .states button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; color: var(--fg2); }
+  .states button:hover { color: var(--fg); border-color: var(--fg2); }
+  .pbar .ttl2 { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .pbar .ttl2 .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
+  .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
+  .frame { position: relative; }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 4b · the paper page</h1>
+  <span class="sp"></span>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">B, as a page of its own on the desktop. The reading column holds the Brief (or the abstract), the Deep card and, last, the paper's facts, each with its name in the side column; the Deep card's sections sit there one level down. The rail holds what stays at hand while reading: the Gist, Save, Deep read and BibTeX, and per topic its grade, thumbs and Label. On the phone the page is the reading alone; Save and the thumbs are in the bottom bar, and ⋯ opens a sheet with the paper's facts, its links and a label per topic. Open papers in different states:</p>
+  <div class="states">
+    <button data-pp="cotf|2610.04321">Landmark with its Deep card</button>
+    <button data-pp="cotm|2610.04780">Deep card being written</button>
+    <button data-pp="cotf|2610.05112">Brief from an older revision</button>
+    <button data-pp="interp|2610.04990">No Brief, abstract instead</button>
+    <button data-pp="|2305.04388">Archive only, not processed</button>
+  </div>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" id="M"></div>
+    <div class="notes">
+      <p><b>4b</b>: the page (not a slide-over) and B, chosen. The rail no longer repeats the links or the paper's facts; those live once, at the foot of the reading column. The arXiv id in the header opens arXiv, ⧉ beside it copies it, and code and weights are links. Among the collection puts the relation above the title on the phone. A swipe on the phone follows the list as you saw it: the shelves top to bottom, Newest or Rarest inside each.</p>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Does the rail hold the right things: the Gist, Save, Deep read, BibTeX, and per topic the grade, thumbs and Label?</li>
+        <li>The Deep card's section names in the side column under "Deep card": clear enough as a second level?</li>
+        <li>Phone ⋯ sheet: labels on top, then links, BibTeX and the facts. Is that the order you would reach for?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const SW = { v: "C", bar: "inline", cards: "rich" };
+const PG = { pick: null, pickth: null, lab: null, rs: null, rsT: null, ps: false, pgopen: [] };
+
+function toast(frame, msg) {
+  frame.querySelectorAll(".toast").forEach((t) => t.remove());
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; frame.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+// the paper's place in the list it was opened from, in the order the list shows: shelf by shelf, sorted inside each
+function inList(st) {
+  if (!st.paper || !(st.topic || st.tab === "Papers")) return null;
+  const shelf = (p) => Math.min(lvOf(p, st.topic), 4);
+  const L = listFor(st, st.topic).sort((a, b) => shelf(b) - shelf(a)), i = L.findIndex((p) => p.id === st.paper);
+  return i < 0 ? null : { L, i };
+}
+const surface = (st, pd) => (st.topic && pd.lv[st.topic] ? st.topic : pd.tp[0]);
+
+function pgBody(pd, st, phone) {
+  if (phone) return `<div class="pg B">${pgHead(pd)}${pgLadder(pd, st, { nopaper: true })}</div>`;
+  return `<div class="pg B">${pgHead(pd)}<div class="pgcols"><div class="pgmain">${pgLadder(pd, st, { nogist: true })}</div><aside class="pgrail">${pgRail(pd, st)}</aside></div></div>`;
+}
+// the phone's bottom bar and its two sheets (the reasons for a thumb, and the paper); a sheet animates only as it opens
+let lastSheet = null;
+function pgFoot(pd, st) {
+  const cur = st.rs ? "rs" : st.ps ? "ps" : null, enter = cur && cur !== lastSheet;
+  lastSheet = cur;
+  const more = `<a data-ps="open" title="The paper: links, BibTeX, labels">⋯</a>`;
+  if (pd.arch) return `<div class="pfoot pgf"><a data-process="${pd.id}"><small>Process</small></a><a data-deep="${pd.id}"><small>Deep read</small></a>${more}</div>${st.ps ? pgSheet(pd, enter) : ""}`;
+  const t = st.rsT || surface(st, pd), re = REACT[pd.id + "|" + t], at = inList(st);
+  const rs = !st.rs ? "" : `<div class="fsheet${enter ? " enter" : ""}"><div class="shade2" data-rs="x"></div><div class="sheetp">
+    ${pd.tp.length > 1 ? `<div class="cap2">Topic</div><div class="row">${pd.tp.map((x) => `<a class="fchip2${x === t ? " on" : ""}" data-rst="${x}">${badge(x)} ${T[x].n}</a>`).join("")}</div>` : ""}
+    <div class="cap2">${st.rs === "up" ? "👍 Why" : "👎 Why"} · ${T[t].n}</div><div class="why big">${REASONS[st.rs].map(([w, n]) => `<a class="${re && re.why === w ? "on" : ""}" data-why="${pd.id}|${t}|${st.rs}|${w}">${n}</a>`).join("")}${re ? `<a class="clr" data-why="${pd.id}|${t}|-|-">Clear</a>` : ""}</div>
+    <button class="done" data-rs="x">Cancel</button></div></div>`;
+  return `<div class="pfoot pgf"><a class="${pd.sv ? "on" : ""}" data-save="${pd.id}">${pd.sv ? "★" : "☆"}</a><a class="${re && re.thumb === "up" ? "on" : "dim"}" data-rs="up">👍</a>
+    <span class="lbl">${at ? `${at.i + 1}/${at.L.length}` : ""}</span><a class="${re && re.thumb === "down" ? "on" : "dim"}" data-rs="down">👎</a>${more}</div>${rs}${st.ps ? pgSheet(pd, enter) : ""}`;
+}
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, dg: null, ...FD, ...PG },
+    view(st) {
+      const pd = st.paper && paperData(st.paper);
+      if (pd) return phone ? { body: pgBody(pd, st, true), title: st.topic ? T[st.topic].n : "Paper", foot: pgFoot(pd, st) } : { body: pgBody(pd, st, false), title: pd.t };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      const v = st.topic ? topicV(st, phone) : st.tab === "Papers" ? papersV(st, phone) : st.tab === "Topics" ? topicsV()
+        : { body: daystrip(TODAY, false) + dayBody(TODAY, DG, { weekly: false }), title: "Digest" };
+      if (phone) return v;
+      const ov = st.dg ? digestPage(st.dg) : null;
+      return { ...v, overlay: ov && `<a class="back" data-back>‹ Close</a>${ov}` };
+    },
+    swipe(st) {
+      const at = inList(st);
+      if (!at) return null;
+      const to = (p) => p && { paper: p.id, ...PG };
+      return { older: to(at.L[at.i - 1]), newer: to(at.L[at.i + 1]) };
+    },
+    click(e, nav) {
+      const f = (s) => e.target.closest(s), st = nav.st, fr = e.currentTarget; let n;
+      const toggle = (a, x) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]);
+      if ((n = f("[data-save]"))) { const p = P[n.dataset.save]; p.sv = !p.sv; nav.set({}); if (st.paper) toast(fr, p.sv ? "Saved: it joins the library." : "Unsaved: it leaves the library until you save it again."); return true; }
+      if ((n = f("[data-process]"))) { toast(fr, `Processing ${n.dataset.process}: classified, analysed and graded like a new paper.`); return true; }
+      if ((n = f("[data-deep]"))) { REQ.add(n.dataset.deep); nav.set({}); toast(fr, "Deep card asked for. It starts as soon as the archive has the text."); return true; }
+      if (f("[data-miss]")) { toast(fr, "Report as a miss: you pick its topic, and it is saved at once."); return true; }
+      if ((n = f("[data-bib]"))) { const pd = paperData(n.dataset.bib); toast(fr, `BibTeX copied${pd.pub ? ` (${pd.pub})` : " (arXiv entry)"}.`); return true; }
+      if ((n = f("[data-copy]"))) { toast(fr, `Copied ${n.dataset.copy}.`); return true; }
+      if (f("[data-doi]")) { toast(fr, "Paste a DOI or DBLP key; litwatch never overwrites it."); return true; }
+      if ((n = f("[data-au]"))) { const a = n.closest(".au"); a.textContent = a.dataset.auall; return true; }
+      if ((n = f("[data-th]"))) { const [id, t, th] = n.dataset.th.split("|"), k = id + "|" + t; nav.set(st.pick === k && st.pickth === th ? { pick: null } : { pick: k, pickth: th, lab: null }); return true; }
+      if ((n = f("[data-why]"))) {
+        const [id, t, th, why] = n.dataset.why.split("|"), k = id + "|" + t, pd = paperData(id);
+        if (th === "-") { delete REACT[k]; toast(fr, "Reaction cleared; its word is taken back."); }
+        else { REACT[k] = { thumb: th, why }; if (why === "wrong" && T[t].depth === "focus") P[id].sv = false; toast(fr, reactAck(pd, t, th, why)); }
+        nav.set({ pick: null, rs: null, rsT: null }); return true;
+      }
+      if ((n = f("[data-labopen]"))) { const k = n.dataset.labopen; nav.set({ lab: st.lab === k ? null : k, pick: null }); return true; }
+      if ((n = f("[data-lab]"))) { const [id, t, fit] = n.dataset.lab.split("|"), k = id + "|" + t; if (LABEL[k] === fit) delete LABEL[k]; else LABEL[k] = fit;
+        nav.set({ lab: null }); toast(fr, LABEL[k] ? `Labelled ${fit} on ${T[t].n}${fit === "unsure" ? "; unsure counts nowhere" : ""}.` : "Label removed."); return true; }
+      if ((n = f("[data-rate]"))) { const [id, r, v] = n.dataset.rate.split("|"), k = id + "|" + r; RATE[k] = RATE[k] === v ? undefined : v; nav.set({}); return true; }
+      if ((n = f("[data-rs]"))) { nav.set(n.dataset.rs === "x" ? { rs: null, rsT: null } : { rs: n.dataset.rs, ps: false }); return true; }
+      if ((n = f("[data-rst]"))) { nav.set({ rsT: n.dataset.rst }); return true; }
+      if ((n = f("[data-ps]"))) { nav.set({ ps: n.dataset.ps !== "x", rs: null }); return true; }
+      if ((n = f(".pg [data-paper]"))) { nav.go({ paper: n.dataset.paper, ...PG }); return true; }
+      if (f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-topic]")) && !f("[data-paper], [data-cell]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
+      else if ((n = f("[data-rl]"))) nav.set({ rset: toggle(st.rset, +n.dataset.rl), n: 40 });
+      else if ((n = f("[data-chip]"))) nav.set({ [n.dataset.chip]: !st[n.dataset.chip], n: 40 });
+      else if ((n = f("[data-sort]"))) nav.set({ sort: n.dataset.sort });
+      else if ((n = f("[data-tf]"))) nav.set({ tf: toggle(st.tf, n.dataset.tf), n: 40 });
+      else if ((n = f("[data-unfold]"))) nav.set({ open: toggle(st.open, +n.dataset.unfold) });
+      else if (f("[data-clear]")) nav.set({ ...FD });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else if ((n = f("[data-paper]"))) nav.go({ paper: n.dataset.paper, ...PG });
+      else return false;
+      return true;
+    },
+  };
+}
+
+const D = document.getElementById("D"), M = document.getElementById("M");
+const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
+[[D, navs[0]], [M, navs[1]]].forEach(([f, n]) => { autoLoad(f, n); liveSearch(f, n); });
+function openPaper(topic, id) { navs.forEach((n) => { n.top(topic ? { tab: null, topic } : { tab: "Papers" }); n.go({ paper: id, ...PG }); }); }
+openPaper("cotf", "2610.04321");
+document.querySelectorAll("[data-pp]").forEach((b) => b.onclick = () => openPaper(...b.dataset.pp.split("|")));
+</script>
+</body></html>
