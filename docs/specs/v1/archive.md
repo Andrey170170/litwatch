@@ -80,3 +80,5 @@ Found in review when the code moved in (PR #41), left as they were in the old re
   beside old directories; swap the whole export at once.
 - `recovery.py`'s reconcile marks every submitted candidate in its own fsynced transaction on each feed cycle; batch
   the writes and skip unchanged ones.
+- `store.py` imports `pyarrow` and `zstandard`, which `pyproject.toml` lists only in the `server` extra, so a plain
+  `pip install .` gives commands that fail at start; make them base dependencies when the archive's image is built.
