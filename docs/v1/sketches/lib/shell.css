@@ -88,3 +88,9 @@
 }
 .pbar .st { margin-left: 4px; }
 .frame[data-dir="nc"] .pbar > .st:not(.run):not(.bad) { color: var(--cy); }
+/* a swipe step: the new day comes in from the side the finger came from */
+.in-older { animation: lw-in-older .2s cubic-bezier(.2, .85, .25, 1); }
+.in-newer { animation: lw-in-newer .2s cubic-bezier(.2, .85, .25, 1); }
+@keyframes lw-in-older { from { transform: translateX(-40px); opacity: 0; } }
+@keyframes lw-in-newer { from { transform: translateX(40px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .in-older, .in-newer { animation: none; } }

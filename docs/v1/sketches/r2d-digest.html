@@ -76,6 +76,7 @@
         <li>Bottom bar: on Day, "‹ Tue 13 Oct ›" with large arrows; on Week, "‹ 5–11 Oct ›"; on History, List and Calendar.</li>
         <li>Day · Week · History: in the drawer, under Digest. An edge swipe opens it.</li>
         <li>A day or week opened from History is a page with the same bottom bar, so ‹ › keeps working there.</li>
+        <li>A swipe across a Day or Week (away from the screen's edge) steps it: right to older, left to newer.</li>
       </ul>
       <p><b>Questions</b></p>
       <ol>
@@ -171,6 +172,13 @@ function makeApp(phone) {
       if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
       return phone ? phoneView(st) : deskView(st);
     },
+    // a swipe on a Day or Week steps it, like ‹ ›
+    swipe: phone ? (st) => {
+      if (st.tab !== "Digest" || st.topic || st.dg || st.paper) return null;
+      if (st.view === "day") { const o = stepDay(st.day, 1), n = stepDay(st.day, -1); return { older: o !== st.day && { day: o }, newer: n !== st.day && { day: n } }; }
+      if (st.view === "week") { const i = WEEKS.indexOf(st.week); return { older: WEEKS[i + 1] && { week: WEEKS[i + 1] }, newer: i > 0 && { week: WEEKS[i - 1] } }; }
+      return null;
+    } : null,
     // P4: Day · Week · History under Digest in the drawer
     sub: phone ? (st) => (SW.pv === "4" ? VIEWS.map(([k, n]) => `<div class="it subit${st.tab === "Digest" && !st.topic && st.view === k ? " on" : ""}" data-subview="${k}">${n}</div>`).join("") : "") : null,
     click(e, nav) {

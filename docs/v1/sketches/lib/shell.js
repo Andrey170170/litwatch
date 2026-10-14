@@ -1,7 +1,8 @@
 // The shell chosen in round 1, shared by every later round: the desktop sidebar (B) and the phone drawer (C).
 // A round passes an app: { start, view(st) -> { body, title?, overlay?, bar?, barRight?, foot? }, click?(e, nav) -> true
-// when handled, sub?(st) -> drawer items under Digest }. On the phone, bar replaces the wordmark on a top-level
-// screen, barRight goes before the run status and ⚙ at the right, and foot is pinned under the scroll.
+// when handled, sub?(st) -> drawer items under Digest, swipe?(st) -> { older, newer } patches or null }. On the
+// phone, bar replaces the wordmark on a top-level screen, barRight goes before the run status and ⚙ at the right,
+// foot is pinned under the scroll, and a horizontal swipe away from the edge steps to swipe's older or newer page.
 // Navigation is a stack: nav.go() pushes a step, nav.back() undoes one, nav.set() changes the page in place
 // (scroll kept), nav.top() jumps to a top-level screen. On a phone-sized page the steps are real history
 // entries, so the OS back gesture walks them too.
@@ -22,7 +23,7 @@ function makeNav(app, draw, useHistory) {
   const nav = {
     st: { ...app.start }, stack: [],
     go(patch) { nav.stack.push(nav.st); nav.st = { ...nav.st, ...patch }; if (useHistory) history.pushState({}, ""); draw("go"); },
-    set(patch) { nav.st = { ...nav.st, ...patch }; draw("keep"); },
+    set(patch, how = "keep") { nav.st = { ...nav.st, ...patch }; draw(how); },
     top(patch) { nav.stack = []; nav.st = { ...app.start, ...patch }; draw("top"); },
     back(how = "back") {
       if (!nav.stack.length) return;
@@ -95,11 +96,13 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
     panel.innerHTML = `<div class="wm">${shellWM()}</div>${shellNavItems(nav.st, "drawer", app)}<div class="it" style="margin-top:auto">⚙ Settings</div>`;
     scr.classList.remove("in-go", "in-back"); void scr.offsetWidth;
     if (how === "go" || how === "back") scr.classList.add("in-" + how);
+    if (how === "older" || how === "newer") scr.querySelectorAll(".pp, .pfoot .lbl").forEach((x) => x.classList.add("in-" + how));
     if (pos > 0) settle(0);
   }
 
   // Two edge gestures. On a top-level screen the drawer follows the finger; on a deeper screen the page does,
   // with the previous one under it, iOS style. Either settles by where the finger let go and how fast.
+  // Away from the edge, a horizontal swipe on a page with swipe() steps it: right to older, left to newer.
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let pos = 0, g = null, clickBlockUntil = 0;
   const ease = "cubic-bezier(.2, .85, .25, 1)";
@@ -119,6 +122,17 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
     under.style.transform = `translateX(${(p - 1) * 30}%)`;
     scr.classList.toggle("lifted", p > 0);
   }
+  // the page content (and the bottom bar's label) follow the finger; past a quarter, or flicked, the next one comes in
+  const stepEls = () => scr.querySelectorAll(".pp, .pfoot .lbl");
+  function step(px, ms = 0) { stepEls().forEach((x) => { x.style.transition = tr(ms); x.style.transform = px ? `translateX(${px}px)` : ""; x.style.opacity = 1 - Math.min(0.6, Math.abs(px) / el.offsetWidth); }); }
+  function endStep(d, v, cancel) {
+    const W = el.offsetWidth, dir = d > 0 ? "older" : "newer", to = g.sw[dir];
+    const commit = !cancel && to && (Math.abs(d) > W / 4 || (Math.abs(v) > 0.35 && Math.sign(v) === Math.sign(d)));
+    if (!commit) return step(0, 200);
+    const ms = reduce ? 0 : 150;
+    step(Math.sign(d) * W, ms);
+    setTimeout(() => nav.set(to, dir), ms);
+  }
   function endSlide(commit, v) {
     const p = parseFloat(scr.style.transform.slice(11)) / 100 || 0, ms = dur(Math.abs((commit ? 1 : 0) - p) * el.offsetWidth, v);
     slide(commit ? 1 : 0, ms);
@@ -128,17 +142,19 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
   el.addEventListener("pointerdown", (e) => {
     if (e.button > 0 || g) return;
     const x = e.clientX - el.getBoundingClientRect().left, shut = pos === 0;
-    if (shut && x > edge()) return;
-    if (!shut && !drawer.contains(e.target)) return;
-    const mode = !shut ? "drawer" : nav.stack.length ? "page" : "drawer";
-    g = { id: e.pointerId, x0: e.clientX, y0: e.clientY, p0: pos, mode, drag: false, s: [[e.timeStamp, e.clientX]] };
+    let mode, sw = null;
+    if (!shut) { if (!drawer.contains(e.target)) return; mode = "drawer"; }
+    else if (x <= edge()) mode = nav.stack.length ? "page" : "drawer";
+    else if (app.swipe && (sw = app.swipe(nav.st)) && scr.contains(e.target) && !e.target.closest(".pbar, .calscroll")) mode = "step";
+    else return;
+    g = { id: e.pointerId, x0: e.clientX, y0: e.clientY, p0: pos, mode, sw, drag: false, s: [[e.timeStamp, e.clientX]] };
   });
   el.addEventListener("pointermove", (e) => {
     if (!g || e.pointerId !== g.id) return;
     const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
     if (!g.drag) {
       if (Math.hypot(dx, dy) < 8) return;
-      const horizontal = Math.abs(dx) > Math.abs(dy) * 1.2, rightWay = g.p0 === 0 ? dx > 0 : dx < 0;
+      const horizontal = Math.abs(dx) > Math.abs(dy) * 1.2, rightWay = g.mode === "step" || (g.p0 === 0 ? dx > 0 : dx < 0);
       if (!horizontal || !rightWay) { g = null; return; }
       g.drag = true; g.x0 = e.clientX;
       try { el.setPointerCapture(e.pointerId); } catch {}
@@ -148,6 +164,7 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
     while (g.s.length > 2 && e.timeStamp - g.s[0][0] > 90) g.s.shift();
     const d = e.clientX - g.x0;
     if (g.mode === "drawer") place(g.p0 + d / panel.offsetWidth);
+    else if (g.mode === "step") step((d > 0 ? g.sw.older : g.sw.newer) ? d : d * 0.25); // resist where nothing lies
     else slide(Math.max(0, d / el.offsetWidth));
   });
   function end(e) {
@@ -156,6 +173,7 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
       const [t0, x0] = g.s[0], [t1, x1] = g.s.at(-1), v = t1 > t0 ? (x1 - x0) / (t1 - t0) : 0;
       const cancel = e.type === "pointercancel";
       if (g.mode === "drawer") settle(cancel ? Math.round(pos) : v > 0.35 ? 1 : v < -0.35 ? 0 : pos > 0.5 ? 1 : 0, v);
+      else if (g.mode === "step") endStep(e.clientX - g.x0, v, cancel);
       else { const p = parseFloat(scr.style.transform.slice(11)) / 100 || 0; endSlide(!cancel && (v > 0.35 || (v > -0.35 && p > 0.4)), v); }
       clickBlockUntil = performance.now() + 350;
     }
