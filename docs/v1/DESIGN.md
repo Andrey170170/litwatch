@@ -2,7 +2,8 @@
 
 The second pass of the v1 web app design, agreed with the owner on 2026-10-13 in seven sketch rounds. The drawings are
 the live sketches in `docs/v1/sketches/` (`index.html` lists each round, what it asked and what was chosen; the last
-round, `r7-settings.html`, is the whole app as chosen, Settings included). This file is the part a builder needs without opening them:
+round, `r7-settings.html`, is the whole app as chosen, Settings included, except the Digest's Week and History, which
+are in `r2d-digest.html`). This file is the part a builder needs without opening them:
 the principles, the shell, the pages, the interactions, the look's tokens and the anatomy of each repeated element.
 Where this file and the spec (`docs/v1/spec/`) differ, the spec wins. Terms are the glossary's (`GLOSSARY.md`).
 
@@ -158,8 +159,8 @@ Process, Deep read (where a provider is configured) and ⋯; its sheet has no la
 **Open states.** A paper with an item on Needs you (below) shows it on its own page, in the same colours and with the
 same actions. A note sits under the header: yellow for a split or escalation ("Split on CoT monitoring. Judge central,
 check adjacent; central stands until it is labelled."), red for ungraded, a failed analysis or full-text pass or
-awaiting classification, each with its buttons. A paper whose analysis failed shows its title alone, with no Gist or
-Weight, until it succeeds. In the rail, a split or escalated topic's row takes a yellow edge, names its state, the two
+awaiting classification, each with its buttons. A paper whose analysis failed has no Gist, Weight or Brief until it
+succeeds: in lists it shows its title alone, on its page the abstract stands in. In the rail, a split or escalated topic's row takes a yellow edge, names its state, the two
 opinions and the Fit that stands ("Split · judge central · check adjacent · central stands", "Escalated · judge related
 · check adjacent · adjacent stands") and keeps its Fit control open until labelled; an ungraded topic's row
 says "ungraded" in red with "Grade it now", then "Grading again" once asked. On the phone the note's Label opens the

@@ -107,7 +107,7 @@ const RUNS = [
 const JOBS = [
   { k: "Re-run", what: "Circuits and causal analysis · version 3", scope: "Labelled papers and reported misses", n: 37, cost: 0.06, st: "offered", at: "saved 10 Oct, not run" },
   { k: "Deep cards", what: "Asked for · 2 papers", n: 2, done: 1, cost: 0.9, st: "running", at: "started 6 min ago" },
-  { k: "Digest", what: "Chain-of-thought monitoring · Thu 8 Oct", st: "failed", at: "8 Oct", why: "The writer timed out twice.", need: 6 },
+  { k: "Digest", what: "Chain-of-thought monitoring · Thu 8 Oct", st: "failed", at: "8 Oct", why: "The writer timed out twice.", need: NEED.findIndex((x) => x.k === "digest") },
   { k: "Re-run", what: "Chain-of-thought faithfulness · version 4", scope: "The topic's existing members", n: 412, cost: 0.61, st: "done", at: "12 Oct, 14:20" },
   { k: "Replay", what: "All Focus topics", scope: "Labelled papers and reported misses", n: 142, cost: 0.31, st: "done", at: "11 Oct, 03:10" },
 ];

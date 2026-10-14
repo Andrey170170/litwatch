@@ -136,7 +136,7 @@ function pgTopics(pd, st, { folded = false } = {}) {
     const labRow = st.lab === k || asks ? `<div class="why${asks ? " ask" : ""}">${fitSeg(pd, t)}</div>` : "";
     const vd = asks ? `<b class="askt">${ps.k === "split" ? "Split" : "Escalated"}</b> · judge ${ps.judge} · check ${ps.check} · ${FIT[l]} stands`
       : ps ? `<b class="badt">Grading failed 3 runs</b> · <a class="inl" data-settle="${ps.i}|Grading again; the result shows on its topic.">Grade it now</a>`
-      : regrade ? "Grading again" : lab ? `<b>your label: ${lab}</b>` : `Fit ${FIT[l]} · Weight ${pd.weight}`;
+      : regrade ? "Grading again" : lab ? `<b>your label: ${lab}</b>` : `Fit ${FIT[l]}${noAnalysis(pd.id) ? "" : ` · Weight ${pd.weight}`}`;
     return `<div class="tprow${asks ? " ask" : ps ? " fail" : ""}" style="${(ps && !asks) || regrade ? "--rc:var(--fg3)" : rc(l)}"><span class="stripe"></span>${badge(t)}<span class="nm">${T[t].n}</span>
       <span class="gr">${(ps && !asks) || regrade ? "ungraded" : GRADE[l]}</span><span class="vd">${vd}</span>
       <span class="sp"></span>${thumbs}<a class="lb" data-labopen="${k}" title="Label the Fit">Label</a></div>${pick}${labRow}`;
@@ -147,7 +147,8 @@ function rung(name, body, extra = "", cls = "") { return `<section class="rung${
 
 function pgCard(pd, st, { folded = false } = {}) {
   const c = pd.card;
-  if (pd.arch) return rung("Deep card", `<p class="prose faint">None yet. Deep read processes the paper, then writes its card.</p>`);
+  if (pd.arch) return rung("Deep card", REQ.has(pd.id) ? `<div class="cardwait"><span class="dot"></span>Queued · processing the paper, then the card</div>`
+    : `<p class="prose faint">None yet. Deep read processes the paper, then writes its card.</p>`);
   if (!c) return rung("Deep card", `<p class="prose faint">None: cards are automatic for Focus must reads and Area picks. <a class="inl" data-deep="${pd.id}">Deep read</a> asks for one.</p>`);
   if (c.state !== "ready") return rung("Deep card", `<div class="cardwait"><span class="dot"></span>${c.state === "running" ? `Being written · reading ${c.read} · ${c.at}` : `Queued · ${c.read}`}</div>`);
   const ext = c.ext;
