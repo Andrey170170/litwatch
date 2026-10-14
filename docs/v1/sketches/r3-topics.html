@@ -100,7 +100,7 @@ function topicsV() {
   const card = (t) => { const L = COLL.filter((p) => p.lv[t.id]), s = L.filter((p) => p.sv).length;
     const top = L.filter((p) => p.lv[t.id] >= 4).sort((a, b) => b.di - a.di)[0];
     const rich = SW.cards === "rich" ? rarityThin(t.id) + (top ? `<div class="nm2"><span class="k2">Newest must read</span><span class="t2" data-paper="${top.id}" title="${esc(top.t)}">${top.t}</span></div>` : "") : "";
-    return `<div class="tcard2" data-topic="${t.id}"><div class="hd">${badge(t.id, "lg")}<div><div class="n">${t.n}</div><div class="s">${L.length} papers · ${s} saved</div></div></div>${rich}${digestStrip(t.id)}</div>`; };
+    return `<div class="tcard2" data-topic="${t.id}"><div class="hd">${badge(t.id, "lg")}<div><div class="n" title="${t.n}">${t.n}</div><div class="s">${L.length} papers · ${s} saved</div></div></div>${rich}${digestStrip(t.id)}</div>`; };
   return { body: ["focus", "area", "field"].map((d) => `<div class="cap" style="margin-top:6px">${d}</div><div class="tgrid">${TOPICS.filter((t) => t.depth === d).map(card).join("")}</div>`).join(""), title: "Topics", bar: `<span class="ttl2">Topics</span>` };
 }
 
