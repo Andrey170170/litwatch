@@ -32,6 +32,9 @@
   .lookp { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: center; margin: 0 0 14px; font-size: 12.5px; }
   .lookp > span { color: var(--fg2); }
   .lookp .sw { flex-wrap: wrap; }
+  .sw.glow label { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; }
+  .sw.glow input { width: 150px; accent-color: #f3e600; }
+  .sw.glow b { font: 500 12px "JetBrains Mono", monospace; min-width: 44px; color: var(--fg); }
   .lookm { display: none; position: relative; }
   .lookm summary { list-style: none; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
   .lookm summary::-webkit-details-marker { display: none; }
@@ -47,7 +50,7 @@
   <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
 </div>
 <div class="wrap">
-  <p class="intro">The screens chosen so far, in one app, with the look as switches. Each switch changes one thing; the first option of each is the look as it stands. They apply to the desktop and the phone together, and work in Light as well as Dark. Jump to:</p>
+  <p class="intro">The screens chosen so far, in one app, with the look as switches. Each switch changes one thing; the first option of each is the look from round 4, except the glow, which is now on by default. The glow's sliders are tuned for Digest rows; topic pages, Papers and the paper's header glow shorter and weaker in proportion. They apply to the desktop and the phone together, and work in Light as well as Dark. Jump to:</p>
   <div class="states">
     <button data-jump="digest">Digest</button>
     <button data-jump="topic">A topic page</button>
@@ -91,7 +94,9 @@ const LOOK = [
   ["rar", "Rarity on rows", [["stripe", "stripe"], ["glow", "stripe and glow"]]],
   ["chrome", "Night City detail", [["now", "as now"], ["plain", "plainer"]]],
 ];
-const LK = Object.assign(Object.fromEntries(LOOK.map(([k, , o]) => [k, o[0][0]])), JSON.parse(localStorage.getItem("lw-r5") || "{}"));
+const LK = Object.assign(Object.fromEntries(LOOK.map(([k, , o]) => [k, o[0][0]])), { rar: "glow", gs: 20, gl: 460 }, JSON.parse(localStorage.getItem("lw-r5") || "{}"));
+// the glow's two sliders: strength in percent of the rarity colour, length in pixels (Digest rows; other rows scale)
+const GLOW = [["gs", "strength", 0, 40, 1, "%"], ["gl", "length", 100, 700, 20, "px"]];
 let gistUp = false;
 const PG = { pick: null, pickth: null, lab: null, rs: null, rsT: null, ps: false, pgopen: [] };
 
@@ -213,11 +218,22 @@ D.addEventListener("scroll", checkGist, true);
 new MutationObserver(checkGist).observe(D, { childList: true });
 // the look switches set data attributes on both frames; nothing is redrawn, so scroll and state stay put
 document.querySelectorAll("[data-look]").forEach((p) => p.innerHTML = LOOK.map(([k, name, opts]) =>
-  `<span>${name}</span><span class="sw">${opts.map(([v, l]) => `<button data-lk="${k}:${v}">${l}</button>`).join("")}</span>`).join(""));
+  `<span>${name}</span><span class="sw">${opts.map(([v, l]) => `<button data-lk="${k}:${v}">${l}</button>`).join("")}</span>`).join("")
+  + `<span>Glow</span><span class="sw glow">${GLOW.map(([k, n, lo, hi, st]) => `<label>${n} <input type="range" min="${lo}" max="${hi}" step="${st}" data-gk="${k}"> <b data-gv="${k}"></b></label>`).join("")}</span>`);
 function applyLook() {
-  [D, M].forEach((f) => Object.entries(LK).forEach(([k, v]) => (f.dataset[k] = v)));
+  [D, M].forEach((f) => {
+    LOOK.forEach(([k]) => (f.dataset[k] = LK[k]));
+    GLOW.forEach(([k, , , , , u]) => f.style.setProperty("--" + k, LK[k] + u));
+  });
   document.querySelectorAll("[data-lk]").forEach((b) => { const [k, v] = b.dataset.lk.split(":"); b.classList.toggle("on", LK[k] === v); });
+  document.querySelectorAll("[data-gk]").forEach((i) => (i.value = LK[i.dataset.gk]));
+  document.querySelectorAll("[data-gv]").forEach((b) => (b.textContent = LK[b.dataset.gv] + GLOW.find((g) => g[0] === b.dataset.gv)[5]));
 }
+document.addEventListener("input", (e) => {
+  const i = e.target.closest("[data-gk]");
+  if (!i) return;
+  LK[i.dataset.gk] = +i.value; localStorage.setItem("lw-r5", JSON.stringify(LK)); applyLook();
+});
 document.addEventListener("click", (e) => {
   const lm = document.querySelector(".lookm");
   if (lm.open && !e.target.closest(".lookm")) lm.open = false;

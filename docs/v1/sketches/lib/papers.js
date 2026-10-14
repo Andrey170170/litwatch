@@ -155,6 +155,7 @@ function digestStrip(id) {
   const daily = T[id].depth !== "field";
   const items = daily ? LOG.filter((d) => !d.none).slice(-15).map((d) => [`${d.key}|${id}`, d.marks[id], d.key])
     : LOG.filter((d) => d.week).slice(-8).map((d) => [`${d.key}|${id}|w`, d.week.marks[id], "Week " + d.week.range]);
-  // one line only: where it is too narrow, the oldest squares are cut on the left
-  return `<div class="dstrip"><span class="lab">${daily ? "Daily digests" : "Weekly digests"}</span><span class="sqs">${items.map(([k, m, n]) => `<span class="dsq${m.r === 0 ? " h" : m.r === -1 ? " x" : ""}" style="${rcs(m.r)}" data-cell="${k}" title="${n} · ${m.c}"></span>`).join("")}</span></div>`;
+  // one line only: newest first in a right-to-left wrapping row, so where it is too narrow whole squares of the
+  // oldest digests wrap onto a hidden second line instead of being cut in half
+  return `<div class="dstrip"><span class="lab">${daily ? "Daily digests" : "Weekly digests"}</span><span class="sqs">${items.reverse().map(([k, m, n]) => `<span class="dsq${m.r === 0 ? " h" : m.r === -1 ? " x" : ""}" style="${rcs(m.r)}" data-cell="${k}" title="${n} · ${m.c}"></span>`).join("")}</span></div>`;
 }

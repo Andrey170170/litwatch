@@ -6,7 +6,7 @@
 .thead .dep { font: 500 11px "JetBrains Mono", monospace; color: var(--fg3); text-transform: uppercase; letter-spacing: .1em; }
 .tsub { font-size: 13.5px; color: var(--fg2); margin: 0 0 10px; max-width: 70ch; }
 .dstrip { display: flex; align-items: center; gap: 3px; margin-bottom: 14px; min-width: 0; }
-.dstrip .sqs { display: flex; gap: 3px; justify-content: flex-end; overflow: hidden; min-width: 0; flex: 0 1 auto; }
+.dstrip .sqs { display: flex; flex-direction: row-reverse; flex-wrap: wrap; gap: 3px; height: 14px; overflow: hidden; min-width: 0; flex: 0 1 auto; }
 .dstrip .lab { flex: none; }
 .dsq { flex: none; }
 .dstrip .lab { font-size: 11px; color: var(--fg3); margin-right: 6px; text-transform: uppercase; letter-spacing: .08em; }
@@ -62,7 +62,9 @@
 .tbl .th { font-size: 10.5px; color: var(--fg3); text-transform: uppercase; letter-spacing: .08em; padding: 6px 0; border-bottom: 1px solid var(--line2); }
 .tbl .tr { padding: 0; height: 34px; border-bottom: 1px solid var(--line2); cursor: pointer; }
 .tbl .tr:hover { background: var(--hover); }
-.tbl .stripe { align-self: stretch; background: var(--rc); }
+/* the stripe is the row's own left edge, so it runs the full height when a row wraps and pads (phone) */
+.tbl .tr { box-shadow: inset 4px 0 0 var(--rc); }
+.tbl .stripe { align-self: stretch; }
 .tbl .ti { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13.5px; }
 .tbl .kd { font-size: 12px; color: var(--fg3); }
 .tbl .bd { display: flex; gap: 3px; }
@@ -112,6 +114,7 @@
 .tcard2 .s { font-size: 12px; color: var(--fg3); }
 .tcard2 .dstrip { margin: 0; }
 .tcard2 .dsq { width: 11px; height: 11px; }
+.tcard2 .dstrip .sqs { height: 11px; }
 .tcard2 .dstrip .lab { display: none; }
 
 /* phone: search and filters in the bottom bar, filters in a sheet over it */
