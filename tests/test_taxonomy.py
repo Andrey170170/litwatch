@@ -1,5 +1,7 @@
 """The taxonomy's rules and its YAML form, on the shipped seed and on small trees."""
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -88,3 +90,9 @@ def test_a_followed_class_described_apart_from_its_subject_is_refused():
                else c for c in tree.classes]  # fmt: skip
     with pytest.raises(ValueError, match="its description must be its subject"):
         Taxonomy(classes=classes, topics=tree.topics)
+
+
+def test_a_topic_directory_import_skips_the_taxonomy_file():
+    root = Path(seeds.__file__).parent
+    assert [t.slug for t in seeds.load(root)] == [t.slug for t in seeds.starter()]
+    assert len(seeds.starter()) == 7

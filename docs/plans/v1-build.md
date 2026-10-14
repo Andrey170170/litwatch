@@ -84,7 +84,7 @@ AGENTS.md lists `archive/`.
 - The silver class sample: a stratified 200-paper draw from 0.14's screened papers with a recorded seed (20 CoT
   positives, 10 owner-labelled papers, 20 positives of each broad selection, 70 papers no selection took), labelled against the tree by Opus 5.5 and GPT-6.1-Sol separately, each
   naming the paper's primary class and its other classes. Agreement is the silver label: the primary class, and each
-  other class both named (one named by only one lab is unsettled and scored neither way); papers whose primary classes
+  class both labs put the paper in, ancestors included (one only one lab did is unsettled and scored neither way); papers whose primary classes
   differ go to the owner, at most 20, on a one-tap page shown in the T3 thread whose answers are pasted back and
   committed. With more than 20, the 20 are drawn with the recorded seed, spread across top-level classes; the rest
   are kept as unresolved, counted in the report and left out of primary-class accuracy. Titles and abstracts are read from the development

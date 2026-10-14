@@ -46,8 +46,9 @@ $1.32 in all. Opus refused 2 papers, which stay unresolved. The committed run re
 (`language-models/agents/agent-evaluation`) as its last part without checking the path; `silver.py` now accepts a
 path only when it is the class's real ancestry. The run's raw replies were not kept, so how many answers were paths
 is unknown; those seen in the trial run all had the right ancestry. Where both named the same primary class it is the silver
-label; another class both named is a silver member (`others`), and one only one of them named is `unsettled`,
-which per-class scores count neither as a member nor as a non-member. Where they differed, 20 papers were drawn with the same seed,
+label. Membership is inherited, so each labeller's classes are closed over their ancestors: a class both put the
+paper in is a silver member (`members`, which includes the primary class and its ancestors), and one only one of
+them did is `unsettled`, which per-class scores count neither as a member nor as a non-member. Where they differed, 20 papers were drawn with the same seed,
 round-robin over the top-level class Opus named, and the owner chose; the rest are `unresolved`, counted and left out
 of primary-class accuracy.
 

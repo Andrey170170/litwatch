@@ -15,6 +15,8 @@ import yaml
 from litwatch.core import Topic
 from litwatch.core.taxonomy import Taxonomy, TaxonomyClass
 
+TAXONOMY = "taxonomy.yaml"
+
 
 def from_spec(raw: dict[str, Any]) -> Topic:
     return Topic.model_validate({k: v for k, v in raw.items() if k != "revision"})
@@ -23,7 +25,12 @@ def from_spec(raw: dict[str, Any]) -> Topic:
 def load(path: Path) -> list[Topic]:
     """One topic per YAML file; a directory loads every `*.yaml` in it, sorted by name."""
     files = sorted(path.glob("*.yaml")) if path.is_dir() else [path]
-    return [from_spec(yaml.safe_load(f.read_text()) or {}) for f in files]
+    return [from_spec(yaml.safe_load(f.read_text()) or {}) for f in files if _is_topic(f.name)]
+
+
+def _is_topic(name: str) -> bool:
+    """Topic files are the YAML files beside the taxonomy, not the taxonomy itself."""
+    return name.endswith(".yaml") and name != TAXONOMY
 
 
 def starter() -> list[Topic]:
@@ -32,7 +39,7 @@ def starter() -> list[Topic]:
     return [
         from_spec(yaml.safe_load(f.read_text()) or {})
         for f in sorted(root.iterdir(), key=lambda f: f.name)
-        if f.name.endswith(".yaml") and f.name != "taxonomy.yaml"
+        if _is_topic(f.name)
     ]
 
 
@@ -48,7 +55,7 @@ def taxonomy(path: Path | None = None) -> Taxonomy:
     text = (
         path.read_text()
         if path
-        else resources.files("litwatch.seeds").joinpath("taxonomy.yaml").read_text()
+        else resources.files("litwatch.seeds").joinpath(TAXONOMY).read_text()
     )
     return taxonomy_from_spec(yaml.safe_load(text) or {})
 

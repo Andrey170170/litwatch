@@ -185,8 +185,18 @@ async def label(name: str) -> None:
     print(f"{name}: {len(results)} sorted, {len(todo) - len(results)} failed, ${cost[0]:.2f}")
 
 
+def closure(answer: dict[str, str], tree: Taxonomy) -> set[str]:
+    """Every class a labeller put the paper in: those named and all their ancestors."""
+    found: set[str] = set()
+    for slug in [answer["primary"], *answer["others"].split()]:
+        while slug is not None and slug not in found:
+            found.add(slug)
+            slug = tree.get(slug).parent
+    return found
+
+
 def compare() -> None:
-    """Agreed primary classes go to silver.csv, with the other classes both named; at most 20
+    """Agreed primary classes go to silver.csv, with the classes both put the paper in; at most 20
     disagreements, drawn with the seed and spread across top-level classes, go to disputed.csv
     for the owner."""
     tree = seeds.taxonomy()
@@ -205,11 +215,12 @@ def compare() -> None:
     )
     for pid in a.keys() & b.keys():
         if a[pid]["primary"] == b[pid]["primary"]:
-            # Another class both named is a silver member; one only one named is unsettled and
+            # Membership is inherited, so each labeller's classes are closed over ancestors: a
+            # class both put the paper in is a silver member, one only one did is unsettled and
             # counts neither way.
-            x, y = set(a[pid]["others"].split()), set(b[pid]["others"].split())
+            x, y = closure(a[pid], tree), closure(b[pid], tree)
             agreed.append(
-                {"paper_id": pid, "primary": a[pid]["primary"], "others": " ".join(sorted(x & y)),
+                {"paper_id": pid, "primary": a[pid]["primary"], "members": " ".join(sorted(x & y)),
                  "unsettled": " ".join(sorted(x ^ y))}
             )  # fmt: skip
         else:
@@ -227,7 +238,7 @@ def compare() -> None:
             if queues.get(c.slug) and len(picked) < MAX_DISPUTED:
                 picked.append(queues[c.slug].pop())
     write(HERE / "silver.csv", sorted(agreed, key=lambda r: r["paper_id"]),
-          ["paper_id", "primary", "others", "unsettled"])  # fmt: skip
+          ["paper_id", "primary", "members", "unsettled"])  # fmt: skip
     disputed = [
         {"paper_id": pid, "opus": a.get(pid, {}).get("primary", ""),
          "sol": b.get(pid, {}).get("primary", ""),
