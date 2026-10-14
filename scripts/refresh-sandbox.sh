@@ -13,7 +13,7 @@
 #   --no-migrate   keep the deployment's schema, to take a baseline before a migration
 set -Eeuo pipefail
 
-readonly SOURCE=litwatch-v1-db TARGET=litwatch-v1-dev DB=sandbox NEXT=sandbox_next
+readonly SOURCE=litwatch-v1-db TARGET=litwatch-v1-dev DB=sandbox NEXT=sandbox_next OLD=sandbox_old
 
 migrate=1
 case "${1:-}" in
@@ -59,9 +59,16 @@ if (( migrate )); then
   LITWATCH_DATABASE_URL="${LITWATCH_DATABASE_URL%/*}/$NEXT" uv run litwatch db migrate
 fi
 
-target_psql -d postgres -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)"
-target_psql -d postgres -c "ALTER DATABASE $NEXT RENAME TO $DB"
+# Swap the two in one transaction, so `sandbox` is always either the old copy or the new one.
+target_psql -d postgres -c "DROP DATABASE IF EXISTS $OLD WITH (FORCE)"
+target_psql -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB'" >/dev/null
+if [[ -n "$(target_psql -d postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '$DB'")" ]]; then
+  target_psql -d postgres -1 -c "ALTER DATABASE $DB RENAME TO $OLD" -c "ALTER DATABASE $NEXT RENAME TO $DB"
+else
+  target_psql -d postgres -c "ALTER DATABASE $NEXT RENAME TO $DB"
+fi
 trap - ERR
+target_psql -d postgres -c "DROP DATABASE IF EXISTS $OLD WITH (FORCE)"
 
 target_psql -d "$DB" -Atc "SELECT 'papers: ' || count(*) FROM papers"
 echo "done: point LITWATCH_DATABASE_URL at the database '$DB'"
