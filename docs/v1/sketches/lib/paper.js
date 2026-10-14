@@ -79,6 +79,9 @@ function reactAck(pd, topic, thumb, why) {
 }
 
 /* ── pieces ── */
+const slug = (pd) => pd.t.toLowerCase().replace(/[^a-z0-9]+/g, "-").split("-").slice(0, 4).join("-");
+const codeUrl = (pd) => `https://github.com/${pd.au[0].split(" ").pop().toLowerCase()}/${slug(pd)}`;
+const wtsUrl = (pd) => `https://huggingface.co/${pd.au[0].split(" ").pop().toLowerCase()}/${slug(pd)}`;
 const ext = (href, label) => `<a class="lnk" href="${href}" target="_blank" rel="noopener">${label} ↗</a>`;
 const rate = (id, rung) => { const v = RATE[id + "|" + rung];
   return `<span class="rate" title="Is the ${rung} accurate?"><a class="${v === "ok" ? "on" : ""}" data-rate="${id}|${rung}|ok">✓</a><a class="${v === "off" ? "on bad" : ""}" data-rate="${id}|${rung}|off">✗</a></span>`; };
@@ -86,12 +89,13 @@ const rate = (id, rung) => { const v = RATE[id + "|" + rung];
 function pgHead(pd) {
   const r = pd.arch ? 0 : pd.r;
   const au = pd.au.length > 4 ? `${pd.au.slice(0, 3).join(", ")} <a class="more" data-au>+${pd.au.length - 3}</a>` : pd.au.join(", ");
-  const facts = [pd.arch ? `${pd.y}` : pd.d + " 2026", pd.ver[0][0] + (pd.ver.length > 1 ? ` <span class="faint">of ${pd.ver.length}</span>` : ""), pd.kind, pd.pub ? `<b>${pd.pub}</b>` : "", pd.code ? "⟨/⟩ code" : "", pd.wts ? "◆ weights" : ""].filter(Boolean);
+  const facts = [pd.arch ? `${pd.y}` : pd.d + " 2026", pd.ver[0][0] + (pd.ver.length > 1 ? ` <span class="faint">of ${pd.ver.length}</span>` : ""), pd.kind, pd.pub ? `<b>${pd.pub}</b>` : "",
+    pd.code ? ext(codeUrl(pd), "⟨/⟩ code") : "", pd.wts ? ext(wtsUrl(pd), "◆ weights") : ""].filter(Boolean);
   return `<div class="pghead" style="${r ? rc(r) : ""}">
     <div class="mark">${r ? `<span class="lvl">${LEVEL[r]}</span>${pd.tp.map((t) => badge(t)).join("")}` : `<span class="lvl none">Not in the collection</span>`}</div>
     <div class="h1">${pd.t}</div>
     <div class="au" data-auall="${esc(pd.au.join(", "))}">${au}</div>
-    <div class="facts"><span class="mono">${pd.id}</span>${facts.map((f) => `<span>${f}</span>`).join("")}</div></div>`;
+    <div class="facts"><span class="idl">${ext(`https://arxiv.org/abs/${pd.id}`, `<span class="mono">${pd.id}</span>`)}<a class="cp" data-copy="${pd.id}" title="Copy the arXiv id">⧉</a></span>${facts.map((f) => `<span>${f}</span>`).join("")}</div></div>`;
 }
 
 function pgActions(pd, { compact = false } = {}) {
@@ -115,7 +119,7 @@ function pgTopics(pd, st, { folded = false } = {}) {
   }).join("")}</div>`;
 }
 
-function rung(name, body, extra = "") { return `<section class="rung"><div class="rl">${name}${extra}</div><div class="rb">${body}</div></section>`; }
+function rung(name, body, extra = "", cls = "") { return `<section class="rung${cls ? " " + cls : ""}"><div class="rl">${name}${extra}</div><div class="rb">${body}</div></section>`; }
 
 function pgCard(pd, st, { folded = false } = {}) {
   const c = pd.card;
@@ -131,6 +135,9 @@ function pgCard(pd, st, { folded = false } = {}) {
     ["prior", "Prior work", c.prior.map(([id, t, rel]) => `<div class="pw${id ? "" : " nolink"}" ${id ? `data-paper="${id}"` : ""}><span class="ti">${t}</span><span class="rel">${rel}</span>${id ? `<span class="mono">${id}</span>` : `<span class="faint">no arXiv id</span>`}</div>`).join(""), `${c.prior.length} papers`],
     ["among", "Among the collection", among(pd).map(([rel, p, why]) => `<div class="pw am" data-paper="${p.id}" style="${rc(p.r)}"><span class="stripe"></span><span class="rtag ${rel}">${rel}</span><span class="ti">${p.t}</span><span class="rel">${why}</span></div>`).join(""), among(pd).map((a) => a[0]).join(" · ")],
   ];
+  // unfolded, each section is a rung of its own, so its name can sit in the side column under "Deep card"
+  if (!folded) return rung("Deep card", `<p class="claim">${c.claim}</p>`, "", "card") + sec.map(([k, n, html]) => rung(n, html, "", "sub")).join("") +
+    rung("", `<div class="cfoot">From ${c.read} · ${c.at} · <a class="inl" data-deep="${pd.id}">Write again</a></div>`, "", "sub end");
   const body = `<p class="claim">${c.claim}</p>` + sec.map(([k, n, html, peek]) => {
     const open = !folded || st.pgopen.includes(k);
     return `<div class="csec${open ? " open" : ""}"><div class="ch"${folded ? ` data-pgfold="${k}"` : ""}>${folded ? `<span class="car">${open ? "▾" : "▸"}</span>` : ""}<span class="cn">${n}</span>${folded && !open ? `<span class="peek">${peek}</span>` : ""}</div>${open ? `<div class="cb">${html}</div>` : ""}</div>`;
@@ -151,9 +158,35 @@ function pgPaper(pd) {
 
 // the ladder: Gist, Brief (or the abstract in its place), Deep card, the paper
 function pgLadder(pd, st, opt = {}) {
-  const gist = pd.arch ? "" : rung("Gist", `<p class="prose gist">${pd.g}</p>`, rate(pd.id, "Gist"));
+  const gist = pd.arch || opt.nogist ? "" : rung("Gist", `<p class="prose gist">${pd.g}</p>`, rate(pd.id, "Gist"));
   const b = pd.brief;
   const brief = b ? rung("Brief", `${b.from ? `<div class="oldrev">${b.from}</div>` : ""}${b.over ? `<p class="overst">${b.over}</p>` : ""}<p class="prose">${b.text}</p>`, rate(pd.id, "Brief"))
     : rung("Abstract", `${pd.arch ? "" : `<div class="why0">No Brief: Briefs are written for Focus papers at central or related and for Area must reads, so the abstract stands in.</div>`}<p class="prose">${pd.abs}</p>`);
   return gist + brief + pgCard(pd, st, opt) + (opt.nopaper ? "" : pgPaper(pd));
+}
+
+// B's rail: what a reader wants at hand while reading. What the paper is (its Gist), the quick actions, and the
+// thumbs and labels per topic, which may change as the reading goes on.
+function pgRail(pd, st) {
+  const acts = pd.arch ? `<a class="btn pri" data-process="${pd.id}">Process</a><a class="btn" data-deep="${pd.id}">Deep read</a><a class="btn" data-miss="${pd.id}">Report as a miss</a>`
+    : `<a class="btn sv2${pd.sv ? " on" : ""}" data-save="${pd.id}">${pd.sv ? "★ Saved" : "☆ Save"}</a>${pd.card ? "" : `<a class="btn" data-deep="${pd.id}">Deep read</a>`}<a class="btn" data-bib="${pd.id}">BibTeX ⧉</a>`;
+  const gist = pd.arch ? "" : `<div class="rgist" style="${rc(pd.r)}"><div class="rl">Gist${rate(pd.id, "Gist")}</div><p>${pd.g}</p></div>`;
+  return gist + `<div class="pgact">${acts}</div>` + pgTopics(pd, st);
+}
+
+// the phone's paper sheet: the paper's facts and links, BibTeX, and a label per topic
+function pgSheet(pd, enter) {
+  const labs = pd.arch ? "" : `<div class="cap2">Your label · Fit per topic</div>` + pd.tp.map((t) => {
+    const k = pd.id + "|" + t, l = pd.lv[t];
+    return `<div class="slab" style="${rc(l)}"><div class="sh">${badge(t)}<span class="nm">${T[t].n}</span><span class="gr">${GRADE[l]}</span></div>
+      <div class="why">${["central", "related", "adjacent", "none", "unsure"].map((f) => `<a class="${LABEL[k] === f ? "on" : ""}${!LABEL[k] && FIT[l] === f ? " auto" : ""}" data-lab="${k}|${f}">${f}</a>`).join("")}</div></div>`;
+  }).join("") + `<div class="faint sm2">The dashed one is the pipeline's verdict.</div>`;
+  const vers = pd.ver.map(([v, d], i) => `${v} · ${d}${i ? "" : " (current)"}`).join("<br>");
+  const links = [ext(`https://arxiv.org/abs/${pd.id}`, "arXiv"), ext(`https://arxiv.org/pdf/${pd.id}`, "PDF"), ext(`https://arxiv.org/src/${pd.id}`, "LaTeX"), pd.code ? ext(codeUrl(pd), "Code") : "", pd.wts ? ext(wtsUrl(pd), "Weights") : ""].join("");
+  return `<div class="fsheet${enter ? " enter" : ""}"><div class="shade2" data-ps="x"></div><div class="sheetp">
+    ${labs}
+    <div class="cap2">The paper</div><div class="row slinks">${links}</div>
+    <div class="row">${pd.arch ? `<a class="btn" data-miss="${pd.id}">Report as a miss</a>` : ""}<a class="btn" data-bib="${pd.id}">BibTeX ⧉</a><a class="btn" data-copy="${pd.id}">arXiv id ⧉</a></div>
+    <div class="kv sm"><span>Versions</span><div>${vers}</div><span>Published</span><div>${pd.pub || `<span class="faint">Preprint only, as far as DBLP knows.</span> <a class="inl" data-doi>Paste a DOI</a>`}</div>${pd.arch ? "" : `<span>Classes</span><div>${pd.tp.map((t) => (PARENT[t] ? T[PARENT[t]].n + " › " : "") + T[t].n).join("<br>")}</div>`}</div>
+    <button class="done" data-ps="x">Done</button></div></div>`;
 }

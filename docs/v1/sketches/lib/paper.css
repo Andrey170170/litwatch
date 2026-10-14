@@ -88,10 +88,17 @@ a.inl { color: var(--acc, var(--fg)); cursor: pointer; }
 .pw .ti { font-weight: 600; }
 .pw .rel { grid-column: 1; color: var(--fg2); font-size: 12.5px; }
 .pw .mono, .pw .faint { grid-column: 2; grid-row: 1; font: 11.5px "JetBrains Mono", monospace; color: var(--fg3); }
-.pw.am { grid-template-columns: 3px 92px 1fr; }
-.pw.am .stripe { grid-row: 1 / 3; background: var(--rc); }
-.pw.am .rtag { grid-row: 1 / 3; font: 600 10.5px "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .06em; padding-top: 2px; }
-.pw.am .ti, .pw.am .rel { grid-column: 3; }
+/* the relation sits above the title when narrow, in its own column when there is room */
+.pw.am { grid-template-columns: 3px 1fr; column-gap: 10px; }
+.pw.am .stripe { grid-row: 1 / 4; background: var(--rc); }
+.pw.am .rtag { grid-column: 2; font: 600 10.5px "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
+.pw.am .ti, .pw.am .rel { grid-column: 2; }
+@container (min-width: 700px) {
+  .pw.am { grid-template-columns: 3px 92px 1fr; }
+  .pw.am .stripe { grid-row: 1 / 3; }
+  .pw.am .rtag { grid-row: 1 / 3; padding-top: 2px; }
+  .pw.am .ti, .pw.am .rel { grid-column: 3; }
+}
 .rtag.agrees { color: var(--ok, var(--fg)); } .rtag.contradicts { color: var(--sig); } .rtag.extends { color: var(--fg); } .rtag.supersedes { color: var(--acc, var(--fg)); }
 .cfoot { border-top: 1px solid var(--line2); padding-top: 8px; font-size: 12px; color: var(--fg3); }
 .cardwait { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px dashed var(--line); font-size: 13px; color: var(--fg2); }
@@ -101,6 +108,10 @@ a.inl { color: var(--acc, var(--fg)); cursor: pointer; }
 
 /* B: the ladder and a rail beside it, when there is room */
 .pgcols { display: block; }
+@container (min-width: 900px) {
+  .pg.B .rung { display: grid; grid-template-columns: 104px 1fr; gap: 16px; }
+  .pg.B .rung .rl { flex-direction: column; align-items: flex-start; padding-top: 3px; }
+}
 @container (min-width: 760px) {
   .pg.B .pgcols { display: grid; grid-template-columns: 1fr 270px; gap: 28px; align-items: start; }
   .pg.B .pgrail { position: sticky; top: 0; }
@@ -129,3 +140,33 @@ a.inl { color: var(--acc, var(--fg)); cursor: pointer; }
 .tphd { padding: 6px 10px; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--fg3); cursor: pointer; border-bottom: 1px solid var(--line2); }
 .tphd:hover { color: var(--fg); }
 .tphd + .tprow { border-top: 0; }
+
+/* 4b: the paper as a page, the Deep card's sections as rungs of a second level */
+.inner:has(.pg) { max-width: 1080px; }
+.rung.card { margin-bottom: 8px; }
+.rung.sub { margin-bottom: 0; padding: 9px 0 12px; border-top: 1px solid var(--line2); }
+.rung.sub .rl { font: 700 11px Rajdhani, sans-serif; letter-spacing: .14em; color: var(--fg2); }
+.rung.sub .rb > .prose:last-child, .rung.sub .rb > .pw:last-child { margin-bottom: 0; }
+.rung.end { margin-bottom: 22px; padding-bottom: 0; }
+.rung.end .cfoot { border: 0; padding: 0; }
+.facts .idl { display: inline-flex; align-items: center; gap: 4px; }
+.facts .lnk { font-size: 12px; color: var(--fg2); }
+.cp { cursor: pointer; color: var(--fg3); font-size: 12px; }
+.cp:hover { color: var(--fg); }
+.rgist { border-left: 3px solid var(--rc); padding-left: 10px; margin-bottom: 14px; }
+.rgist .rl { display: flex; align-items: center; gap: 8px; font: 700 11px Rajdhani, sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--sig, var(--fg3)); margin-bottom: 4px; }
+.rgist p { margin: 0; font-size: 14px; line-height: 1.45; }
+.rgist:hover .rate { opacity: 1; }
+.pgrail .tprow .nm { flex: 1 1 calc(100% - 40px); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pgrail .tprow .gr { order: 2; }
+.pgrail .tprow .vd { order: 3; flex: 1 1 100%; }
+.pgrail .tprow .sp { display: none; }
+.pgrail .tprow .th, .pgrail .tprow .lb { order: 4; }
+.slab { border-left: 3px solid var(--rc); padding-left: 10px; margin: 0 0 12px; }
+.slab .sh { display: flex; align-items: center; gap: 8px; font-size: 13.5px; margin-bottom: 6px; }
+.slab .sh .nm { font-weight: 600; }
+.slab .sh .gr { font: 600 11px "JetBrains Mono", monospace; color: var(--rc); text-transform: uppercase; }
+.slab .why { padding: 0; border: 0; background: none; }
+.why a.auto { border-style: dashed; color: var(--fg); }
+.slinks { gap: 16px; }
+.sm2 { font-size: 11.5px; margin: -4px 0 6px; }
