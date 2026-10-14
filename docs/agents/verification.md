@@ -117,4 +117,3 @@ preference set.
   comes with N5, when the archive joins the stack; its page list grows with N7.
 - **A disposable archive** for registration and PDF fetches comes with N5's fresh stack; until then those are
   shown by faked HTTP only.
-- **The Zotero test account** is not set up yet; until it is, Zotero is shown by faked HTTP only.
