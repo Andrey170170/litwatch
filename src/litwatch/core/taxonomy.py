@@ -100,6 +100,8 @@ class Taxonomy(BaseModel):
         for t in self.topics:
             if t.class_ not in slugs:
                 found.append(f"topic on {t.class_!r}: no such class")
+            elif self.get(t.class_).description != " ".join(t.subject.split()):
+                found.append(f"class {t.class_!r} is followed; its description must be its subject")
             if t.depth == Depth.FOCUS and t.rubric is None:
                 found.append(f"Focus topic {t.class_!r} has no rubric")
             if t.depth != Depth.FOCUS and t.rubric is not None:

@@ -42,7 +42,10 @@ commands. 200 papers from `tiers-0.14.csv`, drawn with seed 20261014: 20 positiv
 the owner labelled, 20 positives of each of the five broad selections, and 70 papers no selection placed above
 tier 4. Two labs sorted each paper into the seed tree separately, from its title and abstract (read from the
 development database): Opus 5.5 (Anthropic) and GPT-6.1-Sol (OpenAI, through OpenRouter), both at medium effort, for
-$1.32 in all. Opus refused 2 papers, which stay unresolved. Where both named the same primary class it is the silver
+$1.32 in all. Opus refused 2 papers, which stay unresolved. The committed run read a path-like answer
+(`language-models/agents/agent-evaluation`) as its last part without checking the path; `silver.py` now accepts a
+path only when it is the class's real ancestry. The run's raw replies were not kept, so how many answers were paths
+is unknown; those seen in the trial run all had the right ancestry. Where both named the same primary class it is the silver
 label; another class both named is a silver member (`others`), and one only one of them named is `unsettled`,
 which per-class scores count neither as a member nor as a non-member. Where they differed, 20 papers were drawn with the same seed,
 round-robin over the top-level class Opus named, and the owner chose; the rest are `unresolved`, counted and left out

@@ -17,14 +17,14 @@ import sys
 from pathlib import Path
 
 import psycopg
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from litwatch import seeds
 from litwatch.config import RoleConfig
 from litwatch.core.taxonomy import Taxonomy
 from litwatch.llm.anthropic import AnthropicProvider
 from litwatch.llm.openrouter import OpenRouterProvider
-from litwatch.llm.types import Request, Stop
+from litwatch.llm.types import ProviderError, Request, Stop
 
 HERE = Path(__file__).parent
 SEED = 20261014
@@ -105,6 +105,20 @@ def system_prompt(tree: Taxonomy) -> str:
     )
 
 
+def slug_of(answer: str, tree: Taxonomy) -> str | None:
+    """The class an answer names: a bare slug, or a path whose parts are the class's ancestry
+    (`interpretability/circuits`). Anything else names no class."""
+    *path, slug = re.split(r"[/:]", answer.strip())
+    if slug not in {c.slug for c in tree.classes}:
+        return None
+    ancestry: list[str] = []
+    parent = tree.get(slug).parent
+    while parent is not None:
+        ancestry.insert(0, parent)
+        parent = tree.get(parent).parent
+    return slug if not path or path == ancestry[-len(path) :] else None
+
+
 def texts(ids: list[str]) -> dict[str, tuple[str, str]]:
     """Title and abstract from a read-only source: the development copy of 0.14's papers."""
     with psycopg.connect(os.environ["TEXT_DSN"]) as conn:
@@ -117,7 +131,6 @@ def texts(ids: list[str]) -> dict[str, tuple[str, str]]:
 async def label(name: str) -> None:
     """Sort every paper of the sample not yet in `silver-<name>.csv`; a run can be resumed."""
     role, tree = LABELLERS[name], seeds.taxonomy()
-    slugs = {c.slug for c in tree.classes}
     provider = (
         AnthropicProvider(os.environ["ANTHROPIC_API_KEY"])
         if role.provider == "anthropic"
@@ -137,20 +150,27 @@ async def label(name: str) -> None:
             system=system, user=f"Title: {title}\n\nAbstract: {abstract}", output=Sorting
         )
         for _ in range(3):
-            async with gate:
-                reply = await provider.complete(role, request)
+            try:
+                async with gate:
+                    reply = await provider.complete(role, request)
+            except ProviderError as exc:
+                print(f"{pid}: {exc}", file=sys.stderr)
+                continue
             cost[0] += reply.usage.cost or 0.0
             if reply.stop != Stop.COMPLETE:
                 print(f"{pid}: {reply.stop.value}", file=sys.stderr)
                 continue
-            sorting = Sorting.model_validate_json(reply.text)
-            # A path such as `interpretability/circuits` still names one class: its last part.
-            primary, *others = [
-                re.split(r"[/:]", s.strip())[-1] for s in (sorting.primary, *sorting.others)
-            ]
-            named = [primary, *others]
-            if unknown := [s for s in named if s not in slugs]:
-                print(f"{pid}: unknown classes {unknown}", file=sys.stderr)
+            try:
+                sorting = Sorting.model_validate_json(reply.text)
+            except ValidationError as exc:
+                print(f"{pid}: malformed answer: {exc}", file=sys.stderr)
+                continue
+            named = [slug_of(s, tree) for s in (sorting.primary, *sorting.others)]
+            primary, *others = named
+            if None in named:
+                print(
+                    f"{pid}: unknown classes {[sorting.primary, *sorting.others]}", file=sys.stderr
+                )
             else:
                 others = [s for s in dict.fromkeys(others) if s != primary]
                 return {"paper_id": pid, "primary": primary, "others": " ".join(others),

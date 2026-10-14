@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from litwatch import seeds
-from litwatch.core.taxonomy import Depth
+from litwatch.core.taxonomy import Depth, Taxonomy
 
 
 def spec(*, topics=(), deep=False, **overrides):
@@ -80,3 +80,11 @@ def test_a_followed_class_may_not_carry_its_own_description():
     raw = spec(topics=[topic(), topic(cls="b")])
     with pytest.raises(ValueError, match="its description is its topic's subject"):
         seeds.taxonomy_from_spec(raw)
+
+
+def test_a_followed_class_described_apart_from_its_subject_is_refused():
+    tree = seeds.taxonomy_from_spec(spec(topics=[topic()]))
+    classes = [c.model_copy(update={"description": "Something else entirely."}) if c.slug == "c"
+               else c for c in tree.classes]  # fmt: skip
+    with pytest.raises(ValueError, match="its description must be its subject"):
+        Taxonomy(classes=classes, topics=tree.topics)
