@@ -6,7 +6,7 @@ round, `r6-interact.html`, is the whole app as chosen). This file is the part a 
 the principles, the shell, the pages, the interactions, the look's tokens and the anatomy of each repeated element.
 Where this file and the spec (`docs/v1/spec/`) differ, the spec wins. Terms are the glossary's (`GLOSSARY.md`).
 
-It replaces the first v1 design (this file before 2026-10-13, with `docs/v1/design.html`), which was a newspaper:
+It replaces the first v1 design (this file and `docs/v1/design.html` before 2026-10-13, both in git history), which was a newspaper:
 editorial and hard to scan.
 
 ## Principles
