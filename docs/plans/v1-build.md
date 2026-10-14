@@ -36,7 +36,7 @@ Choices made without asking the owner:
 ## Order of work
 
 ```
-archive   A   archive/ via git subtree
+archive   A   archive/, the code as one commit
 core      N0  tree, topics, evaluation labels
           N1  decide() and the classifier bake-off
           N2a classification, analysis, intake from the archive
@@ -59,8 +59,10 @@ taking in new papers and registering them with the archive.
 
 ### The PRs
 
-**A · The archive moves in.** `git subtree add` of `Andrey170170/arxiv-archive` into `archive/`, with its history;
-its tests run in CI as their own job. Nothing deployed changes: the running archive keeps its own checkout until N5.
+**A · The archive moves in.** The code of `Andrey170170/arxiv-archive` (its package, tests, `pyproject.toml`,
+`requirements.lock`) is copied into `archive/` as one squashed commit naming the source commit, with a README for its
+place here; the old repository keeps the history and the instance's records (manifests, evidence, the historical
+downloader, the runbooks for the owner's server). Its tests run in CI as their own job. Nothing deployed changes: the running archive keeps its own checkout until N5.
 AGENTS.md lists `archive/`.
 
 **N0 · Tree, topics and evaluation labels.**
@@ -144,7 +146,9 @@ milestone. Not taken: freeze the deployment on its image; keep deploying the bra
 can steer it weeks earlier; the cost is API churn the web track follows (R1). Not taken: start after N6.
 
 **D3 · The archive's code moves in first, as its own PR.** *Why:* N2a, N3 and N5 then change the archive and its
-client in one PR each, and a disposable archive for verification exists from N3. Not taken: move it at N5.
+client in one PR each, and a disposable archive for verification exists from N3. Not taken: move it at N5. The code moves as one squashed commit (owner, 2026-10-14): the history and the instance's
+records stay in the old repository, so this one stays small and publishable. Not taken: the whole repository with its
+history (about 30 MB, mostly the instance's records); the code with its history.
 
 **D4 · N0 takes what exists; the owner does not hand-label 200 papers.** The tree is taxonomy.md as agreed; the CoT
 topics keep 0.14's definitions; the Area and Field topics take 0.14's subjects; the two new topics were drafted and
@@ -199,7 +203,7 @@ reactions show the need. Not taken: a rubric per topic at every depth (the bar w
 
 | | Claim | Evidence |
 | --- | --- | --- |
-| V1 | The archive builds and tests inside this repository; nothing deployed changed (A) | Its tests in CI; `git log archive/` shows its history; the live archive's status unchanged |
+| V1 | The archive builds and tests inside this repository; nothing deployed changed (A) | Its tests in CI; the import commit names its source commit; the live archive's status unchanged |
 | V2 | The tree loads, every class is described, every topic has its subject and every Focus topic its rubric, and the evaluation labels exist per source (N0) | pytest on the taxonomy store and the YAML round trip; label counts per class and source; the owner's adjudication committed |
 | V3 | A default classifier is chosen with threshold and band, and Focus membership recall on the CoT positives is at least the first v1's candidate recall (N1) | The report in `evals/`; one real `decide` call per provider; the owner's pick |
 | V4 | Classification, analysis, grading per depth, the grade table, rarity, effective grades and the library rule do what pipeline.md says (N2a–b) | pytest per rule on real Postgres (section 4's grading-topic examples, both tables, the floors, the lab-diversity refusal, Area escalation); a sandbox night with its run record |

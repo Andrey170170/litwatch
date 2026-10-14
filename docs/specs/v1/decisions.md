@@ -92,8 +92,9 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
     are read from the archive and run through the whole pipeline, unlabelled; no data is carried from 0.14 or the
     first v1. Every other paper is not processed and stays in the archive; the owner's earlier labels become the
     evaluation set (decision 55). Backfill, through the same archive intake over older windows, comes after v1.
-49. **The archive's code moves into this repository** as `archive/`, with history, deployed as its own container(s);
-    its read-only web interface is retired once litwatch covers it. (Agreed by the owner 2026-10-13.)
+49. **The archive's code moves into this repository** as `archive/`, deployed as its own container(s); its read-only
+    web interface is retired once litwatch covers it. (Agreed by the owner 2026-10-13.) Amended 2026-10-14: the code
+    moves as one squashed commit; the old repository keeps the history and the owner's instance records.
 50. **Costs.** Month-to-date spend per provider; amber against a monthly budget; nightly runs never downgraded; hard
     ceilings on re-runs and backfills.
 51. **The library.** Focus papers at relevant or above are saved automatically; everything else by hand. Zotero's
