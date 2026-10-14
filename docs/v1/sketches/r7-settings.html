@@ -76,6 +76,7 @@
 const SW = { v: "C", bar: "inline", cards: "rich", acts: "grid" };
 // the chosen interactions (round 6)
 const IX = { react: "reason", sheet: "drag" };
+SHELL_RUN = "over"; // openrouter is projected over its budget (Runs and cost)
 // what a Settings page starts with
 const SETST = { sub: null, cal: null, calpick: false, cls: null, fold: null, saved: false, nopen: null, evf: null, paper: null };
 let gistUp = false;
@@ -150,7 +151,10 @@ function makeApp(phone) {
       // acknowledged only where the page does not show the result: a copy, a request, the owner's word
       const done = (msg) => toast(fr, msg);
       // Settings
-      if (f("[data-settings]")) { if (!st.set) nav.go({ set: phone ? "index" : "overview", tab: null, topic: null, dg: null, ...SETST }); return true; }
+      if ((n = f("[data-settings]"))) { // the gear opens Settings; the run status opens the page it names
+        const to = n.dataset.settings;
+        if (to ? st.set !== to || st.sub || st.paper : !st.set) nav.go({ set: to || (phone ? "index" : "overview"), tab: null, topic: null, dg: null, ...SETST });
+        return true; }
       if (f("[data-leave]")) { while (nav.stack.length && nav.st.set) nav.back(); if (nav.st.set) nav.top({}); return true; }
       if ((n = f("[data-sset]"))) {
         const to = { set: n.dataset.sset, ...SETST };

@@ -10,13 +10,15 @@
 // entries, so the OS back gesture walks them too.
 
 const SHELL_TABS = ["Digest", "Topics", "Papers"];
-// The run status sits in the wordmark: last night's count when all went well, the progress while it runs,
-// and the problem when something failed. SHELL_RUN is a sketch switch.
+// The run status sits in the wordmark: last night's count when all went well, the progress while it runs, the
+// problem when something failed, the spend when a provider is projected over its budget (failed outranks running,
+// running outranks over). SHELL_RUN is a sketch switch. data-settings names the Settings page the status opens.
 let SHELL_RUN = "ok";
 function shellStatus() {
-  if (SHELL_RUN === "running") return `<span class="st run" title="Tonight's run: 212 of 530 papers read">212/530</span>`;
-  if (SHELL_RUN === "failed") return `<span class="st bad" title="2 digests failed last night · open Quality">2 failed</span>`;
-  return `<span class="st" title="530 papers read last night · all quiet">530</span>`;
+  if (SHELL_RUN === "running") return `<span class="st run" data-settings="overview" title="Tonight's run: 212 of 530 papers read">212/530</span>`;
+  if (SHELL_RUN === "failed") return `<span class="st bad" data-settings="needs" title="2 digests failed last night · open Needs you">2 failed</span>`;
+  if (SHELL_RUN === "over") return `<span class="st warn" data-settings="runs" title="openrouter projected at $47 of a $40 budget · open Runs and cost">530 · $ over</span>`;
+  return `<span class="st" data-settings="overview" title="530 papers read last night · all quiet">530</span>`;
 }
 const shellWM = () => `litwatch${shellStatus()}`;
 

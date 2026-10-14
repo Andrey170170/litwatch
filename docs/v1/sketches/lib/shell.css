@@ -19,6 +19,7 @@
 .st { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; font: 500 11.5px "JetBrains Mono", monospace; letter-spacing: 0; text-transform: none; color: var(--fg2); white-space: nowrap; }
 .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
 .st.run, .frame .wm .st.run { color: var(--warn, #e0a100); }
+.st[data-settings] { cursor: pointer; }
 .st.run::before { background: var(--warn, #e0a100); animation: lw-pulse 1.2s ease-in-out infinite; }
 .st.bad, .frame .wm .st.bad { color: var(--bad); cursor: pointer; }
 .st.bad::before { background: var(--bad); }
@@ -87,7 +88,7 @@
   .frame.phone { position: fixed; top: 45px; left: 0; right: 0; bottom: 0; width: auto; height: auto; border: 0; border-radius: 0; }
 }
 .pbar .st { margin-left: 4px; }
-.frame[data-dir="nc"] .pbar > .st:not(.run):not(.bad) { color: var(--cy); }
+.frame[data-dir="nc"] .pbar > .st:not(.run):not(.bad):not(.warn) { color: var(--cy); }
 /* a swipe step: the new day comes in from the side the finger came from */
 .in-older { animation: lw-in-older .2s cubic-bezier(.2, .85, .25, 1); }
 .in-newer { animation: lw-in-newer .2s cubic-bezier(.2, .85, .25, 1); }

@@ -131,7 +131,7 @@ const dgTitle = (key) => { const { id, w } = src(key); return T[id].n + (w ? " �
 
 function daystrip(day, history) {
   const i = NEWEST.findIndex((d) => d.key === day);
-  return `<div class="daystrip"><button class="ib" data-step="1">‹</button><span class="day">${day === TODAY ? "<small>Today</small>" : ""}${day}</span><button class="ib" data-step="-1" ${i === 0 ? "disabled" : ""}>›</button><span class="sp"></span>${history ? '<a class="chipbtn" data-go="history">History</a>' : ""}</div>`;
+  return `<div class="daystrip"><button class="ib" data-step="1" ${stepDay(day, 1) === day ? "disabled" : ""}>‹</button><span class="day">${day === TODAY ? "<small>Today</small>" : ""}${day}</span><button class="ib" data-step="-1" ${i === 0 ? "disabled" : ""}>›</button><span class="sp"></span>${history ? '<a class="chipbtn" data-go="history">History</a>' : ""}</div>`;
 }
 const DG = (key) => `data-dg="${key}"`; DG.fold = false;
 function dayBody(day, act = DG, { weekly = true } = {}) {

@@ -90,7 +90,7 @@ const TREE = [
 ];
 const MISSES = [
   { ti: "Probing for Unverbalized Plans in Reasoning Traces", t: "cotf", d: "11 Oct", at: "classification",
-    trace: [["Classifier", "0.12 under 0.40", "bad"], ["Uncertain band", "under 0.20", "bad"], ["Keywords", "no match", "bad"], ["Judge", "not graded", "off"], ["Check", "not graded", "off"]] },
+    trace: [["Classifier", "0.12 under 0.40", "bad"], ["Uncertain band", "under 0.20", "bad"], ["Keywords", "no match", "bad"], ["Judge", "related", "ok"], ["Check", "related", "ok"]] },
   { ti: "When Monitors Read Too Little: Truncated Traces and Oversight", t: "cotm", d: "8 Oct", at: "grading",
     trace: [["Classifier", "0.71, a member", "ok"], ["Uncertain band", "—", "off"], ["Keywords", "CoT monitor*", "ok"], ["Judge", "adjacent", "bad"], ["Check", "adjacent", "bad"]] },
   { ti: "Faithfulness of Self-Explanations Under Fine-Tuning", t: "cotf", d: "29 Sep", at: "classification", done: "Threshold lowered to 0.40 (version 3); the replay of 11 Oct admits it.",
