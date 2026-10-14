@@ -58,3 +58,40 @@
 .frame.desk .grid.wide .gl .badge { width: 18px; height: 18px; font-size: 8.5px; }
 /* topic labels stay put while the calendar scrolls */
 .calscroll .grid .gl { position: sticky; left: 0; z-index: 2; background: var(--bg); padding-right: 3px; }
+
+/* cards open as a whole */
+.dblock.click { cursor: pointer; }
+.dblock.click:hover { border-color: color-mix(in srgb, var(--acc, var(--fg)) 45%, var(--line)); }
+.dblock.click:hover .hd .n { color: var(--acc, var(--fg)); }
+
+/* the month calendar */
+.month { display: grid; grid-template-columns: repeat(5, 1fr) 1.7fr; gap: 5px; align-items: stretch; }
+.month .mh { font-size: 10.5px; color: var(--fg3); text-transform: uppercase; letter-spacing: .1em; padding: 0 2px; }
+.mday, .mweek { background: var(--surface); border: 1px solid var(--line2); padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mweek { background: color-mix(in srgb, var(--acc, var(--fg)) 5%, var(--surface));
+  display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto repeat(5, min-content); grid-auto-flow: column; column-gap: 4px; align-content: start; }
+.mweek .mnum { grid-column: 1 / -1; grid-row: 1; }
+.mday.empty, .mweek.empty { background: none; border-style: dashed; min-height: 40px; }
+.mday.today { border-color: var(--acc, var(--fg)); }
+.mnum { font: 500 11px "JetBrains Mono", monospace; color: var(--fg2); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mnum:hover { color: var(--acc, var(--fg)); }
+.mday.today .mnum { color: var(--acc, var(--fg)); font-weight: 700; }
+.mbar { display: block; height: 6px; background: var(--rc); cursor: pointer; }
+.mbar.h { background: none; box-shadow: inset 0 0 0 1px var(--line); }
+.mbar.x { background: repeating-linear-gradient(45deg, var(--bad) 0 3px, transparent 3px 6px); }
+.month.text .mbar:hover { outline: 1px solid var(--fg); outline-offset: 1px; }
+.month:not(.text) .mday:not(.empty), .month:not(.text) .mweek:not(.empty) { cursor: pointer; }
+.month:not(.text) .mbar { cursor: inherit; }
+.month.text { gap: 6px; }
+.month.text .mday, .month.text .mweek { padding: 6px; gap: 3px; }
+.month.text .mbar { height: 22px; display: flex; align-items: center; gap: 6px; padding-right: 6px; background: color-mix(in srgb, var(--rc) 16%, transparent); box-shadow: inset 3px 0 0 var(--rc); }
+.month.text .mbar.h { background: none; box-shadow: inset 0 0 0 1px var(--line2); }
+.month.text .mbar.x { box-shadow: inset 0 0 0 1px var(--bad); background: none; }
+.month.text .mbar .badge { width: 16px; height: 16px; font-size: 7.5px; margin-left: 6px; }
+.month.text .mc { font: 11px "JetBrains Mono", monospace; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.month.text .mbar.h .mc { color: var(--fg3); }
+.month.text .mbar.x .mc { color: var(--bad); }
+/* the rows grid at desktop size, using the width */
+.frame.desk .grid.lg { --cw: 24px; gap: 4px; }
+.frame.desk .grid.lg .gl .badge { width: 22px; height: 22px; font-size: 9.5px; }
+.inner:has(.wideview) { max-width: none; }

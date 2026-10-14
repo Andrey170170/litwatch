@@ -16,8 +16,16 @@
 .side { width: 236px; flex: none; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 12px 8px; overflow-y: auto; }
 .side .wm { padding: 2px 8px; display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -.02em; font-size: 15px; cursor: default; }
 .side .wm { margin-bottom: 10px; }
-.wm .st { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; font: 500 11.5px "JetBrains Mono", monospace; letter-spacing: 0; text-transform: none; color: var(--fg2); }
-.wm .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.st { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; font: 500 11.5px "JetBrains Mono", monospace; letter-spacing: 0; text-transform: none; color: var(--fg2); white-space: nowrap; }
+.st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+.st.run, .frame .wm .st.run { color: var(--warn, #e0a100); }
+.st.run::before { background: var(--warn, #e0a100); animation: lw-pulse 1.2s ease-in-out infinite; }
+.st.bad, .frame .wm .st.bad { color: var(--bad); cursor: pointer; }
+.st.bad::before { background: var(--bad); }
+@keyframes lw-pulse { 50% { opacity: .25; } }
+.pfoot { flex: none; border-top: 1px solid var(--line); background: var(--surface); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+.drawer .it.subit { padding: 6px 10px 6px 26px; font-size: 13.5px; color: var(--fg2); }
+.drawer .it.subit.on { background: none; color: var(--acc, var(--fg)); }
 .side .it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-weight: 500; color: var(--fg2); font-size: 13.5px; }
 .side .it:hover { background: var(--hover); }
 .side .it.on { background: var(--sel); color: var(--fg); }

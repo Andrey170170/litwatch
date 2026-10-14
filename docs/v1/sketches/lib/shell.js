@@ -1,12 +1,21 @@
 // The shell chosen in round 1, shared by every later round: the desktop sidebar (B) and the phone drawer (C).
-// A round passes an app: { start, view(st) -> { body, title?, overlay? }, click?(e, nav) -> true when handled }.
+// A round passes an app: { start, view(st) -> { body, title?, overlay?, bar?, barRight?, foot? }, click?(e, nav) -> true
+// when handled, sub?(st) -> drawer items under Digest }. On the phone, bar replaces the wordmark on a top-level
+// screen, barRight goes before ⚙, and foot is pinned under the scroll.
 // Navigation is a stack: nav.go() pushes a step, nav.back() undoes one, nav.set() changes the page in place
 // (scroll kept), nav.top() jumps to a top-level screen. On a phone-sized page the steps are real history
 // entries, so the OS back gesture walks them too.
 
 const SHELL_TABS = ["Digest", "Topics", "Papers"];
-// the run status sits in the wordmark: last night's count, with a dot that turns red when something failed
-const SHELL_WM = `litwatch<span class="st" title="530 papers read last night · all quiet">530</span>`;
+// The run status sits in the wordmark: last night's count when all went well, the progress while it runs,
+// and the problem when something failed. SHELL_RUN is a sketch switch.
+let SHELL_RUN = "ok";
+function shellStatus() {
+  if (SHELL_RUN === "running") return `<span class="st run" title="Tonight's run: 212 of 530 papers read">212/530</span>`;
+  if (SHELL_RUN === "failed") return `<span class="st bad" title="2 digests failed last night · open Quality">2 failed</span>`;
+  return `<span class="st" title="530 papers read last night · all quiet">530</span>`;
+}
+const shellWM = () => `litwatch${shellStatus()}`;
 
 function makeNav(app, draw, useHistory) {
   let skipPop = 0;
@@ -39,9 +48,10 @@ function shellClick(e, nav, app) {
   else if (f("[data-back]")) nav.back();
 }
 
-function shellNavItems(st, cls) {
+function shellNavItems(st, cls, app) {
   const tabOn = (t) => st.tab === t && !st.topic;
-  return SHELL_TABS.map((t) => `<div class="it${tabOn(t) ? " on" : ""}" data-tab="${t}">${t}</div>`).join("") +
+  const sub = (t) => (t === "Digest" && cls === "drawer" && app && app.sub ? app.sub(st) : "");
+  return SHELL_TABS.map((t) => `<div class="it${tabOn(t) ? " on" : ""}" data-tab="${t}">${t}</div>${sub(t)}`).join("") +
     `<div class="sec">Following</div>` +
     TOPICS.map((t) => { const x = DIGEST[t.id]; const n = cls === "side" && x && !x.quiet ? x.c.split(" ")[0] : "";
       return `<div class="it${st.topic === t.id ? " on" : ""}" data-topic="${t.id}">${badge(t.id)}<span class="nm">${t.n}</span>${n ? `<span class="k${t.depth === "focus" ? " hot" : ""}">${n}</span>` : ""}</div>`; }).join("");
@@ -54,7 +64,7 @@ function mountDesk(el, app) {
     const main = el.querySelector(".main"), keep = how === "keep" && main ? main.scrollTop : 0;
     const v = app.view(nav.st, nav);
     const backLink = nav.stack.length && !v.overlay && !v.noBack ? `<a class="back" data-back>‹ Back</a>` : "";
-    el.innerHTML = `<div class="body"><div class="side"><div class="wm">${SHELL_WM}</div>${shellNavItems(nav.st, "side")}<div class="foot"><div class="it">⚙ Settings</div></div></div>
+    el.innerHTML = `<div class="body"><div class="side"><div class="wm">${shellWM()}</div>${shellNavItems(nav.st, "side")}<div class="foot"><div class="it">⚙ Settings</div></div></div>
       <div class="main scroll"><div class="inner">${backLink}${v.body}</div></div>
       ${v.overlay ? `<div class="over${hadOverlay ? "" : " enter"}"><div class="shade" data-back></div><div class="sheet scroll">${v.overlay}</div></div>` : ""}</div>`;
     hadOverlay = !!v.overlay;
@@ -75,14 +85,14 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
   function screenHTML(st, depth) {
     const v = app.view(st, nav);
     const left = depth ? `<button class="ib" data-back>‹</button><span class="ttl">${v.title || ""}</span>`
-      : `<button class="ib" data-menu>☰</button><span class="wm">${SHELL_WM}</span>`;
-    return `<div class="pbar">${left}<span class="sp"></span><button class="ib">⚙</button></div><div class="scroll"><div class="pp">${v.body}${v.overlay || ""}</div></div>`;
+      : `<button class="ib" data-menu>☰</button>${v.bar || `<span class="wm">${shellWM()}</span>`}`;
+    return `<div class="pbar">${left}<span class="sp"></span>${v.barRight || ""}<button class="ib">⚙</button></div><div class="scroll"><div class="pp">${v.body}${v.overlay || ""}</div></div>${v.foot || ""}`;
   }
   function draw(how) {
     const sc = scr.querySelector(".scroll"), keep = how === "keep" && sc ? sc.scrollTop : 0;
     scr.innerHTML = screenHTML(nav.st, nav.stack.length);
     scr.querySelector(".scroll").scrollTop = keep;
-    panel.innerHTML = `<div class="wm">${SHELL_WM}</div>${shellNavItems(nav.st, "drawer")}<div class="it" style="margin-top:auto">⚙ Settings</div>`;
+    panel.innerHTML = `<div class="wm">${shellWM()}</div>${shellNavItems(nav.st, "drawer", app)}<div class="it" style="margin-top:auto">⚙ Settings</div>`;
     scr.classList.remove("in-go", "in-back"); void scr.offsetWidth;
     if (how === "go" || how === "back") scr.classList.add("in-" + how);
     if (pos > 0) settle(0);

@@ -71,7 +71,8 @@ for (let i = 0; i < 37; i++) {
     const f = (d) => `${d.getUTCDate()} ${MONTH[d.getUTCMonth() - 8]}`;
     day.week = { range: `${from.getUTCMonth() === to.getUTCMonth() ? from.getUTCDate() : f(from)}–${f(to)}`, marks: {} };
     for (const t of TOPICS) {
-      const [, picks, n] = WEEK[t.id], R = seeded(key + "w" + t.id), r = key === "Mon 12 Oct" ? WEEK_R[t.id] : 2 + Math.floor(R() * 4);
+      const [, picks, n0] = WEEK[t.id], R = seeded(key + "w" + t.id), now = key === "Mon 12 Oct", r = now ? WEEK_R[t.id] : 2 + Math.floor(R() * 4);
+      const n = now ? n0 : Math.max(1, Math.round(n0 * (0.6 + R() * 0.8)));
       day.week.marks[t.id] = { n, r, c: t.depth === "focus" ? `Week · ${n} papers` : `Week · ${picks.length >= 5 ? 5 : 3} picks` };
     }
   }
@@ -93,16 +94,16 @@ function gistOf(id, w) { return w ? WEEK[id][0] : (DIGEST[id] && DIGEST[id].p) |
 function picksOf(id, w) { return w ? WEEK[id][1] : (DIGEST[id] && DIGEST[id].picks) || PAPERS.filter((p) => p.tp.includes(id)).slice(0, 2).map((p) => p.id); }
 function failedLine(id) { return `<div class="failed">${badge(id)}<span>${T[id].n}: this digest could not be written. The next run writes it again.</span></div>`; }
 
-// a digest at Gist level: its Gist, its picks' Marks, a count of the rest
+// a digest at Gist level: its Gist, its picks' Marks, a count of the rest; the whole card opens the digest
 function gistBlock(key, act, extra = "") {
   const { id, w, m } = src(key);
   if (m.r === -1) return failedLine(id);
-  if (!m.r) return `<div class="dblock quiet ${extra}"><div class="hd" ${act(key, 2)}>${badge(id)}<span class="n">${T[id].n}</span><span class="c">Nothing new</span>${foldBtn(key, act)}</div></div>`;
+  if (!m.r) return `<div class="dblock quiet click ${extra}" ${act(key, 2)}><div class="hd">${badge(id)}<span class="n">${T[id].n}</span><span class="c">Nothing new</span>${foldBtn(key, act)}</div></div>`;
   const picks = picksOf(id, w).slice(0, 3);
   const rest = Math.max(0, m.n - picks.length);
-  return `<div class="dblock ${extra}"><div class="hd" ${act(key, 2)}>${badge(id)}<span class="n">${T[id].n}</span><span class="c" style="color:var(--r${m.r})">${m.c}</span>${foldBtn(key, act)}</div>
-    <p class="p" ${act(key, 2)}>${gistOf(id, w)}</p><div class="list">${picks.map((pid) => prow(P[pid], { badges: false })).join("")}</div>
-    <div class="more" ${act(key, 2)}>${rest ? `+${rest} more · ` : ""}Read the digest ›</div></div>`;
+  return `<div class="dblock click ${extra}" ${act(key, 2)}><div class="hd">${badge(id)}<span class="n">${T[id].n}</span><span class="c" style="color:var(--r${m.r})">${m.c}</span>${foldBtn(key, act)}</div>
+    <p class="p">${gistOf(id, w)}</p><div class="list">${picks.map((pid) => prow(P[pid], { badges: false })).join("")}</div>
+    ${rest ? `<div class="more">+${rest} paper${rest > 1 ? "s" : ""}</div>` : ""}</div>`;
 }
 const foldBtn = (key, act) => (act.fold ? `<button class="ib fold" ${act(key, 0)} title="Fold">–</button>` : "");
 
@@ -158,7 +159,7 @@ function historyList() {
 }
 
 /* C · the colour grid */
-function gridView(sel, { weeks = 3 } = {}) {
+function gridView(sel, { weeks = 3, lg = false } = {}) {
   const weeksShown = weeks;
   let from = LOG.length - 1, left = weeks; // back to the Monday that starts the oldest week shown
   while (from > 0 && !(LOG[from].dow === 1 && --left === 0)) from--;
@@ -184,6 +185,34 @@ function gridView(sel, { weeks = 3 } = {}) {
     });
   });
   const leg = [1, 2, 3, 4, 5].map((r) => `<span><i style="--rc:var(--r${r})"></i>${["", "Common", "Uncommon", "Rare", "Epic", "Legendary"][r]}</span>`).join("");
-  return `<div class="gridwrap"><div class="ghead"><span class="cap">${LOG[from].key.slice(4)} – ${TODAY.slice(4)}</span><span class="legend">${leg}<span><i class="h"></i>Nothing new</span></span></div><div class="calscroll"><div class="grid${weeksShown > 4 ? " wide" : ""}" style="grid-template-columns:${tpl}">${h}</div></div></div>`;
+  return `<div class="gridwrap"><div class="ghead"><span class="cap">${LOG[from].key.slice(4)} – ${TODAY.slice(4)}</span><span class="legend">${leg}<span><i class="h"></i>Nothing new</span></span></div><div class="calscroll"><div class="grid${lg ? " lg" : weeksShown > 4 ? " wide" : ""}" style="grid-template-columns:${tpl}">${h}</div></div></div>`;
 }
 
+
+/* History as a month: a row per week, Monday to Friday, then the week's W. A day cell holds its daily digests as
+   bars in the fixed topic order; the W cell holds the weekly ones in two columns, Focus and Area first (level with
+   the days' bars), Fields beside them, so Field topics need no rows of their own. With text (desktop), a bar carries
+   its badge and count and opens its digest; without (phone), bars are too thin to tap, so a cell opens its Day or Week. */
+function monthView({ weeks = 6, text = false } = {}) {
+  let from = LOG.length - 1, left = weeks;
+  while (from > 0 && !(LOG[from].dow === 1 && --left === 0)) from--;
+  const rows = [];
+  for (const d of LOG.slice(from)) { if (d.dow === 1) rows.push({ mon: d, days: {} }); if (!d.none) rows.at(-1).days[d.dow] = d; }
+  const nextMon = (mon) => { const i = LOG.indexOf(mon) + 7; return LOG[i] && LOG[i].week ? LOG[i] : null; };
+  const short = (m) => (m.r === -1 ? "failed" : m.r ? m.n : "–");
+  const bar = (key, id, m) => `<span class="mbar${m.r === 0 ? " h" : m.r === -1 ? " x" : ""}" style="${rcs(m.r)}" ${text ? `data-cell="${key}"` : ""} title="${T[id].n} · ${m.c}">${text ? `${badge(id)}<span class="mc">${short(m)}</span>` : ""}</span>`;
+  let h = ["Mon", "Tue", "Wed", "Thu", "Fri", "Week"].map((n) => `<div class="mh">${n}</div>`).join("");
+  rows.forEach((row, ri) => {
+    for (let dow = 1; dow <= 5; dow++) {
+      const d = row.days[dow];
+      if (!d) { h += `<div class="mday empty"></div>`; continue; }
+      const num = d.dom === 1 || (ri === 0 && dow === 1) ? `${d.dom} ${d.key.split(" ")[2]}` : d.dom;
+      h += `<div class="mday${d.key === TODAY ? " today" : ""}" ${text ? "" : `data-gday="${d.key}"`}><span class="mnum" data-gday="${d.key}" title="Open ${d.key}">${num}</span>${DAILY.map((id) => bar(`${d.key}|${id}`, id, d.marks[id])).join("")}</div>`;
+    }
+    const wm = nextMon(row.mon);
+    if (!wm) { h += `<div class="mweek empty"><span class="mnum">W · Monday</span></div>`; return; }
+    h += `<div class="mweek" ${text ? "" : `data-gweek="${wm.key}"`}><span class="mnum" data-gweek="${wm.key}" title="Open the week ${wm.week.range}">W ${wm.week.range}</span>` +
+      TOPICS.map((t) => bar(`${wm.key}|${t.id}|w`, t.id, wm.week.marks[t.id])).join("") + `</div>`;
+  });
+  return `<div class="month${text ? " text" : ""}">${h}</div>`;
+}
