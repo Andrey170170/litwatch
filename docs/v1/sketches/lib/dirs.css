@@ -1,6 +1,6 @@
 /* Look directions for round 1b. Each one restyles wire.css's fragments inside a frame with data-dir set;
    "neat" has no rules here, it is wire.css as is. */
-@import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&family=UnifrakturMaguntia&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Michroma&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&family=UnifrakturMaguntia&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Michroma&display=swap");
 
 /* ───────────── B · Night City: Cyberpunk 2077's interface ───────────── */
 .frame[data-dir="nc"] {
@@ -19,7 +19,7 @@ html[data-theme="dark"] .frame[data-dir="nc"] {
 }
 .frame[data-dir="nc"] .wm { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .2em; font-size: 18px; }
 html[data-theme="dark"] .frame[data-dir="nc"] .wm { color: var(--acc); }
-.frame[data-dir="nc"] .wm::after { content: "v1 // net"; font: 400 10.5px "Share Tech Mono", monospace; letter-spacing: .04em; color: var(--sig); margin-left: 6px; text-transform: uppercase; }
+.frame[data-dir="nc"] .wm::after { content: "v1 // net"; font: 400 10.5px "JetBrains Mono", monospace; letter-spacing: .04em; color: var(--sig); margin-left: 6px; text-transform: uppercase; }
 .frame[data-dir="nc"] .wm:hover { animation: nc-glitch .45s steps(3) 1; }
 @keyframes nc-glitch {
   0% { text-shadow: 2px 0 var(--sig), -2px 0 var(--cy); transform: translateX(1px); }
@@ -27,7 +27,7 @@ html[data-theme="dark"] .frame[data-dir="nc"] .wm { color: var(--acc); }
   70% { text-shadow: 1px 0 var(--sig), -1px 0 var(--cy); transform: none; }
   100% { text-shadow: none; }
 }
-.frame[data-dir="nc"] .status { font: 400 11px "Share Tech Mono", monospace; text-transform: uppercase; color: var(--cy); letter-spacing: .03em; }
+.frame[data-dir="nc"] .status { font: 400 11px "JetBrains Mono", monospace; text-transform: uppercase; color: var(--cy); letter-spacing: .03em; }
 .frame[data-dir="nc"] .status::before, .frame[data-dir="nc"] .dot { border-radius: 0; background: var(--cy); }
 html[data-theme="dark"] .frame[data-dir="nc"] .status::before { box-shadow: 0 0 6px var(--cy); }
 .frame[data-dir="nc"] .sec, .frame[data-dir="nc"] .cap { font-family: Rajdhani, sans-serif; font-weight: 700; letter-spacing: .22em; color: var(--sig); }
@@ -36,16 +36,16 @@ html[data-theme="dark"] .frame[data-dir="nc"] .status::before { box-shadow: 0 0 
 .frame[data-dir="nc"] .side .it[data-tab], .frame[data-dir="nc"] .drawer .it[data-tab] { text-transform: uppercase; letter-spacing: .1em; }
 .frame[data-dir="nc"] .side .it.on, .frame[data-dir="nc"] .drawer .it.on { background: var(--sel); color: var(--sel-fg); box-shadow: inset 3px 0 0 var(--fg); }
 html[data-theme="dark"] .frame[data-dir="nc"] .side .it.on, html[data-theme="dark"] .frame[data-dir="nc"] .drawer .it.on { box-shadow: inset 3px 0 0 var(--acc); }
-.frame[data-dir="nc"] .side .it .k { font-family: "Share Tech Mono", monospace; }
+.frame[data-dir="nc"] .side .it .k { font-family: "JetBrains Mono", monospace; }
 .frame[data-dir="nc"] .side .it .k.hot { background: var(--sig); color: #fff; border-radius: 0; }
 .frame[data-dir="nc"] .list, .frame[data-dir="nc"] .dblock, .frame[data-dir="nc"] .btn {
   border-radius: 0; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
 }
 .frame[data-dir="nc"] .dblock .list { clip-path: none; }
 .frame[data-dir="nc"] .dblock .hd .n { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; font-size: 15.5px; }
-.frame[data-dir="nc"] .dblock .hd .c, .frame[data-dir="nc"] .drow .c { font-family: "Share Tech Mono", monospace; color: var(--sig); text-transform: uppercase; font-size: 11.5px; }
+.frame[data-dir="nc"] .dblock .hd .c, .frame[data-dir="nc"] .drow .c { font-family: "JetBrains Mono", monospace; color: var(--sig); text-transform: uppercase; font-size: 11.5px; }
 .frame[data-dir="nc"] .prow:hover::before, .frame[data-dir="nc"] .drow:hover::before { box-shadow: 0 0 10px var(--rc); }
-.frame[data-dir="nc"] .prow .d, .frame[data-dir="nc"] .mono { font-family: "Share Tech Mono", monospace; }
+.frame[data-dir="nc"] .prow .d, .frame[data-dir="nc"] .mono { font-family: "JetBrains Mono", monospace; }
 .frame[data-dir="nc"] .badge { border-radius: 0; font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 10.5px; letter-spacing: .02em; clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%); }
 .frame[data-dir="nc"] .btn { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; padding: 0 14px; }
 .frame[data-dir="nc"] .btn:hover { background: var(--acc); color: #0c0f13; border-color: var(--acc); }
@@ -53,10 +53,6 @@ html[data-theme="dark"] .frame[data-dir="nc"] .side .it.on, html[data-theme="dar
 .frame[data-dir="nc"] .h1 { font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 25px; line-height: 1.12; letter-spacing: .01em; }
 .frame[data-dir="nc"] .daystrip .day, .frame[data-dir="nc"] .dayh { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
 .frame[data-dir="nc"] .pbar { box-shadow: inset 0 -2px 0 var(--acc); }
-html[data-theme="dark"] .frame[data-dir="nc"]::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 30;
-  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, .022) 0 1px, transparent 1px 3px);
-}
 html[data-theme="dark"] .frame[data-dir="nc"] .drawer .panel { box-shadow: inset -1px 0 0 var(--acc); }
 
 /* ───────────── C · Newsprint: the paper idea ───────────── */

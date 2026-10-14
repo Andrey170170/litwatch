@@ -1,0 +1,78 @@
+/* The chosen shell (lib/shell.js): desktop sidebar and phone drawer, plus the page chrome rounds 2+ share. */
+
+/* page chrome */
+.dirs { display: flex; gap: 4px; }
+.dirs button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+.dirs button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+.dirs button i { font-style: normal; margin-left: 4px; }
+.desc { max-width: 90ch; margin: 0 0 14px; font-size: 14px; }
+.desc b { font-weight: 600; }
+.side-by-side { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; margin-top: 24px; }
+.notes { flex: 1; min-width: 300px; max-width: 62ch; }
+.notes ol { padding-left: 20px; margin: 6px 0; } .notes li { margin: 6px 0; }
+
+/* desktop */
+.body { display: flex; flex: 1; min-height: 0; position: relative; }
+.side { width: 236px; flex: none; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 12px 8px; overflow-y: auto; }
+.side .wm { padding: 2px 8px; display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -.02em; font-size: 15px; cursor: default; }
+.side .status { padding: 0 8px 12px; }
+.side .it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-weight: 500; color: var(--fg2); font-size: 13.5px; }
+.side .it:hover { background: var(--hover); }
+.side .it.on { background: var(--sel); color: var(--fg); }
+.side .it .k { margin-left: auto; font-size: 11.5px; color: var(--fg3); font-weight: 500; }
+.side .it .k.hot { color: var(--fg); background: var(--line); border-radius: 8px; padding: 0 6px; }
+.side .sec { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--fg3); padding: 14px 8px 4px; }
+.side .it .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 450; }
+.side .foot { margin-top: auto; }
+.main { flex: 1; min-width: 0; }
+.main .inner { max-width: 860px; padding: 18px 24px 40px; }
+/* a slide-over from the right, over the main column only */
+.over { position: absolute; top: 0; bottom: 0; left: 236px; right: 0; z-index: 6; }
+.over .shade { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); }
+.over .sheet { position: absolute; top: 0; bottom: 0; right: 0; width: min(640px, 92%); background: var(--bg); border-left: 1px solid var(--line); padding: 18px 24px 40px; box-shadow: -8px 0 30px rgba(0, 0, 0, .3); }
+.over.enter .shade { animation: lw-fade .22s ease-out; }
+.over.enter .sheet { animation: lw-from-right .26s cubic-bezier(.2, .85, .25, 1); }
+@keyframes lw-fade { from { opacity: 0; } }
+@keyframes lw-from-right { from { transform: translateX(40px); opacity: 0; } }
+
+/* phone */
+.frame.phone { user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.frame.phone, .frame.phone .scroll, .frame.phone .panel { touch-action: pan-y; }
+.screen, .under { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
+.screen { z-index: 1; }
+.screen.lifted { box-shadow: -10px 0 30px rgba(0, 0, 0, .35); }
+.under { z-index: 0; display: none; }
+.screen.in-go { animation: lw-in-go .24s cubic-bezier(.2, .85, .25, 1); }
+.screen.in-back { animation: lw-in-back .24s cubic-bezier(.2, .85, .25, 1); }
+@keyframes lw-in-go { from { transform: translateX(28px); opacity: .4; } }
+@keyframes lw-in-back { from { transform: translateX(-28px); opacity: .4; } }
+.pbar { display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 8px 0 6px; background: var(--surface); border-bottom: 1px solid var(--line); flex: none; }
+.pbar .wm { font-weight: 700; letter-spacing: -.02em; font-size: 16px; }
+.pbar .ttl { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pbar .sp { flex: 1; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.pp { padding: 12px; }
+.drawer { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.drawer.live { pointer-events: auto; }
+.drawer .shade { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); opacity: 0; }
+.drawer .panel { position: absolute; top: 0; bottom: 0; left: 0; width: min(300px, 82%); transform: translateX(-100%); background: var(--surface); padding: 14px 8px; display: flex; flex-direction: column; overflow-y: auto; }
+.drawer.live .panel { box-shadow: 4px 0 24px rgba(0, 0, 0, .22); }
+.drawer .wm { font-weight: 700; padding: 4px 10px 2px; letter-spacing: -.02em; font-size: 16px; }
+.drawer .status { padding: 0 10px 10px; }
+.drawer .it { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; font-weight: 500; cursor: pointer; }
+.drawer .it:active { background: var(--hover); }
+.drawer .it.on { background: var(--sel); }
+.drawer .sec { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--fg3); padding: 14px 10px 4px; }
+.drawer .nm { font-weight: 450; font-size: 14px; }
+.edgehint { position: absolute; left: 0; top: 0; bottom: 0; width: var(--edge, 40px); z-index: 4; pointer-events: none; display: none;
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--r3) 25%, transparent) 0 6px, transparent 6px 12px); }
+.show-edge .edgehint { display: block; }
+
+/* on a phone, the phone frame is the whole screen */
+@media (max-width: 640px) {
+  body { overflow: hidden; }
+  .top { padding: 6px 8px; gap: 6px; } .top h1, .top .chipbtn, .dirs button i { display: none; }
+  .desk-sec, .desc, .notes, .intro { display: none; }
+  .wrap { padding: 0; }
+  .frame.phone { position: fixed; top: 45px; left: 0; right: 0; bottom: 0; width: auto; height: auto; border: 0; border-radius: 0; }
+}
