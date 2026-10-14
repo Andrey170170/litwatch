@@ -1,36 +1,36 @@
-paper_id,opus,sol,status
-2511.11500,rl-for-reasoning,hallucination,unresolved
-2603.21235,ai-for-science,probabilistic-inference,asked
-2603.27771,multi-agent-systems,safety-evaluations,unresolved
-2605.18105,fairness,other,asked
-2606.07258,,ai-for-science,unresolved
-2606.07610,rl-for-reasoning,multimodal,unresolved
-2607.03502,cot-monitoring,representations,asked
-2607.07146,ai-for-science,computer-vision,asked
-2607.26639,,jailbreaks,unresolved
-2608.25460,oversight-and-control,safety-evaluations,asked
-2608.26958,alignment-and-safety,pretraining,asked
-2608.28040,multimodal,lm-evaluation,unresolved
-2608.28541,agents,learning-theory,asked
-2609.01554,ai-for-science,computer-vision,asked
-2609.05797,oversight-and-control,safety-evaluations,asked
-2609.12259,interpretability,representations,asked
-2609.14976,agent-evaluation,safety-evaluations,asked
-2609.16155,time-series,language-tasks,asked
-2609.18860,sparse-autoencoders,circuits,asked
-2609.24115,agents,agent-evaluation,unresolved
-2609.29961,reinforcement-learning,learning-theory,asked
-2609.32867,lm-evaluation,safety-evaluations,asked
-2609.34985,rl-for-reasoning,preference-training,unresolved
-2609.36477,jailbreaks,safety-evaluations,asked
-2609.36838,multimodal,agents,asked
-2609.37974,architectures,pretraining,unresolved
-2609.37976,reasoning-and-rl,inference-efficiency,unresolved
-2609.38098,multimodal,steering,asked
-2609.39740,long-context,architectures,unresolved
-2610.02466,robotics,reinforcement-learning,asked
-2610.04902,agents,multi-agent-systems,unresolved
-2610.06163,coding-agents,agent-evaluation,unresolved
-2610.06454,agent-evaluation,safety-evaluations,unresolved
-2610.07767,inference-efficiency,training-systems,asked
-2610.11337,classical-ai,other,unresolved
+paper_id,opus,sol,status,members,unsettled
+2511.11500,rl-for-reasoning,hallucination,unresolved,hallucination language-models reasoning-and-rl rl-for-reasoning,
+2603.21235,ai-for-science,probabilistic-inference,asked,ai-for-science machine-learning probabilistic-inference,computer-vision
+2603.27771,multi-agent-systems,safety-evaluations,unresolved,agents alignment-and-safety language-models multi-agent-systems safety-evaluations,
+2605.18105,fairness,other,asked,,ai-and-society fairness other
+2606.07258,,ai-for-science,unresolved,,
+2606.07610,rl-for-reasoning,multimodal,unresolved,language-models multimodal,reasoning-and-rl rl-for-reasoning
+2607.03502,cot-monitoring,representations,asked,alignment-and-safety circuits cot-monitoring interpretability representations,
+2607.07146,ai-for-science,computer-vision,asked,computer-vision machine-learning,ai-for-science
+2607.26639,,jailbreaks,unresolved,,
+2608.25460,oversight-and-control,safety-evaluations,asked,alignment-and-safety safety-evaluations,deception oversight-and-control
+2608.26958,alignment-and-safety,pretraining,asked,language-models pretraining,alignment-and-safety
+2608.28040,multimodal,lm-evaluation,unresolved,language-models multimodal,language-tasks lm-evaluation
+2608.28541,agents,learning-theory,asked,machine-learning,agents language-models learning-theory
+2609.01554,ai-for-science,computer-vision,asked,ai-for-science computer-vision machine-learning,
+2609.05797,oversight-and-control,safety-evaluations,asked,alignment-and-safety safety-evaluations,jailbreaks oversight-and-control
+2609.12259,interpretability,representations,asked,interpretability,interpretability-evaluation machine-learning representations
+2609.14976,agent-evaluation,safety-evaluations,asked,agent-evaluation agents alignment-and-safety language-models safety-evaluations,efficiency-and-architecture long-context
+2609.16155,time-series,language-tasks,asked,language-models language-tasks machine-learning time-series,
+2609.18860,sparse-autoencoders,circuits,asked,circuits interpretability representations,language-models multimodal sparse-autoencoders
+2609.24115,agents,agent-evaluation,unresolved,agent-evaluation agents language-models,
+2609.29961,reinforcement-learning,learning-theory,asked,learning-theory machine-learning reinforcement-learning,
+2609.32867,lm-evaluation,safety-evaluations,asked,,alignment-and-safety hallucination language-models lm-evaluation safety-evaluations
+2609.34985,rl-for-reasoning,preference-training,unresolved,alignment-and-safety language-models reasoning-and-rl rl-for-reasoning safety-training,preference-training
+2609.36477,jailbreaks,safety-evaluations,asked,alignment-and-safety jailbreaks,hallucination interpretability language-models representations safety-evaluations
+2609.36838,multimodal,agents,asked,agents language-models multimodal,reasoning-and-rl
+2609.37974,architectures,pretraining,unresolved,language-models,architectures efficiency-and-architecture inference-efficiency pretraining
+2609.37976,reasoning-and-rl,inference-efficiency,unresolved,language-models reasoning-analyses reasoning-and-rl,efficiency-and-architecture inference-efficiency
+2609.38098,multimodal,steering,asked,interpretability language-models multimodal steering,sparse-autoencoders
+2609.39740,long-context,architectures,unresolved,architectures efficiency-and-architecture language-models long-context,reasoning-and-rl test-time-compute
+2610.02466,robotics,reinforcement-learning,asked,machine-learning reinforcement-learning,robotics
+2610.04902,agents,multi-agent-systems,unresolved,agents language-models,multi-agent-systems reasoning-and-rl rl-for-reasoning
+2610.06163,coding-agents,agent-evaluation,unresolved,agent-evaluation agents coding-agents language-models,
+2610.06454,agent-evaluation,safety-evaluations,unresolved,agent-evaluation agents alignment-and-safety language-models,model-security oversight-and-control safety-evaluations
+2610.07767,inference-efficiency,training-systems,asked,efficiency-and-architecture inference-efficiency language-models training-systems,reasoning-and-rl rl-for-reasoning
+2610.11337,classical-ai,other,unresolved,,classical-ai machine-learning other

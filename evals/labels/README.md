@@ -13,7 +13,7 @@ is not stored: an evaluation reads titles and abstracts when it runs. Topic and 
 | `silver-sample.csv` | 200 | silver | the papers drawn for the class sample, with their stratum |
 | `silver-opus.csv`, `silver-sol.csv` | 198, 200 | silver | each labeller's primary class, other classes and reason |
 | `silver.csv` | 165 | silver | the papers both labellers gave the same primary class |
-| `disputed.csv` | 35 | silver | the papers they did not, with whether the owner was asked |
+| `disputed.csv` | 35 | silver | the papers they did not, with whether the owner was asked and the memberships both labellers still agree on |
 | `adjudicated.csv` | 20 | adjudicated | the owner's primary class for the papers asked, and which labeller it matched |
 
 ## Where they came from
@@ -48,7 +48,9 @@ path only when it is the class's real ancestry. The run's raw replies were not k
 is unknown; those seen in the trial run all had the right ancestry. Where both named the same primary class it is the silver
 label. Membership is inherited, so each labeller's classes are closed over their ancestors: a class both put the
 paper in is a silver member (`members`, which includes the primary class and its ancestors), and one only one of
-them did is `unsettled`, which per-class scores count neither as a member nor as a non-member. Where they differed, 20 papers were drawn with the same seed,
+them did is `unsettled`, which per-class scores count neither as a member nor as a non-member. Memberships do not
+depend on the primary class, so `disputed.csv` carries them too (two different Agents children still agree on Agents
+and Language models). Where they differed, 20 papers were drawn with the same seed,
 round-robin over the top-level class Opus named, and the owner chose; the rest are `unresolved`, counted and left out
 of primary-class accuracy.
 

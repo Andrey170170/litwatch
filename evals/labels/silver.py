@@ -239,13 +239,22 @@ def compare() -> None:
                 picked.append(queues[c.slug].pop())
     write(HERE / "silver.csv", sorted(agreed, key=lambda r: r["paper_id"]),
           ["paper_id", "primary", "members", "unsettled"])  # fmt: skip
+
+    def settled(pid: str) -> dict[str, str]:
+        """Memberships do not depend on the primary class: both labellers' agreement counts."""
+        if pid in missing:
+            return {"members": "", "unsettled": ""}
+        x, y = closure(a[pid], tree), closure(b[pid], tree)
+        return {"members": " ".join(sorted(x & y)), "unsettled": " ".join(sorted(x ^ y))}
+
     disputed = [
         {"paper_id": pid, "opus": a.get(pid, {}).get("primary", ""),
          "sol": b.get(pid, {}).get("primary", ""),
-         "status": "asked" if pid in picked else "unresolved"}
+         "status": "asked" if pid in picked else "unresolved", **settled(pid)}
         for pid in sorted(differ + missing)
     ]  # fmt: skip
-    write(HERE / "disputed.csv", disputed, ["paper_id", "opus", "sol", "status"])
+    write(HERE / "disputed.csv", disputed,
+          ["paper_id", "opus", "sol", "status", "members", "unsettled"])  # fmt: skip
     print(
         f"{len(agreed)} agreed, {len(differ)} differ, {len(missing)} with one label, "
         f"{len(picked)} asked of the owner"
