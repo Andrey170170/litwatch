@@ -1,0 +1,345 @@
+# The seed taxonomy (docs/specs/v1/taxonomy.md): the class tree, then the followed topics in the
+# owner's order. A followed class has no description of its own; its topic's subject is it.
+classes:
+  - slug: language-models
+    name: Language models
+    children:
+      - slug: pretraining
+        name: Pretraining, data and scaling
+        description: Pretraining objectives and recipes, training data curation, tokenization, scaling laws.
+      - slug: preference-training
+        name: Instruction tuning and preference training
+        description: >-
+          Supervised fine-tuning, RLHF, DPO and other preference optimization for general helpfulness.
+          Reasoning-specific RL is under Reasoning; safety-motivated alignment is under Alignment and safety.
+      - slug: reasoning-and-rl
+        name: Reasoning and RL post-training
+        children:
+          - slug: test-time-compute
+            name: Chain-of-thought prompting and test-time compute
+            description: Prompting methods, sampling and search at inference, thinking budgets.
+          - slug: rl-for-reasoning
+            name: Reinforcement learning for reasoning
+            description: RL from verifiable rewards, reward models for reasoning, policy optimization methods.
+          - slug: reasoning-analyses
+            name: Analyses of reasoning models
+            description: What reasoning training changes, how reasoning traces behave, length and overthinking.
+      - slug: agents
+        name: Agents and tool use
+        children:
+          - slug: coding-agents
+            name: Coding and software engineering agents
+            description: Repository-level coding, SWE-bench-style tasks, debugging agents.
+          - slug: computer-use-agents
+            name: Web, GUI and computer-use agents
+            description: Browser and desktop control, screen understanding.
+          - slug: multi-agent-systems
+            name: Multi-agent systems
+            description: Several language-model agents interacting, cooperating or debating.
+          - slug: agent-evaluation
+            name: Agent benchmarks and evaluation
+            description: Environments, benchmarks and metrics for agents.
+      - slug: efficiency-and-architecture
+        name: Efficiency and architecture
+        children:
+          - slug: architectures
+            name: Model architectures
+            description: >-
+              Transformer variants, state-space and recurrent models, mixture of experts, looped and
+              recursive models.
+          - slug: long-context
+            name: Long context and memory
+            description: Context extension, memory mechanisms, context compression.
+          - slug: inference-efficiency
+            name: Inference efficiency
+            description: Quantization, pruning, KV-cache methods, speculative decoding, serving.
+          - slug: training-systems
+            name: Training efficiency and systems
+            description: Distributed training, parallelism, optimizers at scale.
+      - slug: retrieval
+        name: Retrieval-augmented generation
+        description: Retrieval, knowledge bases, grounding and citation for language models.
+      - slug: hallucination
+        name: Hallucination, calibration and uncertainty
+        description: Factuality, truthfulness, confidence estimation, self-consistency.
+      - slug: lm-evaluation
+        name: Language model evaluation and benchmarks
+        description: >-
+          General capability benchmarks, evaluation methodology, LLM-as-judge. Safety evaluations are
+          under Alignment and safety; agent benchmarks under Agents.
+      - slug: multimodal
+        name: Multimodal language models
+        description: Vision-language and audio-language models, multimodal reasoning.
+      - slug: multilingual
+        name: Multilingual and low-resource languages
+        description: Cross-lingual transfer, languages other than English, low-resource settings.
+      - slug: language-tasks
+        name: Language tasks and applications
+        description: >-
+          Machine translation, summarization, information extraction, dialogue, question answering,
+          domain applications of language models (law, medicine, education).
+  - slug: interpretability
+    name: Interpretability
+    children:
+      - slug: representations
+        name: Features and representations
+        description: >-
+          Probes, representation geometry, linear representations, superposition, neurons and
+          directions.
+      - slug: sparse-autoencoders
+        name: Sparse autoencoders and dictionary learning
+        description: SAEs, transcoders, crosscoders, their training and evaluation.
+      - slug: circuits
+        name: Circuits and causal analysis
+      - slug: steering
+        name: Steering and model editing
+        description: Activation steering, representation engineering, knowledge and behaviour editing.
+      - slug: automated-interpretability
+        name: Automated interpretability
+        description: >-
+          Model-written explanations, automated circuit discovery, interpretability agents and tooling.
+      - slug: interpretability-evaluation
+        name: Interpretability methodology and evaluation
+        description: >-
+          Benchmarks, ground truth, faithfulness of explanations to the model, best practices.
+      - slug: training-dynamics
+        name: Training dynamics and mechanisms of learning
+        description: >-
+          How mechanisms form during training: grokking, phase changes, developmental
+          interpretability.
+      - slug: cot-faithfulness
+        name: Chain-of-thought faithfulness
+  - slug: alignment-and-safety
+    name: Alignment and safety
+    children:
+      - slug: safety-training
+        name: Safety-motivated alignment training
+        description: >-
+          Constitutional and value-based training, refusal training, character and honesty training.
+      - slug: jailbreaks
+        name: Jailbreaks, red-teaming and robustness
+        description: >-
+          Attacks on safety training, defences, adversarial prompts, red-teaming methods.
+      - slug: model-security
+        name: Prompt injection and model security
+        description: >-
+          Prompt injection, data extraction, backdoors and poisoning, agent security.
+      - slug: deception
+        name: Deception, sandbagging and scheming
+        description: >-
+          Strategic deception, hidden objectives, sandbagging, evaluation awareness, model organisms
+          of misalignment.
+      - slug: reward-hacking
+        name: Reward hacking and specification gaming
+        description: >-
+          Exploiting reward signals, specification gaming, emergent misalignment from training.
+      - slug: oversight-and-control
+        name: Scalable oversight and AI control
+        description: >-
+          Debate, weak-to-strong supervision, control protocols, monitoring of actions.
+      - slug: safety-evaluations
+        name: Dangerous capabilities and safety evaluations
+        description: >-
+          Evaluations of harmful capabilities, safety benchmarks, evaluation methodology for safety.
+      - slug: cot-monitoring
+        name: Chain-of-thought monitoring
+  - slug: machine-learning
+    name: Machine learning beyond language models
+    description: >-
+      Machine learning research whose main subject is not language models: theory, other modalities,
+      other learning settings and applications.
+    children:
+      - slug: learning-theory
+        name: Learning theory and optimization
+        description: >-
+          Generalization theory, optimization methods and analysis, not specific to language models.
+      - slug: reinforcement-learning
+        name: Reinforcement learning
+        description: RL algorithms and theory outside language-model post-training.
+      - slug: media-generation
+        name: Generative models for images, video and audio
+        description: Diffusion, flows, GANs, autoregressive media generation.
+      - slug: computer-vision
+        name: Computer vision
+        description: Recognition, detection, segmentation, 3D vision, video understanding.
+      - slug: graph-learning
+        name: Graph and geometric learning
+        description: Graph neural networks, geometric and equivariant learning.
+      - slug: time-series
+        name: Time series and tabular data
+        description: Forecasting, anomaly detection, tabular models.
+      - slug: probabilistic-inference
+        name: Probabilistic and causal inference
+        description: Bayesian methods, uncertainty, causal discovery and inference.
+      - slug: federated-and-private
+        name: Federated and privacy-preserving learning
+        description: Federated learning, differential privacy, unlearning.
+      - slug: robotics
+        name: Robotics and embodied AI
+        description: >-
+          Robot learning, embodied agents, perception for control, autonomous driving.
+      - slug: ai-for-science
+        name: AI for science and health
+        description: >-
+          Applications to physics, chemistry, biology, medicine and other sciences.
+      - slug: classical-ai
+        name: Classical AI, planning and logic
+        description: >-
+          Search, planning, constraint solving, knowledge representation, symbolic reasoning.
+  - slug: ai-and-society
+    name: AI and society
+    description: >-
+      The effects of AI on people and institutions, and how they are studied and governed.
+    children:
+      - slug: fairness
+        name: Fairness, bias and social impact
+        description: Bias in models and data, fairness methods, social effects of AI.
+      - slug: policy
+        name: AI policy, governance and economics
+        description: >-
+          Regulation, governance, labour and economic effects, forecasting AI progress.
+      - slug: human-ai-interaction
+        name: Human-AI interaction
+        description: User studies, AI assistance, education with AI, human factors.
+  - slug: other
+    name: Other
+    description: Papers in the configured categories that fit none of the above.
+
+topics:
+  - class: cot-faithfulness
+    depth: focus
+    monogram: CF
+    colour: '#c026d3'
+    subject: >-
+      Whether a language model's reasoning trace (chain of thought, thinking tokens, scratchpad) omits
+      or contradicts a computation the model actually performed. A step is faithful iff it accurately
+      describes a process that took place at some point in the model, regardless of when it is verbalized;
+      a trace is faithful iff it contains the complete path the model followed and no unfaithful steps
+      (BonaFide, 2605.25052). Unfaithfulness is omission (the trace lacks a computation that happened,
+      such as following a hint without saying so) or commission (a step describes a process that did not
+      happen). Not in scope: correctness or validity of reasoning steps, grounding of answers in evidence,
+      plausibility or quality of rationales, unsafe content inside traces, executable trace validity for
+      agents, and plan-to-output fidelity in generation models.
+    rubric: |-
+      - Central: a method for detecting such omission or commission, a benchmark or ground-truth construction for it, a definition of it, or a meta-evaluation of such methods, intended to transfer across tasks and models. The knowledge of what the model actually computed must come from task construction (hints, cues, or hidden directives whose use is revealed by the output), from model internals read against the trace, or from a meta-evaluation of such methods. Whether a hint, cue, or hidden directive the model demonstrably followed is disclosed in its trace is such an omission test, whatever the paper calls it.
+      - Related: interventions that only measure whether the trace matters to the answer (paraphrasing, truncation, perturbation, step importance), which are proxies for importance, not faithfulness; single-domain audits that apply a sound method to one task.
+      - Adjacent: papers on reading traces for unsafe intent or on monitorability in general, and position papers.
+    keywords:
+      - chain.of.thought
+      - '[^a-z]CoT[^a-z]'
+      - faithful
+      - unfaithful
+      - unverbalized
+      - hidden reasoning
+      - reasoning trace
+      - steganograph
+      - scratchpad
+      - thinking tokens
+  - class: cot-monitoring
+    depth: focus
+    monogram: CM
+    colour: '#e11d48'
+    subject: >-
+      Reading a language model's reasoning trace (chain of thought, thinking tokens, scratchpad) for oversight:
+      monitors that detect misbehavior such as reward hacking, sabotage, deception, sandbagging, unsafe
+      intent, or evaluation awareness from the trace; monitorability, what erodes it, and the effect of
+      training or optimization pressure on traces; evasion of monitors through hidden, encoded, or obfuscated
+      reasoning; legibility of traces for humans or weaker models; and evaluations or benchmarks for any
+      of these. Whether a trace matches the computation the model performed is the subject of Chain-of-thought
+      faithfulness; such papers belong here only when they also say something about monitoring.
+    rubric: |-
+      - Central: a method that reads a model's reasoning trace to detect misbehavior (reward hacking, sabotage, deception, sandbagging, unsafe intent, evaluation awareness), an evaluation of how well such monitors work or of what makes traces monitorable, a study of how training or optimization pressure erodes monitorability, or a demonstration of evasion (hidden, encoded, or obfuscated reasoning). Must be intended to transfer across tasks and models.
+      - Related: single-domain audits, position papers, and legibility studies without a detection result.
+      - Adjacent: papers on whether the trace matches the model's computation (Chain-of-thought faithfulness), unless they also measure a monitor.
+    keywords:
+      - chain.of.thought monitor
+      - CoT monitor
+      - monitorab
+      - hidden reasoning
+      - encoded reasoning
+      - steganograph
+      - reward hacking
+      - sandbag
+      - obfuscat
+      - scheming
+      - evaluation.aware
+  - class: circuits
+    depth: focus
+    monogram: CI
+    colour: '#0891b2'
+    subject: >-
+      Finding and testing the causal mechanisms inside neural networks, mostly language models: which components
+      (attention heads, MLP neurons, features, layers) carry out a behaviour and how they connect. Covers circuit
+      discovery, activation and path patching, attribution patching, causal tracing, causal scrubbing and causal
+      abstraction, attribution graphs, and analyses that identify a circuit for a behaviour and verify it causally.
+      Out of scope: probes or feature dictionaries with no causal test, steering or editing aimed at changing
+      behaviour rather than explaining it, and studies that use a single ablation as a side measurement.
+    rubric: |-
+      - Central: a method for discovering or verifying circuits or causal mechanisms; an evaluation or ground truth for such methods (faithfulness and completeness metrics, models with known circuits); or a causally verified mechanism shown to recur across models, tasks or scales.
+      - Related: a causally verified circuit for one behaviour in one model; patching or attribution as the main evidence for a claim about how a model works; sparse autoencoder or transcoder work whose main result is a causal circuit; theory of what counts as a mechanism.
+      - Adjacent: correlational interpretability with no causal test; steering or editing where the mechanism is not the question; patching used in passing.
+    keywords:
+      - circuit discover
+      - activation patching
+      - path patching
+      - attribution patching
+      - causal tracing
+      - causal scrubbing
+      - causal abstraction
+      - attribution graph
+      - interchange intervention
+      - mechanistic interpretab
+  - class: interpretability
+    depth: area
+    monogram: IN
+    colour: '#4f46e5'
+    subject: >-
+      Understanding the internal mechanisms, representations, or circuits of neural language models: probes,
+      sparse autoencoders, attention and attribution analysis, activation patching and ablation, steering
+      vectors, logit lens, feature and circuit discovery, and the methods and evaluations for these tools.
+  - class: alignment-and-safety
+    depth: area
+    monogram: AS
+    colour: '#ea580c'
+    subject: >-
+      Making language models behave as intended and knowing whether they do: preference and constitutional
+      training, refusal and jailbreak robustness, reward hacking and specification gaming, deception and
+      sandbagging, chain-of-thought and action monitoring, scalable oversight, and evaluation methodology
+      and benchmarks for capabilities and safety. Narrow domain benchmarks without a methodological contribution
+      are not part of the field.
+  - class: language-models
+    depth: field
+    monogram: LM
+    colour: '#0284c7'
+    subject: >-
+      Large language models and other text foundation models as the object of research: how they are pretrained,
+      tuned, evaluated, grounded with retrieval, extended to other modalities and languages, and applied. Out of
+      scope: interpretability and alignment and safety research (their own areas), and papers that use a language
+      model only as an off-the-shelf tool in another field's study.
+  - class: reasoning-and-rl
+    depth: field
+    monogram: RE
+    colour: '#65a30d'
+    subject: >-
+      Training and using language models to reason: reinforcement learning from verifiable rewards and
+      reward models, GRPO-style post-training, reasoning models and their thinking budgets, test-time
+      scaling and search, self-verification and reflection, distillation of reasoning, and analyses of
+      what such training changes. Prompting tricks evaluated on one benchmark are not part of the field.
+  - class: agents
+    depth: field
+    monogram: AG
+    colour: '#ca8a04'
+    subject: >-
+      Language models acting over multiple steps: agent architectures and frameworks, tool and function
+      calling, computer and browser use, coding agents, multi-agent systems, planning and memory for agents,
+      agent benchmarks and evaluations, and training methods specific to agents. Papers that use an off-the-shelf
+      agent only as a baseline for a different topic are not part of the field.
+  - class: efficiency-and-architecture
+    depth: field
+    monogram: EF
+    colour: '#0d9488'
+    subject: >-
+      How language models are built and run: architectures beyond the standard transformer, mixture of
+      experts, long-context and memory mechanisms, KV-cache and attention efficiency, quantization, pruning,
+      distillation, speculative decoding, and training and inference systems. Hardware-specific kernels
+      with no modelling change are not part of the field.

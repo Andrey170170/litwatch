@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import date
 from pathlib import Path
@@ -38,11 +39,13 @@ topics_app = typer.Typer(no_args_is_help=True, help="Topics as YAML, in and out.
 eval_app = typer.Typer(no_args_is_help=True, help="Dry runs measured against the owner's labels.")
 library_app = typer.Typer(no_args_is_help=True, help="Effective grades and the library.")
 issue_app = typer.Typer(no_args_is_help=True, help="The daily issue: build it, read it.")
+taxonomy_app = typer.Typer(no_args_is_help=True, help="The class tree and its followed topics.")
 app.add_typer(db_app, name="db")
 app.add_typer(topics_app, name="topics")
 app.add_typer(eval_app, name="eval")
 app.add_typer(library_app, name="library")
 app.add_typer(issue_app, name="issue")
+app.add_typer(taxonomy_app, name="taxonomy")
 console = Console()
 
 ConfigPath = Annotated[
@@ -226,6 +229,26 @@ def topics_export(directory: Path) -> None:
     for topic in _run(lambda conn: topics_store.all(conn, None)):
         (directory / f"{topic.slug}.yaml").write_text(seeds.dump(topic))
         console.print(f"wrote {topic.slug}.yaml")
+
+
+@taxonomy_app.command("check")
+def taxonomy_check(
+    path: Annotated[Path | None, typer.Argument(help="A taxonomy YAML; default the seed.")] = None,
+) -> None:
+    """Validate a taxonomy file and summarise it."""
+    try:
+        tree = seeds.taxonomy(path)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    levels = Counter(tree.level(c.slug) for c in tree.classes)
+    console.print(
+        f"{len(tree.classes)} classes ("
+        + ", ".join(f"{n} at level {level}" for level, n in sorted(levels.items()))
+        + ")"
+    )
+    for topic in tree.topics:
+        console.print(f"{topic.depth.value:6} {topic.monogram}  {tree.get(topic.class_).name}")
 
 
 # -- evaluation ------------------------------------------------------------------------------------

@@ -37,6 +37,21 @@ class Paper(BaseModel):
     license: str | None = None
 
 
+def keyword_patterns(value: Any) -> list[str]:
+    """Keyword patterns from a list or a comma- or line-separated string, each a valid regex."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = re.split(r"[,\n]", value)
+    items = [str(k).strip() for k in value if str(k).strip()]
+    for pattern in items:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(f"keyword {pattern!r} is not a valid regex: {exc}") from exc
+    return items
+
+
 class TopicKind(StrEnum):
     """The service a topic gets: graded per paper, reviewed weekly, or summarised weekly."""
 
@@ -121,17 +136,7 @@ class Topic(BaseModel):
     @field_validator("keywords", mode="before")
     @classmethod
     def _keywords(cls, value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            value = re.split(r"[,\n]", value)
-        items = [str(k).strip() for k in value if str(k).strip()]
-        for pattern in items:
-            try:
-                re.compile(pattern)
-            except re.error as exc:
-                raise ValueError(f"keyword {pattern!r} is not a valid regex: {exc}") from exc
-        return items
+        return keyword_patterns(value)
 
     @property
     def field(self) -> str:
