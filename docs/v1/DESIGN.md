@@ -47,8 +47,9 @@ with "‹ Back" at its top.
   the miss lookup (spec, first v1 decision 4).
 
 **Run status**, in the wordmark on both: the papers read last night when the run went well ("530", a cyan square);
-the progress while it runs ("212/530", amber, pulsing); the problem when something failed ("2 failed", red). It opens
-Settings: Needs you when something failed, Overview otherwise. What counts as a problem is the spec's.
+the progress while it runs ("212/530", amber, pulsing); the problem when something failed ("2 failed", red); the spend when a provider's month is projected over its budget
+("530 · $ over", amber, steady). Failed outranks running, running outranks over budget. It opens Settings: Needs you
+when something failed, Runs and cost when over budget, Overview otherwise. What counts as a problem is the spec's.
 
 ## Pages
 
@@ -156,9 +157,11 @@ Process, Deep read (where a provider is configured) and ⋯; its sheet has no la
 
 **Open states.** A paper with an item on Needs you (below) shows it on its own page, in the same colours and with the
 same actions. A note sits under the header: yellow for a split or escalation ("Split on CoT monitoring. Judge central,
-check adjacent; central stands until it is labelled."), red for ungraded, a failed full-text pass or awaiting
-classification, each with its buttons. In the rail, a split or escalated topic's row takes a yellow edge, reads "Split ·
-judge central · check adjacent · central stands" and keeps its Fit control open until labelled; an ungraded topic's row
+check adjacent; central stands until it is labelled."), red for ungraded, a failed analysis or full-text pass or
+awaiting classification, each with its buttons. A paper whose analysis failed shows its title alone, with no Gist or
+Weight, until it succeeds. In the rail, a split or escalated topic's row takes a yellow edge, names its state, the two
+opinions and the Fit that stands ("Split · judge central · check adjacent · central stands", "Escalated · judge related
+· check adjacent · adjacent stands") and keeps its Fit control open until labelled; an ungraded topic's row
 says "ungraded" in red with "Grade it now", then "Grading again" once asked. On the phone the note's Label opens the
 paper sheet, where the topic is marked the same way. A paper awaiting classification says so in red in place of a
 rarity. Settling an item on either page settles it on both; on the paper's page the note goes, so a toast says what
@@ -191,28 +194,34 @@ stage, and "Matters, no topic".
 
 **Needs you.** Only what waits on the owner, grouped by kind, each group with one line on what it means: Focus splits
 and Area escalations (yellow, settled with the Fit control, the standing Fit underlined); awaiting classification
-(Dismiss, Classify by hand, Fix the text), ungraded (Grade it now), full text (Try again, Use the PDF) and digests
-(Write it again), red. A title opens its paper, where the same item shows (Paper, open states).
+(Dismiss, Classify by hand, Fix the text), ungraded (Grade it now), analysis (the error, Try again), full text (Try
+again, Use the PDF) and digests (Write it again), red. A title opens its paper, where the same item shows (Paper, open states).
 
 **Calibrate.** A first page with "Start a session" and the past sessions (date, answered, seed, how many answers differ
-from the pipeline). A session: a strip of 20 squares (answered cyan, the current one yellow) that jumps to any paper;
+from the pipeline). A session draws its papers as the spec says (about 20 per Focus topic, half at relevant or
+above and half below, with a recorded seed): a strip of one square per paper (answered cyan, the current one yellow) that jumps to any paper;
 the paper, blind (title, authors, id, date, Gist, Brief or abstract, classes; no grade, rarity or topic marks); the
 spec's questions as segmented controls; "‹ Back", "3 of 20", "Next ›". On the phone the strip sticks under the header,
 the bottom bar holds ‹ Back, "3/20 ▴" and Next ›, and "3/20" opens a sheet listing the session's papers to jump to. A
 past session opens its review: each paper with the owner's Fit against the pipeline's, amber where they differ; a row
 opens its paper.
 
-**Misses.** Each report with its topic, date and the stage that let it go, and its trace as five cells (classifier,
-uncertain band, keywords, judge, check), each with a top edge cyan where the paper passed, red where it was let go,
-grey where it was not reached. Edit the topic, Edit the class, Resolved.
+**Misses.** Each report with its topic, date and the stage that let it go, and its trace: the miss record's five cells
+(classifier, uncertain band, keywords, judge, check), what each stage concluded for the owner's topic when the reported
+paper went through the pipeline. A cell's top edge is cyan where the stage would have admitted it, red where it would
+have let it go, grey while the run is pending; judge and check always have a Fit, since grading for the reported topic
+runs whatever classification said. Edit the topic, Edit the class, Resolved.
 
 **Topics and the topic editor.** Focus, Area and Field lists in the fixed order. A row drags by its ⋮⋮ grip to a new
 place within its depth, which becomes the order of the sidebar and the Digest; the rest of the row opens the topic's
 editor: class, depth, subject, rubric, interests, keywords (with their matches over 90 days), look (badge, monogram,
 colour) and status. Save does nothing until something has changed.
 
-**The re-run offer.** Saving an edit puts the offer in place of Save and Cancel, in the note's style: "Saved as
-version 6. It applies to papers classified or graded from now on.", the spec's scoped re-runs as rows to tick, each
+**The re-run offer.** Saving an edit puts the offer in place of Save and Cancel, in the note's style. Its first line says what the save changed: an edit to what the models
+read applies forward ("Saved as version 6. It applies to papers classified or graded from now on."); following a
+different class, or moving, splitting or merging classes, changes at once how existing memberships resolve, and the
+line says so ("Saved. Topic pages and rarity follow the new shape now; papers it brings in show ungraded until a
+re-run grades them."). Then the spec's scoped re-runs as rows to tick, each
 with its paper count and estimated cost, a ceiling ("Stop at $5.00"), then Not now and "Run · 476 papers ≈ $0.67".
 Run starts it and the toast says where its progress is. Not now keeps the offer in Jobs as "not run", and the toast
 says so; nothing runs by itself.
@@ -363,9 +372,10 @@ count sits on its own line under the name, so it starts at the same place in eve
 then badges where the list mixes topics, kind, ⟨/⟩ and ◆ facets and the date); the table row, one line (stripe, title,
 badges on Papers, kind, facets, date, ★), its stripe an inset full-height edge. ★ saves and unsaves in place.
 
-**State mark.** A paper row whose paper has an open state (Paper, open states) in the row's topic, or in any topic
-where the list has none (Papers), carries an 11 px triangle in its top-right corner: yellow for the owner's word, red
-for a failure.
+**State mark.** A paper row whose paper has an open state (Paper, open states) carries an 11 px triangle in its
+top-right corner: yellow for the owner's word, red for a failure; yellow when it has both. A topic's states count in
+that topic's lists (in any topic on Papers); a paper's own states (analysis, full text, awaiting classification) count
+everywhere.
 
 **Rarity bar.** Five segments, Legendary to Common, each in its colour (an 18 % ground and a 3 px top edge), sized by
 how many papers the other filters leave at that level (with a minimum, so every level stays tappable), each showing
