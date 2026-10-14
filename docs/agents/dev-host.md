@@ -32,4 +32,5 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   (`ss -H -ltnp 'sport = :8766'`) after checking that `/proc/<pid>/cwd` is your checkout. Never kill by a name or
   path pattern: the production container and other worktrees run `litwatch serve` too.
 - Zotero: the test account's `LITWATCH_ZOTERO_USER_ID` and `ZOTERO_API_KEY` go in `.env.v1`. `.env` carries the
-  owner's real library ID and key file, and fills them in whenever `.env.v1` doesn't.
+  owner's real library ID and key file, and fills them in whenever `.env.v1` doesn't. Before any real Zotero run,
+  check that `.env.v1` sets both, and stop if it doesn't.
