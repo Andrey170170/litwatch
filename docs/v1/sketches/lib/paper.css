@@ -166,7 +166,36 @@ a.inl { color: var(--acc, var(--fg)); cursor: pointer; }
 .slab .sh { display: flex; align-items: center; gap: 8px; font-size: 13.5px; margin-bottom: 6px; }
 .slab .sh .nm { font-weight: 600; }
 .slab .sh .gr { font: 600 11px "JetBrains Mono", monospace; color: var(--rc); text-transform: uppercase; }
-.slab .why { padding: 0; border: 0; background: none; }
 .why a.auto { border-style: dashed; color: var(--fg); }
 .slinks { gap: 16px; }
 .sm2 { font-size: 11.5px; margin: -4px 0 6px; }
+
+/* 4c: the quick actions as a grid of equal cells, or in the header; the Fit label as one segmented control */
+.agrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+.agrid a, .hbtn { display: flex; align-items: center; justify-content: center; height: 34px; border: 1px solid var(--line); cursor: pointer; text-decoration: none;
+  font: 700 12.5px Rajdhani, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--fg2); }
+.agrid a:hover, .hbtn:hover { border-color: var(--fg2); color: var(--fg); }
+.agrid a.on, .agrid a.pri, .hbtn.on, .hbtn.pri { background: var(--acc, var(--fg)); border-color: var(--acc, var(--fg)); color: #0c0f13; }
+.agrid a.wide { grid-column: 1 / -1; }
+.hbtn { display: inline-flex; height: 26px; padding: 0 12px; margin-left: 6px; }
+.pghead .mark .sp { flex: 1; }
+.fitseg { display: flex; width: 100%; }
+.fitseg a { flex: 1; text-align: center; padding: 7px 0; border: 1px solid var(--line); margin-left: -1px; font-size: 12.5px; color: var(--fg2); cursor: pointer; }
+.fitseg a:first-child { margin-left: 0; }
+.fitseg a:hover { color: var(--fg); }
+.fitseg a.auto { color: var(--fg); box-shadow: inset 0 -2px 0 var(--fg3); }
+.fitseg a.on { background: var(--acc, var(--fg)); border-color: var(--acc, var(--fg)); color: #0c0f13; position: relative; }
+.pgrail .fitseg a { font-size: 11px; padding: 6px 0; }
+.why:has(.fitseg) { padding: 8px 10px 10px; }
+.slab { margin: 0 0 16px; }
+.slab .sh { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; margin: 0; }
+.slab .sh .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.slab .ss { font-size: 11.5px; color: var(--fg3); margin: 3px 0 8px 28px; }
+.slab .ss .gr { font: 600 11px "JetBrains Mono", monospace; color: var(--rc); text-transform: uppercase; }
+.fsheet .agrid { margin-bottom: 12px; }
+
+/* the Gist moves into the rail once it has scrolled out of the reading column */
+.pg.track .pgrail .rgist { opacity: 0; max-height: 0; margin-bottom: 0; overflow: hidden; transform: translateX(-28px);
+  transition: opacity .3s ease, transform .35s cubic-bezier(.2, .85, .25, 1), max-height .3s ease, margin .3s ease; }
+.pg.track.gistup .pgrail .rgist { opacity: 1; max-height: 220px; margin-bottom: 14px; transform: none; }
+@media (prefers-reduced-motion: reduce) { .pg.track .pgrail .rgist { transition: none; } }
