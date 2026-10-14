@@ -1,8 +1,8 @@
 # litwatch v1 web app design
 
-The second pass of the v1 web app design, agreed with the owner on 2026-10-13 in six sketch rounds. The drawings are
+The second pass of the v1 web app design, agreed with the owner on 2026-10-13 in seven sketch rounds. The drawings are
 the live sketches in `docs/v1/sketches/` (`index.html` lists each round, what it asked and what was chosen; the last
-round, `r6-interact.html`, is the whole app as chosen). This file is the part a builder needs without opening them:
+round, `r7-settings.html`, is the whole app as chosen, Settings included). This file is the part a builder needs without opening them:
 the principles, the shell, the pages, the interactions, the look's tokens and the anatomy of each repeated element.
 Where this file and the spec (`docs/v1/spec/`) differ, the spec wins. Terms are the glossary's (`GLOSSARY.md`).
 
@@ -19,7 +19,7 @@ editorial and hard to scan.
 | **Dense and scannable.** | Like 0.14's tables, not a newspaper: one line a paper where a list is browsed, prose only where a digest or a Brief is read. |
 | **The page is the acknowledgement.** | An action shows its result where it was taken (a lit star, a lit thumb with its reason, a label). A toast appears only for results the page cannot show. |
 | **Offered, never asked.** | Feedback is always at hand and never requested; Calibrate, behind the gear, is the one place that asks. No queues, no "mark as read". |
-| **Kitchen behind a door.** | Quality, the topic editor, runs, integrations and configuration are Settings pages; only the run status is on the front. |
+| **Kitchen behind a door.** | Overview, Needs you, the topic editor, runs, integrations and configuration are Settings pages; on the front are only the run status and a paper's own open states. |
 | **Self-contained.** | With no integration connected every page works; only the buttons that need one (Deep read without a provider) are missing. |
 | **Phone first, desktop whole.** | The phone keeps its controls at the bottom within reach of the thumb and moves by swipes; the desktop uses its width for a sidebar, a rail and full tables. |
 
@@ -48,7 +48,7 @@ with "‹ Back" at its top.
 
 **Run status**, in the wordmark on both: the papers read last night when the run went well ("530", a cyan square);
 the progress while it runs ("212/530", amber, pulsing); the problem when something failed ("2 failed", red). It opens
-Quality. What counts as a problem is the spec's.
+Settings: Needs you when something failed, Overview otherwise. What counts as a problem is the spec's.
 
 ## Pages
 
@@ -154,12 +154,86 @@ of the list it was opened from.
 A paper outside the collection on the phone: the header and the Abstract (no Gist or Brief), and a bottom bar of
 Process, Deep read (where a provider is configured) and ⋯; its sheet has no labels and adds "Report as a miss".
 
+**Open states.** A paper with an item on Needs you (below) shows it on its own page, in the same colours and with the
+same actions. A note sits under the header: yellow for a split or escalation ("Split on CoT monitoring. Judge central,
+check adjacent; central stands until it is labelled."), red for ungraded, a failed full-text pass or awaiting
+classification, each with its buttons. In the rail, a split or escalated topic's row takes a yellow edge, reads "Split ·
+judge central · check adjacent · central stands" and keeps its Fit control open until labelled; an ungraded topic's row
+says "ungraded" in red with "Grade it now", then "Grading again" once asked. On the phone the note's Label opens the
+paper sheet, where the topic is marked the same way. A paper awaiting classification says so in red in place of a
+rarity. Settling an item on either page settles it on both; on the paper's page the note goes, so a toast says what
+was done. List rows carry the state mark (anatomy below).
+
 ### Settings
 
-Not drawn in this pass. Its pages and their content are the spec's (Quality with Calibrate, the topics and the
-taxonomy, misses, runs and cost, integrations, configuration; `spec/feedback.md`, `spec/data.md`), built from the same
-parts as the rest: rows, shelves where a list is long, the Fit control, cards, the toast. Calibrate is one paper per
-screen with its questions as segmented controls and a count ("7 of 20").
+Behind the gear: the sidebar's foot on the desktop, the header's ⚙ and the drawer on the phone. The pages and what
+they hold are the spec's (`feedback.md`, `pipeline.md` sections 9 and 10, `models.md`, `integrations.md`, `data.md`);
+the spec's Quality page is two pages here, Overview and Needs you.
+
+**Around the pages.** On the desktop Settings takes the sidebar: the wordmark, "‹ Back to reading", "⚙ Settings", then
+the pages in three groups, Reading (Overview, Needs you, Calibrate, Misses), Following (Topics, Taxonomy) and System
+(Runs and cost, Integrations, Configuration), with a count beside a page that wants something. The gear opens
+Overview. A page inside a page (a topic's editor, Jobs, an integration's events, a past Calibrate session) has
+"‹ Back"; a paper opened from Settings keeps the Settings sidebar. On the phone the gear opens the list of pages in the
+same groups, each with a line under its name ("6 waiting", "Last session 6 Oct"), and every page is a deeper screen.
+Page heads stack on the phone, and wide tables drop columns rather than scroll sideways.
+
+**Colours.** An item carries a 3 px left edge: yellow (`--acc`) asks for the owner's word, red (`--sig`) reports a
+failure, cyan (`--cy`) is fine or settled, amber (`--warn`) is a projection over budget or a difference worth a look.
+A settled item turns cyan, keeps its result in place and fades until the page is left. Shares are bars with their
+number, cyan, amber or red by how good they are.
+
+**Overview.** Four tiles, each opening its page: what needs the owner (the count, yellow), last night (date, papers,
+digests, cost; red when it failed), this month's spend against the budgets (amber when a provider is projected over),
+the last Calibrate session. Then the spec's numbers: recall per Focus topic (classification, membership, grading, end
+to end, n; "Run replay"), precision at relevant (with "below, owner wanted it"), reactions over 30 days per topic and
+stage, and "Matters, no topic".
+
+**Needs you.** Only what waits on the owner, grouped by kind, each group with one line on what it means: Focus splits
+and Area escalations (yellow, settled with the Fit control, the standing Fit underlined); awaiting classification
+(Dismiss, Classify by hand, Fix the text), ungraded (Grade it now), full text (Try again, Use the PDF) and digests
+(Write it again), red. A title opens its paper, where the same item shows (Paper, open states).
+
+**Calibrate.** A first page with "Start a session" and the past sessions (date, answered, seed, how many answers differ
+from the pipeline). A session: a strip of 20 squares (answered cyan, the current one yellow) that jumps to any paper;
+the paper, blind (title, authors, id, date, Gist, Brief or abstract, classes; no grade, rarity or topic marks); the
+spec's questions as segmented controls; "‹ Back", "3 of 20", "Next ›". On the phone the strip sticks under the header,
+the bottom bar holds ‹ Back, "3/20 ▴" and Next ›, and "3/20" opens a sheet listing the session's papers to jump to. A
+past session opens its review: each paper with the owner's Fit against the pipeline's, amber where they differ; a row
+opens its paper.
+
+**Misses.** Each report with its topic, date and the stage that let it go, and its trace as five cells (classifier,
+uncertain band, keywords, judge, check), each with a top edge cyan where the paper passed, red where it was let go,
+grey where it was not reached. Edit the topic, Edit the class, Resolved.
+
+**Topics and the topic editor.** Focus, Area and Field lists in the fixed order. A row drags by its ⋮⋮ grip to a new
+place within its depth, which becomes the order of the sidebar and the Digest; the rest of the row opens the topic's
+editor: class, depth, subject, rubric, interests, keywords (with their matches over 90 days), look (badge, monogram,
+colour) and status. Save does nothing until something has changed.
+
+**The re-run offer.** Saving an edit puts the offer in place of Save and Cancel, in the note's style: "Saved as
+version 6. It applies to papers classified or graded from now on.", the spec's scoped re-runs as rows to tick, each
+with its paper count and estimated cost, a ceiling ("Stop at $5.00"), then Not now and "Run · 476 papers ≈ $0.67".
+Run starts it and the toast says where its progress is. Not now keeps the offer in Jobs as "not run", and the toast
+says so; nothing runs by itself.
+
+**Taxonomy.** The tree as rows: a caret, the name, the badge of the topic following it, members, threshold. The caret
+folds and unfolds a branch; the rest of the row opens the class's editor in place under it (name, description,
+threshold) with the same Save and offer. Export YAML and Import YAML in the head. On the phone the members column is
+hidden and long names are cut with "…".
+
+**Runs and cost.** Spend per provider as a bar: month to date solid, projected to the month's end lighter, the budget a
+tick, amber when projected over. Then the nights as a table (night, papers, graded, digests, took, cost, and what
+failed, red-edged), then the latest three jobs and "All jobs ›". **Jobs** holds the work outside the nightly run in
+four groups: Not run (yellow; Run now, With tonight's run, Discard), Running and queued (cyan, with progress), Failed
+(red; Try again) and Done. A job that is also a Needs you item settles with it.
+
+**Integrations.** A card per integration: its name, what it is connected to, what it does and its status (cyan up to
+date, red failed, grey not loaded); a failed event with Retry now and Skip this event; All events. The outbox counts
+under the cards. **An integration's events**: time, event, paper and result, newest first, filtered by all, failed or
+waiting; a failed event has Retry and Skip.
+
+**Configuration.** The models per role and `litwatch.toml` as loaded, secrets masked, read-only.
 
 ## Interactions
 
@@ -212,10 +286,10 @@ the wordmark. Dark first; Light is a full equal, following the system preference
 | `--line2` | `#dfe3e1` | `#121c25` | rules between rows |
 | `--hover` | `#f7f1b8` | `#0e2027` | hover and press |
 | `--sel` | `#f3e600` | `rgba(243, 230, 0, .1)` | the selected nav item (its text `#0c0f13` in Light, `#f3e600` in Dark) |
-| `--acc` | `#f3e600` | `#f3e600` | the one accent: selection, hover fill, the toast's edge, the phone header's rule |
+| `--acc` | `#f3e600` | `#f3e600` | the one accent: selection, hover fill, the toast's edge, the phone header's rule, what asks for the owner's word |
 | `--sig` | `#d90f2d` | `#ff3b4e` | section names, failures, the Focus count, the overstatement callout |
-| `--cy` | `#00899b` | `#2de2e6` | the run status when all went well |
-| `--warn` | `#d2860b` | `#e8b23d` | the run status while running |
+| `--cy` | `#00899b` | `#2de2e6` | the run status when all went well, what is fine or settled |
+| `--warn` | `#d2860b` | `#e8b23d` | the run status while running, a projection over budget |
 
 **Rarity**, for the stripe, the glow, the shelf heads, the bars and squares:
 
@@ -288,6 +362,10 @@ count sits on its own line under the name, so it starts at the same place in eve
 **Paper row**, three forms: the digest row (title and date); the reading row (title and ★ on the first line, the Gist,
 then badges where the list mixes topics, kind, ⟨/⟩ and ◆ facets and the date); the table row, one line (stripe, title,
 badges on Papers, kind, facets, date, ★), its stripe an inset full-height edge. ★ saves and unsaves in place.
+
+**State mark.** A paper row whose paper has an open state (Paper, open states) in the row's topic, or in any topic
+where the list has none (Papers), carries an 11 px triangle in its top-right corner: yellow for the owner's word, red
+for a failure.
 
 **Rarity bar.** Five segments, Legendary to Common, each in its colour (an 18 % ground and a 3 px top edge), sized by
 how many papers the other filters leave at that level (with a minimum, so every level stays tappable), each showing
