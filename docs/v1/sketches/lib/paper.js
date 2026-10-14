@@ -147,7 +147,8 @@ function rung(name, body, extra = "", cls = "") { return `<section class="rung${
 
 function pgCard(pd, st, { folded = false } = {}) {
   const c = pd.card;
-  if (pd.arch) return rung("Deep card", `<p class="prose faint">None yet. Deep read processes the paper, then writes its card.</p>`);
+  if (pd.arch) return rung("Deep card", REQ.has(pd.id) ? `<div class="cardwait"><span class="dot"></span>Queued · processing the paper, then the card</div>`
+    : `<p class="prose faint">None yet. Deep read processes the paper, then writes its card.</p>`);
   if (!c) return rung("Deep card", `<p class="prose faint">None: cards are automatic for Focus must reads and Area picks. <a class="inl" data-deep="${pd.id}">Deep read</a> asks for one.</p>`);
   if (c.state !== "ready") return rung("Deep card", `<div class="cardwait"><span class="dot"></span>${c.state === "running" ? `Being written · reading ${c.read} · ${c.at}` : `Queued · ${c.read}`}</div>`);
   const ext = c.ext;
