@@ -25,6 +25,8 @@ class Depth(StrEnum):
 class TaxonomyClass(BaseModel):
     """One node of the tree. `parent` is the parent's slug, None at the top."""
 
+    model_config = ConfigDict(extra="forbid")  # a misspelled field must not pass silently
+
     slug: str = Field(pattern=SLUG_RE.pattern)
     name: str = Field(min_length=2, max_length=80)
     description: str = Field(min_length=10)
@@ -42,7 +44,7 @@ class FollowedTopic(BaseModel):
     """A class the owner follows. The graders read its subject (the Fit definition) and, for a
     Focus topic, its rubric (what each Fit level means for it)."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     class_: str = Field(alias="class")
     depth: Depth
@@ -68,6 +70,8 @@ class FollowedTopic(BaseModel):
 class Taxonomy(BaseModel):
     """The tree, parents before children and siblings in the owner's order, and the followed
     topics in the owner's order. Construction fails with every problem found."""
+
+    model_config = ConfigDict(extra="forbid")
 
     classes: list[TaxonomyClass] = Field(min_length=1)
     topics: list[FollowedTopic] = Field(default_factory=list)

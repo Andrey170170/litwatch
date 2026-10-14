@@ -145,6 +145,9 @@ async def label(name: str) -> None:
     gate, cost = asyncio.Semaphore(8), [0.0]
 
     async def one(pid: str) -> dict[str, str] | None:
+        if pid not in text:
+            print(f"{pid}: no title or abstract in TEXT_DSN", file=sys.stderr)
+            return None
         title, abstract = text[pid]
         request = Request(
             system=system, user=f"Title: {title}\n\nAbstract: {abstract}", output=Sorting

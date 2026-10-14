@@ -74,6 +74,12 @@ def test_a_small_tree_flattens_parents_first():
         ({}, "at least 1 item"),
         (spec(topics=[topic(), {}]), "Field required"),
         ({"classes": ["not a class"]}, "valid dictionary"),
+        (spec(topics=[topic(colour="#123456", color="#654321")]), "Extra inputs"),
+        (
+            {"classes": [{"slug": "a", "name": "Top", "description": "A top class.", "child": []}]},
+            "Extra inputs",
+        ),
+        (spec(topic=[topic()]), "unknown taxonomy keys"),
     ],
 )
 def test_a_broken_taxonomy_is_refused_with_its_problem(raw, problem):

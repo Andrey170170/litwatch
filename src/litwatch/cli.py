@@ -12,6 +12,7 @@ from typing import Annotated, Any
 
 import psycopg
 import typer
+import yaml
 from rich.console import Console
 
 from litwatch import config as configuration
@@ -238,7 +239,7 @@ def taxonomy_check(
     """Validate a taxonomy file and summarise it."""
     try:
         tree = seeds.taxonomy(path)
-    except ValueError as exc:
+    except (ValueError, OSError, yaml.YAMLError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
     levels = Counter(tree.level(c.slug) for c in tree.classes)

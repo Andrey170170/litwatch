@@ -65,6 +65,8 @@ def taxonomy_from_spec(raw: dict[str, Any]) -> Taxonomy:
     subject as its description and may not carry one of its own."""
     if not isinstance(raw, dict):
         raise ValueError("a taxonomy is a mapping with `classes` and `topics`")
+    if unknown := sorted(set(raw) - {"classes", "topics"}):
+        raise ValueError(f"unknown taxonomy keys {unknown}; expected `classes` and `topics`")
     # Entries of the wrong shape are passed on as they are, for validation to report.
     subjects = {
         t.get("class"): t.get("subject") for t in raw.get("topics") or [] if isinstance(t, dict)
