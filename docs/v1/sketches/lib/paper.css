@@ -193,6 +193,7 @@ a.inl { color: var(--acc, var(--fg)); cursor: pointer; }
 .slab .ss { font-size: 11.5px; color: var(--fg3); margin: 3px 0 8px 28px; }
 .slab .ss .gr { font: 600 11px "JetBrains Mono", monospace; color: var(--rc); text-transform: uppercase; }
 .fsheet .agrid { margin-bottom: 12px; }
+.pgrail .agrid { margin: 14px 0 0; }
 
 /* the Gist moves into the rail once it has scrolled out of the reading column */
 .pg.track .pgrail .rgist { opacity: 0; max-height: 0; margin-bottom: 0; overflow: hidden; transform: translateX(-28px);

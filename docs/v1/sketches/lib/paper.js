@@ -169,12 +169,12 @@ function pgLadder(pd, st, opt = {}) {
 }
 
 // B's rail: what a reader wants at hand while reading. The Gist (shown once it has scrolled out of the reading
-// column), the quick actions as a grid unless they sit in the header, and the thumbs and labels per topic.
+// column), the thumbs and labels per topic, then the quick actions as a grid unless they sit in the header.
 function pgRail(pd, st, { acts = "grid" } = {}) {
   const gist = pd.arch ? "" : `<div class="rgist" style="${rc(pd.r)}"><div class="rl">Gist${rate(pd.id, "Gist")}</div><p>${pd.g}</p></div>`;
   const arch = `<div class="agrid"><a class="pri" data-process="${pd.id}">Process</a><a data-deep="${pd.id}">Deep read</a><a class="wide" data-miss="${pd.id}">Report as a miss</a></div>`;
   const grid = acts !== "grid" ? "" : pd.arch ? arch : pgGrid(pd, ["save", "bib", "arxiv", "pdf"]);
-  return gist + grid + pgTopics(pd, st);
+  return gist + pgTopics(pd, st) + grid;
 }
 // the paper's quick actions and links as a grid of equal cells; Deep read joins while the paper has no card
 function pgGrid(pd, keys) {
