@@ -3,7 +3,7 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* The Masthead look (docs/v1/DESIGN.md "Tokens"). Dark follows the system preference. */
+/* The Masthead look (docs/specs/v1/DESIGN.md "Tokens"). Dark follows the system preference. */
 :root {
   color-scheme: light dark;
   --background: #faf7f1;

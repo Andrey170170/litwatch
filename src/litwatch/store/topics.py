@@ -27,7 +27,7 @@ def _topic(row: dict[str, Any]) -> Topic:
     )
 
 
-# Each topic gets the first of these not in use (docs/v1/DESIGN.md, topic colours).
+# Each topic gets the first of these not in use (docs/specs/v1/DESIGN.md, topic colours).
 COLOURS = (
     "#2f5d50",
     "#8a3b2e",

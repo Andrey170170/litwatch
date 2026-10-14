@@ -1,8 +1,8 @@
 # litwatch web
 
 The user side of litwatch: the Digest, paper pages, Topics, Papers and the Settings gear
-(this app still follows the first design; `docs/v1/DESIGN.md` is now the second one, not built yet, and
-`docs/v1/spec/` is the contract).
+(this app still follows the first design; `docs/specs/v1/DESIGN.md` is now the second one, not built yet, and
+`docs/specs/v1/` is the contract).
 
 - `pnpm dev` runs Vite on 5173 and proxies `/api` to `litwatch serve --port 8766`; set `LITWATCH_API` to
   proxy elsewhere (`LITWATCH_API=http://127.0.0.1:8767 pnpm dev`).

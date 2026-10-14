@@ -10,7 +10,7 @@ issues, and adds classification, analysis, the full-text queue and digests.
 
 The milestones below replace the first spec's M7 for everything up to the switch. Each ends with something that runs
 and a stated check. The web app's rework is planned by the second pass (UI sketches) and slots in as N7. Each
-milestone is one or more PRs into `v1`, each with a local Astra review and the bot rounds.
+milestone is one or more PRs into `v1`, shipped as [`docs/agents/workflow.md`](../../agents/workflow.md) says.
 
 **N0 · Taxonomy and labels.** The owner edits [taxonomy.md](taxonomy.md) into the seed tree. litwatch draws 200 papers
 from the side-by-side collection with a recorded seed (stratified so every top-level class has some, plus the 0.14
