@@ -136,7 +136,7 @@ function pgTopics(pd, st, { folded = false } = {}) {
     const labRow = st.lab === k || asks ? `<div class="why${asks ? " ask" : ""}">${fitSeg(pd, t)}</div>` : "";
     const vd = asks ? `<b class="askt">${ps.k === "split" ? "Split" : "Escalated"}</b> · judge ${ps.judge} · check ${ps.check} · ${FIT[l]} stands`
       : ps ? `<b class="badt">Grading failed 3 runs</b> · <a class="inl" data-settle="${ps.i}|Grading again; the result shows on its topic.">Grade it now</a>`
-      : regrade ? "Grading again" : lab ? `<b>your label: ${lab}</b>` : `Fit ${FIT[l]} · Weight ${pd.weight}`;
+      : regrade ? "Grading again" : lab ? `<b>your label: ${lab}</b>` : `Fit ${FIT[l]}${noAnalysis(pd.id) ? "" : ` · Weight ${pd.weight}`}`;
     return `<div class="tprow${asks ? " ask" : ps ? " fail" : ""}" style="${(ps && !asks) || regrade ? "--rc:var(--fg3)" : rc(l)}"><span class="stripe"></span>${badge(t)}<span class="nm">${T[t].n}</span>
       <span class="gr">${(ps && !asks) || regrade ? "ungraded" : GRADE[l]}</span><span class="vd">${vd}</span>
       <span class="sp"></span>${thumbs}<a class="lb" data-labopen="${k}" title="Label the Fit">Label</a></div>${pick}${labRow}`;
