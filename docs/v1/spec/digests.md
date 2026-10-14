@@ -94,12 +94,14 @@ over the papers due then. Its papers stay due meanwhile, so nothing is lost or a
 
 ## What the Digest tab shows
 
-The detail-level ladder for digests, and the order rules the mechanics must support. The pages themselves are the UI
-pass's.
+The detail-level ladder for digests, and the order rules the mechanics must support. The pages themselves are
+[`DESIGN.md`](../DESIGN.md)'s.
 
-1. **History**: days, newest first. Each day lists its topics' digest **Marks**: badge, how many papers, and the
-   colour of the best of them ("4 new · 1 must read", "Nothing new").
+1. **History**: days, newest first, as a list or a month calendar. Each day shows its topics' digest **Marks**: badge,
+   how many papers, and the colour of the best of them ("4 new · 1 must read", "Nothing new"); the calendar shows the
+   colours alone where it is too narrow for the rest.
 2. **A day**: each topic's digest **Gist**, followed by the Marks of its picks (up to 3) and a small count of the rest.
+   **A week** is the same for the week's weekly digests.
 3. **A digest**: its full text, its picks and listed papers at their Mark and Gist.
 4. **A paper**: the paper page, from its Brief down.
 
