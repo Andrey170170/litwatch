@@ -70,3 +70,13 @@ owner's instance: its history, the acquisition manifests and evidence, the histo
 for the owner's server. Its read-only web interface is retired once
 litwatch's Papers tab and paper pages cover search and paper pages, keeping its API. Decision 49 in
 [decisions.md](decisions.md), agreed 2026-10-13.
+
+## Deferred to N5
+
+Found in review when the code moved in (PR #41), left as they were in the old repository:
+
+- `arxiv_archive.__version__` says 0.3.0 while `pyproject.toml` says 0.5.1; derive it from the package metadata.
+- `backup.py` refreshes the stable export path one entry at a time, so a failure part-way leaves new database files
+  beside old directories; swap the whole export at once.
+- `recovery.py`'s reconcile marks every submitted candidate in its own fsynced transaction on each feed cycle; batch
+  the writes and skip unchanged ones.

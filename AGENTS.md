@@ -14,6 +14,7 @@ the results through its own web app. It is single-user and self-hosted. Branch `
 - `src/litwatch/`: the Python service (CLI, nightly jobs, API). Each package's `__init__.py` docstring states its job.
 - `web/`: the web app (React, Vite, pnpm). `pnpm build` writes into `src/litwatch/api/web/`, which the service serves.
 - `deep/`: the deep-card service (Node, TypeScript), a separate package with its own image.
+- `archive/`: the archive (Python, its own package and tests); the store of arXiv papers litwatch ships with.
 - `evals/`: evaluation reports, their configs and the labelled sets.
 
 ## Rules the code keeps
@@ -33,7 +34,8 @@ CI (`.github/workflows/ci.yaml`) runs all of these; run the ones your change tou
 - `uv run ruff check src tests`, `uv run ruff format --check src tests`
 - `uv run pytest --strict-markers`. Tests that need PostgreSQL create and drop their own schema in
   `TEST_DATABASE_URL`, which must be a disposable database, and skip without it.
-- In `deep/`: `npm run typecheck`, `npm test`. In `web/`: `pnpm typecheck`, `pnpm test`.
+- In `deep/`: `npm run typecheck`, `npm test`. In `web/`: `pnpm typecheck`, `pnpm test`. In `archive/`:
+  `.venv/bin/python -m unittest discover -s tests` (setup in its README).
 
 After an API change, regenerate the client types: `uv run litwatch openapi web/openapi.json`, then `pnpm generate` in
 `web/`.
