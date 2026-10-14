@@ -19,11 +19,13 @@
 .rstrip .rsh .on { border-color: var(--acc, var(--fg)); color: var(--fg); }
 .rstrip .why { border: 0; background: none; padding: 0; }
 
-/* ── the acknowledgement as a note beside the control it answers ── */
-.ackn { position: absolute; z-index: 30; max-width: min(340px, 80%); padding: 7px 11px; background: var(--surface); color: var(--fg); border: 1px solid var(--acc, var(--fg));
-  font-size: 12.5px; line-height: 1.35; box-shadow: 0 6px 20px rgba(0, 0, 0, .3); pointer-events: none; animation: lw-ack 2.8s ease-out forwards; }
-.frame[data-dir="nc"] .ackn { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
-@keyframes lw-ack { 0% { opacity: 0; transform: translateY(4px); } 6%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+/* ── the acknowledgement: a short toast in the note style, under the main column (above the phone's bottom bar).
+   Only effects the page does not show are acknowledged ── */
+.frame .toast { background: var(--surface); color: var(--fg); border: 1px solid var(--acc, var(--fg)); padding: 7px 12px; font-size: 12.5px; max-width: min(380px, 86%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .3); animation: lw-ack 2.6s ease-out forwards; }
+.frame.desk .toast { left: calc(50% + 118px); }
+.frame[data-dir="nc"] .toast { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+@keyframes lw-ack { 0% { opacity: 0; translate: 0 4px; } 6%, 82% { opacity: 1; translate: 0 0; } 100% { opacity: 0; } }
 
 /* ── desktop hover on rows: a background (as now), the glow brightening with a wider stripe, or a yellow frame ── */
 .frame.desk[data-hover="glow"] :is(.prow, .drow:not(.quiet), .br, .tbl .tr) { transition: --g1 .16s ease-out, --g2 .16s ease-out, box-shadow .16s ease-out; }
@@ -39,25 +41,20 @@
 .frame.desk[data-hover="frame"] :is(.prow, .drow):hover { box-shadow: inset 0 0 0 1px var(--acc); }
 .frame.desk[data-hover="frame"] :is(.br, .tbl .tr):hover { box-shadow: inset 4px 0 0 var(--rc), inset 0 0 0 1px var(--acc); }
 
-/* ── page motion: none on desktop and the phone, subtle (the phone as now, the desktop slides a little), or Night City,
-   a stepped scan that reveals the page top to bottom and slide-overs and sheets from their edge ── */
+/* ── page motion: none on desktop and the phone, subtle (the phone as now, the desktop page slides in a little), or
+   Night City: subtle, with the arriving page's title flickering in the wordmark's glitch ── */
 .frame[data-motion="none"] :is(.screen.in-go, .screen.in-back, .in-older, .in-newer, .over.enter .shade, .over.enter .sheet, .fsheet.enter .shade2, .fsheet.enter .sheetp, .rstrip.enter) { animation: none; }
-.frame[data-motion="subtle"] .main.nav-go > .inner { animation: lw-in-go .22s cubic-bezier(.2, .85, .25, 1); }
-.frame[data-motion="subtle"] .main.nav-back > .inner { animation: lw-in-back .22s cubic-bezier(.2, .85, .25, 1); }
-.frame[data-motion="subtle"] .main.nav-top > .inner { animation: lw-fade .16s ease-out; }
-.frame[data-motion="nc"] :is(.main.nav-go, .main.nav-back, .main.nav-top, .screen.in-go, .screen.in-back) { animation: nc-scan .26s steps(6, end); }
-.frame[data-motion="nc"] .over.enter .sheet { animation: nc-side .22s steps(5, end); }
-.frame[data-motion="nc"] :is(.fsheet.enter .sheetp, .rstrip.enter) { animation: nc-rise .2s steps(4, end); }
-@keyframes nc-scan { 0% { clip-path: inset(0 0 100% 0); transform: translateX(-4px); } 75% { transform: translateX(2px); } 100% { clip-path: inset(0); transform: none; } }
-@keyframes nc-side { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
-@keyframes nc-rise { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+.frame:is([data-motion="subtle"], [data-motion="nc"]) .main.nav-go > .inner { animation: lw-in-go .22s cubic-bezier(.2, .85, .25, 1); }
+.frame:is([data-motion="subtle"], [data-motion="nc"]) .main.nav-back > .inner { animation: lw-in-back .22s cubic-bezier(.2, .85, .25, 1); }
+.frame:is([data-motion="subtle"], [data-motion="nc"]) .main.nav-top > .inner { animation: lw-fade .16s ease-out; }
+.frame[data-motion="nc"] :is(.main:not(.nav-keep), .screen.in-go, .screen.in-back) :is(.h1, .pbar .ttl, .pbar .ttl2) { animation: nc-glitch .4s steps(3) .08s 1; }
 
 /* ── phone sheets: a handle shows they can be dragged down to close ── */
 .frame[data-sheet="drag"] .fsheet .sheetp { touch-action: none; }
 .frame[data-sheet="drag"] .fsheet .sheetp::before { content: ""; align-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--fg3); margin: -6px 0 -2px; flex: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .frame :is(.main, .main > .inner, .screen, .over .sheet, .fsheet .sheetp, .rstrip) { animation: none !important; }
-  .frame .ackn { animation: lw-ack-still 2.8s step-end forwards; }
+  .frame :is(.main, .main > .inner, .screen, .over .sheet, .fsheet .sheetp, .rstrip, .h1, .pbar .ttl, .pbar .ttl2) { animation: none !important; }
+  .frame .toast { animation: lw-ack-still 2.6s step-end forwards; }
 }
 @keyframes lw-ack-still { to { opacity: 0; } }
