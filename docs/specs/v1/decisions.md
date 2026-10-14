@@ -88,8 +88,10 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
     text for all intake and PDFs for followed, saved or opened papers (configurable; the owner's instance too).
 47. **The collection is the processed papers.** litwatch keeps only papers it processed, with the text as judged;
     every other paper is the archive's, with a paper page and Process / Deep read actions.
-48. **Restart rather than migrate.** The last week runs through the new pipeline, plus the evaluation papers and every
-    paper the owner's feedback touches; the rest of the side-by-side collection is dropped. Backfill comes after v1.
+48. **Restart rather than migrate.** Amended 2026-10-14: v1 starts from an empty database. The two most recent weeks
+    are read from the archive and run through the whole pipeline, unlabelled; no data is carried from 0.14 or the
+    first v1. Every other paper is not processed and stays in the archive; the owner's earlier labels become the
+    evaluation set (decision 55). Backfill, through the same archive intake over older windows, comes after v1.
 49. **The archive's code moves into this repository** as `archive/`, with history, deployed as its own container(s);
     its read-only web interface is retired once litwatch covers it. (Agreed by the owner 2026-10-13.)
 50. **Costs.** Month-to-date spend per provider; amber against a monthly budget; nightly runs never downgraded; hard
@@ -99,7 +101,26 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 52. **Order of work.** The core is redesigned before the switch, in two passes: this spec, then the UI sketches and
     design; no code until both are merged. 0.14 stays production meanwhile.
 
+## Decided 2026-10-14, planning the build
+
+The build plan is [`docs/plans/v1-build.md`](../../plans/v1-build.md).
+
+53. **Weight is judged in the paper's own area.** One Weight per paper, judged against its primary class (what is a
+    landmark in one area can be incremental in another); classification runs first, so analysis knows it. A
+    per-topic Weight is added only if "overrated" reactions show papers from another area rated too high.
+54. **Fit and Weight have one written definition per level** ([pipeline.md](pipeline.md), section 4), given to every
+    model that judges them. Fit is how close a paper is to a topic: a topic's subject is its Fit definition, and a
+    Focus topic's rubric spells out what each Fit level means for it. Weight is how much the paper matters: 0.14's
+    must-read bar for the broad selections becomes its definition. Area and Field topics carry no rubric.
+55. **Evaluation labels without hand labelling.** The owner's first-v1 labels, 0.14's CoT positives and the
+    regression set measure Focus recall; 0.14's selection tiers are silver memberships of the matching classes; a
+    stratified sample labelled by two models of different labs gives silver primary classes, and the owner settles
+    only where they disagree (at most 20 papers). Each source is a cohort, never pooled. The set lives as files in
+    `evals/labels/`, not in the live database.
+56. **The build.** The first v1's deployment was stopped on 2026-10-14 (its database dumped first); the owner reads
+    0.14 until the restart, and 0.14 keeps registering new papers with the archive. The archive's code moves in
+    first; the web app is built from N2 onward, in parallel with the core.
+
 ## Open
 
-- The Focus topics' subjects, rubrics and keywords, and the tree's last edits, in N0 ([taxonomy.md](taxonomy.md)).
 - The grade table and rarity offsets are starting points, tuned in N2.

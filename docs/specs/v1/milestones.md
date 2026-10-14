@@ -9,25 +9,32 @@ scheduler on, Zotero, WebDAV and Notion off. Most of that code stays: the redesi
 issues, and adds classification, analysis, the full-text queue and digests.
 
 The milestones below replace the first spec's M7 for everything up to the switch. Each ends with something that runs
-and a stated check. The web app's rework is planned by the second pass (UI sketches) and slots in as N7. Each
-milestone is one or more PRs into `v1`, shipped as [`docs/agents/workflow.md`](../../agents/workflow.md) says.
+and a stated check. Each milestone is one or more PRs into `v1`, shipped as
+[`docs/agents/workflow.md`](../../agents/workflow.md) says. The order of work, the PRs and their evidence are in
+the build plan, [`docs/plans/v1-build.md`](../../plans/v1-build.md) (approved 2026-10-14): the archive's code moves
+in first (decision 49), and the web app (N7) is built from N2 onward, beside the core.
 
-**N0 · Taxonomy and labels.** The owner edits [taxonomy.md](taxonomy.md) into the seed tree. litwatch draws 200 papers
-from the side-by-side collection with a recorded seed (stratified so every top-level class has some, plus the 0.14
-CoT positives and the labelled papers), and the owner assigns each its classes on a quick page (title, abstract, a
-pick list; most papers take a few seconds). *Check:* the tree loads, every class has a description, 200 papers carry
-class labels.
+On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
+restart (decision 56).
+
+**N0 · Taxonomy, topics and evaluation labels.** [taxonomy.md](taxonomy.md) becomes the seed tree with its followed
+topics. The evaluation set is built from what exists, as files in `evals/labels/` (decision 55): the owner's first-v1
+labels, the provisional positives and the regression set; 0.14's selection tiers as silver memberships; and 200 papers
+drawn with a recorded seed (stratified so every top-level class has some, plus the 0.14 CoT positives and the
+labelled papers), labelled against the tree by two models of different labs, with the owner settling the papers on
+which they name different primary classes (at most 20). *Check:* the tree loads, every class has a description, every
+topic has its subject and every Focus topic its rubric, and the label counts per class and cohort are reported.
 
 **N1 · Classifier comparison.** The decision request shape in `llm`; the classification request built from the tree;
-Luna Decisions, Jev and Haiku 5.5 run on the N0 sample and the CoT evaluation set. Reported per candidate: recall per
-Focus class at the threshold and with the uncertain band, primary-class accuracy, per-class precision on the top
-levels, cost per 1,000 papers, latency, failure rate. *Check:* a written report in `evals/` and a chosen default,
+Luna Decisions, Jev and Haiku 5.5 run on the N0 evaluation set. Reported per candidate and per cohort, never pooled:
+recall per Focus class at the threshold and with the uncertain band, primary-class accuracy, per-class precision on
+the top levels, cost per 1,000 papers, latency, failure rate. *Check:* a written report in `evals/` and a chosen default,
 with the threshold and band set from it; Focus membership recall (band and keyword check included) on the CoT
 positives at least as high as the first v1's candidate recall.
 
 **N2 · The new core.** Classification and analysis as nightly steps; grading per followed topic at its assurance level
 with Area escalation; the grade table and rarity; the library rule; budgets; replay with the four recall numbers.
-*Check:* run over the last week plus the evaluation papers; end-to-end Focus recall on the owner's labels and the
+*Check:* run over the two most recent weeks, read from the archive, plus the evaluation papers; end-to-end Focus recall on the owner's labels and the
 0.14 positives at least as high as the first v1's, or each loss looked at; grade-table and rarity offsets tuned on the
 labels; measured cost per weekday written next to the estimates in [pipeline.md](pipeline.md).
 
@@ -39,20 +46,23 @@ digest used the abstract; on ten hand-read papers, the overstatement line appear
 the owner agrees the abstract overstates and nowhere else.
 
 **N4 · Digests.** Daily and weekly digests per depth, their Gists, picks, quiet days, records, the bounded wait, the
-History, day and digest API. *Check:* digests for the restart week, read by the owner against the same week in 0.14's
+History, day and digest API. *Check:* digests for the restart weeks, read by the owner against the same weeks in 0.14's
 Notion; every Focus central paper of the week appears; the Area daily has at most a few picks on an ordinary day.
 
-**N5 · The archive in the stack.** The archive's code moved per decision 49; the storage policy; relevance fixes in
+**N5 · The archive in the stack.** The archive's code is already in `archive/` (moved first, per the build plan); the
+storage policy; relevance fixes in
 the archive (exact title and phrase first, title over abstract) and in litwatch (keep the archive's order, relevance by
 default with a query); paper pages and Process / Deep read for papers outside the collection; the compose file runs the
 archive. *Check:* "attention is all you need" returns 1706.03762 first; a fresh stack with an empty archive ingests a
 night and serves full text for it; the owner's instance applies the PDF policy.
 
-**N6 · Restart.** The migration of [data.md](data.md) on a copy of the side-by-side database: the last week through the
-full pipeline, the evaluation papers, everything the owner's feedback touches; the rest dropped. *Check:* the counts
-of kept and dropped papers, and no label, reaction, saved paper, Zotero item or Deep card lost.
+**N6 · Restart.** A fresh stack with an empty database (decision 48): the two most recent weeks are read from the
+archive and run through the whole pipeline, unlabelled. *Check:* the counts and cost per step against the estimates;
+every Focus paper at central with its Brief, or the reason it has none; the digests of the window written.
 
-**N7 · The web app.** From the second pass. Its own check comes with its plan.
+**N7 · The web app.** [`DESIGN.md`](DESIGN.md), built in four parts (shell and reading pages, Settings, the Digest,
+phone gestures and the PWA) as the build plan says. *Check:* every page walked on the sandbox at phone and desktop
+widths, dark and light, beside its sketch; the owner's read.
 
 **N8 · Side by side and switch** (the first spec's M7, adapted). A few days beside 0.14 with the scheduler on and the
 owner reading v1 every morning; Zotero stays off until the switch and its collections are renamed then. The switch

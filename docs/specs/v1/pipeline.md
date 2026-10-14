@@ -20,6 +20,10 @@ policy, its PDF (see [archive.md](archive.md)). Registration is delivered throug
 work (durable, retried with backoff, idempotent on the archive's side), so an archive outage delays registration and
 never loses it; intake's checkpoint does not wait for it. Intake emits `paper.added` and `paper.revised`.
 
+A second intake source reads the papers of a date window and the configured categories from the archive instead of
+arXiv, and stores them as the nightly source does (they are already registered there). The restart, the sandbox and
+later the backfill use it.
+
 Every paper intake stores is processed by classification and analysis, so the collection is exactly what intake
 stored plus papers the owner added (a miss, a paper processed on demand from the archive).
 
@@ -67,8 +71,8 @@ One call per paper to the `analyse` role, a small LLM (Haiku 5.5 class), from ti
 
 - the **Gist**, 20–30 words, about the paper and not about any class, in litwatch's objective voice (no "for you",
   no reader-directed wording);
-- **Weight** (landmark, solid, incremental) with one sentence why, judged from the abstract, recorded with source
-  `abstract`;
+- **Weight** (landmark, solid, incremental; defined in section 4) with one sentence why, judged from the abstract
+  against the paper's own area, its primary class from classification, and recorded with source `abstract`;
 - **facets**: contribution kind (method, analysis, benchmark or dataset, theory, position, survey), and whether the
   abstract announces released code and released weights.
 
@@ -110,6 +114,33 @@ A verdict needs every grader it calls to answer validly (a Fit from the four, a 
 with its probability). If one fails, comes back truncated or invalid, or refuses, no verdict is made:
 the grading stays pending, is retried next run, and after three failed runs is listed on Quality as ungraded with a
 button to grade it now (carried from the first v1).
+
+### Fit and Weight
+
+Fit and Weight are two axes. **Fit** is how close a paper is to one topic; **Weight** is how much the paper matters,
+whatever topic it is graded for. Each level has one definition, given word for word to every model that judges it
+(the graders and `area_check` for Fit; `analyse` and `brief` for Weight):
+
+| Fit | Meaning |
+| --- | --- |
+| central | The paper's main question is the topic's subject. |
+| related | A substantial part of the paper is about the subject, or its main result is something work on the subject would use directly, but the subject is not its main question. |
+| adjacent | The paper touches the subject (uses its methods as a tool, asks a neighbouring question, cites it as motivation) without adding to it. |
+| none | The paper is in the topic's subtree by classification but is not about the subject. |
+
+A topic's subject is its Fit definition: what is in it and, where a neighbour is close, what is out. A Focus topic's
+rubric spells out what each Fit level means for that topic. Area and Field topics carry no rubric.
+
+| Weight | Meaning |
+| --- | --- |
+| landmark | Its area will treat it as a reference: a new model family or training recipe with released weights, a large margin on a widely used benchmark, a method shown to work across several domains, or strong evidence overturning a common assumption. Rare: about one or two papers in a hundred in an area. |
+| solid | A complete, sound contribution others in its area would build on: a method with a fair comparison, a careful analysis, a useful benchmark. |
+| incremental | A small step: a minor variant, a single narrow application or evaluation, a survey or position paper without new evidence. |
+
+Weight is judged against the paper's own area, its primary class: what is a landmark in one area can be incremental
+in another. A paper is given one Weight, not one per topic (decision 53). A paper with little Fit to a topic but a
+landmark Weight is not hidden: its grade there is adjacent, and in a mixed list its Weight gives it at least rare
+(section 5).
 
 ### Grade
 
@@ -249,4 +280,4 @@ N1 and N2:
 | Deep cards | Focus must reads, Area picks, requests: a few a week | the `deep` service's own subscription |
 | Digests | one call per digest written | as the first v1's reviews |
 
-The restart (milestone N6) runs this over one week of papers plus the evaluation papers.
+The restart (milestone N6) runs this over the two most recent weeks of papers, read from the archive.

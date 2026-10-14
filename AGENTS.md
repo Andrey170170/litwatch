@@ -9,6 +9,7 @@ the results through its own web app. It is single-user and self-hosted. Branch `
 - `GLOSSARY.md`: the domain terms. Code, docs and generated prose use them as defined there.
 - `docs/specs/v1/`: what v1 does and why, one file per subject, indexed by its `README.md`. `milestones.md` there
   says what is built and what comes next; `DESIGN.md` there is the web app.
+- `docs/plans/`: approved build plans; `v1-build.md` is the order of work for v1, its PRs and their evidence.
 - `docs/agents/workflow.md`: how changes ship here. `docs/agents/verification.md`: how a change is shown to work.
 - `src/litwatch/`: the Python service (CLI, nightly jobs, API). Each package's `__init__.py` docstring states its job.
 - `web/`: the web app (React, Vite, pnpm). `pnpm build` writes into `src/litwatch/api/web/`, which the service serves.

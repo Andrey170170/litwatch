@@ -8,11 +8,11 @@ development share one Docker daemon and one process table.
 | Name | What | Where |
 | --- | --- | --- |
 | containers `litwatch`, `litwatch-deep` | 0.14, in production | |
-| containers `litwatch-v1`, `litwatch-v1-db`, `litwatch-deep-v1` | the v1 deployment the owner reads daily | stack `/opt/homelab-config/stacks/litwatch-v1` (its README); API 127.0.0.1:8770, Postgres 127.0.0.1:55433 |
+| containers `litwatch-v1`, `litwatch-v1-db`, `litwatch-deep-v1` | the first v1's deployment, **stopped** since 2026-10-14 (not removed; its database dumped to `~/backups/litwatch-v1-first-build-2026-10-14.dump`) | stack `/opt/homelab-config/stacks/litwatch-v1` (its README) |
 | container `litwatch-v1-dev` | development Postgres | 127.0.0.1:55432; databases `litwatch` (an adopted copy of production), `test` (pytest), `sandbox` (end-to-end runs) |
 | user unit `litwatch-sketches` | the UI sketches | port 8791, serving `docs/specs/v1/sketches/` |
 
-The production and v1 deployments are touched only when the task is about them.
+Production and the stopped v1 deployment are touched only when the task is about them.
 
 ## Running litwatch in development
 
@@ -27,9 +27,10 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
 - The agent shell exports `ANTHROPIC_BASE_URL` for the agent's own proxy. The Anthropic SDK picks it up and every
   litwatch call fails with 401, hence `env -u`.
 - Dev API: `litwatch serve --port 8766`; the web app's `pnpm dev` (port 5173) proxies `/api` to it.
-- The sandbox: `scripts/refresh-sandbox.sh` rebuilds `sandbox` from a dump of the v1 deployment's database (about
-  a minute), migrates it, and replaces the old one only once the copy is complete. Point `LITWATCH_DATABASE_URL`
-  at `sandbox` to run against it, and refresh it before a run that writes.
+- The sandbox: until N2a, `sandbox` is the last copy of the first v1's deployment, whose containers stopped on
+  2026-10-14, so `scripts/refresh-sandbox.sh` cannot run. From N2a the script builds `sandbox` fresh from a window
+  of papers read from the archive, and replaces the old one only once the new one is complete. Point
+  `LITWATCH_DATABASE_URL` at `sandbox` to run against it, and refresh it before a run that writes.
 - Stop only what you started: the PID you captured when starting it, or the owner of your port
   (`ss -H -ltnp 'sport = :8766'`) after checking that `/proc/<pid>/cwd` is your checkout. Never kill by a name or
   path pattern: the production container and other worktrees run `litwatch serve` too.

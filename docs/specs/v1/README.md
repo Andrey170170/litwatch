@@ -1,7 +1,8 @@
 # litwatch v1 specification
 
-Status (2026-10-13): **redesign of the core, not built.** Milestones M0–M6 of the first v1 design are built on branch
-`v1` and run side by side with 0.14 (`litwatch-v1` stack). Reading that build showed the design was wrong in two
+Status (2026-10-14): **redesign of the core, being built** by the build plan,
+[`docs/plans/v1-build.md`](../../plans/v1-build.md). Milestones M0–M6 of the first v1 design are built on branch `v1`
+and ran side by side with 0.14 until 2026-10-14. Reading that build showed the design was wrong in two
 places: the reading surface (a newspaper, not the scannable tool 0.14's Notion tables were) and the core (one way of
 judging per topic kind, with nothing that tells a good paper from a weak one at a glance). This spec replaces the
 first one. The first spec is `docs/v1/SPEC.md` at commit e6940ea; what it decided and this one keeps is listed in

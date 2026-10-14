@@ -53,8 +53,8 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - Evidence: pytest migrating a fresh schema; a data migration also runs on a fresh sandbox copy, with counts
   before and after and a check that nothing the owner touched (labels, reactions, saved papers, Zotero items, Deep
   cards) is lost.
-- How: `scripts/refresh-sandbox.sh --exact` (the deployment's schema and data), count with SQL, `litwatch db migrate`
-  against the sandbox, count again.
+- How: build the sandbox at the schema before the change (`scripts/refresh-sandbox.sh`, see
+  [dev-host.md](dev-host.md)), count with SQL, `litwatch db migrate` against it, count again.
 
 ### Integrations (Zotero, WebDAV, deep, archive, webhook)
 - Works means: an event produces the right external effect, and a failure is retried and visible.
@@ -85,10 +85,11 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - **Real Postgres, always.** SQL is never mocked; tests use `TEST_DATABASE_URL`.
 - **Fakes stand in for model providers and HTTP services in tests.** A claim about what a model writes or decides
   is shown by the quality harness or an evaluation, never by a fake.
-- **End-to-end runs use the sandbox**, a one-way copy of the v1 deployment's database with the scheduler and
-  integrations off. Data flows in only: the copy keeps the deployment's pipeline backlog, but none of its external
-  work (integration deliveries, deep jobs, Zotero and WebDAV items). An empty database is a bad test; hand-written rows are for visual states
-  (long titles, odd counts) only, never to claim that behavior works.
+- **End-to-end runs use the sandbox**, a development database of real papers with the scheduler and integrations
+  off. From N2a it is built fresh: an empty schema plus a window of papers read from the archive and run through the
+  pipeline, as the restart does. Until then it is the last copy of the first v1's deployment, which stopped on
+  2026-10-14. An empty database is a bad test; hand-written rows are for visual states (long titles, odd counts)
+  only, never to claim that behavior works.
 - **The quality harness** scores an artifact (Gist, Brief, digest, Deep card, classification) on a gold set:
   papers with the owner's recorded judgments, the **preference set**. Each entry holds the key facts that must
   survive, the claims that must not appear, and ratings of earlier outputs. Scoring is rule checks (length,
@@ -98,8 +99,8 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - **Owner checks.** A claim only the owner can judge (a milestone check that says "read by the owner") is
   prepared by the agent and listed in the PR as pending; the PR does not merge until the owner has done it.
 - **Spending.** Model calls for evidence may cost up to $5 per change without asking; above that, ask first.
-- **Never touched**: production 0.14, the v1 deployment's database (it is only ever read, to refresh the
-  sandbox) and its deep service, and the owner's Zotero library.
+- **Never touched**: production 0.14, the first v1's stopped deployment (its containers and database) and its deep
+  service, and the owner's Zotero library. The live archive is only read (metadata, search).
 
 ## Runtime evidence
 
@@ -115,5 +116,5 @@ preference set.
 - **The stack smoke test** (a fresh stack on a seeded database built from real papers, headless Playwright visiting
   every page at both widths, failing on console errors, 5xx or an empty page, screenshots kept as CI artifacts)
   comes with N5, when the archive joins the stack; its page list grows with N7.
-- **A disposable archive** for registration and PDF fetches comes with N5's fresh stack; until then those are
-  shown by faked HTTP only.
+- **A disposable archive** for registration and PDF fetches comes with N3, run from `archive/`; until then those
+  are shown by faked HTTP only.
