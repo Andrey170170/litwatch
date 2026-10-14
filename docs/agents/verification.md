@@ -58,7 +58,9 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 ### Integrations (Zotero, WebDAV, deep, archive, webhook)
 - Works means: an event produces the right external effect, and a failure is retried and visible.
 - Evidence: tests against faked HTTP (`tests/fakes_http.py`); a real run against a test target: Zotero against
-  the test account, never the owner's library; deep and the archive against the dev or v1 instances read-only.
+  the test account, never the owner's library; deep against a dev instance of `deep/` started for the run on its
+  own port (a card request is a real, paid job); the archive with `register = false`, which only searches and
+  reads.
 - How: integration configured in a dev `litwatch.toml` on the sandbox; the dispatcher run; the target inspected.
 
 ### Deep-card service (`deep/`)
@@ -94,7 +96,7 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
   prepared by the agent and listed in the PR as pending; the PR does not merge until the owner has done it.
 - **Spending.** Model calls for evidence may cost up to $5 per change without asking; above that, ask first.
 - **Never touched**: production 0.14, the v1 deployment's database (it is only ever read, to refresh the
-  sandbox), and the owner's Zotero library.
+  sandbox) and its deep service, and the owner's Zotero library.
 
 ## Runtime evidence
 
