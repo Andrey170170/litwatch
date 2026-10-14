@@ -94,7 +94,7 @@ const LOOK = [
   ["rar", "Rarity on rows", [["stripe", "stripe"], ["glow", "stripe and glow"]]],
   ["chrome", "Night City detail", [["now", "as now"], ["plain", "plainer"]]],
 ];
-const LK = Object.assign(Object.fromEntries(LOOK.map(([k, , o]) => [k, o[0][0]])), { rar: "glow", gs: 20, gl: 460 }, JSON.parse(localStorage.getItem("lw-r5") || "{}"));
+const LK = Object.assign(Object.fromEntries(LOOK.map(([k, , o]) => [k, o[0][0]])), { rar: "glow", gs: 20, gl: 220 }, JSON.parse(localStorage.getItem("lw-r5c") || "{}"));
 // the glow's two sliders: strength in percent of the rarity colour, length in pixels (Digest rows; other rows scale)
 const GLOW = [["gs", "strength", 0, 40, 1, "%"], ["gl", "length", 100, 700, 20, "px"]];
 let gistUp = false;
@@ -232,7 +232,7 @@ function applyLook() {
 document.addEventListener("input", (e) => {
   const i = e.target.closest("[data-gk]");
   if (!i) return;
-  LK[i.dataset.gk] = +i.value; localStorage.setItem("lw-r5", JSON.stringify(LK)); applyLook();
+  LK[i.dataset.gk] = +i.value; localStorage.setItem("lw-r5c", JSON.stringify(LK)); applyLook();
 });
 document.addEventListener("click", (e) => {
   const lm = document.querySelector(".lookm");
@@ -240,7 +240,7 @@ document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-lk]");
   if (!b) return;
   const [k, v] = b.dataset.lk.split(":"); LK[k] = v;
-  localStorage.setItem("lw-r5", JSON.stringify(LK)); applyLook();
+  localStorage.setItem("lw-r5c", JSON.stringify(LK)); applyLook();
 });
 applyLook();
 </script>

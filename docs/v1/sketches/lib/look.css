@@ -55,16 +55,17 @@ html[data-theme="dark"] .frame[data-badge="mono"] .badge { --tc: var(--fg2) !imp
 .frame[data-badge="mono"] .badge:not(.area):not(.field) { color: var(--bg); }
 
 /* ── rarity on rows: the stripe (as now), or the stripe plus a glow of the rarity colour fading to the right.
-   --gs (strength) and --gl (length) come from the sliders and are tuned for Digest rows; the taller rows of topic
-   pages and Papers, and the paper's header, glow shorter and weaker. Light mode takes three quarters. ── */
-.frame { --gs: 20%; --gl: 460px; --gk: 1; }
+   --gs (strength) and --gl (length) come from the sliders; the defaults are the values chosen in round 5c: Digest rows
+   220px at 20%, the taller rows of topic pages and Papers about the same length at three quarters of the strength,
+   the paper's header 0.6 of the length at three quarters. Light mode takes three quarters again. ── */
+.frame { --gs: 20%; --gl: 220px; --gk: 1; }
 html:not([data-theme="dark"]) .frame { --gk: .75; }
 .frame[data-rar="glow"] :is(.prow, .drow:not(.quiet), .tprow, .br, .tbl .tr, .pghead) {
   --g1: calc(var(--gs) * var(--gk)); --g2: var(--gl);
   background-image: linear-gradient(90deg, color-mix(in srgb, var(--rc) var(--g1), transparent), transparent min(60%, var(--g2)));
 }
-.frame[data-rar="glow"] :is(.br, .tbl .tr) { --g1: calc(var(--gs) * var(--gk) * .75); --g2: calc(var(--gl) * .5); }
-.frame[data-rar="glow"] .pghead { --g1: calc(var(--gs) * var(--gk) * .75); --g2: calc(var(--gl) * .55); }
+.frame[data-rar="glow"] :is(.br, .tbl .tr) { --g1: calc(var(--gs) * var(--gk) * .75); --g2: var(--gl); }
+.frame[data-rar="glow"] .pghead { --g1: calc(var(--gs) * var(--gk) * .75); --g2: calc(var(--gl) * .6); }
 
 /* ── Night City detail: as now, or plainer (square corners, grey section names, no // and no glitch) ── */
 .frame[data-chrome="plain"] :is(.list, .dblock, .btn, .badge, .mday, .mweek, .grid .cell) { clip-path: none !important; }

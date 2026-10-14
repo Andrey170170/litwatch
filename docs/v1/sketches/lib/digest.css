@@ -99,3 +99,7 @@
 /* History loads older weeks as it scrolls, then says where the archive starts */
 .loadmore, .archstart { font-size: 12px; color: var(--fg3); text-align: center; padding: 10px 0; }
 .loadmore::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fg3); animation: lw-pulse 1s ease-in-out infinite; }
+/* phone: the counts sit on their own line under the topic name, so they start at the same place in every block */
+.frame.phone .dblock .hd { flex-wrap: wrap; row-gap: 2px; }
+.frame.phone .dblock .hd .n { flex: 1; min-width: 0; }
+.frame.phone .dblock .hd .c { order: 3; flex-basis: calc(100% - 28px); margin-left: 28px; }
