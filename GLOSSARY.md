@@ -57,7 +57,7 @@ Eligible for a topic's next digest and not yet in a published one; a late paper 
 
 **Fit**:
 How close a paper is to one topic: central, related, adjacent, none. The topic's subject defines it; a Focus topic's
-rubric spells out each level.
+rubric spells out central, related and adjacent.
 
 **Weight**:
 How much a paper matters in its own area (its primary class), whatever topic it is graded for: landmark, solid,

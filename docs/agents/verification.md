@@ -54,7 +54,9 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
   before and after and a check that nothing the owner touched (labels, reactions, saved papers, Zotero items, Deep
   cards) is lost.
 - How: build the sandbox at the schema before the change (`scripts/refresh-sandbox.sh`, see
-  [dev-host.md](dev-host.md)), count with SQL, `litwatch db migrate` against it, count again.
+  [dev-host.md](dev-host.md)), count with SQL, `litwatch db migrate` against it, count again. Until N2a, when the
+  script cannot run, restore the first v1's dump (`~/backups/litwatch-v1-first-build-2026-10-14.dump`) into a new
+  scratch database on `litwatch-v1-dev` instead, and drop it afterwards; never start the stopped deployment.
 
 ### Integrations (Zotero, WebDAV, deep, archive, webhook)
 - Works means: an event produces the right external effect, and a failure is retried and visible.

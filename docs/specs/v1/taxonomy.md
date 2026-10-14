@@ -9,8 +9,9 @@ Rules the draft follows:
 
 - **Names say what they mean on their own** ("Chain-of-thought faithfulness", not "CoT faithfulness"): decision models
   choose by the name more than by the description.
-- At most three levels. A class has a description of one or two sentences here; the followed classes reuse their
-  topic's subject. Descriptions say what is out as well as what is in, where a neighbour is close.
+- At most three levels. A class has a description of one or two sentences here. A followed class (in bold, and the
+  three top-level classes marked as topics) is only summarised in this section: its description is its topic's
+  subject, under Followed topics below. Descriptions say what is out as well as what is in, where a neighbour is close.
 - **Topics** are marked: [Focus], [Area], [Field]. Today's seven 0.14 selections map
   onto them (CoT faithfulness and CoT monitoring were Watch; interpretability and alignment-and-safety were Radar;
   agents, efficiency-and-architecture and reasoning-and-rl were Pulse).
@@ -65,7 +66,7 @@ study is out.
 | Automated interpretability | Model-written explanations, automated circuit discovery, interpretability agents and tooling. |
 | Interpretability methodology and evaluation | Benchmarks, ground truth, faithfulness of explanations to the model, best practices. |
 | Training dynamics and mechanisms of learning | How mechanisms form during training: grokking, phase changes, developmental interpretability. |
-| **Chain-of-thought faithfulness** [Focus] | The topic's subject: whether a model's reasoning trace omits or contradicts a computation the model actually performed (BonaFide's definition). |
+| **Chain-of-thought faithfulness** [Focus] | Whether a model's reasoning trace omits or contradicts a computation the model actually performed (BonaFide's definition). |
 
 ## 3. Alignment and safety [Area]
 
@@ -81,11 +82,13 @@ contribution are out.
 | Reward hacking and specification gaming | Exploiting reward signals, specification gaming, emergent misalignment from training. |
 | Scalable oversight and AI control | Debate, weak-to-strong supervision, control protocols, monitoring of actions. |
 | Dangerous capabilities and safety evaluations | Evaluations of harmful capabilities, safety benchmarks, evaluation methodology for safety. |
-| **Chain-of-thought monitoring** [Focus] | The topic's subject: reading a model's reasoning trace for oversight, monitorability, and evasion of monitors. |
+| **Chain-of-thought monitoring** [Focus] | Reading a model's reasoning trace for oversight, monitorability, and evasion of monitors. |
 
 ## 4. Machine learning beyond language models
 
-Shallow on purpose: these classes are not followed, so they only give a paper a primary class and Weight its colour.
+Machine learning research whose main subject is not language models: theory, other modalities, other learning
+settings and applications. Shallow on purpose: these classes are not followed, so they only give a paper a primary
+class and Weight its colour.
 
 | Class | Description |
 | --- | --- |
@@ -102,6 +105,8 @@ Shallow on purpose: these classes are not followed, so they only give a paper a 
 | Classical AI, planning and logic | Search, planning, constraint solving, knowledge representation, symbolic reasoning. |
 
 ## 5. AI and society
+
+The effects of AI on people and institutions, and how they are studied and governed.
 
 | Class | Description |
 | --- | --- |
@@ -124,8 +129,8 @@ Papers in the configured categories that fit none of the above.
 
 ## Followed topics
 
-A topic's subject is its Fit definition; a Focus topic's rubric spells out each Fit level ([pipeline.md](pipeline.md),
-section 4). A followed class's description is its topic's subject.
+A topic's subject is its Fit definition; a Focus topic's rubric spells out central, related and adjacent for it
+([pipeline.md](pipeline.md), section 4); anything below adjacent is none. A followed class's description is its topic's subject.
 
 | Topic | Depth | Subject, rubric, keywords |
 | --- | --- | --- |

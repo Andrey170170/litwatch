@@ -20,15 +20,14 @@ restart (decision 56).
 **N0 · Taxonomy, topics and evaluation labels.** [taxonomy.md](taxonomy.md) becomes the seed tree with its followed
 topics. The evaluation set is built from what exists, as files in `evals/labels/` (decision 55): the owner's first-v1
 labels, the provisional positives and the regression set; 0.14's selection tiers as silver memberships; and 200 papers
-drawn with a recorded seed (stratified so every top-level class has some, plus the 0.14 CoT positives and the
-labelled papers), labelled against the tree by two models of different labs, with the owner settling the papers on
+drawn with a recorded seed (stratified over 0.14's selections, CoT positives and labelled papers included), labelled against the tree by two models of different labs, with the owner settling the papers on
 which they name different primary classes (at most 20). *Check:* the tree loads, every class has a description, every
 topic has its subject and every Focus topic its rubric, and the label counts per class and cohort are reported.
 
 **N1 · Classifier comparison.** The decision request shape in `llm`; the classification request built from the tree;
-Luna Decisions, Jev and Haiku 5.5 run on the N0 evaluation set. Reported per candidate and per cohort, never pooled:
-recall per Focus class at the threshold and with the uncertain band, primary-class accuracy, per-class precision on
-the top levels, cost per 1,000 papers, latency, failure rate. *Check:* a written report in `evals/` and a chosen default,
+Luna Decisions, Jev and Haiku 5.5 run on the N0 evaluation set. Reported per candidate and per cohort, never pooled, each
+metric on the cohorts that carry its label: recall per Focus class at the threshold and with the uncertain band,
+primary-class accuracy, per-class precision on the top levels, cost per 1,000 papers, latency, failure rate. *Check:* a written report in `evals/` and a chosen default,
 with the threshold and band set from it; Focus membership recall (band and keyword check included) on the CoT
 positives at least as high as the first v1's candidate recall.
 

@@ -66,34 +66,37 @@ downloader, the runbooks for the owner's server). Its tests run in CI as their o
 AGENTS.md lists `archive/`.
 
 **N0 · Tree, topics and evaluation labels.**
-- Migration: `classes` and `class_versions` ([data.md](../specs/v1/data.md)); `topics` gains `class` and `depth`
-  beside its old columns, which go in N2 with the grading that reads them.
+- No migration: the tree and topics stay in the seed file until N2, whose classification step is the first to read
+  them; `classes`, `class_versions` and the reshaped `topics` ([data.md](../specs/v1/data.md)) come then, with
+  `litwatch taxonomy import` and `export`. N1 reads the tree from the file, as it reads the labels.
 - `seeds/taxonomy.yaml` from taxonomy.md: every class with its description, the followed topics with depth, subject,
   rubric (Focus), keywords, colour and monogram. The two CoT topics keep 0.14's subjects, rubrics and keywords,
   reworded from tiers to Fit levels; the Area and Field topics take 0.14's subjects; Circuits and causal analysis and
-  Language models take the definitions agreed on 2026-10-14 (taxonomy.md). `litwatch taxonomy import` and `export`
-  with validation: unique names, at most three levels, every class described, every topic on an existing class, every
-  Focus topic with a rubric.
+  Language models take the definitions agreed on 2026-10-14 (taxonomy.md). `litwatch taxonomy check` validates a taxonomy
+  file: unique names, at most three levels, every class described, every topic on an existing class, every Focus
+  topic with a rubric and no other topic with one.
 - The evaluation set as files in `evals/labels/`, never in the live database (decision 55): the owner's first-v1
   labels mapped to Fit (relevant → central, adjacent → adjacent, not relevant → none, the first-v1 value kept in a
   `legacy` column) and the provisional positives; the regression set; 0.14's selection tiers as silver memberships of
   the matching classes (tier 1–2 member, tier 4 not, tier 3 left out); and the silver class sample below. The source
   rows were exported from the first v1's databases on 2026-10-14 before its deployment stopped; 0.14's tiers come
   from the development database's adopted copy of production.
-- The silver class sample: a stratified 200-paper draw with a recorded seed (every top-level class represented, plus
-  the CoT positives and the labelled papers), labelled against the tree by Opus 5.5 and GPT-6.1-Sol separately, each
+- The silver class sample: a stratified 200-paper draw from 0.14's screened papers with a recorded seed (20 CoT
+  positives, 10 owner-labelled papers, 20 positives of each broad selection, 70 papers no selection took), labelled against the tree by Opus 5.5 and GPT-6.1-Sol separately, each
   naming the paper's primary class and its other classes. Agreement is the silver label; papers whose primary classes
   differ go to the owner, at most 20, on a one-tap page shown in the T3 thread whose answers are pasted back and
   committed. With more than 20, the 20 are drawn with the recorded seed, spread across top-level classes; the rest
-  are kept as unresolved, counted in the report and left out of primary-class accuracy. Text comes from the archive's metadata, read only.
+  are kept as unresolved, counted in the report and left out of primary-class accuracy. Titles and abstracts are read from the development
+  database's copy of 0.14, read only.
 - Check: the tree loads and round-trips through YAML; every class has a description; every topic has its subject and
   every Focus topic its rubric; label counts per class and source (owner, 0.14, silver, adjudicated).
 
 **N1 · The decision request and the bake-off.** `Gateway.decide` with the OpenRouter Decisions adapter and the
 chat-with-schema adapter; the classification request built from the tree; `litwatch eval classify` over the N0
-evaluation set for Luna Decisions, Jev and Haiku 5.5. The report in `evals/` gives, per candidate and per cohort
-(owner, 0.14, silver, never pooled): recall per Focus class at the threshold and with the band and the keyword check,
-primary-class accuracy, per-class precision on the top levels, cost per 1,000 papers, latency and failure rate. The
+evaluation set for Luna Decisions, Jev and Haiku 5.5. The report in `evals/` gives, per candidate and per cohort,
+never pooled, each metric on the cohorts that carry its label: recall per Focus class at the threshold and with the
+band and the keyword check (owner, provisional, regression, 0.14), primary-class accuracy (silver, adjudicated),
+per-class precision on the top levels (silver, 0.14), and cost per 1,000 papers, latency and failure rate. The
 quality harness starts here, for classification. Owner check: the default.
 
 **N2a · Classification, analysis and intake from the archive.** Classification and analysis as nightly steps with
@@ -168,7 +171,7 @@ silver. Not taken: silver without the owner's 20 (it leaves out the hard papers)
 
 **D7 · Fit is closeness to a topic, Weight is importance in the paper's own area** (decisions 53, 54). One shared
 definition of each level, written into every prompt that judges it. A topic's subject is its Fit definition; a Focus
-topic's rubric spells out what each Fit level means for it. 0.14's must-read bar becomes the Weight definition.
+topic's rubric spells out what central, related and adjacent mean for it. 0.14's must-read bar becomes the Weight definition.
 Weight is one per paper, judged against the paper's primary class; a per-topic Weight is added only if "overrated"
 reactions show the need. Not taken: a rubric per topic at every depth (the bar would count twice).
 
@@ -205,7 +208,7 @@ reactions show the need. Not taken: a rubric per topic at every depth (the bar w
 | | Claim | Evidence |
 | --- | --- | --- |
 | V1 | The archive builds and tests inside this repository; nothing deployed changed (A) | Its tests in CI; the import commit names its source commit; the live archive's status unchanged |
-| V2 | The tree loads, every class is described, every topic has its subject and every Focus topic its rubric, and the evaluation labels exist per source (N0) | pytest on the taxonomy store and the YAML round trip; label counts per class and source; the owner's adjudication committed |
+| V2 | The tree loads, every class is described, every topic has its subject and every Focus topic its rubric, and the evaluation labels exist per source (N0) | pytest on the taxonomy rules and the YAML round trip; label counts per class and source; the owner's adjudication committed |
 | V3 | A default classifier is chosen with threshold and band, and Focus membership recall on the CoT positives is at least the first v1's candidate recall (N1) | The report in `evals/`; one real `decide` call per provider; the owner's pick |
 | V4 | Classification, analysis, grading per depth, the grade table, rarity, effective grades and the library rule do what pipeline.md says (N2a–b) | pytest per rule on real Postgres (section 4's grading-topic examples, both tables, the floors, the lab-diversity refusal, Area escalation); a sandbox night with its run record |
 | V5 | End-to-end Focus recall is at least the first v1's, or each loss looked at; cost per weekday measured (N2c) | `eval replay` and `eval report` per cohort; the two-week sandbox run; the cost table in pipeline.md |

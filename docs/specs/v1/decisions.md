@@ -111,7 +111,7 @@ The build plan is [`docs/plans/v1-build.md`](../../plans/v1-build.md).
     per-topic Weight is added only if "overrated" reactions show papers from another area rated too high.
 54. **Fit and Weight have one written definition per level** ([pipeline.md](pipeline.md), section 4), given to every
     model that judges them. Fit is how close a paper is to a topic: a topic's subject is its Fit definition, and a
-    Focus topic's rubric spells out what each Fit level means for it. Weight is how much the paper matters: 0.14's
+    Focus topic's rubric spells out what central, related and adjacent mean for it. Weight is how much the paper matters: 0.14's
     must-read bar for the broad selections becomes its definition. Area and Field topics carry no rubric.
 55. **Evaluation labels without hand labelling.** The owner's first-v1 labels, 0.14's CoT positives and the
     regression set measure Focus recall; 0.14's selection tiers are silver memberships of the matching classes; a
