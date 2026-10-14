@@ -87,7 +87,7 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
   is shown by the quality harness or an evaluation, never by a fake.
 - **End-to-end runs use the sandbox**, a one-way copy of the v1 deployment's database with the scheduler and
   integrations off. Data flows in only: the copy keeps the deployment's pipeline backlog, but none of its external
-  work (integration deliveries, deep jobs). An empty database is a bad test; hand-written rows are for visual states
+  work (integration deliveries, deep jobs, Zotero and WebDAV items). An empty database is a bad test; hand-written rows are for visual states
   (long titles, odd counts) only, never to claim that behavior works.
 - **The quality harness** scores an artifact (Gist, Brief, digest, Deep card, classification) on a gold set:
   papers with the owner's recorded judgments, the **preference set**. Each entry holds the key facts that must

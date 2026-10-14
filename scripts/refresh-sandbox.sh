@@ -7,8 +7,8 @@
 # `sandbox_next` and replaces `sandbox` only once it is complete, so a failed refresh leaves
 # the previous sandbox as it was. The copy keeps the deployment's pipeline backlog (it is
 # realistic state), but none of its external work: copied events count as already
-# delivered, so an integration enabled in dev starts after them, and deep jobs and the
-# deep waiting queue are detached.
+# delivered, so an integration enabled in dev starts after them, and the deep jobs and the
+# Zotero and WebDAV items that point at the deployment's targets are dropped.
 #
 #   --no-migrate   keep the deployment's schema, to take a baseline before a migration
 set -Eeuo pipefail
@@ -44,15 +44,28 @@ target_psql -d postgres -c "CREATE DATABASE $NEXT"
 docker exec "$SOURCE" pg_dump -U litwatch -d litwatch -Fc --no-owner --no-privileges \
   | docker exec -i "$TARGET" pg_restore -U postgres -d "$NEXT" --no-owner --no-privileges --exit-on-error
 
-# Transaction ids belong to the cluster that wrote them; restamping every copied event with
-# this transaction's id makes them all settled here, ahead of anything the sandbox writes.
+# Transaction ids belong to the cluster that wrote them. Every copied event gets xid 1,
+# below any transaction here, so all of them count as settled and ahead of anything the
+# sandbox writes, even while another transaction in this cluster is still open. What ties
+# the copy to the deployment's targets goes: deep jobs and their queue, and the Zotero and
+# WebDAV items (with the 0.x keys Zotero's setup would take over again), so integrations
+# enabled in dev work against their test targets from scratch.
 target_psql -d "$NEXT" -1 <<'SQL'
-UPDATE outbox SET xid = pg_current_xact_id();
+UPDATE outbox SET xid = '1'::xid8;
 DELETE FROM integration_cursors;
 DELETE FROM deep_waiting;
 UPDATE deep_cards SET job_id = NULL, job_since = NULL, job_revision = NULL, job_version = NULL,
                       job_event = NULL, job_automatic = NULL
  WHERE job_id IS NOT NULL;
+DELETE FROM zotero_items;
+DELETE FROM webdav_files;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'papers' AND column_name = 'zotero_key') THEN
+    UPDATE papers SET zotero_key = NULL, zotero_attachment_key = NULL
+     WHERE zotero_key IS NOT NULL OR zotero_attachment_key IS NOT NULL;
+  END IF;
+END $$;
 SQL
 
 if (( migrate )); then
