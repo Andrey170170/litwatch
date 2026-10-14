@@ -84,7 +84,8 @@ AGENTS.md lists `archive/`.
   the CoT positives and the labelled papers), labelled against the tree by Opus 5.5 and GPT-6.1-Sol separately, each
   naming the paper's primary class and its other classes. Agreement is the silver label; papers whose primary classes
   differ go to the owner, at most 20, on a one-tap page shown in the T3 thread whose answers are pasted back and
-  committed. Text comes from the archive's metadata, read only.
+  committed. With more than 20, the 20 are drawn with the recorded seed, spread across top-level classes; the rest
+  are kept as unresolved, counted in the report and left out of primary-class accuracy. Text comes from the archive's metadata, read only.
 - Check: the tree loads and round-trips through YAML; every class has a description; every topic has its subject and
   every Focus topic its rubric; label counts per class and source (owner, 0.14, silver, adjudicated).
 

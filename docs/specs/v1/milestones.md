@@ -4,8 +4,8 @@
 
 M0–M6 of the first v1 are built on `v1` (PRs #15–#32): package layout, migrations, the model gateway, intake,
 topics, triage, grading with two labs, feedback and the evaluation, the API and web app, reviews and issues, the
-scheduler, DBLP, the outbox and integrations, the 0.14 migration. The `litwatch-v1` stack runs it beside 0.14 with the
-scheduler on, Zotero, WebDAV and Notion off. Most of that code stays: the redesign replaces triage, takes, reviews and
+scheduler, DBLP, the outbox and integrations, the 0.14 migration. The `litwatch-v1` stack ran it beside 0.14 with the
+scheduler on until 2026-10-14; it is now stopped. Most of that code stays: the redesign replaces triage, takes, reviews and
 issues, and adds classification, analysis, the full-text queue and digests.
 
 The milestones below replace the first spec's M7 for everything up to the switch. Each ends with something that runs

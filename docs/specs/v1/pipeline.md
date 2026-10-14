@@ -129,7 +129,10 @@ whatever topic it is graded for. Each level has one definition, given word for w
 | none | The paper is in the topic's subtree by classification but is not about the subject. |
 
 A topic's subject is its Fit definition: what is in it and, where a neighbour is close, what is out. A Focus topic's
-rubric spells out what each Fit level means for that topic. Area and Field topics carry no rubric.
+rubric spells out what each Fit level means for that topic, and where it places a kind of paper at a level, the
+rubric wins over the general definitions above: a Focus topic is a narrow research question, and its rubric says how
+much of that question a paper must answer to be central (a single-task audit can be on the subject and still only
+related). Area and Field topics carry no rubric.
 
 | Weight | Meaning |
 | --- | --- |
