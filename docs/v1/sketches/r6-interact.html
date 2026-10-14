@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 6 · interactions</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<link rel="stylesheet" href="lib/papers.css">
+<link rel="stylesheet" href="lib/paper.css">
+<link rel="stylesheet" href="lib/look.css">
+<link rel="stylesheet" href="lib/interact.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<script src="lib/papers.js"></script>
+<script src="lib/topicpage.js"></script>
+<script src="lib/paper.js"></script>
+<style>
+  .sw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+  .sw button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px; color: var(--fg2); }
+  .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+  @media (max-width: 640px) { .sw > span { display: none; } }
+  .states { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .states button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; color: var(--fg2); }
+  .states button:hover { color: var(--fg); border-color: var(--fg2); }
+  .pbar .ttl2 { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .pbar .ttl2 .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
+  .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
+  .frame { position: relative; }
+  /* the interaction switches: a panel above the frames on desktop, a dropdown in the top bar on a phone */
+  .lookp { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: center; margin: 0 0 14px; font-size: 12.5px; }
+  .lookp > span { color: var(--fg2); }
+  .lookp .sw { flex-wrap: wrap; }
+  .lookm { display: none; position: relative; }
+  .lookm summary { list-style: none; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+  .lookm summary::-webkit-details-marker { display: none; }
+  .lookm .lookp { position: fixed; left: 8px; right: 8px; top: 46px; z-index: 40; background: var(--page); border: 1px solid var(--line); border-radius: 8px; padding: 12px; grid-template-columns: 1fr; gap: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, .4); }
+  .lookm .lookp > span { margin-top: 6px; }
+  @media (max-width: 640px) { .lookm { display: block; } }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 6 · interactions</h1>
+  <span class="sp"></span>
+  <details class="lookm"><summary>Switches ▾</summary><div class="lookp" data-ix></div></details>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">The app with the look from round 5, and how it responds as switches. The first option of each is how it behaves now. Open a paper and give a topic a thumb, Save it, label it; open a digest from the Digest tab; move between pages; on the phone, open the ⋯ sheet and the filters. Press feedback (rows darken while held, buttons sink a pixel) is on in every option. Jump to:</p>
+  <div class="states">
+    <button data-jump="digest">Digest</button>
+    <button data-jump="topic">A topic page</button>
+    <button data-jump="paper">A paper</button>
+    <button data-jump="papers">Papers</button>
+  </div>
+  <div class="lookp" data-ix></div>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" data-rar="glow" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" data-rar="glow" id="M"></div>
+    <div class="notes">
+      <p><b>The switches</b></p>
+      <ul>
+        <li><b>Reacting</b>: the reason first (now: a thumb opens its reasons and nothing is recorded until one is picked), or the thumb first: it counts at once, and the reasons follow as an optional second tap. Tapping a lit thumb takes it back. On the phone the reasons come as a strip above the bottom bar instead of a sheet.</li>
+        <li><b>Acknowledgement</b>: a toast at the bottom (now), or a short note beside the control that was used, fading after a few seconds. It says the same thing either way.</li>
+        <li><b>Desktop hover</b> on paper rows: a background (now), the rarity glow brightening and lengthening with a wider stripe, or a yellow frame with a cut corner.</li>
+        <li><b>Page motion</b>: none; subtle (the phone as now, the desktop page sliding in a little); or Night City, a stepped scan that reveals a page top to bottom and slide-overs and sheets from their edge. Reduced motion in the OS turns all of it off.</li>
+        <li><b>Phone sheets</b>: closed with the shade or the button (now), or also by dragging them down by the handle.</li>
+      </ul>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Reacting: reason first, or thumb first with the reason optional after?</li>
+        <li>Acknowledgement: the toast, or the note beside the control?</li>
+        <li>Desktop hover: background, brighter glow, or the yellow frame?</li>
+        <li>Page motion: none, subtle or Night City, on the desktop and on the phone?</li>
+        <li>Phone sheets: drag down to close as well, or not needed?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const SW = { v: "C", bar: "inline", cards: "rich", acts: "grid" };
+// the interaction options, first value = the behaviour so far
+const IXO = [
+  ["react", "Reacting", [["reason", "reason first"], ["thumb", "thumb first, reason after"]]],
+  ["ack", "Acknowledgement", [["toast", "toast"], ["inline", "note beside the control"]]],
+  ["hover", "Desktop hover", [["bg", "background"], ["glow", "brighter glow"], ["frame", "yellow frame"]]],
+  ["motion", "Page motion", [["subtle", "subtle"], ["none", "none"], ["nc", "Night City"]]],
+  ["sheet", "Phone sheets", [["tap", "tap to close"], ["drag", "drag down too"]]],
+];
+const IX = Object.assign(Object.fromEntries(IXO.map(([k, , o]) => [k, o[0][0]])), JSON.parse(localStorage.getItem("lw-r6") || "{}"));
+let gistUp = false;
+const PG = { pick: null, pickth: null, lab: null, rs: null, rsT: null, rstrip: null, ps: false, pgopen: [] };
+
+function toast(frame, msg) {
+  frame.querySelectorAll(".toast").forEach((t) => t.remove());
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; frame.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+// the acknowledgement: a toast, or a note by the control that was used (found again by sel after the redraw)
+function ack(frame, msg, sel) {
+  const at = IX.ack === "inline" && sel && [...frame.querySelectorAll(sel)].find((x) => x.getClientRects().length);
+  if (!at) return toast(frame, msg);
+  frame.querySelectorAll(".ackn, .toast").forEach((t) => t.remove());
+  const n = document.createElement("div"), F = frame.getBoundingClientRect(), r = at.getBoundingClientRect();
+  n.className = "ackn"; n.textContent = msg; frame.appendChild(n);
+  // above the control, clear of whatever it opens under itself; under it only at the frame's top
+  const below = r.top - F.top < n.offsetHeight + 60;
+  const top = r.top - F.top - frame.clientTop, left = r.left - F.left - frame.clientLeft, W = frame.clientWidth;
+  n.style.top = (below ? top + r.height + 6 : top - n.offsetHeight - 6) + "px";
+  n.style.left = Math.max(8, Math.min(left, W - n.offsetWidth - 8)) + "px";
+  setTimeout(() => n.remove(), 2800);
+}
+// the control a click came from, as a selector that finds it again after the page is redrawn
+const selOf = (n) => { const a = [...n.attributes].find((x) => x.name.startsWith("data-")); return a && `[${a.name}="${CSS.escape(a.value)}"]`; };
+// the paper's place in the list it was opened from, in the order the list shows: shelf by shelf, sorted inside each
+function inList(st) {
+  if (!st.paper || !(st.topic || st.tab === "Papers")) return null;
+  const shelf = (p) => Math.min(lvOf(p, st.topic), 4);
+  const L = listFor(st, st.topic).sort((a, b) => shelf(b) - shelf(a)), i = L.findIndex((p) => p.id === st.paper);
+  return i < 0 ? null : { L, i };
+}
+const surface = (st, pd) => (st.topic && pd.lv[st.topic] ? st.topic : pd.tp[0]);
+
+function pgBody(pd, st, phone) {
+  if (phone) return `<div class="pg B">${pgHead(pd)}${pgLadder(pd, st, { nopaper: true })}</div>`;
+  return `<div class="pg B track${gistUp ? " gistup" : ""}">${pgHead(pd, { acts: SW.acts === "head" })}<div class="pgcols"><div class="pgmain">${pgLadder(pd, st)}</div><aside class="pgrail">${pgRail(pd, st, { acts: SW.acts })}</aside></div></div>`;
+}
+// the phone's bottom bar and its two sheets (the reasons for a thumb, and the paper); a sheet animates only as it opens
+let lastSheet = null;
+function pgFoot(pd, st) {
+  const cur = st.rs ? "rs" : st.ps ? "ps" : st.rstrip ? "strip" : null, enter = cur && cur !== lastSheet;
+  lastSheet = cur;
+  const more = `<a data-ps="open" title="The paper: links, BibTeX, labels">⋯</a>`;
+  if (pd.arch) return `<div class="pfoot pgf"><a data-process="${pd.id}"><small>Process</small></a><a data-deep="${pd.id}"><small>Deep read</small></a>${more}</div>${st.ps ? pgSheet(pd, enter) : ""}`;
+  const t = st.rsT || surface(st, pd), re = REACT[pd.id + "|" + t], at = inList(st);
+  const rs = !st.rs ? "" : `<div class="fsheet${enter ? " enter" : ""}"><div class="shade2" data-rs="x"></div><div class="sheetp">
+    ${pd.tp.length > 1 ? `<div class="cap2">Topic</div><div class="row">${pd.tp.map((x) => `<a class="fchip2${x === t ? " on" : ""}" data-rst="${x}">${badge(x)} ${T[x].n}</a>`).join("")}</div>` : ""}
+    <div class="cap2">${st.rs === "up" ? "👍 Why" : "👎 Why"} · ${T[t].n}</div><div class="why big">${REASONS[st.rs].map(([w, n]) => `<a class="${re && re.why === w ? "on" : ""}" data-why="${pd.id}|${t}|${st.rs}|${w}">${n}</a>`).join("")}${re ? `<a class="clr" data-why="${pd.id}|${t}|-|-">Clear</a>` : ""}</div>
+    <button class="done" data-rs="x">Cancel</button></div></div>`;
+  // thumb first: the strip is the acknowledgement (the thumb is already counted); it moves the thumb to another
+  // topic or adds the reason
+  const strip = !st.rstrip || !re ? "" : `<div class="rstrip${enter ? " enter" : ""}"><div class="rsh">${re.thumb === "up" ? "👍" : "👎"} Counted on
+    ${pd.tp.length > 1 ? pd.tp.map((x) => `<a class="fchip2${x === t ? " on" : ""}" data-rmove="${x}">${badge(x)} ${T[x].n}</a>`).join("") : `${badge(t)} ${T[t].n}`}</div>
+    <div class="why big after"><span class="whyq">Why, if you like:</span>${REASONS[re.thumb].map(([w, n]) => `<a class="${re.why === w ? "on" : ""}" data-why="${pd.id}|${t}|${re.thumb}|${w}">${n}</a>`).join("")}</div></div>`;
+  return `${strip}<div class="pfoot pgf"><a class="${pd.sv ? "on" : ""}" data-save="${pd.id}">${pd.sv ? "★" : "☆"}</a><a class="${re && re.thumb === "up" ? "on" : "dim"}" data-rs="up">👍</a>
+    <span class="lbl">${at ? `${at.i + 1}/${at.L.length}` : ""}</span><a class="${re && re.thumb === "down" ? "on" : "dim"}" data-rs="down">👎</a>${more}</div>${rs}${st.ps ? pgSheet(pd, enter) : ""}`;
+}
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, dg: null, ...FD, ...PG },
+    view(st) {
+      const pd = st.paper && paperData(st.paper);
+      if (pd) return phone ? { body: pgBody(pd, st, true), title: st.topic ? T[st.topic].n : "Paper", foot: pgFoot(pd, st) } : { body: pgBody(pd, st, false), title: pd.t };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      const v = st.topic ? topicV(st, phone) : st.tab === "Papers" ? papersV(st, phone) : st.tab === "Topics" ? topicsV()
+        : { body: daystrip(TODAY, false) + dayBody(TODAY, DG, { weekly: false }), title: "Digest" };
+      if (phone) return v;
+      const ov = st.dg ? digestPage(st.dg) : null;
+      return { ...v, overlay: ov && `<a class="back" data-back>‹ Close</a>${ov}` };
+    },
+    swipe(st) {
+      const at = inList(st);
+      if (!at) return null;
+      const to = (p) => p && { paper: p.id, ...PG };
+      return { older: to(at.L[at.i - 1]), newer: to(at.L[at.i + 1]) };
+    },
+    click(e, nav) {
+      const f = (s) => e.target.closest(s), st = nav.st, fr = e.currentTarget; let n;
+      const toggle = (a, x) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]);
+      const done = (msg, sel) => ack(fr, msg, sel || (n && selOf(n)));
+      // thumb first: a click anywhere else puts the offered reasons away
+      if (IX.react === "thumb" && (st.pick || st.rstrip) && !f(".why, .rstrip, [data-th], [data-rs]")) nav.set({ pick: null, rstrip: null });
+      if ((n = f("[data-save]"))) { const p = P[n.dataset.save]; p.sv = !p.sv; nav.set({}); if (st.paper) done(p.sv ? "Saved: it joins the library." : "Unsaved: it leaves the library until you save it again."); return true; }
+      if ((n = f("[data-process]"))) { done(`Processing ${n.dataset.process}: classified, analysed and graded like a new paper.`); return true; }
+      if ((n = f("[data-deep]"))) { REQ.add(n.dataset.deep); nav.set({}); done("Deep card asked for. It starts as soon as the archive has the text."); return true; }
+      if ((n = f("[data-miss]"))) { done("Report as a miss: you pick its topic, and it is saved at once."); return true; }
+      if ((n = f("[data-bib]"))) { const pd = paperData(n.dataset.bib); done(`BibTeX copied${pd.pub ? ` (${pd.pub})` : " (arXiv entry)"}.`); return true; }
+      if ((n = f("[data-copy]"))) { done(`Copied ${n.dataset.copy}.`); return true; }
+      if (f("[data-doi]")) { done("Paste a DOI or DBLP key; litwatch never overwrites it."); return true; }
+      if ((n = f("[data-au]"))) { const a = n.closest(".au"); a.textContent = a.dataset.auall; return true; }
+      if ((n = f("[data-th]")) && IX.react === "thumb") {
+        const [id, t, th] = n.dataset.th.split("|"), k = id + "|" + t, sel = `[data-th="${k}|${th}"]`;
+        if (REACT[k] && REACT[k].thumb === th) { delete REACT[k]; nav.set({ pick: null }); done("Reaction cleared; its word is taken back.", sel); }
+        else { REACT[k] = { thumb: th, why: null }; nav.set({ pick: k, pickth: th, lab: null }); done(reactAck(paperData(id), t, th, null), sel); }
+        return true;
+      }
+      if ((n = f("[data-th]"))) { const [id, t, th] = n.dataset.th.split("|"), k = id + "|" + t; nav.set(st.pick === k && st.pickth === th ? { pick: null } : { pick: k, pickth: th, lab: null }); return true; }
+      if ((n = f("[data-why]"))) {
+        const [id, t, th, why] = n.dataset.why.split("|"), k = id + "|" + t, pd = paperData(id);
+        if (th === "-") delete REACT[k];
+        else { REACT[k] = { thumb: th, why }; if (why === "wrong" && T[t].depth === "focus") P[id].sv = false; }
+        nav.set({ pick: null, rs: null, rsT: null, rstrip: null });
+        done(th === "-" ? "Reaction cleared; its word is taken back." : reactAck(pd, t, th, why), `[data-th="${k}|${th}"], [data-rs="${th}"]`); return true;
+      }
+      if ((n = f("[data-labopen]"))) { const k = n.dataset.labopen; nav.set({ lab: st.lab === k ? null : k, pick: null }); return true; }
+      if ((n = f("[data-lab]"))) { const [id, t, fit] = n.dataset.lab.split("|"), k = id + "|" + t; if (LABEL[k] === fit) delete LABEL[k]; else LABEL[k] = fit;
+        nav.set({ lab: null }); done(LABEL[k] ? `Labelled ${fit} on ${T[t].n}${fit === "unsure" ? "; unsure counts nowhere" : ""}.` : "Label removed.", `[data-labopen="${k}"], [data-lab="${k}|${fit}"]`); return true; }
+      if ((n = f("[data-rate]"))) { const [id, r, v] = n.dataset.rate.split("|"), k = id + "|" + r; RATE[k] = RATE[k] === v ? undefined : v; nav.set({}); return true; }
+      if ((n = f("[data-rs]")) && IX.react === "thumb" && n.dataset.rs !== "x") {
+        const pd = paperData(st.paper), th = n.dataset.rs, t = st.rsT || surface(st, pd), k = pd.id + "|" + t, sel = `[data-rs="${th}"]`;
+        if (REACT[k] && REACT[k].thumb === th) { delete REACT[k]; nav.set({ rstrip: null, ps: false }); done("Reaction cleared; its word is taken back.", sel); }
+        else { REACT[k] = { thumb: th, why: null }; nav.set({ rstrip: th, ps: false }); }
+        return true;
+      }
+      if ((n = f("[data-rmove]"))) {
+        const pd = paperData(st.paper), from = st.rsT || surface(st, pd), to = n.dataset.rmove, re = REACT[pd.id + "|" + from];
+        if (to !== from && re) { delete REACT[pd.id + "|" + from]; REACT[pd.id + "|" + to] = re; }
+        nav.set({ rsT: to }); return true;
+      }
+      if ((n = f("[data-rs]"))) { nav.set(n.dataset.rs === "x" ? { rs: null, rsT: null } : { rs: n.dataset.rs, ps: false }); return true; }
+      if ((n = f("[data-rst]"))) { nav.set({ rsT: n.dataset.rst }); return true; }
+      if ((n = f("[data-ps]"))) { nav.set({ ps: n.dataset.ps !== "x", rs: null }); return true; }
+      if ((n = f(".pg [data-paper]"))) { nav.go({ paper: n.dataset.paper, ...PG }); return true; }
+      if (f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-topic]")) && !f("[data-paper], [data-cell]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
+      else if ((n = f("[data-rl]"))) nav.set({ rset: toggle(st.rset, +n.dataset.rl), n: 40 });
+      else if ((n = f("[data-chip]"))) nav.set({ [n.dataset.chip]: !st[n.dataset.chip], n: 40 });
+      else if ((n = f("[data-sort]"))) nav.set({ sort: n.dataset.sort });
+      else if ((n = f("[data-tf]"))) nav.set({ tf: toggle(st.tf, n.dataset.tf), n: 40 });
+      else if ((n = f("[data-unfold]"))) nav.set({ open: toggle(st.open, +n.dataset.unfold) });
+      else if (f("[data-clear]")) nav.set({ ...FD });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else if ((n = f("[data-paper]"))) nav.go({ paper: n.dataset.paper, ...PG });
+      else return false;
+      return true;
+    },
+  };
+}
+
+const D = document.getElementById("D"), M = document.getElementById("M");
+const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
+[[D, navs[0]], [M, navs[1]]].forEach(([f, n]) => { autoLoad(f, n); liveSearch(f, n); });
+function openPaper(topic, id) { navs.forEach((n) => { n.top(topic ? { tab: null, topic } : { tab: "Papers" }); n.go({ paper: id, ...PG }); }); }
+const JUMP = {
+  digest: () => navs.forEach((n) => n.top({ tab: "Digest", topic: null })),
+  topic: () => navs.forEach((n) => n.top({ tab: null, topic: "cotf" })),
+  paper: () => openPaper("cotf", "2610.04321"),
+  papers: () => navs.forEach((n) => n.top({ tab: "Papers", topic: null })),
+  topics: () => navs.forEach((n) => n.top({ tab: "Topics", topic: null })),
+};
+document.querySelectorAll("[data-jump]").forEach((b) => b.onclick = () => JUMP[b.dataset.jump]());
+// the Gist is "up" once the reading column's Gist has scrolled out of view; checked on scroll and after each redraw
+function checkGist() {
+  const g = D.querySelector(".pgmain .gistr"), m = D.querySelector(".main"), pg = D.querySelector(".pg.track");
+  if (!g || !pg) return;
+  gistUp = g.getBoundingClientRect().bottom < m.getBoundingClientRect().top + 8;
+  pg.classList.toggle("gistup", gistUp);
+}
+D.addEventListener("scroll", checkGist, true);
+new MutationObserver(checkGist).observe(D, { childList: true });
+// the switches set data attributes on both frames (and the reacting flow on the paper code); the app redraws in place
+document.querySelectorAll("[data-ix]").forEach((p) => p.innerHTML = IXO.map(([k, name, opts]) =>
+  `<span>${name}</span><span class="sw">${opts.map(([v, l]) => `<button data-xk="${k}:${v}">${l}</button>`).join("")}</span>`).join(""));
+function applyIx() {
+  [D, M].forEach((f) => IXO.forEach(([k]) => (f.dataset[k] = IX[k])));
+  REACT_FLOW = IX.react;
+  document.querySelectorAll("[data-xk]").forEach((b) => { const [k, v] = b.dataset.xk.split(":"); b.classList.toggle("on", IX[k] === v); });
+}
+document.addEventListener("click", (e) => {
+  const lm = document.querySelector(".lookm");
+  if (lm.open && !e.target.closest(".lookm")) lm.open = false;
+  const b = e.target.closest("[data-xk]");
+  if (!b) return;
+  const [k, v] = b.dataset.xk.split(":"); IX[k] = v;
+  localStorage.setItem("lw-r6", JSON.stringify(IX)); applyIx();
+  if (k === "react") navs.forEach((n) => n.set({ pick: null, rs: null, rstrip: null }));
+});
+// iOS shows :active on touch only once the page listens for touches
+document.addEventListener("touchstart", () => {}, { passive: true });
+
+// drag a phone sheet down to close it: it follows the finger, and past a third of its height (or flicked) it goes,
+// by the same click as its shade; otherwise it springs back
+let sg = null, swallow = false;
+M.addEventListener("pointerdown", (e) => {
+  const sp = e.target.closest(".fsheet .sheetp");
+  if (IX.sheet !== "drag" || !sp || e.button > 0) return;
+  sg = { sp, id: e.pointerId, y0: e.clientY, x0: e.clientX, drag: false, s: [[e.timeStamp, e.clientY]] };
+});
+M.addEventListener("pointermove", (e) => {
+  if (!sg || e.pointerId !== sg.id) return;
+  const dy = e.clientY - sg.y0;
+  if (!sg.drag) {
+    if (Math.hypot(dy, e.clientX - sg.x0) < 8) return;
+    if (dy < 0 || Math.abs(dy) < Math.abs(e.clientX - sg.x0)) { sg = null; return; }
+    sg.drag = true; sg.y0 = e.clientY; sg.sp.style.animation = "none";
+    try { M.setPointerCapture(e.pointerId); } catch {}
+  }
+  sg.s.push([e.timeStamp, e.clientY]);
+  while (sg.s.length > 2 && e.timeStamp - sg.s[0][0] > 90) sg.s.shift();
+  sg.sp.style.transition = "none";
+  sg.sp.style.transform = `translateY(${Math.max(0, e.clientY - sg.y0)}px)`;
+});
+function sheetEnd(e) {
+  if (!sg || e.pointerId !== sg.id) return;
+  const g = sg; sg = null;
+  if (!g.drag) return;
+  swallow = true; setTimeout(() => (swallow = false), 350);
+  const dy = Math.max(0, e.clientY - g.y0), [t0, y0] = g.s[0], [t1, y1] = g.s.at(-1), v = t1 > t0 ? (y1 - y0) / (t1 - t0) : 0;
+  const go = e.type !== "pointercancel" && (dy > g.sp.offsetHeight / 3 || v > 0.5);
+  const ms = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : go ? 160 : 200;
+  g.sp.style.transition = ms ? `transform ${ms}ms cubic-bezier(.2, .85, .25, 1)` : "none";
+  g.sp.style.transform = go ? "translateY(100%)" : "";
+  if (go) setTimeout(() => g.sp.closest(".fsheet").querySelector(".shade2").click(), ms);
+}
+M.addEventListener("pointerup", sheetEnd);
+M.addEventListener("pointercancel", sheetEnd);
+// the release of a drag is not a tap on whatever lies under the finger
+document.addEventListener("click", (e) => { if (swallow && e.isTrusted) { swallow = false; e.stopPropagation(); e.preventDefault(); } }, true);
+applyIx();
+</script>
+</body></html>

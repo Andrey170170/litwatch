@@ -65,8 +65,11 @@ function mountDesk(el, app) {
     const main = el.querySelector(".main"), keep = how === "keep" && main ? main.scrollTop : 0;
     const v = app.view(nav.st, nav);
     const backLink = nav.stack.length && !v.overlay && !v.noBack ? `<a class="back" data-back>‹ Back</a>` : "";
+    // the main column says how it was reached (nav-go, nav-back, nav-top, nav-keep) so a round can animate it;
+    // opening or closing a slide-over leaves the page under it as it was
+    const came = v.overlay || hadOverlay ? "keep" : how;
     el.innerHTML = `<div class="body"><div class="side"><div class="wm">${shellWM()}</div>${shellNavItems(nav.st, "side")}<div class="foot"><div class="it">⚙ Settings</div></div></div>
-      <div class="main scroll"><div class="inner">${backLink}${v.body}</div></div>
+      <div class="main scroll nav-${came}"><div class="inner">${backLink}${v.body}</div></div>
       ${v.overlay ? `<div class="over${hadOverlay ? "" : " enter"}"><div class="shade" data-back></div><div class="sheet scroll">${v.overlay}</div></div>` : ""}</div>`;
     hadOverlay = !!v.overlay;
     el.querySelector(".main").scrollTop = keep;

@@ -69,9 +69,13 @@ function paperData(id) {
 /* ── state the sketch keeps: reactions, labels and rung ratings, per paper and topic ── */
 const REACT = {}, LABEL = {}, RATE = {}, REQ = new Set();
 const REASONS = { down: [["wrong", "Wrong topic"], ["over", "Overrated"], ["notint", "Not interesting"], ["knew", "Already knew it"]], up: [["under", "Underrated"], ["great", "Great find"]] };
+// how a thumb is given: "reason" asks for the reason first; "thumb" records the thumb at once and offers the reasons after
+let REACT_FLOW = "reason";
+const whyName = (thumb, why) => (why ? REASONS[thumb].find((r) => r[0] === why)[1] : "");
 // the acknowledgement says what happened
 function reactAck(pd, topic, thumb, why) {
   const tn = T[topic].n, focus = T[topic].depth === "focus";
+  if (!why) return `Noted: thumbs ${thumb} on ${tn}, no reason given.`;
   if (why === "wrong") return focus ? `Marked not on ${tn}; it leaves the library.` : `Noted: wrong topic on ${tn}. Collected for Quality.`;
   if (why === "great") return focus ? `Marked ${FIT[pd.lv[topic]] === "central" ? "central" : "related"} on ${tn}.` : `Noted: great find on ${tn}.`;
   if (why === "knew") return "Noted: already knew it. Not counted as a correction.";
@@ -113,8 +117,9 @@ function pgTopics(pd, st, { folded = false } = {}) {
   if (folded && !st.pgopen.includes("topics")) return `<div class="tpfold" data-pgfold="topics">${pd.tp.map((t) => `<span class="tpill" style="${rc(pd.lv[t])}">${badge(t)}<span>${GRADE[pd.lv[t]]}</span></span>`).join("")}<span class="sp"></span><span class="faint">Thumbs · labels ›</span></div>`;
   return `<div class="tplist">${folded ? `<div class="tphd" data-pgfold="topics">▾ Topics</div>` : ""}${pd.tp.map((t) => {
     const k = pd.id + "|" + t, re = REACT[k], lab = LABEL[k], l = pd.lv[t];
-    const thumbs = ["up", "down"].map((th) => `<a class="th${re && re.thumb === th ? " on" : ""}" data-th="${k}|${th}" title="${th === "up" ? "Thumbs up" : "Thumbs down"}">${th === "up" ? "👍" : "👎"}${re && re.thumb === th ? `<span>${REASONS[th].find((r) => r[0] === re.why)[1]}</span>` : ""}</a>`).join("");
-    const pick = st.pick === k ? `<div class="why">${["up", "down"].includes(st.pickth) ? REASONS[st.pickth].map(([w, n]) => `<a data-why="${k}|${st.pickth}|${w}">${n}</a>`).join("") : ""}${re ? `<a class="clr" data-why="${k}|-|-">Clear</a>` : ""}</div>` : "";
+    const thumbs = ["up", "down"].map((th) => `<a class="th${re && re.thumb === th ? " on" : ""}" data-th="${k}|${th}" title="${th === "up" ? "Thumbs up" : "Thumbs down"}">${th === "up" ? "👍" : "👎"}${re && re.thumb === th && re.why ? `<span>${whyName(th, re.why)}</span>` : ""}</a>`).join("");
+    const after = REACT_FLOW === "thumb", ask = after ? `<span class="whyq">Why, if you like:</span>` : "";
+    const pick = st.pick === k ? `<div class="why${after ? " after" : ""}">${["up", "down"].includes(st.pickth) ? ask + REASONS[st.pickth].map(([w, n]) => `<a class="${re && re.why === w ? "on" : ""}" data-why="${k}|${st.pickth}|${w}">${n}</a>`).join("") : ""}${re && !after ? `<a class="clr" data-why="${k}|-|-">Clear</a>` : ""}</div>` : "";
     const labRow = st.lab === k ? `<div class="why">${fitSeg(pd, t)}</div>` : "";
     return `<div class="tprow" style="${rc(l)}"><span class="stripe"></span>${badge(t)}<span class="nm">${T[t].n}</span>
       <span class="gr">${GRADE[l]}</span><span class="vd">${lab ? `<b>your label: ${lab}</b>` : `Fit ${FIT[l]} · Weight ${pd.weight}`}</span>
