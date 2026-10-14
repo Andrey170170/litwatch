@@ -9,7 +9,7 @@ development share one Docker daemon and one process table.
 | --- | --- | --- |
 | containers `litwatch`, `litwatch-deep` | 0.14, in production | |
 | containers `litwatch-v1`, `litwatch-v1-db`, `litwatch-deep-v1` | the v1 deployment the owner reads daily | stack `/opt/homelab-config/stacks/litwatch-v1` (its README); API 127.0.0.1:8770, Postgres 127.0.0.1:55433 |
-| container `litwatch-v1-dev` | development Postgres | 127.0.0.1:55432; databases `litwatch` (an adopted copy of production), `test` (pytest), `web_demo` (for clicking through the web app) |
+| container `litwatch-v1-dev` | development Postgres | 127.0.0.1:55432; databases `litwatch` (an adopted copy of production), `test` (pytest), `sandbox` (end-to-end runs) |
 | user unit `litwatch-sketches` | the UI sketches | port 8791, serving `docs/specs/v1/sketches/` |
 
 The production and v1 deployments are touched only when the task is about them.
@@ -26,8 +26,10 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   `TEST_DATABASE_URL` (dev `test`) and `LITWATCH_API_TOKEN`; source it first so `.env` only fills in the API keys.
 - The agent shell exports `ANTHROPIC_BASE_URL` for the agent's own proxy. The Anthropic SDK picks it up and every
   litwatch call fails with 401, hence `env -u`.
-- Dev API: `litwatch serve --port 8766`; the web app's `pnpm dev` (port 5173) proxies `/api` to it. Point
-  `LITWATCH_DATABASE_URL` at `web_demo` to click through the app without touching dev data.
+- Dev API: `litwatch serve --port 8766`; the web app's `pnpm dev` (port 5173) proxies `/api` to it.
+- The sandbox: `scripts/refresh-sandbox.sh` rebuilds `sandbox` from a dump of the v1 deployment's database (about
+  a minute), migrates it, and replaces the old one only once the copy is complete. Point `LITWATCH_DATABASE_URL`
+  at `sandbox` to run against it, and refresh it before a run that writes.
 - Stop only what you started: the PID you captured when starting it, or the owner of your port
   (`ss -H -ltnp 'sport = :8766'`) after checking that `/proc/<pid>/cwd` is your checkout. Never kill by a name or
   path pattern: the production container and other worktrees run `litwatch serve` too.
