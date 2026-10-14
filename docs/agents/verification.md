@@ -53,7 +53,7 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - Evidence: pytest migrating a fresh schema; a data migration also runs on a fresh sandbox copy, with counts
   before and after and a check that nothing the owner touched (labels, reactions, saved papers, Zotero items, Deep
   cards) is lost.
-- How: refresh the sandbox, run the migration there, count with SQL before and after.
+- How: `scripts/refresh-sandbox.sh`, run the migration there, count with SQL before and after.
 
 ### Integrations (Zotero, WebDAV, deep, archive, webhook)
 - Works means: an event produces the right external effect, and a failure is retried and visible.
@@ -107,8 +107,6 @@ preference set.
 
 ## Known gaps
 
-- **The sandbox** has no refresh script yet; `web_demo` on the dev Postgres stands in. Closing it: a script that
-  restores a read-only dump of the v1 deployment into a fresh database. Next, before N0.
 - **The quality harness and the preference set** don't exist yet. Each arrives with the milestone that introduces
   what it measures: classification and Gists in N1–N2, Briefs in N3, digests in N4, Deep cards with the first
   change to `deep/`.
