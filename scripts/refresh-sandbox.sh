@@ -1,50 +1,67 @@
 #!/usr/bin/env bash
 # Rebuild the sandbox database from the v1 deployment's, for end-to-end runs
-# (docs/agents/verification.md). The deployment is only read: pg_dump takes a consistent
-# snapshot. Data flows one way, into the sandbox, which never acts on the deployment's
-# pending work: every integration starts from the copy's last event, and the deployment's
-# queue of papers waiting for deep cards is dropped.
+# (docs/agents/verification.md). Run from the repository root on the owner's server
+# (docs/agents/dev-host.md).
 #
-# Run from the repository root on the owner's server (docs/agents/dev-host.md). The
-# containers and database names below are that server's and can be overridden.
-set -euo pipefail
+# The deployment is only read: pg_dump takes a consistent snapshot. The copy is built as
+# `sandbox_next` and replaces `sandbox` only once it is complete, so a failed refresh leaves
+# the previous sandbox as it was. The copy keeps the deployment's pipeline backlog (it is
+# realistic state), but none of its external work: copied events count as already
+# delivered, so an integration enabled in dev starts after them, and deep jobs and the
+# deep waiting queue are detached.
+#
+#   --no-migrate   keep the deployment's schema, to take a baseline before a migration
+set -Eeuo pipefail
 
-SOURCE_CONTAINER=${SOURCE_CONTAINER:-litwatch-v1-db}
-SOURCE_USER=${SOURCE_USER:-litwatch}
-SOURCE_DB=${SOURCE_DB:-litwatch}
-TARGET_CONTAINER=${TARGET_CONTAINER:-litwatch-v1-dev}
-TARGET_USER=${TARGET_USER:-postgres}
-TARGET_DB=${TARGET_DB:-sandbox}
+readonly SOURCE=litwatch-v1-db TARGET=litwatch-v1-dev DB=sandbox NEXT=sandbox_next
 
-# The target is dropped and rebuilt, so only a database named for that is accepted.
-case "$TARGET_DB" in
-  sandbox*) ;;
-  *) echo "refusing to replace '$TARGET_DB': the target's name must start with 'sandbox'" >&2; exit 1 ;;
+migrate=1
+case "${1:-}" in
+  "") ;;
+  --no-migrate) migrate=0 ;;
+  *) echo "usage: $0 [--no-migrate]" >&2; exit 2 ;;
 esac
-if [[ "$TARGET_CONTAINER" == "$SOURCE_CONTAINER" ]]; then
-  echo "refusing to write into the source container '$SOURCE_CONTAINER'" >&2
+
+# Migrations connect through .env.v1's DSN; it must reach the same container the copy is
+# restored into.
+set -a; . ./.env.v1; set +a
+dsn_server=$(sed -E 's#^[a-z]+://[^@]*@([^/]+)/.*#\1#' <<<"$LITWATCH_DATABASE_URL")
+if [[ "$dsn_server" != "$(docker port "$TARGET" 5432/tcp | head -1)" ]]; then
+  echo "LITWATCH_DATABASE_URL in .env.v1 does not point at $TARGET" >&2
   exit 1
 fi
 
 target_psql() {
-  docker exec -i "$TARGET_CONTAINER" psql -v ON_ERROR_STOP=1 -q -U "$TARGET_USER" "$@"
+  docker exec -i "$TARGET" psql -v ON_ERROR_STOP=1 -q -U postgres "$@"
 }
 
-echo "rebuilding $TARGET_CONTAINER/$TARGET_DB from $SOURCE_CONTAINER/$SOURCE_DB"
-target_psql -d postgres -c "DROP DATABASE IF EXISTS \"$TARGET_DB\" WITH (FORCE)"
-target_psql -d postgres -c "CREATE DATABASE \"$TARGET_DB\""
-docker exec "$SOURCE_CONTAINER" pg_dump -U "$SOURCE_USER" -d "$SOURCE_DB" -Fc --no-owner --no-privileges \
-  | docker exec -i "$TARGET_CONTAINER" pg_restore -U "$TARGET_USER" -d "$TARGET_DB" \
-      --no-owner --no-privileges --exit-on-error
+drop_next() { target_psql -d postgres -c "DROP DATABASE IF EXISTS $NEXT WITH (FORCE)"; }
+trap 'echo "refresh failed; $NEXT dropped" >&2; drop_next' ERR
 
-target_psql -d "$TARGET_DB" <<'SQL'
+echo "copying $SOURCE into $TARGET/$NEXT"
+drop_next
+target_psql -d postgres -c "CREATE DATABASE $NEXT"
+docker exec "$SOURCE" pg_dump -U litwatch -d litwatch -Fc --no-owner --no-privileges \
+  | docker exec -i "$TARGET" pg_restore -U postgres -d "$NEXT" --no-owner --no-privileges --exit-on-error
+
+# Transaction ids belong to the cluster that wrote them; restamping every copied event with
+# this transaction's id makes them all settled here, ahead of anything the sandbox writes.
+target_psql -d "$NEXT" -1 <<'SQL'
+UPDATE outbox SET xid = pg_current_xact_id();
 DELETE FROM integration_cursors;
 DELETE FROM deep_waiting;
+UPDATE deep_cards SET job_id = NULL, job_since = NULL, job_revision = NULL, job_version = NULL,
+                      job_event = NULL, job_automatic = NULL
+ WHERE job_id IS NOT NULL;
 SQL
 
-# Bring the copy up to this checkout's schema, which may be ahead of the deployment's.
-set -a; . ./.env.v1; set +a
-LITWATCH_DATABASE_URL="${LITWATCH_DATABASE_URL%/*}/$TARGET_DB" uv run litwatch db migrate
+if (( migrate )); then
+  LITWATCH_DATABASE_URL="${LITWATCH_DATABASE_URL%/*}/$NEXT" uv run litwatch db migrate
+fi
 
-target_psql -d "$TARGET_DB" -Atc "SELECT 'papers: ' || count(*) FROM papers"
-echo "done: point LITWATCH_DATABASE_URL at the database '$TARGET_DB'"
+target_psql -d postgres -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)"
+target_psql -d postgres -c "ALTER DATABASE $NEXT RENAME TO $DB"
+trap - ERR
+
+target_psql -d "$DB" -Atc "SELECT 'papers: ' || count(*) FROM papers"
+echo "done: point LITWATCH_DATABASE_URL at the database '$DB'"

@@ -28,8 +28,8 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   litwatch call fails with 401, hence `env -u`.
 - Dev API: `litwatch serve --port 8766`; the web app's `pnpm dev` (port 5173) proxies `/api` to it.
 - The sandbox: `scripts/refresh-sandbox.sh` rebuilds `sandbox` from a dump of the v1 deployment's database (about
-  a minute) and migrates it; point `LITWATCH_DATABASE_URL` at `sandbox` to run against it. Refresh it before a
-  run that writes.
+  a minute), migrates it, and replaces the old one only once the copy is complete. Point `LITWATCH_DATABASE_URL`
+  at `sandbox` to run against it, and refresh it before a run that writes.
 - Stop only what you started: the PID you captured when starting it, or the owner of your port
   (`ss -H -ltnp 'sport = :8766'`) after checking that `/proc/<pid>/cwd` is your checkout. Never kill by a name or
   path pattern: the production container and other worktrees run `litwatch serve` too.
