@@ -60,6 +60,22 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  archive:
+    name: Archive tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: archive
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+      - run: uv venv && uv pip install -r requirements.lock -e .
+      - run: .venv/bin/python -m unittest discover -s tests
+
   web:
     name: Web app type check, tests and build
     runs-on: ubuntu-latest
@@ -84,7 +100,7 @@ jobs:
 
   container:
     name: Container smoke test
-    needs: [quality, deep, web]
+    needs: [quality, deep, web, archive]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

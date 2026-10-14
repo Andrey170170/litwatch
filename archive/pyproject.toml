@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arxiv-archive"
+version = "0.5.1"
+description = "Internal paper catalog, PDF and LaTeX store, and priority acquisition service"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["requests>=2.34,<3"]
+
+[project.optional-dependencies]
+server = ["pyarrow>=25,<26", "zstandard>=0.25,<0.26"]
+
+[project.scripts]
+paper-archive-web = "arxiv_archive.web_server:main"
+paper-archive-indexer = "arxiv_archive.search_indexer:main"
+paper-archive-recovery = "arxiv_archive.recovery:main"
+paper-archive = "arxiv_archive.cli:main"
+paper-archive-worker = "arxiv_archive.worker:main"
+paper-archive-backup = "arxiv_archive.backup:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arxiv_archive"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "README.md", "pyproject.toml", "requirements.lock"]
