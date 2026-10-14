@@ -69,7 +69,7 @@ class Taxonomy(BaseModel):
     """The tree, parents before children and siblings in the owner's order, and the followed
     topics in the owner's order. Construction fails with every problem found."""
 
-    classes: list[TaxonomyClass]
+    classes: list[TaxonomyClass] = Field(min_length=1)
     topics: list[FollowedTopic] = Field(default_factory=list)
 
     @model_validator(mode="after")

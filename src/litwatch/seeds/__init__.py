@@ -63,11 +63,19 @@ def taxonomy(path: Path | None = None) -> Taxonomy:
 def taxonomy_from_spec(raw: dict[str, Any]) -> Taxonomy:
     """Nested classes (`children`) flattened parents first; a followed class takes its topic's
     subject as its description and may not carry one of its own."""
-    subjects = {t["class"]: t.get("subject") for t in raw.get("topics") or []}
-    classes: list[dict[str, Any]] = []
+    if not isinstance(raw, dict):
+        raise ValueError("a taxonomy is a mapping with `classes` and `topics`")
+    # Entries of the wrong shape are passed on as they are, for validation to report.
+    subjects = {
+        t.get("class"): t.get("subject") for t in raw.get("topics") or [] if isinstance(t, dict)
+    }
+    classes: list[Any] = []
 
-    def walk(nodes: list[dict[str, Any]], parent: str | None) -> None:
+    def walk(nodes: list[Any], parent: str | None) -> None:
         for node in nodes:
+            if not isinstance(node, dict):
+                classes.append(node)
+                continue
             spec = {k: v for k, v in node.items() if k != "children"}
             if spec.get("slug") in subjects:
                 if "description" in spec:

@@ -71,6 +71,9 @@ def test_a_small_tree_flattens_parents_first():
         (spec(topics=[topic(rubric=None)]), "has no rubric"),
         (spec(topics=[topic(depth="area", rubric="- Central: x.")]), "only Focus topics"),
         (spec(topics=[topic(), topic()]), "followed 2 times"),
+        ({}, "at least 1 item"),
+        (spec(topics=[topic(), {}]), "Field required"),
+        ({"classes": ["not a class"]}, "valid dictionary"),
     ],
 )
 def test_a_broken_taxonomy_is_refused_with_its_problem(raw, problem):
