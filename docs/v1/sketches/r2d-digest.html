@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 2d · the Digest, thumb first</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<style>
+  .segbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .segbar .sp { flex: 1; }
+  .seg { display: inline-flex; border: 1px solid var(--line); background: var(--surface); }
+  .seg a { padding: 5px 16px; font-size: 12.5px; font-weight: 600; color: var(--fg2); cursor: pointer; text-align: center; }
+  .seg a:hover { color: var(--fg); }
+  .seg a.on { background: var(--sel); color: var(--sel-fg, var(--fg)); }
+  .seg.sm a { padding: 4px 10px; }
+  .frame[data-dir="nc"] .seg { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+  .frame[data-dir="nc"] .seg a { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; font-size: 13.5px; }
+  .frame[data-dir="nc"] .seg.sm a { font-size: 12.5px; letter-spacing: .08em; }
+  /* List / Calendar: plain icons, the active one in the accent */
+  .modes { display: inline-flex; gap: 2px; }
+  .modes a { min-width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; color: var(--fg3); cursor: pointer; }
+  .modes a:hover { color: var(--fg); }
+  .modes a.on { color: var(--acc, var(--fg)); }
+  .wkline { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 13px; cursor: pointer;
+    border: 1px solid color-mix(in srgb, var(--acc, var(--fg)) 45%, transparent); color: var(--acc, var(--fg)); }
+  .wkline:hover { background: color-mix(in srgb, var(--acc, var(--fg)) 8%, transparent); }
+  .frame[data-dir="nc"] .wkline { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .weeksub { font-size: 12px; color: var(--fg3); margin: -6px 0 12px; }
+  .grp .k { margin-left: auto; font-size: 11px; color: var(--fg3); }
+  .calnote { font-size: 12px; color: var(--fg3); margin-top: 10px; max-width: 60ch; }
+  /* P1: one control row under the header */
+  .ctl { display: flex; align-items: center; gap: 6px; margin: -4px 0 12px; }
+  .ctl .sp { flex: 1; }
+  .stp { display: inline-flex; align-items: center; min-width: 0; }
+  .stp .ib { width: 30px; }
+  .stp .ib[disabled] { opacity: .3; cursor: default; }
+  .stp .lbl { font: 600 13px "JetBrains Mono", monospace; white-space: nowrap; }
+  .frame[data-dir="nc"] .stp .lbl { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; font-size: 15px; }
+  /* P4: the controls in a bar at the bottom, in reach of the thumb */
+  .pfoot { padding-top: 4px; padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
+  .pfoot .stp { display: flex; width: 100%; }
+  .pfoot .stp .ib { width: 64px; height: 46px; font-size: 24px; }
+  .pfoot .stp .lbl { flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+  .pfoot .stp .lbl small { font: 500 10px "JetBrains Mono", monospace; color: var(--fg3); letter-spacing: .12em; text-transform: uppercase; }
+  .pfoot .modes { display: flex; width: 100%; }
+  .pfoot .modes a { flex: 1; height: 46px; font-size: 18px; }
+  .pfoot .modes a span { font-size: 13px; }
+  .frame[data-dir="nc"] .pfoot .modes a span { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; font-size: 14px; }
+  /* sketch switches */
+  .sw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+  .sw button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px; color: var(--fg2); }
+  .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+  @media (max-width: 640px) { .sw > span { display: none; } .sw button { padding: 3px 6px; } }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 2d · the Digest, thumb first</h1>
+  <span class="sp"></span>
+  <span class="sw"><span>Phone</span><button data-sw="pv:4">P4</button><button data-sw="pv:1">P1</button></span>
+  <span class="sw"><span>Run</span><button data-sw="run:ok">ok</button><button data-sw="run:running">running</button><button data-sw="run:failed">failed</button></span>
+  <label class="tune" style="font-size:12px;color:var(--fg2)"><input type="checkbox" id="showedge"> edge</label>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">Your answers to 2c, applied. The calendar is the Month one, with badges and counts on desktop and colours only on the phone. History keeps loading as you scroll (the list down into older days, the calendar up into older weeks) until it reaches the start of the archive, here Monday 1 June. On the phone the run status now sits at the right of the header, next to ⚙. New: <b>P4</b>, with Day · Week · History in the drawer under Digest and the controls at the bottom of the screen, within reach of your thumb. P1 stays as the baseline.</p>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" id="M"></div>
+    <div class="notes">
+      <p><b>P4</b></p>
+      <ul>
+        <li>Header: ☰ litwatch, then the status and ⚙ on the right.</li>
+        <li>Bottom bar: on Day, "‹ Tue 13 Oct ›" with large arrows; on Week, "‹ 5–11 Oct ›"; on History, List and Calendar.</li>
+        <li>Day · Week · History: in the drawer, under Digest. An edge swipe opens it.</li>
+        <li>A day or week opened from History is a page with the same bottom bar, so ‹ › keeps working there.</li>
+      </ul>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>P4 or P1?</li>
+        <li>In P4, switching between Day, Week and History takes two taps, through the drawer. Is that fine, or should a long press on the bottom bar (or a horizontal swipe on it) switch views too?</li>
+        <li>Should a horizontal swipe on a Day's content step to the previous or next day, like the arrows? It would not clash with the edge swipe, which starts at the screen's edge.</li>
+        <li>History opens on the List. Should it remember your last choice (List or Calendar) instead?</li>
+        <li>Is the Digest settled enough to move on to round 3, the topic page and Papers?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const WEEKS = NEWEST.filter((d) => d.week).map((d) => d.key); // Mondays that wrote weeklies, newest first
+const SW = Object.assign({ pv: "4", run: "ok" }, JSON.parse(localStorage.getItem("lw-r2d") || "{}"));
+SHELL_RUN = SW.run;
+const LOAD = 6; // weeks History shows at first and adds per load
+
+const VIEWS = [["day", "Day"], ["week", "Week"], ["history", "History"]];
+const viewSeg = (st, cls = "") => `<div class="seg ${cls}">${VIEWS.map(([k, n]) => `<a class="${st.view === k ? "on" : ""}" data-view="${k}">${n}</a>`).join("")}</div>`;
+const modes = (st, labels) => `<span class="modes">${[["list", "☰", "List"], ["cal", "▦", "Calendar"]].map(([k, i, n]) => `<a class="${st.hmode === k ? "on" : ""}" data-hmode="${k}" title="${n}">${i}${labels ? `<span>${n}</span>` : ""}</a>`).join("")}</span>`;
+// ‹ label › for the current day or week; long spells it out and marks today
+function stepper(st, long) {
+  if (st.view === "day") {
+    const i = NEWEST.findIndex((d) => d.key === st.day), today = st.day === TODAY;
+    const lbl = long ? `${today ? "<small>Today</small>" : ""}${st.day}` : today ? "Today" : st.day.split(" ").slice(1).join(" ");
+    return `<span class="stp"><button class="ib" data-step="1">‹</button><span class="lbl">${lbl}</span><button class="ib" data-step="-1" ${i === 0 ? "disabled" : ""}>›</button></span>`;
+  }
+  const i = WEEKS.indexOf(st.week);
+  return `<span class="stp"><button class="ib" data-wstep="1" ${i === WEEKS.length - 1 ? "disabled" : ""}>‹</button><span class="lbl">${long && i === 0 ? "<small>Last week</small>" : ""}${DAY[st.week].week.range}</span><button class="ib" data-wstep="-1" ${i === 0 ? "disabled" : ""}>›</button></span>`;
+}
+
+function dayView(day, strip) {
+  const d = DAY[day];
+  const wk = d.week ? `<div class="wkline" data-goweek="${day}">Weekly digests for ${d.week.range} are out <span style="margin-left:auto">›</span></div>` : "";
+  return (strip ? daystrip(day, false) : "") + wk + dayBody(day, DG, { weekly: false });
+}
+function weekView(mon, strip) {
+  const i = WEEKS.indexOf(mon), w = DAY[mon].week;
+  return (strip ? `<div class="daystrip"><button class="ib" data-wstep="1" ${i === WEEKS.length - 1 ? "disabled" : ""}>‹</button><span class="day">${i === 0 ? "<small>Last week</small>" : ""}${w.range}</span><button class="ib" data-wstep="-1" ${i === 0 ? "disabled" : ""}>›</button></div>` : "") +
+    `<div class="weeksub">Written ${mon}</div>` + TOPICS.map((t) => gistBlock(`${mon}|${t.id}|w`, DG)).join("");
+}
+// History as a list: newest first, a weekend as one line, each week's weeklies closing the week they cover;
+// it shows `weeks` weeks, and a loader at the bottom while older ones exist
+function historyList(weeks) {
+  let h = "", mondays = 0, i = 0;
+  for (; i < NEWEST.length && mondays < weeks; i++) {
+    const d = NEWEST[i];
+    if (d.none) {
+      const sat = NEWEST[i + 1] && NEWEST[i + 1].none ? NEWEST[++i] : null;
+      h += `<div class="grp"><span class="t">${sat ? `${sat.key.split(" ")[0]} – ${d.key}` : d.key}</span><span class="s">No papers released</span></div>`;
+      continue;
+    }
+    h += `<div class="grp click" data-day="${d.key}"><span class="t">${d.key}</span>${d.key === TODAY ? '<span class="s">today</span>' : ""}<span class="k">open the day ›</span></div>`;
+    h += `<div class="list">${DAILY.map((id) => markRow(`${d.key}|${id}`, id, d.marks[id], DG)).join("")}</div>`;
+    if (d.week) h += `<div class="grp click pin" data-week="${d.key}"><span class="t">Week ${d.week.range}</span><span class="s">weekly digests</span><span class="k">open the week ›</span></div>
+      <div class="list">${TOPICS.map((t) => markRow(`${d.key}|${t.id}|w`, t.id, d.week.marks[t.id], DG)).join("")}</div>`;
+    if (d.dow === 1) mondays++;
+  }
+  return h + (i < NEWEST.length ? `<div class="loadmore">Loading older days…</div>` : `<div class="archstart">The archive starts on ${LOG[0].key}.</div>`);
+}
+function historyCal(st, phone) {
+  return monthView({ weeks: st.hweeks, text: !phone, older: true }) +
+    `<p class="calnote">${phone ? "A day opens its Day, a W cell opens its Week." : "A date opens its Day, a W opens its Week, a bar opens that digest."}</p>`;
+}
+const historyBody = (st, phone) => (st.hmode === "cal" ? historyCal(st, phone) : historyList(st.hweeks));
+
+function deskView(st) {
+  const bar = `<div class="segbar">${viewSeg(st)}<span class="sp"></span>${st.view === "history" ? modes(st) : ""}</div>`;
+  const body = bar + (st.view === "day" ? dayView(st.day, true) : st.view === "week" ? weekView(st.week, true) : `<div class="wideview">${historyBody(st, false)}</div>`);
+  const ov = st.paper ? paperView(st.paper) : st.dg ? digestPage(st.dg) : null;
+  return { body, overlay: ov && `<a class="back" data-back>‹ ${st.paper && st.dg ? "Digest" : "Close"}</a>${ov}` };
+}
+function phoneView(st) {
+  const title = st.view === "day" ? st.day : st.view === "week" ? "Week " + DAY[st.week].week.range : "History";
+  const content = st.view === "day" ? dayView(st.day, false) : st.view === "week" ? weekView(st.week, false) : historyBody(st, true);
+  if (SW.pv === "1") {
+    const right = st.view === "history" ? modes(st) : stepper(st, false);
+    return { body: `<div class="ctl">${viewSeg(st, "sm")}<span class="sp"></span>${right}</div>` + content, title };
+  }
+  return { body: content, title, foot: `<div class="pfoot">${st.view === "history" ? modes(st, true) : stepper(st, true)}</div>` };
+}
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, view: "day", day: TODAY, week: WEEKS[0], hmode: "list", hweeks: LOAD, dg: null },
+    view(st) {
+      const slide = !phone && st.tab === "Digest" && !st.topic;
+      if (st.paper && !slide) return { body: paperView(st.paper), title: "" };
+      if (st.topic) return { body: phone ? topicPage(st.topic).replace(/<div style="display:flex;gap:10px[^]*?<\/div>\s*<\/div>/, "") : topicPage(st.topic), title: T[st.topic].n };
+      if (st.tab === "Topics") return { body: topicsView() };
+      if (st.tab === "Papers") return { body: papersView() };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      return phone ? phoneView(st) : deskView(st);
+    },
+    // P4: Day · Week · History under Digest in the drawer
+    sub: phone ? (st) => (SW.pv === "4" ? VIEWS.map(([k, n]) => `<div class="it subit${st.tab === "Digest" && !st.topic && st.view === k ? " on" : ""}" data-subview="${k}">${n}</div>`).join("") : "") : null,
+    click(e, nav) {
+      const f = (s) => e.target.closest(s); let n;
+      if ((n = f("[data-subview]"))) { nav.top({ tab: "Digest", view: n.dataset.subview }); return true; }
+      if (f(".st.bad")) { alert("Would open Quality: the two failed digests and why."); return true; }
+      if (f("[data-paper]") || f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-view]"))) nav.set({ view: n.dataset.view });
+      else if ((n = f("[data-hmode]"))) {
+        nav.set({ hmode: n.dataset.hmode, hweeks: LOAD });
+        // the calendar runs oldest to newest, so it opens at the bottom, on this week
+        const sc = scroller(e.currentTarget); sc.scrollTop = n.dataset.hmode === "cal" ? sc.scrollHeight : 0;
+        sc.dispatchEvent(new Event("scroll")); // a short calendar cannot scroll, so check for loading now
+      }
+      else if ((n = f("[data-step]"))) nav.set({ day: stepDay(nav.st.day, +n.dataset.step) });
+      else if ((n = f("[data-wstep]"))) { const i = WEEKS.indexOf(nav.st.week) + +n.dataset.wstep; if (WEEKS[i]) nav.set({ week: WEEKS[i] }); }
+      else if ((n = f("[data-day], [data-gday]"))) nav.go({ view: "day", day: n.dataset.day || n.dataset.gday });
+      else if ((n = f("[data-week], [data-gweek], [data-goweek]"))) nav.go({ view: "week", week: n.dataset.week || n.dataset.gweek || n.dataset.goweek });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else return false;
+      return true;
+    },
+  };
+}
+const scroller = (frame) => frame.querySelector(".main, .screen > .scroll");
+
+// History loads more as you near its loader: the list at the bottom, the calendar at the top (keeping your place)
+function autoLoad(frame, nav) {
+  let busy = false;
+  frame.addEventListener("scroll", () => {
+    const sc = scroller(frame);
+    if (busy || !sc || !sc.querySelector(".loadmore")) return;
+    const cal = nav.st.hmode === "cal";
+    if (cal ? sc.scrollTop > 300 : sc.scrollHeight - sc.scrollTop - sc.clientHeight > 300) return;
+    busy = true;
+    setTimeout(() => {
+      const h0 = scroller(frame).scrollHeight;
+      nav.set({ hweeks: nav.st.hweeks + LOAD });
+      const s2 = scroller(frame);
+      if (cal) s2.scrollTop += s2.scrollHeight - h0;
+      busy = false;
+      s2.dispatchEvent(new Event("scroll")); // still near the loader: load again
+    }, 450);
+  }, true);
+}
+
+const D = document.getElementById("D"), M = document.getElementById("M");
+const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
+autoLoad(D, navs[0]); autoLoad(M, navs[1]);
+function markSwitches() { document.querySelectorAll("[data-sw]").forEach((b) => { const [k, v] = b.dataset.sw.split(":"); b.classList.toggle("on", SW[k] === v); }); }
+document.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => {
+  const [k, v] = b.dataset.sw.split(":"); SW[k] = v; SHELL_RUN = SW.run;
+  localStorage.setItem("lw-r2d", JSON.stringify(SW)); markSwitches(); navs.forEach((n) => n.set({}));
+});
+markSwitches();
+document.getElementById("showedge").onchange = (e) => M.classList.toggle("show-edge", e.target.checked);
+</script>
+</body></html>

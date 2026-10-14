@@ -1,7 +1,7 @@
 // The shell chosen in round 1, shared by every later round: the desktop sidebar (B) and the phone drawer (C).
 // A round passes an app: { start, view(st) -> { body, title?, overlay?, bar?, barRight?, foot? }, click?(e, nav) -> true
 // when handled, sub?(st) -> drawer items under Digest }. On the phone, bar replaces the wordmark on a top-level
-// screen, barRight goes before ⚙, and foot is pinned under the scroll.
+// screen, barRight goes before the run status and ⚙ at the right, and foot is pinned under the scroll.
 // Navigation is a stack: nav.go() pushes a step, nav.back() undoes one, nav.set() changes the page in place
 // (scroll kept), nav.top() jumps to a top-level screen. On a phone-sized page the steps are real history
 // entries, so the OS back gesture walks them too.
@@ -85,8 +85,8 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
   function screenHTML(st, depth) {
     const v = app.view(st, nav);
     const left = depth ? `<button class="ib" data-back>‹</button><span class="ttl">${v.title || ""}</span>`
-      : `<button class="ib" data-menu>☰</button>${v.bar || `<span class="wm">${shellWM()}</span>`}`;
-    return `<div class="pbar">${left}<span class="sp"></span>${v.barRight || ""}<button class="ib">⚙</button></div><div class="scroll"><div class="pp">${v.body}${v.overlay || ""}</div></div>${v.foot || ""}`;
+      : `<button class="ib" data-menu>☰</button>${v.bar || `<span class="wm">litwatch</span>`}`;
+    return `<div class="pbar">${left}<span class="sp"></span>${v.barRight || ""}${shellStatus()}<button class="ib">⚙</button></div><div class="scroll"><div class="pp">${v.body}${v.overlay || ""}</div></div>${v.foot || ""}`;
   }
   function draw(how) {
     const sc = scr.querySelector(".scroll"), keep = how === "keep" && sc ? sc.scrollTop : 0;

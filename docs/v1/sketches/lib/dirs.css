@@ -170,8 +170,11 @@ html[data-theme="dark"] .frame[data-dir="mc"] .wm { text-shadow: 0 0 8px rgba(25
 .frame[data-dir="mc"] .pbar { box-shadow: inset 0 -2px 0 var(--acc); }
 .frame[data-dir="nc"] .wm .st.bad { color: var(--sig); }
 .frame[data-dir="nc"] .wm .st.bad::before { background: var(--sig); }
-.frame[data-dir="nc"] .wm .st.run { color: var(--acc); }
-.frame[data-dir="nc"] .wm .st.run::before { background: var(--acc); }
+.frame[data-dir="nc"] .wm .st.run, .frame[data-dir="nc"] .pbar > .st.run { color: var(--acc); }
+.frame[data-dir="nc"] .wm .st.run::before, .frame[data-dir="nc"] .pbar > .st.run::before { background: var(--acc); }
+.frame[data-dir="nc"] .pbar > .st.bad { color: var(--sig); }
+.frame[data-dir="nc"] .pbar > .st.bad::before { background: var(--sig); }
+.frame[data-dir="nc"] .pbar > .st::before { border-radius: 0; }
 .frame[data-dir="nc"] .mday, .frame[data-dir="nc"] .mweek { clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%); }
 .frame[data-dir="nc"] .month .mh { font-family: Rajdhani, sans-serif; font-weight: 700; letter-spacing: .14em; }
 /* the Digest views under Digest in the drawer: the tab stays filled, the view is marked by colour only */

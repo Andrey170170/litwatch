@@ -43,8 +43,10 @@ const WEEK = {
 };
 const WEEK_R = { cotf: 5, cotm: 4, circ: 4, interp: 4, align: 3, lm: 4, reason: 3, agents: 2, eff: 3 };
 
-// six weeks of days, Monday 7 Sep to today, oldest first; generated marks, with today, Mon 12 and Fri 9 as in round 1
-const MON = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MONTH = ["Sep", "Oct"];
+// every day since the archive started, Monday 1 Jun to today, oldest first; generated marks, with today, Mon 12 and
+// Fri 9 as in round 1
+const MON = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const START = Date.UTC(2026, 5, 1), DAYMS = 864e5, NDAYS = (Date.UTC(2026, 9, 13) - START) / DAYMS + 1;
 function seeded(s) { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h ^= h >>> 13; return (h >>> 0) / 4294967296; }; }
 const FIXED = {
   "Tue 13 Oct": { cotf: [2, 5, "2 new · 1 must read"], cotm: [2, 4, "2 new · 1 must read"], circ: [1, 3, "1 new"], interp: [11, 3, "11 new · 1 pick"], align: [0, 0, "Nothing new"] },
@@ -53,9 +55,9 @@ const FIXED = {
   "Thu 8 Oct": { cotm: [0, -1, "Could not be written"] },
 };
 const LOG = [];
-for (let i = 0; i < 37; i++) {
-  const dt = new Date(Date.UTC(2026, 8, 7 + i)), dow = dt.getUTCDay(), dom = dt.getUTCDate();
-  const key = `${MON[dow]} ${dom} ${MONTH[dt.getUTCMonth() - 8]}`;
+for (let i = 0; i < NDAYS; i++) {
+  const dt = new Date(START + i * DAYMS), dow = dt.getUTCDay(), dom = dt.getUTCDate();
+  const key = `${MON[dow]} ${dom} ${MONTH[dt.getUTCMonth()]}`;
   const day = { key, dom, dow, none: dow === 0 || dow === 6, marks: {} };
   if (!day.none) for (const id of DAILY) {
     const fx = FIXED[key] && FIXED[key][id];
@@ -67,8 +69,8 @@ for (let i = 0; i < 37; i++) {
     day.marks[id] = { n, r, c: `${n} new` + (area ? (k ? ` · ${k} pick${k > 1 ? "s" : ""}` : "") : r >= 4 ? " · 1 must read" : "") };
   }
   if (dow === 1 && i > 0) {
-    const from = new Date(Date.UTC(2026, 8, 7 + i - 7)), to = new Date(Date.UTC(2026, 8, 7 + i - 1));
-    const f = (d) => `${d.getUTCDate()} ${MONTH[d.getUTCMonth() - 8]}`;
+    const from = new Date(START + (i - 7) * DAYMS), to = new Date(START + (i - 1) * DAYMS);
+    const f = (d) => `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}`;
     day.week = { range: `${from.getUTCMonth() === to.getUTCMonth() ? from.getUTCDate() : f(from)}–${f(to)}`, marks: {} };
     for (const t of TOPICS) {
       const [, picks, n0] = WEEK[t.id], R = seeded(key + "w" + t.id), now = key === "Mon 12 Oct", r = now ? WEEK_R[t.id] : 2 + Math.floor(R() * 4);
@@ -193,7 +195,7 @@ function gridView(sel, { weeks = 3, lg = false } = {}) {
    bars in the fixed topic order; the W cell holds the weekly ones in two columns, Focus and Area first (level with
    the days' bars), Fields beside them, so Field topics need no rows of their own. With text (desktop), a bar carries
    its badge and count and opens its digest; without (phone), bars are too thin to tap, so a cell opens its Day or Week. */
-function monthView({ weeks = 6, text = false } = {}) {
+function monthView({ weeks = 6, text = false, older = false } = {}) {
   let from = LOG.length - 1, left = weeks;
   while (from > 0 && !(LOG[from].dow === 1 && --left === 0)) from--;
   const rows = [];
@@ -214,5 +216,7 @@ function monthView({ weeks = 6, text = false } = {}) {
     h += `<div class="mweek" ${text ? "" : `data-gweek="${wm.key}"`}><span class="mnum" data-gweek="${wm.key}" title="Open the week ${wm.week.range}">W ${wm.week.range}</span>` +
       TOPICS.map((t) => bar(`${wm.key}|${t.id}|w`, t.id, wm.week.marks[t.id])).join("") + `</div>`;
   });
-  return `<div class="month${text ? " text" : ""}">${h}</div>`;
+  // with older, the top says whether scrolling up loads more weeks or the archive starts here
+  const top = !older ? "" : from > 0 ? `<div class="loadmore">Loading older weeks…</div>` : `<div class="archstart">The archive starts on ${LOG[0].key}.</div>`;
+  return `${top}<div class="month${text ? " text" : ""}">${h}</div>`;
 }

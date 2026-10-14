@@ -150,7 +150,7 @@ function phoneView(st) {
     return { body: `<div class="ctl">${viewSeg(st, "sm")}<span class="sp"></span>${right}</div>` + content, title };
   }
   const bar = st.view === "history" ? `<span class="ttl2">History</span>` : stepper(st, true);
-  const barRight = (st.view === "history" ? modes(st) : "") + shellStatus();
+  const barRight = st.view === "history" ? modes(st) : "";
   return { body: content, title, bar, barRight, foot: SW.pv === "3" ? `<div class="pfoot">${viewSeg(st)}</div>` : "" };
 }
 
