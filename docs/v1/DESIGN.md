@@ -14,7 +14,7 @@ editorial and hard to scan.
 | Principle | What it means and rules out |
 | --- | --- |
 | **Colour before text.** | Rarity is a colour on every paper and digest; a topic is a badge in its own colour. A list is read by colour first, then by title. No grade words on rows. |
-| **Positions stay put.** | Topics keep one order everywhere (Focus, Area, Field, each in the owner's order), and a topic with nothing new keeps its slot. Controls sit in the same place on every list page. Nothing reorders under the reader. |
+| **Positions stay put.** | Topics keep one order wherever they are listed (the sidebar, cards, digest groups, calendar slots: Focus, Area, Field, each in the owner's order), and a topic with nothing new keeps its slot. The badges on a paper row are the exception: the topic giving its highest level comes first (spec, `pipeline.md`). Controls sit in the same place on every list page. Nothing reorders under the reader. |
 | **One rung at a time.** | Every page is built on the detail ladder (Mark, Gist, Brief, Deep card, the paper): each item opens one level deeper, and each level is enough to decide whether to open the next. |
 | **Dense and scannable.** | Like 0.14's tables, not a newspaper: one line a paper where a list is browsed, prose only where a digest or a Brief is read. |
 | **The page is the acknowledgement.** | An action shows its result where it was taken (a lit star, a lit thumb with its reason, a label). A toast appears only for results the page cannot show. |
@@ -60,7 +60,8 @@ Day, today.
 
 **Day.** The date with "‹ ›" to step (on the phone the bottom bar's "‹ Tue 13 Oct ›" with large arrows, plus the
 swipe), "Today" over it on today. Then one digest card per daily topic in the fixed order, at Gist level (anatomy
-below). On a Monday the week's weekly digests follow under "Weekly · 5–11 Oct". A weekend or holiday with no release
+below). On a Monday one line above the cards, "Weekly digests for 5–11 Oct are out ›", opens that Week; the weekly
+cards themselves are not repeated in the Day. A weekend or holiday with no release
 is one line, "No papers released", and stepping skips it.
 
 **Week.** One week's weekly digests, every topic in the fixed order, the same cards; "‹ 5–11 Oct ›" steps by week.
@@ -77,10 +78,13 @@ scroll until the archive's start, where they say "The archive starts on Mon 1 Ju
   and count and opens its digest, a date opens its Day and a W its Week. On the phone the bars are colour only and a
   cell opens its Day or Week. Today's cell is outlined.
 
-**A digest** (the slide-over on the desktop, a page on the phone with the same bottom bar, so ‹ › keeps stepping):
+A Day or Week opened from History is a page with the same bottom bar on the phone, so ‹ › and the swipe keep stepping
+there.
+
+**A digest** (the slide-over on the desktop; on the phone a page with ‹ back and no bottom bar, which does not step):
 a large badge, the topic's name, "Daily digest · Tue 13 Oct" or "Weekly digest · 5–11 Oct" and the count line in the
 rarity colour; the full text; then its papers by role as rows with Gists. A Focus daily digest: Central, then
-Related. An Area daily digest: Picks, Mentioned (papers its text names), Also due. A weekly digest: "Central this
+Related, whose rows are one line each without a Gist. An Area daily digest: Picks, Mentioned (papers its text names), Also due. A weekly digest: "Central this
 week" for Focus, Picks for the others. A digest with nothing due says so in one line; a failed one says it could not
 be written and that the next run writes it again.
 
@@ -146,6 +150,9 @@ the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet
 grade and whose Fit it shows, then the Fit control), the actions and links as the same grid (arXiv, PDF, LaTeX, Code,
 Weights, BibTeX), then versions, published version and classes, and Done. A swipe steps to the previous or next paper
 of the list it was opened from.
+
+A paper outside the collection on the phone: the header and the Abstract (no Gist or Brief), and a bottom bar of
+Process, Deep read (where a provider is configured) and ⋯; its sheet has no labels and adds "Report as a miss".
 
 ### Settings
 
