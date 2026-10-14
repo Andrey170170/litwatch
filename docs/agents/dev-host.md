@@ -28,6 +28,8 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   litwatch call fails with 401, hence `env -u`.
 - Dev API: `litwatch serve --port 8766`; the web app's `pnpm dev` (port 5173) proxies `/api` to it. Point
   `LITWATCH_DATABASE_URL` at `web_demo` to click through the app without touching dev data.
-- Stop a dev server by its port: `pkill -f '[b]in/litwatch serve --port 8766'`. The production container also runs
-  `litwatch serve`, so a pattern without the port kills it; the bracket keeps the pattern from matching the shell
-  that runs it.
+- Stop only what you started: the PID you captured when starting it, or the owner of your port
+  (`ss -H -ltnp 'sport = :8766'`) after checking that `/proc/<pid>/cwd` is your checkout. Never kill by a name or
+  path pattern: the production container and other worktrees run `litwatch serve` too.
+- Zotero: the test account's `LITWATCH_ZOTERO_USER_ID` and `ZOTERO_API_KEY` go in `.env.v1`. `.env` carries the
+  owner's real library ID and key file, and fills them in whenever `.env.v1` doesn't.
