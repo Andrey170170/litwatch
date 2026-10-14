@@ -312,7 +312,7 @@ document.addEventListener("touchstart", () => {}, { passive: true });
 let sg = null, swallow = false;
 M.addEventListener("pointerdown", (e) => {
   const sp = e.target.closest(".fsheet .sheetp");
-  if (IX.sheet !== "drag" || !sp || e.button > 0) return;
+  if (IX.sheet !== "drag" || !sp || e.button > 0 || e.clientY - sp.getBoundingClientRect().top > 28) return; // the handle's strip
   sg = { sp, id: e.pointerId, y0: e.clientY, x0: e.clientX, drag: false, s: [[e.timeStamp, e.clientY]] };
 });
 M.addEventListener("pointermove", (e) => {

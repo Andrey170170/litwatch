@@ -15,10 +15,10 @@ const SHELL_TABS = ["Digest", "Topics", "Papers"];
 // running outranks over). SHELL_RUN is a sketch switch. data-settings names the Settings page the status opens.
 let SHELL_RUN = "ok";
 function shellStatus() {
-  if (SHELL_RUN === "running") return `<span class="st run" data-settings="overview" title="Tonight's run: 212 of 530 papers read">212/530</span>`;
-  if (SHELL_RUN === "failed") return `<span class="st bad" data-settings="needs" title="2 digests failed last night · open Needs you">2 failed</span>`;
-  if (SHELL_RUN === "over") return `<span class="st warn" data-settings="runs" title="openrouter projected at $47 of a $40 budget · open Runs and cost">530 · $ over</span>`;
-  return `<span class="st" data-settings="overview" title="530 papers read last night · all quiet">530</span>`;
+  if (SHELL_RUN === "running") return `<button class="st run" data-settings="overview" title="Tonight's run: 212 of 530 papers read">212/530</button>`;
+  if (SHELL_RUN === "failed") return `<button class="st bad" data-settings="needs" title="2 digests failed last night · open Needs you">2 failed</button>`;
+  if (SHELL_RUN === "over") return `<button class="st warn" data-settings="runs" title="openrouter projected at $47 of a $40 budget · open Runs and cost">530 · $ over</button>`;
+  return `<button class="st" data-settings="overview" title="530 papers read last night · all quiet">530</button>`;
 }
 const shellWM = () => `litwatch${shellStatus()}`;
 

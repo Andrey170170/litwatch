@@ -2,7 +2,9 @@
 // today's digests in full, last week's weeklies, and the History list and colour grid built from them.
 
 /* ── sample data for this round ── */
-const DAILY = ["cotf", "cotm", "circ", "interp", "align"];
+// the daily topics (Focus and Area) in the owner's order, which Settings › Topics can change
+const daily = () => TOPICS.filter((t) => t.depth !== "field").map((t) => t.id);
+const DAILY = daily(); // the order at load, for the earlier rounds
 PAPERS.push(
   { id: "2610.04877", r: 1, t: "Process Rewards Favour Verbose Steps Over Faithful Ones", g: "Process reward models score longer steps higher whether or not the step was used.", d: "9 Oct", tp: ["cotf"] },
   ...[["SAE Reconstruction Loss Does Not Predict Downstream Faithfulness", "Across 40 SAEs, lower reconstruction loss buys little on causal faithfulness benchmarks.", 2],
@@ -59,7 +61,7 @@ for (let i = 0; i < NDAYS; i++) {
   const dt = new Date(START + i * DAYMS), dow = dt.getUTCDay(), dom = dt.getUTCDate();
   const key = `${MON[dow]} ${dom} ${MONTH[dt.getUTCMonth()]}`;
   const day = { key, dom, dow, none: dow === 0 || dow === 6, marks: {} };
-  if (!day.none) for (const id of DAILY) {
+  if (!day.none) for (const id of daily()) {
     const fx = FIXED[key] && FIXED[key][id];
     if (fx) { day.marks[id] = { n: fx[0], r: fx[1], c: fx[2] }; continue; }
     const R = seeded(key + id), area = T[id].depth === "area";
@@ -137,7 +139,7 @@ const DG = (key) => `data-dg="${key}"`; DG.fold = false;
 function dayBody(day, act = DG, { weekly = true } = {}) {
   const d = DAY[day];
   if (d.none) return `<div class="none">No papers released.</div>`;
-  let h = DAILY.map((id) => gistBlock(`${day}|${id}`, act)).join("");
+  let h = daily().map((id) => gistBlock(`${day}|${id}`, act)).join("");
   if (d.week && weekly) h += `<div class="grp"><span class="t">Weekly</span><span class="s">${d.week.range}</span></div>` + TOPICS.map((t) => gistBlock(`${day}|${t.id}|w`, act)).join("");
   return h;
 }
@@ -154,7 +156,7 @@ function historyList() {
   for (const d of NEWEST) {
     h += `<div class="grp click" data-day="${d.key}"><span class="t">${d.key}</span>${d.key === TODAY ? '<span class="s">today</span>' : ""}</div>`;
     if (d.none) { h += `<div class="none">No papers released.</div>`; continue; }
-    h += `<div class="list">${DAILY.map((id) => markRow(`${d.key}|${id}`, id, d.marks[id], DG)).join("")}</div>`;
+    h += `<div class="list">${daily().map((id) => markRow(`${d.key}|${id}`, id, d.marks[id], DG)).join("")}</div>`;
     if (d.week) h += `<div class="grp"><span class="s">Weekly · ${d.week.range}</span></div><div class="list">${TOPICS.map((t) => markRow(`${d.key}|${t.id}|w`, t.id, d.week.marks[t.id], DG)).join("")}</div>`;
   }
   return h;
@@ -209,7 +211,7 @@ function monthView({ weeks = 6, text = false, older = false } = {}) {
       const d = row.days[dow];
       if (!d) { h += `<div class="mday empty"></div>`; continue; }
       const num = d.dom === 1 || (ri === 0 && dow === 1) ? `${d.dom} ${d.key.split(" ")[2]}` : d.dom;
-      h += `<div class="mday${d.key === TODAY ? " today" : ""}" ${text ? "" : `data-gday="${d.key}"`}><span class="mnum" data-gday="${d.key}" title="Open ${d.key}">${num}</span>${DAILY.map((id) => bar(`${d.key}|${id}`, id, d.marks[id])).join("")}</div>`;
+      h += `<div class="mday${d.key === TODAY ? " today" : ""}" ${text ? "" : `data-gday="${d.key}"`}><span class="mnum" data-gday="${d.key}" title="Open ${d.key}">${num}</span>${daily().map((id) => bar(`${d.key}|${id}`, id, d.marks[id])).join("")}</div>`;
     }
     const wm = nextMon(row.mon);
     if (!wm) { h += `<div class="mweek empty"><span class="mnum">W · Monday</span></div>`; return; }

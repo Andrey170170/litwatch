@@ -27,10 +27,11 @@ const NEED = [
   { k: "esc", id: "2610.04990", t: "interp", judge: "related", check: "adjacent" },
   { k: "await", aid: "2610.03312", ti: "On the Limits of Self-Correction (Extended Abstract)", why: "Classification failed 3 runs: the abstract is one sentence and names no method." },
   { k: "ungraded", id: "2610.04411", t: "reason", why: "Grading failed 3 runs: the grader's reply did not parse." },
+  { k: "analysis", id: "2610.04002", why: "Analysis failed 3 runs: the provider returned an empty reply." },
   { k: "fulltext", id: "2610.03877", why: "The LaTeX source failed to build 3 times (a missing style file). Its Deep card waits on the text." },
   { k: "digest", t: "cotm", day: "Thu 8 Oct", why: "The writer timed out twice." },
 ];
-NEED.forEach((x, i) => { x.i = i; const key = x.k === "await" ? x.aid : x.k === "fulltext" ? x.id : x.id && x.id + "|" + x.t; if (key) PSTATE[key] = x; });
+NEED.forEach((x, i) => { x.i = i; const key = x.k === "await" ? x.aid : x.k === "fulltext" || x.k === "analysis" ? x.id : x.id && x.id + "|" + x.t; if (key) PSTATE[key] = x; });
 // the paper awaiting classification is in the archive and in no class
 ARCH.push({ id: "2610.03312", t: "On the Limits of Self-Correction (Extended Abstract)", au: "Brandt, Ito", y: 2026 });
 AX["2610.03312"] = { ver: [["v1", "10 Oct"]], abs: "Self-correction does not help without external feedback." };
@@ -40,6 +41,7 @@ const NEED_KIND = {
   esc: ["Area escalations", "The check disagreed with the judge. The less inclusive Fit stands until it is labelled.", "ask"],
   await: ["Awaiting classification", "Classification failed three runs; the paper is in no class.", "fail"],
   ungraded: ["Ungraded", "Grading failed three runs; the paper shows ungraded on its topic.", "fail"],
+  analysis: ["Analysis", "Analysis failed three runs; the paper has no Gist or Weight and shows its title alone.", "fail"],
   fulltext: ["Full text", "A full-text pass failed or is stuck.", "fail"],
   digest: ["Digests", "A digest could not be written.", "fail"],
 };
@@ -154,6 +156,7 @@ function needActs(x, st) {
   const b = (label, res) => `<a class="btn" data-settle="${x.i}|${res}">${label}</a>`;
   if (x.k === "await") return st.nopen === x.i ? classifyForm(x.i) : `<div class="nact">${b("Dismiss", "Dismissed; it stays in the archive.")}<a class="btn" data-nopen="${x.i}">Classify by hand</a>${b("Fix the text", "Opened the text: title and abstract.")}</div>`;
   if (x.k === "ungraded") return `<div class="nact">${b("Grade it now", "Grading again; the result shows on its topic.")}</div>`;
+  if (x.k === "analysis") return `<div class="nact">${b("Try again", "Queued for another analysis.")}</div>`;
   if (x.k === "fulltext") return `<div class="nact">${b("Try again", "Queued for another full-text pass.")}${b("Use the PDF", "Queued to read the PDF instead.")}</div>`;
   return `<div class="nact">${b("Write it again", "Writing it again; it appears on Thu 8 Oct when done.")}</div>`;
 }
@@ -189,7 +192,7 @@ function pgNotes(pd, st, phone) {
   return `<div class="pnotes">${items.map((x) => {
     const ask = NEED_KIND[x.k][2] === "ask", tn = x.t ? T[x.t].n : "";
     const txt = ask ? `<b>${x.k === "split" ? "Split" : "Escalated"} on ${tn}.</b> Judge ${x.judge}, check ${x.check}; ${fitName(x)} stands until it is labelled.`
-      : `<b>${x.k === "ungraded" ? `Ungraded on ${tn}.` : x.k === "fulltext" ? "Full text failed." : "Awaiting classification."}</b> ${x.why}`;
+      : `<b>${x.k === "ungraded" ? `Ungraded on ${tn}.` : x.k === "fulltext" ? "Full text failed." : x.k === "analysis" ? "Analysis failed." : "Awaiting classification."}</b> ${x.why}`;
     const act = ask ? (phone ? `<div class="nact"><a class="btn" data-ps="open">Label</a></div>` : "") : needActs(x, st);
     return `<div class="need ${ask ? "ask" : "fail"}"><div class="nb">${txt}</div>${act}</div>`;
   }).join("")}</div>`;

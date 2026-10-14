@@ -51,6 +51,7 @@
 
 /* ── phone sheets: a handle shows they can be dragged down to close ── */
 .frame[data-sheet="drag"] .fsheet .sheetp { touch-action: none; }
+.frame[data-sheet="drag"] .fsheet .sheetp :is(.cpk, [style*="overflow"]) { touch-action: pan-y; }
 .frame[data-sheet="drag"] .fsheet .sheetp::before { content: ""; align-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--fg3); margin: -6px 0 -2px; flex: none; }
 
 @media (prefers-reduced-motion: reduce) {

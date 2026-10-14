@@ -44,7 +44,7 @@ function papersV(st, phone) {
   const list = listFor(st, null);
   const out = st.q ? ARCH.filter((a) => matches(a, st.q)) : [];
   const band = !st.q ? "" : `<div class="outh">Outside the collection · from the archive<span class="cnt">${out.length}</span></div>` +
-    (out.length ? out.map((a) => `<div class="orow"><span class="ti">${a.t}<br><span class="au">${a.au} · ${a.y} · ${a.id}</span></span><a class="btn" data-process="${a.id}">Process</a></div>`).join("") : `<div class="empty">No archive hits for "${esc(st.q)}".</div>`);
+    (out.length ? out.map((a) => `<div class="orow"><span class="ti" data-paper="${a.id}">${a.t}<br><span class="au">${a.au} · ${a.y} · ${a.id}</span></span><a class="btn" data-process="${a.id}">Process</a></div>`).join("") : `<div class="empty">No archive hits for "${esc(st.q)}".</div>`);
   return { body: (phone ? "" : `<div class="h1">Papers</div>`) + controls(st, null, phone) + (list.length || !st.q ? rows(list, st, null) : "") + band, title: "Papers", bar: `<span class="ttl2">Papers</span>`, foot: phone ? phoneFoot(st, null) : "" };
 }
 function topicsV() {

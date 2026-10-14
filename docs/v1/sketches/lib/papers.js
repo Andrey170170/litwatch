@@ -117,13 +117,15 @@ function rarityThin(topic) {
 const chip = (st, k, label) => `<a class="fchip2${st[k] ? " on" : ""}" data-chip="${k}">${label}</a>`;
 const sortSeg = (st) => `<span class="sortseg">${[["new", "Newest"], ["rare", "Rarest"], ...(st.q ? [["match", "Best match"]] : [])].map(([k, n]) => `<a class="${st.sort === k ? "on" : ""}" data-sort="${k}">${n}</a>`).join("")}</span>`;
 const topicToggles = (st) => `<div class="tfs">${TOPICS.map((t) => `<a class="tf${st.tf.includes(t.id) ? " on" : ""}${st.tf.length && !st.tf.includes(t.id) ? " off" : ""}" data-tf="${t.id}" title="${t.n}">${badge(t.id)}</a>`).join("")}</div>`;
+// a mixed list's badges, the topic giving the paper's level first
+const badgesOf = (p) => [...p.tp].sort((a, b) => (p.lv[b] || 0) - (p.lv[a] || 0)).map((t) => badge(t)).join("");
 const facets = (p) => `<span class="fx">${p.code ? '<i title="Code released">⟨/⟩</i>' : ""}${p.wts ? '<i title="Weights released">◆</i>' : ""}</span>`;
 const star = (p) => `<a class="sv${p.sv ? " on" : ""}" data-save="${p.id}" title="${p.sv ? "Saved · tap to unsave" : "Save"}">${p.sv ? "★" : "☆"}</a>`;
 
 // A: a table, one line a paper
 function tableRows(list, topic, { badges = !topic } = {}) {
   return `<div class="tbl"><div class="th"><span></span><span>Title</span>${badges ? "<span>Topics</span>" : ""}<span>Kind</span><span></span><span>Date</span><span></span></div>` +
-    list.map((p) => `<div class="tr${badges ? " wb" : ""}" data-paper="${p.id}" style="--rc:var(--r${lvOf(p, topic)})"${rowMark(p.id, topic)} title="${p.g}"><span class="stripe"></span><span class="ti">${p.t}</span>${badges ? `<span class="bd">${p.tp.map((t) => badge(t)).join("")}</span>` : ""}<span class="kd">${p.kind}</span>${facets(p)}<span class="dt">${p.d}</span>${star(p)}</div>`).join("") + `</div>`;
+    list.map((p) => `<div class="tr${badges ? " wb" : ""}" data-paper="${p.id}" style="--rc:var(--r${lvOf(p, topic)})"${rowMark(p.id, topic)} title="${p.g}"><span class="stripe"></span><span class="ti">${p.t}</span>${badges ? `<span class="bd">${badgesOf(p)}</span>` : ""}<span class="kd">${p.kind}</span>${facets(p)}<span class="dt">${p.d}</span>${star(p)}</div>`).join("") + `</div>`;
 }
 // B: a reading list, title and Gist, grouped by week
 function readingRows(list, topic, { badges = !topic, group = true } = {}) {
@@ -132,7 +134,7 @@ function readingRows(list, topic, { badges = !topic, group = true } = {}) {
     const mon = weekOf(p.di);
     if (group && mon !== wk) { wk = mon; h += `<div class="wkh">${mon === THIS_WEEK ? "This week" : "Week of " + mon.slice(4)}</div>`; }
     h += `<div class="br" data-paper="${p.id}" style="--rc:var(--r${lvOf(p, topic)})"${rowMark(p.id, topic)}><div class="l1"><span class="ti">${p.t}</span>${star(p)}</div>
-      <div class="g">${p.g}</div><div class="m">${badges ? p.tp.map((t) => badge(t)).join("") : ""}<span>${p.kind}</span>${facets(p)}<span class="sp"></span><span class="dt">${p.d}</span></div></div>`;
+      <div class="g">${p.g}</div><div class="m">${badges ? badgesOf(p) : ""}<span>${p.kind}</span>${facets(p)}<span class="sp"></span><span class="dt">${p.d}</span></div></div>`;
   }
   return `<div class="blist">${h}</div>`;
 }
@@ -146,7 +148,8 @@ function shelfRows(list, topic, st, { badges = !topic } = {}) {
     if (!L.length) return "";
     const head = `<div class="shh${open ? "" : " fold"}" ${bi >= 2 ? `data-unfold="${bi}"` : ""} style="--rc:var(--r${ls[0]})"><span class="sq"></span>${name}<span class="k">${L.length}</span>${bi >= 2 ? `<span class="tg">${open ? "fold" : "show"}</span>` : ""}</div>`;
     if (!open) return head;
-    return head + (bi === 0 ? readingRows(L, topic, { badges, group: false }) : tableRows(L.slice(0, bi === 1 ? 60 : st.n), topic, { badges }).replace('<div class="th">', '<div class="th hide">'));
+    const lim = bi === 1 ? Math.max(60, st.n) : st.n, more = L.length > lim ? `<div class="loadmore">Loading more…</div>` : "";
+    return head + (bi === 0 ? readingRows(L, topic, { badges, group: false }) : tableRows(L.slice(0, lim), topic, { badges }).replace('<div class="th">', '<div class="th hide">') + more);
   }).join("");
 }
 

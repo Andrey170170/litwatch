@@ -76,6 +76,8 @@ function rowState(id, topic) {
   const st = [openState(id), ...(topic ? [topic] : (P[id] ? P[id].tp : [])).map((t) => openState(id + "|" + t))].filter(Boolean);
   return st.some((s) => s.k === "split" || s.k === "esc") ? "ask" : st.length ? "fail" : "";
 }
+// a paper whose analysis failed has no Gist, Weight or Brief until it succeeds
+const noAnalysis = (id) => { const s = openState(id); return !!s && s.k === "analysis"; };
 const openState = (key) => { const s = PSTATE[key]; return s && !s.done && !((s.k === "split" || s.k === "esc") && LABEL[key]) ? s : null; };
 const REASONS = { down: [["wrong", "Wrong topic"], ["over", "Overrated"], ["notint", "Not interesting"], ["knew", "Already knew it"]], up: [["under", "Underrated"], ["great", "Great find"]] };
 // how a thumb is given: "reason" asks for the reason first; "thumb" records the thumb at once and offers the reasons after
@@ -180,8 +182,8 @@ function pgPaper(pd) {
 
 // the ladder: Gist, Brief (or the abstract in its place), Deep card, the paper
 function pgLadder(pd, st, opt = {}) {
-  const gist = pd.arch || opt.nogist ? "" : rung("Gist", `<p class="prose gist">${pd.g}</p>`, rate(pd.id, "Gist"), "gistr");
-  const b = pd.brief;
+  const gist = pd.arch || opt.nogist || noAnalysis(pd.id) ? "" : rung("Gist", `<p class="prose gist">${pd.g}</p>`, rate(pd.id, "Gist"), "gistr");
+  const b = noAnalysis(pd.id) ? null : pd.brief;
   const brief = b ? rung("Brief", `${b.from ? `<div class="oldrev">${b.from}</div>` : ""}${b.over ? `<p class="overst">${b.over}</p>` : ""}<p class="prose">${b.text}</p>`, rate(pd.id, "Brief"))
     : rung("Abstract", `${pd.arch ? "" : `<div class="why0">No Brief: Briefs are written for Focus papers at central or related and for Area must reads, so the abstract stands in.</div>`}<p class="prose">${pd.abs}</p>`);
   return gist + brief + pgCard(pd, st, opt) + (opt.nopaper ? "" : pgPaper(pd));
@@ -190,7 +192,7 @@ function pgLadder(pd, st, opt = {}) {
 // B's rail: what a reader wants at hand while reading. The Gist (shown once it has scrolled out of the reading
 // column), the thumbs and labels per topic, then the quick actions as a grid unless they sit in the header.
 function pgRail(pd, st, { acts = "grid" } = {}) {
-  const gist = pd.arch ? "" : `<div class="rgist" style="${rc(pd.r)}"><div class="rl">Gist${rate(pd.id, "Gist")}</div><p>${pd.g}</p></div>`;
+  const gist = pd.arch || noAnalysis(pd.id) ? "" : `<div class="rgist" style="${rc(pd.r)}"><div class="rl">Gist${rate(pd.id, "Gist")}</div><p>${pd.g}</p></div>`;
   const arch = `<div class="agrid"><a class="pri" data-process="${pd.id}">Process</a><a data-deep="${pd.id}">Deep read</a><a class="wide" data-miss="${pd.id}">Report as a miss</a></div>`;
   const grid = acts !== "grid" ? "" : pd.arch ? arch : pgGrid(pd, ["save", "bib", "arxiv", "pdf"]);
   return gist + pgTopics(pd, st) + grid;
