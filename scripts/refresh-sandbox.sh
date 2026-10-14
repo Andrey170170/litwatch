@@ -10,16 +10,17 @@
 # delivered, so an integration enabled in dev starts after them, and the deep jobs and the
 # Zotero and WebDAV items that point at the deployment's targets are dropped.
 #
-#   --no-migrate   keep the deployment's schema, to take a baseline before a migration
+#   --exact   an exact copy at the deployment's schema, nothing detached: the baseline for a
+#             migration check. Enable no integration on it; refresh normally afterwards.
 set -Eeuo pipefail
 
 readonly SOURCE=litwatch-v1-db TARGET=litwatch-v1-dev DB=sandbox NEXT=sandbox_next OLD=sandbox_old
 
-migrate=1
+exact=0
 case "${1:-}" in
   "") ;;
-  --no-migrate) migrate=0 ;;
-  *) echo "usage: $0 [--no-migrate]" >&2; exit 2 ;;
+  --exact) exact=1 ;;
+  *) echo "usage: $0 [--exact]" >&2; exit 2 ;;
 esac
 
 # Migrations connect through .env.v1's DSN; it must reach the same container the copy is
@@ -44,16 +45,18 @@ target_psql -d postgres -c "CREATE DATABASE $NEXT"
 docker exec "$SOURCE" pg_dump -U litwatch -d litwatch -Fc --no-owner --no-privileges \
   | docker exec -i "$TARGET" pg_restore -U postgres -d "$NEXT" --no-owner --no-privileges --exit-on-error
 
-# Transaction ids belong to the cluster that wrote them. Every copied event gets xid 1,
-# below any transaction here, so all of them count as settled and ahead of anything the
-# sandbox writes, even while another transaction in this cluster is still open. What ties
-# the copy to the deployment's targets goes: deep jobs and their queue, and the Zotero and
-# WebDAV items (with the 0.x keys Zotero's setup would take over again), so integrations
-# enabled in dev work against their test targets from scratch.
-target_psql -d "$NEXT" -1 <<'SQL'
+if (( ! exact )); then
+  # Transaction ids belong to the cluster that wrote them. Every copied event gets xid 1,
+  # below any transaction here, so all of them count as settled and ahead of anything the
+  # sandbox writes, even while another transaction in this cluster is still open. What ties
+  # the copy to the deployment's targets goes: deep jobs, attempts and queue, and the Zotero and
+  # WebDAV items (with the 0.x keys Zotero's setup would take over again), so integrations
+  # enabled in dev work against their test targets from scratch.
+  target_psql -d "$NEXT" -1 <<'SQL'
 UPDATE outbox SET xid = '1'::xid8;
 DELETE FROM integration_cursors;
 DELETE FROM deep_waiting;
+DELETE FROM deep_attempts;
 UPDATE deep_cards SET job_id = NULL, job_since = NULL, job_revision = NULL, job_version = NULL,
                       job_event = NULL, job_automatic = NULL
  WHERE job_id IS NOT NULL;
@@ -68,7 +71,6 @@ DO $$ BEGIN
 END $$;
 SQL
 
-if (( migrate )); then
   LITWATCH_DATABASE_URL="${LITWATCH_DATABASE_URL%/*}/$NEXT" uv run litwatch db migrate
 fi
 

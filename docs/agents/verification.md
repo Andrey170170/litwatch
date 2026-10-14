@@ -53,7 +53,7 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - Evidence: pytest migrating a fresh schema; a data migration also runs on a fresh sandbox copy, with counts
   before and after and a check that nothing the owner touched (labels, reactions, saved papers, Zotero items, Deep
   cards) is lost.
-- How: `scripts/refresh-sandbox.sh --no-migrate` (the deployment's schema), count with SQL, `litwatch db migrate`
+- How: `scripts/refresh-sandbox.sh --exact` (the deployment's schema and data), count with SQL, `litwatch db migrate`
   against the sandbox, count again.
 
 ### Integrations (Zotero, WebDAV, deep, archive, webhook)
