@@ -68,6 +68,10 @@ function paperData(id) {
 
 /* ── state the sketch keeps: reactions, labels and rung ratings, per paper and topic ── */
 const REACT = {}, LABEL = {}, RATE = {}, REQ = new Set();
+// the pipeline's open states (round 7b; Settings › Needs you lists the same items): per "id|topic" a split, an
+// escalation or ungraded, per id a failed full-text pass or a paper awaiting classification. An item with .done is settled.
+const PSTATE = {};
+const openState = (key) => { const s = PSTATE[key]; return s && !s.done && !((s.k === "split" || s.k === "esc") && LABEL[key]) ? s : null; };
 const REASONS = { down: [["wrong", "Wrong topic"], ["over", "Overrated"], ["notint", "Not interesting"], ["knew", "Already knew it"]], up: [["under", "Underrated"], ["great", "Great find"]] };
 // how a thumb is given: "reason" asks for the reason first; "thumb" records the thumb at once and offers the reasons after
 let REACT_FLOW = "reason";
@@ -99,7 +103,7 @@ function pgHead(pd, { acts = false } = {}) {
   const hact = !acts ? "" : pd.arch ? `<span class="sp"></span><a class="hbtn pri" data-process="${pd.id}">Process</a><a class="hbtn" data-deep="${pd.id}">Deep read</a>`
     : `<span class="sp"></span>${pd.card ? "" : `<a class="hbtn" data-deep="${pd.id}">Deep read</a>`}<a class="hbtn${pd.sv ? " on" : ""}" data-save="${pd.id}">${pd.sv ? "★ Saved" : "☆ Save"}</a>`;
   return `<div class="pghead" style="${r ? rc(r) : ""}">
-    <div class="mark">${r ? `<span class="lvl">${LEVEL[r]}</span>${pd.tp.map((t) => badge(t)).join("")}` : `<span class="lvl none">Not in the collection</span>`}${hact}</div>
+    <div class="mark">${r ? `<span class="lvl">${LEVEL[r]}</span>${pd.tp.map((t) => badge(t)).join("")}` : `<span class="lvl none${openState(pd.id) ? " fail" : ""}">${openState(pd.id) ? "Awaiting classification" : "Not in the collection"}</span>`}${hact}</div>
     <div class="h1">${pd.t}</div>
     <div class="au" data-auall="${esc(pd.au.join(", "))}">${au}</div>
     <div class="facts"><span class="idl">${ext(`https://arxiv.org/abs/${pd.id}`, `<span class="mono">${pd.id}</span>`)}<a class="cp" data-copy="${pd.id}" title="Copy the arXiv id">⧉</a></span>${facts.map((f) => `<span>${f}</span>`).join("")}</div></div>`;
@@ -116,13 +120,18 @@ function pgTopics(pd, st, { folded = false } = {}) {
   if (pd.arch) return "";
   if (folded && !st.pgopen.includes("topics")) return `<div class="tpfold" data-pgfold="topics">${pd.tp.map((t) => `<span class="tpill" style="${rc(pd.lv[t])}">${badge(t)}<span>${GRADE[pd.lv[t]]}</span></span>`).join("")}<span class="sp"></span><span class="faint">Thumbs · labels ›</span></div>`;
   return `<div class="tplist">${folded ? `<div class="tphd" data-pgfold="topics">▾ Topics</div>` : ""}${pd.tp.map((t) => {
-    const k = pd.id + "|" + t, re = REACT[k], lab = LABEL[k], l = pd.lv[t];
+    const k = pd.id + "|" + t, re = REACT[k], lab = LABEL[k], l = pd.lv[t], ps = openState(k), asks = ps && ps.k !== "ungraded";
+    const regrade = !ps && PSTATE[k] && PSTATE[k].k === "ungraded"; // asked to grade again: ungraded until the result is in
     const thumbs = ["up", "down"].map((th) => `<a class="th${re && re.thumb === th ? " on" : ""}" data-th="${k}|${th}" title="${th === "up" ? "Thumbs up" : "Thumbs down"}">${th === "up" ? "👍" : "👎"}${re && re.thumb === th && re.why ? `<span>${whyName(th, re.why)}</span>` : ""}</a>`).join("");
     const after = REACT_FLOW === "thumb", ask = after ? `<span class="whyq">Why, if you like:</span>` : "";
     const pick = st.pick === k ? `<div class="why${after ? " after" : ""}">${["up", "down"].includes(st.pickth) ? ask + REASONS[st.pickth].map(([w, n]) => `<a class="${re && re.why === w ? "on" : ""}" data-why="${k}|${st.pickth}|${w}">${n}</a>`).join("") : ""}${re && !after ? `<a class="clr" data-why="${k}|-|-">Clear</a>` : ""}</div>` : "";
-    const labRow = st.lab === k ? `<div class="why">${fitSeg(pd, t)}</div>` : "";
-    return `<div class="tprow" style="${rc(l)}"><span class="stripe"></span>${badge(t)}<span class="nm">${T[t].n}</span>
-      <span class="gr">${GRADE[l]}</span><span class="vd">${lab ? `<b>your label: ${lab}</b>` : `Fit ${FIT[l]} · Weight ${pd.weight}`}</span>
+    // a split or escalation keeps its Fit control open until it is labelled; ungraded offers to grade again
+    const labRow = st.lab === k || asks ? `<div class="why${asks ? " ask" : ""}">${fitSeg(pd, t)}</div>` : "";
+    const vd = asks ? `<b class="askt">${ps.k === "split" ? "Split" : "Escalated"}</b> · judge ${ps.judge} · check ${ps.check} · ${FIT[l]} stands`
+      : ps ? `<b class="badt">Grading failed 3 runs</b> · <a class="inl" data-settle="${ps.i}|Grading again; the result shows on its topic.">Grade it now</a>`
+      : regrade ? "Grading again" : lab ? `<b>your label: ${lab}</b>` : `Fit ${FIT[l]} · Weight ${pd.weight}`;
+    return `<div class="tprow${asks ? " ask" : ps ? " fail" : ""}" style="${(ps && !asks) || regrade ? "--rc:var(--fg3)" : rc(l)}"><span class="stripe"></span>${badge(t)}<span class="nm">${T[t].n}</span>
+      <span class="gr">${(ps && !asks) || regrade ? "ungraded" : GRADE[l]}</span><span class="vd">${vd}</span>
       <span class="sp"></span>${thumbs}<a class="lb" data-labopen="${k}" title="Label the Fit">Label</a></div>${pick}${labRow}`;
   }).join("")}</div>`;
 }
@@ -202,9 +211,11 @@ function fitSeg(pd, t) {
 // the phone's paper sheet: a label per topic, the actions and links as a grid, then the paper's facts
 function pgSheet(pd, enter) {
   const labs = pd.arch ? "" : `<div class="cap2">Label</div>` + pd.tp.map((t) => {
-    const k = pd.id + "|" + t, l = pd.lv[t];
-    return `<div class="slab" style="${rc(l)}"><div class="sh">${badge(t)}<span class="nm">${T[t].n}</span></div>
-      <div class="ss"><span class="gr">${GRADE[l]}</span>${LABEL[k] ? ` · your label` : ` · pipeline: ${FIT[l]}`}</div>${fitSeg(pd, t)}</div>`;
+    const k = pd.id + "|" + t, l = pd.lv[t], ps = openState(k), asks = ps && ps.k !== "ungraded";
+    const ss = asks ? `<b class="askt">${ps.k === "split" ? "Split" : "Escalated"}</b> · judge ${ps.judge} · check ${ps.check} · ${FIT[l]} stands`
+      : ps ? `<b class="badt">ungraded</b> · grading failed 3 runs` : `<span class="gr">${GRADE[l]}</span>${LABEL[k] ? ` · your label` : ` · pipeline: ${FIT[l]}`}`;
+    return `<div class="slab${asks ? " ask" : ""}" style="${ps && !asks ? "--rc:var(--fg3)" : rc(l)}"><div class="sh">${badge(t)}<span class="nm">${T[t].n}</span></div>
+      <div class="ss">${ss}</div>${ps && !asks ? "" : fitSeg(pd, t)}</div>`;
   }).join("");
   const vers = pd.ver.map(([v, d], i) => `${v} · ${d}${i ? "" : " (current)"}`).join("<br>");
   return `<div class="fsheet${enter ? " enter" : ""}"><div class="shade2" data-ps="x"></div><div class="sheetp">

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Round 7 · Settings</title>
+<title>Round 7b · Settings</title>
 <link rel="stylesheet" href="lib/wire.css">
 <link rel="stylesheet" href="lib/dirs.css">
 <link rel="stylesheet" href="lib/shell.css">
@@ -18,10 +18,6 @@
 <script src="lib/paper.js"></script>
 <script src="lib/settings.js"></script>
 <style>
-  .sw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
-  .sw button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px; color: var(--fg2); }
-  .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
-  @media (max-width: 640px) { .sw > span { display: none; } }
   .states { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
   .states button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; color: var(--fg2); }
   .states button:hover { color: var(--fg); border-color: var(--fg2); }
@@ -31,70 +27,57 @@
   .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
   .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
   .frame { position: relative; }
-  /* the interaction switches: a panel above the frames on desktop, a dropdown in the top bar on a phone */
-  .lookp { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: center; margin: 0 0 14px; font-size: 12.5px; }
-  .lookp > span { color: var(--fg2); }
-  .lookp .sw { flex-wrap: wrap; }
-  .lookm { display: none; position: relative; }
-  .lookm summary { list-style: none; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
-  .lookm summary::-webkit-details-marker { display: none; }
-  .lookm .lookp { position: fixed; left: 8px; right: 8px; top: 46px; z-index: 40; background: var(--page); border: 1px solid var(--line); border-radius: 8px; padding: 12px; grid-template-columns: 1fr; gap: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, .4); }
-  .lookm .lookp > span { margin-top: 6px; }
-  @media (max-width: 640px) { .lookm { display: block; } }
 </style></head>
 <body>
 <div class="top">
-  <h1>Round 7 · Settings</h1>
+  <h1>Round 7b · Settings</h1>
   <span class="sp"></span>
-  <details class="lookm"><summary>Switches ▾</summary><div class="lookp" data-ix></div></details>
   <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
 </div>
 <div class="wrap">
-  <p class="intro">Settings, behind the gear, on the app as chosen so far. Quick and rough: the pages and what they hold are the spec's; the question is how they sit and read. The ⚙ at the foot of the sidebar (on the phone, the ⚙ in the bar or in the drawer) opens them. Jump to:</p>
+  <p class="intro">Settings, behind the gear, on the app as chosen so far: Settings takes the sidebar, numbers as bars. The ⚙ at the foot of the sidebar (on the phone, the ⚙ in the bar or in the drawer) opens them. Jump to:</p>
   <div class="states">
-    <button data-jump="quality">Quality</button>
+    <button data-jump="overview">Overview</button>
+    <button data-jump="needs">Needs you</button>
+    <button data-jump="split">A paper with a split</button>
+    <button data-jump="fulltext">A paper whose full text failed</button>
     <button data-jump="calibrate">Calibrate</button>
+    <button data-jump="session">A past session</button>
     <button data-jump="editor">A topic's editor</button>
     <button data-jump="taxonomy">Taxonomy</button>
-    <button data-jump="misses">Misses</button>
-    <button data-jump="runs">Runs and cost</button>
-    <button data-jump="integrations">Integrations</button>
+    <button data-jump="jobs">Jobs</button>
+    <button data-jump="events">zotero's events</button>
     <button data-jump="digest">Back to the Digest</button>
   </div>
-  <div class="lookp" data-ix></div>
   <div class="desk-sec"><div class="frame desk" data-dir="nc" data-rar="glow" data-react="reason" data-hover="glow" data-motion="subtle" data-sheet="drag" id="D"></div></div>
   <div class="side-by-side">
     <div class="frame phone" data-dir="nc" data-rar="glow" data-react="reason" data-hover="glow" data-motion="subtle" data-sheet="drag" id="M"></div>
     <div class="notes">
-      <p><b>What is here</b></p>
+      <p><b>What changed in 7b</b></p>
       <ul>
-        <li><b>Eight pages in three groups</b>: Reading (Quality, Calibrate, Misses), Following (Topics, Taxonomy), System (Runs and cost, Integrations, Configuration). Two desktop layouts, one switch.</li>
-        <li><b>Quality</b>: "Needs you" first, grouped by kind. Yellow edge asks for the owner's word (splits and escalations, settled with the Fit control); red reports a failure, with its actions. A settled item turns cyan and stays until the next visit. Then "How it is doing": recall, precision, reactions, matters with no topic, cost.</li>
-        <li><b>Calibrate</b>: one paper per screen, blind (no grade, rarity or topic marks), the questions as segmented controls, a strip of 20 squares for the session.</li>
-        <li><b>Topic editor</b>: a page from Topics; Save puts the scoped re-run offer at the top, in the note's style, with counts, costs and a ceiling. The class editor on Taxonomy opens in its row and offers the same.</li>
-        <li><b>Misses</b>: each report with its trace as five stage cells, red where the paper was let go.</li>
+        <li><b>Overview</b> holds how the pipeline is doing: four tiles (what needs the owner, last night, this month's spend, the last Calibrate session), then recall, precision, reactions and matters with no topic. <b>Needs you</b> holds only what waits on the owner.</li>
+        <li><b>On the paper's page</b>, the same items: a note under the head in the same colour (yellow asks for a word, red reports a failure) with the same actions, and the topic row in the rail marked (a split keeps its Fit control open; ungraded shows red). On the phone the note's Label opens the ⋯ sheet, where the topic is marked too. Settling it on either page settles it on both.</li>
+        <li><b>Calibrate</b>: the strip of squares jumps; on the phone the number in the bar opens a list of the session's papers. Past sessions open a review: the owner's Fit against the pipeline's, amber where they differ.</li>
+        <li><b>The re-run offer</b> takes the place of Save and Cancel, in the topic editor and in the class editor. Not now leaves it in Runs and cost › Jobs as "not run", to run now, with tonight's run, or discard.</li>
+        <li><b>Jobs</b> and <b>an integration's events</b> are pages of their own. Topics drag by ⋮⋮; Taxonomy's carets fold, the row opens the editor.</li>
       </ul>
       <p><b>Questions</b></p>
       <ol>
-        <li>Desktop: should Settings take over the sidebar (its index there, "‹ Back to reading" on top), or should the app's sidebar stay with an index column in the page?</li>
-        <li>Quality: "Needs you" above "How it is doing", grouped by kind, each settled in place. Right order and grouping?</li>
-        <li>Calibrate: blind, one paper per screen, Fit for each Focus topic first. Right, or should it show the paper's place (grade, rarity) after the answer?</li>
-        <li>The re-run offer right after Save, at the top of the editor, with the ceiling there. Right place, or a separate step?</li>
-        <li>Numbers on Quality: coloured numbers or bars?</li>
+        <li>The gear opens Overview. Should it open Needs you instead while something waits there?</li>
+        <li>Paper states show on the paper's page only. Should list rows (Digest, topic pages, Papers) mark them too, say a small yellow or red tick at the row's edge?</li>
+        <li>A re-run put off with Not now waits in Jobs. Should the topic's editor also say so ("Version 4 has a re-run not run ›")?</li>
+        <li>A past Calibrate session shows where the owner's Fit differs from the pipeline's. Enough, or should a difference there turn into a label with one click?</li>
+        <li>Taxonomy on the phone: Members hidden, long names cut, the class editor opening in its row. Fine, or the editor as a page of its own?</li>
       </ol>
     </div>
   </div>
 </div>
 <script>
 const SW = { v: "C", bar: "inline", cards: "rich", acts: "grid" };
-// the round's switches, first value = the default
-const IXO = [
-  ["layout", "Desktop layout", [["side", "Settings takes the sidebar"], ["col", "sidebar stays, index in the page"]]],
-  ["look", "Numbers", [["numbers", "coloured numbers"], ["bars", "bars"]]],
-];
-const IX = Object.assign(Object.fromEntries(IXO.map(([k, , o]) => [k, o[0][0]])), { react: "reason", sheet: "drag" }, JSON.parse(localStorage.getItem("lw-r7") || "{}"));
+// the chosen interactions (round 6)
+const IX = { react: "reason", sheet: "drag" };
 // what a Settings page starts with
-const SETST = { sub: null, cal: null, cls: null, saved: false, nopen: null, paper: null };
+const SETST = { sub: null, cal: null, calpick: false, cls: null, fold: null, saved: false, nopen: null, evf: null, paper: null };
 let gistUp = false;
 const PG = { pick: null, pickth: null, lab: null, rs: null, rsT: null, rstrip: null, ps: false, pgopen: [] };
 
@@ -116,8 +99,8 @@ const toggle = (a, x) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]);
 const surface = (st, pd) => (st.topic && pd.lv[st.topic] ? st.topic : pd.tp[0]);
 
 function pgBody(pd, st, phone) {
-  if (phone) return `<div class="pg B">${pgHead(pd)}${pgLadder(pd, st, { nopaper: true })}</div>`;
-  return `<div class="pg B track${gistUp ? " gistup" : ""}">${pgHead(pd, { acts: SW.acts === "head" })}<div class="pgcols"><div class="pgmain">${pgLadder(pd, st)}</div><aside class="pgrail">${pgRail(pd, st, { acts: SW.acts })}</aside></div></div>`;
+  if (phone) return `<div class="pg B">${pgHead(pd)}${pgNotes(pd, st, true)}${pgLadder(pd, st, { nopaper: true })}</div>`;
+  return `<div class="pg B track${gistUp ? " gistup" : ""}">${pgHead(pd, { acts: SW.acts === "head" })}${pgNotes(pd, st, false)}<div class="pgcols"><div class="pgmain">${pgLadder(pd, st)}</div><aside class="pgrail">${pgRail(pd, st, { acts: SW.acts })}</aside></div></div>`;
 }
 // the phone's bottom bar and its two sheets (the reasons for a thumb, and the paper); a sheet animates only as it opens
 let lastSheet = null;
@@ -145,10 +128,9 @@ function makeApp(phone) {
     start: { tab: "Digest", topic: null, paper: null, dg: null, set: null, ...SETST, ...FD, ...PG },
     view(st) {
       const pd = st.paper && paperData(st.paper);
-      const opt = { look: IX.look, layout: IX.layout };
       // a paper opened from a Settings page keeps the Settings sidebar
-      if (pd && st.set && !phone) return { body: pgBody(pd, st, false), title: pd.t, side: IX.layout === "side" ? setV({ ...st, paper: null }, false, opt).side : undefined };
-      if (st.set && !pd) return setV(st, phone, opt);
+      if (pd && st.set && !phone) return { body: pgBody(pd, st, false), title: pd.t, side: setSide(st) };
+      if (st.set && !pd) return setV(st, phone);
       if (pd) return phone ? { body: pgBody(pd, st, true), title: st.topic ? T[st.topic].n : "Paper", foot: pgFoot(pd, st) } : { body: pgBody(pd, st, false), title: pd.t };
       if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
       const v = st.topic ? topicV(st, phone) : st.tab === "Papers" ? papersV(st, phone) : st.tab === "Topics" ? topicsV()
@@ -168,7 +150,7 @@ function makeApp(phone) {
       // acknowledged only where the page does not show the result: a copy, a request, the owner's word
       const done = (msg) => toast(fr, msg);
       // Settings
-      if (f("[data-settings]")) { if (!st.set) nav.go({ set: phone ? "index" : "quality", tab: null, topic: null, dg: null, ...SETST }); return true; }
+      if (f("[data-settings]")) { if (!st.set) nav.go({ set: phone ? "index" : "overview", tab: null, topic: null, dg: null, ...SETST }); return true; }
       if (f("[data-leave]")) { while (nav.stack.length && nav.st.set) nav.back(); if (nav.st.set) nav.top({}); return true; }
       if ((n = f("[data-sset]"))) {
         const to = { set: n.dataset.sset, ...SETST };
@@ -176,16 +158,39 @@ function makeApp(phone) {
         else { while (nav.stack.length > 1 && (nav.st.sub || nav.st.paper)) nav.back(); nav.set(to, "top"); }
         return true;
       }
-      if ((n = f("[data-sub]"))) { nav.go({ sub: n.dataset.sub, saved: false }); return true; }
-      if ((n = f("[data-settle]"))) { const [k, msg] = n.dataset.settle.split("|"); SETTLED[k] = msg; nav.set({ nopen: null }); return true; }
-      if ((n = f("[data-nopen]"))) { nav.set({ nopen: +n.dataset.nopen < 0 ? null : +n.dataset.nopen }); return true; }
-      if ((n = f("[data-saved], [data-toast]"))) {
-        if (n.dataset.saved) nav.set({ saved: n.dataset.saved === "1" }, n.dataset.saved === "1" ? "top" : "keep");
-        if (n.dataset.toast) done(n.dataset.toast);
+      if (f(".grip")) return true; // the grip drags; a click on it opens nothing
+      if ((n = f("[data-sub]"))) { nav.go({ sub: n.dataset.sub, saved: false, evf: null }); return true; }
+      if ((n = f("[data-settle]"))) {
+        // a Needs you item (by index) settles wherever it shows; on a paper's page its note goes, so the result is said
+        const [k, msg] = n.dataset.settle.split("|");
+        if (/^\d+$/.test(k)) NEED[+k].done = msg; else SETTLED[k] = msg;
+        nav.set({ nopen: null });
+        if (st.paper) done(msg);
         return true;
       }
+      if ((n = f("[data-nopen]"))) { nav.set({ nopen: +n.dataset.nopen < 0 ? null : +n.dataset.nopen }); return true; }
+      if ((n = f("[data-saved]"))) { nav.set({ saved: true }, "keep"); return true; }
+      if ((n = f("[data-toast]"))) { done(n.dataset.toast); return true; }
+      if ((n = f("[data-notnow], [data-rerun]"))) {
+        // either way the offer goes; a put-off re-run waits in Jobs, so the toast says where
+        const run = !!n.dataset.rerun, [what, cnt, cost] = (n.dataset.rerun || n.dataset.notnow).split("|");
+        const scope = [...RR].map((k) => ({ labels: "labelled papers and misses", members: "existing members", kw: "keyword matches", range: "1 Sep – 13 Oct" })[k]).join(", ");
+        JOBS.unshift({ k: "Re-run", what, scope: scope.charAt(0).toUpperCase() + scope.slice(1), n: +cnt, done: 0, cost: +cost, st: run ? "running" : "offered", at: run ? "started just now" : "saved just now, not run" });
+        nav.set({ saved: false, cls: null });
+        done(run ? `Re-run started: ${(+cnt).toLocaleString("en")} papers, stops at $5.00. Progress in Runs and cost › Jobs.` : "Not run. It waits in Runs and cost › Jobs, to run now or with tonight's run.");
+        return true;
+      }
+      if ((n = f("[data-job]"))) {
+        const [i, a] = n.dataset.job.split("|"), j = JOBS[+i];
+        if (a === "discard") JOBS.splice(+i, 1);
+        else Object.assign(j, a === "run" ? { st: "running", done: 0, at: "started just now" } : { st: "queued", at: "" });
+        if (a === "run" && j.need != null) NEED[j.need].done = "Writing it again; it appears on Thu 8 Oct when done.";
+        nav.set({}); return true;
+      }
+      if ((n = f("[data-evf]"))) { nav.set({ evf: n.dataset.evf }); return true; }
       if ((n = f("[data-rr]"))) { const k = n.dataset.rr; RR.has(k) ? RR.delete(k) : RR.add(k); nav.set({}); return true; }
-      if ((n = f("[data-cal]"))) { const i = +n.dataset.cal; if (i >= 0) nav.set({ cal: i }, st.cal == null || i > st.cal ? "go" : "back"); return true; }
+      if ((n = f("[data-calpick]"))) { nav.set({ calpick: n.dataset.calpick === "1" }); return true; }
+      if ((n = f("[data-cal]"))) { const i = +n.dataset.cal; if (i >= 0 && i !== st.cal) nav.set({ cal: i, calpick: false }, st.cal == null || i > st.cal ? "go" : "back"); else nav.set({ calpick: false }); return true; }
       if ((n = f("[data-cf], [data-cc], [data-cv], [data-cg], [data-cw]"))) {
         const a = (CAL[st.cal] = CAL[st.cal] || { fit: {}, wrong: [] }), d = n.dataset, flip = (k, v) => (a[k] = a[k] === v ? undefined : v);
         if (d.cf) { const [t, v] = d.cf.split("|"); a.fit[t] = a.fit[t] === v ? undefined : v; }
@@ -193,7 +198,10 @@ function makeApp(phone) {
         else a.wrong = toggle(a.wrong, d.cw);
         nav.set({}); return true;
       }
-      if ((n = f("[data-clsave]"))) { nav.set({ cls: null, saved: true }, "top"); return true; }
+      if ((n = f("[data-fold]"))) {
+        const i = +n.dataset.fold, cur = st.fold || TREE.flatMap((r, j) => (r[5] ? [j] : []));
+        nav.set({ fold: toggle(cur, i) }); return true;
+      }
       if ((n = f("[data-cls]"))) { const i = +n.dataset.cls; nav.set({ cls: i < 0 || st.cls === i ? null : i, saved: false }); return true; }
       if ((n = f("[data-tog]"))) { n.classList.toggle("on"); return true; }
       if (f("[data-x], .tin")) return true;
@@ -267,11 +275,13 @@ function openPaper(topic, id) { navs.forEach((n) => { n.top(topic ? { tab: null,
 function openSet(set, extra = {}) {
   navs.forEach((n, i) => { n.top({}); n.go(i ? { set: "index", tab: null, ...SETST } : { set, tab: null, ...SETST, ...extra }); if (i) n.go({ set, ...SETST, ...extra }); });
 }
+const then = (patch) => navs.forEach((n) => n.go(patch));
 const JUMP = {
   digest: () => navs.forEach((n) => n.top({ tab: "Digest", topic: null })),
-  quality: () => openSet("quality"), calibrate: () => openSet("calibrate", { cal: 2 }), taxonomy: () => openSet("taxonomy"),
-  misses: () => openSet("misses"), runs: () => openSet("runs"), integrations: () => openSet("integrations"),
-  editor: () => { openSet("topics"); navs.forEach((n) => n.go({ sub: "t:cotf" })); },
+  overview: () => openSet("overview"), needs: () => openSet("needs"), calibrate: () => openSet("calibrate", { cal: 2 }), taxonomy: () => openSet("taxonomy"),
+  split: () => { openSet("needs"); then({ paper: "2610.04780", ...PG }); }, fulltext: () => { openSet("needs"); then({ paper: "2610.03877", ...PG }); },
+  session: () => { openSet("calibrate"); then({ sub: "cs:0" }); }, jobs: () => { openSet("runs"); then({ sub: "jobs" }); },
+  events: () => { openSet("integrations"); then({ sub: "ev:zotero" }); }, editor: () => { openSet("topics"); then({ sub: "t:cotf" }); },
 };
 document.querySelectorAll("[data-jump]").forEach((b) => b.onclick = () => JUMP[b.dataset.jump]());
 // the Gist is "up" once the reading column's Gist has scrolled out of view; checked on scroll and after each redraw
@@ -283,21 +293,6 @@ function checkGist() {
 }
 D.addEventListener("scroll", checkGist, true);
 new MutationObserver(checkGist).observe(D, { childList: true });
-// the switches set data attributes on both frames (and the reacting flow on the paper code); the app redraws in place
-document.querySelectorAll("[data-ix]").forEach((p) => p.innerHTML = IXO.map(([k, name, opts]) =>
-  `<span>${name}</span><span class="sw">${opts.map(([v, l]) => `<button data-xk="${k}:${v}">${l}</button>`).join("")}</span>`).join(""));
-function applyIx() {
-  document.querySelectorAll("[data-xk]").forEach((b) => { const [k, v] = b.dataset.xk.split(":"); b.classList.toggle("on", IX[k] === v); });
-}
-document.addEventListener("click", (e) => {
-  const lm = document.querySelector(".lookm");
-  if (lm.open && !e.target.closest(".lookm")) lm.open = false;
-  const b = e.target.closest("[data-xk]");
-  if (!b) return;
-  const [k, v] = b.dataset.xk.split(":"); IX[k] = v;
-  localStorage.setItem("lw-r7", JSON.stringify(IX)); applyIx();
-  navs.forEach((n) => n.set({}));
-});
 // iOS shows :active on touch only once the page listens for touches
 document.addEventListener("touchstart", () => {}, { passive: true });
 
@@ -339,6 +334,37 @@ M.addEventListener("pointerup", sheetEnd);
 M.addEventListener("pointercancel", sheetEnd);
 // the release of a drag is not a tap on whatever lies under the finger
 document.addEventListener("click", (e) => { if (swallow && e.isTrusted) { swallow = false; e.stopPropagation(); e.preventDefault(); } }, true);
-applyIx();
+
+// drag a topic by its grip to reorder it within its depth: the row moves as the pointer passes a neighbour's middle,
+// and on release TOPICS takes the new order, which the sidebar and the Digest follow. Caught before the phone's edge swipe.
+let tg = null;
+[D, M].forEach((fr) => {
+  fr.addEventListener("pointerdown", (e) => {
+    const g = e.target.closest(".trow .grip");
+    if (!g || e.button > 0) return;
+    e.stopPropagation(); e.preventDefault();
+    tg = { fr, row: g.closest(".trow"), id: e.pointerId, moved: false };
+    tg.row.classList.add("drag");
+    try { g.setPointerCapture(e.pointerId); } catch {}
+  }, true);
+  fr.addEventListener("pointermove", (e) => {
+    if (!tg || tg.fr !== fr || e.pointerId !== tg.id) return;
+    const row = tg.row, mid = (r) => r.getBoundingClientRect().top + r.offsetHeight / 2;
+    for (let p; (p = row.previousElementSibling) && e.clientY < mid(p);) { row.parentNode.insertBefore(row, p); tg.moved = true; }
+    for (let n; (n = row.nextElementSibling) && e.clientY > mid(n);) { row.parentNode.insertBefore(n, row); tg.moved = true; }
+  }, true);
+  const end = (e) => {
+    if (!tg || tg.fr !== fr || e.pointerId !== tg.id) return;
+    const { row, moved } = tg, list = row.parentNode, dep = list.dataset.order;
+    row.classList.remove("drag"); tg = null;
+    if (!moved) return;
+    swallow = true; setTimeout(() => (swallow = false), 350);
+    const order = [...list.children].map((r) => T[r.dataset.tid]), slots = TOPICS.flatMap((t, i) => (t.depth === dep ? [i] : []));
+    slots.forEach((s, j) => (TOPICS[s] = order[j]));
+    navs.forEach((n) => n.set({}));
+  };
+  fr.addEventListener("pointerup", end, true);
+  fr.addEventListener("pointercancel", end, true);
+});
 </script>
 </body></html>
