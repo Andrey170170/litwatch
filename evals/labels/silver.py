@@ -166,8 +166,9 @@ async def label(name: str) -> None:
 
 
 def compare() -> None:
-    """Agreed primary classes go to silver.csv; at most 20 disagreements, drawn with the seed
-    and spread across top-level classes, go to disputed.csv for the owner."""
+    """Agreed primary classes go to silver.csv, with the other classes both named; at most 20
+    disagreements, drawn with the seed and spread across top-level classes, go to disputed.csv
+    for the owner."""
     tree = seeds.taxonomy()
 
     def top(slug: str) -> str:
@@ -184,10 +185,13 @@ def compare() -> None:
     )
     for pid in a.keys() & b.keys():
         if a[pid]["primary"] == b[pid]["primary"]:
-            others = sorted(set(a[pid]["others"].split()) | set(b[pid]["others"].split()))
+            # Another class both named is a silver member; one only one named is unsettled and
+            # counts neither way.
+            x, y = set(a[pid]["others"].split()), set(b[pid]["others"].split())
             agreed.append(
-                {"paper_id": pid, "primary": a[pid]["primary"], "others": " ".join(others)}
-            )
+                {"paper_id": pid, "primary": a[pid]["primary"], "others": " ".join(sorted(x & y)),
+                 "unsettled": " ".join(sorted(x ^ y))}
+            )  # fmt: skip
         else:
             differ.append(pid)
     # Round-robin over the top-level class Opus named, in tree order, each queue shuffled.
@@ -203,7 +207,7 @@ def compare() -> None:
             if queues.get(c.slug) and len(picked) < MAX_DISPUTED:
                 picked.append(queues[c.slug].pop())
     write(HERE / "silver.csv", sorted(agreed, key=lambda r: r["paper_id"]),
-          ["paper_id", "primary", "others"])  # fmt: skip
+          ["paper_id", "primary", "others", "unsettled"])  # fmt: skip
     disputed = [
         {"paper_id": pid, "opus": a.get(pid, {}).get("primary", ""),
          "sol": b.get(pid, {}).get("primary", ""),

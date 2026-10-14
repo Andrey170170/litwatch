@@ -43,7 +43,8 @@ the owner labelled, 20 positives of each of the five broad selections, and 70 pa
 tier 4. Two labs sorted each paper into the seed tree separately, from its title and abstract (read from the
 development database): Opus 5.5 (Anthropic) and GPT-6.1-Sol (OpenAI, through OpenRouter), both at medium effort, for
 $1.32 in all. Opus refused 2 papers, which stay unresolved. Where both named the same primary class it is the silver
-label, with the union of their other classes. Where they differed, 20 papers were drawn with the same seed,
+label; another class both named is a silver member (`others`), and one only one of them named is `unsettled`,
+which per-class scores count neither as a member nor as a non-member. Where they differed, 20 papers were drawn with the same seed,
 round-robin over the top-level class Opus named, and the owner chose; the rest are `unresolved`, counted and left out
 of primary-class accuracy.
 
