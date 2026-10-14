@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 3 · topic page and Papers</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<link rel="stylesheet" href="lib/papers.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<script src="lib/papers.js"></script>
+<style>
+  .sw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+  .sw button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px; color: var(--fg2); }
+  .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+  @media (max-width: 640px) { .sw > span { display: none; } .sw button { padding: 3px 6px; } }
+  .pbar .ttl2 { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
+  .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 3 · topic page and Papers</h1>
+  <span class="sp"></span>
+  <span class="sw"><span>Rows</span><button data-sw="v:A">A table</button><button data-sw="v:B">B reading</button><button data-sw="v:C">C shelves</button></span>
+  <label class="tune" style="font-size:12px;color:var(--fg2)"><input type="checkbox" id="showedge"> edge</label>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">A topic page, the Papers tab and the Topics tab, on the chosen shell. All three tabs share one set of controls: a <b>rarity bar</b> (five segments, sized by count; tap one or more to filter), Saved, Code, a search box and the sort order. On the phone these sit in the bottom bar and in a sheet that bar opens. The rows come in three forms: <b>A</b> a dense table, one line per paper; <b>B</b> a reading list of title and Gist, grouped by week; <b>C</b> shelves by rarity, with the top shelves open and the rest folded to a count. A topic page also shows its recent digests as a strip of squares. Papers searches the collection and, once you type, the archive, whose papers sit in their own band with Process. This page opens on Interpretability; the sidebar and drawer reach the other topics. The ★ on a row saves the paper; the Digest tab here is a placeholder.</p>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" id="M"></div>
+    <div class="notes">
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Rows: A, B or C? They can differ by place: for example C on a topic page, A in Papers, B on the phone.</li>
+        <li>The rarity bar as the main filter: right? On a topic page its levels read as grades (hover a segment); in Papers they are the mixed rarity.</li>
+        <li>Papers sorts newest first, or by best match once you type. Should a topic page sort newest first too, or rarest first?</li>
+        <li>Phone: search and filters in the bottom bar, the filters in a sheet. Good, or should the rarity bar stay visible at the top of the list?</li>
+        <li>The Topics tab: cards with each topic's recent digests as squares. Enough, or should it show more, such as counts per rarity or the newest must read?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const SW = Object.assign({ v: "A" }, JSON.parse(localStorage.getItem("lw-r3") || "{}"));
+const FD = { q: "", rset: [], saved: false, code: false, tf: [], sort: "new", n: 40, open: [], fs: false };
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+const CADENCE = { focus: "daily and weekly digests", area: "daily and weekly digests", field: "weekly digest" };
+const nfilt = (st, papers) => (st.rset.length ? 1 : 0) + st.saved + st.code + (papers && st.tf.length ? 1 : 0);
+
+// the rows in the chosen form, with a loader while more exist
+function rows(list, st, topic) {
+  if (!list.length) return `<div class="empty">Nothing matches. <a data-clear>Clear the filters</a></div>`;
+  if (SW.v === "C") return `<div class="wideview">${shelfRows(list, topic, st)}</div>`;
+  const shown = list.slice(0, st.n), more = list.length > st.n ? `<div class="loadmore">Loading more…</div>` : `<div class="archstart">${list.length} papers</div>`;
+  return SW.v === "A" ? `<div class="wideview">${tableRows(shown, topic)}</div>${more}` : readingRows(shown, topic, { group: st.sort === "new" }) + more;
+}
+function controls(st, topic, phone) {
+  if (phone) return "";
+  const n = listFor(st, topic).length;
+  const q = `<label class="qbox${topic ? "" : " big"}">⌕<input data-q value="${esc(st.q)}" placeholder="${topic ? "Search in " + T[topic].n : "Search the collection and the archive (3.1M papers)"}"></label>`;
+  return (topic ? "" : `<div class="ctlrow">${q}</div><div class="ctlrow">${topicToggles(st)}</div>`) + rarityBar(st, topic) +
+    `<div class="ctlrow">${topic ? q : ""}${chip(st, "saved", topic ? "★ Saved" : "★ Saved · the library")}${chip(st, "code", "⟨/⟩ Code")}<span class="sp"></span><span class="cnt">${n} papers</span>${sortSeg(st)}</div>`;
+}
+// on the phone: search and the filter button in the bottom bar; the filters in a sheet over it
+function phoneFoot(st, topic) {
+  const nf = nfilt(st, !topic);
+  const sheet = !st.fs ? "" : `<div class="fsheet"><div class="shade2" data-fs></div><div class="sheetp">
+    ${topic ? "" : `<div class="cap2">Topics</div>${topicToggles(st)}`}
+    <div class="cap2">Rarity</div>${rarityBar(st, topic)}
+    <div class="cap2">Show</div><div class="row">${chip(st, "saved", "★ Saved")}${chip(st, "code", "⟨/⟩ Code")}</div>
+    <div class="cap2">Sort</div><div class="row">${sortSeg(st)}<span style="flex:1"></span><span class="cnt">${listFor(st, topic).length} papers</span></div>
+    <button class="done" data-fs>Done</button></div></div>`;
+  return `<div class="pfoot qbar"><label class="qbox">⌕<input data-q value="${esc(st.q)}" placeholder="${topic ? "Search in " + T[topic].n : "Search papers"}"></label><button class="fbtn" data-fs>⧩${nf ? `<i>${nf}</i>` : ""}</button></div>${sheet}`;
+}
+
+function topicV(st, phone) {
+  const id = st.topic, t = T[id];
+  const head = `<div class="thead">${badge(id, "lg")}<div><div class="dep">${t.depth} · ${CADENCE[t.depth]}</div><div class="h1">${t.n}</div></div></div><p class="tsub">${SUBJECT[id]}</p>${digestStrip(id)}`;
+  return { body: head + controls(st, id, phone) + rows(listFor(st, id), st, id), title: t.n, bar: `<span class="ttl2">${badge(id)}${t.n}</span>`, foot: phone ? phoneFoot(st, id) : "" };
+}
+function papersV(st, phone) {
+  const list = listFor(st, null);
+  const out = st.q ? ARCH.filter((a) => matches(a, st.q)) : [];
+  const band = !st.q ? "" : `<div class="outh">Outside the collection · from the archive<span class="cnt">${out.length}</span></div>` +
+    (out.length ? out.map((a) => `<div class="orow"><span class="ti">${a.t}<br><span class="au">${a.au} · ${a.y} · ${a.id}</span></span><a class="btn" data-process="${a.id}">Process</a></div>`).join("") : `<div class="empty">No archive hits for "${esc(st.q)}".</div>`);
+  return { body: (phone ? "" : `<div class="h1">Papers</div>`) + controls(st, null, phone) + (list.length || !st.q ? rows(list, st, null) : "") + band, title: "Papers", bar: `<span class="ttl2">Papers</span>`, foot: phone ? phoneFoot(st, null) : "" };
+}
+function topicsV() {
+  const card = (t) => { const n = COLL.filter((p) => p.lv[t.id]).length, s = COLL.filter((p) => p.lv[t.id] && p.sv).length;
+    return `<div class="tcard2" data-topic="${t.id}"><div class="hd">${badge(t.id, "lg")}<div><div class="n">${t.n}</div><div class="s">${n} papers · ${s} saved</div></div></div>${digestStrip(t.id)}</div>`; };
+  return { body: ["focus", "area", "field"].map((d) => `<div class="cap" style="margin-top:6px">${d}</div><div class="tgrid">${TOPICS.filter((t) => t.depth === d).map(card).join("")}</div>`).join(""), title: "Topics", bar: `<span class="ttl2">Topics</span>` };
+}
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, dg: null, ...FD },
+    view(st) {
+      if (phone && st.paper) return { body: paperView(st.paper), title: "" };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      const v = st.topic ? topicV(st, phone) : st.tab === "Papers" ? papersV(st, phone) : st.tab === "Topics" ? topicsV()
+        : { body: daystrip(TODAY, false) + dayBody(TODAY, DG, { weekly: false }), title: "Digest" };
+      if (phone) return v;
+      const ov = st.paper ? paperView(st.paper) : st.dg ? digestPage(st.dg) : null;
+      return { ...v, overlay: ov && `<a class="back" data-back>‹ ${st.paper && st.dg ? "Digest" : "Close"}</a>${ov}` };
+    },
+    click(e, nav) {
+      const f = (s) => e.target.closest(s), st = nav.st; let n;
+      const toggle = (a, x) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]);
+      if ((n = f("[data-save]"))) { const p = P[n.dataset.save]; p.sv = !p.sv; nav.set({}); return true; }
+      if ((n = f("[data-process]"))) { alert(`Would process ${n.dataset.process}: classify, analyse and grade it like a new paper.`); return true; }
+      if (f("[data-fs]")) { nav.set({ fs: !st.fs }); return true; }
+      if (f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-topic]")) && !f("[data-paper]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
+      else if ((n = f("[data-rl]"))) nav.set({ rset: toggle(st.rset, +n.dataset.rl), n: 40 });
+      else if ((n = f("[data-chip]"))) nav.set({ [n.dataset.chip]: !st[n.dataset.chip], n: 40 });
+      else if ((n = f("[data-sort]"))) nav.set({ sort: n.dataset.sort });
+      else if ((n = f("[data-tf]"))) nav.set({ tf: toggle(st.tf, n.dataset.tf), n: 40 });
+      else if ((n = f("[data-unfold]"))) nav.set({ open: toggle(st.open, +n.dataset.unfold) });
+      else if (f("[data-clear]")) nav.set({ ...FD });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else if (f("[data-paper]")) return false;
+      else if (f("[data-step]")) return true;
+      else return false;
+      return true;
+    },
+  };
+}
+const scroller = (frame) => frame.querySelector(".main, .screen > .scroll");
+// the list grows as you near its end
+function autoLoad(frame, nav) {
+  let busy = false;
+  frame.addEventListener("scroll", () => {
+    const sc = scroller(frame);
+    if (busy || !sc || !sc.querySelector(".loadmore") || sc.scrollHeight - sc.scrollTop - sc.clientHeight > 300) return;
+    busy = true;
+    setTimeout(() => { nav.set({ n: nav.st.n + 40 }); busy = false; }, 350);
+  }, true);
+}
+// typing filters as you go; the redraw replaces the input, so focus and caret are put back
+function liveSearch(frame, nav) {
+  frame.addEventListener("input", (e) => {
+    if (!e.target.matches("[data-q]")) return;
+    const q = e.target.value, at = e.target.selectionStart, st = nav.st;
+    const sort = q && !st.q && st.sort === "new" && !st.topic ? "match" : !q && st.sort === "match" ? "new" : st.sort;
+    nav.set({ q, sort, n: 40 });
+    const inp = frame.querySelector(".screen [data-q], .main [data-q]");
+    if (inp) { inp.focus(); inp.setSelectionRange(at, at); }
+  });
+}
+
+const D = document.getElementById("D"), M = document.getElementById("M");
+const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
+[[D, navs[0]], [M, navs[1]]].forEach(([f, n]) => { autoLoad(f, n); liveSearch(f, n); n.top({ tab: null, topic: "interp" }); });
+function markSwitches() { document.querySelectorAll("[data-sw]").forEach((b) => { const [k, v] = b.dataset.sw.split(":"); b.classList.toggle("on", SW[k] === v); }); }
+document.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => {
+  const [k, v] = b.dataset.sw.split(":"); SW[k] = v;
+  localStorage.setItem("lw-r3", JSON.stringify(SW)); markSwitches(); navs.forEach((n) => n.set({}));
+});
+markSwitches();
+document.getElementById("showedge").onchange = (e) => M.classList.toggle("show-edge", e.target.checked);
+</script>
+</body></html>
