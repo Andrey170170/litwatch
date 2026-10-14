@@ -1,0 +1,166 @@
+paper_id,primary,others
+1910.04076,computer-vision,robotics
+2404.05880,jailbreaks,federated-and-private safety-training
+2405.08448,preference-training,
+2412.16555,jailbreaks,multimodal
+2502.18770,reward-hacking,preference-training
+2505.13878,preference-training,
+2506.19459,probabilistic-inference,
+2509.22230,reasoning-and-rl,inference-efficiency
+2510.07492,ai-for-science,computer-vision media-generation
+2512.00614,multi-agent-systems,federated-and-private
+2512.09198,ai-for-science,
+2512.18318,media-generation,inference-efficiency
+2601.04260,circuits,
+2602.03994,cot-faithfulness,circuits
+2603.21045,media-generation,computer-vision
+2603.28662,agent-evaluation,multimodal
+2605.06979,circuits,automated-interpretability
+2605.17610,multimodal,inference-efficiency safety-evaluations test-time-compute
+2605.19227,model-security,multimodal
+2605.28003,reasoning-and-rl,pretraining
+2605.29000,language-tasks,long-context
+2606.08496,automated-interpretability,sparse-autoencoders
+2606.22327,inference-efficiency,
+2606.23933,reinforcement-learning,
+2606.28525,safety-training,representations reward-hacking steering
+2607.00691,learning-theory,media-generation
+2607.20995,circuits,
+2607.21971,rl-for-reasoning,test-time-compute
+2608.21114,reinforcement-learning,
+2608.21501,rl-for-reasoning,
+2608.21678,media-generation,
+2608.21766,deception,representations steering training-dynamics
+2608.22055,multi-agent-systems,robotics
+2608.22636,reinforcement-learning,learning-theory
+2608.23075,ai-for-science,
+2608.23247,classical-ai,
+2608.23809,sparse-autoencoders,multilingual representations
+2608.24232,safety-evaluations,cot-monitoring
+2608.24715,computer-vision,ai-for-science
+2608.24771,ai-for-science,time-series
+2608.24964,probabilistic-inference,learning-theory
+2608.25315,interpretability-evaluation,steering
+2608.26683,reinforcement-learning,
+2608.27348,cot-monitoring,oversight-and-control
+2608.27420,rl-for-reasoning,
+2608.27448,rl-for-reasoning,test-time-compute
+2608.28393,time-series,probabilistic-inference
+2608.29252,rl-for-reasoning,
+2608.29289,ai-for-science,time-series
+2608.29605,agents,long-context
+2608.30647,long-context,inference-efficiency
+2608.30916,agent-evaluation,
+2608.30923,time-series,
+2609.00047,graph-learning,
+2609.01633,graph-learning,ai-for-science
+2609.02566,ai-for-science,reinforcement-learning
+2609.02852,model-security,cot-faithfulness cot-monitoring
+2609.02986,architectures,circuits long-context
+2609.04851,robotics,
+2609.06100,rl-for-reasoning,
+2609.06704,cot-faithfulness,multimodal
+2609.06951,steering,representations
+2609.07053,representations,
+2609.09324,time-series,
+2609.12004,ai-for-science,learning-theory
+2609.12419,rl-for-reasoning,
+2609.13040,learning-theory,
+2609.13548,computer-use-agents,
+2609.13889,model-security,agents
+2609.13914,machine-learning,
+2609.14141,learning-theory,
+2609.15037,training-systems,
+2609.15687,ai-for-science,
+2609.15989,cot-monitoring,cot-faithfulness model-security
+2609.16069,time-series,media-generation
+2609.16071,time-series,
+2609.16382,representations,training-dynamics
+2609.17241,inference-efficiency,
+2609.17951,classical-ai,
+2609.18204,oversight-and-control,lm-evaluation
+2609.19101,reward-hacking,oversight-and-control representations
+2609.19650,multilingual,language-tasks
+2609.19801,agent-evaluation,agents robotics
+2609.19832,graph-learning,time-series
+2609.20129,jailbreaks,sparse-autoencoders
+2609.20732,retrieval,language-tasks
+2609.21561,reasoning-and-rl,reasoning-analyses
+2609.22119,deception,representations steering
+2609.22219,representations,circuits interpretability-evaluation
+2609.23065,cot-faithfulness,circuits sparse-autoencoders
+2609.23371,long-context,retrieval
+2609.23680,classical-ai,
+2609.23773,federated-and-private,
+2609.24855,language-tasks,
+2609.26000,media-generation,
+2609.26063,federated-and-private,graph-learning
+2609.26603,graph-learning,ai-for-science
+2609.27041,representations,reasoning-analyses
+2609.27294,architectures,inference-efficiency training-systems
+2609.27470,inference-efficiency,long-context multimodal
+2609.27871,agents,oversight-and-control
+2609.28080,lm-evaluation,
+2609.30877,learning-theory,
+2609.31009,inference-efficiency,
+2609.31098,representations,training-dynamics
+2609.32570,machine-learning,computer-vision
+2609.32790,federated-and-private,learning-theory
+2609.33134,reasoning-analyses,cot-faithfulness
+2609.33455,reasoning-and-rl,
+2609.33891,learning-theory,fairness
+2609.34715,ai-for-science,
+2609.34970,reward-hacking,safety-training training-dynamics
+2609.35074,cot-faithfulness,cot-monitoring hallucination
+2609.35599,representations,steering
+2609.35628,learning-theory,
+2609.35732,agent-evaluation,hallucination
+2609.35880,reinforcement-learning,
+2609.35912,model-security,agent-evaluation multimodal safety-evaluations
+2609.35928,multi-agent-systems,fairness
+2609.36221,interpretability,circuits
+2609.36222,inference-efficiency,architectures
+2609.36368,multimodal,
+2609.36452,inference-efficiency,architectures
+2609.36584,training-systems,
+2609.36956,jailbreaks,
+2609.37522,agents,inference-efficiency
+2609.37680,circuits,representations
+2609.38415,safety-evaluations,deception model-security
+2609.39010,ai-for-science,
+2609.39114,learning-theory,training-systems
+2609.39838,cot-monitoring,
+2610.00024,circuits,multimodal representations
+2610.00367,inference-efficiency,architectures
+2610.00961,oversight-and-control,coding-agents human-ai-interaction
+2610.01127,pretraining,
+2610.01358,ai-for-science,
+2610.02015,reasoning-analyses,cot-monitoring
+2610.02098,interpretability-evaluation,automated-interpretability circuits
+2610.02588,agent-evaluation,reward-hacking
+2610.03771,media-generation,
+2610.04469,rl-for-reasoning,multimodal
+2610.04594,cot-faithfulness,interpretability-evaluation
+2610.04596,rl-for-reasoning,
+2610.05166,robotics,
+2610.05300,agents,
+2610.05492,robotics,multimodal retrieval
+2610.05819,robotics,reinforcement-learning
+2610.06637,agents,reasoning-and-rl
+2610.06782,retrieval,agents multilingual
+2610.07167,robotics,learning-theory
+2610.07333,training-systems,architectures
+2610.07458,graph-learning,
+2610.07522,inference-efficiency,
+2610.07643,inference-efficiency,long-context
+2610.08118,time-series,
+2610.08703,language-tasks,lm-evaluation
+2610.09639,reasoning-analyses,
+2610.10657,model-security,reward-hacking
+2610.10878,agents,reasoning-and-rl
+2610.11318,ai-for-science,media-generation
+2610.11351,deception,cot-monitoring
+2610.11407,time-series,media-generation probabilistic-inference
+2610.11578,coding-agents,multi-agent-systems retrieval
+2610.12235,agents,lm-evaluation
+2610.12445,deception,oversight-and-control representations
