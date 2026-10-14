@@ -16,6 +16,7 @@
   .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
   @media (max-width: 640px) { .sw > span { display: none; } .sw button { padding: 3px 6px; } }
   .pbar .ttl2 { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .pbar .ttl2 .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
   .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
   .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
@@ -24,7 +25,9 @@
 <div class="top">
   <h1>Round 3 · topic page and Papers</h1>
   <span class="sp"></span>
-  <span class="sw"><span>Rows</span><button data-sw="v:A">A table</button><button data-sw="v:B">B reading</button><button data-sw="v:C">C shelves</button></span>
+  <span class="sw"><span>Rows</span><button data-sw="v:A">A</button><button data-sw="v:B">B</button><button data-sw="v:C">C shelves</button></span>
+  <span class="sw"><span>Rarity bar</span><button data-sw="bar:inline">inline</button><button data-sw="bar:row">own row</button></span>
+  <span class="sw"><span>Topic cards</span><button data-sw="cards:plain">plain</button><button data-sw="cards:rich">rich</button></span>
   <label class="tune" style="font-size:12px;color:var(--fg2)"><input type="checkbox" id="showedge"> edge</label>
   <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
 </div>
@@ -34,19 +37,17 @@
   <div class="side-by-side">
     <div class="frame phone" data-dir="nc" id="M"></div>
     <div class="notes">
+      <p><b>3b</b>: C shelves chosen, sorted inside each shelf (in search too). The phone header's topic name ends in "…", and the digest strip stays on one line, cutting the oldest squares when narrow. The filter sheet no longer replays its animation on every tap. Two switches at the top: the rarity bar <i>inline</i> with the other controls or on its <i>own row</i> (desktop), and the Topics tab's cards <i>plain</i> or <i>rich</i>.</p>
       <p><b>Questions</b></p>
       <ol>
-        <li>Rows: A, B or C? They can differ by place: for example C on a topic page, A in Papers, B on the phone.</li>
-        <li>The rarity bar as the main filter: right? On a topic page its levels read as grades (hover a segment); in Papers they are the mixed rarity.</li>
-        <li>Papers sorts newest first, or by best match once you type. Should a topic page sort newest first too, or rarest first?</li>
-        <li>Phone: search and filters in the bottom bar, the filters in a sheet. Good, or should the rarity bar stay visible at the top of the list?</li>
-        <li>The Topics tab: cards with each topic's recent digests as squares. Enough, or should it show more, such as counts per rarity or the newest must read?</li>
+        <li>Rarity bar inline or on its own row?</li>
+        <li>Topics tab (the Topics item in the sidebar or drawer): plain cards, or rich ones with the topic's levels as a thin bar and its newest must read?</li>
       </ol>
     </div>
   </div>
 </div>
 <script>
-const SW = Object.assign({ v: "A" }, JSON.parse(localStorage.getItem("lw-r3") || "{}"));
+const SW = Object.assign({ v: "C", bar: "inline", cards: "rich" }, JSON.parse(localStorage.getItem("lw-r3") || "{}"));
 const FD = { q: "", rset: [], saved: false, code: false, tf: [], sort: "new", n: 40, open: [], fs: false };
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const CADENCE = { focus: "daily and weekly digests", area: "daily and weekly digests", field: "weekly digest" };
@@ -62,14 +63,18 @@ function rows(list, st, topic) {
 function controls(st, topic, phone) {
   if (phone) return "";
   const n = listFor(st, topic).length;
-  const q = `<label class="qbox${topic ? "" : " big"}">⌕<input data-q value="${esc(st.q)}" placeholder="${topic ? "Search in " + T[topic].n : "Search the collection and the archive (3.1M papers)"}"></label>`;
-  return (topic ? "" : `<div class="ctlrow">${q}</div><div class="ctlrow">${topicToggles(st)}</div>`) + rarityBar(st, topic) +
-    `<div class="ctlrow">${topic ? q : ""}${chip(st, "saved", topic ? "★ Saved" : "★ Saved · the library")}${chip(st, "code", "⟨/⟩ Code")}<span class="sp"></span><span class="cnt">${n} papers</span>${sortSeg(st)}</div>`;
+  const inl = SW.bar === "inline";
+  const q = `<label class="qbox${topic ? (inl ? " short" : "") : " big"}">⌕<input data-q value="${esc(st.q)}" placeholder="${topic ? "Search in " + T[topic].n : "Search the collection and the archive (3.1M papers)"}"></label>`;
+  return (topic ? "" : `<div class="ctlrow">${q}</div><div class="ctlrow">${topicToggles(st)}</div>`) + (inl ? "" : rarityBar(st, topic)) +
+    `<div class="ctlrow">${topic ? q : ""}${chip(st, "saved", topic ? "★ Saved" : "★ Saved · the library")}${chip(st, "code", "⟨/⟩ Code")}${inl ? rarityBar(st, topic, { inline: true }) : '<span class="sp"></span>'}<span class="cnt">${n} papers</span>${sortSeg(st)}</div>`;
 }
-// on the phone: search and the filter button in the bottom bar; the filters in a sheet over it
+// on the phone: search and the filter button in the bottom bar; the filters in a sheet over it, which animates only
+// as it opens
+let sheetOpen = false;
 function phoneFoot(st, topic) {
-  const nf = nfilt(st, !topic);
-  const sheet = !st.fs ? "" : `<div class="fsheet"><div class="shade2" data-fs></div><div class="sheetp">
+  const nf = nfilt(st, !topic), enter = st.fs && !sheetOpen;
+  sheetOpen = st.fs;
+  const sheet = !st.fs ? "" : `<div class="fsheet${enter ? " enter" : ""}"><div class="shade2" data-fs></div><div class="sheetp">
     ${topic ? "" : `<div class="cap2">Topics</div>${topicToggles(st)}`}
     <div class="cap2">Rarity</div>${rarityBar(st, topic)}
     <div class="cap2">Show</div><div class="row">${chip(st, "saved", "★ Saved")}${chip(st, "code", "⟨/⟩ Code")}</div>
@@ -81,7 +86,7 @@ function phoneFoot(st, topic) {
 function topicV(st, phone) {
   const id = st.topic, t = T[id];
   const head = `<div class="thead">${badge(id, "lg")}<div><div class="dep">${t.depth} · ${CADENCE[t.depth]}</div><div class="h1">${t.n}</div></div></div><p class="tsub">${SUBJECT[id]}</p>${digestStrip(id)}`;
-  return { body: head + controls(st, id, phone) + rows(listFor(st, id), st, id), title: t.n, bar: `<span class="ttl2">${badge(id)}${t.n}</span>`, foot: phone ? phoneFoot(st, id) : "" };
+  return { body: head + controls(st, id, phone) + rows(listFor(st, id), st, id), title: t.n, bar: `<span class="ttl2">${badge(id)}<span class="t">${t.n}</span></span>`, foot: phone ? phoneFoot(st, id) : "" };
 }
 function papersV(st, phone) {
   const list = listFor(st, null);
@@ -91,8 +96,11 @@ function papersV(st, phone) {
   return { body: (phone ? "" : `<div class="h1">Papers</div>`) + controls(st, null, phone) + (list.length || !st.q ? rows(list, st, null) : "") + band, title: "Papers", bar: `<span class="ttl2">Papers</span>`, foot: phone ? phoneFoot(st, null) : "" };
 }
 function topicsV() {
-  const card = (t) => { const n = COLL.filter((p) => p.lv[t.id]).length, s = COLL.filter((p) => p.lv[t.id] && p.sv).length;
-    return `<div class="tcard2" data-topic="${t.id}"><div class="hd">${badge(t.id, "lg")}<div><div class="n">${t.n}</div><div class="s">${n} papers · ${s} saved</div></div></div>${digestStrip(t.id)}</div>`; };
+  // plain: name, counts, recent digests; rich adds the topic's levels as a thin bar and its newest must read
+  const card = (t) => { const L = COLL.filter((p) => p.lv[t.id]), s = L.filter((p) => p.sv).length;
+    const top = L.filter((p) => p.lv[t.id] >= 4).sort((a, b) => b.di - a.di)[0];
+    const rich = SW.cards === "rich" ? rarityThin(t.id) + (top ? `<div class="nm2"><span class="k2">Newest must read</span><span class="t2" data-paper="${top.id}" title="${esc(top.t)}">${top.t}</span></div>` : "") : "";
+    return `<div class="tcard2" data-topic="${t.id}"><div class="hd">${badge(t.id, "lg")}<div><div class="n">${t.n}</div><div class="s">${L.length} papers · ${s} saved</div></div></div>${rich}${digestStrip(t.id)}</div>`; };
   return { body: ["focus", "area", "field"].map((d) => `<div class="cap" style="margin-top:6px">${d}</div><div class="tgrid">${TOPICS.filter((t) => t.depth === d).map(card).join("")}</div>`).join(""), title: "Topics", bar: `<span class="ttl2">Topics</span>` };
 }
 
@@ -115,7 +123,7 @@ function makeApp(phone) {
       if ((n = f("[data-process]"))) { alert(`Would process ${n.dataset.process}: classify, analyse and grade it like a new paper.`); return true; }
       if (f("[data-fs]")) { nav.set({ fs: !st.fs }); return true; }
       if (f(".side, .drawer .panel")) return false;
-      if ((n = f("[data-topic]")) && !f("[data-paper]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
+      if ((n = f("[data-topic]")) && !f("[data-paper], [data-cell]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
       else if ((n = f("[data-rl]"))) nav.set({ rset: toggle(st.rset, +n.dataset.rl), n: 40 });
       else if ((n = f("[data-chip]"))) nav.set({ [n.dataset.chip]: !st[n.dataset.chip], n: 40 });
       else if ((n = f("[data-sort]"))) nav.set({ sort: n.dataset.sort });

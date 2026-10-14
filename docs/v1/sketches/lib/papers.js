@@ -57,7 +57,7 @@ const COLL = [];
     for (const t of TOPICS) { x -= weight[t.id]; if (x < 0) { t0 = t.id; break; } }
     const tp = [t0];
     if (PARENT[t0] && R() < 0.8) tp.push(PARENT[t0]);
-    else if (R() < 0.2) { const t1 = pick(TOPICS).id; if (!tp.includes(t1)) tp.push(t1); }
+    else if (R() < 0.2) { const t1 = pick(TOPICS.filter((t) => t.depth !== "focus")).id; if (!tp.includes(t1)) tp.push(t1); } // Focus only by its own subject
     const lv = Object.fromEntries(tp.map((t) => { const u = R(); return [t, level(() => u, T[t].depth)]; }));
     const s = pick(SUBJ[t0]), kind = pick(KINDS), form = i % 3;
     const title = form === 0 ? `${s} ${pick(TAIL)}` : form === 1 ? `${s}: ${pick(CLAIM)}` : `Rethinking ${s} ${pick(TAIL.filter((x) => x !== "Revisited"))}`;
@@ -102,11 +102,17 @@ function listFor(st, topic) {
 
 // rarity as a bar of five segments, widths by count of what the other filters leave; a segment filters to that
 // level (several may be on)
-function rarityBar(st, topic) {
+function rarityBar(st, topic, { inline = false } = {}) {
   const n = [0, 0, 0, 0, 0, 0];
   for (const p of listFor({ ...st, rset: [] }, topic)) n[lvOf(p, topic)]++;
   const tot = n.reduce((a, b) => a + b, 0) || 1;
-  return `<div class="rbar">${[5, 4, 3, 2, 1].map((l) => `<a class="rseg${st.rset.includes(l) ? " on" : ""}${st.rset.length && !st.rset.includes(l) ? " off" : ""}" data-rl="${l}" style="--rc:var(--r${l});flex:${Math.max(n[l] / tot, 0.07)}" title="${LEVEL[l]}${topic ? ` (${GRADE[l]})` : ""}: ${n[l]}"><b>${n[l]}</b><span>${LEVEL[l]}</span></a>`).join("")}</div>`;
+  return `<div class="rbar${inline ? " inl" : ""}">${[5, 4, 3, 2, 1].map((l) => `<a class="rseg${st.rset.includes(l) ? " on" : ""}${st.rset.length && !st.rset.includes(l) ? " off" : ""}" data-rl="${l}" style="--rc:var(--r${l});flex:${Math.max(n[l] / tot, 0.07)}" title="${LEVEL[l]}${topic ? ` (${GRADE[l]})` : ""}: ${n[l]}"><b>${n[l]}</b><span>${LEVEL[l]}</span></a>`).join("")}</div>`;
+}
+// a topic's levels as a thin bar, for the Topics tab
+function rarityThin(topic) {
+  const n = [0, 0, 0, 0, 0, 0];
+  for (const p of COLL) if (p.lv[topic]) n[p.lv[topic]]++;
+  return `<div class="rthin">${[5, 4, 3, 2, 1].map((l) => `<span style="--rc:var(--r${l});flex:${Math.max(n[l], 0.6)}" title="${LEVEL[l]}: ${n[l]}"></span>`).join("")}</div>`;
 }
 const chip = (st, k, label) => `<a class="fchip2${st[k] ? " on" : ""}" data-chip="${k}">${label}</a>`;
 const sortSeg = (st) => `<span class="sortseg">${[["new", "Newest"], ["rare", "Rarest"], ...(st.q ? [["match", "Best match"]] : [])].map(([k, n]) => `<a class="${st.sort === k ? "on" : ""}" data-sort="${k}">${n}</a>`).join("")}</span>`;
@@ -149,5 +155,6 @@ function digestStrip(id) {
   const daily = T[id].depth !== "field";
   const items = daily ? LOG.filter((d) => !d.none).slice(-15).map((d) => [`${d.key}|${id}`, d.marks[id], d.key])
     : LOG.filter((d) => d.week).slice(-8).map((d) => [`${d.key}|${id}|w`, d.week.marks[id], "Week " + d.week.range]);
-  return `<div class="dstrip"><span class="lab">${daily ? "Daily digests" : "Weekly digests"}</span>${items.map(([k, m, n]) => `<span class="dsq${m.r === 0 ? " h" : m.r === -1 ? " x" : ""}" style="${rcs(m.r)}" data-cell="${k}" title="${n} · ${m.c}"></span>`).join("")}</div>`;
+  // one line only: where it is too narrow, the oldest squares are cut on the left
+  return `<div class="dstrip"><span class="lab">${daily ? "Daily digests" : "Weekly digests"}</span><span class="sqs">${items.map(([k, m, n]) => `<span class="dsq${m.r === 0 ? " h" : m.r === -1 ? " x" : ""}" style="${rcs(m.r)}" data-cell="${k}" title="${n} · ${m.c}"></span>`).join("")}</span></div>`;
 }

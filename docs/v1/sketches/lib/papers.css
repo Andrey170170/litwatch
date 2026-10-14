@@ -5,7 +5,10 @@
 .thead .h1 { margin: 0; }
 .thead .dep { font: 500 11px "JetBrains Mono", monospace; color: var(--fg3); text-transform: uppercase; letter-spacing: .1em; }
 .tsub { font-size: 13.5px; color: var(--fg2); margin: 0 0 10px; max-width: 70ch; }
-.dstrip { display: flex; align-items: center; gap: 3px; margin-bottom: 14px; flex-wrap: wrap; }
+.dstrip { display: flex; align-items: center; gap: 3px; margin-bottom: 14px; min-width: 0; }
+.dstrip .sqs { display: flex; gap: 3px; justify-content: flex-end; overflow: hidden; min-width: 0; flex: 0 1 auto; }
+.dstrip .lab { flex: none; }
+.dsq { flex: none; }
 .dstrip .lab { font-size: 11px; color: var(--fg3); margin-right: 6px; text-transform: uppercase; letter-spacing: .08em; }
 .dsq { width: 14px; height: 14px; background: var(--rc); cursor: pointer; }
 .dsq.h { background: none; box-shadow: inset 0 0 0 1px var(--line); }
@@ -125,3 +128,23 @@
 @keyframes lw-up { from { transform: translateY(40px); opacity: 0; } }
 .frame.phone .rseg span { display: none; }
 .frame.phone .rseg { padding: 8px 7px; }
+
+/* the rarity bar inline with the other controls (desktop) */
+.ctlrow .rbar.inl { flex: 1; min-width: 260px; margin: 0; }
+.ctlrow .rbar.inl .rseg { flex-direction: row; align-items: center; gap: 6px; height: 34px; padding: 0 8px; }
+.ctlrow .rbar.inl .rseg b { font-size: 12.5px; }
+/* narrow segments keep the count; the name is in the tooltip */
+.ctlrow .rbar.inl .rseg { container-type: inline-size; }
+@container (max-width: 92px) { .ctlrow .rbar.inl .rseg span { display: none; } }
+.ctlrow .qbox.short { max-width: 280px; flex: 0 1 280px; }
+/* the filter sheet animates only as it opens, not on every change inside it */
+.fsheet .shade2, .fsheet .sheetp { animation: none; }
+.fsheet.enter .shade2 { animation: lw-fade .2s ease-out; }
+.fsheet.enter .sheetp { animation: lw-up .24s cubic-bezier(.2, .85, .25, 1); }
+/* Topics tab, the richer card */
+.rthin { display: flex; gap: 2px; height: 6px; }
+.rthin span { background: var(--rc); }
+.tcard2 .nm2 { font-size: 12.5px; color: var(--fg2); display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.tcard2 .nm2 .k2 { flex: none; font-size: 10.5px; color: var(--fg3); text-transform: uppercase; letter-spacing: .08em; }
+.tcard2 .nm2 .t2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcard2 .nm2 .t2:hover { color: var(--fg); }
