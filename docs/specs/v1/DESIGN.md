@@ -1,11 +1,11 @@
 # litwatch v1 web app design
 
 The second pass of the v1 web app design, agreed with the owner on 2026-10-13 in seven sketch rounds. The drawings are
-the live sketches in `docs/v1/sketches/` (`index.html` lists each round, what it asked and what was chosen; the last
+the live sketches in `docs/specs/v1/sketches/` (`index.html` lists each round, what it asked and what was chosen; the last
 round, `r7-settings.html`, is the whole app as chosen, Settings included, except the Digest's Week and History, which
 are in `r2d-digest.html`). This file is the part a builder needs without opening them:
 the principles, the shell, the pages, the interactions, the look's tokens and the anatomy of each repeated element.
-Where this file and the spec (`docs/v1/spec/`) differ, the spec wins. Terms are the glossary's (`GLOSSARY.md`).
+Where this file and the spec (`docs/specs/v1/`) differ, the spec wins. Terms are the glossary's (`GLOSSARY.md`).
 
 It replaces the first v1 design (this file and `docs/v1/design.html` before 2026-10-13, both in git history), which was a newspaper:
 editorial and hard to scan.

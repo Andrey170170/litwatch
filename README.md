@@ -5,7 +5,7 @@ the configured categories is stored; a cheap model triages each one against your
 keyword audit catches what the model drops, and two models from different labs grade every
 candidate for a Watch topic.
 
-This branch is v1 in progress. The specification is in `docs/v1/spec/` and the terms in
+This branch is v1 in progress. The specification is in `docs/specs/v1/` and the terms in
 `GLOSSARY.md`; milestones M0 to M6 of the first v1 design are built, and the core is being
 redesigned (classes, detail levels, digests per depth) before the switch. Release 0.14 lives on `main`.
 
@@ -19,7 +19,7 @@ litwatch db migrate
 litwatch topics import --starter                # or a directory of your own YAML topics
 ```
 
-Models, categories and limits are set in `litwatch.toml` (see `docs/v1/spec/data.md`, configuration); with
+Models, categories and limits are set in `litwatch.toml` (see `docs/specs/v1/data.md`, configuration); with
 no file the defaults apply. `litwatch ping judge` sends one small request through a role.
 
 ## Commands

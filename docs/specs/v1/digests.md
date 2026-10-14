@@ -95,7 +95,7 @@ over the papers due then. Its papers stay due meanwhile, so nothing is lost or a
 ## What the Digest tab shows
 
 The detail-level ladder for digests, and the order rules the mechanics must support. The pages themselves are
-[`DESIGN.md`](../DESIGN.md)'s.
+[`DESIGN.md`](DESIGN.md)'s.
 
 1. **History**: days, newest first, as a list or a month calendar. Each day shows its topics' digest **Marks**: badge,
    how many papers, and the colour of the best of them ("4 new · 1 must read", "Nothing new"); the calendar shows the
