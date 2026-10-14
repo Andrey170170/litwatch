@@ -1,0 +1,131 @@
+/* Round 4: the paper page. The page is a container, so its layout follows the width it gets (slide-over, page,
+   phone), not the window. */
+.pg { container-type: inline-size; }
+.over .sheet:has(.pg) { width: min(880px, 94%); }
+
+.pghead { border-left: 4px solid var(--rc, var(--line)); padding: 2px 0 2px 14px; margin-bottom: 12px; }
+.pghead .mark { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.pghead .lvl { font: 700 12px Rajdhani, sans-serif; letter-spacing: .2em; text-transform: uppercase; color: var(--rc); margin-right: 4px; }
+.pghead .lvl.none { color: var(--fg3); }
+.pghead .h1 { margin-bottom: 8px; }
+.pghead .au { font-size: 13px; color: var(--fg2); margin-bottom: 6px; }
+.pghead .au .more { color: var(--acc, var(--fg)); cursor: pointer; }
+.pghead .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--fg3); }
+.pghead .facts .mono { font-family: "JetBrains Mono", monospace; }
+.pghead .facts b { color: var(--fg); font-weight: 600; }
+.faint { color: var(--fg3); }
+
+.pgact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
+.pgact .sp { flex: 1; }
+.pgact .btn.sv2.on, .pgact .btn.pri { background: var(--acc, var(--fg)); color: #0c0f13; border-color: var(--acc, var(--fg)); }
+.lnk { font-size: 12.5px; color: var(--fg2); cursor: pointer; text-decoration: none; white-space: nowrap; }
+.lnk:hover { color: var(--fg); text-decoration: underline; }
+a.inl { color: var(--acc, var(--fg)); cursor: pointer; }
+
+/* topics: one row each, coloured by that topic's grade */
+.tplist { border: 1px solid var(--line2); margin-bottom: 18px; }
+.tprow { display: flex; align-items: center; gap: 8px; padding: 7px 10px 7px 9px; border-top: 1px solid var(--line2); border-left: 3px solid var(--rc); font-size: 13px; flex-wrap: wrap; }
+.tprow:first-child { border-top: 0; }
+.tprow .stripe { display: none; }
+.tprow .nm { font-weight: 600; }
+.tprow .gr { font: 600 11px "JetBrains Mono", monospace; color: var(--rc); text-transform: uppercase; letter-spacing: .04em; }
+.tprow .vd { font-size: 12px; color: var(--fg3); }
+.tprow .vd b { color: var(--fg); font-weight: 500; }
+.tprow .sp { flex: 1; }
+.tprow .th, .tprow .lb { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--line); cursor: pointer; font-size: 13px; color: var(--fg2); }
+.tprow .th { filter: grayscale(1); opacity: .7; }
+.tprow .th:hover, .tprow .th.on { filter: none; opacity: 1; }
+.tprow .th.on { border-color: var(--acc, var(--fg)); }
+.tprow .th span { font-size: 11.5px; color: var(--fg); }
+.tprow .lb { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; }
+.why { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px 10px 17px; border-top: 1px dashed var(--line2); background: color-mix(in srgb, var(--fg) 3%, transparent); }
+.why a { padding: 4px 10px; border: 1px solid var(--line); cursor: pointer; font-size: 12.5px; color: var(--fg2); }
+.why a:hover, .why a.on { border-color: var(--acc, var(--fg)); color: var(--fg); }
+.why a.clr { border-style: dashed; }
+.why, .tprow + .why { animation: lw-fade .15s ease-out; }
+.tpfold { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--line2); margin-bottom: 18px; cursor: pointer; font-size: 12px; }
+.tpfold:hover { border-color: var(--line); }
+.tpill { display: inline-flex; align-items: center; gap: 6px; padding-right: 8px; border-left: 3px solid var(--rc); padding-left: 6px; }
+.tpill span:last-child { font: 600 11px "JetBrains Mono", monospace; color: var(--rc); text-transform: uppercase; }
+
+/* the ladder: each rung a label and a body; side by side when the page is wide */
+.rung { margin: 0 0 22px; }
+.rung .rl { display: flex; align-items: center; gap: 10px; font: 700 12px Rajdhani, sans-serif; letter-spacing: .2em; text-transform: uppercase; color: var(--sig, var(--fg3)); margin-bottom: 6px; }
+@container (min-width: 700px) {
+  .pg.A .rung, .pg.C .rung { display: grid; grid-template-columns: 104px 1fr; gap: 16px; }
+  .pg.A .rung .rl, .pg.C .rung .rl { flex-direction: column; align-items: flex-start; padding-top: 3px; }
+}
+.rate { display: inline-flex; gap: 2px; opacity: .35; transition: opacity .15s; }
+.rung:hover .rate, .rate:has(.on) { opacity: 1; }
+.rate a { font: 600 11px "JetBrains Mono", monospace; padding: 1px 5px; border: 1px solid var(--line); color: var(--fg3); cursor: pointer; letter-spacing: 0; }
+.rate a.on { color: var(--ok, var(--fg)); border-color: currentColor; }
+.rate a.on.bad { color: var(--sig); }
+.prose.gist { font-size: 16px; line-height: 1.5; color: var(--fg); }
+.overst { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--sig); background: color-mix(in srgb, var(--sig) 10%, transparent); font-size: 13.5px; font-weight: 600; }
+.oldrev, .why0 { font-size: 12px; color: var(--fg3); margin-bottom: 6px; }
+.oldrev { padding: 4px 8px; border: 1px dashed var(--line); display: inline-block; }
+
+/* the Deep card */
+.claim { font-size: 15.5px; line-height: 1.45; font-weight: 600; margin: 0 0 12px; padding-left: 10px; border-left: 3px solid var(--acc, var(--fg)); }
+.csec { border-top: 1px solid var(--line2); }
+.csec .ch { display: flex; align-items: baseline; gap: 8px; padding: 8px 0; min-width: 0; }
+.csec .ch[data-pgfold] { cursor: pointer; }
+.csec .ch[data-pgfold]:hover .cn { color: var(--fg); }
+.csec .car { width: 10px; color: var(--fg3); font-size: 11px; }
+.csec .cn { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--fg2); flex: none; }
+.csec .peek { font-size: 12.5px; color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.csec .cb { padding: 0 0 12px; animation: lw-fade .15s ease-out; }
+.kv { display: grid; grid-template-columns: 92px 1fr; gap: 8px 12px; font-size: 13.5px; line-height: 1.5; }
+.kv > span { font-size: 11.5px; color: var(--fg3); padding-top: 2px; }
+.kv.sm { font-size: 12.5px; margin-top: 10px; }
+.tag { font-style: normal; display: inline-block; margin: 0 4px 4px 0; padding: 1px 7px; border: 1px solid var(--line); font-size: 12px; }
+.lim { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.5; }
+.lim li { margin-bottom: 4px; }
+.pw { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 7px 8px; margin: 0 -8px; cursor: pointer; font-size: 13px; }
+.pw:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.pw.nolink { cursor: default; }
+.pw.nolink:hover { background: none; }
+.pw .ti { font-weight: 600; }
+.pw .rel { grid-column: 1; color: var(--fg2); font-size: 12.5px; }
+.pw .mono, .pw .faint { grid-column: 2; grid-row: 1; font: 11.5px "JetBrains Mono", monospace; color: var(--fg3); }
+.pw.am { grid-template-columns: 3px 92px 1fr; }
+.pw.am .stripe { grid-row: 1 / 3; background: var(--rc); }
+.pw.am .rtag { grid-row: 1 / 3; font: 600 10.5px "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .06em; padding-top: 2px; }
+.pw.am .ti, .pw.am .rel { grid-column: 3; }
+.rtag.agrees { color: var(--ok, var(--fg)); } .rtag.contradicts { color: var(--sig); } .rtag.extends { color: var(--fg); } .rtag.supersedes { color: var(--acc, var(--fg)); }
+.cfoot { border-top: 1px solid var(--line2); padding-top: 8px; font-size: 12px; color: var(--fg3); }
+.cardwait { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px dashed var(--line); font-size: 13px; color: var(--fg2); }
+.cardwait .dot { width: 8px; height: 8px; background: var(--acc, var(--fg)); animation: lw-pulse 1.4s ease-in-out infinite; }
+.links { display: flex; gap: 16px; flex-wrap: wrap; }
+.vers { display: flex; flex-direction: column; }
+
+/* B: the ladder and a rail beside it, when there is room */
+.pgcols { display: block; }
+@container (min-width: 760px) {
+  .pg.B .pgcols { display: grid; grid-template-columns: 1fr 270px; gap: 28px; align-items: start; }
+  .pg.B .pgrail { position: sticky; top: 0; }
+}
+.pgrail .pgact { flex-direction: column; align-items: stretch; }
+.pgrail .pgact .sp { display: none; }
+.pgrail .pgact .lnk { text-align: left; }
+.pgrail .tprow .vd, .frame.phone .tprow .vd { flex-basis: 100%; order: 3; }
+.pgrail .tprow { row-gap: 4px; }
+
+/* toast */
+.toast { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 30; max-width: 86%; padding: 9px 14px; background: var(--fg); color: var(--bg); font-size: 13px; box-shadow: 0 6px 24px rgba(0, 0, 0, .35); animation: lw-fade .18s ease-out; pointer-events: none; }
+.frame.phone .toast { bottom: 84px; }
+
+/* phone: Save and the thumbs at the bottom, a sheet for the reasons */
+.pfoot.pgf { display: flex; align-items: center; gap: 4px; }
+.pfoot.pgf a { flex: 1; height: 46px; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 19px; cursor: pointer; color: var(--fg2); }
+.pfoot.pgf a.on { color: var(--acc, var(--fg)); }
+.pfoot.pgf a.dim { filter: grayscale(1); opacity: .7; }
+.pfoot.pgf a small { font: 600 12px Rajdhani, sans-serif; letter-spacing: .12em; text-transform: uppercase; }
+.pfoot.pgf .lbl { flex: none; width: 56px; text-align: center; font: 500 11px "JetBrains Mono", monospace; color: var(--fg3); }
+.frame.phone .pghead .h1 { font-size: 21px; }
+.frame.phone .kv { grid-template-columns: 76px 1fr; }
+.fsheet .why { border: 0; background: none; padding: 0; margin-bottom: 4px; }
+.why.big a { padding: 10px 14px; font-size: 14px; }
+.tphd { padding: 6px 10px; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--fg3); cursor: pointer; border-bottom: 1px solid var(--line2); }
+.tphd:hover { color: var(--fg); }
+.tphd + .tprow { border-top: 0; }
