@@ -1,6 +1,7 @@
-# The class tree (draft)
+# The class tree
 
-A first draft for the owner to edit, in this file during the spec review and in Settings later. Sources: paperflow-lite's
+The seed tree, agreed with the owner (2026-10-13 and 2026-10-14). Milestone N0 turns it and the followed topics below
+into `src/litwatch/seeds/taxonomy.yaml`; after that the tree is edited in Settings. Sources: paperflow-lite's
 22 collections, the seven 0.14 selections, and what cs.CL, cs.LG and cs.AI announce. Every paper intake stores must
 fit somewhere, so the tree covers the whole intake shallowly and the owner's interests deeply.
 
@@ -8,8 +9,9 @@ Rules the draft follows:
 
 - **Names say what they mean on their own** ("Chain-of-thought faithfulness", not "CoT faithfulness"): decision models
   choose by the name more than by the description.
-- At most three levels. A class has a description of one or two sentences here; the followed classes reuse their
-  topic's subject. Descriptions say what is out as well as what is in, where a neighbour is close.
+- At most three levels. A class has a description of one or two sentences here. A followed class (in bold, and the
+  three top-level classes marked as topics) is only summarised in this section: its description is its topic's
+  subject, under Followed topics below. Descriptions say what is out as well as what is in, where a neighbour is close.
 - **Topics** are marked: [Focus], [Area], [Field]. Today's seven 0.14 selections map
   onto them (CoT faithfulness and CoT monitoring were Watch; interpretability and alignment-and-safety were Radar;
   agents, efficiency-and-architecture and reasoning-and-rl were Pulse).
@@ -64,7 +66,7 @@ study is out.
 | Automated interpretability | Model-written explanations, automated circuit discovery, interpretability agents and tooling. |
 | Interpretability methodology and evaluation | Benchmarks, ground truth, faithfulness of explanations to the model, best practices. |
 | Training dynamics and mechanisms of learning | How mechanisms form during training: grokking, phase changes, developmental interpretability. |
-| **Chain-of-thought faithfulness** [Focus] | The topic's subject: whether a model's reasoning trace omits or contradicts a computation the model actually performed (BonaFide's definition). |
+| **Chain-of-thought faithfulness** [Focus] | Whether a model's reasoning trace omits or contradicts a computation the model actually performed (BonaFide's definition). |
 
 ## 3. Alignment and safety [Area]
 
@@ -80,11 +82,13 @@ contribution are out.
 | Reward hacking and specification gaming | Exploiting reward signals, specification gaming, emergent misalignment from training. |
 | Scalable oversight and AI control | Debate, weak-to-strong supervision, control protocols, monitoring of actions. |
 | Dangerous capabilities and safety evaluations | Evaluations of harmful capabilities, safety benchmarks, evaluation methodology for safety. |
-| **Chain-of-thought monitoring** [Focus] | The topic's subject: reading a model's reasoning trace for oversight, monitorability, and evasion of monitors. |
+| **Chain-of-thought monitoring** [Focus] | Reading a model's reasoning trace for oversight, monitorability, and evasion of monitors. |
 
 ## 4. Machine learning beyond language models
 
-Shallow on purpose: these classes are not followed, so they only give a paper a primary class and Weight its colour.
+Machine learning research whose main subject is not language models: theory, other modalities, other learning
+settings and applications. Shallow on purpose: these classes are not followed, so they only give a paper a primary
+class and Weight its colour.
 
 | Class | Description |
 | --- | --- |
@@ -102,6 +106,8 @@ Shallow on purpose: these classes are not followed, so they only give a paper a 
 
 ## 5. AI and society
 
+The effects of AI on people and institutions, and how they are studied and governed.
+
 | Class | Description |
 | --- | --- |
 | Fairness, bias and social impact | Bias in models and data, fairness methods, social effects of AI. |
@@ -118,5 +124,55 @@ Papers in the configured categories that fit none of the above.
   Alignment and safety, as now; a paper on both gets both classes. Alignment and safety is an Area (daily and weekly
   digests).
 - Agreed 2026-10-13: Language models is followed as a Field (a weekly overview of all LLM research, 3 picks), with
-  Reasoning, Agents and Efficiency as its followed children; Circuits and causal analysis is a new Focus topic, whose
-  subject, rubric and keywords are written in N0.
+  Reasoning, Agents and Efficiency as its followed children; Circuits and causal analysis is a new Focus topic.
+- Agreed 2026-10-14: the tree stands as above; the followed topics' definitions are below.
+
+## Followed topics
+
+A topic's subject is its Fit definition; a Focus topic's rubric spells out central, related and adjacent for it
+([pipeline.md](pipeline.md), section 4); anything below adjacent is none. A followed class's description is its topic's subject.
+
+| Topic | Depth | Subject, rubric, keywords |
+| --- | --- | --- |
+| Chain-of-thought faithfulness | Focus | 0.14's (the `cot-faithfulness` selection), the rubric reworded from tiers to Fit levels: tier 2 is related, tier 3 adjacent |
+| Chain-of-thought monitoring | Focus | 0.14's (`cot-monitoring`), reworded the same way |
+| Circuits and causal analysis | Focus | new, below |
+| Interpretability | Area | 0.14's subject (`interpretability`); no rubric |
+| Alignment and safety | Area | 0.14's subject (`alignment-and-safety`); no rubric |
+| Language models | Field | new, below |
+| Reasoning and RL post-training | Field | 0.14's subject (`reasoning-and-rl`) |
+| Agents and tool use | Field | 0.14's subject (`agents`) |
+| Efficiency and architecture | Field | 0.14's subject (`efficiency-and-architecture`) |
+
+0.14's must-read rubrics for the five broad selections are not carried as topic rubrics; their bar became the Weight
+definition (decision 54).
+
+### Circuits and causal analysis
+
+*Subject.* Finding and testing the causal mechanisms inside neural networks, mostly language models: which components
+(attention heads, MLP neurons, features, layers) carry out a behaviour and how they connect. Covers circuit discovery,
+activation and path patching, attribution patching, causal tracing, causal scrubbing and causal abstraction,
+attribution graphs, and analyses that identify a circuit for a behaviour and verify it causally. Out of scope: probes
+or feature dictionaries with no causal test, steering or editing aimed at changing behaviour rather than explaining
+it, and studies that use a single ablation as a side measurement.
+
+*Rubric.*
+- **Central:** a method for discovering or verifying circuits or causal mechanisms; an evaluation or ground truth for
+  such methods (faithfulness and completeness metrics, models with known circuits); or a causally verified mechanism
+  shown to recur across models, tasks or scales.
+- **Related:** a causally verified circuit for one behaviour in one model; patching or attribution as the main
+  evidence for a claim about how a model works; sparse autoencoder or transcoder work whose main result is a causal
+  circuit; theory of what counts as a mechanism.
+- **Adjacent:** correlational interpretability with no causal test; steering or editing where the mechanism is not
+  the question; patching used in passing.
+
+*Keywords.* circuit discover, activation patching, path patching, attribution patching, causal tracing, causal
+scrubbing, causal abstraction, attribution graph, interchange intervention, mechanistic interpretab. Bare "circuit"
+is left out: it matches quantum and electronic circuits.
+
+### Language models
+
+*Subject.* Large language models and other text foundation models as the object of research: how they are pretrained,
+tuned, evaluated, grounded with retrieval, extended to other modalities and languages, and applied. Out of scope:
+interpretability and alignment and safety research (their own areas), and papers that use a language model only as an
+off-the-shelf tool in another field's study.

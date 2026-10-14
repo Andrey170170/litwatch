@@ -70,26 +70,23 @@ the draw), `publications`, `library`, `outbox`, `integration_cursors`,
 `zotero_items`, `webdav_files`, `deep_cards`, `deep_attempts`, `deep_waiting`, `eval_runs`, `eval_results` (columns
 for classification instead of triage), `eval_samples`, `schema_migrations`.
 
-The restart ([milestones.md](milestones.md), N6) is a new migration on a copy of the side-by-side database: papers
-outside the restart set and their dependent rows are dropped; labels, reactions, appraisals, misses, library state,
-publications, Zotero and WebDAV state and Deep cards are kept for every paper that has them, and those papers are part
-of the restart set.
+The restart ([milestones.md](milestones.md), N6) starts from an empty database (decision 48): the migrations run on
+a fresh schema, and the two most recent weeks are read from the archive. Nothing is carried from 0.14 or the first
+v1; the first v1's database was dumped before its deployment stopped (2026-10-14).
 
-The first v1's feedback is mapped onto the new terms. Every mapped row keeps its first-v1 value in a `legacy` column,
-so nothing is lost if a mapping turns out wrong:
+The owner's earlier labels are kept as the evaluation set, as files in `evals/labels/` (decision 55), mapped onto the
+new terms. Each mapped row keeps its first-v1 value in a `legacy` column, so nothing is lost if a mapping turns out
+wrong:
 
-| First v1 | Becomes |
+| Before | Becomes |
 | --- | --- |
-| label relevant (with or without a grade) on a Watch topic | label Fit central on the Focus topic for the same class; the old grade is kept only in `legacy` |
+| first-v1 label relevant (with or without a grade) on a Watch topic | Fit central on the Focus topic for the same class; the old grade only in `legacy` |
 | label adjacent / not relevant / unsure | Fit adjacent / none / unsure |
-| provisional label | stays provisional, in its own cohort ([feedback.md](feedback.md), evaluation) |
-| reaction reason unrelated to the topic / not for me / overrated / already knew it / great find | wrong topic / not interesting / overrated / already knew it / great find |
-| reaction on a Radar or Pulse field | the same reaction on the Area or Field topic whose class matches the field, or on no topic if none does |
+| provisional label | provisional, in its own cohort ([feedback.md](feedback.md), evaluation) |
 | a label origin (gold, reader, sample, miss) | kept as it is |
-| take rating | not mapped (takes are gone); exported with the takes to `evals/` before they are dropped |
+| a 0.14 selection tier | a silver membership of the matching class: tier 1–2 member, tier 4 not, tier 3 left out |
 
-A label of relevant whose grade was must read can show as relevant after the restart when the paper's Weight is
-incremental; the restart's report lists those papers for the owner to look at.
+The first v1 had no reactions, misses or take ratings to map.
 
 ## Configuration
 

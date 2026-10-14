@@ -63,8 +63,10 @@ what was judged, not a second source of truth: the archive holds the current pap
 ## Where the archive's code lives
 
 The archive is today a separate repository (`Andrey170170/arxiv-archive`, 21 commits) with its own runbooks. One of
-v1's aims is one place for papers, so it moves into this repository as `archive/`, beside `deep/`,
-importing its history with `git subtree`, deployed as its own container or containers. A submodule would keep two
-repositories and make every cross-cutting change two commits. Its read-only web interface is retired once
+v1's aims is one place for papers, so its code (the package, its tests and its build files) moves into this repository
+as `archive/`, beside `deep/`, as one squashed commit, deployed as its own container or containers. A submodule would
+keep two repositories and make every cross-cutting change two commits. The old repository stays as the record of the
+owner's instance: its history, the acquisition manifests and evidence, the historical downloader and the runbooks
+for the owner's server. Its read-only web interface is retired once
 litwatch's Papers tab and paper pages cover search and paper pages, keeping its API. Decision 49 in
 [decisions.md](decisions.md), agreed 2026-10-13.

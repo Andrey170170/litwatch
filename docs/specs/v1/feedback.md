@@ -107,4 +107,7 @@ drawn paper left unanswered counts nowhere (first v1, carried).
 The first evaluation set ([milestones.md](milestones.md), N2) is reported as separate cohorts, never pooled, each with
 its own positives: the owner's labels (positives: labelled central or related); the first v1's provisional positives
 (bulk-accepted, not the owner's word on each paper; all of them positives); and the regression set of 0.14's CoT
-verdicts and the silver labels (positives: papers 0.14 put at tier 1 or 2 on a CoT selection).
+verdicts and the silver labels (positives: papers 0.14 put at tier 1 or 2 on a CoT selection). Class labels for
+classification ([milestones.md](milestones.md), N0–N1) are two more cohorts: 0.14's selection tiers as memberships of
+the matching classes, and a stratified sample labelled by two models of different labs, where the owner settled the
+papers on which they named different primary classes (decision 55). The whole set lives as files in `evals/labels/`.

@@ -56,11 +56,13 @@ Eligible for a topic's next digest and not yet in a published one; a late paper 
 ## Judging a paper
 
 **Fit**:
-How central a paper is to one class it belongs to: central, related, adjacent.
+How close a paper is to one topic: central, related, adjacent, none. The topic's subject defines it; a Focus topic's
+rubric spells out central, related and adjacent.
 
 **Weight**:
-How significant a paper is regardless of class: landmark, solid, incremental. Judged from the abstract for every
-paper, and judged again from the full text by a Brief or a Weight re-check.
+How much a paper matters in its own area (its primary class), whatever topic it is graded for: landmark, solid,
+incremental. Judged from the abstract for every paper, and judged again from the full text by a Brief or a Weight
+re-check.
 
 **Full-text pass**:
 Any work that reads a paper's full text rather than its abstract (a Brief, a Weight re-check, a Deep card); it runs
