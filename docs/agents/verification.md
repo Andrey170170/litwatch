@@ -59,8 +59,9 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - Works means: an event produces the right external effect, and a failure is retried and visible.
 - Evidence: tests against faked HTTP (`tests/fakes_http.py`); a real run against a test target: Zotero against
   the test account, never the owner's library; deep against a dev instance of `deep/` started for the run on its
-  own port (a card request is a real, paid job); the archive with `register = false`, which only searches and
-  reads.
+  own port (a card request is a real, paid job); the archive's search against the live archive with
+  `register = false`. Registration and PDF fetches write to the archive (a fetch queues a job), so they run only
+  against a disposable archive.
 - How: integration configured in a dev `litwatch.toml` on the sandbox; the dispatcher run; the target inspected.
 
 ### Deep-card service (`deep/`)
@@ -114,4 +115,6 @@ preference set.
 - **The stack smoke test** (a fresh stack on a seeded database built from real papers, headless Playwright visiting
   every page at both widths, failing on console errors, 5xx or an empty page, screenshots kept as CI artifacts)
   comes with N5, when the archive joins the stack; its page list grows with N7.
+- **A disposable archive** for registration and PDF fetches comes with N5's fresh stack; until then those are
+  shown by faked HTTP only.
 - **The Zotero test account** is not set up yet; until it is, Zotero is shown by faked HTTP only.
