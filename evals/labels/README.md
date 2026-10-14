@@ -14,7 +14,7 @@ is not stored: an evaluation reads titles and abstracts when it runs. Topic and 
 | `silver-opus.csv`, `silver-sol.csv` | 198, 200 | silver | each labeller's primary class, other classes and reason |
 | `silver.csv` | 165 | silver | the papers both labellers gave the same primary class |
 | `disputed.csv` | 35 | silver | the papers they did not, with whether the owner was asked |
-| `adjudicated.csv` | 20 | adjudicated | the owner's primary class for the papers asked |
+| `adjudicated.csv` | 20 | adjudicated | the owner's primary class for the papers asked, and which labeller it matched |
 
 ## Where they came from
 
@@ -54,3 +54,29 @@ of primary-class accuracy.
 Agreement on the primary class was 165 of 198 papers both answered (83 %); 22 of the 35 disputed papers differ only
 below the same top-level class. The sample has no agreed paper in AI and society or Other: 0.14's screened papers
 come from cs.CL, cs.LG and cs.AI and rarely land there.
+
+The owner settled all 20 on 2026-10-14, siding with GPT-6.1-Sol on 11 and Opus 5.5 on 9, and never choosing a third
+class.
+
+## Counts
+
+Primary classes by top-level class, and 0.14's silver memberships (tier 1–2 member, tier 4 not):
+
+| Top-level class | silver | adjudicated |
+| --- | --- | --- |
+| Language models | 61 | 3 |
+| Interpretability | 22 | 3 |
+| Alignment and safety | 24 | 7 |
+| Machine learning beyond language models | 58 | 6 |
+| AI and society | 0 | 1 |
+| Other | 0 | 0 |
+
+| Class | 0.14 members | 0.14 non-members |
+| --- | --- | --- |
+| Chain-of-thought faithfulness | 39 | 22,850 |
+| Chain-of-thought monitoring | 51 | 22,297 |
+| Interpretability | 522 | 20,859 |
+| Alignment and safety | 1,048 | 16,413 |
+| Reasoning and RL post-training | 804 | 16,990 |
+| Agents and tool use | 2,141 | 16,136 |
+| Efficiency and architecture | 1,109 | 16,545 |
