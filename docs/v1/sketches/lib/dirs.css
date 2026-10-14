@@ -19,7 +19,8 @@ html[data-theme="dark"] .frame[data-dir="nc"] {
 }
 .frame[data-dir="nc"] .wm { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .2em; font-size: 18px; }
 html[data-theme="dark"] .frame[data-dir="nc"] .wm { color: var(--acc); }
-.frame[data-dir="nc"] .wm::after { content: "v1 // net"; font: 400 10.5px "JetBrains Mono", monospace; letter-spacing: .04em; color: var(--sig); margin-left: 6px; text-transform: uppercase; }
+.frame[data-dir="nc"] .wm .st { color: var(--cy); }
+.frame[data-dir="nc"] .wm .st::before { border-radius: 0; }
 .frame[data-dir="nc"] .wm:hover { animation: nc-glitch .45s steps(3) 1; }
 @keyframes nc-glitch {
   0% { text-shadow: 2px 0 var(--sig), -2px 0 var(--cy); transform: translateX(1px); }

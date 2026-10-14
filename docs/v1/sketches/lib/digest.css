@@ -1,0 +1,60 @@
+/* Digest fragments from round 2 on (lib/digest.js): blocks, Marks, groups, the colour grid. */
+.none { color: var(--fg3); font-size: 13px; padding: 4px 0 2px; }
+.failed { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--bad); padding: 8px 12px; border: 1px dashed color-mix(in srgb, var(--bad) 50%, transparent); margin-bottom: 10px; }
+.drow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drow.quiet { color: var(--fg3); } .drow.quiet::before { background: var(--line); }
+.drow:hover { background: var(--hover); }
+.dblock .hd, .dblock .p, .dblock .more { cursor: pointer; }
+.dblock .more { color: var(--fg2); }
+.dblock .more:hover, .dblock .hd:hover .n { color: var(--acc, var(--fg)); }
+.dblock .fold { margin-left: 4px; width: 24px; height: 24px; font-size: 14px; }
+.dblock .body2 { padding: 2px 12px 12px; border-top: 1px solid var(--line2); }
+.dblock .body2 .prose { font-size: 14px; margin: 10px 0; }
+.dblock .body2 .cap { margin-top: 14px; }
+.unfold { animation: lw-unfold .24s cubic-bezier(.2, .85, .25, 1); }
+@keyframes lw-unfold { from { opacity: 0; transform: translateY(-6px); } }
+.grp { margin: 18px 0 8px; display: flex; align-items: baseline; gap: 8px; }
+.grp:first-child { margin-top: 0; }
+.grp .t { font-weight: 700; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+.grp .s { font-size: 12px; color: var(--fg3); }
+.grp.click { cursor: pointer; } .grp.click:hover .t { color: var(--acc, var(--fg)); }
+.frame[data-dir="nc"] .grp .t { font-family: Rajdhani, sans-serif; letter-spacing: .14em; }
+.frame[data-dir="nc"] .grp.pin .t { color: var(--acc); }
+.dghead { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 8px; }
+.dghead .h1 { margin: 0; }
+.dghead .sub { font-size: 12.5px; color: var(--fg2); margin-top: 2px; }
+.dgfull .cap { margin-top: 18px; }
+.daystrip .ib[disabled] { opacity: .3; cursor: default; }
+.daystrip .day small { color: var(--fg3); font-weight: 500; margin-right: 6px; }
+/* the colour grid (C) */
+.gridwrap { margin-bottom: 16px; }
+.ghead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.ghead .cap { margin: 0; }
+.legend { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--fg3); }
+.legend i { display: inline-block; width: 9px; height: 9px; background: var(--rc); margin-right: 3px; vertical-align: -1px; }
+.legend i.h { background: none; box-shadow: inset 0 0 0 1px var(--fg3); }
+.grid { --cw: 18px; display: grid; gap: 3px 3px; align-items: center; position: relative; width: max-content; }
+.frame.desk .grid { --cw: 24px; gap: 4px; }
+.grid .gh { font-size: 10.5px; color: var(--fg3); text-align: center; cursor: pointer; line-height: 1.6; }
+.grid .gh.on { color: var(--fg); font-weight: 700; }
+.grid .gh.today { color: var(--acc, var(--fg)); }
+.grid .gh.w { color: var(--fg2); cursor: default; font-weight: 700; }
+.grid .gl { display: flex; } .grid .gl .badge { width: 18px; height: 18px; font-size: 8.5px; }
+.frame.desk .grid .gl .badge { width: 22px; height: 22px; font-size: 9.5px; }
+.grid .cell { width: var(--cw); height: var(--cw); background: var(--rc); cursor: pointer; position: relative; z-index: 1; }
+.grid .cell.h { background: none; box-shadow: inset 0 0 0 1px var(--line); }
+.grid .cell.x { background: none; box-shadow: inset 0 0 0 1px var(--bad); }
+.grid .cell.x::after { content: "×"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--bad); font-size: 12px; }
+.grid .cell.wk { box-shadow: inset 0 0 0 2px var(--bg); }
+.grid .cell:hover { outline: 2px solid var(--fg); outline-offset: 1px; }
+.grid .colhl { background: color-mix(in srgb, var(--acc, var(--fg)) 16%, transparent); margin: -2px -2px; z-index: 0; align-self: stretch; }
+.frame[data-dir="nc"] .grid .cell { clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%); }
+.frame[data-dir="nc"] .grid .cell.h, .frame[data-dir="nc"] .grid .cell.x { clip-path: none; }
+.frame[data-dir="nc"] .grid .gh { font-family: "JetBrains Mono", monospace; }
+/* the calendar scrolls sideways on narrow screens and opens at its newest end */
+.calscroll { display: flex; flex-direction: row-reverse; overflow-x: auto; touch-action: pan-x pan-y; padding-bottom: 4px; }
+.calscroll .grid { flex: none; margin-right: auto; } /* left-aligned when it fits */
+.frame.desk .grid.wide { --cw: 18px; gap: 3px; }
+.frame.desk .grid.wide .gl .badge { width: 18px; height: 18px; font-size: 8.5px; }
+/* topic labels stay put while the calendar scrolls */
+.calscroll .grid .gl { position: sticky; left: 0; z-index: 2; background: var(--bg); padding-right: 3px; }

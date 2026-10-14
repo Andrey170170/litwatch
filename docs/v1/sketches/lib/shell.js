@@ -5,6 +5,8 @@
 // entries, so the OS back gesture walks them too.
 
 const SHELL_TABS = ["Digest", "Topics", "Papers"];
+// the run status sits in the wordmark: last night's count, with a dot that turns red when something failed
+const SHELL_WM = `litwatch<span class="st" title="530 papers read last night · all quiet">530</span>`;
 
 function makeNav(app, draw, useHistory) {
   let skipPop = 0;
@@ -52,7 +54,7 @@ function mountDesk(el, app) {
     const main = el.querySelector(".main"), keep = how === "keep" && main ? main.scrollTop : 0;
     const v = app.view(nav.st, nav);
     const backLink = nav.stack.length && !v.overlay && !v.noBack ? `<a class="back" data-back>‹ Back</a>` : "";
-    el.innerHTML = `<div class="body"><div class="side"><div class="wm">litwatch</div><div class="status">530 read · all quiet</div>${shellNavItems(nav.st, "side")}<div class="foot"><div class="it">⚙ Settings</div></div></div>
+    el.innerHTML = `<div class="body"><div class="side"><div class="wm">${SHELL_WM}</div>${shellNavItems(nav.st, "side")}<div class="foot"><div class="it">⚙ Settings</div></div></div>
       <div class="main scroll"><div class="inner">${backLink}${v.body}</div></div>
       ${v.overlay ? `<div class="over${hadOverlay ? "" : " enter"}"><div class="shade" data-back></div><div class="sheet scroll">${v.overlay}</div></div>` : ""}</div>`;
     hadOverlay = !!v.overlay;
@@ -73,14 +75,14 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
   function screenHTML(st, depth) {
     const v = app.view(st, nav);
     const left = depth ? `<button class="ib" data-back>‹</button><span class="ttl">${v.title || ""}</span>`
-      : `<button class="ib" data-menu>☰</button><span class="wm">litwatch</span><span class="dot" title="530 read · all quiet"></span>`;
+      : `<button class="ib" data-menu>☰</button><span class="wm">${SHELL_WM}</span>`;
     return `<div class="pbar">${left}<span class="sp"></span><button class="ib">⚙</button></div><div class="scroll"><div class="pp">${v.body}${v.overlay || ""}</div></div>`;
   }
   function draw(how) {
     const sc = scr.querySelector(".scroll"), keep = how === "keep" && sc ? sc.scrollTop : 0;
     scr.innerHTML = screenHTML(nav.st, nav.stack.length);
     scr.querySelector(".scroll").scrollTop = keep;
-    panel.innerHTML = `<div class="wm">litwatch</div><div class="status">530 read · all quiet</div>${shellNavItems(nav.st, "drawer")}<div class="it" style="margin-top:auto">⚙ Settings</div>`;
+    panel.innerHTML = `<div class="wm">${SHELL_WM}</div>${shellNavItems(nav.st, "drawer")}<div class="it" style="margin-top:auto">⚙ Settings</div>`;
     scr.classList.remove("in-go", "in-back"); void scr.offsetWidth;
     if (how === "go" || how === "back") scr.classList.add("in-" + how);
     if (pos > 0) settle(0);
