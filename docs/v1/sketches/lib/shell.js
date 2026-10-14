@@ -1,8 +1,10 @@
 // The shell chosen in round 1, shared by every later round: the desktop sidebar (B) and the phone drawer (C).
-// A round passes an app: { start, view(st) -> { body, title?, overlay?, bar?, barRight?, foot? }, click?(e, nav) -> true
+// A round passes an app: { start, view(st) -> { body, title?, overlay?, bar?, barRight?, foot?, side? }, click?(e, nav) -> true
 // when handled, sub?(st) -> drawer items under Digest, swipe?(st) -> { older, newer } patches or null }. On the
 // phone, bar replaces the wordmark on a top-level screen, barRight goes before the run status and ⚙ at the right,
 // foot is pinned under the scroll, and a horizontal swipe away from the edge steps to swipe's older or newer page.
+// On the desktop, side replaces the sidebar's content. The ⚙ entries carry data-settings for a round to handle, and
+// show as on while st.set names a Settings page.
 // Navigation is a stack: nav.go() pushes a step, nav.back() undoes one, nav.set() changes the page in place
 // (scroll kept), nav.top() jumps to a top-level screen. On a phone-sized page the steps are real history
 // entries, so the OS back gesture walks them too.
@@ -68,7 +70,8 @@ function mountDesk(el, app) {
     // the main column says how it was reached (nav-go, nav-back, nav-top, nav-keep) so a round can animate it;
     // opening or closing a slide-over leaves the page under it as it was
     const came = v.overlay || hadOverlay ? "keep" : how;
-    el.innerHTML = `<div class="body"><div class="side"><div class="wm">${shellWM()}</div>${shellNavItems(nav.st, "side")}<div class="foot"><div class="it">⚙ Settings</div></div></div>
+    const side = v.side || `<div class="wm">${shellWM()}</div>${shellNavItems(nav.st, "side")}<div class="foot"><div class="it${nav.st.set ? " on" : ""}" data-settings>⚙ Settings</div></div>`;
+    el.innerHTML = `<div class="body"><div class="side">${side}</div>
       <div class="main scroll nav-${came}"><div class="inner">${backLink}${v.body}</div></div>
       ${v.overlay ? `<div class="over${hadOverlay ? "" : " enter"}"><div class="shade" data-back></div><div class="sheet scroll">${v.overlay}</div></div>` : ""}</div>`;
     hadOverlay = !!v.overlay;
@@ -90,13 +93,13 @@ function mountPhone(el, app, { edge = () => 40 } = {}) {
     const v = app.view(st, nav);
     const left = depth ? `<button class="ib" data-back>‹</button><span class="ttl">${v.title || ""}</span>`
       : `<button class="ib" data-menu>☰</button>${v.bar || `<span class="wm">litwatch</span>`}`;
-    return `<div class="pbar">${left}<span class="sp"></span>${v.barRight || ""}${shellStatus()}<button class="ib">⚙</button></div><div class="scroll"><div class="pp">${v.body}${v.overlay || ""}</div></div>${v.foot || ""}`;
+    return `<div class="pbar">${left}<span class="sp"></span>${v.barRight || ""}${shellStatus()}<button class="ib" data-settings>⚙</button></div><div class="scroll"><div class="pp">${v.body}${v.overlay || ""}</div></div>${v.foot || ""}`;
   }
   function draw(how) {
     const sc = scr.querySelector(".scroll"), keep = how === "keep" && sc ? sc.scrollTop : 0;
     scr.innerHTML = screenHTML(nav.st, nav.stack.length);
     scr.querySelector(".scroll").scrollTop = keep;
-    panel.innerHTML = `<div class="wm">${shellWM()}</div>${shellNavItems(nav.st, "drawer", app)}<div class="it" style="margin-top:auto">⚙ Settings</div>`;
+    panel.innerHTML = `<div class="wm">${shellWM()}</div>${shellNavItems(nav.st, "drawer", app)}<div class="it${nav.st.set ? " on" : ""}" data-settings style="margin-top:auto">⚙ Settings</div>`;
     scr.classList.remove("in-go", "in-back"); void scr.offsetWidth;
     if (how === "go" || how === "back") scr.classList.add("in-" + how);
     if (how === "older" || how === "newer") scr.querySelectorAll(".pp, .pfoot .lbl").forEach((x) => x.classList.add("in-" + how));
