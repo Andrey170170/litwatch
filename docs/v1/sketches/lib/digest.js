@@ -104,7 +104,7 @@ function gistBlock(key, act, extra = "") {
   const picks = picksOf(id, w).slice(0, 3);
   const rest = Math.max(0, m.n - picks.length);
   return `<div class="dblock click ${extra}" ${act(key, 2)}><div class="hd">${badge(id)}<span class="n">${T[id].n}</span><span class="c" style="color:var(--r${m.r})">${m.c}</span>${foldBtn(key, act)}</div>
-    <p class="p">${gistOf(id, w)}</p><div class="list">${picks.map((pid) => prow(P[pid], { badges: false })).join("")}</div>
+    <p class="p">${gistOf(id, w)}</p><div class="list">${picks.map((pid) => prow(P[pid], { badges: false, topic: id })).join("")}</div>
     ${rest ? `<div class="more">+${rest} paper${rest > 1 ? "s" : ""}</div>` : ""}</div>`;
 }
 const foldBtn = (key, act) => (act.fold ? `<button class="ib fold" ${act(key, 0)} title="Fold">–</button>` : "");
@@ -115,7 +115,7 @@ function digestBody(key) {
   if (m.r === -1) return `<p class="prose" style="color:var(--bad)">This digest could not be written. Its papers stay due, and the next run writes it again.</p>`;
   if (!m.r) return `<p class="prose faint">Nothing was due for this topic that day. The run looked and found nothing new.</p>`;
   const text = (!w && FULL[id]) || [gistOf(id, w), "The rest of the digest goes here: the writer's longer text on the same papers, in the same voice."];
-  const rows = (ids, gist = true) => `<div class="list">${ids.map((pid) => prow(P[pid], { badges: false, gist })).join("")}</div>`;
+  const rows = (ids, gist = true) => `<div class="list">${ids.map((pid) => prow(P[pid], { badges: false, gist, topic: id })).join("")}</div>`;
   let lists;
   if (w) lists = `<div class="cap">${t.depth === "focus" ? "Central this week" : "Picks"}</div>` + rows(picksOf(id, w));
   else if (t.depth === "focus") lists = `<div class="cap">Central</div>` + rows(picksOf(id)) + (RELATED[id] ? `<div class="cap">Related</div>` + rows(RELATED[id], false) : "");

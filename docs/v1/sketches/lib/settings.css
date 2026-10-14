@@ -40,6 +40,7 @@ html:not([data-theme="dark"]) .inl { color: var(--fg); text-decoration: underlin
 .btn.pri { background: var(--acc, var(--fg)); border-color: var(--acc, var(--fg)); color: #0c0f13; }
 .nact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .nact .sp { flex: 1; }
+.btn.dis { opacity: .4; cursor: default; }
 .warnt { color: var(--warnc); } .badt { color: var(--badc); }
 
 /* an item that needs the owner: yellow edge when it asks for a word, red when something failed; settled items fade */
@@ -285,3 +286,7 @@ a.car:hover { color: var(--fg); background: var(--line2); }
 .slab.ask { border-left-color: var(--acc); }
 .slab .ss .badt { font-weight: 600; }
 .lvl.none.fail { color: var(--badc); }
+/* the same states on list rows: a corner at the row's right edge, yellow for a word, red for a failure */
+.prow[data-st], .tr[data-st], .br[data-st] { position: relative; }
+:is(.prow, .tr, .br)[data-st]::after { content: ""; position: absolute; right: 0; top: 0; border-style: solid; border-width: 0 11px 11px 0; border-color: transparent var(--acc) transparent transparent; }
+:is(.prow, .tr, .br)[data-st="fail"]::after { border-right-color: var(--badc); }

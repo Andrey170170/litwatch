@@ -17,6 +17,8 @@ const SETTLED = {}; // a miss ("m0") or an integration's failed event ("i0") -> 
 const CAL = []; // Calibrate answers per screen
 const CAL_N = 20;
 const RR = new Set(["labels", "members"]); // the scoped re-runs ticked in the offer
+let FORM_DIRTY = false; // an editor's form has changed since it opened; until then Save does nothing
+const saveBtn = (more) => `<div class="nact"><a class="btn pri${FORM_DIRTY ? "" : " dis"}" data-saved="1"${FORM_DIRTY ? "" : ' title="Nothing changed"'}>Save</a>${more}</div>`;
 
 // what waits on the owner; .done once settled. The same items show on their paper's page through PSTATE.
 const NEED = [
@@ -301,7 +303,7 @@ function editorV(st, id) {
     ${f("Keywords", `<div class="kws">${kw}</div>`, "matches in the last 90 days")}
     ${f("Look", `<div class="look"><span class="badge ${t.depth} lg" style="--tc:${t.hue}">${t.m}</span><span class="tin sm mono" contenteditable="plaintext-only">${t.m}</span><span class="sws">${SWATCH.map((c) => `<i style="background:${c}"${c === t.hue ? ' class="on"' : ""}></i>`).join("")}</span></div>`)}
     ${f("Status", seg(["active", "paused"], "active", "data-x"), "a paused topic keeps its papers and gets no new ones")}</div>
-    <div style="margin-top:16px">${st.saved ? offer("topic", t.n, topicVer(id) + 1) : `<div class="nact"><a class="btn pri" data-saved="1">Save</a><a class="btn" data-back>Cancel</a></div>`}</div>`;
+    <div style="margin-top:16px">${st.saved ? offer("topic", t.n, topicVer(id) + 1) : saveBtn(`<a class="btn" data-back>Cancel</a>`)}</div>`;
   return { body, title: t.n };
 }
 
@@ -318,7 +320,7 @@ function taxV(st) {
       <div class="fld"><div class="fl">Name</div><div class="tin one" contenteditable="plaintext-only">${n}</div></div>
       <div class="fld"><div class="fl">Description<span class="faint"> · says what is out as well as what is in</span></div><div class="tin" contenteditable="plaintext-only" style="min-height:3em">The class's one or two sentences from the taxonomy.</div></div>
       <div class="fld"><div class="fl">Threshold<span class="faint"> · a paper is a member at or above it</span></div><div class="tin one sm mono" contenteditable="plaintext-only">${th.toFixed(2)}</div></div></div>
-      <div style="margin-top:12px">${st.saved ? offer("class", n, 2) : `<div class="nact"><a class="btn pri" data-saved="1">Save</a><a class="btn" data-cls="-1">Cancel</a></div>`}</div></div>`;
+      <div style="margin-top:12px">${st.saved ? offer("class", n, 2) : saveBtn(`<a class="btn" data-cls="-1">Cancel</a>`)}</div></div>`;
     // the caret folds the branch; the rest of the row opens the class's editor
     return `<div class="crow d${d}${st.cls === i ? " on" : ""}" data-cls="${i}">${kids ? `<a class="car" data-fold="${i}">${shut ? "▸" : "▾"}</a>` : `<span class="car"></span>`}<span class="nm">${n}</span>${tp ? badge(tp) : ""}<span class="mono faint mem">${m.toLocaleString("en")}</span><span class="mono th">${th.toFixed(2)}</span></div>${ed}`;
   }).join("");

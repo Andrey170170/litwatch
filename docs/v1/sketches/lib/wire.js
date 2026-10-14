@@ -44,8 +44,10 @@ const P = Object.fromEntries(PAPERS.map((p) => [p.id, p]));
 const badge = (id, cls = "") => { const t = T[id]; return `<span class="badge ${t.depth} ${cls}" style="--tc:${t.hue}" title="${t.n}">${t.m}</span>`; };
 const rc = (r) => `--rc:var(--r${r})`;
 
-function prow(p, { gist = false, badges = true, sel = false } = {}) {
-  return `<div class="prow${sel ? " on" : ""}" data-paper="${p.id}" style="${rc(p.r)}"><span class="t">${p.t}${gist ? `<span class="g">${p.g}</span>` : ""}</span>${badges ? `<span class="bs">${p.tp.map((x) => badge(x)).join("")}</span>` : ""}<span class="d">${p.d}</span></div>`;
+// a mark for the paper's open pipeline states, on pages that load paper.js (round 7b)
+const rowMark = (id, topic) => { const s = typeof rowState === "function" ? rowState(id, topic) : ""; return s ? ` data-st="${s}"` : ""; };
+function prow(p, { gist = false, badges = true, sel = false, topic = null } = {}) {
+  return `<div class="prow${sel ? " on" : ""}" data-paper="${p.id}" style="${rc(p.r)}"${rowMark(p.id, topic)}><span class="t">${p.t}${gist ? `<span class="g">${p.g}</span>` : ""}</span>${badges ? `<span class="bs">${p.tp.map((x) => badge(x)).join("")}</span>` : ""}<span class="d">${p.d}</span></div>`;
 }
 function dblock(id, { picks = 3 } = {}) {
   const x = DIGEST[id], t = T[id];

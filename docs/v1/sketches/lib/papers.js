@@ -123,7 +123,7 @@ const star = (p) => `<a class="sv${p.sv ? " on" : ""}" data-save="${p.id}" title
 // A: a table, one line a paper
 function tableRows(list, topic, { badges = !topic } = {}) {
   return `<div class="tbl"><div class="th"><span></span><span>Title</span>${badges ? "<span>Topics</span>" : ""}<span>Kind</span><span></span><span>Date</span><span></span></div>` +
-    list.map((p) => `<div class="tr${badges ? " wb" : ""}" data-paper="${p.id}" style="--rc:var(--r${lvOf(p, topic)})" title="${p.g}"><span class="stripe"></span><span class="ti">${p.t}</span>${badges ? `<span class="bd">${p.tp.map((t) => badge(t)).join("")}</span>` : ""}<span class="kd">${p.kind}</span>${facets(p)}<span class="dt">${p.d}</span>${star(p)}</div>`).join("") + `</div>`;
+    list.map((p) => `<div class="tr${badges ? " wb" : ""}" data-paper="${p.id}" style="--rc:var(--r${lvOf(p, topic)})"${rowMark(p.id, topic)} title="${p.g}"><span class="stripe"></span><span class="ti">${p.t}</span>${badges ? `<span class="bd">${p.tp.map((t) => badge(t)).join("")}</span>` : ""}<span class="kd">${p.kind}</span>${facets(p)}<span class="dt">${p.d}</span>${star(p)}</div>`).join("") + `</div>`;
 }
 // B: a reading list, title and Gist, grouped by week
 function readingRows(list, topic, { badges = !topic, group = true } = {}) {
@@ -131,7 +131,7 @@ function readingRows(list, topic, { badges = !topic, group = true } = {}) {
   for (const p of list) {
     const mon = weekOf(p.di);
     if (group && mon !== wk) { wk = mon; h += `<div class="wkh">${mon === THIS_WEEK ? "This week" : "Week of " + mon.slice(4)}</div>`; }
-    h += `<div class="br" data-paper="${p.id}" style="--rc:var(--r${lvOf(p, topic)})"><div class="l1"><span class="ti">${p.t}</span>${star(p)}</div>
+    h += `<div class="br" data-paper="${p.id}" style="--rc:var(--r${lvOf(p, topic)})"${rowMark(p.id, topic)}><div class="l1"><span class="ti">${p.t}</span>${star(p)}</div>
       <div class="g">${p.g}</div><div class="m">${badges ? p.tp.map((t) => badge(t)).join("") : ""}<span>${p.kind}</span>${facets(p)}<span class="sp"></span><span class="dt">${p.d}</span></div></div>`;
   }
   return `<div class="blist">${h}</div>`;

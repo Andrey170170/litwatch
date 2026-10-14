@@ -71,6 +71,11 @@ const REACT = {}, LABEL = {}, RATE = {}, REQ = new Set();
 // the pipeline's open states (round 7b; Settings › Needs you lists the same items): per "id|topic" a split, an
 // escalation or ungraded, per id a failed full-text pass or a paper awaiting classification. An item with .done is settled.
 const PSTATE = {};
+// a list row's mark for its paper's open states: in the row's topic (any topic where the row has none) or on the paper
+function rowState(id, topic) {
+  const st = [openState(id), ...(topic ? [topic] : (P[id] ? P[id].tp : [])).map((t) => openState(id + "|" + t))].filter(Boolean);
+  return st.some((s) => s.k === "split" || s.k === "esc") ? "ask" : st.length ? "fail" : "";
+}
 const openState = (key) => { const s = PSTATE[key]; return s && !s.done && !((s.k === "split" || s.k === "esc") && LABEL[key]) ? s : null; };
 const REASONS = { down: [["wrong", "Wrong topic"], ["over", "Overrated"], ["notint", "Not interesting"], ["knew", "Already knew it"]], up: [["under", "Underrated"], ["great", "Great find"]] };
 // how a thumb is given: "reason" asks for the reason first; "thumb" records the thumb at once and offers the reasons after

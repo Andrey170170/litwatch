@@ -159,7 +159,7 @@ function makeApp(phone) {
         return true;
       }
       if (f(".grip")) return true; // the grip drags; a click on it opens nothing
-      if ((n = f("[data-sub]"))) { nav.go({ sub: n.dataset.sub, saved: false, evf: null }); return true; }
+      if ((n = f("[data-sub]"))) { FORM_DIRTY = false; nav.go({ sub: n.dataset.sub, saved: false, evf: null }); return true; }
       if ((n = f("[data-settle]"))) {
         // a Needs you item (by index) settles wherever it shows; on a paper's page its note goes, so the result is said
         const [k, msg] = n.dataset.settle.split("|");
@@ -169,7 +169,12 @@ function makeApp(phone) {
         return true;
       }
       if ((n = f("[data-nopen]"))) { nav.set({ nopen: +n.dataset.nopen < 0 ? null : +n.dataset.nopen }); return true; }
-      if ((n = f("[data-saved]"))) { nav.set({ saved: true }, "keep"); return true; }
+      if ((n = f("[data-saved]"))) { if (FORM_DIRTY) { FORM_DIRTY = false; nav.set({ saved: true }, "keep"); } return true; }
+      // a choice in an editor's form changes it, in place (a redraw would lose what was typed)
+      if ((n = f(".form [data-x], .sws i, .kw .x"))) {
+        if (!n.matches(".kw .x")) { [...n.parentNode.children].forEach((c) => c.classList.remove("on")); n.classList.add("on"); } else n.closest(".kw").remove();
+        markDirty(fr); return true;
+      }
       if ((n = f("[data-toast]"))) { done(n.dataset.toast); return true; }
       if ((n = f("[data-notnow], [data-rerun]"))) {
         // either way the offer goes; a put-off re-run waits in Jobs, so the toast says where
@@ -202,7 +207,7 @@ function makeApp(phone) {
         const i = +n.dataset.fold, cur = st.fold || TREE.flatMap((r, j) => (r[5] ? [j] : []));
         nav.set({ fold: toggle(cur, i) }); return true;
       }
-      if ((n = f("[data-cls]"))) { const i = +n.dataset.cls; nav.set({ cls: i < 0 || st.cls === i ? null : i, saved: false }); return true; }
+      if ((n = f("[data-cls]"))) { FORM_DIRTY = false; const i = +n.dataset.cls; nav.set({ cls: i < 0 || st.cls === i ? null : i, saved: false }); return true; }
       if ((n = f("[data-tog]"))) { n.classList.toggle("on"); return true; }
       if (f("[data-x], .tin")) return true;
       // thumb first: a click anywhere else puts the offered reasons away
@@ -268,6 +273,8 @@ function makeApp(phone) {
 }
 
 const D = document.getElementById("D"), M = document.getElementById("M");
+const markDirty = (fr) => { FORM_DIRTY = true; fr.querySelectorAll(".btn.dis[data-saved]").forEach((b) => { b.classList.remove("dis"); b.removeAttribute("title"); }); };
+[D, M].forEach((fr) => fr.addEventListener("input", (e) => { if (e.target.closest(".form")) markDirty(fr); }));
 const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
 [[D, navs[0]], [M, navs[1]]].forEach(([f, n]) => { autoLoad(f, n); liveSearch(f, n); });
 function openPaper(topic, id) { navs.forEach((n) => { n.top(topic ? { tab: null, topic } : { tab: "Papers" }); n.go({ paper: id, ...PG }); }); }
