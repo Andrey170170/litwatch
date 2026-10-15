@@ -7,7 +7,7 @@ import zipfile
 import pytest
 
 from litwatch import events
-from litwatch.core import Grade, Hand, Label, LabelOrigin, LabelValue, Opinion, Publication, Verdict
+from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Opinion, Publication, Verdict
 from litwatch.feedback import word
 from litwatch.integrations import webdav as webdav_mod
 from litwatch.integrations.webdav import WebDav, WebDAVWriter
@@ -55,24 +55,25 @@ async def world(conn):
 
 
 async def grade(conn, g: str) -> None:
+    """A verdict whose grade, with no Weight yet (solid), is `g`."""
+    fit = {"must_read": Fit.CENTRAL, "relevant": Fit.RELATED}.get(g) or Fit(g)
     await verdicts.add(
         conn,
         Verdict(
             paper_id=P.id,
             topic=FAITH.slug,
-            topic_revision=1,
-            grade=Grade(g),
-            judge=Opinion(grade=Grade(g), reason="r", model="anthropic:x"),
-            check=Opinion(grade=Grade(g), reason="r", model="openrouter:y"),
+            topic_version="v",
+            fit=fit,
+            reason="r",
+            opinions={"judge": Opinion(fit=fit, reason="r", model="anthropic:x")},
         ),
     )
     await word.settle(conn, P.id)
 
 
-async def say(conn, value: LabelValue, g: Grade | None = None) -> None:
+async def say(conn, value: LabelValue) -> None:
     await word.label(
-        conn,
-        Label(paper_id=P.id, topic=FAITH.slug, value=value, grade=g, origin=LabelOrigin.READER),
+        conn, Label(paper_id=P.id, topic=FAITH.slug, value=value, origin=LabelOrigin.READER)
     )
 
 
@@ -107,7 +108,7 @@ async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_
     (note,) = fake.notes(key)
     assert "litwatch:screen schema=2" in note and "Chain-of-thought faithfulness" in note
 
-    await say(conn, LabelValue.RELEVANT, Grade.RELEVANT)
+    await say(conn, LabelValue.RELATED)
     await run(conn, z)
     assert fake.collection_names(key) == {"Litwatch", "Tier 2"}
     assert "litwatch:watch:cot-faithfulness:relevant" in fake.tags(key)
@@ -196,10 +197,10 @@ async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(worl
         return "INBOX" in fake.items[key]["data"]["collections"]
 
     assert inbox()
-    await say(conn, LabelValue.RELEVANT, Grade.RELEVANT)  # below must read: out of the inbox
+    await say(conn, LabelValue.RELATED)  # below must read: out of the inbox
     await run(conn, z)
     assert not inbox() and "Tier 2" in fake.collection_names(key)
-    await say(conn, LabelValue.RELEVANT, Grade.MUST_READ)  # back
+    await say(conn, LabelValue.CENTRAL)  # back
     await run(conn, z)
     assert inbox()
     await word.toggle(conn, P.id, Hand.UNSAVE)  # unsaved: out with the other collections
@@ -336,12 +337,12 @@ async def test_an_overruled_or_unsaved_must_read_fetches_no_pdf_until_it_is_back
 
     # The verdict says must read; the owner says relevant before webdav gets to it.
     await grade(conn, "must_read")
-    await say(conn, LabelValue.RELEVANT, Grade.RELEVANT)
+    await say(conn, LabelValue.RELATED)
     await run(conn, z, w)
     assert arxiv.calls == [] and dav.files == {}
 
     # Must read again, but unsaved by hand: still nothing.
-    await say(conn, LabelValue.RELEVANT, Grade.MUST_READ)
+    await say(conn, LabelValue.CENTRAL)
     await word.toggle(conn, P.id, Hand.UNSAVE)
     await run(conn, z, w)
     assert arxiv.calls == []

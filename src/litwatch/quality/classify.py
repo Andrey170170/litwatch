@@ -26,13 +26,15 @@ from litwatch import classification
 from litwatch.core import Paper
 from litwatch.core.classification import (
     Classified,
+    Membership,
+    Source,
     Thresholds,
     band,
     direct,
-    grading_topics,
     keyword,
     with_ancestors,
 )
+from litwatch.core.grading import grading_topics
 from litwatch.core.taxonomy import Depth, Taxonomy
 from litwatch.llm.gateway import CallError, Gateway
 
@@ -256,13 +258,12 @@ def _top(tree: Taxonomy, slug: str) -> str:
 def graded(tree: Taxonomy, r: Result, s: Thresholds = AT_DEFAULT) -> set[str]:
     """The topics that would grade the paper: from its direct memberships, the band and the
     keyword check (each a direct membership of a Focus topic's class)."""
-    if r.error:
-        joined = set(r.keywords)
-    else:
+    found = [Membership(slug=k, source=Source.KEYWORD) for k in r.keywords]
+    if not r.error:
         c = r.classified
-        joined = direct(tree, c, s) | band(tree, c, s)
-        joined |= set(r.keywords)
-    return grading_topics(tree, joined)
+        found += [Membership(slug=d, source=Source.CLASSIFIER) for d in direct(tree, c, s)]
+        found += [Membership(slug=b, source=Source.UNCERTAIN) for b in band(tree, c, s)]
+    return grading_topics(tree, found)
 
 
 def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -> str:

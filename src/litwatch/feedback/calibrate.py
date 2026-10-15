@@ -13,16 +13,15 @@ import random
 from typing import Any, Literal
 
 import psycopg
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
-from litwatch.core import Depth, Grade, Label, LabelOrigin, LabelValue, Status
+from litwatch.core import Depth, Fit, Grade, Label, LabelOrigin, LabelValue, Status, Weight, grade
 from litwatch.feedback import word
 from litwatch.store import taxonomy as taxonomy_store
 
 SESSION = 20
 DRAW_DAYS = 30
 PRECISION_DAYS = 90
-SHOWN = ("must_read", "relevant")
 
 
 async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> list[dict]:
@@ -31,22 +30,31 @@ async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> l
 
 async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[dict[str, Any]]:
     """The current verdicts of the trailing days on one side of the line, with no firm label.
-    A verdict migrated from 0.14 is not v1's grading, so precision never judges one."""
-    return await _all(
+    The side is the pipeline's grade, from the verdict's Fit and the current Weight, whatever
+    the owner said."""
+    rows = await _all(
         conn,
-        f"""
-        SELECT paper_id, id AS verdict_id FROM (
+        """
+        SELECT paper_id, id AS verdict_id, fit,
+               (SELECT w.weight FROM weights w WHERE w.paper_id = v.paper_id
+                ORDER BY w.paper_revision DESC, w.id DESC LIMIT 1) AS weight
+        FROM (
             SELECT DISTINCT ON (paper_id) * FROM verdicts WHERE topic = %s
-            ORDER BY paper_id, paper_revision DESC, topic_revision DESC, recorded_at DESC, id DESC
+            ORDER BY paper_id, paper_revision DESC, recorded_at DESC, id DESC
         ) v
-        WHERE recorded_at >= now() - make_interval(days => %s) AND NOT migrated
-          AND grade {"IN" if above else "NOT IN"} ('must_read', 'relevant')
+        WHERE recorded_at >= now() - make_interval(days => %s)
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = v.paper_id
                           AND l.topic = v.topic AND NOT l.provisional)
         ORDER BY paper_id
         """,
         (topic, DRAW_DAYS),
     )
+    return [
+        r
+        for r in rows
+        if grade(Fit(r["fit"]), r["weight"] and Weight(r["weight"])).at_least(Grade.RELEVANT)
+        == above
+    ]
 
 
 async def draw(conn: psycopg.AsyncConnection, seed: int, size: int = SESSION) -> int:
@@ -99,14 +107,15 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
     rows = await _all(
         conn,
         """
-        SELECT s.paper_id, s.topic, s.why, s.verdict_id, s.a, s.b FROM (
+        SELECT s.paper_id, s.topic, s.why, s.verdict_id FROM (
             SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic, 'split' AS why,
-                   v.id AS verdict_id, v.judge->>'grade' AS a, v.check_opinion->>'grade' AS b,
-                   v.recorded_at
+                   v.id AS verdict_id, v.opinions->'judge'->>'fit' AS a,
+                   v.opinions->'check'->>'fit' AS b, v.recorded_at
             FROM verdicts v JOIN topics t ON t.class = v.topic AND t.depth = 'focus'
-            ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.topic_revision DESC,
-                     v.recorded_at DESC, v.id DESC) s
-        WHERE (a IN ('must_read', 'relevant')) <> (b IN ('must_read', 'relevant'))
+            ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.recorded_at DESC,
+                     v.id DESC) s
+        -- the two Fits on either side of related: one grader would have kept it, one not
+        WHERE (a IN ('central', 'related')) <> (b IN ('central', 'related'))
           -- last night's: recorded since the latest nightly run started
           AND s.recorded_at >= coalesce(
               (SELECT started_at FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1),
@@ -114,12 +123,12 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = s.paper_id
                           AND l.topic = s.topic AND NOT l.provisional)
         UNION ALL
-        SELECT m.paper_id, m.topic, 'miss', NULL, NULL, NULL FROM misses m
+        SELECT m.paper_id, m.topic, 'miss', NULL FROM misses m
         JOIN topics t ON t.class = m.topic AND t.depth = 'focus'
         WHERE NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = m.paper_id
                           AND l.topic = m.topic AND NOT l.provisional)
         UNION ALL
-        SELECT r.paper_id, r.topic, 'reaction', NULL, NULL, NULL FROM reactions r
+        SELECT r.paper_id, r.topic, 'reaction', NULL FROM reactions r
         JOIN topics t ON t.class = r.topic AND t.depth = 'focus'
         WHERE r.reason IN ('unrelated', 'great_find')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = r.paper_id
@@ -153,24 +162,11 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
     return added
 
 
-class Fit(BaseModel):
-    value: LabelValue
-    grade: Grade | None = None  # with relevant: must read or worth reading
-
-    @model_validator(mode="after")
-    def _grade_fits_value(self) -> Fit:
-        if self.value == LabelValue.RELEVANT:
-            if self.grade is None or not self.grade.at_least(Grade.RELEVANT):
-                raise ValueError("relevant needs a grade: must_read or relevant")
-        elif self.grade is not None:
-            raise ValueError("a grade goes only with relevant")
-        return self
-
-
 class Answer(BaseModel):
-    """One paper's answers. Fit for the topic it was drawn or taken for is required."""
+    """One paper's answers. Fit for the topic it was drawn or taken for is required: central,
+    related, adjacent, none or unsure."""
 
-    fit: dict[str, Fit]
+    fit: dict[str, LabelValue]
     value: Literal["matters", "fine", "not_for_me"] | None = None
     note: str | None = None
 
@@ -200,8 +196,7 @@ async def answer(
                 Label(
                     paper_id=item["paper_id"],
                     topic=topic,
-                    value=fit.value,
-                    grade=fit.grade if fit.value == LabelValue.RELEVANT else None,
+                    value=fit,
                     origin=LabelOrigin.SAMPLE if drawn else LabelOrigin.READER,
                 ),
             )
@@ -223,7 +218,7 @@ async def answer(
         await conn.execute(
             "UPDATE calibration_items SET answer = %s, answered_at = now() "
             "WHERE session_id = %s AND position = %s",
-            (given.fit[item["topic"]].value.value, session_id, position),
+            (given.fit[item["topic"]].value, session_id, position),
         )
 
 
@@ -239,8 +234,7 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
         """
         SELECT i.position, i.paper_id, i.topic, i.why, i.answered_at, p.title, p.abstract,
                p.authors, p.published,
-               (SELECT coalesce(jsonb_object_agg(l.topic, jsonb_build_object('value', l.value,
-                    'grade', l.grade)), '{}') FROM labels l
+               (SELECT coalesce(jsonb_object_agg(l.topic, l.value), '{}') FROM labels l
                 WHERE l.paper_id = i.paper_id AND NOT l.provisional) AS fit,
                (SELECT row_to_json(a) FROM (SELECT value, note FROM appraisals
                 WHERE paper_id = i.paper_id ORDER BY at DESC, id DESC LIMIT 1) a) AS appraisal
@@ -254,14 +248,14 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
 
 async def precision(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
     """Per Focus topic over the trailing 90 days of draws: precision at relevant (the drawn
-    upper group labelled relevant) and how often grading dropped a wanted paper (the lower
-    group labelled relevant). Unsure and unanswered draws count nowhere."""
+    upper group answered central or related) and how often grading dropped a wanted paper (the
+    lower group answered so). Unsure and unanswered draws count nowhere."""
     rows = await _all(
         conn,
         """
         SELECT t.class AS topic, i.why,
                count(*) FILTER (WHERE i.answer IS NOT NULL AND i.answer <> 'unsure') AS answered,
-               count(*) FILTER (WHERE i.answer = 'relevant') AS relevant
+               count(*) FILTER (WHERE i.answer IN ('central', 'related')) AS relevant
         FROM topics t
         JOIN calibration_items i ON i.topic = t.class AND i.why IN ('above', 'below')
         JOIN calibration_sessions s ON s.id = i.session_id

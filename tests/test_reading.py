@@ -8,7 +8,7 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Grade, Opinion, Verdict
+from litwatch.core import Fit, Opinion, Verdict
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -32,16 +32,20 @@ async def client(conn):
         yield c
 
 
-async def grade(conn, p, g: str) -> None:
+async def grade(conn, p, fit: str) -> None:
+    """A verdict of `fit`: with no Weight yet (solid), related is relevant."""
     await verdicts.add(
         conn,
         Verdict(
             paper_id=p.id,
             topic=FAITH.slug,
-            topic_revision=1,
-            grade=Grade(g),
-            judge=Opinion(grade=Grade(g), reason="judge's reason", model="anthropic:x"),
-            check=Opinion(grade=Grade(g), reason="check's reason", model="openrouter:y"),
+            topic_version=FAITH.version,
+            fit=Fit(fit),
+            reason="judge's reason",
+            opinions={
+                "judge": Opinion(fit=Fit(fit), reason="judge's reason", model="anthropic:x"),
+                "check": Opinion(fit=Fit(fit), reason="check's reason", model="openrouter:y"),
+            },
         ),
     )
     await word.settle(conn, p.id)
@@ -56,7 +60,7 @@ async def test_signing_in_trades_the_token_for_a_cookie(client):
 
 
 async def test_acknowledgements_say_what_happened(client, conn):
-    await grade(conn, P, "relevant")
+    await grade(conn, P, "related")
     said = await client.put(
         f"/api/reactions/{P.id}",
         json={"topic": FAITH.slug, "value": "down", "reason": "not_for_me"},
@@ -77,15 +81,18 @@ async def test_acknowledgements_say_what_happened(client, conn):
 
 
 async def test_a_paper_page_carries_its_history_and_current_verdicts(client, conn):
-    await grade(conn, P, "relevant")
+    await grade(conn, P, "related")
     page = (await client.get(f"/api/papers/{P.id}")).json()
     (topic,) = page["topics"]
-    assert (topic["slug"], topic["grade"]) == (FAITH.slug, "relevant")
+    assert (topic["slug"], topic["fit"], topic["grade"]) == (FAITH.slug, "related", "relevant")
     (chosen,) = page["chosen"]
-    assert chosen["judge"] == {
-        "grade": "relevant",
+    assert (chosen["fit"], chosen["paper_revision"]) == ("related", 1)
+    assert chosen["opinions"]["judge"] == {
+        "fit": "related",
         "reason": "judge's reason",
         "model": "anthropic:x",
+        "holds": None,
+        "probability": None,
     }
     assert [h["what"] for h in page["history"]] == ["graded"]
     assert page["saved"] and page["pdf_url"] == f"https://arxiv.org/pdf/{P.id}"
@@ -99,7 +106,7 @@ async def test_a_paper_page_carries_its_history_and_current_verdicts(client, con
 
 
 async def test_the_papers_table_filters_by_topic_and_searches(client, conn):
-    await grade(conn, P, "relevant")
+    await grade(conn, P, "related")
     await grade(conn, Q, "adjacent")
     rows = (await client.get("/api/papers", params={"topic": FAITH.slug})).json()
     assert [r["id"] for r in rows["rows"]] == [P.id] and rows["total"] == 1
@@ -121,8 +128,20 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
     (miss,) = await (await conn.execute("SELECT * FROM misses")).fetchall()
     assert (miss["paper_id"], miss["topic"]) == (Q.id, FAITH.slug)
     page = (await client.get(f"/api/papers/{Q.id}")).json()
-    assert page["topics"][0]["label"]["origin"] == "miss"
+    label = page["topics"][0]["label"]
+    assert label == {"value": "central", "origin": "miss", "provisional": False}
     assert page["topics"][0]["missed"] and page["history"][0]["what"] == "missed"
+    # A membership of the topic's class, so grading runs for it whatever classification says,
+    # and the owner's newest Save, which outranks an earlier Unsave.
+    (member,) = await (await conn.execute("SELECT class, source FROM memberships")).fetchall()
+    assert (member["class"], member["source"]) == (FAITH.slug, "miss")
+    (hand,) = await (await conn.execute("SELECT hand FROM library")).fetchall()
+    assert hand["hand"] == "save"
+    await client.put(f"/api/library/{P.id}", json={"saved": False})
+    body = {"paper_id": P.id, "topic": FAITH.slug, "fit": "related"}
+    assert (await client.post("/api/misses", json=body)).json()["saved"] is True
+    body["fit"] = "adjacent"
+    assert (await client.post("/api/misses", json=body)).status_code == 422
 
 
 async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
@@ -134,6 +153,8 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
         "error": None,
         "awaiting_classification": 0,
         "analysis_failed": 0,
+        "ungraded": 0,
+        "over_budget": [],
     }
     await conn.execute("INSERT INTO runs (kind) VALUES ('nightly')")
     assert (await client.get("/api/status")).json()["state"] == "running"
@@ -159,16 +180,16 @@ async def test_a_paper_without_authors_still_reads(client, conn):
 
 async def test_reporting_a_miss_again_keeps_a_later_correction(client, conn):
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
-    await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "not_relevant"})
+    await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "none"})
     again = await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     assert again.json()["message"] == "Already reported as missed for Chain-of-thought faithfulness"
     (label,) = await (await conn.execute("SELECT value FROM labels")).fetchall()
-    assert label["value"] == "not_relevant"
+    assert label["value"] == "none"
     assert len(await (await conn.execute("SELECT id FROM misses")).fetchall()) == 1
 
 
 async def test_a_page_past_the_end_still_counts_the_filter(client, conn):
-    await grade(conn, P, "relevant")
+    await grade(conn, P, "related")
     page = (await client.get("/api/papers", params={"topic": FAITH.slug, "offset": 50})).json()
     assert (page["rows"], page["total"]) == ([], 1)
 
@@ -202,7 +223,7 @@ async def test_the_paper_page_lists_versions_seen(client, conn):
 
 
 async def test_also_in_leaves_out_the_topic_whose_table_it_is(client, conn):
-    await grade(conn, P, "relevant")
+    await grade(conn, P, "related")
     (row,) = (await client.get("/api/papers", params={"q": "hidden computation"})).json()["rows"]
     assert (row["grade"], row["also_in"]) == ("relevant", ["Chain-of-thought faithfulness"])
     (row,) = (await client.get("/api/papers", params={"topic": FAITH.slug})).json()["rows"]
@@ -265,16 +286,16 @@ async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     assert [m["id"] for m in await (await conn.execute("SELECT id FROM misses")).fetchall()] == [
         miss["id"]
     ]
-    # A newer thumb withdraws it as the owner's word, though the relevant label is still stored.
+    # A newer thumb withdraws it as the owner's word, though the central label is still stored.
     body = {"topic": FAITH.slug, "value": "down", "reason": "unrelated"}
     await client.put(f"/api/reactions/{Q.id}", json=body)
     assert not (await faith())["missed"]
     await client.delete(f"/api/reactions/{Q.id}", params={"topic": FAITH.slug})
     assert (await faith())["missed"]
-    # A correction since stands: the owner said it is not relevant after all.
-    await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "not_relevant"})
+    # A correction since stands: the owner said its Fit is none after all.
+    await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "none"})
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
-    assert (await faith())["label"]["value"] == "not_relevant" and not (await faith())["missed"]
+    assert (await faith())["label"]["value"] == "none" and not (await faith())["missed"]
 
 
 async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, conn):
@@ -302,17 +323,17 @@ async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, c
                 Label(
                     paper_id=Q.id,
                     topic=FAITH.slug,
-                    value=LabelValue.NOT_RELEVANT,
+                    value=LabelValue.NONE,
                     origin=LabelOrigin.READER,
                 ),
             )
         assert (await again).status_code == 200
     (label,) = await (await conn.execute("SELECT value, origin FROM labels")).fetchall()
-    assert (label["value"], label["origin"]) == ("not_relevant", "reader")
+    assert (label["value"], label["origin"]) == ("none", "reader")
 
 
 async def test_a_topic_card_counts_its_papers_and_how_many_are_saved(client, conn):
-    await grade(conn, P, "relevant")
+    await grade(conn, P, "related")
     await grade(conn, Q, "adjacent")
     cards = {c["slug"]: c for c in (await client.get("/api/topics")).json()}
     assert (cards[FAITH.slug]["papers"], cards[FAITH.slug]["saved"]) == (1, 1)

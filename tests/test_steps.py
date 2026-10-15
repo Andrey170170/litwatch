@@ -1,5 +1,6 @@
 """Classification and analysis as nightly steps: what they record, their events, failures and
-the owner's actions on a paper classification keeps failing on. Models are scripted."""
+the owner's actions on a paper classification keeps failing on. Models are scripted; grading
+answers too, and is tested in test_grading."""
 
 import asyncio
 import json
@@ -23,7 +24,17 @@ from tests.conftest import TREE, paper
 from tests.fakes import ScriptedProvider
 
 CLASSIFY = RoleConfig(provider="openrouter", model="test/decider")
-CONFIG = Config(models=Models(classify=CLASSIFY))
+# Each role its own model, so a scripted answer knows which role was asked.
+ROLES = {
+    "classify": CLASSIFY,
+    "analyse": RoleConfig(provider="anthropic", model="test-analyse"),
+    "judge": RoleConfig(provider="anthropic", model="test-judge"),
+    "check": RoleConfig(provider="openrouter", model="test/check"),
+    "area_check": RoleConfig(provider="openrouter", model="test/area-check"),
+    "field_grade": RoleConfig(provider="anthropic", model="test-field"),
+}
+CONFIG = Config(models=Models(**ROLES))
+BY_MODEL = {r.model: name for name, r in ROLES.items()}
 NAMES = {c.slug: c.name for c in TREE.classes}
 GIST = (
     "Probes read a model's hidden steps from its activations and find that traces omit a third "
@@ -51,23 +62,36 @@ def decision(primary: str = "other", **probabilities: float) -> dict:
 
 
 class Scripted:
-    """Scripted `classify` and `analyse` roles, answering by the paper's title."""
+    """Scripted roles, answering by the paper's title: `classify` and `analyse`, and the
+    graders (`fits` by (role, title); related unless scripted, and `area_check` sure it holds)."""
 
     def __init__(self) -> None:
         self.decisions: dict[str, dict] = {}
         self.analyses: dict[str, dict] = {}
+        self.fits: dict[tuple[str, str], dict | Exception] = {}
         self.asked: list[tuple[str, str]] = []  # (role, title)
         self.users: list[str] = []  # every request's user message
 
     def respond(self, role: RoleConfig, request) -> str:
         title = request.user.split("Title: ", 1)[1].split("\n", 1)[0]
-        step = "classify" if role.model == CLASSIFY.model else "analyse"
+        step = BY_MODEL[role.model]
         self.asked.append((step, title))
         self.users.append(request.user)
-        answer = (self.decisions if step == "classify" else self.analyses).get(title)
+        match step:
+            case "classify":
+                answer = self.decisions.get(title) or decision()
+            case "analyse":
+                answer = self.analyses.get(title) or ANALYSIS
+            case "area_check":
+                answer = self.fits.get((step, title)) or {"holds": 0.9}
+            case _:
+                answer = self.fits.get((step, title)) or {
+                    "reason": "On the subject.",
+                    "fit": "related",
+                }
         if isinstance(answer, Exception):
             raise answer
-        return json.dumps(answer or (decision() if step == "classify" else ANALYSIS))
+        return json.dumps(answer)
 
     def gateway(self, config: Config, journal) -> Gateway:
         providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}

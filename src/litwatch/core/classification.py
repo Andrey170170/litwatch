@@ -136,15 +136,3 @@ def standing(rows: list[Membership]) -> list[Membership]:
     the other sources say. Elsewhere every source's membership stands."""
     owner = {m.slug: m for m in rows if m.source == Source.OWNER}
     return [m for m in rows if (m.source == Source.OWNER and m.member) or m.slug not in owner]
-
-
-def grading_topics(tree: Taxonomy, direct_members: set[str]) -> set[str]:
-    """The topics that grade a paper: for each direct membership, the nearest followed class at
-    or above it (pipeline.md, section 4). Inherited memberships add none."""
-    followed = {t.slug for t in tree.topics}
-    found = set()
-    for slug in direct_members:
-        nearest = next((s for s in [slug, *tree.ancestors(slug)] if s in followed), None)
-        if nearest:
-            found.add(nearest)
-    return found

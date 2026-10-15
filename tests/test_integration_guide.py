@@ -10,7 +10,7 @@ import pytest
 
 from litwatch import integrations
 from litwatch.config import Config
-from litwatch.core import Grade, Hand, Opinion, Verdict
+from litwatch.core import Fit, Hand, Opinion, Verdict
 from litwatch.events import Integration
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
@@ -34,16 +34,17 @@ def example(tmp_path, monkeypatch):
 
 
 async def grade(conn, g: str) -> None:
-    opinion = Opinion(grade=Grade(g), reason="r", model="m")
+    """A verdict whose grade, with no Weight yet (solid), is `g`."""
+    fit = {"must_read": Fit.CENTRAL, "relevant": Fit.RELATED}.get(g) or Fit(g)
     await verdicts.add(
         conn,
         Verdict(
             paper_id=P.id,
             topic=FAITH.slug,
-            topic_revision=1,
-            grade=Grade(g),
-            judge=opinion,
-            check=opinion,
+            topic_version="v",
+            fit=fit,
+            reason="r",
+            opinions={"judge": Opinion(fit=fit, reason="r", model="anthropic:x")},
         ),
     )
     await word.settle(conn, P.id)

@@ -1,10 +1,20 @@
 """Domain types and pure rules. Imports nothing from the rest of litwatch and does no I/O."""
 
 from litwatch.core.analysis import Analysis, Contribution, Facets, Weight
+from litwatch.core.grading import (
+    Effective,
+    Fit,
+    Opinion,
+    Rarity,
+    Verdict,
+    current_verdict,
+    effective,
+    grade,
+    grading_topics,
+    mixed_rarity,
+)
 from litwatch.core.rules import (
     FAILED_RUNS,
-    current_verdict,
-    effective_grade,
     in_library,
     owners_word,
     rewritten,
@@ -23,15 +33,12 @@ from litwatch.core.types import (
     Label,
     LabelOrigin,
     LabelValue,
-    Opinion,
     Paper,
     Publication,
     Reaction,
     ReactionReason,
     ReactionValue,
     Status,
-    Verdict,
-    Word,
 )
 
 __all__ = [
@@ -40,8 +47,10 @@ __all__ = [
     "Analysis",
     "Contribution",
     "Depth",
+    "Effective",
     "Event",
     "Facets",
+    "Fit",
     "Grade",
     "Hand",
     "Label",
@@ -50,6 +59,7 @@ __all__ = [
     "Opinion",
     "Paper",
     "Publication",
+    "Rarity",
     "Reaction",
     "ReactionReason",
     "ReactionValue",
@@ -62,10 +72,12 @@ __all__ = [
     "Topic",
     "Verdict",
     "Weight",
-    "Word",
     "current_verdict",
-    "effective_grade",
+    "effective",
+    "grade",
+    "grading_topics",
     "in_library",
+    "mixed_rarity",
     "owners_word",
     "rewritten",
 ]

@@ -143,7 +143,7 @@ def nightly(
     ] = None,
     config: ConfigPath = None,
 ) -> None:
-    """The nightly run as the scheduler runs it: intake, classification and analysis."""
+    """The nightly run as the scheduler runs it: intake, classification, analysis, grading."""
     cfg = configuration.load(config)
     run_id = _run(lambda conn: nightly_job.run(conn, cfg, fetch=fetch, days=days, limit=limit))
     run = _run(lambda conn: runs.get(conn, run_id))
@@ -353,7 +353,7 @@ def openapi(out: Annotated[Path, typer.Argument(help="Where to write the schema.
 
 @app.command()
 def ping(
-    role: Annotated[str, typer.Argument(help="classify, analyse, judge, check or writer")],
+    role: Annotated[str, typer.Argument(help=", ".join(configuration.ROLES))],
     config: ConfigPath = None,
 ) -> None:
     """Send one small request through a role, to check its key, model and price."""

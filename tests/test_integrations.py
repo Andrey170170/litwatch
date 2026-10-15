@@ -17,7 +17,7 @@ from litwatch import events, integrations
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import (
-    Grade,
+    Fit,
     Hand,
     Label,
     LabelOrigin,
@@ -59,15 +59,17 @@ async def world(conn):
 
 
 async def grade(conn, g: str, pid: str = P.id) -> None:
+    """A verdict whose grade, with no Weight yet (solid), is `g`."""
+    fit = {"must_read": Fit.CENTRAL, "relevant": Fit.RELATED}.get(g) or Fit(g)
     await verdicts.add(
         conn,
         Verdict(
             paper_id=pid,
             topic=FAITH.slug,
-            topic_revision=1,
-            grade=Grade(g),
-            judge=Opinion(grade=Grade(g), reason="r", model="anthropic:x"),
-            check=Opinion(grade=Grade(g), reason="r", model="openrouter:y"),
+            topic_version="v",
+            fit=fit,
+            reason="r",
+            opinions={"judge": Opinion(fit=fit, reason="r", model="anthropic:x")},
         ),
     )
     await word.settle(conn, pid)

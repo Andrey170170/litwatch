@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import psycopg
 
-from litwatch.core import Analysis, Paper, TaxonomyClass
+from litwatch.core import Analysis, Paper, TaxonomyClass, Weight
 from litwatch.store.papers import COLUMNS, row_to_paper
 from litwatch.store.taxonomy import row_to_class
 
@@ -76,3 +76,17 @@ async def add(
         )
     ).fetchone()
     return row["id"]
+
+
+async def current_weight(conn: psycopg.AsyncConnection, paper_id: str) -> Weight | None:
+    """The paper's current Weight: the newest of its latest revision that has one, so an older
+    revision's stands until the new text is analysed. The full-text queue (N3) refines this
+    to the pass queued last for the current revision."""
+    row = await (
+        await conn.execute(
+            "SELECT weight FROM weights WHERE paper_id = %s "
+            "ORDER BY paper_revision DESC, id DESC LIMIT 1",
+            (paper_id,),
+        )
+    ).fetchone()
+    return Weight(row["weight"]) if row else None

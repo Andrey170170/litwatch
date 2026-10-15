@@ -1,15 +1,20 @@
-"""What every route needs: a connection, and the shared token (or the read token)."""
+"""What every route needs: a connection, and the shared token (or the read token); and the
+month's spend against budget, which the status line and Quality both show."""
 
 from __future__ import annotations
 
 import hmac
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Annotated
 
 import psycopg
 from fastapi import Depends, HTTPException, Request, Response
 
 from litwatch import store
+from litwatch.config import Budget
+from litwatch.core.budget import Spend, month_start, spend
+from litwatch.store import calls
 
 COOKIE = "litwatch_token"
 
@@ -58,3 +63,10 @@ def set_token_cookie(request: Request, response: Response, token: str) -> None:
     response.set_cookie(
         COOKIE, token, httponly=True, samesite="strict", secure=https, max_age=90 * 86400
     )
+
+
+async def budget_lines(conn: psycopg.AsyncConnection, budget: Budget) -> list[Spend]:
+    """Month-to-date spend per provider from the call journal, projected to the month's end,
+    against `[budget]`."""
+    now = datetime.now(UTC)
+    return spend(await calls.spent_since(conn, month_start(now)), budget.by_provider, now)

@@ -5,7 +5,7 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Grade, Opinion, Verdict
+from litwatch.core import Fit, Opinion, Verdict
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -62,8 +62,12 @@ async def test_a_topic_edit_applies_forward_and_a_depth_change_settles_its_paper
     assert nowhere.status_code == 404
 
     await verdicts.add(
-        conn, Verdict(paper_id=P.id, topic=FAITH.slug, topic_revision=2, grade=Grade.RELEVANT)
-    )
+        conn,
+        Verdict(
+            paper_id=P.id, topic=FAITH.slug, topic_version="v", fit=Fit.RELATED, reason="r",
+            opinions={},
+        ),
+    )  # fmt: skip
     assert (await word.settle(conn, P.id)).saved
     area = body | {"depth": "area", "rubric": None}
     assert (await client.put(f"/api/settings/topics/{FAITH.slug}", json=area)).status_code == 200
@@ -111,28 +115,31 @@ async def test_the_schedule_says_when_each_job_next_fires_in_its_zone(conn):
     assert (local.hour, local.minute) == (6, 0)
 
 
-async def test_quality_lists_last_nights_splits_and_config_hides_secrets(client, conn):
+async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secrets(client, conn):
     await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
-    for topic in (FAITH.slug, "interpretability"):  # an Area topic's split takes no label
+    opinions = {
+        "judge": Opinion(fit=Fit.CENTRAL, reason="yes", model="a"),
+        "check": Opinion(fit=Fit.NONE, reason="no", model="b"),
+    }
+    marks = {FAITH.slug: {"split": True}, "interpretability": {"escalated": True}, "agents": {}}
+    for topic, marked in marks.items():
         await verdicts.add(
             conn,
             Verdict(
                 paper_id=P.id,
                 topic=topic,
-                topic_revision=1,
-                grade=Grade.RELEVANT,
-                split=True,
-                judge=Opinion(grade=Grade.RELEVANT, reason="yes"),
-                check=Opinion(grade=Grade.NONE, reason="no"),
+                topic_version="v",
+                fit=Fit.CENTRAL,
+                reason="yes",
+                opinions=opinions,
+                **marked,
             ),
         )
     page = (await client.get("/api/settings/quality")).json()
-    (split,) = page["night"]["splits"]
-    assert (split["paper_id"], split["judge"]["reason"], split["check"]["grade"]) == (
-        P.id,
-        "yes",
-        "none",
-    )
+    split, escalated = sorted(page["night"]["splits"], key=lambda r: r["topic"])
+    assert (split["topic"], split["opinions"]["check"]["fit"]) == (FAITH.slug, "none")
+    assert (escalated["topic"], escalated["depth"]) == ("interpretability", "area")
+    assert [c["provider"] for c in page["cost"]] == ["anthropic", "openrouter"]
     config = (await client.get("/api/settings/config")).json()
     assert config["models"]["writer"]["model"] == "claude-opus-5-5"
 

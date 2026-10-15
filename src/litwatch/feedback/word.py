@@ -1,9 +1,9 @@
 """The owner's word and what follows from it.
 
-Every change that can move a paper (a verdict, a label, a thumb, the Save toggle) ends in
-`settle`, which recomputes the paper's effective grade per Focus topic and whether it is in
-the library, stores both, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the
-same transaction.
+Every change that can move a paper (a verdict, a Weight, a label, a thumb, the Save toggle, an
+edit of the followed topics) ends in `settle`, which recomputes the paper's effective Fit and
+grade per followed topic, its rarity and whether it is in the library, stores them, and emits
+`grade.changed`, `paper.saved` and `paper.unsaved` in the same transaction.
 """
 
 from __future__ import annotations
@@ -16,16 +16,20 @@ import psycopg
 from litwatch import events
 from litwatch.core import (
     Depth,
+    Effective,
     Grade,
     Hand,
     Label,
     Reaction,
+    Status,
     Taxonomy,
     current_verdict,
-    effective_grade,
+    effective,
     in_library,
+    mixed_rarity,
     owners_word,
 )
+from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
@@ -45,10 +49,6 @@ class Settled:
     saved: bool = False
 
 
-async def _focus_topics(conn: psycopg.AsyncConnection) -> set[str]:
-    return {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
-
-
 # Advisory lock namespace for settling one paper; the second key is the paper id's hash.
 SETTLE_LOCK = 7213912
 
@@ -65,8 +65,13 @@ async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     await conn.execute("SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (SETTLE_LOCK, paper_id))
 
 
+def _value(e: Effective | None) -> dict[str, str | None]:
+    return {"grade": e.grade.value if e else None, "fit": e.fit.value if e else None}
+
+
 async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
-    """Recompute and store the paper's effective grades and library state, with their events.
+    """Recompute and store the paper's effective Fits and grades, its rarity and its library
+    state, with their events.
 
     Settles of one paper are serialized and read only after the lock is held, so the last to
     run sees every committed change and leaves the stored state right.
@@ -74,39 +79,59 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
 
     async with conn.transaction():
         await lock(conn, paper_id)
-        focus = await _focus_topics(conn)
+        # Followed topics in the owner's order; a draft topic is not used.
+        topics = {t.slug: t for t in await taxonomy_store.topics(conn) if t.status != Status.DRAFT}
         labels = {x.topic: x for x in await feedback_store.labels_for(conn, paper_id)}
         reactions = {r.topic: r for r in await word_store.reactions_for(conn, paper_id)}
         by_topic: dict[str, list] = {}
         for v in await verdicts_store.for_paper(conn, paper_id):
             by_topic.setdefault(v.topic, []).append(v)
+        weight = await analyses_store.current_weight(conn, paper_id)
         before = await word_store.effective_for(conn, paper_id)
 
         result = Settled(paper_id)
-        after: dict[str, Grade | None] = {}
-        # A stored grade for a topic no longer followed at Focus is removed, with its event.
-        involved = (set(focus) & (set(labels) | set(reactions) | set(by_topic))) | set(before)
+        after: dict[str, Effective] = {}
+        # A stored grade for a topic no longer followed is removed, with its event.
+        involved = (set(topics) & (set(labels) | set(reactions) | set(by_topic))) | set(before)
         for topic in sorted(involved):
-            word = owners_word(labels.get(topic), reactions.get(topic))
-            old = before.get(topic)
             verdict = current_verdict(by_topic.get(topic, []))
-            new = after[topic] = effective_grade(word, verdict) if topic in focus else None
-            if new != old:
-                result.grades[topic] = (old, new)
-                await word_store.set_effective(conn, paper_id, topic, new)
+            new = None
+            if t := topics.get(topic):
+                fit = verdict.fit if verdict else None
+                focus = t.depth == Depth.FOCUS
+                word = owners_word(labels.get(topic), reactions.get(topic), fit, focus=focus)
+                new = effective(word, fit, weight)
+            if new is not None:
+                after[topic] = new
+            old = before.get(topic)
+            if new == old:
+                continue
+            await word_store.set_effective(conn, paper_id, topic, new)
+            if _value(new) != _value(old):
+                result.grades[topic] = (old.grade if old else None, new.grade if new else None)
+                b, a = _value(old), _value(new)
                 await events.emit(
                     conn,
                     events.GRADE_CHANGED,
                     paper_id,
                     topic=topic,
-                    before=old.value if old else None,
-                    after=new.value if new else None,
+                    before=b["grade"],
+                    after=a["grade"],
+                    fit_before=b["fit"],
+                    fit_after=a["fit"],
                 )
+
+        # Rarity: the followed topics' page levels in the owner's order, lowered by depth.
+        levels = [(s, t.depth, after[s].rarity) for s, t in topics.items() if s in after]
+        rarity = mixed_rarity(levels, weight)
+        if rarity != await word_store.rarity_of(conn, paper_id):
+            await word_store.set_rarity(conn, paper_id, *rarity)
 
         row = await word_store.library_row(conn, paper_id)
         hand = Hand(row["hand"]) if row and row["hand"] else None
         result.was_saved = bool(row and row["saved"])
-        result.saved = in_library(hand, after.values())
+        focus_grades = [e.grade for s, e in after.items() if topics[s].depth == Depth.FOCUS]
+        result.saved = in_library(hand, focus_grades)
         if result.saved != result.was_saved:
             await word_store.set_saved(conn, paper_id, result.saved)
             await events.emit(
@@ -154,7 +179,8 @@ async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Se
 
 async def save_taxonomy(conn: psycopg.AsyncConnection, tree: Taxonomy) -> taxonomy_store.Saved:
     """Save the taxonomy and, in the same transaction, settle the papers of every topic it
-    changed: a topic no longer followed at Focus takes its grades with it."""
+    changed: a topic no longer followed takes its grades with it, a new depth moves its
+    papers' rarity, and one no longer at Focus its papers' place in the library."""
     async with conn.transaction():
         saved = await taxonomy_store.save(conn, tree)
         for slug in saved.changed_topics:

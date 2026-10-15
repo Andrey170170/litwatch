@@ -1,4 +1,4 @@
-"""The pure rules: which verdict counts, and what the owner's label does."""
+"""The pure rules: which verdict counts, versions, and configuration."""
 
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, urlsplit
@@ -7,69 +7,36 @@ import pytest
 
 from litwatch import config
 from litwatch.config import Config, Models, RoleConfig
-from litwatch.core import (
-    Depth,
-    Grade,
-    Label,
-    LabelOrigin,
-    LabelValue,
-    Status,
-    Verdict,
-    current_verdict,
-    effective_grade,
-)
+from litwatch.core import Depth, Fit, Status, Verdict, current_verdict
 from tests.conftest import FAITH, TREE
 
 T0 = datetime(2026, 10, 1, tzinfo=UTC)
 
 
-def verdict(grade: str, *, revision=1, text=1, version=1, at=T0, id=1) -> Verdict:
+def verdict(fit: str, *, text=1, version="v1", at=T0, id=1) -> Verdict:
     return Verdict(
         id=id,
         paper_id="p",
         topic="t",
-        topic_revision=revision,
-        paper_version=version,
+        topic_version=version,
         paper_revision=text,
-        grade=Grade(grade),
+        fit=Fit(fit),
+        reason="r",
+        opinions={},
         recorded_at=at,
     )
 
 
-def label(value: str, grade: str | None = None) -> Label:
-    return Label(
-        paper_id="p",
-        topic="t",
-        value=LabelValue(value),
-        grade=Grade(grade) if grade else None,
-        origin=LabelOrigin.READER,
-    )
-
-
 def test_the_current_verdict_is_chosen_by_text_first_and_time_second():
-    old_text = verdict("must_read", text=1, at=T0 + timedelta(days=9), id=1)
-    # The rewrite's arXiv version is unknown, which must not rank it below the old text.
-    new_text = verdict("none", text=2, version=None, at=T0, id=2)
+    old_text = verdict("central", text=1, at=T0 + timedelta(days=9), id=1)
+    new_text = verdict("none", text=2, at=T0, id=2)
     # A late re-grade of the old text does not overtake the verdict on the rewrite.
     assert current_verdict([old_text, new_text]) is new_text
-    newer_topic = verdict("adjacent", text=2, revision=2, at=T0, id=3)
-    assert current_verdict([old_text, new_text, newer_topic]) is newer_topic
-    again = verdict("relevant", text=2, revision=2, at=T0 + timedelta(hours=1), id=4)
-    assert current_verdict([newer_topic, again]) is again
+    # The topic's version plays no part: a verdict stays valid on its topic whatever version.
+    again = verdict("related", text=2, version="v0", at=T0 + timedelta(hours=1), id=3)
+    assert current_verdict([old_text, new_text, again]) is again
+    assert current_verdict([old_text]) is old_text  # until the new text is graded
     assert current_verdict([]) is None
-
-
-def test_the_owners_label_outranks_the_verdict():
-    assert effective_grade(None, verdict("adjacent")) == Grade.ADJACENT
-    assert effective_grade(label("unsure"), verdict("adjacent")) == Grade.ADJACENT
-    assert effective_grade(label("not_relevant"), verdict("must_read")) == Grade.NONE
-    assert effective_grade(label("adjacent"), verdict("must_read")) == Grade.ADJACENT
-    # Relevant without a grade keeps a verdict that already says so, and lifts one that does not.
-    assert effective_grade(label("relevant"), verdict("must_read")) == Grade.MUST_READ
-    assert effective_grade(label("relevant"), verdict("none")) == Grade.RELEVANT
-    assert effective_grade(label("relevant"), None) == Grade.RELEVANT
-    assert effective_grade(label("relevant", "adjacent"), verdict("must_read")) == Grade.ADJACENT
-    assert effective_grade(None, None) is None
 
 
 def test_a_topic_version_follows_what_a_grader_reads_and_nothing_else():

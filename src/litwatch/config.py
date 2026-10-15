@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from litwatch.core.classification import CHOSEN, Thresholds
 
-ROLES = ("classify", "analyse", "judge", "check", "writer")
+ROLES = ("classify", "analyse", "judge", "check", "area_check", "field_grade", "writer")
 
 
 class _Section(BaseModel):
@@ -67,6 +67,11 @@ class Models(_Section):
     check: RoleConfig = RoleConfig(
         provider="openrouter", model="meta/muse-spark-1.3-contributor", effort="high"
     )
+    # A decision model asked whether an Area verdict's Fit holds.
+    area_check: RoleConfig = RoleConfig(
+        provider="openrouter", model="openai/gpt-6-luna-decisions", decisions=True
+    )
+    field_grade: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5")
     writer: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 
     @model_validator(mode="after")
@@ -108,6 +113,26 @@ class Classification(_Section):
         return Thresholds(
             default=self.default_threshold, focus=self.focus_threshold, floor=self.uncertain_floor
         )
+
+
+class Grading(_Section):
+    """How Area verdicts are checked (pipeline.md, section 4)."""
+
+    # A "yes" from `area_check` below this probability escalates to `check`, as a "no" does.
+    area_check_min_confidence: float = Field(default=0.7, gt=0, le=1)
+
+
+class Budget(_Section):
+    """A monthly budget per provider account, in USD (models.md, budgets). Projected spend over
+    it turns the status line amber; nothing is downgraded or stopped. None is no budget."""
+
+    anthropic_monthly: float | None = Field(default=200, gt=0)
+    openrouter_monthly: float | None = Field(default=30, gt=0)
+
+    @property
+    def by_provider(self) -> dict[str, float]:
+        found = {"anthropic": self.anthropic_monthly, "openrouter": self.openrouter_monthly}
+        return {k: v for k, v in found.items() if v is not None}
 
 
 def system_zone() -> tzinfo:
@@ -168,6 +193,8 @@ class Config(_Section):
     intake: Intake = Intake()
     models: Models = Models()
     classification: Classification = Classification()
+    grading: Grading = Grading()
+    budget: Budget = Budget()
     schedule: Schedule = Schedule()
     integrations: dict[str, dict] = Field(default_factory=dict)
 

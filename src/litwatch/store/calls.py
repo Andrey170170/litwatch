@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -80,3 +81,17 @@ class CallJournal:
             )
         ).fetchall()
         return {r["operation"]: {"calls": r["calls"], "cost": float(r["cost"])} for r in rows}
+
+
+async def spent_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[str, float]:
+    """What every run's calls started since `since` cost, per provider account (`usage.via`).
+    A reused reply costs nothing; a call of unknown cost counts nothing."""
+    rows = await (
+        await conn.execute(
+            "SELECT usage->>'via' AS via, sum((usage->>'cost')::numeric) AS cost "
+            "FROM inference_calls WHERE started_at >= %s AND usage->>'via' IS NOT NULL "
+            "AND usage->>'cost' IS NOT NULL GROUP BY 1",
+            (since,),
+        )
+    ).fetchall()
+    return {r["via"]: float(r["cost"]) for r in rows}

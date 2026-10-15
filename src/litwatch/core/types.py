@@ -59,7 +59,7 @@ class Status(StrEnum):
 
 
 class Grade(StrEnum):
-    """A Focus topic's judgement of a paper, most inclusive first."""
+    """A paper's standing on one topic, from its Fit there and its Weight, most inclusive first."""
 
     MUST_READ = "must_read"
     RELEVANT = "relevant"
@@ -75,42 +75,13 @@ class Grade(StrEnum):
         return self.rank <= other.rank
 
 
-class Opinion(BaseModel):
-    """One model's grade of one paper for one Focus topic."""
-
-    grade: Grade
-    reason: str
-    model: str | None = None  # `provider:model@effort` of the call that produced it
-
-    @field_validator("reason")
-    @classmethod
-    def _no_nul(cls, value: str) -> str:
-        # PostgreSQL rejects \u0000 inside jsonb; models emit it now and then.
-        return value.replace("\x00", "")
-
-
-class Verdict(BaseModel):
-    """A recorded grading. Each grading is its own row; see `current_verdict` for which counts."""
-
-    id: int | None = None
-    paper_id: str
-    topic: str
-    topic_revision: int
-    paper_version: int | None = None
-    paper_revision: int = 1
-    grade: Grade
-    split: bool = False
-    judge: Opinion | None = None
-    check: Opinion | None = None
-    migrated: bool = False  # carried over from a 0.x tier, with a single opinion
-    recorded_at: datetime | None = None
-
-
 class LabelValue(StrEnum):
-    RELEVANT = "relevant"
-    # A source of ideas for the topic without being about it. Not a positive for recall.
+    """A label's answer: a Fit (`core.grading.Fit`), or unsure."""
+
+    CENTRAL = "central"
+    RELATED = "related"
     ADJACENT = "adjacent"
-    NOT_RELEVANT = "not_relevant"
+    NONE = "none"
     UNSURE = "unsure"  # changes nothing and is left out of every metric
 
 
@@ -131,24 +102,16 @@ class LabelOrigin(StrEnum):
 
 
 class Label(BaseModel):
-    """The owner's word on one paper for one Focus topic. It outranks any verdict."""
+    """The owner's answer on a paper's Fit for one topic. It outranks any verdict."""
 
     paper_id: str
     topic: str
     value: LabelValue
-    grade: Grade | None = None
     origin: LabelOrigin
     # Accepted in bulk without being read; the owner's own label replaces it.
     provisional: bool = False
     note: str | None = None
     labelled_at: datetime | None = None
-
-
-class Word(BaseModel):
-    """The owner's word on a paper for a Focus topic, from a label or a reaction."""
-
-    value: LabelValue
-    grade: Grade | None = None
 
 
 class ReactionValue(StrEnum):
@@ -159,11 +122,11 @@ class ReactionValue(StrEnum):
 class ReactionReason(StrEnum):
     # with a thumb down
     NOT_FOR_ME = "not_for_me"
-    UNRELATED = "unrelated"  # unrelated to the topic: on a Focus topic, the word not relevant
+    UNRELATED = "unrelated"  # wrong topic: on a Focus topic, the owner's word Fit none
     ALREADY_KNEW = "already_knew"
     OVERRATED = "overrated"
     # with a thumb up
-    GREAT_FIND = "great_find"  # on a Focus topic, the word relevant
+    GREAT_FIND = "great_find"  # on a Focus topic, the owner's word central or related
 
     @property
     def goes_with(self) -> ReactionValue:
