@@ -68,7 +68,9 @@ admin() {
 }
 
 drop_next() { admin -c "DROP DATABASE IF EXISTS $NEXT WITH (FORCE)"; }
-trap 'echo "refresh failed; $NEXT dropped, $db untouched" >&2; drop_next' ERR
+# Undo the swap's lock-out if the swap failed; a no-op when `$db` does not exist.
+reopen() { admin -c "ALTER DATABASE $db ALLOW_CONNECTIONS true" >/dev/null 2>&1 || true; }
+trap 'echo "refresh failed; $NEXT dropped, $db untouched" >&2; reopen; drop_next' ERR
 
 window=(--days "$days")
 [[ -n "$since" ]] && window=(--since "$since")
@@ -82,8 +84,15 @@ LITWATCH_DATABASE_URL=$next_dsn uv run litwatch intake archive "${window[@]}"
 
 # Swap the two in one transaction, so `$db` is always either the old sandbox or the new one.
 admin -c "DROP DATABASE IF EXISTS $OLD WITH (FORCE)"
-admin -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db'" >/dev/null
 if [[ -n "$(admin -Atc "SELECT 1 FROM pg_database WHERE datname = '$db'")" ]]; then
+  # No new sessions between disconnecting the old ones and the rename.
+  admin -c "ALTER DATABASE $db ALLOW_CONNECTIONS false"
+  admin -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db'" >/dev/null
+  # Termination is asynchronous: wait (up to 10 s) for the sessions to go.
+  for _ in {1..20}; do
+    [[ "$(admin -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname = '$db'")" == 0 ]] && break
+    sleep 0.5
+  done
   admin -1 -c "ALTER DATABASE $db RENAME TO $OLD" -c "ALTER DATABASE $NEXT RENAME TO $db"
 else
   admin -c "ALTER DATABASE $NEXT RENAME TO $db"
