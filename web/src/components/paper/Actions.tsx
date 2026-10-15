@@ -1,5 +1,6 @@
 /** The quick actions (DESIGN.md, "The rail"): the action grid, Deep read, the miss report and the DOI form. */
 import { useQuery } from "@tanstack/react-query";
+import { Copy } from "lucide-react";
 import { Fragment, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { bibtexFor, copyText, useDeepRead, useMiss, usePublication, useSave } from "@/api/mutations";
@@ -8,6 +9,9 @@ import { Badge } from "@/components/Badge";
 import { toast } from "@/lib/toast";
 
 export type Paper = Schemas["Paper"];
+
+/** The copy mark, drawn rather than typed: ⧉ is missing from the UI fonts. */
+export const CopyMark = () => <Copy size="1em" aria-hidden style={{ verticalAlign: "-0.125em" }} />;
 
 export function copyId(id: string) {
   return copyText(id, `Copied ${id}`);
@@ -55,8 +59,8 @@ export function linkCells(paper: Paper, keys: ("arxiv" | "pdf" | "latex" | "code
     latex: ext(paper.source_url, "LaTeX"),
     code: paper.facets?.releases_code ? (card?.code_url ? ext(card.code_url, "Code") : <span title="The abstract announces code; no link is known yet">⟨/⟩ Code</span>) : null,
     weights: paper.facets?.releases_weights ? <span title="The abstract announces weights; no link is known yet">◆ Weights</span> : null,
-    bib: <button onClick={() => void copyBibtex(paper.id)}>BibTeX ⧉</button>,
-    id: <button onClick={() => void copyId(paper.id)}>arXiv id ⧉</button>,
+    bib: <button onClick={() => void copyBibtex(paper.id)}>BibTeX <CopyMark /></button>,
+    id: <button onClick={() => void copyId(paper.id)}>arXiv id <CopyMark /></button>,
   };
   return keys.map((k) => cells[k] && <Fragment key={k}>{cells[k]}</Fragment>);
 }

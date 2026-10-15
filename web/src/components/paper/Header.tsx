@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Badge } from "@/components/Badge";
 import { authorsShort, fullDate } from "@/lib/format";
 import { CONTRIBUTION_NAME, RARITY_NAME, rc } from "@/lib/rarity";
-import { copyId, type Paper } from "./Actions";
+import { CopyMark, copyId, type Paper } from "./Actions";
 
 export function Header({ paper }: { paper: Paper }) {
   const [all, setAll] = useState(false);
@@ -42,7 +42,7 @@ export function Header({ paper }: { paper: Paper }) {
             {paper.id} ↗
           </a>
           <button className="cp" onClick={() => void copyId(paper.id)} title="Copy the arXiv id" aria-label="Copy the arXiv id">
-            ⧉
+            <CopyMark />
           </button>
         </span>
         {paper.published && <span className="mono">{fullDate(paper.published)}</span>}
