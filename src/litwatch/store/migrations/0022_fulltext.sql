@@ -6,6 +6,8 @@
 -- is awaiting text until the archive has the text; `ready` is a pass to be tried again (after a
 -- failure, or by the owner); `running` holds a lease, and one whose lease ran out is tried again.
 -- `tried_at` is when a worker last took it, so passes still awaiting text take turns.
+-- `retry_text`: tried again (a nightly retry, the owner's "run now"), the archive is to try
+-- again the downloads it gave up on, at the pass's next read; kept until that is asked.
 CREATE TABLE fulltext_passes (
     id               bigserial PRIMARY KEY,
     paper_id         text NOT NULL REFERENCES papers (id) ON DELETE CASCADE,
@@ -23,6 +25,7 @@ CREATE TABLE fulltext_passes (
     text_hash        text,
     lease_until      timestamptz,
     failed_runs      integer NOT NULL DEFAULT 0,
+    retry_text       boolean NOT NULL DEFAULT false,
     last_error       text,
     finished_at      timestamptz
 );

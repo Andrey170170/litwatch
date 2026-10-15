@@ -29,6 +29,7 @@ from litwatch.archive import (
     ArchiveUnavailable,
     PaperText,
     read_text,
+    retry_downloads,
 )
 from litwatch.config import Config
 from litwatch.core.fulltext import LEASE, TextRead
@@ -62,6 +63,7 @@ class Attempt:
     error: str | None = None
     counts: bool = False  # a failure that counts: no text to be had, or an unusable answer
     waiting: bool = False  # no text yet: the archive is fetching it, or cannot be reached
+    retry_asked: bool = False  # the archive was asked to retry the downloads it gave up on
 
 
 def archive_for(config: Config) -> ArchiveClient | None:
@@ -73,14 +75,19 @@ def archive_for(config: Config) -> ArchiveClient | None:
 
 
 async def _read(archive: ArchiveClient, c: Claimed) -> Attempt:
+    a = Attempt(c)
     try:
-        # Tried again: what the archive gave up on is tried again too.
-        text = await read_text(archive, c.paper, URGENT, retry=c.again)
+        if c.retry_text:  # tried again: what the archive gave up on is tried again too
+            await retry_downloads(archive, c.paper, URGENT)
+            a.retry_asked = True
+        a.text = await read_text(archive, c.paper, URGENT)
     except ArchiveUnavailable as exc:
-        return Attempt(c, waiting=True, error=f"the archive: {exc}")
+        a.waiting, a.error = True, f"the archive: {exc}"
     except ArchiveError as exc:  # TextUnavailable included: no text to be had
-        return Attempt(c, error=f"no text: {exc}", counts=True)
-    return Attempt(c, text=text) if text else Attempt(c, waiting=True)
+        a.error, a.counts = f"no text: {exc}", True
+    else:
+        a.waiting = a.text is None
+    return a
 
 
 async def _write(attempts: list[Attempt], gateway: Gateway) -> AsyncIterator[Attempt]:
@@ -132,6 +139,8 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
         if not await store_.held(conn, c):
             return False
         read = _read_of(a.text)
+        if a.retry_asked:
+            await store_.retry_asked(conn, c)
         if a.waiting or await store_.dismissed(conn, c.paper.id):
             a.waiting = True  # a dismissed paper's pass writes nothing; `claim` leaves it alone
             await store_.awaiting(conn, c, a.error)

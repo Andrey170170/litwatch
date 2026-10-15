@@ -125,7 +125,7 @@ class Claimed:
     paper: Paper
     area: TaxonomyClass | None
     lease_until: datetime
-    again: bool = False  # tried again (after a failure, or by the owner), not a first try
+    retry_text: bool = False  # the archive is to retry the downloads it gave up on
 
 
 async def claim(
@@ -136,15 +136,13 @@ async def claim(
 ) -> list[Claimed]:
     """Take up to `limit` text passes to try, least recently tried first, `besides` those
     already tried: passes awaiting text, those to be tried again, and running ones whose lease
-    ran out (the worker died). Each is held for `lease`; `again` says it was ready, to be
-    tried again. Only passes for their paper's current
+    ran out (the worker died). Each is held for `lease`. Only passes for their paper's current
     revision are taken (`drop_stale` removes the others); a dismissed paper's are left alone."""
     rows = await (
         await conn.execute(
             f"""
             WITH taken AS (
-                SELECT f.id, f.state = 'ready' AS again
-                FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
+                SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
                 WHERE f.kind <> 'deep' AND p.dismissed_at IS NULL
                   AND f.paper_revision = p.revision AND NOT f.id = ANY(%s)
                   AND (f.state IN ('awaiting_text', 'ready')
@@ -155,10 +153,10 @@ async def claim(
                 UPDATE fulltext_passes f SET state = 'running', tried_at = now(),
                                              lease_until = now() + %s
                 FROM taken WHERE f.id = taken.id
-                RETURNING f.id, f.kind, f.paper_revision, f.lease_until, f.paper_id, taken.again
+                RETURNING f.id, f.kind, f.paper_revision, f.lease_until, f.paper_id, f.retry_text
             )
             SELECT {COLUMNS}, x.id AS pass_id, x.kind, x.paper_revision AS pass_revision,
-                   x.lease_until, x.again, k.slug, k.name, k.description, k.parent, k.threshold
+                   x.lease_until, x.retry_text, k.slug, k.name, k.description, k.parent, k.threshold
             FROM claimed x JOIN papers p ON p.id = x.paper_id
             LEFT JOIN LATERAL (SELECT primary_class FROM classifications
                                WHERE paper_id = p.id
@@ -177,7 +175,7 @@ async def claim(
             paper=row_to_paper(r),
             area=row_to_class(r) if r["slug"] else None,
             lease_until=r["lease_until"],
-            again=r["again"],
+            retry_text=r["retry_text"],
         )
         for r in rows
     ]
@@ -194,6 +192,11 @@ async def held(conn: psycopg.AsyncConnection, c: Claimed) -> bool:
         )
     ).fetchone()
     return row is not None
+
+
+async def retry_asked(conn: psycopg.AsyncConnection, c: Claimed) -> None:
+    """The archive was asked to retry what it gave up on for the pass."""
+    await conn.execute("UPDATE fulltext_passes SET retry_text = false WHERE id = %s", (c.id,))
 
 
 async def dismissed(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
@@ -328,9 +331,11 @@ async def outdated(conn: psycopg.AsyncConnection) -> list[str]:
 
 
 async def retry_failed(conn: psycopg.AsyncConnection, runs: int) -> int:
-    """Make every failed pass with fewer than `runs` failed runs ready: the run tries it again."""
+    """Make every failed pass with fewer than `runs` failed runs ready: the run tries it again,
+    and the archive what it gave up on."""
     cur = await conn.execute(
-        "UPDATE fulltext_passes SET state = 'ready' WHERE state = 'failed' AND failed_runs < %s",
+        "UPDATE fulltext_passes SET state = 'ready', retry_text = true "
+        "WHERE state = 'failed' AND failed_runs < %s",
         (runs,),
     )
     return cur.rowcount
@@ -382,7 +387,7 @@ async def run_now(conn: psycopg.AsyncConnection, pass_id: int, runs: int) -> boo
     Returns False when it does not wait for the owner."""
     cur = await conn.execute(
         "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, tried_at = NULL, "
-        "queued_at = now() FROM papers p "
+        "queued_at = now(), retry_text = true FROM papers p "
         f"WHERE f.id = %(id)s AND p.id = f.paper_id AND {STUCK}",
         {"id": pass_id} | stuck_params(runs),
     )

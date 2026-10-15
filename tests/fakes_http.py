@@ -213,6 +213,7 @@ class FakeArchive:
         if path.startswith("/v1/jobs/") and path.endswith("/retry"):
             job_id = int(path.split("/")[3])
             self.retried.append(job_id)
+            self.statuses[self.jobs[job_id - 1]["kind"]] = "pending"  # until a test says
             return httpx.Response(200, json={"id": job_id, "status": "pending"})
         if path.startswith("/v1/jobs/"):
             return httpx.Response(200, json={"id": 1, "status": self.status})

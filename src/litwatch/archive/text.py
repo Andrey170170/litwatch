@@ -65,16 +65,28 @@ async def _retried(archive: ArchiveClient, job: dict) -> bool:
     return True
 
 
+async def retry_downloads(archive: ArchiveClient, paper: Paper, priority: int = URGENT) -> int:
+    """Ask the archive to try again the downloads of the paper's text that it gave up on after
+    failing: its source, and its PDF when the source is not to be had. Returns how many."""
+    try:
+        paper = await archive.resolve(paper)
+    except ArchiveVersionUnknown:
+        return 0  # read from the historical LaTeX alone: nothing to download
+    jobs = [await archive.request(paper, "source", priority)]
+    if jobs[0].get("status") in DONE:
+        jobs.append(await archive.request(paper, "pdf", priority))
+    return sum([await _retried(archive, job) for job in jobs])
+
+
 async def read_text(
-    archive: ArchiveClient, paper: Paper, priority: int = URGENT, *, retry: bool = False
+    archive: ArchiveClient, paper: Paper, priority: int = URGENT
 ) -> PaperText | None:
     """The paper's text, of its arXiv version, or None while the archive is still fetching it.
     Its source is asked for at `priority`; when arXiv has no usable source for it, its PDF.
     A paper of no known version is read from the archive's historical LaTeX alone, of no known
     version either: a newer source the archive holds may be of another text. Raises
     TextUnavailable when there is no text to be had, and ArchiveUnavailable while the archive
-    cannot be reached. With `retry`, a job the archive gave up on after failing is tried again,
-    and the text awaited."""
+    cannot be reached."""
     try:
         paper = await archive.resolve(paper)
     except ArchiveVersionUnknown:
@@ -83,16 +95,12 @@ async def read_text(
         raise TextUnavailable(f"{paper.id}: no arXiv version known and no LaTeX text") from None
     assert paper.version is not None
     source = await archive.request(paper, "source", priority)
-    if retry and await _retried(archive, source):
-        return None
     if source.get("status") == "complete":
         if found := _usable(await archive.latex(paper.id, paper.version)):
             return found
     elif source.get("status") not in DONE:
         return None
     pdf = await archive.request(paper, "pdf", priority)
-    if retry and await _retried(archive, pdf):
-        return None
     if pdf.get("status") in DONE:
         raise TextUnavailable(f"{paper.id}v{paper.version}: source {_why(source)}; PDF {_why(pdf)}")
     if pdf.get("status") != "complete":
