@@ -1,6 +1,5 @@
 """A paper's text from its LaTeX source: the main file with its inputs, and its version."""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -85,6 +84,34 @@ class LatexTextTests(unittest.TestCase):
         )
         self.assertIn("B", text)
         self.assertEqual(text.count("\\documentclass"), 1)
+
+    def test_bare_inputs_and_paths_out_of_a_subdirectory_are_inlined(self):
+        text = self.text(
+            [
+                (
+                    "paper/main.tex",
+                    b"\\documentclass{article}\\begin{document}\n\\input sections/one\n"
+                    b"\\input{../shared/two}\n\\input{../../outside}\n\\inputencoding{utf8}\n"
+                    b"\\end{document}",
+                ),
+                ("paper/sections/one.tex", b"Bare input.\n"),
+                ("shared/two.tex", b"From the parent.\n"),
+            ]
+        )
+        self.assertIn("Bare input.", text)
+        self.assertIn("From the parent.", text)
+        self.assertNotIn("\\input sections", text)
+        self.assertIn("\\inputencoding{utf8}", text)  # not an input
+
+    def test_a_commented_out_document_is_not_the_main_file(self):
+        text = self.text(
+            [
+                ("a_template.tex", b"% \\documentclass{article}\n% \\begin{document}\nTemplate\n"),
+                ("main.tex", b"\\documentclass{article}\\begin{document}Paper\\end{document}\n"),
+            ]
+        )
+        self.assertIn("Paper", text)
+        self.assertNotIn("Template", text)
 
     def test_without_a_main_file_every_latex_file_in_order_and_without_latex_none(self):
         self.assertEqual(

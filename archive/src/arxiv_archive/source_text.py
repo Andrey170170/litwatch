@@ -15,6 +15,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import posixpath
 import re
 import tarfile
 from contextlib import contextmanager
@@ -201,9 +202,10 @@ def text_package(package: Path, output: Path, limit: int) -> dict:
     }
 
 
-# The files a paper's text is read from, and how they pull each other in.
+# The files a paper's text is read from, and how they pull each other in: `\input{name}`,
+# `\include{name}`, `\subfile{name}`, or TeX's bare `\input name`.
 LATEX_SUFFIXES = ('.tex', '.ltx', '.latex')
-INPUT = re.compile(r'\\(?:input|include|subfile)\s*\{([^}]*)\}')
+INPUT = re.compile(r'\\(?:input|include|subfile)\s*\{([^}]*)\}|\\input\s+([^\s{}\\%]+)')
 BIBLIOGRAPHY = re.compile(r'\\bibliography\s*\{[^}]*\}')
 COMMENT = re.compile(r'(?<!\\)%.*')
 MAX_INPUT_DEPTH = 8
@@ -211,13 +213,15 @@ MAX_INPUT_DEPTH = 8
 
 def _decode(body: bytes) -> str:
     try:
-        return body.decode('utf-8')
+        text = body.decode('utf-8')
     except UnicodeDecodeError:
-        return body.decode('latin-1')  # older submissions; every byte decodes
+        text = body.decode('latin-1')  # older submissions; every byte decodes
+    return '\n'.join(COMMENT.sub('', line) for line in text.splitlines())
 
 
 def _members(package: Path, limit: int) -> dict[str, str]:
-    """The package's LaTeX and .bbl files, decoded, by path. A bare file is `main.tex`."""
+    """The package's LaTeX and .bbl files by path, decoded and with comments dropped. A bare
+    file is `main.tex`."""
     found: dict[str, str] = {}
     total = 0
     with source_stream(package, limit) as raw:
@@ -252,45 +256,46 @@ def _main(files: dict[str, str]) -> str | None:
     return roots[0] if roots else None
 
 
-def _uncommented(body: str) -> str:
-    return '\n'.join(COMMENT.sub('', line) for line in body.splitlines())
+def _inside(path: str) -> str | None:
+    """`path` with `.` and `..` resolved, or None when it leaves the package."""
+    path = posixpath.normpath(path)
+    return None if path.startswith(('../', '/')) or path == '..' else path
 
 
 def latex_text(package: Path, limit: int) -> str:
-    """The paper's text from its source package: the main file with every `\\input`,
-    `\\include` and `\\subfile` inlined (each file once, at most `MAX_INPUT_DEPTH` deep),
-    comments dropped, and `\\bibliography` replaced by the package's .bbl where there is one.
-    Without a main file, every LaTeX file in path order. Raises NoTextSource when the
-    package holds no LaTeX."""
+    """The paper's text from its source package: the main file with every input inlined (each
+    file once, at most `MAX_INPUT_DEPTH` deep), comments dropped, and `\\bibliography` replaced
+    by the package's .bbl where there is one. Without a main file, every LaTeX file in path
+    order. Raises NoTextSource when the package holds no LaTeX."""
     files = _members(package, limit)
     latex = sorted(n for n in files if n.lower().endswith(LATEX_SUFFIXES))
     if not latex:
         raise NoTextSource('Source package has no LaTeX files')
     main = _main(files)
     if main is None:
-        return '\n\n'.join(_uncommented(files[n]) for n in latex).strip() + '\n'
+        return '\n\n'.join(files[n] for n in latex).strip() + '\n'
     used = {main}
 
     def resolve(name: str, here: str) -> str | None:
-        name = name.strip()
-        base = str(PurePosixPath(here).parent)
-        for candidate in (name, name + '.tex'):
-            for path in (candidate, str(PurePosixPath(base) / candidate)):
-                path = str(PurePosixPath(path))
+        # TeX looks beside the main file; authors often write paths from the including file.
+        for base in (posixpath.dirname(main), posixpath.dirname(here)):
+            for candidate in (name, name + '.tex'):
+                path = _inside(posixpath.join(base, candidate.strip()))
                 if path in files and path not in used:
                     return path
         return None
 
     def expand(body: str, here: str, depth: int) -> str:
         def inline(match: re.Match) -> str:
-            path = resolve(match.group(1), here) if depth < MAX_INPUT_DEPTH else None
+            name = match.group(1) or match.group(2)
+            path = resolve(name, here) if depth < MAX_INPUT_DEPTH else None
             if path is None:
                 return ''
             used.add(path)
-            return expand(_uncommented(files[path]), path, depth + 1)
+            return expand(files[path], path, depth + 1)
         return INPUT.sub(inline, body)
 
-    text = expand(_uncommented(files[main]), main, 0)
+    text = expand(files[main], main, 0)
     stem = str(PurePosixPath(main).with_suffix('.bbl'))
     bbl = files.get(stem) or next((files[n] for n in sorted(files) if n.lower().endswith('.bbl')), None)
     if bbl is not None:
