@@ -136,15 +136,18 @@ class ClassesIn(Awaiting):
 @router.put("/classification/{paper_id:path}")
 async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
     """The owner names the paper's classes, which go on as usual with source `owner`."""
-    # Read before the paper's lock: locks are taken taxonomy first (`feedback.word.lock`).
-    tree = await taxonomy_store.load(c)
-    if tree is None:
-        raise HTTPException(status_code=409, detail="no taxonomy")
-    async with _awaiting(c, paper_id, body.revision) as paper:
-        try:
-            await classification.by_hand(c, paper, tree, body.classes, body.primary)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # The taxonomy is read in the action's transaction, so its shared lock holds the tree still
+    # until the classification is recorded; and before the paper's lock, since locks are
+    # taken taxonomy first (`feedback.word.lock`).
+    async with c.transaction():
+        tree = await taxonomy_store.load(c)
+        if tree is None:
+            raise HTTPException(status_code=409, detail="no taxonomy")
+        async with _awaiting(c, paper_id, body.revision) as paper:
+            try:
+                await classification.by_hand(c, paper, tree, body.classes, body.primary)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "classes": list(dict.fromkeys(body.classes)),
         "primary": body.primary or body.classes[0],
