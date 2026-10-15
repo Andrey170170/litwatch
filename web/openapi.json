@@ -938,7 +938,7 @@
       },
       "delete": {
         "summary": "Unreact",
-        "description": "Clear a thumb: it takes back its own word and nothing else.",
+        "description": "Clear a thumb: it takes back its own word and nothing else. A thumb on a topic no longer\nshown can be cleared too; it carried no word, so nothing is said.",
         "operationId": "unreact_api_reactions__paper_id__delete",
         "parameters": [
           {
@@ -1181,6 +1181,9 @@
           },
           "404": {
             "description": "No such paper or topic"
+          },
+          "409": {
+            "description": "Not a Focus topic"
           },
           "422": {
             "description": "Validation Error",
@@ -2857,7 +2860,14 @@
             "title": "Colour"
           },
           "grade": {
-            "$ref": "#/components/schemas/Grade"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rarity": {
             "$ref": "#/components/schemas/Rarity"
@@ -2874,7 +2884,7 @@
           "rarity"
         ],
         "title": "GradedBadge",
-        "description": "A badge on a paper: the paper's effective grade on that topic, and the topic page's\nrarity it gives."
+        "description": "A badge on a paper, one per followed topic whose page holds it: the grade and rarity\nthat page shows (`core.page_standing`); grade null where neither the topic nor a followed\ndescendant graded it, the rarity then its Weight's floor."
       },
       "GradedOut": {
         "properties": {

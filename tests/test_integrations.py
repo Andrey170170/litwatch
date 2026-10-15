@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from importlib import resources
 
 import httpx
@@ -224,13 +224,14 @@ async def test_the_archive_answers_searches_by_arxiv_id_with_its_rank_as_score()
         },
         {"id": "2401.00002", "title": "Second", "authors": "", "published": ""},
     ]
-    hits = archive(fake).search("hidden traces", SearchFilters(year=2024, limit=10))
+    window = SearchFilters(since=date(2024, 1, 1), until=date(2024, 1, 31), limit=10)
+    hits = archive(fake).search("hidden traces", window)
     assert [h.id for h in hits] == ["2401.00001", "2401.00002"]
     assert hits[0].authors == ["Ann Lee", "Bo Chen", "Cy Dee"]
     assert hits[0].published.year == 2024 and hits[1].published is None
     assert hits[0].score > hits[1].score
     assert fake.searches == [
-        {"q": "hidden traces", "limit": "10", "date_from": "2024-01-01", "date_to": "2024-12-31"}
+        {"q": "hidden traces", "limit": "10", "date_from": "2024-01-01", "date_to": "2024-01-31"}
     ]
 
 

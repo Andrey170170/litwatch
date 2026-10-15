@@ -190,7 +190,8 @@ export interface paths {
         post?: never;
         /**
          * Unreact
-         * @description Clear a thumb: it takes back its own word and nothing else.
+         * @description Clear a thumb: it takes back its own word and nothing else. A thumb on a topic no longer
+         *     shown can be cleared too; it carried no word, so nothing is said.
          */
         delete: operations["unreact_api_reactions__paper_id__delete"];
         options?: never;
@@ -1021,8 +1022,9 @@ export interface components {
         GradeLevel: "must_read" | "relevant" | "adjacent" | "none" | "ungraded";
         /**
          * GradedBadge
-         * @description A badge on a paper: the paper's effective grade on that topic, and the topic page's
-         *     rarity it gives.
+         * @description A badge on a paper, one per followed topic whose page holds it: the grade and rarity
+         *     that page shows (`core.page_standing`); grade null where neither the topic nor a followed
+         *     descendant graded it, the rarity then its Weight's floor.
          */
         GradedBadge: {
             /** Slug */
@@ -1034,7 +1036,7 @@ export interface components {
             monogram: string;
             /** Colour */
             colour: string;
-            grade: components["schemas"]["Grade"];
+            grade: components["schemas"]["Grade"] | null;
             rarity: components["schemas"]["Rarity"];
         };
         /**
@@ -2411,6 +2413,13 @@ export interface operations {
             };
             /** @description No such paper or topic */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a Focus topic */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

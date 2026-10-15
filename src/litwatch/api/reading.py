@@ -3,6 +3,7 @@ paper's page, and the owner's word (docs/specs/v1/DESIGN.md, Shell, Pages and In
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Annotated, Any
 
 import psycopg
@@ -18,8 +19,8 @@ from litwatch.core import (
     Hand,
     Label,
     LabelOrigin,
+    PageStanding,
     Publication,
-    Rarity,
     Reaction,
     ReactionReason,
     SearchFilters,
@@ -52,13 +53,19 @@ def _config(request: Request) -> Any:
     return request.app.state.config
 
 
-async def _topic(c: psycopg.AsyncConnection, slug: str) -> tuple[str, Topic]:
-    """The shown topic on class `slug`, with its class's name; 404 for any other."""
+async def _shown(c: psycopg.AsyncConnection, slug: str) -> tuple[str, Topic] | None:
+    """The shown topic on class `slug`, with its class's name."""
     tree = await taxonomy_store.load(c)
     topic = next((t for t in tree.shown() if t.slug == slug), None) if tree else None
-    if topic is None:
+    return (tree.get(slug).name, topic) if topic else None
+
+
+async def _topic(c: psycopg.AsyncConnection, slug: str) -> tuple[str, Topic]:
+    """The shown topic on class `slug`, with its class's name; 404 for any other."""
+    found = await _shown(c, slug)
+    if found is None:
         raise HTTPException(status_code=404, detail="no such topic")
-    return tree.get(slug).name, topic
+    return found
 
 
 async def _known(c: psycopg.AsyncConnection, paper_id: str) -> None:
@@ -82,12 +89,40 @@ def _looks(tree: Taxonomy | None) -> dict[str, s.Badge]:
     }
 
 
-def _badges(looks: dict[str, s.Badge], grades: list[dict[str, Any]]) -> list[s.GradedBadge]:
-    """The paper's badges: the shown topics it has a grade on, the highest level's first."""
-    by = {g["topic"]: g for g in grades if g["topic"] in looks}
-    levels = [(t, looks[t].depth, Rarity(by[t]["rarity"])) for t in looks if t in by]
+def _standings(
+    tree: Taxonomy | None,
+    members: Iterable[str],
+    grades: list[dict[str, Any]],
+    weight: Weight | None,
+) -> dict[str, PageStanding]:
+    """The shown topics on whose page the paper is, as `store.reading.SCOPE` finds them, each as
+    its page shows it (`page_standing`), in the fixed order: the topics at or above a class it
+    stands in, and those graded it or with a followed descendant that did."""
+    if tree is None:
+        return {}
+    shown = [t.slug for t in tree.shown()]
+    effective = {
+        g["topic"]: Effective(fit=g["fit"], grade=g["grade"], rarity=g["rarity"])
+        for g in grades
+        if g["topic"] in shown
+    }
+    classes = {c.slug for c in tree.classes}
+    on = {a for c in [*members, *effective] if c in classes for a in [c, *tree.ancestors(c)]}
+    found = {}
+    for slug in shown:
+        if slug in on:
+            under = [t.slug for t in tree.under(slug) if t.slug != slug and t.slug in effective]
+            below = [(t, effective[t]) for t in under]
+            found[slug] = page_standing(effective.get(slug), below, weight)
+    return found
+
+
+def _badges(looks: dict[str, s.Badge], standings: dict[str, PageStanding]) -> list[s.GradedBadge]:
+    """The paper's badges: its followed topics, the one giving the highest level first (ties in
+    the fixed order); `grade` is null where neither the topic nor a descendant graded it."""
+    levels = [(t, looks[t].depth, st.rarity) for t, st in standings.items()]
     return [
-        s.GradedBadge(**looks[t].model_dump(), grade=by[t]["grade"], rarity=by[t]["rarity"])
+        s.GradedBadge(**looks[t].model_dump(), grade=standings[t].grade, rarity=standings[t].rarity)
         for t in badge_order(levels)
     ]
 
@@ -102,12 +137,15 @@ def _facets(r: dict[str, Any]) -> s.Facets | None:
     )
 
 
-def _row[R: s.Row](looks: dict[str, s.Badge], r: dict[str, Any], model: type[R]) -> R:
+def _row[R: s.Row](
+    tree: Taxonomy | None, looks: dict[str, s.Badge], r: dict[str, Any], model: type[R]
+) -> R:
     extra = {k: r[k] for k in ("grade", "via") if k in r}
+    weight = Weight(r["weight"]) if r["weight"] else None
     return model(
         **{k: r[k] for k in ("id", "title", "authors", "published", "gist", "weight", "rarity")},
         facets=_facets(r),
-        badges=_badges(looks, r["grades"]),
+        badges=_badges(looks, _standings(tree, r["members"], r["grades"], weight)),
         saved=r["saved"],
         state=r["state"],
         **extra,
@@ -154,20 +192,19 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
         listed = await reading.papers(
             c, tree, _query(params), limit=params.limit, offset=params.offset
         )
-        answer.rows = [_row(looks, r, s.Row) for r in listed.rows]
+        answer.rows = [_row(tree, looks, r, s.Row) for r in listed.rows]
         answer.total, answer.counts = listed.total, s.RarityCounts(**listed.rarities)
-    ours = (params.topic, params.depth, params.rarity, params.grade, params.code, params.weight)
+    # A paper outside the collection has no topic, level, Weight or analysis, and is not saved.
+    ours = (params.topic, params.depth, params.rarity, params.grade, params.weight)
     if (
         params.q
         and params.offset == 0
         and params.source != "collection"
-        and not any(x for x in ours)
+        and not any(ours)
+        and params.code is None
         and params.saved is not True
     ):
-        # A provider takes a year: the window's, when it lies within one.
-        bounds = {d.year for d in (params.since, params.until) if d}
-        year = bounds.pop() if len(bounds) == 1 else None
-        filters = SearchFilters(year=year, limit=params.limit)
+        filters = SearchFilters(since=params.since, until=params.until, limit=params.limit)
         answer.outside, answer.left_out = await integrations_api.search_outside(
             request, c, params.q, filters, params.sort
         )
@@ -182,7 +219,8 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
     tree = await taxonomy_store.load(c)
     looks = _looks(tree)
     weight = Weight(found["weight"]) if found["weight"] else None
-    rail = _rail(tree, looks, found, weight)
+    standings = _standings(tree, _members(tree, found["memberships"]), found["grades"], weight)
+    rail = _rail(tree, looks, found, standings)
     states = [
         s.OpenState(kind=kind, revision=found["revision"], error=f["last_error"])
         for f in found["failures"]
@@ -224,7 +262,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         source_url=f"https://arxiv.org/e-print/{paper_id}",
         in_collection=found["in_collection"],
         rarity=found["rarity"],
-        badges=_badges(looks, found["grades"]),
+        badges=_badges(looks, standings),
         gist=s.Gist(text=found["gist"]) if found["gist"] else None,
         weight=s.WeightState(
             weight=weight, reason=found["weight_reason"], source=found["weight_source"]
@@ -261,35 +299,25 @@ def _rail(
     tree: Taxonomy | None,
     looks: dict[str, s.Badge],
     found: dict[str, Any],
-    weight: Weight | None,
+    standings: dict[str, PageStanding],
 ) -> list[s.PaperTopic]:
-    """The shown topics the paper is in (its subtree's), graded for, or has a label, thumb,
-    miss or failed grading on, in the fixed order."""
+    """The topics of the paper's badges (`_standings`), and the shown topics it has a label,
+    thumb, miss or failed grading on, in the fixed order."""
     if tree is None:
         return []
-    grades = {
-        g["topic"]: Effective(fit=g["fit"], grade=g["grade"], rarity=g["rarity"])
-        for g in found["grades"]
-    }
+    fits = {g["topic"]: g["fit"] for g in found["grades"]}
     verdicts = {v["topic"]: v for v in found["verdicts"]}
     labels = {x["topic"]: x for x in found["labels"]}
     reactions = {r["topic"]: r for r in found["reactions"] if r["topic"]}
     missed = {m["topic"] for m in found["misses"]}
     failed = {f["topic"]: f for f in found["failures"] if f["step"] == "grading"}
-    members = _members(tree, found["memberships"])
-    in_topics = {a for c in members for a in [c, *tree.ancestors(c)]}
-    involved = set(grades) | in_topics | set(failed) | set(labels) | set(reactions) | missed
+    involved = set(standings) | set(failed) | set(labels) | set(reactions) | missed
     rail = []
     for slug, look in looks.items():
         if slug not in involved:
             continue
         topic = tree.topic(slug)
-        own = grades.get(slug)
-        under = [t.slug for t in tree.under(slug) if t.slug != slug]
-        below = [(t, grades[t]) for t in under if t in grades]
-        shows = (
-            page_standing(own, below, weight) if own or below or found["in_collection"] else None
-        )
+        shows = standings.get(slug)
         v, label, thumb = verdicts.get(slug), labels.get(slug), reactions.get(slug)
         said = owners_word(
             Label(paper_id=found["id"], **label) if label else None,
@@ -307,7 +335,7 @@ def _rail(
         rail.append(
             s.PaperTopic(
                 topic=look,
-                fit=own.fit if own else None,
+                fit=fits.get(slug),
                 grade=shows.grade if shows else None,
                 rarity=shows.rarity if shows else None,
                 via=shows.via if shows else None,
@@ -473,7 +501,7 @@ async def lookup(body: s.LookupIn, c: Conn) -> s.Lookup:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     tree = await taxonomy_store.load(c)
     listed = await reading.papers(c, tree, reading.Query(ids=[found.id]), limit=1)
-    return s.Lookup(row=_row(_looks(tree), listed.rows[0], s.Row), fetched=fetched)
+    return s.Lookup(row=_row(tree, _looks(tree), listed.rows[0], s.Row), fetched=fetched)
 
 
 # -- topics ----------------------------------------------------------------------------------------
@@ -522,7 +550,7 @@ async def topic(slug: str, c: Conn, params: Annotated[s.TopicPapersIn, Query()])
     looks = _looks(tree)
     return s.TopicPage(
         topic=s.TopicHead(**_head(tree, found)),
-        rows=[_row(looks, r, s.TopicRow) for r in listed.rows],
+        rows=[_row(tree, looks, r, s.TopicRow) for r in listed.rows],
         total=listed.total,
         counts=s.RarityCounts(**listed.rarities),
         grades=s.GradeCounts(**listed.grades),
@@ -550,19 +578,26 @@ def _speaks(topic: Topic | None, reason: ReactionReason | None) -> bool:
     return topic is not None and topic.depth == Depth.FOCUS and reason in REACTION_WORDS
 
 
+# Each action below checks the topic and the paper under the paper's lock (`word.lock`, after
+# the taxonomy's, shared), then writes and settles in the same transaction: a topic edited
+# meanwhile cannot take a write, or a message, it no longer qualifies for.
+
+
 @router.put("/reactions/{paper_id:path}", responses=NOT_FOUND)
 async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
     """A thumb for the topic of the surface it was given on, replacing the one there. Wrong
     topic and great find on a Focus topic are the owner's word, and say so."""
-    await _known(c, paper_id)
-    name, topic = await _topic(c, body.topic) if body.topic else (None, None)
     try:
         reaction = Reaction(
             paper_id=paper_id, topic=body.topic, value=body.value, reason=body.reason
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    _, settled = await word.react(c, reaction)
+    async with c.transaction():
+        await word.lock(c, paper_id)
+        await _known(c, paper_id)
+        name, topic = await _topic(c, body.topic) if body.topic else (None, None)
+        _, settled = await word.react(c, reaction)
     if not _speaks(topic, body.reason):
         return _ack(settled)
     if body.reason == ReactionReason.WRONG_TOPIC:
@@ -572,14 +607,16 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
 
 @router.delete("/reactions/{paper_id:path}")
 async def unreact(paper_id: str, c: Conn, topic: str | None = None) -> s.Ack:
-    """Clear a thumb: it takes back its own word and nothing else."""
-    thumb = next((r for r in await word_store.reactions_for(c, paper_id) if r.topic == topic), None)
-    settled = await word.unreact(c, paper_id, topic)
-    if thumb is None or topic is None:
-        return _ack(settled)
-    name, followed = await _topic(c, topic)
-    if _speaks(followed, thumb.reason):
-        return _ack(settled, f"Mark on {name} taken back")
+    """Clear a thumb: it takes back its own word and nothing else. A thumb on a topic no longer
+    shown can be cleared too; it carried no word, so nothing is said."""
+    async with c.transaction():
+        await word.lock(c, paper_id)
+        thumbs = await word_store.reactions_for(c, paper_id)
+        thumb = next((r for r in thumbs if r.topic == topic), None)
+        shown = await _shown(c, topic) if thumb and topic else None
+        settled = await word.unreact(c, paper_id, topic)
+    if shown and _speaks(shown[1], thumb.reason):
+        return _ack(settled, f"Mark on {shown[0]} taken back")
     return _ack(settled)
 
 
@@ -594,10 +631,12 @@ async def save(paper_id: str, body: s.SaveIn, c: Conn) -> s.Ack:
 async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn) -> s.Ack:
     """The Fit control on a paper's page: the owner's own word on any shown topic (origin
     `reader`). Unsure is stored and counts nowhere."""
-    await _topic(c, topic)
-    await _known(c, paper_id)
     given = Label(paper_id=paper_id, topic=topic, value=body.value, origin=LabelOrigin.READER)
-    _, settled = await word.label(c, given)
+    async with c.transaction():
+        await word.lock(c, paper_id)
+        await _topic(c, topic)
+        await _known(c, paper_id)
+        _, settled = await word.label(c, given)
     return _ack(settled)
 
 
@@ -607,14 +646,16 @@ async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
     return _ack(await word.unlabel(c, paper_id, topic))
 
 
-@router.post("/misses", responses=NOT_FOUND)
+@router.post("/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}})
 async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
     """File a miss for a Focus topic: the owner's word, at once, and the paper saved."""
-    name, topic = await _topic(c, body.topic)
-    if topic.depth != Depth.FOCUS:
-        raise HTTPException(status_code=404, detail="not a Focus topic")
-    await _known(c, body.paper_id)
-    _, settled, new = await misses.report(c, body.paper_id, body.topic, body.fit)
+    async with c.transaction():
+        await word.lock(c, body.paper_id)
+        name, topic = await _topic(c, body.topic)
+        if topic.depth != Depth.FOCUS:
+            raise HTTPException(status_code=409, detail="not a Focus topic")
+        await _known(c, body.paper_id)
+        _, settled, new = await misses.report(c, body.paper_id, body.topic, body.fit)
     if not new:
         return _ack(settled, f"Already reported as missed for {name}")
     return _ack(settled, f"Reported as missed for {name}")

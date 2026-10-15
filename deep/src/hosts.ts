@@ -32,14 +32,18 @@ interface PaperRow {
   title: string;
   authors?: string[];
   published?: string | null;
-  /** Highest level first; the first badge's grade is the paper's best. */
+  /** One per followed topic whose page holds the paper; grade null where none graded it. */
   badges?: { grade?: string | null }[];
   gist?: string | null;
 }
 
 const TIERS: Record<string, number> = { must_read: 1, relevant: 2, adjacent: 3, none: 4 };
-const tier = (grade: string | null | undefined): number | null =>
-  grade && Object.hasOwn(TIERS, grade) ? TIERS[grade]! : null;
+/** The highest grade across the badges: the first badge gives the highest rarity after the depth
+ * offsets, which need not be the highest grade. */
+const tier = (badges: { grade?: string | null }[] | undefined): number | null => {
+  const tiers = (badges ?? []).flatMap((b) => (b.grade && Object.hasOwn(TIERS, b.grade) ? [TIERS[b.grade]!] : []));
+  return tiers.length ? Math.min(...tiers) : null;
+};
 
 /** v1's `GET /api/papers` answer as `store.search` hits: the collection first, then the
  * papers only a search provider holds. */
@@ -49,7 +53,7 @@ export function storeHits(body: { rows?: PaperRow[]; outside?: PaperRow[] }): St
     title: row.title,
     authors: row.authors ?? [],
     published: row.published ?? null,
-    tier: tier(row.badges?.[0]?.grade),
+    tier: tier(row.badges),
     reason: row.gist ?? null,
     in_collection: inCollection,
   });

@@ -392,10 +392,11 @@ async def topic_papers(
 
 async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str]) -> list[dict]:
     """The rows of a page, in its order: each paper with its current Gist, Weight and facets,
-    its mixed-list rarity, its effective grades (`grades`, for its badges), whether it is saved,
-    and its open state on an `in_view` topic or its own: `word` (a split or escalated verdict
-    the owner has not labelled), else `failure` (a step stopped after `FAILED_RUNS` failed runs:
-    classification, analysis, or a grading)."""
+    its mixed-list rarity, its effective grades and the classes it stands in on a page
+    (`grades`, `members`: what its badges come from), whether it is saved, and its open state
+    on an `in_view` topic or its own: `word` (a split or escalated verdict the owner has not
+    labelled), else `failure` (a step stopped after `FAILED_RUNS` failed runs: classification,
+    analysis, or a grading)."""
     if not ids:
         return []
     found = await _all(
@@ -405,8 +406,10 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
                coalesce(l.saved, false) AS saved, {CURRENT_GIST} AS gist,
                a.contribution, a.releases_code, a.releases_weights,
                (SELECT coalesce(jsonb_agg(jsonb_build_object(
-                    'topic', e.topic, 'grade', e.grade, 'rarity', e.rarity)), '[]')
+                    'topic', e.topic, 'fit', e.fit, 'grade', e.grade, 'rarity', e.rarity)), '[]')
                 FROM effective_grades e WHERE e.paper_id = p.id) AS grades,
+               ARRAY(SELECT m.class FROM memberships m WHERE m.paper_id = p.id
+                     AND {SHOWN_MEMBER}) AS members,
                CASE WHEN EXISTS (
                         SELECT 1 FROM (
                             SELECT DISTINCT ON (v.topic) v.topic, v.split, v.escalated
@@ -541,7 +544,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
             FROM verdicts WHERE paper_id = %(p)s
             UNION ALL
             SELECT 'labelled', labelled_at, topic, value, NULL, NULL, NULL, NULL
-            FROM labels WHERE paper_id = %(p)s AND origin <> 'miss'  -- the miss says it
+            FROM labels WHERE paper_id = %(p)s
             UNION ALL
             SELECT 'reacted', reacted_at, topic, value, reason, NULL, NULL, NULL
             FROM reactions WHERE paper_id = %(p)s

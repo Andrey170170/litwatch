@@ -196,7 +196,7 @@ class SearchProvider(Protocol):
 - `search` is **synchronous**: litwatch runs it in a thread beside its own search, with a timeout
   of a few seconds. A provider that raises or does not answer in time is left out of that
   response, named in its `left_out`, and counted on its card under Settings.
-- `SearchFilters` has `year` (filter by published year when set) and `limit`.
+- `SearchFilters` has `since` and `until` (published on or after, on or before, when set) and `limit`.
 - `SearchHit` has `id` (the version-stripped arXiv id), `title`, `authors` (list of names),
   `published` (aware datetime or None) and an optional `score` (higher is better; compared only
   within one provider, for the "best match" sort).

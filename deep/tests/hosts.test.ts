@@ -35,10 +35,14 @@ test("store.search asks v1's papers table with the read token and keeps the old 
   }
 });
 
-test("the best badge's grade maps to the tier the agent knows", () => {
+test("the highest grade across the badges maps to the tier the agent knows", () => {
   const tiers = ["must_read", "relevant", "adjacent", "none"].map(
     (grade) => storeHits({ rows: [{ id: "1", title: "t", badges: [{ grade }] }] })[0].tier,
   );
   assert.deepEqual(tiers, [1, 2, 3, 4]);
+  // A Focus relevant ties a Field must read lowered by its depth and comes first; ungraded is no tier.
+  const tied = [{ grade: "relevant" }, { grade: null }, { grade: "must_read" }];
+  assert.equal(storeHits({ rows: [{ id: "1", title: "t", badges: tied }] })[0].tier, 1);
+  assert.equal(storeHits({ rows: [{ id: "1", title: "t", badges: [{ grade: null }] }] })[0].tier, null);
   assert.deepEqual(storeHits({}), []);
 });

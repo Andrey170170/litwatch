@@ -149,7 +149,16 @@ async def test_papers_are_rarest_first_with_the_counts_the_shelves_need(client, 
             "colour": FAITH.colour,
             "grade": "must_read",
             "rarity": "epic",
-        }
+        },
+        {  # its Area, by its Focus topic's grade
+            "slug": INTERP.slug,
+            "name": "Interpretability",
+            "depth": "area",
+            "monogram": "IN",
+            "colour": INTERP.colour,
+            "grade": "must_read",
+            "rarity": "epic",
+        },
     ]
     assert page["rows"][4]["gist"] is None and page["rows"][4]["badges"] == []
     # Paging: a page past the end still counts the filter.
@@ -228,8 +237,33 @@ async def test_badges_put_the_topic_giving_the_highest_level_first(client, conn)
     await grade(conn, P, "adjacent")  # Focus adjacent: uncommon
     await grade(conn, P, "central", AGENTS)  # Field must read: epic, lowered to rare
     (row,) = (await client.get("/api/papers", params={"q": "hidden"})).json()["rows"]
-    assert [b["slug"] for b in row["badges"]] == [AGENTS.slug, FAITH.slug]
+    assert [b["slug"] for b in row["badges"]] == [AGENTS.slug, FAITH.slug, INTERP.slug]
     assert row["rarity"] == "rare"
+
+
+async def test_badges_and_rail_cover_every_followed_topic_whose_page_holds_the_paper(client, conn):
+    """A badge per followed topic whose subtree the paper is in, graded there or not, and per
+    followed ancestor of a topic that graded it; the rail shows the same topics."""
+    await classify(conn, P, FAITH.slug)  # not graded yet, as for a topic just followed
+    await analyse(conn, P, "landmark")
+    (row,) = (await client.get("/api/papers", params={"q": "hidden"})).json()["rows"]
+    assert [(b["slug"], b["grade"], b["rarity"]) for b in row["badges"]] == [
+        (FAITH.slug, None, "rare"),  # the landmark Weight's floor
+        (INTERP.slug, None, "rare"),
+    ]
+    # Admitted by the keyword check alone and graded there: its Area shows it too.
+    await classify(conn, Q, "other", keyword=[FAITH.slug])
+    await grade(conn, Q, "adjacent")
+    (row,) = (await client.get("/api/papers", params={"q": "sparse"})).json()["rows"]
+    assert [(b["slug"], b["grade"]) for b in row["badges"]] == [
+        (FAITH.slug, "adjacent"),
+        (INTERP.slug, "adjacent"),
+    ]
+    rail = (await client.get(f"/api/papers/{Q.id}")).json()["topics"]
+    assert [(t["topic"]["slug"], t["fit"], t["via"]) for t in rail] == [
+        (FAITH.slug, "adjacent", None),
+        (INTERP.slug, None, FAITH.slug),
+    ]
 
 
 # -- topics ----------------------------------------------------------------------------------------
@@ -292,7 +326,7 @@ async def test_a_paper_page_has_its_header_rail_classes_states_and_history(clien
 
     page = (await client.get(f"/api/papers/{P.id}")).json()
     assert (page["rarity"], page["in_collection"], page["revision"]) == ("legendary", True, 1)
-    assert [b["slug"] for b in page["badges"]] == [FAITH.slug, AGENTS.slug]
+    assert [b["slug"] for b in page["badges"]] == [FAITH.slug, INTERP.slug, AGENTS.slug]
     assert page["weight"] == {"weight": "landmark", "reason": "Sound work.", "source": "abstract"}
     assert page["gist"] == {"text": "Probes find hidden steps."}
     assert [v["version"] for v in page["versions"]] == [1, 2] and page["version"] == 2
@@ -400,6 +434,16 @@ async def test_a_thumb_takes_a_reason_from_feedback_and_says_only_what_the_page_
     assert (await thumb("down", "underrated")).status_code == 422
     assert (await thumb("down", "unrelated")).status_code == 422  # the first v1's name
     assert (await thumb("up", None, "nope")).status_code == 404
+    # A thumb on a topic no longer followed can still be cleared; it says nothing.
+    await thumb("up", None, AGENTS.slug)
+    unfollowed = [t for t in TREE.topics if t.slug != AGENTS.slug]
+    await word.save_taxonomy(conn, TREE.model_copy(update={"topics": unfollowed}))
+    cleared = await client.delete(f"/api/reactions/{P.id}", params={"topic": AGENTS.slug})
+    assert (cleared.status_code, cleared.json()["message"]) == (200, None)
+    (left,) = await (
+        await conn.execute("SELECT count(*) AS n FROM reactions WHERE topic = %s", (AGENTS.slug,))
+    ).fetchall()
+    assert left["n"] == 0
     saved = await client.put(f"/api/library/{Q.id}", json={"saved": True})
     assert saved.json() == {"message": None, "saved": True, "grades": {}}
 
@@ -487,7 +531,8 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
     assert (interp["topic"]["slug"], interp["via"]) == (INTERP.slug, FAITH.slug)
     assert faith["label"] == {"value": "central", "origin": "miss", "provisional": False}
     assert faith["missed"] and faith["word"] == "central" and faith["grade"] == "must_read"
-    assert page["history"][-1]["what"] == "missed"
+    said = [(h["what"], h["value"]) for h in page["history"]]
+    assert said == [("missed", None), ("labelled", "central")]
     # A membership of the topic's class, so grading runs for it whatever classification says,
     # and the owner's newest Save, which outranks an earlier Unsave.
     (member,) = await (await conn.execute("SELECT class, source FROM memberships")).fetchall()
@@ -500,7 +545,7 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
     body["fit"] = "adjacent"
     assert (await client.post("/api/misses", json=body)).status_code == 422
     body = {"paper_id": P.id, "topic": INTERP.slug}
-    assert (await client.post("/api/misses", json=body)).status_code == 404
+    assert (await client.post("/api/misses", json=body)).status_code == 409  # not Focus
 
 
 async def test_a_miss_taken_back_can_be_reported_again(client, conn):
@@ -532,6 +577,11 @@ async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     await client.put(f"/api/labels/{FAITH.slug}/{Q.id}", json={"value": "none"})
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     assert (await faith())["label"]["value"] == "none" and (await faith())["word"] == "none"
+    # The history shows the correction, the label keeping the miss's origin.
+    history = (await client.get(f"/api/papers/{Q.id}")).json()["history"]
+    assert [(h["what"], h["value"]) for h in history if h["what"] == "labelled"] == [
+        ("labelled", "none")
+    ]
 
 
 async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, conn):

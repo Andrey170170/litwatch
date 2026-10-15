@@ -59,10 +59,11 @@ class Badge(BaseModel):
 
 
 class GradedBadge(Badge):
-    """A badge on a paper: the paper's effective grade on that topic, and the topic page's
-    rarity it gives."""
+    """A badge on a paper, one per followed topic whose page holds it: the grade and rarity
+    that page shows (`core.page_standing`); grade null where neither the topic nor a followed
+    descendant graded it, the rarity then its Weight's floor."""
 
-    grade: Grade
+    grade: Grade | None
     rarity: Rarity
 
 
