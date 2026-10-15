@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const counts = { legendary: 1, epic: 1, rare: 1, uncommon: 4, common: 9, unrated: 2 };
@@ -91,6 +91,43 @@ describe("Papers", () => {
     await userEvent.click(within(rare).getByRole("button", { name: "Try again" }));
     expect(await within(rare).findByText("Rare one")).toBeInTheDocument();
     expect(calls.filter((c) => c.url.includes("rarity=rare")).length).toBe(2);
+  });
+
+  it("keeps the rows it has when the next page fails, and tries that page again on request", async () => {
+    viewport(true);
+    // jsdom has no IntersectionObserver; this one sees every sentinel at once.
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(private cb: (entries: { isIntersecting: boolean }[]) => void) {}
+        observe() {
+          this.cb([{ isIntersecting: true }]);
+        }
+        disconnect() {}
+      },
+    );
+    let failMore = true;
+    const many = Array.from({ length: 50 }, (_, i) => row(`2610.${String(i).padStart(5, "0")}`, `Epic ${i}`, "epic"));
+    const calls = scriptFetch({
+      "GET /api/status": { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
+      "GET /api/topics": [],
+      "GET /api/papers": ({ url }) => {
+        const q = new URL(url, "http://x").searchParams;
+        if (!(q.get("rarity") ?? "").includes("epic")) return { rows: [], total: 0, counts };
+        if (q.get("offset") === "0") return { rows: many, total: 51, counts };
+        if (failMore) return json({ detail: "gone" }, 500);
+        return { rows: [row("2610.00050", "Epic 50", "epic")], total: 51, counts };
+      },
+    });
+    renderApp("/papers");
+    const top = await screen.findByRole("region", { name: "Epic and legendary" });
+    expect(await within(top).findByText(/Could not load more/)).toBeInTheDocument();
+    expect(within(top).getAllByRole("link")).toHaveLength(50);
+    failMore = false;
+    await userEvent.click(within(top).getByRole("button", { name: "Try again" }));
+    expect(await within(top).findByText("Epic 50")).toBeInTheDocument();
+    expect(within(top).queryByText(/Could not load/)).toBeNull();
+    expect(calls.filter((c) => c.url.includes("offset=50")).length).toBe(2);
   });
 
   it("keeps an opened shelf open on the way back, without refetching the list", async () => {

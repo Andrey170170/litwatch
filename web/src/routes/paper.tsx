@@ -65,17 +65,18 @@ function Rail({ paper, gistAway, asked, onAsked }: { paper: Paper; gistAway: boo
 export function PaperPage() {
   const { _splat: id = "" } = useParams({ from: "/paper/$" });
   const { topic: under } = useSearch({ from: "/paper/$" });
+  // Keyed by the paper: the route is reused from one paper to the next, and no open form, sheet or half-made
+  // pick may carry over (a DOI typed on one paper must not be set on another).
+  return <PaperView key={id} id={id} under={under} />;
+}
+
+function PaperView({ id, under }: { id: string; under: string | undefined }) {
   const desktop = useDesktop();
   const [asked, setAsked] = useState(() => cardAsked(id));
   // While a card is asked for, the page polls until an integration has written it (the API has no queued state).
   const { data: paper, error, isPending } = useQuery({ ...paperQuery(id), refetchInterval: asked ? 15_000 : false });
   const [gistAway, setGistAway] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
-  useEffect(() => {
-    setAsked(cardAsked(id));
-    setSheet(null);
-    setGistAway(false);
-  }, [id]);
   useEffect(() => {
     if (asked && paper?.card) {
       forgetCard(id);

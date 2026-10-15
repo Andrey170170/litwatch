@@ -1,5 +1,6 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { renderApp, scriptFetch, viewport } from "@/test/harness";
 
@@ -69,6 +70,30 @@ describe("a paper's page", () => {
     await userEvent.click(screen.getByRole("button", { name: "related" }));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/labels/mi/2610.00002")).toBe(true));
     expect(fit).toBeInTheDocument();
+  });
+
+  it("starts afresh on another paper: a DOI typed on one is not set on the next", async () => {
+    viewport(true);
+    const other = { ...paper, id: "2610.00003", title: "Epic two", arxiv_url: "https://arxiv.org/abs/2610.00003" };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": paper,
+      "GET /api/papers/2610.00003": other,
+      "PUT /api/papers/2610.00003/publication": { venue: "ICLR", year: 2026, doi: "10.1/x" },
+    });
+    // The second paper stays cached (the harness's client forgets at once), so the page is reused on the way to it.
+    const { router } = renderApp("/paper/2610.00003", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    expect(await screen.findByRole("heading", { name: "Epic two" })).toBeInTheDocument();
+    await router.navigate({ to: "/paper/$", params: { _splat: "2610.00002" } });
+    expect(await screen.findByRole("heading", { name: "Epic one" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Paste a DOI" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "DOI" }), "10.1/x");
+    await router.navigate({ to: "/paper/$", params: { _splat: "2610.00003" } });
+    expect(await screen.findByRole("heading", { name: "Epic two" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "DOI" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Paste a DOI" })).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
   });
 
   it("says when a paper is not in the collection", async () => {

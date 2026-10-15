@@ -42,6 +42,8 @@ function ShelfView<P extends Page, K extends QueryKey>({ shelf, query, topic, li
   const style = { "--rc": rc(shelf.colour) } as React.CSSProperties;
   const list = { key: shelfKey, ids: rows.map((r) => r.id), total: total ?? rows.length };
   const Head = shelf.open ? "div" : "button";
+  const moreFailed = q.isFetchNextPageError;
+  const retry = () => void (moreFailed ? q.fetchNextPage() : q.refetch());
   return (
     <section aria-label={shelf.name}>
       <Head className={`shh${open ? "" : " fold"}`} style={style} onClick={shelf.open ? undefined : toggle} aria-expanded={shelf.open ? undefined : open}>
@@ -50,15 +52,7 @@ function ShelfView<P extends Page, K extends QueryKey>({ shelf, query, topic, li
         <span className="k">{total ?? ""}</span>
         {!shelf.open && <span className="tg">{open ? "fold" : "show"}</span>}
       </Head>
-      {q.isError && (
-        <div className="loadmore">
-          Could not load ·{" "}
-          <button className="inl" onClick={() => void q.refetch()}>
-            Try again
-          </button>
-        </div>
-      )}
-      {open && !q.isError && (
+      {open && (
         <div className={shelf.form === "table" ? "tbl" : "blist"}>
           {rows.map((r) =>
             shelf.form === "reading" ? (
@@ -67,8 +61,16 @@ function ShelfView<P extends Page, K extends QueryKey>({ shelf, query, topic, li
               <TableRow key={r.id} row={r} rarity={r.rarity} topic={topic} list={list} />
             ),
           )}
-          {q.hasNextPage && !q.isFetchingNextPage && <Sentinel onSeen={() => void q.fetchNextPage()} />}
+          {q.hasNextPage && !q.isFetchingNextPage && !q.isError && <Sentinel onSeen={() => void q.fetchNextPage()} />}
           {q.isFetchingNextPage && <div className="loadmore">Loading more…</div>}
+        </div>
+      )}
+      {q.isError && !q.isFetching && (
+        <div className="loadmore">
+          {moreFailed ? "Could not load more" : "Could not load"} ·{" "}
+          <button className="inl" onClick={retry}>
+            Try again
+          </button>
         </div>
       )}
     </section>
