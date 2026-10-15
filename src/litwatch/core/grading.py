@@ -95,8 +95,8 @@ TOPIC_RARITY: dict[Grade, Rarity] = {
     Grade.MUST_READ: Rarity.EPIC,
 }
 # How far a topic's level is lowered in a mixed list, by its depth. Tuned in N2c: Field 2 keeps a
-# Field must read below rare, so rare and above in a mixed list is mostly Focus and Area
-# (evals/2026-10-15-tuning.md).
+# Field must read below rare unless it is a landmark, so rare and above in a mixed list is mostly
+# Focus and Area (evals/2026-10-15-tuning.md).
 DEPTH_OFFSETS: dict[Depth, int] = {Depth.FOCUS: 0, Depth.AREA: 0, Depth.FIELD: 2}
 # What a paper's Weight alone gives it in a mixed list: all an ungraded paper has.
 WEIGHT_FLOORS: dict[Weight, Rarity] = {

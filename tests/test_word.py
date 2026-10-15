@@ -159,7 +159,7 @@ async def test_area_and_field_topics_have_effective_grades_and_never_save(db):
         AGENTS.slug: "must_read",
     }
     (rarity,) = await stored(db, "rarities")
-    # Field's epic is lowered to rare; the Area's epic stands.
+    # Field's epic is lowered to uncommon; the Area's epic stands.
     assert (rarity["level"], rarity["best_topic"]) == ("epic", INTERP.slug)
     assert await stored(db, "library") == []
 
