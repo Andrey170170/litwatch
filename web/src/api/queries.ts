@@ -54,11 +54,13 @@ const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowF
 
 /** A list reached going forward (a link, not Back) is a fresh visit: its cached pages are marked stale, so it loads
  * afresh when shown. Only the list gone to: the one left keeps its pages for the way back. A Settings page reached
- * the same way marks every Settings read stale: the page shown loads afresh, the sidebar's hints follow. */
+ * the same way starts every Settings read afresh: the ones shown (the sidebar's hints stay mounted across pages, so
+ * they are refetched, not only marked) now, the rest when a page next shows them. */
 export function freshVisit(qc: QueryClient, pathname: string) {
   const path = pathname.replace(/\/$/, "") || "/";
   const topic = /^\/topics\/([^/]+)$/.exec(path);
-  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : path.startsWith("/settings") ? ["settings"] : null;
+  if (path.startsWith("/settings")) return void qc.invalidateQueries({ queryKey: ["settings"] });
+  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : null;
   if (key) void qc.invalidateQueries({ queryKey: key, refetchType: "none" });
 }
 

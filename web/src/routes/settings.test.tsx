@@ -81,7 +81,10 @@ describe("Settings", () => {
   it("keeps the visit's rows on the way back from a paper, and starts afresh on a link", async () => {
     viewport(true);
     const paper = { id: "2610.00002", title: "A stuck paper", authors: ["A"], abstract: "A.", published: "2026-10-13", version: 1, revision: 1, arxiv_url: "", pdf_url: "", source_url: "", in_collection: true, saved: false, topics: [], states: [], publication_by_owner: false, card_requestable: false };
-    const calls = scriptFetch({ ...common, "GET /api/papers/2610.00002": paper, "POST /api/settings/analysis/2610.00002/retry": { saved: false } });
+    // The second read of /quality finds the failure gone and the split too.
+    let reads = 0;
+    const later = { ...quality, night: { ...quality.night, splits: [], analysis_failed: [] } };
+    const calls = scriptFetch({ ...common, "GET /api/settings/quality": () => (++reads > 1 ? later : quality), "GET /api/papers/2610.00002": paper, "POST /api/settings/analysis/2610.00002/retry": { saved: false } });
     const { router } = renderApp("/settings/needs");
     const item = (await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")!;
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Try again" }));
@@ -94,9 +97,13 @@ describe("Settings", () => {
     router.history.back();
     expect((await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")).toHaveClass("settled");
     expect(fetched()).toBe(1);
-    // A Settings page reached by a link is a fresh visit: the reads load again.
-    await userEvent.click(screen.getByRole("link", { name: /Overview/ }));
+    // A Settings page reached by a link is a fresh visit: the reads load again, the sidebar's count with them, on a
+    // page that does not read /quality itself.
+    const needs = screen.getByRole("link", { name: /Needs you/ });
+    expect(within(needs).getByText("2")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: /Taxonomy/ }));
     await waitFor(() => expect(fetched()).toBe(2));
+    await waitFor(() => expect(within(needs).getByText("1")).toBeInTheDocument());
   });
 
   it("settles an item whose action answers 409 with the reason, in place", async () => {
