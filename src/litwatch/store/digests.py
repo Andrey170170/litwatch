@@ -18,7 +18,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch import events
-from litwatch.core import Depth, Taxonomy, Topic
+from litwatch.core import Depth, Status, Taxonomy, Topic
 from litwatch.core.digests import DUE_WINDOW, PUBLISHED, DigestPeriod, DigestRole, DigestState
 from litwatch.core.fulltext import AWAITING_TOO_LONG
 from litwatch.core.rules import REACTION_WORDS
@@ -68,14 +68,15 @@ _RECHECKING = """(
                       AND f.kind <> 'deep' AND f.state = 'done'))"""
 
 # Grading has finished for paper `p` under the topic: its current text's grading pass is done,
-# and no grading for a topic in the subtree is failed and still to be tried again.
+# and no grading for an active topic in the subtree is failed and still to be tried again (a
+# paused topic grades nothing, so its failures wait for the owner).
 _GRADED = """
     EXISTS (SELECT 1 FROM grading_passes g
             WHERE g.paper_id = p.id AND g.paper_revision = p.revision)
     AND NOT EXISTS (SELECT 1 FROM step_failures f
                     WHERE f.paper_id = p.id AND f.step = 'grading'
                       AND f.paper_revision = p.revision AND f.failed_runs < %(runs)s
-                      AND f.topic = ANY(%(under)s))"""
+                      AND f.topic = ANY(%(active)s))"""
 
 _WRITER_READS = f"""
     {CURRENT_GIST} AS gist,
@@ -95,31 +96,33 @@ def _word(paper: str, topic: str) -> str:
                  AND r.reason IN ({words})))"""
 
 
-# A member of the topic's subtree by the pipeline, not by the owner's word (a class label, a
-# reported miss): by classification, not taken out of that class by a class label; or graded
-# central or related on a followed topic in the subtree, which a paper the keyword check or the
-# uncertain band sent there is.
-_MEMBER = """(
+def _member(narrow: str) -> str:
+    """Paper `p` is a member of the topic's subtree by the pipeline, not by the owner's word (a
+    class label, a reported miss, which grading follows too): by classification, or by the
+    uncertain band or the keyword check where `narrow` holds; and not taken out of that class by
+    a class label."""
+    return f"""
     EXISTS (SELECT 1 FROM memberships m
             WHERE m.paper_id = p.id AND m.class = ANY(%(map_classes)s) AND m.member
-              AND m.source = 'classifier'
+              AND m.source IN ('classifier', 'uncertain', 'keyword')
+              AND (m.source = 'classifier' OR {narrow})
               AND NOT EXISTS (SELECT 1 FROM memberships o
                               WHERE o.paper_id = m.paper_id AND o.class = m.class
-                                AND o.source = 'owner' AND NOT o.member))
-    OR EXISTS (SELECT 1 FROM unnest(%(under)s::text[]) u (topic)
-               CROSS JOIN LATERAL (
-                   SELECT v.fit FROM verdicts v WHERE v.paper_id = p.id AND v.topic = u.topic
-                   ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC LIMIT 1) v
-               WHERE v.fit IN ('central', 'related')
-                 AND NOT EXISTS (SELECT 1 FROM memberships o
-                                 WHERE o.paper_id = p.id AND o.class = u.topic
-                                   AND o.source = 'owner' AND NOT o.member)))"""
+                                AND o.source = 'owner' AND NOT o.member))"""
+
+
+# An uncertain-band or keyword member of a Focus class in an Area's or Field's subtree counts
+# once graded central or related on that Focus topic, so it is not admitted ungraded.
+_SUBTREE_MEMBER = _member("""(
+    SELECT v.fit FROM verdicts v WHERE v.paper_id = p.id AND v.topic = m.class
+    ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC LIMIT 1
+) IN ('central', 'related')""")
 
 
 def _focus(which: str) -> str:
     """A Focus topic's eligible papers: graded there, at effective Fit central or related, and
     at a verdict's Fit that was too, so the owner's word, which the owner already knows, never
-    makes a paper due."""
+    makes a paper due, and a member of it by the pipeline (`_member`)."""
     return f"""
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, g.grade, g.rarity,
            g.topic AS graded_on, v.reason AS fit_reason, p.abstract, {_WRITER_READS}
@@ -129,13 +132,13 @@ def _focus(which: str) -> str:
                   WHERE v.paper_id = p.id AND v.topic = %(topic)s
                   ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC LIMIT 1) v ON true
     WHERE p.dismissed_at IS NULL AND g.fit IN ('central', 'related')
-      AND v.fit IN ('central', 'related') AND {which}
+      AND v.fit IN ('central', 'related') AND {which} AND {_member("m.class = %(topic)s")}
     ORDER BY {_rank("g.rarity")} DESC, p.announced, p.id
     """
 
 
 def _subtree(which: str, gates: str) -> str:
-    """An Area or Field topic's papers: its subtree's members by classification, at its page's
+    """An Area or Field topic's papers: its subtree's members by the pipeline, at its page's
     standing, less those the owner's word sets below related where they are graded."""
     return f"""
     WITH {SCOPE}{STANDING}
@@ -149,7 +152,7 @@ def _subtree(which: str, gates: str) -> str:
                        WHERE v.paper_id = p.id AND v.topic = g.topic
                        ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC
                        LIMIT 1) v ON true
-    WHERE p.dismissed_at IS NULL AND {which} AND {_MEMBER}
+    WHERE p.dismissed_at IS NULL AND {which} AND {_SUBTREE_MEMBER}
       AND (g.fit IN ('adjacent', 'none') AND {_word("p.id", "g.topic")}) IS NOT TRUE {gates}
     ORDER BY {_rank("coalesce(s.rarity, 'common')")} DESC, p.announced, p.id
     """
@@ -162,7 +165,7 @@ def _rows(rows: list[dict[str, Any]]) -> list[Due]:
 def _params(tree: Taxonomy, topic: Topic, runs: int) -> dict[str, Any]:
     return _scope(tree, [topic.slug]) | {
         "topic": topic.slug,
-        "under": [t.slug for t in tree.under(topic.slug)],
+        "active": [t.slug for t in tree.under(topic.slug) if t.status == Status.ACTIVE],
         "runs": runs,
         "long": AWAITING_TOO_LONG,
     }

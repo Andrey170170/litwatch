@@ -9,10 +9,14 @@ ALTER TABLE papers ADD COLUMN announced date;
 CREATE INDEX papers_announced ON papers (announced);
 
 -- The papers stored before now, by the same rule: the first version's submission time in US
--- Eastern (else its date, as before that day's deadline), the deadline it made (14:00 on a
--- weekday), and the listing on the weekday after.
+-- Eastern (else its first-version time, unless that is a day alone, at midnight UTC, taken as
+-- before that day's deadline), the deadline it made (14:00 on a weekday), and the listing on the
+-- weekday after.
 WITH submitted AS (
-    SELECT p.id, v.at, p.published
+    SELECT p.id,
+           coalesce(v.at, CASE WHEN (p.published AT TIME ZONE 'UTC')::time <> '00:00'
+                               THEN p.published END) AS at,
+           p.published
     FROM papers p LEFT JOIN LATERAL (
         SELECT (e->>'date')::timestamptz AS at
         FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.version_history) = 'array'

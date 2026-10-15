@@ -221,6 +221,11 @@ def _outcome(a: Attempt) -> str:
     return "briefs_written" if a.output is not None else "fulltext_failed"
 
 
+def worked(counts: Counter[str]) -> int:
+    """How many passes `work`'s tries spent on: written or failed, not those awaiting text."""
+    return counts["briefs_written"] + counts["fulltext_failed"]
+
+
 async def work(
     conn: psycopg.AsyncConnection,
     config: Config,
@@ -291,8 +296,7 @@ async def work_waiting(
     total: Counter[str] = Counter()
     deadline = asyncio.get_running_loop().time() + wait
     while True:
-        worked = total["briefs_written"] + total["fulltext_failed"]
-        allowance = None if limit is None else limit - worked
+        allowance = None if limit is None else limit - worked(total)
         if allowance is not None and allowance <= 0:
             return total
         done = await work(conn, config, archive, gateway=gateway, limit=allowance)

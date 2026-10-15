@@ -5,6 +5,7 @@ voice check, and the Digest tab's API. The `writer` role is scripted."""
 import asyncio
 import json
 import re
+from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -15,12 +16,14 @@ from litwatch import digests, fulltext
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Label, LabelValue, Status
+from litwatch.core.classification import Source
 from litwatch.core.digests import listing_day, voice_problems
 from litwatch.digests import writer
 from litwatch.feedback import word
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, ProviderError
+from litwatch.store import classifications as classifications_store
 from litwatch.store import digests as store_
 from litwatch.store import papers as papers_store
 from litwatch.store import reading, runs, verdicts
@@ -147,7 +150,8 @@ async def test_the_migration_dates_stored_papers_as_the_code_does(conn):
     early = paper("2610.00012", version_history=[{"version": 1, "date": "2026-10-05T17:00:00Z"}])
     weekend = paper("2610.00013", version_history=[{"version": 1, "date": "2026-10-10T12:00:00Z"}])
     friday = paper("2610.00014", published="2026-10-09")
-    found = [late, early, weekend, friday]
+    searched = paper("2610.00015", published="2026-10-05T18:30:00+00:00")  # arXiv search's time
+    found = [late, early, weekend, friday, searched]
     await papers_store.upsert(conn, found)
     by_code = {
         r["id"]: r["announced"]
@@ -158,6 +162,7 @@ async def test_the_migration_dates_stored_papers_as_the_code_does(conn):
         early.id: TUE,
         weekend.id: date(2026, 10, 13),
         friday.id: date(2026, 10, 12),
+        searched.id: WED,
     }
     sql = Path("src/litwatch/store/migrations/0024_digests.sql").read_text()
     backfill = re.search(r"WITH submitted AS .*?;", sql, re.S).group(0)
@@ -322,6 +327,36 @@ async def test_a_paper_the_keyword_check_sent_to_a_focus_topic_is_in_its_areas_d
     await day(db, Writer(), TUE)
     state, found = await shown(db, INTERP.slug, "day", TUE)
     assert state == "written" and [i for i, _ in found] == [P.id]
+
+
+async def test_a_reported_miss_graded_central_is_due_neither_for_its_topic_nor_above(db):
+    """Grading follows the owner's report of a miss, but the owner already knows the paper."""
+    await classify(db, P)
+    await analyse(db, P)
+    version = (await taxonomy_store.load(db)).get(FAITH.slug).version
+    await classifications_store.put_owner(db, P, FAITH.slug, True, version, source=Source.MISS)
+    await grade(db, P, "central")
+    await verdicts.passed(db, [(P.id, 1)])
+    await listed(db, TUE, P)
+    await day(db, Writer(), TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
+    assert await shown(db, INTERP.slug, "day", TUE) == ("nothing_new", [])
+
+
+async def test_a_grading_failed_on_a_paused_topic_does_not_hold_back_its_area(db):
+    """A paused topic grades nothing, so its failed grading is not waited for."""
+    await area(db, Q, "related")
+    await db.execute(
+        "INSERT INTO step_failures (paper_id, step, paper_revision, failed_runs, last_error,"
+        " topic) VALUES (%s, 'grading', 1, 1, 'down', %s)",
+        (Q.id, FAITH.slug),
+    )
+    await listed(db, TUE, Q)
+    await taxonomy_store.save(
+        db, TREE.following(FAITH.model_copy(update={"status": Status.PAUSED}))
+    )
+    await day(db, Writer(), TUE)
+    assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(Q.id, "listed")])
 
 
 async def test_a_focus_paper_without_its_brief_is_written_from_its_abstract(db):
@@ -542,7 +577,7 @@ async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db, monkeypatch
     since = datetime.now(UTC) - timedelta(minutes=1)
     worked = []
 
-    async def work(conn, config, archive, run=None, deadline=None):
+    async def work(conn, config, archive, run=None, limit=None, deadline=None):
         worked.append(deadline)
         if len(worked) == 2:
             await conn.execute("UPDATE fulltext_passes SET state = 'done'")
@@ -561,7 +596,7 @@ async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, monkeypatch):
     await focus(db, P, "central")
     since = datetime.now(UTC) - timedelta(minutes=1)
 
-    async def work(conn, config, archive, run=None, deadline=None):
+    async def work(conn, config, archive, run=None, limit=None, deadline=None):
         return {}
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
@@ -574,6 +609,24 @@ async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, monkeypatch):
     # A pass that failed in this run is not waited for: it is tried on the next one.
     await db.execute("UPDATE fulltext_passes SET state = 'failed', failed_runs = 1")
     assert await store_.waiting_passes(db, since) == 0
+
+
+async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(db, monkeypatch):
+    """`nightly --limit`: the passes worked before the wait count against it too."""
+    await focus(db, P, "central")
+    since = datetime.now(UTC) - timedelta(minutes=1)
+    limits = []
+
+    async def work(conn, config, archive, run=None, limit=None, deadline=None):
+        limits.append(limit)
+        return Counter(briefs_written=1)
+
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
+    monkeypatch.setattr(fulltext, "work", work)
+    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
+        deadline = nightly.time.monotonic() + 0.1
+        await nightly.wait_for_texts(db, Config(), run, since, deadline, 0.01, limit=2)
+    assert limits == [2, 1]  # then the allowance is spent and the wait only waits
 
 
 async def test_no_batch_of_passes_starts_after_the_deadline(db):

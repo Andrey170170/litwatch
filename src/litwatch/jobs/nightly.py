@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import Counter
 from contextlib import aclosing
 from datetime import UTC, date, datetime, timedelta
 
@@ -83,14 +84,15 @@ async def text_passes(
     run: ModelRun,
     limit: int | None = None,
     deadline: float | None = None,
-) -> None:
+) -> Counter[str]:
     """Reconcile the full-text queue with the database: settle every candidate paper
     (`store.fulltext.candidates`: those with a pass open, those the rule may give one, those
     read for an older version or revision), so a trigger missed costs at most a night
     (pipeline.md, sections 6 and 8); all of them, as `limit` caps what is spent. Then make
     the failed passes ready again, those with fewer than `FAILED_RUNS` failed runs; and try
     every pass that is due once, up to `limit` and until `deadline`: the passes this run queued
-    have their text asked for now, and the service's worker runs each once its text is there."""
+    have their text asked for now, and the service's worker runs each once its text is there.
+    Returns how the tries ended."""
     reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK)
     await word.settle_all(conn, reconciled)
     run.add("fulltext_reconciled", len(reconciled))
@@ -98,9 +100,9 @@ async def text_passes(
     archive = fulltext.archive_for(config)
     if archive is None:
         log.warning("no archive configured: full-text passes wait")
-        return
+        return Counter()
     try:
-        await fulltext.work(conn, config, archive, run=run, limit=limit, deadline=deadline)
+        return await fulltext.work(conn, config, archive, run=run, limit=limit, deadline=deadline)
     finally:
         await archive.aclose()
 
@@ -115,13 +117,15 @@ async def wait_for_texts(
     since: datetime,
     deadline: float,
     tick: float = WAIT_TICK_SECONDS,
+    limit: int | None = None,
 ) -> None:
     """The bounded wait before the digests (digests.md, timing): until every Brief and Weight
     re-check the run queued (since `since`) has finished, failed in this run or is terminal,
     or until `deadline` (`time.monotonic()`: `[digests] wait_minutes` after grading ended),
     whichever comes first, working the queue meanwhile so a pass runs as soon as its text
     arrives. No batch of passes starts after the deadline, so the wait ends at most one batch
-    late. Without an archive no pass can run, so there is no wait."""
+    late, and the passes worked, written or failed, stop at `limit`; past it the wait leaves them
+    to the service's worker. Without an archive no pass can run, so there is no wait."""
     archive = fulltext.archive_for(config)
     if archive is None:
         return
@@ -132,7 +136,11 @@ async def wait_for_texts(
                 run.add("digest_wait_ended", 1)  # some passes still running: digests went on
                 return
             await asyncio.sleep(min(tick, left))
-            await fulltext.work(conn, config, archive, run=run, deadline=deadline)
+            if limit is None or limit > 0:
+                done = await fulltext.work(
+                    conn, config, archive, run=run, limit=limit, deadline=deadline
+                )
+                limit = None if limit is None else limit - fulltext.worked(done)
     finally:
         await archive.aclose()
 
@@ -187,7 +195,8 @@ async def run(
         await grade(conn, config, run, limit)
         # The digests wait for the passes they depend on, from now and at most this long.
         deadline = time.monotonic() + config.digests.wait_minutes * 60
-        await text_passes(conn, config, run, limit, deadline)
-        await wait_for_texts(conn, config, run, until, deadline)
+        done = await text_passes(conn, config, run, limit, deadline)
+        left = None if limit is None else limit - fulltext.worked(done)
+        await wait_for_texts(conn, config, run, until, deadline, limit=left)
         await write_digests(conn, config, run, today)
         return run.run_id

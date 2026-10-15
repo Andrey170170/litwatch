@@ -80,7 +80,8 @@ def listing_day(submitted: datetime | date) -> date:
 
 def announced(paper: Paper) -> date | None:
     """The listing day of the paper's first version: from its submission time where the
-    version history has it, else from its first-version date."""
+    version history has it, else from its first-version date, a time and all where the source
+    gives one (arXiv's search does; OAI gives a day, which reads as midnight UTC)."""
     for v in paper.version_history:
         if v.get("version") == 1 and v.get("date"):
             try:
@@ -88,7 +89,9 @@ def announced(paper: Paper) -> date | None:
             except ValueError:
                 break
     if paper.published:
-        return listing_day(datetime.fromisoformat(paper.published).date())
+        at = datetime.fromisoformat(paper.published)
+        at = at.replace(tzinfo=at.tzinfo or UTC).astimezone(UTC)
+        return listing_day(at.date() if at.time() == time() else at)
     return None
 
 
