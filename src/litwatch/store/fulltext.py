@@ -208,6 +208,10 @@ class Claimed:
     retry_text: bool = False  # the archive is to retry the downloads it gave up on
 
 
+# Whether Deep pass `f` has an attempt open: its job was submitted, or may have been.
+STARTED = "EXISTS (SELECT 1 FROM deep_attempts a WHERE a.pass_id = f.id AND a.ended_at IS NULL)"
+
+
 async def claim(
     conn: psycopg.AsyncConnection,
     lease: timedelta,
@@ -222,18 +226,21 @@ async def claim(
     ran out (the worker died). Each is held for `lease`. Only passes for their paper's current
     revision are taken (`drop_stale` removes the others); a dismissed paper's are left alone.
     With `deep`, Deep passes instead, the owner's requests first, of any revision (a Deep pass
-    reads the text the paper has when it runs), and the automatic ones only when `automatic`."""
+    reads the text the paper has when it runs), and the automatic ones only when `automatic`;
+    one whose job was submitted is taken whatever the cap or a dismissal says, as following its
+    job spends nothing new and ends its attempt."""
     which = (
-        "f.kind = 'deep' AND (%(automatic)s OR f.reason = 'request')"
+        f"f.kind = 'deep' AND ({STARTED} OR (p.dismissed_at IS NULL "
+        "AND (%(automatic)s OR f.reason = 'request')))"
         if deep
-        else "f.kind <> 'deep' AND f.paper_revision = p.revision"
+        else "f.kind <> 'deep' AND f.paper_revision = p.revision AND p.dismissed_at IS NULL"
     )
     rows = await (
         await conn.execute(
             f"""
             WITH taken AS (
                 SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
-                WHERE {which} AND p.dismissed_at IS NULL AND NOT f.id = ANY(%(besides)s)
+                WHERE {which} AND NOT f.id = ANY(%(besides)s)
                   AND (f.state IN ('awaiting_text', 'ready')
                        OR (f.state = 'running' AND f.lease_until < now()))
                 ORDER BY f.priority, f.tried_at NULLS FIRST, f.id

@@ -285,6 +285,25 @@ async def test_a_failed_poll_lets_the_pass_go_and_its_next_claim_follows_the_job
     assert len(fake.requests) == 1
 
 
+async def test_a_submitted_job_is_followed_past_the_daily_cap_and_a_dismissal(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.fail_polls = 1
+    d = make(fake, max_per_day=1)
+    assert await work(db, with_text(P), d) == {"card_following": 1}
+    assert await work(db, with_text(P), d) == {"cards_written": 1}  # the cap is spent
+
+    await deep_passes.request(db, Q.id)
+    fake.fail_polls = 1
+    assert await work(db, with_text(Q), d) == {"card_following": 1}
+    await db.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (Q.id,))
+    assert await work(db, with_text(Q), d) == {"cards_written": 1}
+    assert [(a["usage"], a["ended_at"] is not None) for a in await attempts(db)] == [
+        (USAGE, True)
+    ] * 2
+    assert len(fake.requests) == 2
+
+
 async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db):
     await grade(db, Fit.CENTRAL)
     # Unsaved by a write that missed its settle: the claim settles it first.
