@@ -17,7 +17,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from litwatch.core.classification import CHOSEN, Thresholds
 
-ROLES = ("classify", "analyse", "judge", "check", "area_check", "field_grade", "writer")
+ROLES = (
+    "classify",
+    "analyse",
+    "judge",
+    "check",
+    "area_check",
+    "field_grade",
+    "brief",
+    "writer",
+)
 
 
 class _Section(BaseModel):
@@ -72,6 +81,8 @@ class Models(_Section):
         provider="openrouter", model="typesafe/jev-1.13", decisions=True
     )
     field_grade: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5")
+    # Briefs, Weight and Gists from the full text (pipeline.md, section 6).
+    brief: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
     writer: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 
     @model_validator(mode="after")

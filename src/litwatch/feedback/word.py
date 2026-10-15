@@ -1,9 +1,11 @@
 """The owner's word and what follows from it.
 
 Every change that can move a paper (a verdict, a Weight, a label, a thumb, the Save toggle, an
-edit of the followed topics) ends in `settle`, which recomputes the paper's effective Fit and
-grade per followed topic, its rarity and whether it is in the library, stores them, and emits
-`grade.changed`, `paper.saved` and `paper.unsaved` in the same transaction.
+edit of the followed topics, a new arXiv version) ends in `settle`, which recomputes the paper's
+effective Fit and grade per followed topic, its rarity and whether it is in the library, stores
+them, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the same transaction. It
+also queues the paper's full-text pass when it qualifies for one, so the owner's word can queue
+one too, and drops one not started that it no longer qualifies for.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from litwatch import events
 from litwatch.core import (
     Depth,
     Effective,
+    Fit,
     Grade,
     Hand,
     Label,
@@ -29,8 +32,10 @@ from litwatch.core import (
     mixed_rarity,
     owners_word,
 )
+from litwatch.core.fulltext import TEXT_PRIORITY, to_drop, to_queue, wanted
 from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
@@ -139,7 +144,33 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
             await events.emit(
                 conn, events.PAPER_SAVED if result.saved else events.PAPER_UNSAVED, paper_id
             )
+        await _text_pass(conn, paper_id, topics, after)
     return result
+
+
+async def _text_pass(
+    conn: psycopg.AsyncConnection, paper_id: str, topics: dict, after: dict[str, Effective]
+) -> None:
+    """Queue the paper's Brief or Weight re-check when it qualifies on its effective Fits and
+    grades in active topics (pipeline.md, section 6), or again for a newer arXiv version
+    (section 8); drop one not started that it no longer qualifies for."""
+    found = await fulltext_store.facts(conn, paper_id)
+    if found is None or found.dismissed:
+        return
+    await fulltext_store.drop_stale(conn, paper_id, found.revision)
+    active = [(topics[s], e) for s, e in after.items() if topics[s].status == Status.ACTIVE]
+    want = wanted(
+        focus=any(
+            t.depth == Depth.FOCUS and e.fit in (Fit.CENTRAL, Fit.RELATED) for t, e in active
+        ),
+        area=any(t.depth == Depth.AREA and e.grade == Grade.MUST_READ for t, e in active),
+        has_text_result=found.has_text_result,
+    )
+    if to_drop(want, found.last):
+        await fulltext_store.drop(conn, found.last.id)
+    elif want is not None and to_queue(want, found.last, found.version):
+        kind, reason = want
+        await fulltext_store.queue(conn, paper_id, found.revision, kind, reason, TEXT_PRIORITY)
 
 
 async def label(conn: psycopg.AsyncConnection, given: Label) -> tuple[Label, Settled]:
@@ -211,8 +242,9 @@ async def settle_ties(conn: psycopg.AsyncConnection) -> int:
 
 
 async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
-    """Settle each paper, as after storing rewritten text: its Weight went with the old text,
-    so its grades fall back to solid until the new text is analysed."""
+    """Settle each paper, as after storing revised papers: a rewrite's Weight went with the old
+    text, so its grades fall back to solid until the new text is analysed, and a new arXiv
+    version queues the passes that read the text again."""
     for paper_id in paper_ids:
         await settle(conn, paper_id)
 

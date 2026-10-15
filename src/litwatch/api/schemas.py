@@ -41,6 +41,8 @@ class RunStatus(BaseModel):
     awaiting_classification: int = 0  # papers whose classification failed three runs in a row
     analysis_failed: int = 0  # papers whose analysis failed three runs in a row, stopped
     ungraded: int = 0  # gradings that failed three runs in a row, stopped
+    # full-text passes that failed three runs in a row, or await their text over a week
+    fulltext_failed: int = 0
     over_budget: list[str] = Field(default_factory=list)  # providers projected over budget
 
 
@@ -231,6 +233,32 @@ class Version(BaseModel):
 
 class Gist(BaseModel):
     text: str
+    source: Literal["abstract", "full_text"] = "abstract"  # full text: written with the Brief
+
+
+class Brief(BaseModel):
+    """The paper's Brief: its current revision's, or the newest from an older revision
+    (`revision` says which) until the current one is written. `overstatement`, when the full
+    text does not support the abstract, opens it."""
+
+    id: int
+    text: str
+    overstatement: str | None = None
+    revision: int
+    arxiv_version: int | None = None  # of the text it read; null when the archive could not say
+    source: Literal["latex", "pdf"]
+    written_at: datetime
+
+
+class TextPass(BaseModel):
+    """The full-text pass queued last for the paper's current text: a Brief (Focus) or a Weight
+    re-check with a Brief (Area pick candidate), and where it is. A paper without one shows its
+    abstract in the Brief's place."""
+
+    id: int
+    kind: Literal["brief", "weight"]
+    state: Literal["awaiting_text", "ready", "running", "done", "failed"]
+    queued_at: datetime
 
 
 class WeightState(BaseModel):
@@ -291,13 +319,23 @@ class PaperTopic(BaseModel):
 class OpenState(BaseModel):
     """What waits on the owner for this paper, as Needs you lists it, with the paper revision
     the action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the
-    text), `analysis_stopped` (try again), and a topic's `split`, `escalated` (label it) or
-    `ungraded` (grade it now)."""
+    text), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or
+    `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed` or
+    `awaiting_text` over a week (run it now)."""
 
-    kind: Literal["awaiting_classification", "analysis_stopped", "split", "escalated", "ungraded"]
+    kind: Literal[
+        "awaiting_classification",
+        "analysis_stopped",
+        "split",
+        "escalated",
+        "ungraded",
+        "fulltext_failed",
+        "awaiting_text",
+    ]
     revision: int
     topic: str | None = None
     error: str | None = None
+    pass_id: int | None = None
 
 
 class ClassSource(BaseModel):
@@ -356,9 +394,9 @@ class DeepCard(BaseModel):
 
 
 class Paper(BaseModel):
-    """A paper's page: its header, its ladder (Gist, abstract, deep card, the paper) and the
-    rail, its open states and its history. Outside the collection (never classified) it has no
-    rarity."""
+    """A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)
+    and the rail, its open states and its history. Outside the collection (never classified)
+    it has no rarity."""
 
     id: str
     title: str
@@ -376,6 +414,8 @@ class Paper(BaseModel):
     rarity: Rarity | None = None
     badges: list[GradedBadge] = Field(default_factory=list)
     gist: Gist | None = None
+    brief: Brief | None = None
+    text_pass: TextPass | None = None
     weight: WeightState | None = None
     facets: Facets | None = None
     saved: bool = False

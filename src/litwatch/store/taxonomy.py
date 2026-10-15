@@ -30,8 +30,9 @@ class Saved:
     retired_classes: list[str] = field(default_factory=list)
     revised_topics: list[str] = field(default_factory=list)  # new, or a new revision
     unfollowed_topics: list[str] = field(default_factory=list)
-    # Followed, unfollowed, into or out of draft, or with a new depth or revision: what their
-    # papers' grades and rarity rest on. A draft topic is not followed; a paused one still is.
+    # Followed, unfollowed, with a new status, depth or revision: what their papers' grades,
+    # rarity and full-text passes rest on. A draft topic is not followed; a paused one still
+    # is, but queues no full-text pass.
     changed_topics: list[str] = field(default_factory=list)
     # The owner's order of the topics kept changed: a tie between topics now breaks otherwise.
     reordered: bool = False
@@ -137,7 +138,7 @@ async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
     async with conn.transaction():
         await lock(conn)
         before = {
-            r["class"]: (r["depth"], r["status"] == "draft", r["revision"])
+            r["class"]: (r["depth"], r["status"], r["revision"])
             for r in await (
                 await conn.execute(
                     "SELECT class, depth, status, revision FROM topics ORDER BY position, class"
@@ -179,7 +180,7 @@ async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
         after: dict[str, tuple[str, bool, int]] = {}
         for position, t in enumerate(tree.topics, 1):
             revision, new = _revision(latest, t.slug, t.version)
-            after[t.slug] = (t.depth.value, t.status == Status.DRAFT, revision)
+            after[t.slug] = (t.depth.value, t.status.value, revision)
             await conn.execute(
                 """
                 INSERT INTO topics (class, depth, subject, rubric, interests, keywords, monogram,

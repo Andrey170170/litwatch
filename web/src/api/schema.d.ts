@@ -451,6 +451,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/fulltext/{pass_id}/now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Pass Now
+         * @description A full-text pass failed three runs in a row, or awaits its text over a week: run it now.
+         *     It is first in line for the full-text worker, with three more runs; its text is asked for
+         *     again at urgent priority. 409 when it no longer waits for the owner (it ran, the paper's
+         *     text changed, it was dropped).
+         */
+        post: operations["run_pass_now_api_settings_fulltext__pass_id__now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/calibrate": {
         parameters: {
             query?: never;
@@ -775,6 +798,34 @@ export interface components {
             /** Cited */
             cited?: components["schemas"]["CitedIn"][];
         };
+        /**
+         * Brief
+         * @description The paper's Brief: its current revision's, or the newest from an older revision
+         *     (`revision` says which) until the current one is written. `overstatement`, when the full
+         *     text does not support the abstract, opens it.
+         */
+        Brief: {
+            /** Id */
+            id: number;
+            /** Text */
+            text: string;
+            /** Overstatement */
+            overstatement?: string | null;
+            /** Revision */
+            revision: number;
+            /** Arxiv Version */
+            arxiv_version?: number | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "latex" | "pdf";
+            /**
+             * Written At
+             * Format: date-time
+             */
+            written_at: string;
+        };
         /** CardRequested */
         CardRequested: {
             /** Event Id */
@@ -980,6 +1031,12 @@ export interface components {
         Gist: {
             /** Text */
             text: string;
+            /**
+             * Source
+             * @default abstract
+             * @enum {string}
+             */
+            source: "abstract" | "full_text";
         };
         /**
          * Grade
@@ -1194,21 +1251,24 @@ export interface components {
          * OpenState
          * @description What waits on the owner for this paper, as Needs you lists it, with the paper revision
          *     the action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the
-         *     text), `analysis_stopped` (try again), and a topic's `split`, `escalated` (label it) or
-         *     `ungraded` (grade it now).
+         *     text), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or
+         *     `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed` or
+         *     `awaiting_text` over a week (run it now).
          */
         OpenState: {
             /**
              * Kind
              * @enum {string}
              */
-            kind: "awaiting_classification" | "analysis_stopped" | "split" | "escalated" | "ungraded";
+            kind: "awaiting_classification" | "analysis_stopped" | "split" | "escalated" | "ungraded" | "fulltext_failed" | "awaiting_text";
             /** Revision */
             revision: number;
             /** Topic */
             topic?: string | null;
             /** Error */
             error?: string | null;
+            /** Pass Id */
+            pass_id?: number | null;
         };
         /**
          * Opinion
@@ -1251,9 +1311,9 @@ export interface components {
         };
         /**
          * Paper
-         * @description A paper's page: its header, its ladder (Gist, abstract, deep card, the paper) and the
-         *     rail, its open states and its history. Outside the collection (never classified) it has no
-         *     rarity.
+         * @description A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)
+         *     and the rail, its open states and its history. Outside the collection (never classified)
+         *     it has no rarity.
          */
         Paper: {
             /** Id */
@@ -1289,6 +1349,8 @@ export interface components {
             /** Badges */
             badges?: components["schemas"]["GradedBadge"][];
             gist?: components["schemas"]["Gist"] | null;
+            brief?: components["schemas"]["Brief"] | null;
+            text_pass?: components["schemas"]["TextPass"] | null;
             weight?: components["schemas"]["WeightState"] | null;
             facets?: components["schemas"]["Facets"] | null;
             /**
@@ -1601,6 +1663,11 @@ export interface components {
              * @default 0
              */
             ungraded: number;
+            /**
+             * Fulltext Failed
+             * @default 0
+             */
+            fulltext_failed: number;
             /** Over Budget */
             over_budget?: string[];
         };
@@ -1681,6 +1748,31 @@ export interface components {
             parent?: string | null;
             /** Threshold */
             threshold?: number | null;
+        };
+        /**
+         * TextPass
+         * @description The full-text pass queued last for the paper's current text: a Brief (Focus) or a Weight
+         *     re-check with a Brief (Area pick candidate), and where it is. A paper without one shows its
+         *     abstract in the Brief's place.
+         */
+        TextPass: {
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "brief" | "weight";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "awaiting_text" | "ready" | "running" | "done" | "failed";
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
         };
         /**
          * Topic
@@ -2771,6 +2863,49 @@ export interface operations {
                 content?: never;
             };
             /** @description The paper's text changed, or it no longer waits for the owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_pass_now_api_settings_fulltext__pass_id__now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pass_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such full-text pass */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The pass no longer waits for the owner */
             409: {
                 headers: {
                     [name: string]: unknown;

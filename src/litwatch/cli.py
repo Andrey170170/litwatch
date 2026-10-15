@@ -471,6 +471,42 @@ def openapi(out: Annotated[Path, typer.Argument(help="Where to write the schema.
     console.print(f"wrote {out}")
 
 
+@app.command("fulltext")
+def fulltext_queue(
+    limit: Annotated[int | None, typer.Option(help="At most this many passes.")] = None,
+    wait: Annotated[
+        int, typer.Option(help="Keep trying, for at most this many seconds, while some await text.")
+    ] = 0,
+    config: ConfigPath = None,
+) -> None:
+    """Work the full-text queue as the service's worker does: try every pass that is due once,
+    and with --wait again every half minute while some still await their text from the archive
+    ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration)."""
+    from litwatch import fulltext  # noqa: PLC0415
+
+    cfg = configuration.load(config)
+    archive = fulltext.archive_for(cfg)
+    if archive is None:
+        raise SystemExit("no archive configured")
+
+    async def work(conn: psycopg.AsyncConnection) -> Counter[str]:
+        total: Counter[str] = Counter()
+        deadline = asyncio.get_running_loop().time() + wait
+        try:
+            while True:
+                done = await fulltext.work(conn, cfg, archive, limit=limit)
+                total.update(done)
+                console.print(dict(done))
+                left = deadline - asyncio.get_running_loop().time()
+                if not done["awaiting_text"] or left <= 0:
+                    return total
+                await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
+        finally:
+            await archive.aclose()
+
+    console.print_json(data=dict(_run(work)))
+
+
 @app.command()
 def ping(
     role: Annotated[str, typer.Argument(help=", ".join(configuration.ROLES))],

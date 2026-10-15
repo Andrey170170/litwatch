@@ -225,28 +225,40 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
     weight = Weight(found["weight"]) if found["weight"] else None
     standings = _standings(tree, _members(tree, found["memberships"]), found["grades"], weight)
     rail = _rail(tree, looks, found, standings)
-    states = [
-        s.OpenState(kind=kind, revision=found["revision"], error=f["last_error"])
-        for f in found["failures"]
-        for step, kind in (
-            ("classification", "awaiting_classification"),
-            ("analysis", "analysis_stopped"),
-        )
-        if f["step"] == step and f["failed_runs"] >= FAILED_RUNS
-    ] + [
-        s.OpenState(
-            kind=t.state,
-            revision=found["revision"],
-            topic=t.topic.slug,
-            error=next(
-                (f["last_error"] for f in found["failures"] if f["topic"] == t.topic.slug), None
+    states = (
+        [
+            s.OpenState(kind=kind, revision=found["revision"], error=f["last_error"])
+            for f in found["failures"]
+            for step, kind in (
+                ("classification", "awaiting_classification"),
+                ("analysis", "analysis_stopped"),
             )
-            if t.state == "ungraded"
-            else None,
-        )
-        for t in rail
-        if t.state in ("split", "escalated", "ungraded")
-    ]
+            if f["step"] == step and f["failed_runs"] >= FAILED_RUNS
+        ]
+        + [
+            s.OpenState(
+                kind=t.state,
+                revision=found["revision"],
+                topic=t.topic.slug,
+                error=next(
+                    (f["last_error"] for f in found["failures"] if f["topic"] == t.topic.slug), None
+                )
+                if t.state == "ungraded"
+                else None,
+            )
+            for t in rail
+            if t.state in ("split", "escalated", "ungraded")
+        ]
+        + [
+            s.OpenState(
+                kind="fulltext_failed" if f["state"] == "failed" else "awaiting_text",
+                revision=found["revision"],
+                error=f["last_error"],
+                pass_id=f["id"],
+            )
+            for f in found["stuck_passes"]
+        ]
+    )
     published = await publications_store.get(c, paper_id)
     card, card_requestable = await integrations_api.card(request, c, paper_id)
     unattached = next((r for r in found["reactions"] if r["topic"] is None), None)
@@ -267,7 +279,9 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         in_collection=found["in_collection"],
         rarity=found["rarity"],
         badges=_badges(looks, standings),
-        gist=s.Gist(text=found["gist"]) if found["gist"] else None,
+        gist=s.Gist(text=found["gist"], source=found["gist_source"]) if found["gist"] else None,
+        brief=s.Brief(**found["brief"]) if found["brief"] else None,
+        text_pass=s.TextPass(**found["text_pass"]) if found["text_pass"] else None,
         weight=s.WeightState(
             weight=weight, reason=found["weight_reason"], source=found["weight_source"]
         )

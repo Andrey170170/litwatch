@@ -25,6 +25,8 @@ class Upserted:
     updated: int = 0
     # Ids whose title or abstract was rewritten: what was said about the old text is stale.
     rewritten: list[str] = field(default_factory=list)
+    # Ids rewritten or given a new arXiv version: what was read of the old text may be stale.
+    revised: list[str] = field(default_factory=list)
 
 
 def row_to_paper(row: dict[str, Any]) -> Paper:
@@ -174,6 +176,7 @@ async def upsert(
                         "UPDATE papers SET revision = revision + 1 WHERE id = %s", (p.id,)
                     )
                 if changed or row["version"] != old["version"]:
+                    result.revised.append(p.id)
                     await events.emit(
                         conn,
                         events.PAPER_REVISED,

@@ -1,5 +1,6 @@
 """What analysis recorded: the analysis itself, and the Weight and Gist it gave from the
-abstract (data.md: `analyses`, `weights`, `gists`)."""
+abstract (data.md: `analyses`, `weights`, `gists`); and which Weight and Gist are current, the
+full-text queue's (`store.fulltext`) before the abstract's."""
 
 from __future__ import annotations
 
@@ -80,10 +81,14 @@ async def add(
     return row["id"]
 
 
+# Of a Weight or Gist row `x` of the paper's current revision, the current one first: from the
+# full-text pass queued last, else the newest from the abstract (pipeline.md, section 6).
+CURRENT_FIRST = "ORDER BY {x}.pass_id DESC NULLS LAST, {x}.id DESC"
+
+
 async def current_weight(conn: psycopg.AsyncConnection, paper_id: str) -> Weight | None:
-    """The paper's current Weight: the newest for its current revision, or None until the
-    current text is analysed (pipeline.md, section 4: it is then treated as solid). The
-    full-text queue (N3) refines this to the pass queued last for the current revision."""
+    """The paper's current Weight for its current revision, or None until the current text is
+    analysed or read (pipeline.md, section 4: it is then treated as solid)."""
     row = await weight_of(conn, paper_id)
     return Weight(row["weight"]) if row else None
 
@@ -93,15 +98,29 @@ async def weight_of(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, A
     return await (
         await conn.execute(
             "SELECT w.weight, w.reason, w.source FROM weights w JOIN papers p ON p.id = w.paper_id "
-            "AND p.revision = w.paper_revision WHERE w.paper_id = %s ORDER BY w.id DESC LIMIT 1",
+            "AND p.revision = w.paper_revision WHERE w.paper_id = %s "
+            f"{CURRENT_FIRST.format(x='w')} LIMIT 1",
             (paper_id,),
         )
     ).fetchone()
 
 
-# The current Gist of paper `p` (an alias in the query using it), as a scalar subquery: the newest
-# for its current revision. The full-text queue (N3) refines it as it does `current_weight`.
-CURRENT_GIST = (
-    "(SELECT g.text FROM gists g WHERE g.paper_id = p.id AND g.paper_revision = p.revision "
-    "ORDER BY g.id DESC LIMIT 1)"
+# The current Gist of paper `p` (an alias in the query using it), as a scalar subquery of the
+# column `{col}`, as `current_weight` chooses.
+_GIST = (
+    "(SELECT g.{col} FROM gists g WHERE g.paper_id = p.id AND g.paper_revision = p.revision "
+    + CURRENT_FIRST.format(x="g")
+    + " LIMIT 1)"
 )
+CURRENT_GIST = _GIST.format(col="text")
+CURRENT_GIST_ID = _GIST.format(col="id")
+CURRENT_GIST_SOURCE = _GIST.format(col="source")
+
+
+async def current_gist_id(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
+    row = await (
+        await conn.execute(
+            f"SELECT {CURRENT_GIST_ID} AS id FROM papers p WHERE p.id = %s", (paper_id,)
+        )
+    ).fetchone()
+    return row["id"] if row else None
