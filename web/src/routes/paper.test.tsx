@@ -56,7 +56,7 @@ describe("a paper's page", () => {
     });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
-    expect(screen.getByText(/Written for an older revision of the text \(arXiv v1\); the current one waits for its full text/)).toBeInTheDocument();
+    expect(screen.getByText(/Written for revision 1 of the text \(arXiv v1\); the current one, revision 2, waits for its full text/)).toBeInTheDocument();
     renderApp("/paper/2610.00003");
     await waitFor(() => expect(screen.getByText("The Brief waits for the paper's full text; the abstract stands in.")).toBeInTheDocument());
     expect(screen.getByText("We study things.")).toBeInTheDocument();

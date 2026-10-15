@@ -15,7 +15,8 @@ import { Sheet } from "@/components/Sheet";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { authorsShort, rowDate } from "@/lib/format";
-import { differs, type LabelValue, pipelineSide, type Session, type SessionItem, type SessionRow } from "@/lib/settings";
+import { answerFits, differs, type LabelValue, pipelineSide, type Session, type SessionItem, type SessionRow } from "@/lib/settings";
+import { BriefBody } from "@/components/paper/Ladder";
 import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 type Value = NonNullable<Schemas["Answer"]["value"]>;
@@ -54,7 +55,7 @@ export function CalibratePage() {
 function PastSessionRow({ s }: { s: SessionRow }) {
   const open = useOpenSession();
   return (
-    <button className="sess" data-sub onClick={() => open(s.id)}>
+    <button className="sess" data-sub onClick={() => open(s.id, { review: true })}>
       <span className="t">{rowDate(s.drawn_at)}</span>
       <span className="fa faint">
         {s.answered} of {s.papers} answered · {s.differ} differ · seed {s.seed}
@@ -76,7 +77,7 @@ function draftOf(item: SessionItem): Draft {
   return { fit, value: item.appraisal?.value ?? null, note: item.appraisal?.note ?? "" };
 }
 
-/** The paper, blind: title, authors, id, date, Gist, abstract and classes; no grade, rarity or topic marks. */
+/** The paper, blind: title, authors, id, date, Gist, Brief or abstract, and classes; no grade, rarity or topic marks. */
 function BlindPaper({ item }: { item: SessionItem }) {
   const paper = useQuery(paperQuery(item.paper_id));
   const au = authorsShort(item.authors);
@@ -96,8 +97,17 @@ function BlindPaper({ item }: { item: SessionItem }) {
         </div>
       )}
       <div className="rgist up">
-        <div className="rl">Abstract</div>
-        <p>{item.abstract}</p>
+        {paper.data?.brief ? (
+          <>
+            <div className="rl">Brief</div>
+            <BriefBody paper={paper.data} brief={paper.data.brief} />
+          </>
+        ) : (
+          <>
+            <div className="rl">Abstract</div>
+            <p>{item.abstract}</p>
+          </>
+        )}
       </div>
       {classes.length > 0 && <div className="faint calcls">Classes: {classes.join(" · ")}</div>}
     </div>
@@ -143,7 +153,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   /** Next records the answer when the drawn topic has its Fit, then moves on; a paper left unanswered stays grey. */
   const next = () => {
     const after = i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true });
-    const fit = Object.fromEntries(Object.entries(draft.fit).filter(([slug]) => focus.has(slug) || slug === item.topic));
+    const fit = answerFits(draft.fit, item, focus);
     if (canRecord && (changed || !item.answered_at)) answer.mutate({ position: item.position, paperId: item.paper_id, answer: { fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
     else after();
   };
@@ -175,7 +185,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
                   {name(t.class)}
                   {t.class === item.topic && <span className="faint"> · drawn for</span>}
                 </span>
-                <FitSeg value={draft.fit[t.class] ?? null} label={`Fit for ${name(t.class)}`} onPick={(f) => setDraft((d) => ({ ...d, fit: { ...d.fit, [t.class]: f } }))} />
+                <FitSeg value={draft.fit[t.class] ?? null} label={`Fit for ${name(t.class)}`} onPick={(f) => f && setDraft((d) => ({ ...d, fit: { ...d.fit, [t.class]: f } }))} />
               </div>
             ))}
           </div>

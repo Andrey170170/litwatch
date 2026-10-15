@@ -510,7 +510,6 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 .need.fail, .icard.fail, .miss { border-left-color: var(--sig); }
 .need.settled, .miss.settled { border-left-color: var(--cy); }
 .need.settled :is(.nh, .nb, .fitseg), .miss.settled :is(.nh, .trace) { opacity: 0.6; }
-.need.settled .fitseg .seg { pointer-events: none; }
 .nh { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .nt { font-weight: 600; font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 a.nt:hover { text-decoration: underline; }

@@ -5,14 +5,19 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow } from "@/api/mutations";
+import { ApiError } from "@/api/client";
+import { said, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel } from "@/api/mutations";
 import { qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
 import { type LabelValue, type Quality, settle, type Settled, type Split, type Stuck, type TextPassStuck, type Waiting, waiting } from "@/lib/settings";
 import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
-type Settle = (what: string) => void;
+type Settle = (what: string | undefined) => void;
+
+/** A 409 says the item no longer waits on the owner (it ran, the text changed, another action took it): it settles
+ * with the API's reason, so the row stays where it is and the count follows. */
+const gone = (settle: Settle) => (e: unknown) => e instanceof ApiError && e.status === 409 && settle(`No longer waits on the owner: ${said(e)}.`);
 
 /** The groups: their name, the line under it, and for a stuck step the name of what failed. */
 const KIND = {
@@ -37,9 +42,11 @@ function Group<T>({ kind, items, children }: { kind: keyof typeof KIND; items: T
   );
 }
 
-/** A split or escalation: the opinions, the standing Fit underlined, and the Fit control until labelled. */
+/** A split or escalation: the opinions, the standing Fit underlined, and the Fit control until labelled. Tapping the
+ * label's segment again takes the label back, and the item waits once more. */
 function SplitItem({ s, badge, settle }: { s: Split; badge: React.ReactNode; settle: Settle }) {
   const label = useLabel(s.paper_id);
+  const unlabel = useUnlabel(s.paper_id);
   // The graders' opinions, judge first; the standing Fit after them.
   const order = ["judge", "check", "area_check"];
   const said = Object.entries(s.opinions)
@@ -63,7 +70,7 @@ function SplitItem({ s, badge, settle }: { s: Split; badge: React.ReactNode; set
         {said}
         <span className="faint">{value ? <>labelled <b>{value}</b></> : <>{s.fit} stands</>}</span>
       </div>
-      <FitSeg value={value} auto={s.fit} label={`Fit on ${s.topic}`} disabled={label.isPending} onPick={(f) => label.mutate({ topic: s.topic, value: f }, { onSuccess: () => settle(f) })} />
+      <FitSeg value={value} auto={s.fit} label={`Fit on ${s.topic}`} disabled={label.isPending} clear onPick={(f) => (f ? label.mutate({ topic: s.topic, value: f }, { onSuccess: () => settle(f) }) : unlabel.mutate(s.topic, { onSuccess: () => settle(undefined) }))} />
     </div>
   );
 }
@@ -108,7 +115,7 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
             ))}
           </div>
           <div className="nact">
-            <button className="btn pri" disabled={!chosen.length || classify.isPending} onClick={() => classify.mutate({ revision: s.revision, classes: chosen }, { onSuccess: () => settle("Classified by hand; grading follows tonight.") })}>
+            <button className="btn pri" disabled={!chosen.length || classify.isPending} onClick={() => classify.mutate({ revision: s.revision, classes: chosen }, { onSuccess: () => settle("Classified by hand; grading follows tonight."), onError: gone(settle) })}>
               Save
             </button>
             <button className="btn" onClick={() => setForm(null)}>
@@ -121,7 +128,7 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
           <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Title" />
           <textarea className="field" rows={5} value={abstract} onChange={(e) => setAbstract(e.target.value)} aria-label="Abstract" placeholder="The abstract, as it should read" />
           <div className="nact">
-            <button className="btn pri" disabled={fix.isPending || !abstract.trim()} onClick={() => fix.mutate({ revision: s.revision, title, abstract }, { onSuccess: () => settle("Text fixed; the next run classifies it again.") })}>
+            <button className="btn pri" disabled={fix.isPending || !abstract.trim()} onClick={() => fix.mutate({ revision: s.revision, title, abstract }, { onSuccess: () => settle("Text fixed; the next run classifies it again."), onError: gone(settle) })}>
               Save the text
             </button>
             <button className="btn" onClick={() => setForm(null)}>
@@ -131,7 +138,7 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
         </div>
       ) : (
         <div className="nact">
-          <button className="btn" disabled={dismiss.isPending} onClick={() => dismiss.mutate(s.revision, { onSuccess: () => settle("Dismissed; it stays searchable in the archive.") })}>
+          <button className="btn" disabled={dismiss.isPending} onClick={() => dismiss.mutate(s.revision, { onSuccess: () => settle("Dismissed; it stays searchable in the archive."), onError: gone(settle) })}>
             Dismiss
           </button>
           <button className="btn" onClick={() => setForm("classes")}>
@@ -153,7 +160,7 @@ function Ungraded({ s, badge, settle }: { s: Stuck; badge: React.ReactNode; sett
   return (
     <Stuck s={s} kind="ungraded" badge={badge}>
       <div className="nact">
-        <button className="btn" disabled={grade.isPending} onClick={() => grade.mutate({ topic: s.topic!, revision: s.revision }, { onSuccess: (r) => settle(r.graded ? `Graded again: ${r.fit}. The result shows on its topic.` : `Grading failed again: ${r.error ?? "no verdict"}. The nightly runs try twice more.`) })}>
+        <button className="btn" disabled={grade.isPending} onClick={() => grade.mutate({ topic: s.topic!, revision: s.revision }, { onSuccess: (r) => settle(r.graded ? `Graded again: ${r.fit}. The result shows on its topic.` : `Grading failed again: ${r.error ?? "no verdict"}. The nightly runs try twice more.`), onError: gone(settle) })}>
           {grade.isPending ? "Grading…" : "Grade it now"}
         </button>
       </div>
@@ -179,7 +186,7 @@ function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
         <div className="nres">{s.settled}</div>
       ) : (
         <div className="nact">
-          <button className="btn" disabled={run.isPending} onClick={() => run.mutate(s.id, { onSuccess: () => settle(s.state === "failed" ? "Running now, first in line, with three more runs." : "Asked for the text again, at urgent priority; the pass runs once it arrives.") })}>
+          <button className="btn" disabled={run.isPending} onClick={() => run.mutate(s.id, { onSuccess: () => settle(s.state === "failed" ? "Running now, first in line, with three more runs." : "Asked for the text again, at urgent priority; the pass runs once it arrives."), onError: gone(settle) })}>
             {run.isPending ? "Starting…" : "Run it now"}
           </button>
         </div>
@@ -193,7 +200,7 @@ function Analysis({ s, settle }: { s: Stuck; settle: Settle }) {
   return (
     <Stuck s={s} kind="analysis">
       <div className="nact">
-        <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate(s.revision, { onSuccess: () => settle("Analysis gets three more runs, from the next one.") })}>
+        <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate(s.revision, { onSuccess: () => settle("Analysis gets three more runs, from the next one."), onError: gone(settle) })}>
           Try again
         </button>
       </div>
@@ -208,7 +215,7 @@ export function NeedsPage() {
   const q = quality.data;
   const badge = (slug: string | null | undefined) => (slug && cards[slug] ? <Badge topic={cards[slug]} /> : null);
   // Marks the item settled in the cached page: it stays where it is, and the counts follow.
-  const settler = (list: Waiting, s: Settled) => (what: string) => qc.setQueryData(qualityQuery.queryKey, (old: Quality | undefined) => old && settle(old, list, s, what));
+  const settler = (list: Waiting, s: Settled) => (what: string | undefined) => qc.setQueryData(qualityQuery.queryKey, (old: Quality | undefined) => old && settle(old, list, s, what));
   const open = q ? waiting(q) : 0;
   // A split labelled before this visit no longer waits; one labelled on it stays, settled.
   const splits = q?.night.splits.filter((s) => s.split && (!s.label || s.settled)) ?? [];

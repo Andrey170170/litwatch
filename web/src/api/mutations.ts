@@ -6,7 +6,9 @@
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
+import { qualityQuery } from "./queries";
 import { rememberCard } from "@/lib/remember";
+import { type Quality, settleFromPaper } from "@/lib/settings";
 import { plural } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -26,12 +28,15 @@ function patchSaved(qc: QueryClient, paperId: string, saved: boolean) {
 
 /** After a write on a paper: refetch its page and patch its star in lists; the lists change no further until the
  * reader goes to one afresh. The write counts as pending until the page is refetched, so the controls show the new
- * state before they re-enable. */
+ * state before they re-enable. An open state the refetched page no longer carries is marked settled, in place, on
+ * the cached Needs you page (DESIGN.md: settling one settles it there too). */
 export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
   void qc.invalidateQueries({ queryKey: ["status"] });
   await qc.invalidateQueries({ queryKey: ["paper", paperId] });
   if (qc.getQueryState(["paper", paperId])?.status === "error") toast("Recorded, but the page could not be refreshed", "error");
+  const paper = qc.getQueryData<Schemas["Paper"]>(["paper", paperId]);
+  if (paper) qc.setQueryData<Quality>(qualityQuery.queryKey, (old) => old && settleFromPaper(old, paper));
 }
 
 export function said(e: unknown, fallback = "That did not go through"): string {
@@ -64,7 +69,7 @@ function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Pro
     onError: (e) => toast(said(e), "error"),
   });
   const busy = usePaperBusy(paperId);
-  return { isPending: busy, mutate: (v: V, options?: { onSuccess?: (r: R) => void }) => m.mutate({ id: paperId, v }, options) };
+  return { isPending: busy, mutate: (v: V, options?: { onSuccess?: (r: R) => void; onError?: (e: unknown) => void }) => m.mutate({ id: paperId, v }, options) };
 }
 
 const acked = (qc: QueryClient, id: string, ack: Ack) => {
@@ -276,7 +281,13 @@ export function useSaveTopic() {
   return useMutation({
     mutationFn: async ({ slug, topic }: { slug: string; topic: Schemas["Topic"] }) =>
       ok(await api.PUT("/api/settings/topics/{slug}", { params: { path: { slug } }, body: topic })),
-    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["taxonomy"] }), qc.invalidateQueries({ queryKey: ["topics"] }), qc.invalidateQueries({ queryKey: ["settings", "taxonomy-stats"] })]),
+    onSuccess: (_, { slug }) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["taxonomy"] }),
+        qc.invalidateQueries({ queryKey: ["topics"] }),
+        qc.invalidateQueries({ queryKey: ["settings", "taxonomy-stats"] }),
+        qc.invalidateQueries({ queryKey: ["settings", "keywords", slug] }),
+      ]),
     onError: (e) => toast(said(e, "Could not save it"), "error"),
   });
 }

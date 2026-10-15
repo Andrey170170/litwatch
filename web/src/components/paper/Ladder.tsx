@@ -120,15 +120,29 @@ export function whyAbstract(paper: Paper): string {
   }
 }
 
-/** The Brief: the overstatement first where the full text does not support the abstract, and which revision of the
- * text it read when the paper has moved on since. */
-function Brief({ paper, brief }: { paper: Paper; brief: NonNullable<Paper["brief"]> }) {
+type Brief = NonNullable<Paper["brief"]>;
+
+/** The Brief's text: the overstatement first where the full text does not support the abstract, and which revision
+ * of the text it read when the paper has moved on since. The ladder and Calibrate's blind paper share it. */
+export function BriefBody({ paper, brief }: { paper: Paper; brief: Brief }) {
   const older = brief.revision < paper.revision;
   return (
-    <Rung name="Brief" extra={<span className="faint normal-case tracking-normal">{brief.source === "latex" ? "from the LaTeX" : "from the PDF"}</span>}>
+    <>
       {brief.overstatement && <div className="overst">{brief.overstatement}</div>}
-      {older && <div className="why0">Written for an older revision of the text{brief.arxiv_version ? ` (arXiv v${brief.arxiv_version})` : ""}; the current one waits for its full text.</div>}
+      {older && (
+        <div className="why0">
+          Written for revision {brief.revision} of the text{brief.arxiv_version ? ` (arXiv v${brief.arxiv_version})` : ""}; the current one, revision {paper.revision}, waits for its full text.
+        </div>
+      )}
       <p className="prose">{brief.text}</p>
+    </>
+  );
+}
+
+function BriefRung({ paper, brief }: { paper: Paper; brief: Brief }) {
+  return (
+    <Rung name="Brief" extra={<span className="faint normal-case tracking-normal">{brief.source === "latex" ? "from the LaTeX" : "from the PDF"}</span>}>
+      <BriefBody paper={paper} brief={brief} />
     </Rung>
   );
 }
@@ -154,7 +168,7 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
         </div>
       )}
       {paper.brief && !analysisFailed ? (
-        <Brief paper={paper} brief={paper.brief} />
+        <BriefRung paper={paper} brief={paper.brief} />
       ) : (
         <Rung name="Abstract">
           {paper.in_collection && !analysisFailed && <div className="why0">{whyAbstract(paper)}</div>}

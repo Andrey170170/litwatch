@@ -39,8 +39,10 @@ export function PaperLink({ id, topic, className, children }: { id: string; topi
 }
 
 /** The Fit control as five equal segments. */
-export function FitSeg({ value, auto, onPick, disabled, label }: { value: LabelValue | null | undefined; auto?: LabelValue | null; onPick: (f: LabelValue) => void; disabled?: boolean; label: string }) {
-  return <Seg values={FITS} value={value} auto={auto} disabled={disabled} label={label} onPick={(f) => f && onPick(f)} />;
+/** The Fit control over the five label values; with `clear`, `onPick` gets null when the chosen value is tapped
+ * again. */
+export function FitSeg({ value, auto, onPick, disabled, label, clear }: { value: LabelValue | null | undefined; auto?: LabelValue | null; onPick: (f: LabelValue | null) => void; disabled?: boolean; label: string; clear?: boolean }) {
+  return <Seg values={FITS} value={value} auto={auto} disabled={disabled} label={label} clear={clear} onPick={(f) => (f || clear) && onPick(f)} />;
 }
 
 /** A form field: its label, a hint after it, the control under. */

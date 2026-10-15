@@ -154,8 +154,9 @@ export function waiting(q: Quality): number {
 /** Which item settled: its paper, and its topic or pass where a paper can have several. */
 export type Settled = { paper_id: string; topic?: string | null; id?: number };
 
-/** The quality page with one item marked settled, in place: the page and the sidebar read the same copy. */
-export function settle(q: Quality, list: Waiting, item: Settled, what: string): Quality {
+/** The quality page with one item marked settled, in place: the page and the sidebar read the same copy. `what`
+ * undefined unsettles it (a label taken back). */
+export function settle(q: Quality, list: Waiting, item: Settled, what: string | undefined): Quality {
   const same = (x: Settled) => x.paper_id === item.paper_id && (item.topic == null || x.topic === item.topic) && (item.id == null || x.id === item.id);
   const mark = <T extends Settled>(xs: T[]): T[] => xs.map((x) => (same(x) ? { ...x, settled: what } : x));
   const night = { ...q.night };
@@ -163,6 +164,33 @@ export function settle(q: Quality, list: Waiting, item: Settled, what: string): 
   else if (list === "fulltext") night.fulltext = mark(night.fulltext);
   else night[list] = mark(night[list]);
   return { ...q, night };
+}
+
+/** The quality page after the paper's own page settled something: an item whose open state the refetched paper no
+ * longer carries is marked settled in place, a split with the label it got. The sidebar's count follows, and the
+ * way back to Needs you finds the row where it was. */
+export function settleFromPaper(q: Quality, paper: Schemas["Paper"]): Quality {
+  const states = paper.states ?? [];
+  const has = (kind: Schemas["OpenState"]["kind"], topic?: string | null, id?: number) => states.some((s) => s.kind === kind && (topic == null || s.topic === topic) && (id == null || s.pass_id === id));
+  const labelOf = (topic: string) => paper.topics.find((t) => t.topic.slug === topic)?.label?.value;
+  const open = <T extends { paper_id: string; settled?: string }>(x: T) => x.paper_id === paper.id && !x.settled;
+  const done = "Settled on the paper's page.";
+  const night = { ...q.night };
+  night.splits = night.splits.map((s) => {
+    const label = open(s) && !s.label && !has(s.split ? "split" : "escalated", s.topic) ? labelOf(s.topic) : undefined;
+    return label ? { ...s, settled: label } : s;
+  });
+  night.awaiting_classification = night.awaiting_classification.map((s) => (open(s) && !has("awaiting_classification") ? { ...s, settled: done } : s));
+  night.analysis_failed = night.analysis_failed.map((s) => (open(s) && !has("analysis_stopped") ? { ...s, settled: done } : s));
+  night.ungraded = night.ungraded.map((s) => (open(s) && !has("ungraded", s.topic) ? { ...s, settled: done } : s));
+  night.fulltext = night.fulltext.map((s) => (open(s) && !has(s.state === "failed" ? "fulltext_failed" : "awaiting_text", null, s.id) ? { ...s, settled: done } : s));
+  return { ...q, night };
+}
+
+/** The Fits an answer sends: the drawn topic's, and any Focus topic's the owner changed on this screen. A label
+ * left as it was is not written again (writing renews its time, and the newest word wins). */
+export function answerFits(draft: Record<string, LabelValue>, item: SessionItem, focus: Set<string>): Record<string, LabelValue> {
+  return Object.fromEntries(Object.entries(draft).filter(([slug, fit]) => slug === item.topic || (focus.has(slug) && fit !== item.fit[slug])));
 }
 
 export type Level = "ok" | "warn" | "bad";

@@ -151,14 +151,19 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
   // not reopen it.
   const [base, setBase] = useState(() => asForm(current ?? fresh(cls)));
   const [form, setForm] = useState(base);
-  const [saved, setSaved] = useState<{ before: Topic | null } | null>(null);
+  // What the last save here sent and replaced: the offer reads these, not the form, which may be edited again.
+  const [saved, setSaved] = useState<{ before: Topic | null; after: Topic } | null>(null);
   // The keyword being typed, or null while the "+ keyword" button shows.
   const [typing, setTyping] = useState<string | null>(null);
   const matches = useQuery(keywordsQuery(cls.slug, !!current));
   const path = classPath(tree, cls.slug);
   const dirty = JSON.stringify(form) !== JSON.stringify(base);
   const version = stats.data?.topic_revisions[cls.slug] ?? 1;
-  const set = (patch: Partial<Topic>) => setForm((f) => ({ ...f, ...patch }));
+  // An edit after a save brings Save back in the offer's place.
+  const set = (patch: Partial<Topic>) => {
+    setForm((f) => ({ ...f, ...patch }));
+    setSaved(null);
+  };
   const keywords = form.keywords ?? [];
   const addKeyword = () => {
     const k = typing?.trim();
@@ -171,7 +176,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
       { slug: cls.slug, topic: body },
       {
         onSuccess: () => {
-          setSaved({ before: current });
+          setSaved({ before: current, after: form });
           setBase(form);
         },
       },
@@ -248,7 +253,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
       <div className="mt-4">
         {saved ? (
           <div className="offer">
-            <div className="oh">{savedLine(saved.before, form, version)}</div>
+            <div className="oh">{savedLine(saved.before, saved.after, version)}</div>
             <div className="nsub">Re-run it now on:</div>
             {["Labelled papers and reported misses", "The topic's existing members", "Papers matching its keywords · last 90 days", "A date range"].map((row) => (
               <div className="ofr off" key={row}>

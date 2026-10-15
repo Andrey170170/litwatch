@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { renderApp, scriptFetch, viewport } from "@/test/harness";
+import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const status = { state: "quiet", papers: 2, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 };
 const cls = { slug: "mi", name: "Mech interp", description: "Circuits and features.", parent: null, threshold: null };
@@ -56,7 +56,7 @@ describe("Settings", () => {
 
   it("settles a split in place: the label is recorded, the item keeps its spot and the count drops", async () => {
     viewport(true);
-    const calls = scriptFetch({ ...common, "PUT /api/labels/mi/2610.00001": { saved: false } });
+    const calls = scriptFetch({ ...common, "PUT /api/labels/mi/2610.00001": { saved: false }, "DELETE /api/labels/mi/2610.00001": { saved: false } });
     renderApp("/settings/needs");
     expect(await screen.findByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     const item = screen.getByText("A split paper").closest(".need")!;
@@ -70,6 +70,23 @@ describe("Settings", () => {
     expect(titles).toEqual(["A split paper", "A stuck paper", "A textless paper"]);
     expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("2");
+    // Tapping the label's segment again takes it back: the split waits once more, where it was.
+    await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "related" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/labels/mi/2610.00001")).toBe(true));
+    await waitFor(() => expect(item).not.toHaveClass("settled"));
+    expect(item).toHaveTextContent("adjacent stands");
+    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+  });
+
+  it("settles an item whose action answers 409 with the reason, in place", async () => {
+    viewport(true);
+    scriptFetch({ ...common, "POST /api/settings/fulltext/7/now": () => json({ detail: "the pass is not waiting for the owner" }, 409) });
+    renderApp("/settings/needs");
+    const item = (await screen.findByRole("link", { name: "A textless paper" })).closest(".need")!;
+    await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Run it now" }));
+    await waitFor(() => expect(item).toHaveClass("settled"));
+    expect(item).toHaveTextContent("No longer waits on the owner: the pass is not waiting for the owner.");
+    expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
   it("lists a full-text pass that failed three runs and runs it now, settling it in place", async () => {
@@ -105,9 +122,14 @@ describe("Settings", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({ class: "mi", interests: "Sparse circuits", keywords: ["circuit"] }));
     expect(await screen.findByText("Saved as version 2. It applies to papers classified or graded from now on.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    // The taxonomy's refetch after the save does not reopen the form.
+    // The taxonomy's refetch after the save does not reopen the form; the keyword counts are fetched again.
     await waitFor(() => expect(calls.filter((c) => c.url === "/api/settings/taxonomy").length).toBeGreaterThan(1));
     expect(screen.getByText("Saved as version 2. It applies to papers classified or graded from now on.")).toBeInTheDocument();
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/settings/topics/mi/keywords").length).toBeGreaterThan(1));
+    // An edit after the save brings Save back in the offer's place; the offer never describes what was not sent.
+    await userEvent.type(screen.getByRole("textbox", { name: "Interests" }), " and more");
+    expect(screen.queryByText(/Saved as version/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
   it("records a Calibrate answer on Next, then shows the next paper", async () => {

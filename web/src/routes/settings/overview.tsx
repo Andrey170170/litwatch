@@ -109,7 +109,9 @@ export function OverviewPage() {
               </div>
               {replay.recall.map((r) => (
                 <div className="mr" key={`${r.cohort}:${r.topic}`}>
-                  {name(r.topic)}
+                  <span>
+                    {name(r.topic)} <span className="faint">· {r.cohort}</span>
+                  </span>
                   {[r.classification, r.membership, r.grading, r.end_to_end].map((s, i) => (
                     <span key={i}>{s.n ? <Share x={s.hits / s.n} /> : <span className="faint">–</span>}</span>
                   ))}

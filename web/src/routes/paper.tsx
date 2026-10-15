@@ -74,9 +74,13 @@ export function PaperPage() {
 function PaperView({ id, under }: { id: string; under: string | undefined }) {
   const desktop = useDesktop();
   const process = useProcess();
-  // While a card is asked for, the page polls until an integration has written it (the API has no queued state).
+  // While a card is asked for, the page polls until an integration has written it (the API has no queued state);
+  // likewise while a full-text pass is queued or running, so the Brief appears once written.
   const asked = useCardAsked(id);
-  const { data: paper, error, isPending } = useQuery({ ...paperQuery(id), refetchInterval: asked ? 15_000 : false });
+  const { data: paper, error, isPending } = useQuery({
+    ...paperQuery(id),
+    refetchInterval: (q) => (asked || ["ready", "running"].includes(q.state.data?.text_pass?.state ?? "") ? 15_000 : false),
+  });
   const [gistAway, setGistAway] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
   useEffect(() => {

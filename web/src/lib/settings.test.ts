@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { differs, level, savedLine, settle, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
+import { answerFits, differs, level, savedLine, settle, settleFromPaper, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
 
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
@@ -20,6 +20,34 @@ describe("waiting", () => {
     expect(after.night.ungraded[0]!.settled).toBeUndefined();
     // Of the paper's two passes, only the one run.
     expect(after.night.fulltext.map((s) => s.settled)).toEqual([undefined, "Running"]);
+  });
+});
+
+describe("settleFromPaper", () => {
+  const q = { night: { ...night, splits: [split, { ...split, topic: "b" }], ungraded: [{ ...stuck, topic: "a" }], analysis_failed: [stuck], fulltext: [pass] } } as Quality;
+  const topic = (slug: string, label?: string) => ({ topic: { slug, name: slug, depth: "focus", monogram: "A", colour: "#fff" }, fit: "related", label: label ? { value: label } : undefined });
+  const paper = (id: string, states: object[], topics: object[] = []) => ({ id, states, topics }) as unknown as Schemas["Paper"];
+  it("settles the items whose open state the paper's page no longer carries, a split with its label", () => {
+    // Labelled on topic a; still split on b; the ungraded grading done; analysis and the pass still open.
+    const after = settleFromPaper(q, paper("1", [{ kind: "split", topic: "b" }, { kind: "analysis_stopped" }], [topic("a", "central"), topic("b")]));
+    expect(after.night.splits.map((s) => s.settled)).toEqual(["central", undefined]);
+    expect(after.night.ungraded[0]!.settled).toBe("Settled on the paper's page.");
+    expect(after.night.analysis_failed[0]!.settled).toBeUndefined();
+    expect(after.night.fulltext[0]!.settled).toBeUndefined();
+    expect(waiting(after)).toBe(3);
+  });
+  it("leaves other papers, settled items and a split gone without a label alone", () => {
+    const after = settleFromPaper(settle(q, "ungraded", { paper_id: "1", topic: "a" }, "Graded"), paper("1", [], [topic("a"), topic("b")]));
+    expect(after.night.splits.map((s) => s.settled)).toEqual([undefined, undefined]);
+    expect(after.night.ungraded[0]!.settled).toBe("Graded");
+    expect(settleFromPaper(q, paper("9", []))).toEqual(q);
+  });
+});
+
+describe("answerFits", () => {
+  const item = { position: 1, paper_id: "1", topic: "a", why: "above", verdict: "related", answer: null, answered_at: null, title: "", abstract: "", authors: [], published: null, fit: { b: "none", c: "related" }, appraisal: null } as SessionItem;
+  it("sends the drawn topic and the Focus labels changed here, not the ones left as they were", () => {
+    expect(answerFits({ a: "central", b: "none", c: "adjacent", d: "none" }, item, new Set(["a", "b", "c"]))).toEqual({ a: "central", c: "adjacent" });
   });
 });
 
