@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-ROLES = ("triage", "judge", "check", "review", "writer")
+ROLES = ("classify", "triage", "judge", "check", "review", "writer")
 
 
 class _Section(BaseModel):
@@ -33,6 +33,15 @@ class RoleConfig(_Section):
     routing: tuple[str, ...] = ()
     timeout_seconds: float = Field(default=180.0, gt=0)
     max_output_tokens: int | None = Field(default=None, gt=0)
+    # The model is served by OpenRouter's Decisions endpoint (Luna Decisions, Jev). A decision
+    # role without it asks a chat model, with a strict schema.
+    decisions: bool = False
+
+    @model_validator(mode="after")
+    def _decisions_on_openrouter(self) -> RoleConfig:
+        if self.decisions and self.provider != "openrouter":
+            raise ValueError("only OpenRouter serves a Decisions endpoint")
+        return self
 
     @property
     def lab(self) -> str:
@@ -47,6 +56,10 @@ class RoleConfig(_Section):
 
 
 class Models(_Section):
+    # Chosen in N1 (evals/2026-10-14-classifiers.md).
+    classify: RoleConfig = RoleConfig(
+        provider="openrouter", model="typesafe/jev-1.13", decisions=True
+    )
     triage: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
     judge: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
     check: RoleConfig = RoleConfig(

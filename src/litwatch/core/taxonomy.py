@@ -122,6 +122,18 @@ class Taxonomy(BaseModel):
         parent = self.get(slug).parent
         return 1 if parent is None else 1 + self.level(parent)
 
+    def ancestors(self, slug: str) -> list[str]:
+        """The classes above `slug`, nearest first."""
+        found, parent = [], self.get(slug).parent
+        while parent is not None:
+            found.append(parent)
+            parent = self.get(parent).parent
+        return found
+
+    def subtree(self, slug: str) -> list[str]:
+        """`slug` and every class under it."""
+        return [c.slug for c in self.classes if c.slug == slug or slug in self.ancestors(c.slug)]
+
     def children(self, slug: str | None) -> list[TaxonomyClass]:
         """The classes directly under `slug`, or the top-level classes for None."""
         return [c for c in self.classes if c.parent == slug]

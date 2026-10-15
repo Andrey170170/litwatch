@@ -29,6 +29,16 @@ def anthropic_message(
     )
 
 
+def decisions_reply(answers: dict[str, Any], cost: float = 0.00005) -> dict[str, Any]:
+    return {
+        "id": "gen-dec-1",
+        "model": "typesafe/jev-1.13-20260917",
+        "provider": "TypeSafe",
+        "answers": answers,
+        "usage": {"input_tokens": 500, "output_tokens": 0, "cost": cost},
+    }
+
+
 def openrouter_completion(text="{}", finish_reason="stop", refusal=None, cost=0.0021):
     return SimpleNamespace(
         id="gen-1",
@@ -58,6 +68,10 @@ class SdkClient:
         self.sent: list[dict[str, Any]] = []
         self.messages = SimpleNamespace(create=self._create)
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def post(self, url: str, *, body: dict[str, Any], cast_to: Any) -> Any:
+        """OpenRouter's Decisions endpoint, through the OpenAI SDK's raw `post`."""
+        return await self._create(url=url, **body)
 
     async def _create(self, **request: Any) -> Any:
         self.sent.append(request)

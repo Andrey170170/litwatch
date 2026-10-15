@@ -6,13 +6,23 @@ import asyncio
 import hashlib
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, ValidationError
 
 from litwatch.config import Models, RoleConfig, secret
-from litwatch.llm.types import Provider, ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm.decisions import Decision, chat_request, decision_of
+from litwatch.llm.types import (
+    DecisionRequest,
+    Provider,
+    ProviderError,
+    Reply,
+    Request,
+    Stop,
+    Usage,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,13 +46,14 @@ def _without_nul(value: Any) -> Any:
 
 class CallError(Exception):
     """A call produced no usable answer. `kind` is `truncated`, `refused`, `invalid`,
-    `timeout` or `provider`; the message carries the detail."""
+    `timeout` or `provider`; the message carries the detail. `usage` is the reply's, when one
+    came back and was billed."""
 
-    def __init__(self, kind: str, detail: str | None = None) -> None:
+    def __init__(self, kind: str, detail: str | None = None, usage: Usage | None = None) -> None:
         # Provider text can carry a NUL, which Postgres text cannot hold; the message is
         # stored as a paper's last error.
         detail = detail.replace("\x00", "") if detail else detail
-        self.kind, self.detail = kind, detail
+        self.kind, self.detail, self.usage = kind, detail, usage
         super().__init__(f"{kind}: {detail}" if detail else kind)
 
 
@@ -65,8 +76,16 @@ class Answer[T: BaseModel]:
     model: str  # `provider:model@effort`, for the record of who said it
 
 
+class DecisionProvider(Provider, Protocol):
+    """A provider with a Decisions endpoint. It answers in the JSON a chat model would give for
+    the same request (`decisions.chat_request`)."""
+
+    async def decide(self, role: RoleConfig, request: DecisionRequest) -> Reply: ...
+
+
 class Gateway:
-    """`ask(role, request)` is the whole interface the pipeline uses."""
+    """`ask(role, request)` and `decide(role, request)` are the whole interface the pipeline
+    uses."""
 
     def __init__(
         self,
@@ -96,15 +115,25 @@ class Gateway:
             "max_output_tokens": role.max_output_tokens,
             "request": request.key_material(),
         }
+        if role.decisions:  # another endpoint, another answer; absent keeps older keys
+            material["decisions"] = True
         return hashlib.sha256(json.dumps(material, ensure_ascii=True).encode()).hexdigest()
 
-    async def complete(self, role_name: str, request: Request) -> Reply:
-        """One reply from the role's model, after retries. Not journalled; `ask` is."""
+    async def complete(
+        self,
+        role_name: str,
+        request: Request,
+        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
+    ) -> Reply:
+        """One reply from the role's model, after retries. Not journalled; `ask` is. `send`
+        replaces the chat call (a Decisions endpoint)."""
         role = self.models.role(role_name)
         provider = self._provider(role)
         for delay in (*self.retry_delays, None):
             try:
                 async with asyncio.timeout(role.timeout_seconds):
+                    if send:
+                        return await send(provider, role)
                     return await provider.complete(role, request)
             except TimeoutError as exc:
                 raise CallError("timeout", f"{role.timeout_seconds:g}s") from exc
@@ -117,8 +146,30 @@ class Gateway:
                 await asyncio.sleep(delay)
         raise AssertionError("unreachable")
 
+    async def decide(
+        self, role_name: str, request: DecisionRequest, *, paper_id: str | None = None
+    ) -> Answer[Decision]:
+        """A validated decision: every question answered, every probability in [0, 1], every
+        choice one of its options. Raises `CallError` as `ask` does."""
+        role = self.models.role(role_name)
+        chat = chat_request(request)
+        send = None
+        if role.decisions:
+
+            async def send(provider: Provider, role: RoleConfig) -> Reply:
+                # Configuration allows a Decisions endpoint only on OpenRouter.
+                return await cast(DecisionProvider, provider).decide(role, request)
+
+        answer = await self.ask(role_name, chat, paper_id=paper_id, send=send)
+        return Answer(decision_of(answer.value, request), answer.usage, answer.model)
+
     async def ask[T: BaseModel](
-        self, role_name: str, request: Request, *, paper_id: str | None = None
+        self,
+        role_name: str,
+        request: Request,
+        *,
+        paper_id: str | None = None,
+        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
     ) -> Answer[T]:
         """A validated answer, reusing an identical earlier call. Raises `CallError`.
 
@@ -141,22 +192,24 @@ class Gateway:
             return Answer(request.output.model_validate(hit["output"]), usage, role.label)
         call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None
         try:
-            reply = await self.complete(role_name, request)
+            reply = await self.complete(role_name, request, send)
             reply.usage.source_call_id = call_id
             if journal:
                 await journal.record(call_id, reply.usage)
             log.info("inference role=%s usage=%s", role_name, reply.usage.model_dump_json())
             if reply.stop == Stop.REFUSED:
                 log.warning("role=%s paper=%s refused: %s", role_name, paper_id, reply.refusal)
-                raise CallError("refused", reply.refusal)
+                raise CallError("refused", reply.refusal, reply.usage)
             if reply.stop == Stop.TRUNCATED:
-                raise CallError("truncated")
+                raise CallError("truncated", usage=reply.usage)
             try:
                 value = request.output.model_validate(_without_nul(json.loads(reply.text)))
             except json.JSONDecodeError as exc:
-                raise CallError("invalid", "not JSON") from exc
+                raise CallError("invalid", "not JSON", reply.usage) from exc
             except ValidationError as exc:
-                raise CallError("invalid", f"{exc.error_count()} validation errors") from exc
+                raise CallError(
+                    "invalid", f"{exc.error_count()} validation errors", reply.usage
+                ) from exc
         except CallError as exc:
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.
