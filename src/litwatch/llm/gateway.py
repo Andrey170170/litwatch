@@ -229,7 +229,7 @@ class Gateway:
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.
             if journal:
-                kept = _without_nul(reply.text) if self.debug and reply else None
+                kept = _without_nul(reply.raw or reply.text) if self.debug and reply else None
                 await journal.reject(call_id, str(exc), kept)
             raise
         if journal:

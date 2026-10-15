@@ -93,6 +93,7 @@ class Reply:
     stop: Stop
     usage: Usage
     refusal: str | None = None  # the category given, when `stop` is refused
+    raw: str | None = None  # what the provider sent, when `text` is a translation of it
 
 
 class ProviderError(Exception):
