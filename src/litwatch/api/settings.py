@@ -151,10 +151,11 @@ class ClassesIn(Awaiting):
 @router.put("/classification/{paper_id:path}", responses=WAITING)
 async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
     """The owner names the paper's classes, which go on as usual with source `owner`."""
-    # The taxonomy is read in the action's transaction, so its shared lock holds the tree still
-    # until the classification is recorded; and before the paper's lock, since locks are
-    # taken taxonomy first (`feedback.word.lock`).
+    # One transaction, with the settle lock taken first as by every write that settles: its
+    # shared taxonomy lock holds the tree still until the classification is recorded, and the
+    # paper is classified and settled together.
     async with c.transaction():
+        await word.lock(c, paper_id)
         tree = await taxonomy_store.load(c)
         if tree is None:
             raise HTTPException(status_code=409, detail="no taxonomy")
@@ -163,7 +164,7 @@ async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str,
                 await classification.by_hand(c, paper, tree, body.classes, body.primary)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
-    await word.settle(c, paper_id)  # classified: in the collection, with a rarity
+        await word.settle(c, paper_id)  # classified: in the collection, with a rarity
     return {
         "classes": list(dict.fromkeys(body.classes)),
         "primary": body.primary or body.classes[0],
@@ -183,9 +184,11 @@ async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
     abstract = (body.abstract or "").strip() or None
     if not (title or abstract):
         raise HTTPException(status_code=422, detail="give a title or an abstract")
-    async with _awaiting(c, paper_id, body.revision):
-        await papers_store.correct(c, paper_id, title, abstract)
-    await word.settle(c, paper_id)  # the old text's Weight went with it
+    async with c.transaction():  # the new text and the grades without its old Weight, together
+        await word.lock(c, paper_id)
+        async with _awaiting(c, paper_id, body.revision):
+            await papers_store.correct(c, paper_id, title, abstract)
+        await word.settle(c, paper_id)
 
 
 @router.post("/analysis/{paper_id:path}/retry", status_code=204, responses=WAITING)

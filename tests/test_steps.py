@@ -12,6 +12,7 @@ import pytest
 
 from litwatch import classification
 from litwatch.api import create_app
+from litwatch.api import settings as settings_api
 from litwatch.config import Classification, Config, Models, RoleConfig
 from litwatch.core import FAILED_RUNS, Paper
 from litwatch.jobs import nightly
@@ -419,6 +420,22 @@ async def test_fixing_the_text_counts_as_a_rewrite_and_classifies_again(client, 
     assert await awaiting(client) == []
     await night(conn, models)
     assert ("other", "classifier") in await members(conn, A.id)
+
+
+async def test_a_correction_that_cannot_settle_is_not_kept(client, conn, monkeypatch):
+    """The new text and the grades without the old text's Weight are stored together, so a
+    failed settle leaves the old text current and the correction can be made again."""
+
+    async def broken(*_):
+        raise RuntimeError("settle failed")
+
+    monkeypatch.setattr(settings_api.word, "settle", broken)
+    url = f"/api/settings/classification/{A.id}/correction"
+    with pytest.raises(RuntimeError):
+        await client.post(url, json=AT_1 | {"title": "Probes, fixed"})
+    assert (await papers_store.get(conn, A.id)).revision == 1
+    monkeypatch.undo()
+    assert (await client.post(url, json=AT_1 | {"title": "Probes, fixed"})).status_code == 204
 
 
 @pytest.mark.parametrize(
