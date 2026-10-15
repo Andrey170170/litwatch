@@ -249,20 +249,38 @@ def _members(package: Path, limit: int) -> dict[str, str]:
 
 
 def _main(files: dict[str, str]) -> str | None:
-    """The file that starts the document: one that begins it (its \\documentclass may sit in
-    a preamble it inputs), else one with \\documentclass; then the one with both, the
+    """The file that starts the document: one no other file inputs (a preamble, or a subfile
+    with a \\documentclass of its own, is not it), then one that begins the document (its
+    \\documentclass may sit in a preamble it inputs), then one with \\documentclass, the
     shallowest path, and by name."""
-    def marks(n: str) -> tuple[bool, bool]:
-        return '\\begin{document}' in files[n], '\\documentclass' in files[n]
-    roots = [n for n in files if n.lower().endswith(LATEX_SUFFIXES) and any(marks(n))]
-    roots.sort(key=lambda n: (*(not m for m in marks(n)), n.count('/'), n))
-    return roots[0] if roots else None
+    latex = [n for n in files if n.lower().endswith(LATEX_SUFFIXES)]
+    inputs = set()
+    for here in latex:
+        for match in INPUT.finditer(files[here]):
+            inputs.update(_candidates(match.group(1) or match.group(2), '', here))
+
+    def rank(n: str) -> tuple:
+        return (n in inputs, '\\begin{document}' not in files[n],
+                '\\documentclass' not in files[n], n.count('/'), n)
+    roots = [n for n in latex if '\\begin{document}' in files[n] or '\\documentclass' in files[n]]
+    return min(roots, key=rank) if roots else None
 
 
 def _inside(path: str) -> str | None:
     """`path` with `.` and `..` resolved, or None when it leaves the package."""
     path = posixpath.normpath(path)
     return None if path.startswith(('../', '/')) or path == '..' else path
+
+
+def _candidates(name: str, main: str, here: str) -> list[str]:
+    """Where an input of `name` from file `here` may be, in the order TeX would look: beside the
+    main file (its working directory), then, as authors often write, beside `here`."""
+    found = []
+    for base in (posixpath.dirname(main), posixpath.dirname(here)):
+        for candidate in (name.strip(), name.strip() + '.tex'):
+            if (path := _inside(posixpath.join(base, candidate))) is not None:
+                found.append(path)
+    return found
 
 
 def latex_text(package: Path, limit: int) -> str:
@@ -280,13 +298,7 @@ def latex_text(package: Path, limit: int) -> str:
     used = {main}
 
     def resolve(name: str, here: str) -> str | None:
-        # TeX looks beside the main file; authors often write paths from the including file.
-        for base in (posixpath.dirname(main), posixpath.dirname(here)):
-            for candidate in (name, name + '.tex'):
-                path = _inside(posixpath.join(base, candidate.strip()))
-                if path in files and path not in used:
-                    return path
-        return None
+        return next((p for p in _candidates(name, main, here) if p in files and p not in used), None)
 
     def expand(body: str, here: str, depth: int) -> str:
         def inline(match: re.Match) -> str:

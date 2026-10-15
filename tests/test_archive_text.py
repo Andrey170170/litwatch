@@ -51,16 +51,16 @@ async def test_a_paper_without_a_source_is_read_from_its_pdf(monkeypatch):
     assert await read_text(client(fake), paper("2610.00001", version=2)) is None
 
 
-async def test_a_source_too_short_to_be_a_paper_falls_back_to_the_pdf(monkeypatch):
+async def test_an_empty_source_text_falls_back_to_the_pdf(monkeypatch):
     fake = FakeArchive()
-    fake.texts["2610.00001"] = (1, "\\documentclass{article} stub")
+    fake.texts["2610.00001"] = (1, "\n\n")
     monkeypatch.setattr(text_module, "pdf_to_markdown", lambda pdf: BODY)
     assert (await read_text(client(fake), paper("2610.00001", version=1))).source == "pdf"
 
 
 async def test_a_short_paper_is_still_a_paper():
     fake = FakeArchive()
-    fake.texts["2610.00001"] = (1, "\\section{Erratum} " + "Table 2 should read 0.81. " * 40)
+    fake.texts["2610.00001"] = (1, "\\section{Erratum} Table 2 should read 0.81, not 0.18.")
     assert (await read_text(client(fake), paper("2610.00001", version=1))).source == "latex"
 
 

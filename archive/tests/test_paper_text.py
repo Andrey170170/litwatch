@@ -123,6 +123,16 @@ class LatexTextTests(unittest.TestCase):
         self.assertIn("Body", text)
         self.assertIn("\\usepackage{amsmath}", text)
 
+    def test_a_subfile_with_its_own_documentclass_is_not_the_entry_point(self):
+        text = self.text(
+            [
+                ("main.tex", b"\\documentclass{article}\\begin{document}Main \\subfile{intro}\\end{document}"),
+                ("intro.tex", b"\\documentclass[main.tex]{subfiles}\\begin{document}Intro\\end{document}"),
+            ]
+        )
+        self.assertIn("Main", text)
+        self.assertIn("Intro", text)
+
     def test_a_comment_after_a_line_break_is_dropped_and_an_escaped_percent_kept(self):
         text = self.text(
             [("main.tex", b"\\documentclass{article}\\begin{document}a & b \\\\% hidden claim\n"

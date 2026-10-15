@@ -19,7 +19,6 @@ from litwatch.core import Paper
 
 log = logging.getLogger(__name__)
 
-MIN_BODY_CHARS = 500  # shorter is a stub or a scan with no text layer; an erratum is longer
 DONE = ("failed", "unavailable")  # a job the archive has given up on
 
 
@@ -44,7 +43,7 @@ def pdf_to_markdown(pdf: bytes) -> str | None:
 
 
 def _usable(text: PaperText | None) -> PaperText | None:
-    return text if text is not None and len(text.body) >= MIN_BODY_CHARS else None
+    return text if text is not None and text.body.strip() else None
 
 
 def _why(job: dict) -> str:
