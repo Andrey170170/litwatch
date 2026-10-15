@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from datetime import date
+from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
 import json
 from pathlib import Path
@@ -57,15 +57,27 @@ def _text(value: Any) -> str:
 
 
 def _date(value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
-        return ''
+    """The UTC calendar date of an ISO or RFC 2822 timestamp (a bare date is taken as UTC)."""
+    if stamp := _timestamp(value):
+        return stamp[:10]
     try:
-        return date.fromisoformat(value[:10]).isoformat()
+        return date.fromisoformat(value[:10]).isoformat() if isinstance(value, str) else ''
     except ValueError:
-        try:
-            return parsedate_to_datetime(value).date().isoformat()
-        except (ValueError, TypeError, OverflowError):
-            return ''
+        return ''
+
+
+def published_date(metadata: dict) -> str:
+    """The first version's submission date (YYYY-MM-DD, UTC), '' when no record says it. An
+    explicit v1 in the version history wins: a record's `published` or `created` may describe
+    a later revision."""
+    for entry in metadata.get('version_history') or metadata.get('versions') or []:
+        if isinstance(entry, dict) and entry.get('version') in (1, 'v1', '1'):
+            if published := _date(entry.get('date') or entry.get('created')):
+                return published
+    for key in ('published', 'first_version_date', 'submitted', 'created'):
+        if published := _date(metadata.get(key)):
+            return published
+    return ''
 
 
 def normalize(row: dict) -> dict:
@@ -79,18 +91,8 @@ def normalize(row: dict) -> dict:
     if isinstance(categories, str):
         categories = categories.split()
     categories = sorted(set(_text(c) for c in categories if _text(c)))
-    published = ''
-    for key in ('published', 'first_version_date', 'submitted', 'created'):
-        published = _date(metadata.get(key))
-        if published:
-            break
-    if not published:
-        for entry in metadata.get('version_history') or metadata.get('versions') or []:
-            if isinstance(entry, dict) and entry.get('version') in (1, 'v1', '1'):
-                published = _date(entry.get('date') or entry.get('created'))
-                break
     return dict(id=row['id'], title=_text(metadata.get('title')), abstract=_text(metadata.get('abstract')),
-                authors=_text(authors), categories=categories, published=published,
+                authors=_text(authors), categories=categories, published=published_date(metadata),
                 latest_version=row.get('latest_version'), doi=_text(metadata.get('doi')),
                 journal_ref=_text(metadata.get('journal_ref')), has_pdf=bool(row.get('has_pdf')),
                 has_source=bool(row.get('has_source')))
@@ -99,6 +101,82 @@ def normalize(row: dict) -> dict:
 def normalize_paper(paper: dict) -> dict:
     """Normalize a decoded Catalog.get_paper() record for detail/BibTeX output."""
     return normalize({**paper, 'metadata_json': json.dumps(paper.get('metadata', {}))})
+
+
+def _timestamp(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace('Z', '+00:00'))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (ValueError, TypeError, OverflowError):
+            return None
+    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
+
+
+def _authors(metadata: dict) -> list[str]:
+    """Names in order: an observed list, HF's parsed names, else the raw string split on
+    commas and "and" (the arXivRaw discovery stores the raw string as a one-item list)."""
+    authors, raw = metadata.get('authors'), metadata.get('authors_raw')
+    if isinstance(authors, list) and authors and not (raw and authors == [raw]):
+        names = [a.get('name') or ' '.join(filter(None, [a.get('forenames'), a.get('keyname')]))
+                 if isinstance(a, dict) else a for a in authors]
+    elif isinstance(metadata.get('authors_parsed'), list) and metadata['authors_parsed']:
+        names = []
+        for name in metadata['authors_parsed']:
+            if isinstance(name, list) and name:
+                family, given, suffix = (name + ['', ''])[:3]
+                names.append(' '.join(filter(None, [given, family, suffix])))
+    else:
+        text = raw or (authors if isinstance(authors, str) else '')
+        names = re.split(r',\s*(?:and\s+)?|\s+and\s+', str(text))
+    return [name for name in (_text(n) for n in names) if name]
+
+
+def _history(metadata: dict) -> list[dict]:
+    """Revisions as {version: int, date: ISO timestamp, ...}, whichever form was stored."""
+    result = []
+    for entry in metadata.get('version_history') or metadata.get('versions') or []:
+        if not isinstance(entry, dict):
+            continue
+        version = entry.get('version')
+        if isinstance(version, str) and (match := re.fullmatch(r'v?([1-9][0-9]*)', version)):
+            version = int(match[1])
+        if type(version) is not int or version < 1:
+            continue
+        extra = {k: entry[k] for k in ('size', 'source_type') if entry.get(k) is not None}
+        result.append({'version': version, 'date': _timestamp(entry.get('date') or entry.get('created')),
+                       **extra})
+    return sorted(result, key=lambda entry: entry['version'])
+
+
+def listing_item(paper_id: str, metadata: dict) -> dict:
+    """A catalog record in one shape whatever representation it was stored in. Dates are
+    YYYY-MM-DD (UTC); a field no record says is null. `version` is the one the metadata
+    describes (its history or its own `version`), never the catalog's `latest_version`, which
+    a stored artifact can advance past the text."""
+    categories = metadata.get('categories') or []
+    if isinstance(categories, str):
+        categories = categories.split()
+    history = _history(metadata)
+    published = published_date(metadata)
+    updated = (_date(metadata.get('updated') or metadata.get('update_date'))
+               or _date((history[-1]['date'] or '') if history else '') or published)
+    own = metadata.get('version')
+    versions = [entry['version'] for entry in history]
+    versions += [own] if type(own) is int and own >= 1 else []
+    return {'id': paper_id,
+            'version': max(versions, default=None),
+            'title': _text(metadata.get('title')), 'abstract': _text(metadata.get('abstract')),
+            'authors': _authors(metadata),
+            'categories': list(dict.fromkeys(c for c in map(_text, categories) if c)),
+            'primary_category': _text(metadata.get('primary_category')) or None,
+            'published': published or None, 'updated': updated or None, 'version_history': history,
+            'doi': _text(metadata.get('doi')) or None,
+            'journal_ref': _text(metadata.get('journal_ref') or metadata.get('journal-ref')) or None,
+            'license': _text(metadata.get('license')) or None}
 
 
 def _decode(row: sqlite3.Row) -> dict:

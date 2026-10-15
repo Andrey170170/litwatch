@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+from urllib.parse import quote
 
 from arxiv_archive.api import PaperServer, read_token
 from arxiv_archive.store import Store
@@ -129,6 +130,39 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(retried["status"], "pending")
         self.assertEqual(retried["attempts"], 0)
         self.assertIsNone(retried["error"])
+
+    def test_lists_papers_by_window_in_pages(self):
+        for paper_id, day, category in (("2610.00001", "2026-10-01", "cs.CL"),
+                                        ("hep-th/9901001", "2026-10-02", "cs.CL"),
+                                        ("2610.00003", "2026-10-02", "cs.AI"),
+                                        ("2610.00004", "2026-10-09", "cs.CL")):
+            self.store.catalog.upsert_paper(paper_id, {"title": paper_id, "published": day,
+                                                       "categories": [category]}, 1)
+        route = "/v1/papers?since=2026-10-01&until=2026-10-08&categories=cs.CL,cs.LG&limit=1"
+        status, _, _ = self.request("GET", route, auth=False)
+        self.assertEqual(status, 401)
+        ids, cursor = [], ""
+        while True:
+            status, _, body = self.request("GET", route + cursor)
+            self.assertEqual(status, 200, body)
+            page = json.loads(body)
+            ids += [item["id"] for item in page["items"]]
+            if page["next"] is None:
+                break
+            cursor = "&cursor=" + quote(page["next"])
+        self.assertEqual(ids, ["2610.00001", "hep-th/9901001"])
+        for bad in ("since=2026-10-01", "since=2026-10-08&until=2026-10-01",
+                    "since=2026-10-01&until=2026-10-08&limit=0",
+                    "since=2026-10-01&until=2026-10-08&categories=cs.CL;drop",
+                    "since=2026-10-01&until=2026-10-08&cursor=nonsense",
+                    "since=2026-10-01&until=2026-10-08&q=x"):
+            status, _, _ = self.request("GET", "/v1/papers?" + bad)
+            self.assertEqual(status, 400, bad)
+        with self.store.catalog.lock, self.store.catalog.db:
+            self.store.catalog.db.execute("DELETE FROM import_checkpoints")
+        status, _, body = self.request("GET", route)
+        self.assertEqual(status, 503)
+        self.assertIn(b"index-dates", body)
 
     def test_concurrency_bound_rejects_before_body(self):
         for _ in range(4):

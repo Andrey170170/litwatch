@@ -27,10 +27,12 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
 - The agent shell exports `ANTHROPIC_BASE_URL` for the agent's own proxy. The Anthropic SDK picks it up and every
   litwatch call fails with 401, hence `env -u`.
 - Dev API: `litwatch serve --port 8766`; the web app's `pnpm dev` (port 5173) proxies `/api` to it.
-- The sandbox: until N2a, `sandbox` is the last copy of the first v1's deployment, whose containers stopped on
-  2026-10-14, so `scripts/refresh-sandbox.sh` cannot run. From N2a the script builds `sandbox` fresh from a window
-  of papers read from the archive, and replaces the old one only once the new one is complete. Point
-  `LITWATCH_DATABASE_URL` at `sandbox` to run against it, and refresh it before a run that writes.
+- The sandbox: `scripts/refresh-sandbox.sh` builds `sandbox` fresh, the migrations plus the papers of a window read
+  from the archive (`--days 14` by default, or `--since`/`--until`), and replaces the old one only once the new one
+  is complete. It only reads the archive, at `LITWATCH_ARCHIVE_URL` with `LITWATCH_ARCHIVE_TOKEN`; from a worktree,
+  pass `--env` with the main checkout's `.env.v1`. Until it first runs, `sandbox` is the last copy of the first
+  v1's deployment, whose containers stopped on 2026-10-14. Point `LITWATCH_DATABASE_URL` at `sandbox` to run
+  against it, and refresh it before a run that writes.
 - Stop only what you started: the PID you captured when starting it, or the owner of your port
   (`ss -H -ltnp 'sport = :8766'`) after checking that `/proc/<pid>/cwd` is your checkout. Never kill by a name or
   path pattern: the production container and other worktrees run `litwatch serve` too.

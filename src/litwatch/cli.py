@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections import Counter
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -16,8 +17,11 @@ from rich.console import Console
 
 from litwatch import config as configuration
 from litwatch import seeds, store
+from litwatch.archive import ArchiveError
 from litwatch.core import Topic
 from litwatch.feedback import word
+from litwatch.integrations import IntegrationError
+from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
@@ -33,11 +37,13 @@ topics_app = typer.Typer(no_args_is_help=True, help="Topics as YAML, in and out.
 eval_app = typer.Typer(no_args_is_help=True, help="Dry runs measured against the owner's labels.")
 library_app = typer.Typer(no_args_is_help=True, help="Effective grades and the library.")
 taxonomy_app = typer.Typer(no_args_is_help=True, help="The class tree and its followed topics.")
+intake_app = typer.Typer(help="Take papers in: from arXiv, or a window from the archive.")
 app.add_typer(db_app, name="db")
 app.add_typer(topics_app, name="topics")
 app.add_typer(eval_app, name="eval")
 app.add_typer(library_app, name="library")
 app.add_typer(taxonomy_app, name="taxonomy")
+app.add_typer(intake_app, name="intake")
 console = Console()
 
 ConfigPath = Annotated[
@@ -70,12 +76,15 @@ def db_migrate() -> None:
     console.print("applied: " + (", ".join(applied) or "nothing, already up to date"))
 
 
-@app.command()
+@intake_app.callback(invoke_without_command=True)
 def intake(
+    ctx: typer.Context,
     days: Annotated[int | None, typer.Option(help="Look back this many days.")] = None,
     config: ConfigPath = None,
 ) -> None:
-    """Fetch new and revised papers for the configured categories."""
+    """Fetch new and revised papers for the configured categories from arXiv."""
+    if ctx.invoked_subcommand is not None:
+        return
     cfg = configuration.load(config)
 
     async def work(conn: psycopg.AsyncConnection) -> Any:
@@ -86,6 +95,44 @@ def intake(
     console.print(
         f"intake {result.details['status']}: {result.fetched} papers, "
         f"{result.inserted} new, {result.updated} updated"
+    )
+
+
+@intake_app.command("archive")
+def intake_archive(
+    since: Annotated[datetime | None, typer.Option(formats=["%Y-%m-%d"], help="First day.")] = None,
+    until: Annotated[
+        datetime | None, typer.Option(formats=["%Y-%m-%d"], help="Last day; default today (UTC).")
+    ] = None,
+    days: Annotated[int | None, typer.Option(help="Instead of --since: this many days.")] = None,
+    config: ConfigPath = None,
+) -> None:
+    """Read the papers first submitted in a window, in the configured categories, from the
+    archive ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration)."""
+    if (since is None) == (days is None) or (days is not None and days < 1):
+        raise typer.BadParameter("give --since or a positive --days")
+    cfg = configuration.load(config)
+    last = until.date() if until else datetime.now(UTC).date()
+    first = since.date() if since else last - timedelta(days=days - 1)
+    if first > last:
+        raise typer.BadParameter("--since must not follow --until")
+
+    async def work(conn: psycopg.AsyncConnection) -> Any:
+        client = archive_integration.source(cfg)
+        try:
+            async with run_lock(conn):
+                return await intake_job.from_archive(conn, cfg, client, first, last)
+        finally:
+            await client.aclose()
+
+    try:
+        result = _run(work)
+    except (ArchiveError, IntegrationError) as exc:
+        raise SystemExit(f"archive: {exc}") from exc
+    console.print(
+        f"intake from the archive, {first} to {last}: {result.fetched} papers, "
+        f"{result.inserted} new, {result.updated} updated"
+        + (f", {len(result.details['skipped'])} without text" if result.details["skipped"] else "")
     )
 
 

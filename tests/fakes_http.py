@@ -169,7 +169,9 @@ class FakeArxiv:
 
 
 class FakeArchive:
-    """arxiv-archive's API: catalog records, jobs, PDFs and search."""
+    """arxiv-archive's API: catalog records, jobs, PDFs, search, and window listings over
+    `listing` (items as `/v1/papers` gives them), a page of `limit` at a time with the next
+    index as the cursor."""
 
     def __init__(self, status: str = "complete", records: dict[str, int] | None = None) -> None:
         self.status = status
@@ -180,6 +182,8 @@ class FakeArchive:
         self.jobs: list[dict[str, Any]] = []
         self.search_items: list[dict[str, Any]] = []
         self.searches: list[dict[str, str]] = []
+        self.listing: list[dict[str, Any]] = []
+        self.listings: list[dict[str, str]] = []
 
     def handle(self, req: httpx.Request) -> httpx.Response:
         assert req.headers["Authorization"] == "Bearer archive-token"
@@ -187,6 +191,14 @@ class FakeArchive:
         if path == "/v1/search":
             self.searches.append(dict(req.url.params))
             return httpx.Response(200, json={"items": self.search_items, "has_more": False})
+        if path == "/v1/papers":
+            params = dict(req.url.params)
+            self.listings.append(params)
+            start, limit = int(params.get("cursor", 0)), int(params["limit"])
+            end = start + limit
+            more = end < len(self.listing)
+            body = {"items": self.listing[start:end], "next": str(end) if more else None}
+            return httpx.Response(200, json=body)
         if path == "/v1/jobs":
             body = json.loads(req.content)
             job = {"id": len(self.jobs) + 1, "status": self.status, **body}

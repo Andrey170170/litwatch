@@ -32,12 +32,14 @@ class IntakeResult:
 
 async def _state(conn, category: str, since: date, run_id: int) -> dict[str, Any]:
     # Persist the initial lower bound even if every source fails on the first attempt.
-    # A rolling three-day window must never erase an older unresolved gap.
+    # A rolling three-day window must never erase an older unresolved gap. A read from the
+    # archive covers new papers only, not every change, so it is no harvest to go on from.
     previous = await (
         await conn.execute(
             "SELECT window_to FROM runs WHERE id<%s AND finished_at IS NOT NULL "
-            "AND error IS NULL AND fetched>0 "
-            "AND (intake IS NULL OR intake->>'status'='complete') ORDER BY id DESC LIMIT 1",
+            "AND error IS NULL AND fetched>0 AND (intake IS NULL OR "
+            "(intake->>'status'='complete' AND intake->>'source' IS DISTINCT FROM 'archive')) "
+            "ORDER BY id DESC LIMIT 1",
             (run_id,),
         )
     ).fetchone()

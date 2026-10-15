@@ -126,12 +126,14 @@ digest's: its topic badge, how many papers it covers and how good the best of th
 
 **Gist** (L1):
 What is skimmed before opening an item. A paper's is about one sentence (20–30 words) on what it shows, independent
-of any class, shown with its publication date; a digest's is a short paragraph.
+of any class, shown with its publication date; it is written from the abstract, and again from the full text when the
+paper gets a written Brief. A digest's is a short paragraph.
 _Avoid_: Take, one-liner, TL;DR
 
 **Brief** (L2):
-What the owner reads on opening a paper to decide whether to read it: the abstract, or for a Focus paper a short
-account written from the full text.
+What the owner reads on opening a paper to decide whether to read it: the abstract, or a short account written from
+the full text by a Brief pass or a Weight re-check (for a Focus paper at central or related, an Area pick
+candidate).
 _Avoid_: Semi-deep, summary
 
 **Deep card** (L3):

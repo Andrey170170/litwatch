@@ -12,7 +12,7 @@ Pipeline code names roles, never models; moving a role between providers or labs
 | `check` | chat | second-lab Fit for Focus topics and escalated Area disagreements | Muse Spark 1.3 (contributor) |
 | `area_check` | decision | "does this Fit hold?" for Area verdicts; a "no" or a low-confidence "yes" escalates | the N1 decision model |
 | `field_grade` | chat | Fit for Field topics | Haiku 5.5 |
-| `brief` | chat | Briefs and Weight from the full text | Opus 5.5 |
+| `brief` | chat | Briefs, Weight and Gists from the full text | Opus 5.5 |
 | `writer` | chat | digests and their Gists | Opus 5.5 |
 
 The first v1's `triage` and `review` roles are removed (`classify`, `analyse` and `writer` replace them). Deep cards are
@@ -59,6 +59,10 @@ overview, where an error costs little.
 - Month-to-date spend per provider, from the journal, shown in Settings and on Quality.
 - A monthly budget per provider in configuration. When the month's projected spend exceeds it, the status line turns
   amber. Nightly runs are never downgraded or stopped automatically.
+- Deep cards, for observation only. The `deep` service counts each card's tokens, turns and list cost (what the run
+  would cost at API prices); litwatch records them with the card's attempt. Settings' Runs and cost shows the month to
+  date as a subscription estimate beside the providers, with no budget and no amber, and says how many attempts' usage
+  is unknown, so the estimate reads as a lower bound when any is.
 - Re-runs and backfills show their estimated cost (calls by role times the role's average cost over the last 30 days)
   before they start, and take a hard ceiling they cannot exceed; reaching it stops the job and records where.
 

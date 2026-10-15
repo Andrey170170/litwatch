@@ -29,6 +29,7 @@ through a role.
 ```sh
 litwatch nightly                     # the nightly run: intake, for now
 litwatch intake --days 1             # intake alone
+litwatch intake archive --days 14    # a window's papers read from the archive instead of arXiv
 litwatch topics list | import | export
 litwatch eval classify | classify-report    # the classifier comparison, against the evaluation labels
 litwatch serve                       # the API and web app; needs LITWATCH_API_TOKEN

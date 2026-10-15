@@ -233,7 +233,8 @@ threshold) with the same Save and offer. Export YAML and Import YAML in the head
 hidden and long names are cut with "…".
 
 **Runs and cost.** Spend per provider as a bar: month to date solid, projected to the month's end lighter, the budget a
-tick, amber when projected over. Then the nights as a table (night, papers, graded, digests, took, cost, and what
+tick, amber when projected over. Under them, Deep cards' month to date as a subscription estimate, with no budget
+and never amber, and "at least" with the count of attempts whose usage is unknown when there are any. Then the nights as a table (night, papers, graded, digests, took, cost, and what
 failed, red-edged), then the latest three jobs and "All jobs ›". **Jobs** holds the work outside the nightly run in
 four groups: Not run (yellow; Run now, With tonight's run, Discard), Running and queued (cyan, with progress), Failed
 (red; Try again) and Done. A job that is also a Needs you item settles with it.
