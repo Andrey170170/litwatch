@@ -11,6 +11,7 @@ import psycopg
 from litwatch import intake
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
+from litwatch.feedback import word
 from litwatch.intake import archive as archive_intake
 from litwatch.store import runs
 
@@ -27,6 +28,7 @@ async def run(
     run_id = await runs.start(conn, "intake", since, until)
     try:
         result = await intake.collect(conn, config.intake.categories, since, run_id)
+        await word.settle_all(conn, result.rewritten)
     except Exception as exc:
         await runs.finish(conn, run_id, error=f"{type(exc).__name__}: {exc}")
         raise
@@ -66,6 +68,7 @@ async def from_archive(
     run_id = await runs.start(conn, "intake", *window)
     try:
         result = await archive_intake.collect(conn, client, config.intake.categories, since, until)
+        await word.settle_all(conn, result.rewritten)
     except Exception as exc:
         await runs.finish(conn, run_id, error=f"{type(exc).__name__}: {exc}")
         raise

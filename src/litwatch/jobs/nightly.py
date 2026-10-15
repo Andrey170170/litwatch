@@ -13,6 +13,7 @@ import psycopg
 from litwatch import analysis, classification, grading, intake
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
+from litwatch.feedback import word
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
 from litwatch.store import analyses as analyses_store
@@ -92,6 +93,7 @@ async def run(
     ):
         if fetch:
             result = await intake.collect(conn, config.intake.categories, since, run.run_id)
+            await word.settle_all(conn, result.rewritten)  # the old text's Weight went with it
             await runs.update(
                 conn,
                 run.run_id,

@@ -33,6 +33,8 @@ class Saved:
     # Followed, unfollowed, into or out of draft, or with a new depth or revision: what their
     # papers' grades and rarity rest on. A draft topic is not followed; a paused one still is.
     changed_topics: list[str] = field(default_factory=list)
+    # The owner's order of the topics kept changed: a tie between topics now breaks otherwise.
+    reordered: bool = False
 
 
 async def lock(conn: psycopg.AsyncConnection) -> None:
@@ -137,7 +139,9 @@ async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
         before = {
             r["class"]: (r["depth"], r["status"] == "draft", r["revision"])
             for r in await (
-                await conn.execute("SELECT class, depth, status, revision FROM topics")
+                await conn.execute(
+                    "SELECT class, depth, status, revision FROM topics ORDER BY position, class"
+                )
             ).fetchall()
         }
 
@@ -225,6 +229,7 @@ async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
         saved.changed_topics = sorted(
             s for s in set(before) | set(after) if before.get(s) != after.get(s)
         )
+        saved.reordered = [s for s in before if s in after] != [s for s in after if s in before]
     return saved
 
 

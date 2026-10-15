@@ -3,15 +3,18 @@ verdict records with its event, failures, and grading a stuck paper now. Models 
 through the real Gateway, as in test_steps."""
 
 from contextlib import asynccontextmanager
+from datetime import date
 
 import httpx
 import pytest
 
 from litwatch import grading
 from litwatch.api import create_app
-from litwatch.core import FAILED_RUNS, Fit
+from litwatch.archive import ArchiveClient
+from litwatch.core import FAILED_RUNS, Fit, Status
 from litwatch.core.grading import FIT_DEFINITIONS
-from litwatch.feedback import misses
+from litwatch.feedback import misses, word
+from litwatch.jobs import intake as intake_job
 from litwatch.llm import ProviderError
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures
@@ -19,7 +22,8 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests.conftest import FAITH, INTERP, TREE
-from tests.test_steps import CONFIG, A, B, Scripted, decision, night, rows
+from tests.fakes_http import FakeArchive, mock
+from tests.test_steps import ANALYSIS, CONFIG, A, B, Scripted, decision, night, rows
 
 TOKEN = "s3cret"
 
@@ -279,3 +283,68 @@ async def test_grading_now_on_text_that_changed_meanwhile_is_refused(conn, model
     assert await verdicts(conn, B.id) == []
     (run,) = await rows(conn, "SELECT counts FROM runs WHERE kind = 'grading'")
     assert "graded" not in run["counts"] and "grading_failed" not in run["counts"]
+
+
+def paused(slug: str = FAITH.slug):
+    return TREE.model_copy(
+        update={
+            "topics": [
+                t.model_copy(update={"status": Status.PAUSED}) if t.slug == slug else t
+                for t in TREE.topics
+            ]
+        }
+    )
+
+
+async def test_a_paused_topic_is_not_graded_now_nor_waits_for_the_owner(conn, models):
+    await stuck(conn, models)
+    await word.save_taxonomy(conn, paused())
+    async with api(conn, models) as client:
+        assert (await client.post(NOW, json={"revision": 1})).status_code == 409
+        status = (await client.get("/api/status")).json()
+        quality = (await client.get("/api/settings/quality")).json()
+    assert status["ungraded"] == 0 and quality["night"]["ungraded"] == []
+    (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
+    assert failure["failed_runs"] == FAILED_RUNS  # nothing reset, nothing spent
+    assert await rows(conn, "SELECT 1 FROM runs WHERE kind = 'grading'") == []
+
+
+async def test_a_miss_whose_grading_stopped_is_no_longer_a_candidate(conn, models):
+    await night(conn, models)  # A leads to no topic; its pass is done
+    await misses.report(conn, A.id, INTERP.slug, Fit.RELATED)
+    models.fits[("judge", A.title)] = fit("very central")
+    for _ in range(FAILED_RUNS):
+        await night(conn, models)
+    assert await verdicts_store.candidates(conn, FAILED_RUNS) == []
+
+
+async def test_a_rewrite_read_in_settles_the_paper_on_solid(conn, models):
+    models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
+    await night(conn, models)  # related and incremental: adjacent, not saved
+    fake = FakeArchive()
+    fake.listing = [
+        {
+            "id": B.id,
+            "version": 2,
+            "title": B.title,
+            "abstract": "An entirely different abstract about robots.",
+            "authors": ["Alice Smith"],
+            "categories": ["cs.CL"],
+            "primary_category": None,
+            "published": "2026-10-02",
+            "updated": "2026-10-10",
+            "version_history": [],
+            "doi": None,
+            "journal_ref": None,
+            "license": None,
+        }
+    ]
+    client = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
+    result = await intake_job.from_archive(
+        conn, CONFIG, client, date(2026, 10, 1), date(2026, 10, 14)
+    )
+    assert result.rewritten == [B.id]
+    (g,) = await rows(conn, "SELECT * FROM effective_grades WHERE paper_id = %s", B.id)
+    assert g["grade"] == "relevant"  # the new text has no Weight yet: solid
+    (saved,) = await rows(conn, "SELECT saved FROM library WHERE paper_id = %s", B.id)
+    assert saved["saved"] is True

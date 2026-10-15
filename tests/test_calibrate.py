@@ -66,6 +66,14 @@ async def test_a_draw_is_even_across_groups_seeded_and_skips_labelled_papers(db)
     assert [i["paper_id"] for i in again] == [i["paper_id"] for i in first]
 
 
+async def test_a_draw_skips_a_verdict_on_text_since_rewritten(db):
+    rewritten = ABOVE[0].model_copy(update={"abstract": "An entirely different abstract."})
+    await papers_store.upsert(db, [rewritten])
+    drawn = await items(db, await calibrate.draw(db, seed=7, size=6))
+    assert ABOVE[0].id not in {i["paper_id"] for i in drawn}
+    assert sorted(i["why"] for i in drawn) == ["above", "above", "below", "below", "below"]
+
+
 async def test_answers_become_labels_and_appraisals(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]

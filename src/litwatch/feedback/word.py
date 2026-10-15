@@ -187,7 +187,34 @@ async def save_taxonomy(conn: psycopg.AsyncConnection, tree: Taxonomy) -> taxono
         saved = await taxonomy_store.save(conn, tree)
         for slug in saved.changed_topics:
             await settle_topic(conn, slug)
+        if saved.reordered:
+            await settle_ties(conn)
     return saved
+
+
+async def reorder(conn: psycopg.AsyncConnection, slugs: list[str]) -> None:
+    """Store the owner's order of the topics (`taxonomy.set_order`; ValueError unless it names
+    every topic once) and, in the same transaction, settle the papers whose best topic it
+    decides."""
+    async with conn.transaction():
+        await taxonomy_store.set_order(conn, slugs)
+        await settle_ties(conn)
+
+
+async def settle_ties(conn: psycopg.AsyncConnection) -> int:
+    """Settle the papers whose best topic the owner's order breaks a tie for (`word.tied`):
+    the only papers a new order changes. Call it after `taxonomy.lock`."""
+    papers = await word_store.tied(conn)
+    for paper_id in papers:
+        await settle(conn, paper_id)
+    return len(papers)
+
+
+async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
+    """Settle each paper, as after storing rewritten text: its Weight went with the old text,
+    so its grades fall back to solid until the new text is analysed."""
+    for paper_id in paper_ids:
+        await settle(conn, paper_id)
 
 
 async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:

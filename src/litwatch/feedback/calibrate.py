@@ -29,7 +29,8 @@ async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> l
 
 
 async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[dict[str, Any]]:
-    """The current verdicts of the trailing days on one side of the line, with no firm label.
+    """The current verdicts of the trailing days on one side of the line, made on the paper's
+    current text and with no firm label.
     The side is the pipeline's grade, from the verdict's Fit and the current Weight, whatever
     the owner said."""
     rows = await _all(
@@ -43,7 +44,9 @@ async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[
             SELECT DISTINCT ON (paper_id) * FROM verdicts WHERE topic = %s
             ORDER BY paper_id, paper_revision DESC, recorded_at DESC, id DESC
         ) v
-        WHERE recorded_at >= now() - make_interval(days => %s)
+        -- On the paper's current text, so its Fit and Weight are judgements of the same text.
+        WHERE paper_revision = (SELECT revision FROM papers WHERE id = v.paper_id)
+          AND recorded_at >= now() - make_interval(days => %s)
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = v.paper_id
                           AND l.topic = v.topic AND NOT l.provisional)
         ORDER BY paper_id

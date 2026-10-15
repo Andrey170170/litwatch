@@ -7,8 +7,10 @@ from datetime import datetime
 from typing import Any
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from litwatch.core import Effective, Grade, Hand, Rarity, Reaction
+from litwatch.core.grading import DEPTH_OFFSETS
 
 # -- reactions -------------------------------------------------------------------------------------
 
@@ -108,6 +110,32 @@ async def rarity_of(
         )
     ).fetchone()
     return (Rarity(row["level"]), row["best_topic"]) if row else None
+
+
+async def tied(conn: psycopg.AsyncConnection) -> list[str]:
+    """Papers whose highest level in a mixed list comes from two or more followed topics: the
+    owner's order picks their best topic (`core.mixed_rarity`), so a new order can change it."""
+    rows = await (
+        await conn.execute(
+            """
+            SELECT paper_id FROM (
+                SELECT paper_id, level, max(level) OVER (PARTITION BY paper_id) AS top FROM (
+                    SELECT g.paper_id,
+                           greatest(array_position(%(levels)s::text[], g.rarity) - 1
+                                    - (%(offsets)s::jsonb ->> t.depth)::int, 0) AS level
+                    FROM effective_grades g
+                    JOIN topics t ON t.class = g.topic AND t.status <> 'draft'
+                ) lowered
+            ) leveled
+            WHERE level = top GROUP BY paper_id HAVING count(*) > 1 ORDER BY paper_id
+            """,
+            {
+                "levels": [r.value for r in Rarity],
+                "offsets": Jsonb({d.value: n for d, n in DEPTH_OFFSETS.items()}),
+            },
+        )
+    ).fetchall()
+    return [r["paper_id"] for r in rows]
 
 
 async def in_collection(conn: psycopg.AsyncConnection, paper_id: str) -> bool:

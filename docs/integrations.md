@@ -134,7 +134,8 @@ Through the repositories in `litwatch.store`. Each function takes the connection
 | --- | --- |
 | `store.papers.get(conn, paper_id)` | `core.Paper` (title, abstract, authors, categories, published, url, version, doi, ...) or None |
 | `store.papers.body(conn, paper_id)` | `(text, "html" or "pdf")` when the full text was fetched for the paper's current revision, else None |
-| `store.word.effective_for(conn, paper_id)` | `{topic slug: core.Grade}` for the Focus topics that have one |
+| `store.word.effective_for(conn, paper_id)` | `{topic slug: core.Effective}` for every followed topic that has one, Focus, Area or Field: its effective `fit`, `grade` and `rarity` on the topic's page |
+| `store.word.focus_grades(conn, paper_id)` | `{topic slug: core.Grade}`, the effective grades on the Focus topics only: what the library reads |
 | `store.word.library_row(conn, paper_id)` | a dict with `saved` (bool) and `hand` (`save`, `unsave` or None), or None |
 | `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug` (its class's), `name`, `depth` (`focus`, `area`, `field`) and `grade` |
 | `store.publications.found(conn, [paper_id])` | `{paper_id: core.Publication}` for those with a published record |

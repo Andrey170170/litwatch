@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from litwatch import classification, grading
 from litwatch.api.deps import Conn, budget_lines
-from litwatch.core import FAILED_RUNS, Fit, Paper, Taxonomy, Topic
+from litwatch.core import FAILED_RUNS, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
@@ -66,7 +66,7 @@ async def order(body: Order, c: Conn) -> None:
     """The owner's order, which topic lists and cards follow. The list must name every topic
     once."""
     try:
-        await taxonomy_store.set_order(c, body.slugs)
+        await word.reorder(c, body.slugs)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -185,6 +185,7 @@ async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
         raise HTTPException(status_code=422, detail="give a title or an abstract")
     async with _awaiting(c, paper_id, body.revision):
         await papers_store.correct(c, paper_id, title, abstract)
+    await word.settle(c, paper_id)  # the old text's Weight went with it
 
 
 @router.post("/analysis/{paper_id:path}/retry", status_code=204, responses=WAITING)
@@ -214,6 +215,8 @@ async def grade_now(
     followed = tree.topic(topic) if tree else None
     if tree is None or followed is None:
         raise HTTPException(status_code=404, detail="no such topic")
+    if followed.status != Status.ACTIVE:
+        raise HTTPException(status_code=409, detail=f"{topic} is {followed.status}: not graded")
     async with _awaiting(c, paper_id, body.revision, "grading", topic) as paper:
         await failures.reset(c, paper_id, "grading", topic)
     config = request.app.state.config

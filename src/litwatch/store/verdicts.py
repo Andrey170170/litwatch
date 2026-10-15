@@ -70,11 +70,11 @@ async def candidates(
     current text first, then oldest first. A paper not dismissed and classified at its current
     revision has work when it has no grading pass yet on that text, a grading on an active topic
     that failed fewer than `runs` runs, or a miss reported for an active topic with no verdict
-    on that text. Each comes with its direct membership rows (`memberships`), whether its
-    grading pass is done (`passed`), the topics graded on its current text (`graded`), the
-    topics whose current verdict on an earlier revision has a Fit above none (`held`;
-    pipeline.md, section 8), the failed grading runs in a row per topic on its current text
-    (`failed`) and the active topics a miss was reported for (`missed`)."""
+    on that text and no grading stopped there. Each comes with its direct membership rows
+    (`memberships`), whether its grading pass is done (`passed`), the topics graded on its
+    current text (`graded`), the topics whose current verdict on an earlier revision has a Fit
+    above none (`held`; pipeline.md, section 8), the failed grading runs in a row per topic on
+    its current text (`failed`) and the active topics a miss was reported for (`missed`)."""
     rows = await (
         await conn.execute(
             """
@@ -98,7 +98,12 @@ async def candidates(
                               WHERE x.paper_id = p.id
                                 AND NOT EXISTS (SELECT 1 FROM verdicts v
                                                 WHERE v.paper_id = p.id AND v.topic = x.topic
-                                                  AND v.paper_revision = p.revision))
+                                                  AND v.paper_revision = p.revision)
+                                AND NOT EXISTS (SELECT 1 FROM step_failures f
+                                                WHERE f.paper_id = p.id AND f.step = 'grading'
+                                                  AND f.topic = x.topic
+                                                  AND f.paper_revision = p.revision
+                                                  AND f.failed_runs >= %(runs)s))
                 ORDER BY p.passed, p.fetched_at, p.id
                 LIMIT %(limit)s
             )

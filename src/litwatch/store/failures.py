@@ -64,16 +64,25 @@ async def reset(conn: psycopg.AsyncConnection, paper_id: str, step: Step, topic:
     )
 
 
+# A grading failure counts only while its topic is active: one paused, draft or unfollowed
+# grades nothing, so nothing waits on it.
+_ACTIVE = (
+    "(f.topic = '' OR EXISTS (SELECT 1 FROM topics t WHERE t.class = f.topic "
+    "AND t.status = 'active'))"
+)
+
+
 async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[dict[str, Any]]:
     """Papers `step` failed on for at least `runs` runs in a row on their current text, with the
-    last error (and the topic, for grading); dismissed papers left out. Most failed first."""
+    last error (and the topic, for grading: active topics only); dismissed papers left out.
+    Most failed first."""
     return await (
         await conn.execute(
             "SELECT f.paper_id, f.paper_revision AS revision, p.title, f.failed_runs, "
             "f.last_error, f.failed_at, nullif(f.topic, '') AS topic "
             "FROM step_failures f JOIN papers p ON p.id = f.paper_id "
             "AND p.revision = f.paper_revision AND p.dismissed_at IS NULL "
-            "WHERE f.step = %s AND f.failed_runs >= %s "
+            f"WHERE f.step = %s AND f.failed_runs >= %s AND {_ACTIVE} "
             "ORDER BY f.failed_runs DESC, f.paper_id, f.topic",
             (step, runs),
         )
@@ -102,7 +111,7 @@ async def count_stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> i
         await conn.execute(
             "SELECT count(*) AS n FROM step_failures f JOIN papers p ON p.id = f.paper_id "
             "AND p.revision = f.paper_revision AND p.dismissed_at IS NULL "
-            "WHERE f.step = %s AND f.failed_runs >= %s",
+            f"WHERE f.step = %s AND f.failed_runs >= %s AND {_ACTIVE}",
             (step, runs),
         )
     ).fetchone()

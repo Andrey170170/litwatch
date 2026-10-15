@@ -192,6 +192,16 @@ async def test_only_a_paper_in_the_collection_has_a_rarity(db):
     assert [r["paper_id"] for r in await stored(db, "rarities")] == [P.id]
 
 
+async def test_a_new_order_of_the_topics_breaks_a_tie_for_the_best_topic(db):
+    await graded(db, "central")
+    await graded(db, "central", topic=INTERP.slug)  # both epic in a mixed list
+    assert (await stored(db, "rarities"))[0]["best_topic"] == FAITH.slug  # first in order
+    await word.reorder(db, [INTERP.slug, FAITH.slug, AGENTS.slug])
+    assert (await stored(db, "rarities"))[0]["best_topic"] == INTERP.slug
+    assert (await word.save_taxonomy(db, TREE)).reordered  # the import's order, back again
+    assert (await stored(db, "rarities"))[0]["best_topic"] == FAITH.slug
+
+
 async def test_wrong_topic_takes_the_paper_out_and_clearing_the_thumb_brings_it_back(db):
     await graded(db, "central")
     _, settled = await word.react(db, thumb("unrelated"))
