@@ -34,14 +34,15 @@ start() {
     nohup "$bin/paper-archive-worker" "${args[@]}" > "$dir/worker.log" 2>&1 &
     echo $! > "$dir/worker.pid"
     for _ in $(seq 50); do
-        if ! ours "$(cat "$dir/worker.pid")" "$dir"; then
-            echo "the worker exited:" >&2
-            tail -20 "$dir/worker.log" >&2
-            stop "$dir"
-            exit 1
-        fi
         if curl -sf -H "Authorization: Bearer $(cat "$dir/token")" \
             "http://127.0.0.1:$port/v1/status" > /dev/null; then
+            # Ready only with both processes up: a worker that exited fetches nothing.
+            if ! ours "$(cat "$dir/worker.pid")" "$dir"; then
+                echo "the worker exited:" >&2
+                tail -20 "$dir/worker.log" >&2
+                stop "$dir"
+                exit 1
+            fi
             echo "export LITWATCH_ARCHIVE_URL=http://127.0.0.1:$port"
             echo "export LITWATCH_ARCHIVE_TOKEN=$(cat "$dir/token")"
             echo "# stop: scripts/disposable-archive.sh stop $dir"

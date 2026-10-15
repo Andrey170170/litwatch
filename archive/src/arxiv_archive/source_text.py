@@ -263,8 +263,8 @@ def _members(package: Path, limit: int) -> dict[str, str]:
 def _mains(files: dict[str, str]) -> list[str]:
     """The files that start a document: one no other file inputs (a preamble, or a subfile
     with a \\documentclass of its own, is not it), then one that begins the document (its
-    \\documentclass may sit in a preamble it inputs), then one with \\documentclass, then the
-    shallowest path. Independent documents that tie (a paper and its supplement) are all kept,
+    \\documentclass may sit in a preamble it inputs, so it is not asked for), else one with
+    \\documentclass, then the shallowest path. Independent documents that tie (a paper and its supplement) are all kept,
     in path order, as arXiv compiles them into one PDF: picking one by name could drop the
     paper."""
     latex = [n for n in files if n.lower().endswith(LATEX_SUFFIXES)]
@@ -274,8 +274,9 @@ def _mains(files: dict[str, str]) -> list[str]:
             inputs.update(_candidates(_input(match), '', here))
 
     def rank(n: str) -> tuple:
-        return (n in inputs, '\\begin{document}' not in files[n],
-                '\\documentclass' not in files[n], n.count('/'))
+        begins = '\\begin{document}' in files[n]
+        return (n in inputs, not begins, not begins and '\\documentclass' not in files[n],
+                n.count('/'))
     roots = [n for n in latex if '\\begin{document}' in files[n] or '\\documentclass' in files[n]]
     best = min(map(rank, roots), default=None)
     return sorted(n for n in roots if rank(n) == best)

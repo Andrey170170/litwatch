@@ -95,6 +95,20 @@ class LatexTextTests(unittest.TestCase):
         self.assertLess(text.index("Appendix only."), text.index("Paper body."))
         self.assertIn("\\bibliography{refs}", text)  # the paper has no .bbl of its own
 
+    def test_a_document_whose_class_is_in_its_preamble_ties_with_one_that_has_its_own(self):
+        text = self.text(
+            [
+                ("paper.tex", b"\\input{preamble}\\begin{document}Paper body.\\end{document}\n"),
+                ("preamble.tex", b"\\documentclass{article}\n"),
+                (
+                    "appendix.tex",
+                    b"\\documentclass{article}\\begin{document}Appendix body.\\end{document}\n",
+                ),
+            ]
+        )
+        self.assertIn("Paper body.", text)
+        self.assertIn("Appendix body.", text)
+
     def test_inputs_that_loop_or_are_missing_end(self):
         text = self.text(
             [
