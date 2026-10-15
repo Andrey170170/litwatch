@@ -473,7 +473,9 @@ def openapi(out: Annotated[Path, typer.Argument(help="Where to write the schema.
 
 @app.command("fulltext")
 def fulltext_queue(
-    limit: Annotated[int | None, typer.Option(help="At most this many passes.")] = None,
+    limit: Annotated[
+        int | None, typer.Option(help="At most this many passes written or failed.")
+    ] = None,
     wait: Annotated[
         int, typer.Option(help="Keep trying, for at most this many seconds, while some await text.")
     ] = 0,
@@ -490,17 +492,10 @@ def fulltext_queue(
         raise SystemExit("no archive configured")
 
     async def work(conn: psycopg.AsyncConnection) -> Counter[str]:
-        total: Counter[str] = Counter()
-        deadline = asyncio.get_running_loop().time() + wait
         try:
-            while True:
-                done = await fulltext.work(conn, cfg, archive, limit=limit)
-                total.update(done)
-                console.print(dict(done))
-                left = deadline - asyncio.get_running_loop().time()
-                if not done["awaiting_text"] or left <= 0:
-                    return total
-                await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
+            return await fulltext.work_waiting(
+                conn, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
+            )
         finally:
             await archive.aclose()
 

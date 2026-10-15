@@ -599,6 +599,38 @@ async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db):
     assert [j["paper_id"] for j in fake.jobs] == [P.id, other.id]  # each in turn
 
 
+async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(db, monkeypatch):
+    await graded(db, "central")  # P's text is still being fetched
+    others = [paper(f"2610.0000{n}", title=f"Paper {n}", version=1) for n in (2, 3, 4)]
+    await papers_store.upsert(db, others)
+    for other in others:
+        found = Verdict(
+            paper_id=other.id,
+            topic=FAITH.slug,
+            topic_version="v",
+            fit=Fit.CENTRAL,
+            reason="r",
+            opinions={},
+        )
+        await verdicts.add(db, found)
+        await word.settle(db, other.id)
+
+    class Fetching(FakeArchive):
+        def handle(self, req):
+            if req.url.path == "/v1/jobs" and json.loads(req.content)["paper_id"] == P.id:
+                return httpx.Response(202, json={"id": 99, "status": "pending"})
+            return super().handle(req)
+
+    fake, writer = Fetching(), Writer()
+    for other in others:
+        fake.texts[other.id] = (1, BODY)
+    monkeypatch.setattr(fulltext, "TICK_SECONDS", 0)
+    done = await fulltext.work_waiting(
+        db, CONFIG, archive(fake), limit=2, wait=5, gateway=writer.gateway
+    )
+    assert done["briefs_written"] == 2 and len(writer.asked) == 2
+
+
 # -- revisions -------------------------------------------------------------------------------------
 
 

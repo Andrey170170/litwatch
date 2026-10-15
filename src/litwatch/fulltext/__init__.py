@@ -18,7 +18,7 @@ import asyncio
 import contextlib
 import logging
 from collections import Counter
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 import psycopg
@@ -268,6 +268,36 @@ async def work(
                     counts[_outcome(a)] += 1
                     r.add(_outcome(a))
     return counts
+
+
+async def work_waiting(
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    archive: ArchiveClient,
+    *,
+    limit: int | None = None,
+    wait: float = 0,
+    gateway: GatewayFactory = default_gateway,
+    report: Callable[[Counter[str]], None] | None = None,
+) -> Counter[str]:
+    """`work`, and again every `TICK_SECONDS` for at most `wait` seconds while some passes await
+    their text (`litwatch fulltext --wait`), reporting each round. `limit` caps the passes
+    worked, written or failed, over all the rounds. Returns how the tries ended."""
+    total: Counter[str] = Counter()
+    deadline = asyncio.get_running_loop().time() + wait
+    while True:
+        worked = total["briefs_written"] + total["fulltext_failed"]
+        allowance = None if limit is None else limit - worked
+        if allowance is not None and allowance <= 0:
+            return total
+        done = await work(conn, config, archive, gateway=gateway, limit=allowance)
+        total.update(done)
+        if report:
+            report(done)
+        left = deadline - asyncio.get_running_loop().time()
+        if not done["awaiting_text"] or left <= 0:
+            return total
+        await asyncio.sleep(min(TICK_SECONDS, left))
 
 
 async def run_forever(
