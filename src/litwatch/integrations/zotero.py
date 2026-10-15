@@ -408,7 +408,7 @@ class Zotero:
     async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
         paper_id = event.paper_id
         key = await state.zotero_item(conn, paper_id)
-        seen = await reading.paper(conn, paper_id)
+        seen = await reading.in_library(conn, paper_id)
         if seen is None:
             return
         if not seen["saved"]:
@@ -419,7 +419,7 @@ class Zotero:
                     await state.set_zotero_item(conn, paper_id, None)
             return
         paper = await papers_store.get(conn, paper_id)
-        focus = [t for t in seen["topics"] if t["depth"] == "focus" and _shown(t["grade"])]
+        focus = [t for t in seen["focus"] if _shown(t["grade"])]
         best = min((Grade(t["grade"]) for t in focus), key=lambda g: g.rank, default=None)
         tags = [f"{WATCH_TAG_PREFIX}{t['slug']}:{t['grade']}" for t in focus]
         attempt = str(event.id)

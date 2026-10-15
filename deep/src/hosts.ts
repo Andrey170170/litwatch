@@ -21,7 +21,7 @@ export interface StoreHit {
   published: string | null;
   /** 1 must read, 2 relevant, 3 adjacent, 4 not about it; null when no Watch topic graded it. */
   tier: number | null;
-  /** litwatch's take on the paper, if it wrote one. */
+  /** litwatch's Gist of the paper, if it wrote one. */
   reason: string | null;
   /** false for a paper litwatch never ingested, found by a search provider (the archive). */
   in_collection: boolean;
@@ -32,11 +32,14 @@ interface PaperRow {
   title: string;
   authors?: string[];
   published?: string | null;
-  grade?: string | null;
-  take?: string | null;
+  /** Highest level first; the first badge's grade is the paper's best. */
+  badges?: { grade?: string | null }[];
+  gist?: string | null;
 }
 
 const TIERS: Record<string, number> = { must_read: 1, relevant: 2, adjacent: 3, none: 4 };
+const tier = (grade: string | null | undefined): number | null =>
+  grade && Object.hasOwn(TIERS, grade) ? TIERS[grade]! : null;
 
 /** v1's `GET /api/papers` answer as `store.search` hits: the collection first, then the
  * papers only a search provider holds. */
@@ -46,8 +49,8 @@ export function storeHits(body: { rows?: PaperRow[]; outside?: PaperRow[] }): St
     title: row.title,
     authors: row.authors ?? [],
     published: row.published ?? null,
-    tier: row.grade && Object.hasOwn(TIERS, row.grade) ? TIERS[row.grade]! : null,
-    reason: row.take ?? null,
+    tier: tier(row.badges?.[0]?.grade),
+    reason: row.gist ?? null,
     in_collection: inCollection,
   });
   return [...(body.rows ?? []).map((r) => hit(r, true)), ...(body.outside ?? []).map((r) => hit(r, false))];

@@ -9,8 +9,8 @@ test("store.search asks v1's papers table with the read token and keeps the old 
     asked.push({ url: String(url), auth: new Headers(init?.headers).get("authorization") });
     return Response.json({
       rows: [
-        { id: "2610.00001", title: "Hidden steps", authors: ["Ann Lee"], published: "2026-10-01T00:00:00Z", grade: "must_read", take: "It finds them." },
-        { id: "2610.00002", title: "Near it", authors: [], published: null, grade: null, take: null },
+        { id: "2610.00001", title: "Hidden steps", authors: ["Ann Lee"], published: "2026-10-01T00:00:00Z", badges: [{ grade: "must_read" }, { grade: "adjacent" }], gist: "It finds them." },
+        { id: "2610.00002", title: "Near it", authors: [], published: null, badges: [], gist: null },
       ],
       total: 2,
       outside: [{ id: "2401.00009", title: "Only in the archive", authors: ["Bo Chen"], published: "2024-01-05T00:00:00Z", source: "archive" }],
@@ -35,9 +35,9 @@ test("store.search asks v1's papers table with the read token and keeps the old 
   }
 });
 
-test("grades map to the tiers the agent knows", () => {
+test("the best badge's grade maps to the tier the agent knows", () => {
   const tiers = ["must_read", "relevant", "adjacent", "none"].map(
-    (grade) => storeHits({ rows: [{ id: "1", title: "t", grade }] })[0].tier,
+    (grade) => storeHits({ rows: [{ id: "1", title: "t", badges: [{ grade }] }] })[0].tier,
   );
   assert.deepEqual(tiers, [1, 2, 3, 4]);
   assert.deepEqual(storeHits({}), []);

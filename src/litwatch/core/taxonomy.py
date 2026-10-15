@@ -185,6 +185,18 @@ class Taxonomy(BaseModel):
     def topic(self, slug: str) -> Topic | None:
         return next((t for t in self.topics if t.slug == slug), None)
 
+    def shown(self) -> list[Topic]:
+        """The topics in use (drafts left out) in the one order every list keeps: Focus, Area,
+        Field, each in the owner's order."""
+        depths = list(Depth)
+        used = [t for t in self.topics if t.status != Status.DRAFT]
+        return sorted(used, key=lambda t: depths.index(t.depth))
+
+    def under(self, slug: str) -> list[Topic]:
+        """The shown topics at or under class `slug`, in that order."""
+        below = set(self.subtree(slug))
+        return [t for t in self.shown() if t.slug in below]
+
     def following(self, topic: Topic) -> Taxonomy:
         """This taxonomy with `topic` in place of its class's topic, or last if the class was not
         followed, and the class described by its subject. Fails as construction does."""
