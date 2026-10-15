@@ -133,6 +133,13 @@ class Grading(_Section):
     area_check_min_confidence: float = Field(default=0.7, gt=0, le=1)
 
 
+class Digests(_Section):
+    """How long the night's digests wait for the full-text passes they depend on (digests.md,
+    timing)."""
+
+    wait_minutes: float = Field(default=120, ge=0)
+
+
 class Budget(_Section):
     """A monthly budget per provider account, in USD (models.md, budgets). Projected spend over
     it turns the status line amber; nothing is downgraded or stopped. None is no budget."""
@@ -208,6 +215,7 @@ class Config(_Section):
     models: Models = Models()
     classification: Classification = Classification()
     grading: Grading = Grading()
+    digests: Digests = Digests()
     budget: Budget = Budget()
     schedule: Schedule = Schedule()
     integrations: dict[str, dict] = Field(default_factory=dict)

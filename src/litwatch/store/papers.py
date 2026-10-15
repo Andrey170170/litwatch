@@ -11,6 +11,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch import events
 from litwatch.core import Paper, rewritten
+from litwatch.core.digests import announced
 
 # What `row_to_paper` reads; the stored body of every match would be megabytes nobody looks at.
 COLUMNS = """
@@ -97,11 +98,13 @@ async def upsert(
                     INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
                                         published, updated, url, metadata_source,
                                         version, version_history,
-                                        doi, journal_ref, license)
+                                        doi, journal_ref, license, announced)
                     VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
                             %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
-                            %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s)
+                            %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s,
+                            %(announced)s)
                     ON CONFLICT (id) DO UPDATE SET
+                        announced = coalesce(papers.announced, EXCLUDED.announced),
                         -- The owner's correction stands while arXiv sends the text it fixed.
                         title = CASE WHEN {_KEPT}
                                      THEN papers.title ELSE EXCLUDED.title END,
@@ -149,6 +152,7 @@ async def upsert(
                         **p.model_dump(),
                         "authors": Jsonb(p.authors),
                         "version_history": Jsonb(p.version_history),
+                        "announced": announced(p),
                         "source": source,
                         "by_day": source in _BY_DAY,
                     },

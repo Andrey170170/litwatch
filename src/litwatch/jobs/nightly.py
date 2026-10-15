@@ -1,16 +1,19 @@
-"""The nightly run: intake, classification, analysis, grading and the full-text queue, under the
-run lock and with a run record. Each recorded Weight and verdict settles its paper (effective
-grades, rarity, the library, its full-text pass) as it is recorded."""
+"""The nightly run: intake, classification, analysis, grading, the full-text queue and, after a
+bounded wait for the passes they depend on, the digests, under the run lock and with a run
+record. Each recorded Weight and verdict settles its paper (effective grades, rarity, the
+library, its full-text pass) as it is recorded."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from contextlib import aclosing
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import psycopg
 
-from litwatch import analysis, classification, fulltext, grading, intake
+from litwatch import analysis, classification, digests, fulltext, grading, intake
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
 from litwatch.core.fulltext import RECONCILE_LOOKBACK
@@ -19,6 +22,7 @@ from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, mod
 from litwatch.jobs.lock import run_lock
 from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
+from litwatch.store import digests as digests_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
@@ -98,6 +102,48 @@ async def text_passes(
         await archive.aclose()
 
 
+WAIT_TICK_SECONDS = 30.0  # how often the wait looks at the passes it waits for
+
+
+async def wait_for_texts(
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    run: ModelRun,
+    since: datetime,
+    graded: float,
+    tick: float = WAIT_TICK_SECONDS,
+) -> None:
+    """The bounded wait before the digests (digests.md, timing): until every Brief and Weight
+    re-check the run queued (since `since`) has finished, failed in this run or is terminal,
+    or for `[digests] wait_minutes` from when grading ended (`graded`, `time.monotonic()`),
+    whichever comes first, working the queue meanwhile so a pass runs as soon as its text
+    arrives. Without an archive no pass can run, so there is no wait."""
+    deadline = graded + config.digests.wait_minutes * 60
+    archive = fulltext.archive_for(config)
+    if archive is None:
+        return
+    try:
+        while await digests_store.waiting_passes(conn, since):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                run.add("digest_wait_ended", 1)  # some passes still running: digests went on
+                return
+            await asyncio.sleep(min(tick, left))
+            await fulltext.work(conn, config, archive, run=run)
+    finally:
+        await archive.aclose()
+
+
+async def write_digests(
+    conn: psycopg.AsyncConnection, config: Config, run: ModelRun, today: date | None = None
+) -> None:
+    """The night's digests, for `today` in the schedule's zone."""
+    tree = await taxonomy_store.load(conn)
+    if tree is None:
+        return
+    await digests.nightly(conn, run, tree, today or datetime.now(config.schedule.zone).date())
+
+
 async def run(
     conn: psycopg.AsyncConnection,
     config: Config,
@@ -106,13 +152,14 @@ async def run(
     days: int | None = None,
     limit: int | None = None,
     gateway: GatewayFactory = default_gateway,
+    today: date | None = None,
 ) -> int:
     """One run under the run lock. Returns the run id.
 
     An incomplete harvest does not stop the rest: what arrived is classified, analysed and
     graded, and the gap stays open for the next run. `limit` caps the papers each step that
     spends takes, and the full-text passes tried; the full-text reconcile spends nothing and
-    takes all.
+    takes all. The digests are those of `today`, by default the day in the schedule's zone.
     """
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
@@ -135,5 +182,8 @@ async def run(
         await classify(conn, config, run, limit)
         await analyse(conn, run, limit)
         await grade(conn, config, run, limit)
+        graded = time.monotonic()
         await text_passes(conn, config, run, limit)
+        await wait_for_texts(conn, config, run, until, graded)
+        await write_digests(conn, config, run, today)
         return run.run_id

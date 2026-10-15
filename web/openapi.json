@@ -1198,6 +1198,228 @@
         }
       }
     },
+    "/api/digests/days/{day}": {
+      "get": {
+        "summary": "Day",
+        "description": "A day's daily digests, every topic's at Gist level, and where \u2039 \u203a step.",
+        "operationId": "day_api_digests_days__day__get",
+        "parameters": [
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Day"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests/weeks/{day}": {
+      "get": {
+        "summary": "Week",
+        "description": "The weekly digests of the week holding `day`, and where \u2039 \u203a step.",
+        "operationId": "week_api_digests_weeks__day__get",
+        "parameters": [
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Week"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests": {
+      "get": {
+        "summary": "History",
+        "description": "History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily\nMarks and whether arXiv listed papers on it, and the weeks those days fall in with their\nweekly Marks.",
+        "operationId": "history_api_digests_get",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/History"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests/{digest_id}": {
+      "get": {
+        "summary": "Digest",
+        "description": "A digest in full: its text and its papers by role, each as it was shown.",
+        "operationId": "digest_api_digests__digest_id__get",
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such digest, or its topic is no longer shown"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests/{digest_id}/write": {
+      "post": {
+        "summary": "Write Again",
+        "description": "Write a failed digest again now, over the papers due for it now, as a run of its own.\nIt may fail again. 409 when it is not failed (written meanwhile), its topic is paused, or\nanother job holds the run lock.",
+        "operationId": "write_again_api_digests__digest_id__write_post",
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such digest, or its topic is no longer shown"
+          },
+          "409": {
+            "description": "The digest is not failed, its topic is not active, or a job runs"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/taxonomy": {
       "get": {
         "summary": "Taxonomy",
@@ -2645,6 +2867,70 @@
         "title": "CurrentVerdict",
         "description": "A topic's current verdict: the Fit that stands, each grader's answer by role, and the\npaper revision it was made from."
       },
+      "Day": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "released": {
+            "type": "boolean",
+            "title": "Released"
+          },
+          "digests": {
+            "items": {
+              "$ref": "#/components/schemas/DigestCard"
+            },
+            "type": "array",
+            "title": "Digests"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
+          "weekly": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "released",
+          "digests"
+        ],
+        "title": "Day",
+        "description": "A day's daily digests in the fixed topic order. `released` is false on a day arXiv listed\nnothing; `previous` and `next` are the nearest days with digests; on a Monday, `weekly` is\nthe Monday of the week whose weekly digests came out that day."
+      },
       "DeepCard": {
         "properties": {
           "card": {
@@ -2692,6 +2978,366 @@
         ],
         "title": "Depth",
         "description": "How closely the owner follows a topic: the research question, the area, the wider field."
+      },
+      "Digest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/Badge"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DigestPeriod"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DigestState"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DigestCounts"
+          },
+          "best_rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gist"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "written_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Written At"
+          },
+          "papers": {
+            "items": {
+              "$ref": "#/components/schemas/DigestPaper"
+            },
+            "type": "array",
+            "title": "Papers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "period",
+          "day",
+          "state",
+          "counts",
+          "written_at",
+          "papers"
+        ],
+        "title": "Digest",
+        "description": "A digest in full: its text and every paper by role; why it failed, when it did."
+      },
+      "DigestCard": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/Badge"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DigestPeriod"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DigestState"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DigestCounts"
+          },
+          "best_rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gist"
+          },
+          "papers": {
+            "items": {
+              "$ref": "#/components/schemas/DigestPaper"
+            },
+            "type": "array",
+            "title": "Papers"
+          },
+          "more": {
+            "type": "integer",
+            "title": "More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "period",
+          "day",
+          "state",
+          "counts",
+          "papers",
+          "more"
+        ],
+        "title": "DigestCard",
+        "description": "A digest at Gist level (a Day or a Week): its Gist and up to three of its papers (its\npicks, else its central papers); `more` are the rest."
+      },
+      "DigestCounts": {
+        "properties": {
+          "papers": {
+            "type": "integer",
+            "title": "Papers",
+            "default": 0
+          },
+          "picks": {
+            "type": "integer",
+            "title": "Picks",
+            "default": 0
+          },
+          "central": {
+            "type": "integer",
+            "title": "Central",
+            "default": 0
+          },
+          "related": {
+            "type": "integer",
+            "title": "Related",
+            "default": 0
+          },
+          "must_read": {
+            "type": "integer",
+            "title": "Must Read",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "DigestCounts",
+        "description": "What a digest's Mark counts: the papers it covered, its picks, and of them those central,\nrelated, and graded must read."
+      },
+      "DigestMark": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/Badge"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DigestPeriod"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DigestState"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DigestCounts"
+          },
+          "best_rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "period",
+          "day",
+          "state",
+          "counts"
+        ],
+        "title": "DigestMark",
+        "description": "A digest at Mark level (History): its topic, how many papers, its best rarity."
+      },
+      "DigestPaper": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "announced": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Announced"
+          },
+          "role": {
+            "$ref": "#/components/schemas/DigestRole"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gist"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rarity": {
+            "$ref": "#/components/schemas/Rarity"
+          },
+          "set_aside": {
+            "type": "boolean",
+            "title": "Set Aside",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "role",
+          "revision",
+          "rarity"
+        ],
+        "title": "DigestPaper",
+        "description": "A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set\nit below relevant where it was graded."
+      },
+      "DigestPeriod": {
+        "type": "string",
+        "enum": [
+          "day",
+          "week"
+        ],
+        "title": "DigestPeriod"
+      },
+      "DigestRole": {
+        "type": "string",
+        "enum": [
+          "pick",
+          "listed",
+          "mentioned"
+        ],
+        "title": "DigestRole",
+        "description": "How a digest shows one of its papers."
+      },
+      "DigestState": {
+        "type": "string",
+        "enum": [
+          "written",
+          "nothing_new",
+          "failed"
+        ],
+        "title": "DigestState",
+        "description": "A digest is published once written, or once it says \"Nothing new\"; a failed one is\nwritten again by the next run, over the papers due then."
       },
       "DrawIn": {
         "properties": {
@@ -3052,6 +3698,70 @@
         "title": "Hand",
         "description": "The owner's newest use of the Save toggle."
       },
+      "History": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryDay"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryWeek"
+            },
+            "type": "array",
+            "title": "Weeks"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "weeks"
+        ],
+        "title": "History",
+        "description": "Days from `until` back to `since`, newest first, and the weeks they touch; `start` is the\nday of the oldest digest, where History stops."
+      },
+      "HistoryDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "released": {
+            "type": "boolean",
+            "title": "Released"
+          },
+          "marks": {
+            "items": {
+              "$ref": "#/components/schemas/DigestMark"
+            },
+            "type": "array",
+            "title": "Marks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "released",
+          "marks"
+        ],
+        "title": "HistoryDay"
+      },
       "HistoryItem": {
         "properties": {
           "what": {
@@ -3159,6 +3869,28 @@
         ],
         "title": "HistoryItem",
         "description": "Something said about the paper, oldest first: every verdict (`value` its Fit), the\nowner's label (its value) and thumb (its value and reason) as they stand, misses, and each\nclassification (`topic` is its primary class). `followed`: the topic is followed now."
+      },
+      "HistoryWeek": {
+        "properties": {
+          "monday": {
+            "type": "string",
+            "format": "date",
+            "title": "Monday"
+          },
+          "marks": {
+            "items": {
+              "$ref": "#/components/schemas/DigestMark"
+            },
+            "type": "array",
+            "title": "Marks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "monday",
+          "marks"
+        ],
+        "title": "HistoryWeek"
       },
       "IntegrationCard": {
         "properties": {
@@ -4637,6 +5369,11 @@
             "title": "Fulltext Failed",
             "default": 0
           },
+          "digests_failed": {
+            "type": "integer",
+            "title": "Digests Failed",
+            "default": 0
+          },
           "over_budget": {
             "items": {
               "type": "string"
@@ -4764,6 +5501,40 @@
         ],
         "title": "Status",
         "description": "Whether a topic is in use."
+      },
+      "StripDigest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DigestState"
+          },
+          "best_rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "day",
+          "state"
+        ],
+        "title": "StripDigest",
+        "description": "One square of a topic's digest strip: a digest, coloured by its best rarity (none for\nnothing new), red when it failed."
       },
       "Taxonomy": {
         "properties": {
@@ -4984,6 +5755,13 @@
             "type": "string",
             "title": "Subject"
           },
+          "strip": {
+            "items": {
+              "$ref": "#/components/schemas/StripDigest"
+            },
+            "type": "array",
+            "title": "Strip"
+          },
           "papers": {
             "type": "integer",
             "title": "Papers"
@@ -5069,6 +5847,13 @@
           "subject": {
             "type": "string",
             "title": "Subject"
+          },
+          "strip": {
+            "items": {
+              "$ref": "#/components/schemas/StripDigest"
+            },
+            "type": "array",
+            "title": "Strip"
           }
         },
         "type": "object",
@@ -5313,6 +6098,53 @@
           "version"
         ],
         "title": "Version"
+      },
+      "Week": {
+        "properties": {
+          "monday": {
+            "type": "string",
+            "format": "date",
+            "title": "Monday"
+          },
+          "digests": {
+            "items": {
+              "$ref": "#/components/schemas/DigestCard"
+            },
+            "type": "array",
+            "title": "Digests"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "type": "object",
+        "required": [
+          "monday",
+          "digests"
+        ],
+        "title": "Week",
+        "description": "A week's weekly digests in the fixed topic order, keyed by its Monday."
       },
       "Weight": {
         "type": "string",

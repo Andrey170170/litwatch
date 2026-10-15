@@ -505,6 +505,7 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
         "analysis_failed": 0,
         "ungraded": 0,
         "fulltext_failed": 0,
+        "digests_failed": 0,
         "over_budget": [],
     }
     await conn.execute(

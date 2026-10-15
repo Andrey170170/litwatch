@@ -18,6 +18,7 @@ from litwatch.core import FAILED_RUNS, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
+from litwatch.store import digests as digests_store
 from litwatch.store import failures, quality
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
@@ -93,6 +94,8 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
             "ungraded": await failures.stuck(c, "grading", FAILED_RUNS),
             # A full-text pass failed three runs in a row, or awaits its text over a week.
             "fulltext": await fulltext_store.stuck(c, FAILED_RUNS),
+            # A digest whose writer call failed: the next run writes it again.
+            "digests": await digests_store.failed(c),
         },
         "cost": [
             line.model_dump() for line in await budget_lines(c, request.app.state.config.budget)
