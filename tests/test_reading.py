@@ -60,7 +60,8 @@ async def analyse(conn, p, weight="solid", *, code=False, gist="Probes find hidd
 
 
 async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) -> None:
-    """A verdict of `fit` on `topic`; `check` a second grader's differing Fit (a split)."""
+    """A verdict of `fit` on `topic`, on the paper's current text; `check` a second grader's
+    differing Fit (a split)."""
     opinions = {"judge": Opinion(fit=Fit(fit), reason="judge's reason", model="anthropic:x")}
     if check or topic is FAITH:
         opinions["check"] = Opinion(fit=Fit(check or fit), reason="check's", model="openrouter:y")
@@ -70,6 +71,7 @@ async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) 
             paper_id=p.id,
             topic=topic.slug,
             topic_version=topic.version,
+            paper_revision=await papers_store.revision(conn, p.id),
             fit=Fit(fit),
             reason="judge's reason",
             opinions=opinions,

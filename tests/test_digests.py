@@ -17,7 +17,7 @@ from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Label, LabelValue, Status
 from litwatch.core.classification import Source
-from litwatch.core.digests import listing_day, voice_problems
+from litwatch.core.digests import DigestPeriod, listing_day, voice_problems
 from litwatch.digests import writer
 from litwatch.feedback import word
 from litwatch.jobs import nightly
@@ -359,6 +359,19 @@ async def test_a_rewritten_paper_graded_again_where_it_was_held_is_due_there(db)
     await day(db, Writer(), TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
     assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(P.id, "listed")])
+
+
+async def test_a_rewritten_focus_paper_waits_for_its_new_texts_grading(db):
+    await focus(db, P, "central")
+    rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
+    await papers_store.upsert(db, [rewritten])
+    await listed(db, TUE, P)
+    await listed(db, WED, S)
+    await day(db, Writer(), TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
+    await grade(db, rewritten, "central")
+    await day(db, Writer(), WED)
+    assert await shown(db, FAITH.slug, "day", WED) == ("written", [(P.id, "listed")])
 
 
 async def test_a_grading_failed_on_a_paused_topic_does_not_hold_back_its_area(db):
@@ -727,6 +740,20 @@ async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db):
         topics = (await http.get("/api/topics")).json()
         assert [len(t["strip"]) for g in topics for t in g["topics"]] == [1, 1, 1]
         assert (await http.get("/api/digests/999999")).status_code == 404
+
+
+async def test_the_tab_steps_only_through_the_digests_it_shows(db):
+    """An unfollowed topic keeps its digests, but the tab neither shows nor steps to them."""
+    w = Writer()
+    tree = await taxonomy_store.load(db)
+    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+        await digests.write(db, run, tree, tree.topic(FAITH.slug), DigestPeriod.DAY, TUE)
+        await digests.write(db, run, tree, tree.topic(INTERP.slug), DigestPeriod.DAY, WED)
+    await taxonomy_store.save(db, TREE.model_copy(update={"topics": [INTERP, AGENTS]}))
+    async with client(db, w) as http:
+        wed = (await http.get(f"/api/digests/days/{WED}")).json()
+        history = (await http.get("/api/digests", params={"since": MON, "until": SAT})).json()
+    assert (wed["previous"], history["start"]) == (None, str(WED))
 
 
 async def test_a_failed_digest_is_written_again_at_the_owners_word(db):

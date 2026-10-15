@@ -30,6 +30,11 @@ def _paper(row: dict[str, Any]) -> s.DigestPaper:
     return s.DigestPaper(id=row["paper_id"], revision=row["paper_revision"], **row)
 
 
+async def _shown(c: psycopg.AsyncConnection) -> list[str]:
+    """The shown topics, whose digests the tab shows and steps through."""
+    return list(_looks(await taxonomy_store.load(c)))
+
+
 async def _marks(
     c: psycopg.AsyncConnection, period: DigestPeriod, first: date, last: date
 ) -> list[tuple[dict[str, Any], s.Badge]]:
@@ -74,6 +79,7 @@ async def _cards(c: psycopg.AsyncConnection, period: DigestPeriod, day: date) ->
 async def day(day: date, c: Conn) -> s.Day:
     """A day's daily digests, every topic's at Gist level, and where ‹ › step."""
     weekly = None
+    shown = await _shown(c)
     monday = day - timedelta(days=7)
     if day.weekday() == 0 and await _marks(c, DigestPeriod.WEEK, monday, monday):
         weekly = monday
@@ -81,8 +87,8 @@ async def day(day: date, c: Conn) -> s.Day:
         day=day,
         released=await store_.released(c, day),
         digests=await _cards(c, DigestPeriod.DAY, day),
-        previous=await store_.step(c, DigestPeriod.DAY, day, later=False),
-        next=await store_.step(c, DigestPeriod.DAY, day, later=True),
+        previous=await store_.step(c, DigestPeriod.DAY, day, False, shown),
+        next=await store_.step(c, DigestPeriod.DAY, day, True, shown),
         weekly=weekly,
     )
 
@@ -91,11 +97,12 @@ async def day(day: date, c: Conn) -> s.Day:
 async def week(day: date, c: Conn) -> s.Week:
     """The weekly digests of the week holding `day`, and where ‹ › step."""
     monday = week_of(day)
+    shown = await _shown(c)
     return s.Week(
         monday=monday,
         digests=await _cards(c, DigestPeriod.WEEK, monday),
-        previous=await store_.step(c, DigestPeriod.WEEK, monday, later=False),
-        next=await store_.step(c, DigestPeriod.WEEK, monday, later=True),
+        previous=await store_.step(c, DigestPeriod.WEEK, monday, False, shown),
+        next=await store_.step(c, DigestPeriod.WEEK, monday, True, shown),
     )
 
 
@@ -117,7 +124,7 @@ async def history(params: Annotated[s.HistoryIn, Query()], c: Conn) -> s.History
     return s.History(
         days=[s.HistoryDay(day=d, released=d in released, marks=days.get(d, [])) for d in span],
         weeks=[s.HistoryWeek(monday=m, marks=weeks.get(m, [])) for m in mondays],
-        start=await store_.first_day(c),
+        start=await store_.first_day(c, await _shown(c)),
     )
 
 

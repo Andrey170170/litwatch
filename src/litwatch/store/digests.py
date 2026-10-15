@@ -145,7 +145,8 @@ _SUBTREE_LED = f"""(
 
 def _focus(which: str) -> str:
     """A Focus topic's eligible papers: graded there, at effective Fit central or related, and
-    at a verdict's Fit that was too, so the owner's word, which the owner already knows, never
+    at a verdict's Fit on the current text that was too (a rewritten paper waits for its
+    grading), so the owner's word, which the owner already knows, never
     makes a paper due, and led there by the pipeline (`_FOCUS_LED`)."""
     return f"""
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, g.grade, g.rarity,
@@ -154,7 +155,8 @@ def _focus(which: str) -> str:
     JOIN effective_grades g ON g.paper_id = p.id AND g.topic = %(topic)s
     JOIN LATERAL (SELECT v.fit, v.reason FROM verdicts v
                   WHERE v.paper_id = p.id AND v.topic = %(topic)s
-                  ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC LIMIT 1) v ON true
+                    AND v.paper_revision = p.revision
+                  ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) v ON true
     WHERE p.dismissed_at IS NULL AND g.fit IN ('central', 'related')
       AND v.fit IN ('central', 'related') AND {which} AND {_FOCUS_LED}
     ORDER BY {_rank("g.rarity")} DESC, p.announced, p.id
@@ -526,24 +528,30 @@ async def released_days(conn: psycopg.AsyncConnection, first: date, last: date) 
 
 
 async def step(
-    conn: psycopg.AsyncConnection, period: DigestPeriod, day: date, later: bool
+    conn: psycopg.AsyncConnection,
+    period: DigestPeriod,
+    day: date,
+    later: bool,
+    topics: list[str],
 ) -> date | None:
-    """The nearest day before `day` (or after, `later`) with digests of `period`: where the Day
-    or Week view steps, past the days without."""
+    """The nearest day before `day` (or after, `later`) with digests of `period` of `topics`
+    (those shown): where the Day or Week view steps, past the days without."""
     op, order = (">", "ASC") if later else ("<", "DESC")
     row = await (
         await conn.execute(
-            f"SELECT day FROM digests WHERE period = %s AND day {op} %s ORDER BY day {order} "
-            "LIMIT 1",
-            (period.value, day),
+            f"SELECT day FROM digests WHERE period = %s AND day {op} %s AND topic = ANY(%s) "
+            f"ORDER BY day {order} LIMIT 1",
+            (period.value, day, topics),
         )
     ).fetchone()
     return row["day"] if row else None
 
 
-async def first_day(conn: psycopg.AsyncConnection) -> date | None:
-    """The day of the oldest digest: where History stops."""
-    row = await (await conn.execute("SELECT min(day) AS day FROM digests")).fetchone()
+async def first_day(conn: psycopg.AsyncConnection, topics: list[str]) -> date | None:
+    """The day of the oldest digest of `topics` (those shown): where History stops."""
+    row = await (
+        await conn.execute("SELECT min(day) AS day FROM digests WHERE topic = ANY(%s)", (topics,))
+    ).fetchone()
     return row["day"]
 
 
