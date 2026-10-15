@@ -325,6 +325,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/classification/{paper_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss
+         * @description Litwatch drops the paper from processing; it stays searchable in the archive.
+         */
+        post: operations["dismiss_api_settings_classification__paper_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/classification/{paper_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Classify By Hand
+         * @description The owner names the paper's classes, which go on as usual with source `owner`.
+         */
+        put: operations["classify_by_hand_api_settings_classification__paper_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/classification/{paper_id}/correction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correct
+         * @description Fix the text classification choked on. It counts as a rewrite: the next run classifies
+         *     the corrected paper.
+         */
+        post: operations["correct_api_settings_classification__paper_id__correction_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/calibrate": {
         parameters: {
             query?: never;
@@ -693,6 +754,20 @@ export interface components {
             authors?: string[];
             /** Year */
             year?: number | null;
+        };
+        /** ClassesIn */
+        ClassesIn: {
+            /** Classes */
+            classes: string[];
+            /** Primary */
+            primary?: string | null;
+        };
+        /** CorrectionIn */
+        CorrectionIn: {
+            /** Title */
+            title?: string | null;
+            /** Abstract */
+            abstract?: string | null;
         };
         /**
          * DeepCard
@@ -1229,14 +1304,15 @@ export interface components {
         };
         /**
          * Status
-         * @description The latest nightly run: none yet, running, failed, or finished without an error.
+         * @description The latest nightly run: none yet, running, failed, or finished without an error, with
+         *     papers waiting for the owner (`attention`) or not (`quiet`).
          */
         litwatch__api__schemas__Status: {
             /**
              * State
              * @enum {string}
              */
-            state: "none" | "running" | "failed" | "quiet";
+            state: "none" | "running" | "failed" | "attention" | "quiet";
             /** Run Id */
             run_id?: number | null;
             /** Started At */
@@ -1245,6 +1321,11 @@ export interface components {
             finished_at?: string | null;
             /** Error */
             error?: string | null;
+            /**
+             * Awaiting Classification
+             * @default 0
+             */
+            awaiting_classification: number;
         };
         /**
          * Status
@@ -1875,6 +1956,105 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    dismiss_api_settings_classification__paper_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    classify_by_hand_api_settings_classification__paper_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassesIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_api_settings_classification__paper_id__correction_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

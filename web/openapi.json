@@ -977,6 +977,134 @@
         }
       }
     },
+    "/api/settings/classification/{paper_id}/dismiss": {
+      "post": {
+        "summary": "Dismiss",
+        "description": "Litwatch drops the paper from processing; it stays searchable in the archive.",
+        "operationId": "dismiss_api_settings_classification__paper_id__dismiss_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/classification/{paper_id}": {
+      "put": {
+        "summary": "Classify By Hand",
+        "description": "The owner names the paper's classes, which go on as usual with source `owner`.",
+        "operationId": "classify_by_hand_api_settings_classification__paper_id__put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassesIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Classify By Hand Api Settings Classification  Paper Id  Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/classification/{paper_id}/correction": {
+      "post": {
+        "summary": "Correct",
+        "description": "Fix the text classification choked on. It counts as a rewrite: the next run classifies\nthe corrected paper.",
+        "operationId": "correct_api_settings_classification__paper_id__correction_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/calibrate": {
       "get": {
         "summary": "Sessions",
@@ -1788,6 +1916,61 @@
         ],
         "title": "CitedIn",
         "description": "A paper outside the collection, as a search hit gives it: enough for an arXiv entry."
+      },
+      "ClassesIn": {
+        "properties": {
+          "classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classes"
+        ],
+        "title": "ClassesIn"
+      },
+      "CorrectionIn": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstract"
+          }
+        },
+        "type": "object",
+        "title": "CorrectionIn"
       },
       "DeepCard": {
         "properties": {
@@ -3344,6 +3527,7 @@
               "none",
               "running",
               "failed",
+              "attention",
               "quiet"
             ],
             "title": "State"
@@ -3393,6 +3577,11 @@
               }
             ],
             "title": "Error"
+          },
+          "awaiting_classification": {
+            "type": "integer",
+            "title": "Awaiting Classification",
+            "default": 0
           }
         },
         "type": "object",
@@ -3400,7 +3589,7 @@
           "state"
         ],
         "title": "Status",
-        "description": "The latest nightly run: none yet, running, failed, or finished without an error."
+        "description": "The latest nightly run: none yet, running, failed, or finished without an error, with\npapers waiting for the owner (`attention`) or not (`quiet`)."
       },
       "litwatch__core__types__Status": {
         "type": "string",

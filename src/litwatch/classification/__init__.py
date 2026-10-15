@@ -1,17 +1,41 @@
-"""Classification's decision request, built from the tree, and its answer read back as class
-probabilities and a primary class (docs/specs/v1/pipeline.md, section 2). The nightly step
-arrives in N2a; the comparison of classifiers (`litwatch eval classify`) uses this now."""
+"""Classification (docs/specs/v1/pipeline.md, section 2): one decision request per paper, built
+from the tree, read back as class probabilities and a primary class, and turned into direct
+memberships with their sources. `classify` asks and writes nothing; `record` stores what it found.
+The comparison of classifiers (`litwatch eval classify`) uses the same request."""
 
 from __future__ import annotations
 
-from litwatch.core.classification import Classified
+import asyncio
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from typing import Any
+
+import psycopg
+
+from litwatch import events
+from litwatch.core import Paper
+from litwatch.core.classification import (
+    CHOSEN,
+    Classified,
+    Membership,
+    Source,
+    Thresholds,
+    keyword,
+    memberships,
+    standing,
+)
 from litwatch.core.taxonomy import Taxonomy
+from litwatch.llm import CallError, Gateway, Usage
 from litwatch.llm.decisions import Decision
 from litwatch.llm.types import Choice, DecisionRequest, Predicate, Question
+from litwatch.store import classifications as store
+from litwatch.store import failures
+from litwatch.store import papers as papers_store
 
 ROLE = "classify"
 # Not a possible class slug (slugs have no underscore), so it never names a yes/no question.
 PRIMARY = "primary_class"
+OWNER = "owner"  # the model of a classification by hand
 
 
 def questions(tree: Taxonomy) -> tuple[Question, ...]:
@@ -43,3 +67,133 @@ def classified(tree: Taxonomy, decision: Decision) -> Classified:
         probabilities=decision.probabilities,
         primary=by_name[decision.choices[PRIMARY].option],
     )
+
+
+@dataclass
+class Classification:
+    """One paper's classification under one tree, or why there is none."""
+
+    paper: Paper
+    taxonomy_revision: str  # `Taxonomy.classes_version` of the tree it was asked under
+    versions: dict[str, str]  # class slug -> its version in that tree
+    classified: Classified | None = None
+    memberships: list[Membership] = field(default_factory=list)
+    response: dict[str, Any] | None = None  # the decision as the model gave it
+    model: str | None = None
+    usage: Usage | None = None
+    error: str | None = None
+
+
+async def _one(
+    paper: Paper, tree: Taxonomy, gateway: Gateway, thresholds: Thresholds
+) -> Classification:
+    found = Classification(paper, tree.classes_version, {c.slug: c.version for c in tree.classes})
+    try:
+        answer = await gateway.decide(
+            ROLE, request(tree, paper.title, paper.abstract), paper_id=paper.id
+        )
+    except CallError as exc:
+        # Every question answered, every probability in [0, 1], the choice a class of the tree:
+        # anything less is a failed call (pipeline.md, section 2).
+        found.error, found.usage = str(exc), exc.usage
+        return found
+    found.classified = classified(tree, answer.value)
+    found.memberships = memberships(tree, found.classified, paper.title, paper.abstract, thresholds)
+    found.response = answer.value.model_dump(mode="json")
+    found.model, found.usage = answer.model, answer.usage
+    return found
+
+
+async def classify(
+    papers: list[Paper],
+    tree: Taxonomy,
+    gateway: Gateway,
+    thresholds: Thresholds = CHOSEN,
+    concurrency: int = 16,
+) -> AsyncIterator[Classification]:
+    """Ask the `classify` role about each paper and yield results as they arrive. Writes
+    nothing. A paper whose call fails is yielded with its error and stops nothing else."""
+    limit = asyncio.Semaphore(concurrency)
+
+    async def bounded(paper: Paper) -> Classification:
+        async with limit:
+            return await _one(paper, tree, gateway, thresholds)
+
+    tasks = [asyncio.create_task(bounded(p)) for p in papers]
+    try:
+        for done in asyncio.as_completed(tasks):
+            yield await done
+    finally:
+        for task in tasks:
+            task.cancel()
+
+
+async def _announce(
+    conn: psycopg.AsyncConnection, paper: Paper, primary: str, by_owner: bool
+) -> None:
+    """`paper.classified`, with the classes the paper is a direct member of now that it is
+    recorded, the owner's labels applied."""
+    classes = sorted({m.slug for m in standing(await store.memberships(conn, paper.id))})
+    await events.emit(
+        conn,
+        events.PAPER_CLASSIFIED,
+        paper.id,
+        revision=paper.revision,
+        primary=primary,
+        classes=classes,
+        by_owner=by_owner,
+    )
+
+
+async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
+    """Store one paper's classification, or count its failure. Returns False when there was
+    nothing to record: the paper's text changed meanwhile, or it was dismissed.
+
+    The classifier's memberships replace the paper's earlier ones; the owner's class labels
+    stay and outrank them (`core.classification.standing`).
+    """
+    async with conn.transaction():
+        if not await papers_store.still_current(conn, c.paper):
+            return False
+        if c.error is not None or c.classified is None or c.model is None:
+            await failures.failed(conn, c.paper, "classification", c.error or "no answer")
+            return True
+        primary = c.classified.primary
+        await store.add(conn, c.paper, c.taxonomy_revision, primary, c.response, c.model)
+        await store.replace(conn, c.paper, c.memberships, c.versions)
+        await failures.succeeded(conn, c.paper.id, "classification")
+        await _announce(conn, c.paper, primary, by_owner=False)
+    return True
+
+
+async def by_hand(
+    conn: psycopg.AsyncConnection,
+    paper: Paper,
+    tree: Taxonomy,
+    classes: list[str],
+    primary: str | None = None,
+) -> bool:
+    """The owner classifies a paper: its classes, each an owner membership, and its primary
+    class (the first named, unless given). The keyword check runs as usual. Raises ValueError
+    for a class not in the tree. Returns False when the paper's text changed meanwhile, or it
+    was dismissed."""
+    if not classes:
+        raise ValueError("name at least one class")
+    if unknown := sorted(set(classes) - {c.slug for c in tree.classes}):
+        raise ValueError(f"not classes of the tree: {', '.join(unknown)}")
+    primary = primary or classes[0]
+    if primary not in classes:
+        raise ValueError("the primary class must be one of the classes named")
+    versions = {c.slug: c.version for c in tree.classes}
+    hits = keyword(tree, paper.title, paper.abstract)
+    async with conn.transaction():
+        if not await papers_store.still_current(conn, paper):
+            return False
+        await store.add(conn, paper, tree.classes_version, primary, None, OWNER)
+        for slug in dict.fromkeys(classes):
+            await store.put_owner(conn, paper, slug, True, versions[slug])
+        found = [Membership(slug=f, source=Source.KEYWORD) for f in sorted(hits)]
+        await store.replace(conn, paper, found, versions)
+        await failures.succeeded(conn, paper.id, "classification")
+        await _announce(conn, paper, primary, by_owner=True)
+    return True

@@ -1,5 +1,5 @@
-"""Settings, the kitchen behind the gear: the taxonomy and its topics, Quality, Calibrate,
-runs, and the configuration (read-only, spec decision 11)."""
+"""Settings, the kitchen behind the gear: the taxonomy and its topics, Quality and the papers
+awaiting classification, Calibrate, runs, and the configuration (read-only, spec decision 11)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
+from litwatch import classification
 from litwatch.api.deps import Conn
-from litwatch.core import Taxonomy, Topic
+from litwatch.core import FAILED_RUNS, Paper, Taxonomy, Topic
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
-from litwatch.store import quality
+from litwatch.store import failures, quality
+from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 
 router = APIRouter(prefix="/api/settings")
@@ -79,11 +81,74 @@ async def quality_page(c: Conn) -> dict[str, Any]:
             "run": night["id"] if night else None,
             "error": night["error"] if night else None,
             "splits": await quality.splits_since(c, since),
+            # Classification failed three runs in a row: these wait for the owner.
+            "awaiting_classification": await failures.stuck(c, "classification", FAILED_RUNS),
+            # Analysis failed three runs in a row; it is tried again every run.
+            "analysis_failed": await failures.stuck(c, "analysis", FAILED_RUNS),
         },
         "calibration": await calibrate.precision(c),
         "matters_no_topic": await calibrate.matters_no_topic(c),
         "collected": await quality.collected_reactions(c),
     }
+
+
+# -- papers classification kept failing on (pipeline.md, section 9) -------------------------------
+
+
+async def _awaiting(c: Any, paper_id: str) -> Paper:
+    waiting = {r["paper_id"] for r in await failures.stuck(c, "classification", FAILED_RUNS)}
+    paper = await papers_store.get(c, paper_id) if paper_id in waiting else None
+    if paper is None:
+        raise HTTPException(status_code=404, detail="not a paper awaiting classification")
+    return paper
+
+
+@router.post("/classification/{paper_id:path}/dismiss", status_code=204)
+async def dismiss(paper_id: str, c: Conn) -> None:
+    """Litwatch drops the paper from processing; it stays searchable in the archive."""
+    await _awaiting(c, paper_id)
+    await papers_store.dismiss(c, paper_id)
+
+
+class ClassesIn(BaseModel):
+    classes: list[str]  # class slugs, the primary one first unless `primary` names it
+    primary: str | None = None
+
+
+@router.put("/classification/{paper_id:path}")
+async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
+    """The owner names the paper's classes, which go on as usual with source `owner`."""
+    paper = await _awaiting(c, paper_id)
+    tree = await taxonomy_store.load(c)
+    if tree is None:
+        raise HTTPException(status_code=409, detail="no taxonomy")
+    try:
+        recorded = await classification.by_hand(c, paper, tree, body.classes, body.primary)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not recorded:
+        raise HTTPException(status_code=409, detail="the paper changed meanwhile")
+    return {
+        "classes": list(dict.fromkeys(body.classes)),
+        "primary": body.primary or body.classes[0],
+    }
+
+
+class CorrectionIn(BaseModel):
+    title: str | None = None
+    abstract: str | None = None
+
+
+@router.post("/classification/{paper_id:path}/correction", status_code=204)
+async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
+    """Fix the text classification choked on. It counts as a rewrite: the next run classifies
+    the corrected paper."""
+    await _awaiting(c, paper_id)
+    title = (body.title or "").strip() or None
+    abstract = (body.abstract or "").strip() or None
+    if not (title or abstract):
+        raise HTTPException(status_code=422, detail="give a title or an abstract")
+    await papers_store.correct(c, paper_id, title, abstract)
 
 
 # -- calibrate -------------------------------------------------------------------------------------

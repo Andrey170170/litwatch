@@ -20,13 +20,15 @@ from litwatch.core import (
 
 
 class Status(BaseModel):
-    """The latest nightly run: none yet, running, failed, or finished without an error."""
+    """The latest nightly run: none yet, running, failed, or finished without an error, with
+    papers waiting for the owner (`attention`) or not (`quiet`)."""
 
-    state: Literal["none", "running", "failed", "quiet"]
+    state: Literal["none", "running", "failed", "attention", "quiet"]
     run_id: int | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: str | None = None
+    awaiting_classification: int = 0  # papers whose classification failed three runs in a row
 
 
 class TopicRef(BaseModel):

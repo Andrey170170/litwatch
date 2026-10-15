@@ -9,6 +9,9 @@ from typing import Any
 import psycopg
 from psycopg import sql
 
+from litwatch.core import FAILED_RUNS
+from litwatch.store import failures
+
 GRADE_ORDER = "ARRAY['must_read', 'relevant', 'adjacent', 'none']"
 STALE_AFTER = timedelta(hours=36)
 # A stored JSON null in `authors` reads as no authors.
@@ -27,21 +30,24 @@ async def _one(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> d
 
 
 async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
-    """The latest nightly run: running, failed (or stuck past `STALE_AFTER`), or done."""
+    """The latest nightly run: running, failed (or stuck past `STALE_AFTER`), or done; done
+    with papers awaiting classification needs the owner's attention."""
     run = await _one(conn, "SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
     if run is None:
         return {"state": "none"}
     now = (await _one(conn, "SELECT now() AS now"))["now"]
+    awaiting = await failures.count_stuck(conn, "classification", FAILED_RUNS)
     result: dict[str, Any] = {
         "run_id": run["id"],
         "started_at": run["started_at"],
         "finished_at": run["finished_at"],
+        "awaiting_classification": awaiting,
     }
     if run["finished_at"] is None and now - run["started_at"] < STALE_AFTER:
         return result | {"state": "running"}
     if run["error"] or run["finished_at"] is None:
         return result | {"state": "failed", "error": run["error"]}
-    return result | {"state": "quiet"}
+    return result | {"state": "attention" if awaiting else "quiet"}
 
 
 # -- a paper ---------------------------------------------------------------------------------------
