@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import anthropic
+import httpx2  # the HTTP client this SDK is built on
 from anthropic import AsyncAnthropic, transform_schema
 
 from litwatch.config import RoleConfig
@@ -78,6 +79,9 @@ class AnthropicProvider:
         try:
             message = await self.client.messages.create(**messages_request(role, request))
         except anthropic.APITimeoutError as exc:
+            if isinstance(exc.__cause__, httpx2.ConnectTimeout):
+                # The connection never opened, so nothing was sent: worth another attempt.
+                raise ProviderError("APITimeoutError while connecting", transient=True) from exc
             raise ProviderError(type(exc).__name__, timeout=True) from exc
         except (
             anthropic.InternalServerError,

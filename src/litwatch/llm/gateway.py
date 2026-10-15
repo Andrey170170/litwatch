@@ -56,6 +56,13 @@ class CallError(Exception):
         self.kind, self.detail, self.usage = kind, detail, usage
         super().__init__(f"{kind}: {detail}" if detail else kind)
 
+    @property
+    def unusable(self) -> bool:
+        """The model answered, and the answer could not be used: asking again is the same
+        question to the same model. A timeout, a provider error or missing credentials say
+        nothing about the paper."""
+        return self.kind in ("invalid", "refused", "truncated")
+
 
 class Journal(Protocol):
     """Where calls are recorded and found again. `store.calls.CallJournal` implements it."""
@@ -207,9 +214,10 @@ class Gateway:
             except json.JSONDecodeError as exc:
                 raise CallError("invalid", "not JSON", reply.usage) from exc
             except ValidationError as exc:
-                raise CallError(
-                    "invalid", f"{exc.error_count()} validation errors", reply.usage
-                ) from exc
+                # Where it failed, not what was said: the reply itself is not kept.
+                where = sorted({".".join(map(str, e["loc"])) or "reply" for e in exc.errors()})
+                detail = f"{exc.error_count()} validation errors: {', '.join(where)}"
+                raise CallError("invalid", detail, reply.usage) from exc
         except CallError as exc:
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.

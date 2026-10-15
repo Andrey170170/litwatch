@@ -2,6 +2,10 @@
 
 import json
 
+import anthropic
+import httpx
+import httpx2
+import openai
 import pytest
 from pydantic import BaseModel
 
@@ -94,7 +98,7 @@ async def test_haiku_charges_a_long_prompt_five_times_and_an_unlisted_model_has_
     [
         (anthropic_message(GOOD, stop_reason="max_tokens"), "truncated", None),
         (anthropic_message("", stop_reason="refusal", category="cyber"), "refused", "cyber"),
-        (anthropic_message('{"yes": "maybe"}'), "invalid", "2 validation errors"),
+        (anthropic_message('{"yes": "maybe"}'), "invalid", "2 validation errors: why, yes"),
     ],
 )
 async def test_an_unusable_reply_is_an_error_that_says_which_kind(reply, kind, detail):
@@ -141,6 +145,33 @@ async def test_a_briefly_absent_provider_is_tried_again_and_a_timeout_is_not():
         await Gateway(MODELS, {"anthropic": ScriptedProvider("anthropic", broken)}).ask(
             "writer", REQUEST
         )
+
+
+def _timeout(sdk, http, phase: str) -> Exception:
+    """The SDK's timeout error as it raises one: from the HTTP client's own."""
+    request = http.Request("POST", "https://api.example.org")
+    exc = sdk.APITimeoutError(request=request)
+    exc.__cause__ = getattr(http, phase)("timed out", request=request)
+    return exc
+
+
+@pytest.mark.parametrize(
+    ("sdk", "http", "provider", "reply", "role"),
+    [
+        (anthropic, httpx2, "anthropic", anthropic_message(GOOD), "writer"),
+        (openai, httpx, "openrouter", openrouter_completion(GOOD), "check"),
+    ],
+)
+async def test_a_connection_that_never_opened_is_tried_again_and_a_read_timeout_is_not(
+    sdk, http, provider, reply, role
+):
+    client = SdkClient(_timeout(sdk, http, "ConnectTimeout"), reply)
+    assert (await gateway(MODELS, **{provider: client}).ask(role, REQUEST)).value.yes
+    assert len(client.sent) == 2
+    client = SdkClient(_timeout(sdk, http, "ReadTimeout"), reply)
+    with pytest.raises(CallError, match="timeout: APITimeoutError"):
+        await gateway(MODELS, **{provider: client}).ask(role, REQUEST)
+    assert len(client.sent) == 1
 
 
 async def test_a_role_without_credentials_fails_as_a_call_error():
