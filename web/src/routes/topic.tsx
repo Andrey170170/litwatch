@@ -1,6 +1,7 @@
 /** A topic's page: its head, the controls, and its papers as shelves by grade (DESIGN.md, "A topic page"). */
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { ApiError } from "@/api/client";
 import { topicQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { ListControls } from "@/components/ListControls";
@@ -19,7 +20,24 @@ export function TopicPage() {
   const topic = page0?.topic;
   const query = (shelf: Shelf, limit: number) => topicQuery(slug, search, shelf, limit);
   const onChange = (next: ListSearch) => void navigate({ search: next, replace: true });
-  if (first.isError) return <div className="empty">No such topic.</div>;
+  // A failed later page or refetch keeps the page and its rows (the shelf offers the retry); only a topic that
+  // never loaded is reported here.
+  if (first.isError && !page0)
+    return (
+      <>
+        <Back />
+        {first.error instanceof ApiError && first.error.status === 404 ? (
+          <div className="empty">No such topic.</div>
+        ) : (
+          <div className="loadmore">
+            Could not load the topic ·{" "}
+            <button className="inl" onClick={() => void first.refetch()}>
+              Try again
+            </button>
+          </div>
+        )}
+      </>
+    );
   const total = page0 ? visibleCount(page0.counts, search) : undefined;
   return (
     <>

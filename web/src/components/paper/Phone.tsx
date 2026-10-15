@@ -74,7 +74,7 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
   );
 }
 
-export function PaperSheet({ paper, asked, onAsked, onClose }: { paper: Paper; asked: boolean; onAsked: () => void; onClose: () => void }) {
+export function PaperSheet({ paper, asked, onClose }: { paper: Paper; asked: boolean; onClose: () => void }) {
   const [miss, setMiss] = useState(false);
   return (
     <Sheet open onClose={onClose} label="The paper">
@@ -89,7 +89,7 @@ export function PaperSheet({ paper, asked, onAsked, onClose }: { paper: Paper; a
       <div className="cap">The paper</div>
       <div className="agrid">
         {linkCells(paper, ["arxiv", "pdf", "latex", "code", "weights", "bib"])}
-        <DeepReadCell paper={paper} asked={asked} onAsked={onAsked} wide />
+        <DeepReadCell paper={paper} asked={asked} wide />
         {!paper.in_collection &&
           (miss ? (
             <div className="wide contents">
@@ -122,7 +122,7 @@ export function PaperSheet({ paper, asked, onAsked, onClose }: { paper: Paper; a
   );
 }
 
-export function PhoneBar({ paper, under, asked, onAsked, sheet, setSheet }: { paper: Paper; under: string | undefined; asked: boolean; onAsked: () => void; sheet: "more" | "up" | "down" | null; setSheet: (s: "more" | "up" | "down" | null) => void }) {
+export function PhoneBar({ paper, under, asked, sheet, setSheet }: { paper: Paper; under: string | undefined; asked: boolean; sheet: "more" | "up" | "down" | null; setSheet: (s: "more" | "up" | "down" | null) => void }) {
   const save = useSave(paper.id);
   const process = useProcess();
   const deep = useDeepRead(paper.id);
@@ -150,7 +150,7 @@ export function PhoneBar({ paper, under, asked, onAsked, sheet, setSheet }: { pa
               <small>Process</small>
             </button>
             {paper.card_requestable && !paper.card && (
-              <button onClick={() => deep.mutate(undefined, { onSuccess: onAsked })} disabled={deep.isPending || asked}>
+              <button onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked}>
                 <small>{asked ? "Queued" : "Deep read"}</small>
               </button>
             )}
@@ -162,7 +162,7 @@ export function PhoneBar({ paper, under, asked, onAsked, sheet, setSheet }: { pa
         </button>
       </div>
       {(sheet === "up" || sheet === "down") && <ReactSheet paper={paper} value={sheet} under={under} onClose={() => setSheet(null)} />}
-      {sheet === "more" && <PaperSheet paper={paper} asked={asked} onAsked={onAsked} onClose={() => setSheet(null)} />}
+      {sheet === "more" && <PaperSheet paper={paper} asked={asked} onClose={() => setSheet(null)} />}
     </Fill>
   );
 }

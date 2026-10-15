@@ -29,12 +29,12 @@ export function SaveCell({ paper }: { paper: Paper }) {
   );
 }
 
-/** Deep read asks for a card; while the request is in, the cell says so. */
-export function DeepReadCell({ paper, asked, onAsked, wide }: { paper: Paper; asked: boolean; onAsked: () => void; wide?: boolean }) {
+/** Deep read asks for a card; while the request is in, the cell says so (the hook remembers it for the page). */
+export function DeepReadCell({ paper, asked, wide }: { paper: Paper; asked: boolean; wide?: boolean }) {
   const deep = useDeepRead(paper.id);
   if (paper.card || !paper.card_requestable) return null;
   return (
-    <button className={wide ? "wide" : ""} onClick={() => deep.mutate(undefined, { onSuccess: onAsked })} disabled={deep.isPending || asked}>
+    <button className={wide ? "wide" : ""} onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked}>
       {asked ? "Deep read · queued" : "Deep read"}
     </button>
   );

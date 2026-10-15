@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/api/client";
 import { useDeepRead, useProcess } from "@/api/mutations";
 import { paperQuery } from "@/api/queries";
-import { cardAsked, forgetCard, rememberCard } from "@/lib/remember";
+import { forgetCard, useCardAsked } from "@/lib/remember";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
@@ -17,7 +17,7 @@ import { Notes } from "@/components/paper/Notes";
 import { PhoneBar } from "@/components/paper/Phone";
 import { PaperRow, TopicRow } from "@/components/paper/TopicRow";
 
-function Rail({ paper, gistAway, asked, onAsked }: { paper: Paper; gistAway: boolean; asked: boolean; onAsked: () => void }) {
+function Rail({ paper, gistAway, asked }: { paper: Paper; gistAway: boolean; asked: boolean }) {
   const [miss, setMiss] = useState(false);
   const process = useProcess();
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
@@ -43,7 +43,7 @@ function Rail({ paper, gistAway, asked, onAsked }: { paper: Paper; gistAway: boo
         <div className="agrid">
           <SaveCell paper={paper} />
           {linkCells(paper, ["bib", "arxiv", "pdf"])}
-          <DeepReadCell paper={paper} asked={asked} onAsked={onAsked} wide />
+          <DeepReadCell paper={paper} asked={asked} wide />
         </div>
       ) : (
         <>
@@ -51,7 +51,7 @@ function Rail({ paper, gistAway, asked, onAsked }: { paper: Paper; gistAway: boo
             <button className="pri" onClick={() => process.mutate(paper.id)} disabled={process.isPending}>
               Process
             </button>
-            <DeepReadCell paper={paper} asked={asked} onAsked={onAsked} />
+            <DeepReadCell paper={paper} asked={asked} />
             <button className="wide" onClick={() => setMiss((m) => !m)}>
               Report as a miss
             </button>
@@ -73,21 +73,14 @@ export function PaperPage() {
 
 function PaperView({ id, under }: { id: string; under: string | undefined }) {
   const desktop = useDesktop();
-  const [asked, setAsked] = useState(() => cardAsked(id));
   // While a card is asked for, the page polls until an integration has written it (the API has no queued state).
+  const asked = useCardAsked(id);
   const { data: paper, error, isPending } = useQuery({ ...paperQuery(id), refetchInterval: asked ? 15_000 : false });
   const [gistAway, setGistAway] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
   useEffect(() => {
-    if (asked && paper?.card) {
-      forgetCard(id);
-      setAsked(false);
-    }
+    if (asked && paper?.card) forgetCard(id);
   }, [asked, paper?.card, id]);
-  const onAsked = () => {
-    rememberCard(id);
-    setAsked(true);
-  };
   const onGistAway = useCallback((away: boolean) => setGistAway(away), []);
   const onLabel = (topic: string) => {
     if (!desktop) setSheet("more");
@@ -102,7 +95,7 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
         <div className="empty">{error instanceof ApiError && error.status === 404 ? `${id} is not in the collection.` : "Could not load the paper."}</div>
       </>
     );
-  const deepRead = paper.card_requestable && !asked ? <DeepReadInline paper={paper} onAsked={onAsked} /> : null;
+  const deepRead = paper.card_requestable && !asked ? <DeepReadInline paper={paper} /> : null;
   return (
     <div className="pg">
       <Fill name="title">
@@ -113,18 +106,18 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
       <Notes paper={paper} onLabel={onLabel} />
       <div className="pgcols">
         <Ladder paper={paper} asked={asked} deepRead={deepRead} onGistAway={onGistAway} />
-        {desktop && <Rail paper={paper} gistAway={gistAway} asked={asked} onAsked={onAsked} />}
+        {desktop && <Rail paper={paper} gistAway={gistAway} asked={asked} />}
       </div>
-      {!desktop && <PhoneBar paper={paper} under={under} asked={asked} onAsked={onAsked} sheet={sheet} setSheet={setSheet} />}
+      {!desktop && <PhoneBar paper={paper} under={under} asked={asked} sheet={sheet} setSheet={setSheet} />}
     </div>
   );
 }
 
 /** "Deep read" inline in the Deep card rung's line, while the paper has no card. */
-function DeepReadInline({ paper, onAsked }: { paper: Paper; onAsked: () => void }) {
+function DeepReadInline({ paper }: { paper: Paper }) {
   const deep = useDeepRead(paper.id);
   return (
-    <button className="inl" onClick={() => deep.mutate(undefined, { onSuccess: onAsked })} disabled={deep.isPending}>
+    <button className="inl" onClick={() => deep.mutate(undefined)} disabled={deep.isPending}>
       Deep read
     </button>
   );

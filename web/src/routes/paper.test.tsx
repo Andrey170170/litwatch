@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
@@ -94,6 +94,31 @@ describe("a paper's page", () => {
     expect(screen.queryByRole("textbox", { name: "DOI" })).toBeNull();
     expect(screen.getByRole("button", { name: "Paste a DOI" })).toBeInTheDocument();
     expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+  });
+
+  it("keeps a Deep read asked from a sheet that closed before the request returned", async () => {
+    viewport(false);
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": paper,
+      "POST /api/papers/2610.00002/card": async () => {
+        await held;
+        return { message: "queued" };
+      },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const sheet = screen.getByRole("dialog", { name: "The paper" });
+    await userEvent.click(within(sheet).getByRole("button", { name: "Deep read" }));
+    await userEvent.click(within(sheet).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    release();
+    expect(await screen.findByText(/Queued · the card shows here/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deep read" })).toBeNull();
   });
 
   it("says when a paper is not in the collection", async () => {
