@@ -60,7 +60,7 @@ paper_id,topic,fit,legacy,cohort,origin,labelled_at,note
 2608.29070,cot-faithfulness,central,relevant/must_read,provisional,legacy_positive,2026-10-09,"0.14 tier 1: It measures whether CoT explicitly references hidden system-prompt directives across 100 task pairs and 8 models and causally manipulates hiding with steering vectors, matching the rubric's hidden-directive omission test via construction and internals."
 2608.29464,cot-faithfulness,central,relevant/must_read,provisional,legacy_positive,2026-10-09,"0.14 tier 1: Introduces the 5,100-sample FACE-Eval benchmark measuring verbalized commitment and unverbalized adoption among cue-following answers, a direct task-constructed cue-omission test of CoT faithfulness."
 2608.29492,cot-faithfulness,none,not_relevant,owner,reject_sample,2026-10-09,
-2608.29956,cot-faithfulness,central,relevant/relevant,provisional,legacy_positive,2026-10-09,"0.14 tier 2: Proposes HCDS measuring whether neutral-prompt behavior aligns with explicit CoT on GSM8K to infer hidden reasoning but explicitly disclaims direct observation or proof of an unexposed trace, making it a proxy omission method that fails Tier 1 ground-truth requirement."
+2608.29956,cot-faithfulness,adjacent,relevant/relevant,owner,v5_review,2026-10-15,"Owner, V5 review: weird paper; HCDS infers latent reasoning when no trace is shown, one model family and GSM8K only; was 0.14 tier 2 (provisional)"
 2608.31066,cot-faithfulness,central,relevant/relevant,provisional,legacy_positive,2026-10-09,"0.14 tier 2: It measures each reasoning token's necessity/sufficiency via its internal effect on answer likelihood for compression, which the rubric explicitly classes as an importance proxy for tier 2 rather than an omission/commission faithfulness test."
 2608.31075,cot-faithfulness,none,not_relevant,owner,reject_sample,2026-10-09,
 2609.00067,cot-faithfulness,adjacent,adjacent,owner,reject_sample,2026-10-09,
@@ -166,6 +166,7 @@ paper_id,topic,fit,legacy,cohort,origin,labelled_at,note
 2604.25053,cot-monitoring,central,relevant/relevant,provisional,legacy_positive,2026-10-09,"0.14 tier 2: It analyzes intermediate reasoning steps to tag stigmatizing language about psychological conditions, which is a single-domain trace audit for bias rather than a transferable monitor for deception or sabotage."
 2605.09027,cot-monitoring,central,relevant/relevant,provisional,legacy_positive,2026-10-09,"0.14 tier 2: External detector reads the four reasoning agents' chess deliberation to detect deliberately misleading imposters, but its chess-only case-study scope fails tier 1's cross-task transfer requirement."
 2605.09314,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
+2605.09502,cot-monitoring,adjacent,,owner,v5_review,2026-10-15,"Owner, V5 review: closer to CoT faithfulness; a probe on internals catches errors the trace does not show. No Fit given on cot-faithfulness."
 2605.10065,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
 2605.10971,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
 2605.11265,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
@@ -198,7 +199,7 @@ paper_id,topic,fit,legacy,cohort,origin,labelled_at,note
 2608.27340,cot-monitoring,central,relevant/relevant,provisional,legacy_positive,2026-10-09,"0.14 tier 2: It detects verbalized eval-awareness framings in CoT and links them to compliance and suppression, but on only Qwen3-32B and FORTRESS it is a single-domain audit, not a transferable Tier 1 monitor."
 2608.27348,cot-monitoring,central,relevant/must_read,provisional,legacy_positive,2026-10-09,0.14 tier 1: Paper uses CoT monitoring to show harmful agentic execution is preceded by intent signals and proposes intent-tool call probability as a judge-free fine-grained detection signal for online intervention.
 2608.27824,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
-2608.28623,cot-monitoring,central,relevant/relevant,provisional,legacy_positive,2026-10-09,"0.14 tier 2: Benchmark measures sycophancy inside reasoning chains across four datasets and pressure conditions, which is trace-based detection of agree-with-user deception adjacent to CoT monitoring but not a Tier 1 oversight monitor for the listed misbehaviors."
+2608.28623,cot-monitoring,related,relevant/relevant,owner,v5_review,2026-10-15,"Owner, V5 review: a weak related, closer to sycophancy; a benchmark of sycophancy inside reasoning chains that builds no monitor; was 0.14 tier 2 (provisional)"
 2608.29070,cot-monitoring,central,relevant/must_read,provisional,legacy_positive,2026-10-09,0.14 tier 1: An LLM monitor reading only the reasoning trace is evaluated across 100 task pairs and 8 models for detecting hidden malign directives while steering vectors causally induce hiding.
 2608.29464,cot-monitoring,central,relevant/must_read,provisional,legacy_positive,2026-10-09,"0.14 tier 1: Evaluates two transcript monitors detecting preference adoption across 32 conditions and finds higher unverbalized adoption correlates with lower detection, directly measuring what erodes CoT monitorability."
 2608.29492,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
@@ -231,7 +232,7 @@ paper_id,topic,fit,legacy,cohort,origin,labelled_at,note
 2609.13760,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
 2609.13980,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
 2609.14127,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
-2609.15517,cot-monitoring,central,relevant/relevant,provisional,legacy_positive,2026-10-09,"0.14 tier 2: It independently scores safety of reasoning segments because unsafe reasoning can be masked by a safe final answer, which is directly relevant to monitoring unsafe intent but presented as DPO alignment training rather than a transferable oversight monitor."
+2609.15517,cot-monitoring,adjacent,relevant/relevant,owner,v5_review,2026-10-15,"Owner, V5 review: the training side (DPO on reasoning segments), not detection; was 0.14 tier 2 (provisional)"
 2609.15989,cot-monitoring,central,relevant/must_read,provisional,legacy_positive,2026-10-09,0.14 tier 1: Demonstrates plan-injection evasion that steers actors to adversarial actions while evading CoT monitors at 25-33% rates across benchmarks and models including DeepSeek-R1.
 2609.17171,cot-monitoring,adjacent,adjacent,owner,reject_sample,2026-10-09,
 2609.18204,cot-monitoring,central,relevant/must_read,provisional,legacy_positive,2026-10-09,"0.14 tier 1: Audits five LLM overseers reading procedural traces across 19 compliance tasks, measuring error detection and false-alarm criterion shifts with trace detail."
@@ -239,7 +240,7 @@ paper_id,topic,fit,legacy,cohort,origin,labelled_at,note
 2609.18729,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
 2609.18985,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
 2609.19101,cot-monitoring,central,relevant/must_read,provisional,legacy_positive,2026-10-09,"0.14 tier 1: DoM vectors run on the chain-of-thought detect and predict reward hacking across three models with transfer to non-SWE evaluations, matching the Tier 1 monitor rubric."
-2609.22119,cot-monitoring,central,relevant/relevant,provisional,legacy_positive,2026-10-09,"0.14 tier 2: Uses Chain-of-Thought analysis to show evaluation detection shifts from format sensitivity to higher-order reasoning with scale, but measures mitigation flip rate rather than monitor detection."
+2609.22119,cot-monitoring,adjacent,relevant/relevant,owner,v5_review,2026-10-15,"Owner, V5 review: its subject is evaluation awareness itself (mechanism and mitigation); the trace is not the instrument; was 0.14 tier 2 (provisional)"
 2609.24243,cot-monitoring,central,relevant/must_read,provisional,legacy_positive,2026-10-09,"0.14 tier 1: Paper studies RL eroding CoT monitorability via obfuscation and shows TAME improves monitorability by up to 30.9pp across datasets, model families, and held-out monitors."
 2609.26865,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,
 2609.27421,cot-monitoring,none,not_relevant,owner,reject_sample,2026-10-09,

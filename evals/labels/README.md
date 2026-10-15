@@ -7,7 +7,7 @@ is not stored: an evaluation reads titles and abstracts when it runs. Topic and 
 
 | File | Rows | Cohorts | What it says |
 | --- | --- | --- | --- |
-| `fit.csv` | 302 | `owner`, `provisional` | Fit on the two CoT Focus topics |
+| `fit.csv` | 303 | `owner`, `provisional` | Fit on the two CoT Focus topics |
 | `regression.csv` | 1,153 | `legacy`, `silver` (its `source`) | the first v1's regression set for the CoT topics |
 | `tiers-0.14.csv` | 23,310 | 0.14 | 0.14's selection tier per paper, one column per matching class |
 | `silver-sample.csv` | 200 | silver | the papers drawn for the class sample, with their stratum |
@@ -31,8 +31,10 @@ union of the two (the deployment had 23 rows the development copy did not). No r
 **`fit.csv`.** The first v1's labels on its two Watch topics, mapped to Fit: relevant → central, adjacent → adjacent,
 not relevant → none. `legacy` keeps the first v1's value and grade (`relevant/must_read`, `relevant/relevant`,
 `adjacent`, `not_relevant`). `owner` rows are the owner's: `gold` came from 0.x label files, `reject_sample` from the
-owner reading a sample of the papers triage rejected. `provisional` rows are 0.14's tier 1–2 papers on the two CoT
-selections, carried as positives the owner has not confirmed (`origin` `legacy_positive`).
+owner reading a sample of the papers triage rejected, `v5_review` from the owner reading the replay's losses on
+2026-10-15 ([`2026-10-15-replay.md`](../2026-10-15-replay.md)): four provisional rows confirmed or relabelled, their
+`legacy` kept, and one new row. `provisional` rows are 0.14's tier 1–2 papers on the two CoT selections, carried as
+positives the owner has not confirmed (`origin` `legacy_positive`).
 
 **`regression.csv`.** The first v1's regression set: `legacy` rows are 0.14's tiers (1 must read, 2 relevant,
 3 adjacent) on the CoT selections; `silver` rows were graded by the first v1's two labs. It is kept as it was.
