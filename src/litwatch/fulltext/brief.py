@@ -15,8 +15,9 @@ ROLE = "brief"
 # The Brief asked for is 120–200 words; as with the Gist, the accepted range only guards against
 # a broken answer.
 BRIEF_WORDS = (90, 240)
-# A longer text is cut: about 40k tokens, which keeps the main body and drops the tail of long
-# appendices, at about $0.16 a paper on Opus 5.5.
+# A longer text is cut: about 70k tokens of LaTeX text (some 2.2 characters a token), which keeps
+# the main body and drops the tail of long appendices, at about $0.30 a paper on Opus 5.5; most
+# papers are half that.
 MAX_TEXT_CHARS = 160_000
 CUT = "\n\n[The text is cut here.]"
 OVERSTATES = "The abstract overstates:"
