@@ -67,13 +67,18 @@ async def _retried(archive: ArchiveClient, job: dict) -> bool:
 
 async def retry_downloads(archive: ArchiveClient, paper: Paper, priority: int = URGENT) -> int:
     """Ask the archive to try again the downloads of the paper's text that it gave up on after
-    failing: its source, and its PDF when the source is not to be had. Returns how many."""
+    failing: its source, and its PDF when `read_text` would fall back to it (the source not to
+    be had, or without LaTeX text). Returns how many."""
     try:
         paper = await archive.resolve(paper)
     except ArchiveVersionUnknown:
         return 0  # read from the historical LaTeX alone: nothing to download
-    jobs = [await archive.request(paper, "source", priority)]
-    if jobs[0].get("status") in DONE:
+    assert paper.version is not None
+    jobs = [source := await archive.request(paper, "source", priority)]
+    if source.get("status") in DONE or (
+        source.get("status") == "complete"
+        and not _usable(await archive.latex(paper.id, paper.version))
+    ):
         jobs.append(await archive.request(paper, "pdf", priority))
     return sum([await _retried(archive, job) for job in jobs])
 

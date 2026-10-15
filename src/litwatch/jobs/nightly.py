@@ -75,8 +75,8 @@ async def grade(
 async def text_passes(
     conn: psycopg.AsyncConnection, config: Config, run: ModelRun, limit: int | None = None
 ) -> None:
-    """Settle the papers whose text was read from an older version or revision, which queues
-    their passes again (pipeline.md, section 8); make the failed passes ready again, those with
+    """Settle the papers whose text was read, or its pass queued, for an older version or
+    revision, which queues their passes again (pipeline.md, section 8); make the failed passes ready again, those with
     fewer than `FAILED_RUNS` failed runs; and try every pass that is due once, up to `limit`: the
     passes this run queued have their text asked for now, and the service's worker runs each
     once its text is there. Found in the database, not handed on by intake, so a run cut short

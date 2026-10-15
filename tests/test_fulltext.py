@@ -342,6 +342,16 @@ async def test_a_pass_tried_again_has_the_archive_try_again_what_it_gave_up_on(d
     assert (row["failed_runs"], row["retry_text"]) == (2, False)
 
 
+async def test_a_retry_covers_the_pdf_when_the_source_has_no_latex(db):
+    await graded(db, "central")
+    fake = FakeArchive()  # the source is downloaded, but has no LaTeX text
+    fake.statuses["pdf"] = "failed"
+    assert await work(db, fake, Writer()) == {"fulltext_failed": 1}
+    await fulltext_store.retry_failed(db, FAILED_RUNS)
+    assert await work(db, fake, Writer()) == {"awaiting_text": 1}
+    assert [fake.jobs[i - 1]["kind"] for i in fake.retried] == ["pdf"]
+
+
 async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_now(db):
     await graded(db, "central")
     fake, writer = FakeArchive(status="failed"), Writer()
@@ -471,6 +481,16 @@ async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revisi
         (1, "done"),
         (2, "awaiting_text"),
     ]
+
+
+async def test_a_rewrite_whose_settle_was_cut_short_is_settled_by_the_nightly_sweep(db):
+    await graded(db, "central")  # its first pass awaits text
+    rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
+    assert (await papers_store.upsert(db, [rewrite])).rewritten == [P.id]  # and no settle
+    assert await fulltext_store.outdated(db) == [P.id]
+    await word.settle_all(db, await fulltext_store.outdated(db))
+    assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
+    assert await fulltext_store.outdated(db) == []
 
 
 async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(db):

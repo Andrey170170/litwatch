@@ -311,14 +311,16 @@ async def add(
 
 
 async def outdated(conn: psycopg.AsyncConnection) -> list[str]:
-    """The papers, not dismissed, given a Brief or full-text Weight whose current revision has no
-    text pass open or done on its arXiv version: a new version or revision came after what was
-    read (`to_queue`'s rule, found from the database)."""
+    """The papers, not dismissed, given a Brief or full-text Weight, or with a text pass for an
+    older revision, whose current revision has no text pass open or done on its arXiv version: a
+    new version or revision came after what was read or queued (`to_queue`'s rule, found from
+    the database)."""
     rows = await (
         await conn.execute(
             """
             SELECT DISTINCT p.id FROM fulltext_passes d JOIN papers p ON p.id = d.paper_id
-            WHERE d.kind <> 'deep' AND d.state = 'done' AND p.dismissed_at IS NULL
+            WHERE d.kind <> 'deep' AND (d.state = 'done' OR d.paper_revision < p.revision)
+              AND p.dismissed_at IS NULL
               AND NOT EXISTS (
                   SELECT 1 FROM fulltext_passes f
                   WHERE f.paper_id = p.id AND f.paper_revision = p.revision AND f.kind <> 'deep'
