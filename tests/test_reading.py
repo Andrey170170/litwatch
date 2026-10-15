@@ -91,6 +91,12 @@ async def test_a_paper_page_carries_its_history_and_current_verdicts(client, con
     assert page["saved"] and page["pdf_url"] == f"https://arxiv.org/pdf/{P.id}"
     assert (await client.get("/api/papers/2610.99999")).status_code == 404
 
+    # Unfollowed, the topic's verdict is no longer current but stays in the history.
+    unfollowed = [t for t in TREE.topics if t.slug != FAITH.slug]
+    await word.save_taxonomy(conn, TREE.model_copy(update={"topics": unfollowed}))
+    page = (await client.get(f"/api/papers/{P.id}")).json()
+    assert page["chosen"] == [] and [h["what"] for h in page["history"]] == ["graded"]
+
 
 async def test_the_papers_table_filters_by_topic_and_searches(client, conn):
     await grade(conn, P, "relevant")

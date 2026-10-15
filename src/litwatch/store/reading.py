@@ -87,8 +87,10 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     )
     verdicts = await _all(
         conn,
+        # current verdicts of followed topics only; an unfollowed topic's stay in the history
         "SELECT DISTINCT ON (topic) topic, grade, split, judge, check_opinion AS check, "
-        "migrated, recorded_at FROM verdicts WHERE paper_id = %s "
+        "migrated, recorded_at FROM verdicts v JOIN topics t ON t.class = v.topic "
+        "WHERE paper_id = %s "
         "ORDER BY topic, paper_revision DESC, topic_revision DESC, recorded_at DESC, id DESC",
         (paper_id,),
     )

@@ -25,6 +25,14 @@ def taxonomy(path: Path | None = None) -> Taxonomy:
     return taxonomy_from_spec(yaml.safe_load(text) or {})
 
 
+def _list(value: Any, what: str) -> list[Any]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"`{what}` is a list")
+    return value
+
+
 def taxonomy_from_spec(raw: dict[str, Any]) -> Taxonomy:
     """Nested classes (`children`) flattened parents first; a followed class takes its topic's
     subject as its description and may not carry one of its own."""
@@ -33,9 +41,8 @@ def taxonomy_from_spec(raw: dict[str, Any]) -> Taxonomy:
     if unknown := sorted(set(raw) - {"classes", "topics"}):
         raise ValueError(f"unknown taxonomy keys {unknown}; expected `classes` and `topics`")
     # Entries of the wrong shape are passed on as they are, for validation to report.
-    subjects = {
-        t.get("class"): t.get("subject") for t in raw.get("topics") or [] if isinstance(t, dict)
-    }
+    topics = _list(raw.get("topics"), "topics")
+    subjects = {t.get("class"): t.get("subject") for t in topics if isinstance(t, dict)}
     classes: list[Any] = []
 
     def walk(nodes: list[Any], parent: str | None) -> None:
@@ -52,10 +59,10 @@ def taxonomy_from_spec(raw: dict[str, Any]) -> Taxonomy:
                     )
                 spec["description"] = subjects[spec["slug"]]
             classes.append({**spec, "parent": parent})
-            walk(node.get("children") or [], spec.get("slug"))
+            walk(_list(node.get("children"), "children"), spec.get("slug"))
 
-    walk(raw.get("classes") or [], None)
-    return Taxonomy.model_validate({"classes": classes, "topics": raw.get("topics") or []})
+    walk(_list(raw.get("classes"), "classes"), None)
+    return Taxonomy.model_validate({"classes": classes, "topics": topics})
 
 
 def dump_taxonomy(tree: Taxonomy) -> str:

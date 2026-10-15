@@ -81,6 +81,12 @@ def test_a_small_tree_flattens_parents_first():
             "Extra inputs",
         ),
         (spec(topic=[topic()]), "unknown taxonomy keys"),
+        ({"classes": [], "topics": 1}, "`topics` is a list"),
+        ({"classes": True}, "`classes` is a list"),
+        (
+            {"classes": [{"slug": "a", "name": "Top", "description": "A class.", "children": 1}]},
+            "`children` is a list",
+        ),
     ],
 )
 def test_a_broken_taxonomy_is_refused_with_its_problem(raw, problem):
