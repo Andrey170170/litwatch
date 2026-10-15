@@ -260,9 +260,8 @@ async def run_pass_now(pass_id: int, request: Request, c: Conn) -> None:
         if paper_id is None:
             raise HTTPException(status_code=404, detail="no such full-text pass")
         await word.lock(c, paper_id)  # as every write to a paper's passes
-        if await fulltext_store.stuck_one(c, pass_id, FAILED_RUNS) is None:
+        if not await fulltext_store.run_now(c, pass_id, FAILED_RUNS):
             raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
-        await fulltext_store.run_now(c, pass_id)
     request.app.state.fulltext_wake.set()
 
 

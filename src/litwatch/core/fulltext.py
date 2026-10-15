@@ -67,7 +67,7 @@ def wanted(focus: bool, area: bool, has_text_result: bool) -> tuple[PassKind, st
     return None
 
 
-def to_queue(want: object, last: TextPass | None, version: int | None) -> bool:
+def to_queue(want: tuple[PassKind, str] | None, last: TextPass | None, version: int | None) -> bool:
     """Whether to queue the wanted pass: none was queued for this revision yet, or the last one
     is done and read an older arXiv version than the paper now has. One still to run reads the
     paper's version when it does."""
@@ -80,7 +80,7 @@ def to_queue(want: object, last: TextPass | None, version: int | None) -> bool:
     return last.arxiv_version is None or last.arxiv_version < version
 
 
-def to_drop(want: object, last: TextPass | None) -> bool:
+def to_drop(want: tuple[PassKind, str] | None, last: TextPass | None) -> bool:
     """Whether the last pass is no longer wanted and has not started: it is dropped, so nothing
     is read or listed for the owner for a paper that no longer qualifies (a topic paused, the
     owner's word)."""

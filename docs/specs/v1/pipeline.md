@@ -205,8 +205,10 @@ A **full-text pass** reads the paper's text, not its abstract. Three kinds:
 | Deep card | Focus papers at an effective grade of must read; Area picks; any paper on request | asks the `deep` integration for a card (see [integrations.md](integrations.md)) |
 
 A pass is queued when its paper qualifies, judged on the effective Fit and grade, so the owner's word can queue one
-too (a label or miss that makes a Focus paper central gets it a Brief). It is **awaiting text** until the archive has the paper's text, then runs at
-once, not at the next night. Text comes from the archive: the LaTeX source's text first, the PDF's text when the paper
+too (a label or miss that makes a Focus paper central gets it a Brief). Only active topics queue one; a pass not yet started is dropped
+when its paper no longer qualifies (the owner's word, a paused or unfollowed topic). It is **awaiting text** until the archive has the paper's text, then runs at
+once, not at the next night: the service's full-text worker, which runs with the schedule, looks at the queue every
+half minute (`litwatch fulltext` works it by hand). Text comes from the archive: the LaTeX source's text first, the PDF's text when the paper
 has no source (see [archive.md](archive.md)). For a pass queued by the nightly run, litwatch asks the archive to fetch
 the source at **urgent** priority, so the papers that matter arrive within minutes rather than behind a night's
 background downloads.

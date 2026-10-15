@@ -32,9 +32,8 @@ from litwatch.llm import Gateway, ProviderError
 from litwatch.store import analyses as analyses_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
-from litwatch.store import runs
+from litwatch.store import runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
-from litwatch.store import verdicts
 from tests.conftest import FAITH, INTERP, TREE, paper
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock

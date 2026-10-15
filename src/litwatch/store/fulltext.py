@@ -21,8 +21,6 @@ from litwatch.core.fulltext import (
 from litwatch.store.papers import COLUMNS, row_to_paper
 from litwatch.store.taxonomy import row_to_class
 
-TEXT_KINDS = ("brief", "weight")
-
 
 @dataclass(frozen=True)
 class Facts:
@@ -329,26 +327,16 @@ async def paper_of(conn: psycopg.AsyncConnection, pass_id: int) -> str | None:
     return row["paper_id"] if row else None
 
 
-async def stuck_one(
-    conn: psycopg.AsyncConnection, pass_id: int, runs: int
-) -> dict[str, Any] | None:
-    """The pass, its row locked to the end of the transaction, if it waits on the owner."""
-    return await (
-        await conn.execute(
-            "SELECT f.id, f.paper_id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
-            f"WHERE f.id = %(id)s AND {STUCK} FOR UPDATE OF f",
-            {"id": pass_id} | stuck_params(runs),
-        )
-    ).fetchone()
-
-
-async def run_now(conn: psycopg.AsyncConnection, pass_id: int) -> None:
-    """The owner's "run it now": three more runs, and first in line."""
-    await conn.execute(
-        "UPDATE fulltext_passes SET state = 'ready', failed_runs = 0, tried_at = NULL, "
-        "queued_at = now() WHERE id = %s",
-        (pass_id,),
+async def run_now(conn: psycopg.AsyncConnection, pass_id: int, runs: int) -> bool:
+    """The owner's "run it now" on a pass waiting for them: three more runs, and first in line.
+    Returns False when it does not wait for the owner."""
+    cur = await conn.execute(
+        "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, tried_at = NULL, "
+        "queued_at = now() FROM papers p "
+        f"WHERE f.id = %(id)s AND p.id = f.paper_id AND {STUCK}",
+        {"id": pass_id} | stuck_params(runs),
     )
+    return cur.rowcount == 1
 
 
 # Whether paper `p` has a text pass waiting on the owner, for a query with the parameters
