@@ -57,11 +57,11 @@ async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     """Hold the paper's settle lock to the end of the transaction. Every write that ends in a
     settle takes it first, so no two transactions wait on each other's rows.
 
-    The topic rows are share-locked first, in slug order: a taxonomy edit locks them all
-    before any paper, so locks are always taken topics first, and a settle never reads a depth
-    that an edit in flight is about to change.
+    The taxonomy lock is taken shared first: a taxonomy edit takes it exclusively before any
+    paper, so locks are always taken taxonomy first, and a settle never reads a depth that an
+    edit in flight is about to change.
     """
-    await conn.execute("SELECT class FROM topics ORDER BY class FOR SHARE")
+    await taxonomy_store.lock_shared(conn)
     await conn.execute("SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (SETTLE_LOCK, paper_id))
 
 

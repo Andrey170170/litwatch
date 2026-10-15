@@ -167,15 +167,18 @@ def test_relevant_takes_must_read_or_worth_reading_and_nothing_else_takes_a_grad
     assert Fit(value="relevant", grade="must_read").grade == Grade.MUST_READ
 
 
-async def test_more_takes_in_an_unmarked_miss(db):
-    missed = paper("2610.00400")
-    await papers_store.upsert(db, [missed])
+async def test_more_takes_in_an_unmarked_miss_for_a_focus_topic_only(db):
+    missed, elsewhere = paper("2610.00400"), paper("2610.00401")
+    await papers_store.upsert(db, [missed, elsewhere])
     await db.execute(
-        "INSERT INTO misses (paper_id, topic) VALUES (%s, %s)", (missed.id, FAITH.slug)
+        "INSERT INTO misses (paper_id, topic) VALUES (%s, %s), (%s, 'interpretability')",
+        (missed.id, FAITH.slug, elsewhere.id),
     )
     session_id = await calibrate.draw(db, seed=5, size=0)
     await calibrate.more(db, session_id)
-    assert (missed.id, "miss") in {(i["paper_id"], i["why"]) for i in await items(db, session_id)}
+    taken = {(i["paper_id"], i["why"]) for i in await items(db, session_id)}
+    assert (missed.id, "miss") in taken
+    assert (elsewhere.id, "miss") not in taken  # no label can be given for an Area topic
 
 
 async def test_fit_names_only_focus_topics(db):

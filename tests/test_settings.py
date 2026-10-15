@@ -113,18 +113,19 @@ async def test_the_schedule_says_when_each_job_next_fires_in_its_zone(conn):
 
 async def test_quality_lists_last_nights_splits_and_config_hides_secrets(client, conn):
     await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
-    await verdicts.add(
-        conn,
-        Verdict(
-            paper_id=P.id,
-            topic=FAITH.slug,
-            topic_revision=1,
-            grade=Grade.RELEVANT,
-            split=True,
-            judge=Opinion(grade=Grade.RELEVANT, reason="yes"),
-            check=Opinion(grade=Grade.NONE, reason="no"),
-        ),
-    )
+    for topic in (FAITH.slug, "interpretability"):  # an Area topic's split takes no label
+        await verdicts.add(
+            conn,
+            Verdict(
+                paper_id=P.id,
+                topic=topic,
+                topic_revision=1,
+                grade=Grade.RELEVANT,
+                split=True,
+                judge=Opinion(grade=Grade.RELEVANT, reason="yes"),
+                check=Opinion(grade=Grade.NONE, reason="no"),
+            ),
+        )
     page = (await client.get("/api/settings/quality")).json()
     (split,) = page["night"]["splits"]
     assert (split["paper_id"], split["judge"]["reason"], split["check"]["grade"]) == (

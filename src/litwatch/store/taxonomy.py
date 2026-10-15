@@ -17,7 +17,8 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core import Status, Taxonomy, TaxonomyClass, Topic
 
-# Advisory lock key that serializes taxonomy edits.
+# Advisory lock key on the taxonomy: edits hold it exclusively, readers that need one consistent
+# view (`load`, settles) hold it shared.
 TAXONOMY_LOCK = 7213913
 
 
@@ -34,10 +35,16 @@ class Saved:
 
 
 async def lock(conn: psycopg.AsyncConnection) -> None:
-    """Hold the taxonomy edit lock and every topic row to the end of the transaction, topics
-    in slug order as `feedback.word.lock` takes them, so settles in flight finish first."""
+    """Hold the taxonomy edit lock to the end of the transaction. It waits for settles in
+    flight, which hold the lock shared (`feedback.word.lock`). Every write to classes or
+    topics takes it first."""
     await conn.execute("SELECT pg_advisory_xact_lock(%s)", (TAXONOMY_LOCK,))
-    await conn.execute("SELECT class FROM topics ORDER BY class FOR UPDATE")
+
+
+async def lock_shared(conn: psycopg.AsyncConnection) -> None:
+    """Hold the taxonomy lock shared to the end of the transaction: no edit commits until
+    then, so every read sees one version of the tree."""
+    await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (TAXONOMY_LOCK,))
 
 
 def _class(row: dict[str, Any]) -> TaxonomyClass:
@@ -78,12 +85,14 @@ async def topics(conn: psycopg.AsyncConnection, status: Status | None = None) ->
 
 async def load(conn: psycopg.AsyncConnection) -> Taxonomy | None:
     """The current taxonomy, None before one is saved."""
-    rows = await (
-        await conn.execute("SELECT * FROM classes WHERE retired_at IS NULL ORDER BY position")
-    ).fetchall()
-    if not rows:
-        return None
-    return Taxonomy(classes=[_class(r) for r in rows], topics=await topics(conn))
+    async with conn.transaction():
+        await lock_shared(conn)
+        rows = await (
+            await conn.execute("SELECT * FROM classes WHERE retired_at IS NULL ORDER BY position")
+        ).fetchall()
+        if not rows:
+            return None
+        return Taxonomy(classes=[_class(r) for r in rows], topics=await topics(conn))
 
 
 async def _latest(conn: psycopg.AsyncConnection, table: str) -> dict[str, dict[str, Any]]:

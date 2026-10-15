@@ -115,6 +115,7 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
                           AND l.topic = s.topic AND NOT l.provisional)
         UNION ALL
         SELECT m.paper_id, m.topic, 'miss', NULL, NULL, NULL FROM misses m
+        JOIN topics t ON t.class = m.topic AND t.depth = 'focus'
         WHERE NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = m.paper_id
                           AND l.topic = m.topic AND NOT l.provisional)
         UNION ALL
