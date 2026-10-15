@@ -68,6 +68,7 @@ class Result(BaseModel):
     seconds: float | None = None
     error: str | None = None
     request: str  # `fingerprint`: answers to another request are not mixed into one run
+    inputs: str | None = None  # `inputs`: an answer to other inputs is written again
 
 
 def results(path: Path) -> dict[str, Result]:
@@ -83,6 +84,13 @@ def spent(path: Path) -> float:
         return 0.0
     lines = (line for line in path.read_text().splitlines() if line)
     return sum(Result.model_validate_json(line).cost or 0 for line in lines)
+
+
+def inputs(paper: Paper, entry: Entry) -> str:
+    """What one paper's request is made from besides its text (the version stands for it),
+    hashed."""
+    asked = repr((paper.title, paper.abstract, paper.version, entry.area))
+    return hashlib.sha256(asked.encode()).hexdigest()[:12]
 
 
 def fingerprint(gateway: Gateway) -> str:
@@ -124,9 +132,11 @@ async def run(
 ) -> list[Result]:
     """Write the Brief of every paper not yet answered in `out`, appending each answer as it
     arrives; a paper whose text could not be had is left to the next run. Refuses to resume a
-    run made with another configuration of the role."""
+    run made with another configuration of the role; a paper whose title, abstract, version or
+    area changed since its answer is written again."""
     asked = fingerprint(gateway)
-    done = {pid for pid, r in results(out).items() if r.output is not None}
+    now = {p.id: inputs(p, e) for p, e in papers}
+    done = {pid for pid, r in results(out).items() if r.output and r.inputs == now.get(pid)}
     if other := {r.request for r in results(out).values()} - {asked}:
         raise ValueError(
             f"{out} holds answers to another request ({sorted(other)}); use a new file"
@@ -138,7 +148,7 @@ async def run(
         area = tree.get(entry.area) if entry.area else None
         text = await _text(archive, paper, wait_seconds, poll)
         if isinstance(text, str):
-            result = Result(paper_id=paper.id, error=text, request=asked)
+            result = Result(paper_id=paper.id, error=text, request=asked, inputs=now[paper.id])
         else:
             async with gate:
                 started = time.monotonic()
@@ -150,7 +160,13 @@ async def run(
                     )
                 except CallError as exc:
                     cost = exc.usage.cost if exc.usage else None
-                    result = Result(paper_id=paper.id, error=str(exc), cost=cost, request=asked)
+                    result = Result(
+                        paper_id=paper.id,
+                        error=str(exc),
+                        cost=cost,
+                        request=asked,
+                        inputs=now[paper.id],
+                    )
                 else:
                     result = Result(
                         paper_id=paper.id,
@@ -158,6 +174,7 @@ async def run(
                         model=answer.model,
                         cost=answer.usage.cost,
                         request=asked,
+                        inputs=now[paper.id],
                     )
                 result.seconds = round(time.monotonic() - started, 2)
             result.version, result.source, result.chars = text.version, text.source, len(text.body)
@@ -205,7 +222,14 @@ def report(
     abstract_gists: dict[str, str],
     cost: float,
 ) -> str:
-    """The report, as markdown, from the run alone: no calls. `cost` is what the run spent."""
+    """The report, as markdown, from the run alone: no calls. `cost` is what the run spent. An
+    answer to other inputs than the paper's and entry's now is left out."""
+    stale = {
+        e.id
+        for e in entries
+        if e.id in found and (e.id not in papers or found[e.id].inputs != inputs(papers[e.id], e))
+    }
+    found = {pid: r for pid, r in found.items() if pid not in stale}
     answered = [found[e.id] for e in entries if e.id in found and found[e.id].output]
     lines = [f"# {title}", ""]
     models = sorted({r.model for r in answered if r.model})
@@ -223,7 +247,8 @@ def report(
     for e in entries:
         r = found.get(e.id)
         if r is None or r.output is None:
-            lines.append(f"| {e.id} | {r.error if r else 'not run'} | {_owner(e)} | | | |")
+            why = "answered for other inputs: run it again" if e.id in stale else "not run"
+            lines.append(f"| {e.id} | {r.error if r else why} | {_owner(e)} | | | |")
             continue
         o = r.output
         failed = checks(o)

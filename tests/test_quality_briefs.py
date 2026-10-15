@@ -67,11 +67,17 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     assert [r.paper_id for r in second] == [Q.id] and second[0].version is None
     assert set(briefs.results(out)) == {P.id, Q.id}
 
+    # A paper whose area changed is answered again; the rest are kept.
+    moved = [(P, entries()[0].model_copy(update={"area": "cot-monitoring"})), pairs[1]]
+    third = await briefs.run(gateway(asked), seeds.taxonomy(), moved, archive, out, wait_seconds=0)
+    assert [r.paper_id for r in third] == [P.id]
+    assert "Area: Chain-of-thought monitoring" in asked[-1]
+
     # A billed failure answered again later counts in what the run spent, not in its answers.
-    billed = briefs.Result(paper_id=P.id, error="invalid", cost=0.2, request=first[0].request)
+    billed = briefs.Result(paper_id=P.id, error="invalid", cost=0.2, request=third[0].request)
     with out.open("a") as f:
-        f.write(billed.model_dump_json() + "\n" + first[0].model_dump_json() + "\n")
-    assert briefs.spent(out) == pytest.approx(0.202 + first[0].cost)
+        f.write(billed.model_dump_json() + "\n" + third[0].model_dump_json() + "\n")
+    assert briefs.spent(out) == pytest.approx(0.203 + third[0].cost)
     assert briefs.results(out)[P.id].output is not None
 
     other = Gateway(Models(brief=ROLE.model_copy(update={"model": "another"})), {})
@@ -80,14 +86,15 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
 
 
 def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():
+    p_in, q_in = (briefs.inputs(p, e) for p, e in zip([P, Q], entries(), strict=True))
     found = {
         P.id: briefs.Result(
             paper_id=P.id, version=1, source="latex", chars=900, model="m", cost=0.2, request="x",
-            output=briefs.brief.Output.model_validate(ANSWER),
+            inputs=p_in, output=briefs.brief.Output.model_validate(ANSWER),
         ),
         Q.id: briefs.Result(
             paper_id=Q.id, version=1, source="latex", chars=900, model="m", cost=0.2, request="x",
-            output=briefs.brief.Output.model_validate(
+            inputs=q_in, output=briefs.brief.Output.model_validate(
                 {**ANSWER, "overstatement": None, "gist": GIST_IN_VOICE}
             ),
         ),
@@ -104,3 +111,9 @@ def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():
     assert "**Gist from the abstract.** An old Gist." in text
     assert "**Overstatement.** The abstract overstates: the probes" in text
     assert "$0.60 in all" in text
+
+    # An answer to an abstract since changed is not shown beside the new one.
+    revised = P.model_copy(update={"abstract": "We detect some hidden steps."})
+    text = briefs.report("Briefs", entries(), {P.id: revised, Q.id: Q}, found, {}, 0.6)
+    assert f"| {P.id} | answered for other inputs: run it again |" in text
+    assert "We detect all hidden steps." not in text

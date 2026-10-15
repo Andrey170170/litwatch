@@ -541,7 +541,8 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
     pass open; every one without a text pass for its current revision that the rule may give one
     (an active Focus topic's central or related, an active Area's must read, its own or a
     followed descendant's; or such a verdict or label from the last `lookback`, whose settle
-    may have been missed); the `outdated` ones; and every saved Focus must read with no card.
+    may have been missed); the `outdated` ones; and every saved Focus must read with no card,
+    or one with such a recent Focus verdict or label, whatever text pass it has.
     Bounded by the queue and what qualifies but has no pass, not by the library; never cut
     short, as settling spends nothing and a cut could leave the same papers out every night."""
     rows = await (
@@ -565,19 +566,21 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
                 WHERE g.grade = 'must_read' AND (g.topic = a.root OR NOT EXISTS (
                     SELECT 1 FROM effective_grades own
                     WHERE own.paper_id = g.paper_id AND own.topic = a.root))
+            ), recent AS (
+                -- Verdicts and labels whose settle may have been missed.
+                SELECT paper_id, topic FROM verdicts
+                WHERE recorded_at >= now() - %(lookback)s AND fit IN ('central', 'related')
+                UNION
+                SELECT paper_id, topic FROM labels
+                WHERE labelled_at >= now() - %(lookback)s AND value IN ('central', 'related')
             ), qualifying AS (
                 SELECT paper_id FROM effective_grades
                 WHERE topic IN (SELECT class FROM focus) AND fit IN ('central', 'related')
                 UNION
                 SELECT paper_id FROM area_must_read
                 UNION
-                SELECT paper_id FROM verdicts
-                WHERE recorded_at >= now() - %(lookback)s AND fit IN ('central', 'related')
-                  AND (topic IN (SELECT class FROM focus) OR topic IN (SELECT class FROM area))
-                UNION
-                SELECT paper_id FROM labels
-                WHERE labelled_at >= now() - %(lookback)s AND value IN ('central', 'related')
-                  AND (topic IN (SELECT class FROM focus) OR topic IN (SELECT class FROM area))
+                SELECT paper_id FROM recent
+                WHERE topic IN (SELECT class FROM focus) OR topic IN (SELECT class FROM area)
             )
             SELECT p.id FROM papers p
             WHERE p.dismissed_at IS NULL AND (
@@ -587,10 +590,13 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
                     AND NOT EXISTS (SELECT 1 FROM fulltext_passes f WHERE f.paper_id = p.id
                                     AND f.paper_revision = p.revision AND f.kind <> 'deep'))
                 OR p.id IN ({OUTDATED})
-                -- A Focus must read, saved, with no card: it may want a Deep pass.
-                OR (EXISTS (SELECT 1 FROM effective_grades g WHERE g.paper_id = p.id
-                            AND g.topic IN (SELECT class FROM focus) AND g.grade = 'must_read')
-                    AND EXISTS (SELECT 1 FROM library l WHERE l.paper_id = p.id AND l.saved)
+                -- A Focus must read, saved, or a recent Focus verdict or label, with no card:
+                -- it may want a Deep pass, a Brief pass of its own or not.
+                OR ((EXISTS (SELECT 1 FROM effective_grades g WHERE g.paper_id = p.id
+                             AND g.topic IN (SELECT class FROM focus) AND g.grade = 'must_read')
+                     AND EXISTS (SELECT 1 FROM library l WHERE l.paper_id = p.id AND l.saved)
+                     OR p.id IN (SELECT paper_id FROM recent
+                                 WHERE topic IN (SELECT class FROM focus)))
                     AND NOT EXISTS (SELECT 1 FROM deep_cards c WHERE c.paper_id = p.id
                                     AND c.card IS NOT NULL))
             )

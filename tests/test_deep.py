@@ -184,6 +184,26 @@ async def test_a_must_read_whose_settle_was_missed_gets_its_pass_on_the_nightly_
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
 
 
+async def test_a_missed_settle_is_swept_up_though_the_paper_has_its_brief(db):
+    await grade(db, Fit.RELATED)  # relevant, with its Brief pass, done
+    await db.execute(
+        "UPDATE fulltext_passes SET state = 'done', arxiv_version = 2 WHERE kind = 'brief'"
+    )
+    await verdicts.add(
+        db,
+        Verdict(
+            paper_id=P.id,
+            topic=FAITH.slug,
+            topic_version="v",
+            fit=Fit.CENTRAL,
+            reason="r",
+            opinions={},
+        ),
+    )  # and no settle
+    await word.settle_all(db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK))
+    assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
+
+
 # -- working one -----------------------------------------------------------------------------------
 
 
