@@ -178,6 +178,19 @@ async def status(request: Request, c: Conn) -> s.RunStatus:
 # -- papers ----------------------------------------------------------------------------------------
 
 
+def _shows_outside(query: s.PaperQuery) -> bool:
+    """Whether a Papers filter keeps the outside band: a paper outside the collection has no
+    topic, level, Weight or analysis, and is not saved, so a filter on any of those leaves
+    it out."""
+    ours = (query.topic, query.depth, query.rarity, query.grade, query.weight)
+    return (
+        query.source != "collection"
+        and not any(ours)
+        and query.code is None
+        and query.saved is not True
+    )
+
+
 @router.get("/papers", responses=NOT_FOUND)
 async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query()]) -> s.Papers:
     """Papers: the whole collection, rarest first. A search also asks the search providers, on
@@ -194,16 +207,7 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
         )
         answer.rows = [_row(tree, looks, r, s.Row) for r in listed.rows]
         answer.total, answer.counts = listed.total, s.RarityCounts(**listed.rarities)
-    # A paper outside the collection has no topic, level, Weight or analysis, and is not saved.
-    ours = (params.topic, params.depth, params.rarity, params.grade, params.weight)
-    if (
-        params.q
-        and params.offset == 0
-        and params.source != "collection"
-        and not any(ours)
-        and params.code is None
-        and params.saved is not True
-    ):
+    if params.q and params.offset == 0 and _shows_outside(params):
         filters = SearchFilters(since=params.since, until=params.until, limit=params.limit)
         answer.outside, answer.left_out = await integrations_api.search_outside(
             request, c, params.q, filters, params.sort
@@ -478,13 +482,14 @@ async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
     ):
         await lookups.for_copy(c, request.app.state.publications, body.ids[0])
     ids = list(body.ids)
-    source = body.filter.source if body.filter else None
     if body.filter is not None:
         ids += [i for i in await _matching(c, body.filter) if i not in ids]
+    # The band's hits as the list showed them: none under a filter that leaves the band out.
+    cited = body.cited if body.filter is None or _shows_outside(body.filter) else []
     outside = [
         Cited(id=h.id, title=h.title, authors=list(h.authors), year=h.year)
-        for h in body.cited
-        if h.id not in ids and source != "collection"
+        for h in cited
+        if h.id not in ids
     ]
     return await _bibtex(c, ids, outside)
 

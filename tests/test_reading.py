@@ -687,6 +687,9 @@ async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client
     body["filter"]["source"] = "collection"
     text = (await client.post("/api/bibtex", json=body)).text
     assert "eprint = {2610.00001}" in text and "eprint = {2610.99902}" not in text
+    # So does a filter only the collection has, as the list leaves the band out under it.
+    body["filter"] = {"q": "hidden computation", "source": "outside", "rarity": ["rare"]}
+    assert "@" not in (await client.post("/api/bibtex", json=body)).text
     text = (await client.get("/api/bibtex", params={"q": "sparse"})).text
     assert "eprint = {2610.00002}" in text and "2610.00001" not in text
     outside = {"q": "hidden computation", "source": "outside"}
