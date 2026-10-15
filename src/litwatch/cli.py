@@ -34,7 +34,7 @@ from litwatch.store import taxonomy as taxonomy_store
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="litwatch")
 db_app = typer.Typer(no_args_is_help=True, help="Database migrations.")
 eval_app = typer.Typer(no_args_is_help=True, help="Dry runs measured against the owner's labels.")
-library_app = typer.Typer(no_args_is_help=True, help="Effective grades and the library.")
+library_app = typer.Typer(no_args_is_help=True, help="Effective grades, rarity and the library.")
 taxonomy_app = typer.Typer(no_args_is_help=True, help="The class tree and its topics, as YAML.")
 intake_app = typer.Typer(help="Take papers in: from arXiv, or a window from the archive.")
 app.add_typer(db_app, name="db")
@@ -280,8 +280,8 @@ def eval_classify_report(
 
 @library_app.command("sync")
 def library_sync() -> None:
-    """Settle every paper with a verdict or the owner's word: effective grades, the library,
-    and their events. For a database written around the settle."""
+    """Settle every paper with a verdict, a Weight or the owner's word: effective grades,
+    rarity, the library, and their events. For a database written around the settle."""
     console.print_json(data=_run(word.sync))
 
 

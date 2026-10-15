@@ -406,6 +406,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/grading/{topic}/{paper_id}/now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grade Now
+         * @description A grading failed three runs in a row on this text: grade it now, as a run of its own.
+         *     It counts as the first of three more runs, so a nightly run tries it again if this fails.
+         */
+        post: operations["grade_now_api_settings_grading__topic___paper_id__now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/calibrate": {
         parameters: {
             query?: never;
@@ -682,12 +703,13 @@ export interface components {
         };
         /**
          * Answer
-         * @description One paper's answers. Fit for the topic it was drawn or taken for is required.
+         * @description One paper's answers. Fit for the topic it was drawn or taken for is required: central,
+         *     related, adjacent, none or unsure.
          */
         Answer: {
             /** Fit */
             fit: {
-                [key: string]: components["schemas"]["Fit"];
+                [key: string]: components["schemas"]["LabelValue"];
             };
             /** Value */
             value?: ("matters" | "fine" | "not_for_me") | null;
@@ -749,24 +771,34 @@ export interface components {
         };
         /**
          * Chosen
-         * @description One Focus topic's current verdict on the paper.
+         * @description One followed topic's current verdict on the paper: the Fit that stands, each grader's
+         *     answer by role, and the paper revision it was made from.
          */
         Chosen: {
             /** Topic */
             topic: string;
-            grade: components["schemas"]["Grade"];
+            fit: components["schemas"]["Fit"];
+            /** Reason */
+            reason: string;
             /**
              * Split
              * @default false
              */
             split: boolean;
-            judge?: components["schemas"]["Opinion"] | null;
-            check?: components["schemas"]["Opinion"] | null;
             /**
-             * Migrated
+             * Escalated
              * @default false
              */
-            migrated: boolean;
+            escalated: boolean;
+            /** Opinions */
+            opinions?: {
+                [key: string]: components["schemas"]["Opinion"];
+            };
+            /**
+             * Paper Revision
+             * @default 1
+             */
+            paper_revision: number;
             /** Recorded At */
             recorded_at?: string | null;
         };
@@ -865,17 +897,29 @@ export interface components {
             /** Error */
             error?: string | null;
         };
-        /** Fit */
-        Fit: {
-            value: components["schemas"]["LabelValue"];
-            grade?: components["schemas"]["Grade"] | null;
-        };
+        /**
+         * Fit
+         * @description How close a paper is to one topic, most inclusive first.
+         * @enum {string}
+         */
+        Fit: "central" | "related" | "adjacent" | "none";
         /**
          * Grade
-         * @description A Focus topic's judgement of a paper, most inclusive first.
+         * @description A paper's standing on one topic, from its Fit there and its Weight, most inclusive first.
          * @enum {string}
          */
         Grade: "must_read" | "relevant" | "adjacent" | "none";
+        /**
+         * GradedOut
+         * @description What grading now found: the Fit that stands, or why there is no verdict.
+         */
+        GradedOut: {
+            /** Graded */
+            graded: boolean;
+            fit?: components["schemas"]["Fit"] | null;
+            /** Error */
+            error?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -901,7 +945,7 @@ export interface components {
              * Format: date-time
              */
             at: string;
-            grade?: components["schemas"]["Grade"] | null;
+            fit?: components["schemas"]["Fit"] | null;
         };
         /**
          * IntegrationCard
@@ -939,12 +983,10 @@ export interface components {
         /** LabelIn */
         LabelIn: {
             value: components["schemas"]["LabelValue"];
-            grade?: components["schemas"]["Grade"] | null;
         };
         /** LabelState */
         LabelState: {
             value: components["schemas"]["LabelValue"];
-            grade?: components["schemas"]["Grade"] | null;
             /** Origin */
             origin: string;
             /**
@@ -955,9 +997,10 @@ export interface components {
         };
         /**
          * LabelValue
+         * @description A label's answer: a Fit (`core.grading.Fit`), or unsure.
          * @enum {string}
          */
-        LabelValue: "relevant" | "adjacent" | "not_relevant" | "unsure";
+        LabelValue: "central" | "related" | "adjacent" | "none" | "unsure";
         /** Lookup */
         Lookup: {
             row: components["schemas"]["Row"];
@@ -978,6 +1021,12 @@ export interface components {
             paper_id: string;
             /** Topic */
             topic: string;
+            /**
+             * Fit
+             * @default central
+             * @enum {string}
+             */
+            fit: "central" | "related";
         };
         /** NextFire */
         NextFire: {
@@ -991,13 +1040,21 @@ export interface components {
              */
             next: string;
         };
-        /** Opinion */
+        /**
+         * Opinion
+         * @description One grader's answer: a Fit with one sentence why, or, from `area_check`, whether the
+         *     judge's Fit holds and the probability that it does.
+         */
         Opinion: {
-            grade: components["schemas"]["Grade"];
-            /** Reason */
-            reason: string;
             /** Model */
-            model?: string | null;
+            model: string;
+            fit?: components["schemas"]["Fit"] | null;
+            /** Reason */
+            reason?: string | null;
+            /** Holds */
+            holds?: boolean | null;
+            /** Probability */
+            probability?: number | null;
         };
         /** Order */
         Order: {
@@ -1073,7 +1130,7 @@ export interface components {
         };
         /**
          * PaperTopic
-         * @description The paper as one topic sees it.
+         * @description The paper as one topic sees it: its effective Fit and grade there.
          */
         PaperTopic: {
             /** Slug */
@@ -1083,6 +1140,7 @@ export interface components {
             depth: components["schemas"]["Depth"];
             /** Colour */
             colour?: string | null;
+            fit?: components["schemas"]["Fit"] | null;
             grade?: components["schemas"]["Grade"] | null;
             label?: components["schemas"]["LabelState"] | null;
             reaction?: components["schemas"]["ReactionValue"] | null;
@@ -1364,6 +1422,13 @@ export interface components {
              * @default 0
              */
             analysis_failed: number;
+            /**
+             * Ungraded
+             * @default 0
+             */
+            ungraded: number;
+            /** Over Budget */
+            over_budget?: string[];
         };
         /**
          * Status
@@ -2164,6 +2229,56 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description No such paper */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The paper's text changed, or it no longer waits for the owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grade_now_api_settings_grading__topic___paper_id__now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                topic: string;
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Awaiting"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GradedOut"];
+                };
             };
             /** @description No such paper */
             404: {

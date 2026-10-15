@@ -109,8 +109,8 @@ Every event below carries the paper's id in `paper_id`.
 | `paper.revised` | A stored paper got a new arXiv version, or its title or abstract was rewritten (by arXiv, or corrected by the owner) | `version`, `previous_version`, `rewritten`: bool, `source`; an owner's correction has `rewritten: true, corrected: true` and no versions or source |
 | `paper.classified` | Classification recorded the paper's classes for its current text, by the classifier or by the owner's hand | `revision`: the paper revision; `primary`: the primary class; `classes`: the classes it is now a direct member of, the owner's class labels applied; `by_owner`: bool |
 | `gist.written` | A Gist was written for the paper (from the abstract by analysis; from the full text later) | `revision`, `source`: `abstract` or `full_text`, `gist_id` |
-| `verdict.recorded` | Grading recorded a verdict for a Focus topic | `topic`, `grade`, `split`: bool, `verdict_id` |
-| `grade.changed` | A paper's effective grade for a Focus topic changed, by a verdict or the owner's word | `topic`, `before`, `after`: `must_read`, `relevant`, `adjacent`, `none` or null |
+| `verdict.recorded` | Grading recorded a verdict for a followed topic (Focus, Area or Field) | `topic`, `revision`: the paper revision, `verdict_id`, `fit`: `central`, `related`, `adjacent` or `none`; `weight`: the Weight it was graded with, or null before analysis; `grade`: derived from the two; `split`, `escalated`: bool |
+| `grade.changed` | A paper's effective grade or Fit for a followed topic changed, by a verdict, a new Weight, the owner's word or a taxonomy edit | `topic`, `before`, `after`: `must_read`, `relevant`, `adjacent`, `none` or null; `fit_before`, `fit_after`: `central`, `related`, `adjacent`, `none` or null |
 | `paper.saved` | The paper entered the library | none |
 | `paper.unsaved` | The paper left the library (its last reason went, or the owner unsaved it) | none |
 | `publication.found` | A published record was stored for the paper, by lookup or by the owner | `dblp_key`, `venue`, `year`, `doi`, `by_owner`: bool |
@@ -118,10 +118,13 @@ Every event below carries the paper's id in `paper_id`.
 | `card.ready` | The `deep` integration stored a card | `model` |
 
 `grade.changed` is the one to watch for grades; `verdict.recorded` is the pipeline's internal
-record and can disagree with what the owner sees. The **effective grade** is the owner's word
-where there is one, else the current verdict; every reader-facing surface uses it, and so should
-an integration. The **library** is every paper at an effective grade of `relevant` or above for
-some Focus topic, plus what the owner saved by hand, minus what the owner unsaved.
+record and can disagree with what the owner sees. The **effective Fit** is the owner's word
+where there is one, else the current verdict's; the **effective grade** comes from it and the
+paper's current Weight through the grade table, and the owner's word of central or related never
+yields less than `relevant`. Every reader-facing surface uses it, and so should an integration.
+Grades exist for every followed topic; check the topic's depth (`GET /api/topics`) if only Focus
+topics matter to you. The **library** is every paper at an effective grade of `relevant` or above
+for some Focus topic, plus what the owner saved by hand, minus what the owner unsaved.
 
 ## Reading litwatch's data
 
@@ -221,7 +224,8 @@ Each module's docstring lists its options and environment variables.
 
 ```json
 {"id": 4512, "type": "grade.changed", "paper_id": "2610.01234",
- "payload": {"topic": "cot-faithfulness", "before": "adjacent", "after": "relevant"},
+ "payload": {"topic": "cot-faithfulness", "before": "adjacent", "after": "relevant",
+             "fit_before": "adjacent", "fit_after": "related"},
  "created_at": "2026-10-12T06:41:09.312Z", "xid": 508211}
 ```
 
