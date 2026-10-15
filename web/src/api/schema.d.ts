@@ -675,6 +675,15 @@ export interface components {
             note?: string | null;
         };
         /**
+         * Awaiting
+         * @description What every action on a paper awaiting classification names: the paper revision the
+         *     owner saw on Quality. The action applies only to that text.
+         */
+        Awaiting: {
+            /** Revision */
+            revision: number;
+        };
+        /**
          * BibtexFilter
          * @description A papers-table filter, as `GET /api/papers` takes it.
          */
@@ -757,6 +766,8 @@ export interface components {
         };
         /** ClassesIn */
         ClassesIn: {
+            /** Revision */
+            revision: number;
             /** Classes */
             classes: string[];
             /** Primary */
@@ -764,6 +775,8 @@ export interface components {
         };
         /** CorrectionIn */
         CorrectionIn: {
+            /** Revision */
+            revision: number;
             /** Title */
             title?: string | null;
             /** Abstract */
@@ -1969,7 +1982,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Awaiting"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

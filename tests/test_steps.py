@@ -1,6 +1,7 @@
 """Classification and analysis as nightly steps: what they record, their events, failures and
 the owner's actions on a paper classification keeps failing on. Models are scripted."""
 
+import asyncio
 import json
 
 import httpx
@@ -11,7 +12,7 @@ from litwatch.api import create_app
 from litwatch.config import Classification, Config, Models, RoleConfig
 from litwatch.core import FAILED_RUNS, Paper
 from litwatch.jobs import nightly
-from litwatch.llm import Gateway
+from litwatch.llm import Gateway, ProviderError
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
@@ -61,9 +62,10 @@ class Scripted:
         step = "classify" if role.model == CLASSIFY.model else "analyse"
         self.asked.append((step, title))
         self.users.append(request.user)
-        if step == "classify":
-            return json.dumps(self.decisions.get(title, decision()))
-        return json.dumps(self.analyses.get(title, ANALYSIS))
+        answer = (self.decisions if step == "classify" else self.analyses).get(title)
+        if isinstance(answer, Exception):
+            raise answer
+        return json.dumps(answer or (decision() if step == "classify" else ANALYSIS))
 
     def gateway(self, config: Config, journal) -> Gateway:
         providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
@@ -230,9 +232,62 @@ async def test_a_result_for_text_that_changed_meanwhile_records_nothing(conn, mo
     assert await rows(conn, "SELECT 1 FROM outbox WHERE type = 'paper.classified'") == []
 
 
+@pytest.mark.parametrize("step", ["classify", "analyse"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        ProviderError("APITimeoutError", timeout=True),
+        ProviderError("AuthenticationError: no key"),
+    ],
+)
+async def test_a_model_that_did_not_answer_is_retried_without_counting(conn, models, step, error):
+    (models.decisions if step == "classify" else models.analyses)[A.title] = error
+    table = "classification" if step == "classify" else "analysis"
+    for _ in range(FAILED_RUNS + 1):
+        models.asked.clear()
+        await night(conn, models)
+        assert (step, A.title) in models.asked  # tried again every run
+    (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE paper_id = %s", A.id)
+    assert (failure["step"], failure["failed_runs"]) == (table, 0)
+    assert failure["last_error"].startswith(("timeout", "provider"))
+    assert await failures.stuck(conn, table, FAILED_RUNS) == []
+
+
+async def test_a_failing_record_stops_every_call_before_the_run_closes(conn, models, monkeypatch):
+    """B's call never returns; recording A fails. The run must not end with B still asking."""
+    stalled, cancelled = asyncio.Event(), []
+
+    class Stalling(ScriptedProvider):
+        async def complete(self, role, request):
+            if B.title not in request.user:
+                return await super().complete(role, request)
+            stalled.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.append(B.id)
+                raise
+
+    def gateway(config, journal):
+        providers = {n: Stalling(n, models.respond) for n in ("anthropic", "openrouter")}
+        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+
+    async def boom(conn, found):
+        await stalled.wait()
+        raise RuntimeError("the database went away")
+
+    monkeypatch.setattr(classification, "record", boom)
+    with pytest.raises(RuntimeError):
+        await nightly.run(conn, CONFIG, fetch=False, gateway=gateway)
+    assert cancelled == [B.id]
+    (run,) = await rows(conn, "SELECT error, finished_at FROM runs")
+    assert run["finished_at"] and "the database went away" in run["error"]
+
+
 # -- the owner's three actions on a paper awaiting classification --------------------------------
 
 TOKEN = "s3cret"
+AT_1 = {"revision": 1}  # the revision Quality listed the paper at
 
 
 @pytest.fixture
@@ -257,12 +312,17 @@ async def test_a_paper_awaiting_classification_is_counted_and_listed(client):
     status = (await client.get("/api/status")).json()
     assert status["state"] == "attention" and status["awaiting_classification"] == 1
     assert await awaiting(client) == [A.id]
-    elsewhere = await client.post(f"/api/settings/classification/{B.id}/dismiss")
-    assert elsewhere.status_code == 404  # B was classified: nothing to act on
+    quality = (await client.get("/api/settings/quality")).json()
+    assert quality["night"]["awaiting_classification"][0]["revision"] == 1
+    url = "/api/settings/classification/{}/dismiss"
+    elsewhere = await client.post(url.format(B.id), json={"revision": 1})
+    assert elsewhere.status_code == 409  # B was classified: nothing to act on
+    assert (await client.post(url.format("2610.99999"), json={"revision": 1})).status_code == 404
 
 
 async def test_dismissing_drops_the_paper_from_processing(client, conn, models):
-    assert (await client.post(f"/api/settings/classification/{A.id}/dismiss")).status_code == 204
+    dismissed = await client.post(f"/api/settings/classification/{A.id}/dismiss", json=AT_1)
+    assert dismissed.status_code == 204
     assert await awaiting(client) == []
     assert (await client.get("/api/status")).json()["state"] == "quiet"
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
@@ -273,11 +333,13 @@ async def test_dismissing_drops_the_paper_from_processing(client, conn, models):
 
 
 async def test_classifying_by_hand_goes_on_as_usual_with_source_owner(client, conn, models):
-    bad = await client.put(f"/api/settings/classification/{A.id}", json={"classes": ["nope"]})
+    bad = await client.put(
+        f"/api/settings/classification/{A.id}", json=AT_1 | {"classes": ["nope"]}
+    )
     assert bad.status_code == 422
     done = await client.put(
         f"/api/settings/classification/{A.id}",
-        json={"classes": ["interpretability", "agents"], "primary": "agents"},
+        json=AT_1 | {"classes": ["interpretability", "agents"], "primary": "agents"},
     )
     assert done.json() == {"classes": ["interpretability", "agents"], "primary": "agents"}
     assert await members(conn, A.id) == {("interpretability", "owner"), ("agents", "owner")}
@@ -295,10 +357,10 @@ async def test_classifying_by_hand_goes_on_as_usual_with_source_owner(client, co
 
 
 async def test_fixing_the_text_counts_as_a_rewrite_and_classifies_again(client, conn, models):
-    empty = await client.post(f"/api/settings/classification/{A.id}/correction", json={})
+    empty = await client.post(f"/api/settings/classification/{A.id}/correction", json=AT_1)
     assert empty.status_code == 422
     fixed = await client.post(
-        f"/api/settings/classification/{A.id}/correction", json={"title": "Probes, fixed"}
+        f"/api/settings/classification/{A.id}/correction", json=AT_1 | {"title": "Probes, fixed"}
     )
     assert fixed.status_code == 204
     stored: Paper = await papers_store.get(conn, A.id)
@@ -310,3 +372,30 @@ async def test_fixing_the_text_counts_as_a_rewrite_and_classifies_again(client, 
     assert await awaiting(client) == []
     await night(conn, models)
     assert ("other", "classifier") in await members(conn, A.id)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("POST", "/dismiss", {}),
+        ("PUT", "", {"classes": ["agents"]}),
+        ("POST", "/correction", {"title": "Probes, fixed"}),
+    ],
+)
+async def test_an_action_on_text_that_changed_meanwhile_is_refused(
+    client, conn, method, path, body
+):
+    url = f"/api/settings/classification/{A.id}{path}"
+    # A revision the owner never saw.
+    assert (await client.request(method, url, json=body | {"revision": 2})).status_code == 409
+    # The nightly run rewrote the paper after Quality listed it at revision 1.
+    rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
+    await papers_store.upsert(conn, [rewritten])
+    refused = await client.request(method, url, json=body | AT_1)
+    assert refused.status_code == 409
+    # Nor does the new text wait for the owner: its classification never failed.
+    assert (await client.request(method, url, json=body | {"revision": 2})).status_code == 409
+    stored = await papers_store.get(conn, A.id)
+    assert (stored.title, stored.abstract, stored.revision) == (A.title, rewritten.abstract, 2)
+    assert await rows(conn, "SELECT 1 FROM papers WHERE dismissed_at IS NOT NULL") == []
+    assert await rows(conn, "SELECT 1 FROM classifications WHERE paper_id = %s", A.id) == []

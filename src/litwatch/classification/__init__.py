@@ -82,6 +82,9 @@ class Classification:
     model: str | None = None
     usage: Usage | None = None
     error: str | None = None
+    # The model answered and the answer could not be used: a failed run toward awaiting
+    # classification. Any other error (a timeout, a provider down) is retried without counting.
+    unusable: bool = False
 
 
 async def _one(
@@ -95,7 +98,7 @@ async def _one(
     except CallError as exc:
         # Every question answered, every probability in [0, 1], the choice a class of the tree:
         # anything less is a failed call (pipeline.md, section 2).
-        found.error, found.usage = str(exc), exc.usage
+        found.error, found.usage, found.unusable = str(exc), exc.usage, exc.unusable
         return found
     found.classified = classified(tree, answer.value)
     found.memberships = memberships(tree, found.classified, paper.title, paper.abstract, thresholds)
@@ -112,7 +115,8 @@ async def classify(
     concurrency: int = 16,
 ) -> AsyncIterator[Classification]:
     """Ask the `classify` role about each paper and yield results as they arrive. Writes
-    nothing. A paper whose call fails is yielded with its error and stops nothing else."""
+    nothing. A paper whose call fails is yielded with its error and stops nothing else. Close
+    it (`contextlib.aclosing`) when leaving early, so no call goes on behind the caller."""
     limit = asyncio.Semaphore(concurrency)
 
     async def bounded(paper: Paper) -> Classification:
@@ -124,8 +128,11 @@ async def classify(
         for done in asyncio.as_completed(tasks):
             yield await done
     finally:
+        # Left early (the caller failed or stopped): no call may outlive the run that pays
+        # for it, so every worker is cancelled and awaited before the generator closes.
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _announce(
@@ -146,7 +153,7 @@ async def _announce(
 
 
 async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
-    """Store one paper's classification, or count its failure. Returns False when there was
+    """Store one paper's classification, or record its failure. Returns False when there was
     nothing to record: the paper's text changed meanwhile, or it was dismissed.
 
     The classifier's memberships replace the paper's earlier ones; the owner's class labels
@@ -156,7 +163,8 @@ async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
         if not await papers_store.still_current(conn, c.paper):
             return False
         if c.error is not None or c.classified is None or c.model is None:
-            await failures.failed(conn, c.paper, "classification", c.error or "no answer")
+            error = c.error or "no answer"
+            await failures.failed(conn, c.paper, "classification", error, counts=c.unusable)
             return True
         primary = c.classified.primary
         await store.add(conn, c.paper, c.taxonomy_revision, primary, c.response, c.model)

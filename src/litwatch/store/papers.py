@@ -225,6 +225,17 @@ async def still_current(conn: psycopg.AsyncConnection, paper: Paper) -> bool:
     return row is not None and row["dismissed_at"] is None and row["revision"] == paper.revision
 
 
+async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> Paper | None:
+    """The paper as stored, its row locked to the end of the transaction: intake, a correction,
+    a dismissal and every step's record wait until then. Call it inside a transaction."""
+    row = await (
+        await conn.execute(
+            f"SELECT {COLUMNS} FROM papers p WHERE p.id = %s FOR UPDATE", (paper_id,)
+        )
+    ).fetchone()
+    return row_to_paper(row) if row else None
+
+
 async def dismiss(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     """Drop the paper from processing: never classified, analysed or graded again, even after a
     rewrite. It stays in the collection, and in the archive."""

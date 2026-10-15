@@ -1,6 +1,7 @@
 -- Classification and analysis as nightly steps (N2a; docs/specs/v1/pipeline.md, sections 2, 3
--- and 9; data.md). Every record names the paper revision it was made from; a rewrite makes the
--- paper due for both steps again, and the older records stay as its history.
+-- and 9; data.md). Every record names the paper revision it was made from, and a rewrite makes
+-- the paper due for both steps again. Classifications, analyses, weights and gists keep every
+-- earlier row as history; memberships are only the current projection.
 
 -- One row per classification of a paper: the classifier's whole answer, kept whatever the owner
 -- says, so a threshold change can be replayed without new calls. `taxonomy_revision` is the hash
@@ -19,8 +20,9 @@ CREATE TABLE classifications (
 CREATE INDEX classifications_paper ON classifications (paper_id, paper_revision);
 
 -- Direct memberships only; inherited ones follow from the tree. One row per paper, class and
--- source: a classification replaces the paper's classifier, uncertain and keyword rows; owner and
--- miss rows are the owner's and stay. `member` is false only for the owner's class label taking
+-- source: the current projection, not history. A classification replaces the paper's
+-- classifier, uncertain and keyword rows (their history is `classifications`, every probability
+-- kept, so a threshold change replays); owner and miss rows are the owner's and stay. `member` is false only for the owner's class label taking
 -- the paper out of a class, which outranks every other source for that class. `class_version` is
 -- the class's hash when the membership was made (classes.version).
 CREATE TABLE memberships (

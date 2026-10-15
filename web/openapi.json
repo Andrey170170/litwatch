@@ -993,6 +993,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Awaiting"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -1684,6 +1694,20 @@
         "title": "Answer",
         "description": "One paper's answers. Fit for the topic it was drawn or taken for is required."
       },
+      "Awaiting": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "title": "Awaiting",
+        "description": "What every action on a paper awaiting classification names: the paper revision the\nowner saw on Quality. The action applies only to that text."
+      },
       "BibtexFilter": {
         "properties": {
           "q": {
@@ -1919,6 +1943,10 @@
       },
       "ClassesIn": {
         "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
           "classes": {
             "items": {
               "type": "string"
@@ -1940,12 +1968,17 @@
         },
         "type": "object",
         "required": [
+          "revision",
           "classes"
         ],
         "title": "ClassesIn"
       },
       "CorrectionIn": {
         "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
           "title": {
             "anyOf": [
               {
@@ -1970,6 +2003,9 @@
           }
         },
         "type": "object",
+        "required": [
+          "revision"
+        ],
         "title": "CorrectionIn"
       },
       "DeepCard": {

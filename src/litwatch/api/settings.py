@@ -4,6 +4,8 @@ awaiting classification, Calibrate, runs, and the configuration (read-only, spec
 from __future__ import annotations
 
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -95,22 +97,38 @@ async def quality_page(c: Conn) -> dict[str, Any]:
 # -- papers classification kept failing on (pipeline.md, section 9) -------------------------------
 
 
-async def _awaiting(c: Any, paper_id: str) -> Paper:
-    waiting = {r["paper_id"] for r in await failures.stuck(c, "classification", FAILED_RUNS)}
-    paper = await papers_store.get(c, paper_id) if paper_id in waiting else None
-    if paper is None:
-        raise HTTPException(status_code=404, detail="not a paper awaiting classification")
-    return paper
+class Awaiting(BaseModel):
+    """What every action on a paper awaiting classification names: the paper revision the
+    owner saw on Quality. The action applies only to that text."""
+
+    revision: int
+
+
+@asynccontextmanager
+async def _awaiting(c: Any, paper_id: str, revision: int) -> AsyncIterator[Paper]:
+    """The paper, locked to the end of the action's transaction, if it is still awaiting
+    classification at `revision`; 409 if its text changed or it no longer waits (a nightly
+    rewrite, another action). Eligibility is read after the lock, in the transaction that
+    acts."""
+    async with c.transaction():
+        paper = await papers_store.lock(c, paper_id)
+        if paper is None:
+            raise HTTPException(status_code=404, detail="no such paper")
+        if paper.revision != revision:
+            raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
+        if not await failures.waiting(c, paper, "classification", FAILED_RUNS):
+            raise HTTPException(status_code=409, detail="not awaiting classification")
+        yield paper
 
 
 @router.post("/classification/{paper_id:path}/dismiss", status_code=204)
-async def dismiss(paper_id: str, c: Conn) -> None:
+async def dismiss(paper_id: str, body: Awaiting, c: Conn) -> None:
     """Litwatch drops the paper from processing; it stays searchable in the archive."""
-    await _awaiting(c, paper_id)
-    await papers_store.dismiss(c, paper_id)
+    async with _awaiting(c, paper_id, body.revision):
+        await papers_store.dismiss(c, paper_id)
 
 
-class ClassesIn(BaseModel):
+class ClassesIn(Awaiting):
     classes: list[str]  # class slugs, the primary one first unless `primary` names it
     primary: str | None = None
 
@@ -118,23 +136,22 @@ class ClassesIn(BaseModel):
 @router.put("/classification/{paper_id:path}")
 async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
     """The owner names the paper's classes, which go on as usual with source `owner`."""
-    paper = await _awaiting(c, paper_id)
+    # Read before the paper's lock: locks are taken taxonomy first (`feedback.word.lock`).
     tree = await taxonomy_store.load(c)
     if tree is None:
         raise HTTPException(status_code=409, detail="no taxonomy")
-    try:
-        recorded = await classification.by_hand(c, paper, tree, body.classes, body.primary)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if not recorded:
-        raise HTTPException(status_code=409, detail="the paper changed meanwhile")
+    async with _awaiting(c, paper_id, body.revision) as paper:
+        try:
+            await classification.by_hand(c, paper, tree, body.classes, body.primary)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "classes": list(dict.fromkeys(body.classes)),
         "primary": body.primary or body.classes[0],
     }
 
 
-class CorrectionIn(BaseModel):
+class CorrectionIn(Awaiting):
     title: str | None = None
     abstract: str | None = None
 
@@ -143,12 +160,12 @@ class CorrectionIn(BaseModel):
 async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
     """Fix the text classification choked on. It counts as a rewrite: the next run classifies
     the corrected paper."""
-    await _awaiting(c, paper_id)
     title = (body.title or "").strip() or None
     abstract = (body.abstract or "").strip() or None
     if not (title or abstract):
         raise HTTPException(status_code=422, detail="give a title or an abstract")
-    await papers_store.correct(c, paper_id, title, abstract)
+    async with _awaiting(c, paper_id, body.revision):
+        await papers_store.correct(c, paper_id, title, abstract)
 
 
 # -- calibrate -------------------------------------------------------------------------------------

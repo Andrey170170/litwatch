@@ -41,7 +41,9 @@ evaluation calls the same functions and writes only to evaluation tables.
   request is built from) and `memberships` (paper, class, paper revision, class version, source classifier |
   uncertain | keyword | owner | miss, member yes | no, probability): direct memberships only, a "no" being the
   owner's class label removing the paper from a class; inherited ones come from the tree, and
-  the classifier's raw outcome stays in `classifications` whatever the owner says.
+  the classifier's raw outcome stays in `classifications` whatever the owner says. Memberships are the
+  current projection, replaced by each classification; their history is `classifications`, whose probabilities replay
+  any threshold.
 - `analyses` (paper, paper revision, gist, weight, weight reason, facets, model, at).
 - `weights` (paper, paper revision, weight, source abstract | full_text, pass, reason, at): the current Weight is the
   one from the full-text pass queued last for the current revision, the same pass as the current Brief and Gist, else

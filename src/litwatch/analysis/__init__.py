@@ -20,9 +20,9 @@ from litwatch.store import failures
 from litwatch.store import papers as papers_store
 
 ROLE = "analyse"
-# The Gist asked for is 20–30 words; a little either side is still a Gist, far off is a broken
-# answer and fails like any invalid one.
-GIST_WORDS = (15, 40)
+# The Gist asked for is 20–30 words. The accepted range is a guard against a broken answer, not
+# a second target: outside it the answer fails like any invalid one.
+GIST_WORDS = (15, 35)
 
 SYSTEM = f"""\
 You read the title and abstract of one arXiv paper and describe it for litwatch, which reads \
@@ -32,9 +32,10 @@ Write about the paper, never to a reader: no "you", no audience ("for practition
 anyone building agents"), and no advice on whether to read it ("must read", "worth reading"). \
 State what the paper does and finds, in its own terms. Do not hype and do not hedge.
 
-gist: one or two sentences, 20 to 30 words, saying what the paper does and its main result. \
-It is about the paper, not about any area or topic. Do not start with "This paper" and do not \
-repeat the title.
+gist: what the paper does and its main result, in one or two short sentences of 20 to 30 words \
+in all. 30 words is a hard limit: count the words before answering, and cut detail rather than \
+go over. It is about the paper, not about any area or topic. Do not start with "This paper" and \
+do not repeat the title.
 
 contribution: the main kind of contribution the paper makes.
 - method: a new method, model, algorithm or system
@@ -56,7 +57,7 @@ from what the abstract shows, and give one sentence why in weight_reason. The le
 class Output(BaseModel):
     """The answer's schema. The reason comes before the Weight it argues for."""
 
-    gist: str = Field(description="20 to 30 words")
+    gist: str = Field(description="20 to 30 words, never more than 30")
     contribution: Contribution
     releases_code: bool
     releases_weights: bool
@@ -104,13 +105,14 @@ class Analysed:
     model: str | None = None
     usage: Usage | None = None
     error: str | None = None
+    unusable: bool = False  # the model answered unusably: a failed run that counts
 
 
 async def _one(paper: Paper, area: TaxonomyClass, gateway: Gateway) -> Analysed:
     try:
         answer = await gateway.ask(ROLE, request(paper, area), paper_id=paper.id)
     except CallError as exc:
-        return Analysed(paper, area.slug, error=str(exc), usage=exc.usage)
+        return Analysed(paper, area.slug, error=str(exc), usage=exc.usage, unusable=exc.unusable)
     return Analysed(paper, area.slug, answer.value.analysis(), answer.model, answer.usage)
 
 
@@ -118,7 +120,8 @@ async def analyse(
     papers: list[tuple[Paper, TaxonomyClass]], gateway: Gateway, concurrency: int = 8
 ) -> AsyncIterator[Analysed]:
     """Ask the `analyse` role about each paper, judged in its primary class, and yield results
-    as they arrive. Writes nothing. A failed call is yielded with its error."""
+    as they arrive. Writes nothing. A failed call is yielded with its error. Close it
+    (`contextlib.aclosing`) when leaving early, so no call goes on behind the caller."""
     limit = asyncio.Semaphore(concurrency)
 
     async def bounded(paper: Paper, area: TaxonomyClass) -> Analysed:
@@ -130,19 +133,23 @@ async def analyse(
         for done in asyncio.as_completed(tasks):
             yield await done
     finally:
+        # Left early (the caller failed or stopped): no call may outlive the run that pays
+        # for it, so every worker is cancelled and awaited before the generator closes.
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
     """Store one paper's analysis, its Weight and its Gist from the abstract, with
-    `gist.written`; or count its failure. Returns False when there was nothing to record: the
+    `gist.written`; or record its failure. Returns False when there was nothing to record: the
     paper's text changed meanwhile, or it was dismissed."""
     async with conn.transaction():
         if not await papers_store.still_current(conn, a.paper):
             return False
         if a.analysis is None or a.model is None:
-            await failures.failed(conn, a.paper, "analysis", a.error or "no answer")
+            error = a.error or "no answer"
+            await failures.failed(conn, a.paper, "analysis", error, counts=a.unusable)
             return True
         gist = await store.add(conn, a.paper, a.primary, a.analysis, a.model)
         await failures.succeeded(conn, a.paper.id, "analysis")
