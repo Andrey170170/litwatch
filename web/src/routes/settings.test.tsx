@@ -7,7 +7,7 @@ const status = { state: "quiet", papers: 2, awaiting_classification: 0, analysis
 const cls = { slug: "mi", name: "Mech interp", description: "Circuits and features.", parent: null, threshold: null };
 const topic = { class: "mi", depth: "focus", monogram: "MI", colour: "#f3e600", status: "active", subject: "Circuits and features.", rubric: "central: it studies circuits", interests: "", keywords: ["circuit"] };
 const tree = { classes: [cls], topics: [topic] };
-const stats = { members: { mi: 3 }, thresholds: { mi: 0.5 }, class_revisions: { mi: 1 }, topic_revisions: { mi: 2 } };
+const stats = { members: { mi: 3 }, thresholds: { mi: 0.5 }, topic_revisions: { mi: 2 } };
 const split = {
   paper_id: "2610.00001",
   topic: "mi",

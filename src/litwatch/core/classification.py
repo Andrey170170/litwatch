@@ -92,14 +92,18 @@ def band(tree: Taxonomy, c: Classified, t: Thresholds = CHOSEN) -> set[str]:
     }
 
 
+def keyword_hit(pattern: str, title: str, abstract: str) -> bool:
+    """Whether a keyword pattern matches the title or abstract, case-insensitively."""
+    return re.search(pattern, f"{title}\n{abstract}", re.IGNORECASE) is not None
+
+
 def keyword(tree: Taxonomy, title: str, abstract: str) -> dict[str, str]:
     """Focus topics' classes whose keyword patterns match the title or abstract, with the first
     pattern that matched. No model is involved."""
-    text = f"{title}\n{abstract}"
     found: dict[str, str] = {}
     for t in tree.topics:
         if t.depth == Depth.FOCUS:
-            hit = next((k for k in t.keywords if re.search(k, text, re.IGNORECASE)), None)
+            hit = next((k for k in t.keywords if keyword_hit(k, title, abstract)), None)
             if hit:
                 found[t.slug] = hit
     return found

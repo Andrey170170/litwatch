@@ -16,7 +16,7 @@ export function ConfigurationPage() {
   return (
     <>
       <PageHead title="Configuration" sub="litwatch.toml as loaded; read-only here, the file is the source of truth. Secrets are masked." />
-      <Load error={config.isError} retry={() => void config.refetch()} loading={config.isPending} />
+      <Load q={config} />
       {config.data && (
         <>
           <div className="cap">Models per role</div>

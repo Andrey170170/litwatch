@@ -4,6 +4,7 @@
  * leaves untyped (`/quality`, `/runs`, `/calibrate`).
  */
 import type { Schemas } from "@/api/client";
+import { admits } from "./rarity";
 
 export type Page = "overview" | "needs" | "calibrate" | "misses" | "topics" | "taxonomy" | "runs" | "integrations" | "configuration";
 
@@ -34,10 +35,8 @@ export const GROUPS: { name: string; pages: { id: Page; name: string }[] }[] = [
   },
 ];
 
-export const PAGE_NAME = Object.fromEntries(GROUPS.flatMap((g) => g.pages.map((p) => [p.id, p.name]))) as Record<Page, string>;
-
 export function isPage(s: string): s is Page {
-  return s in PAGE_NAME;
+  return GROUPS.some((g) => g.pages.some((p) => p.id === s));
 }
 
 // -- the untyped endpoints -----------------------------------------------------------------------------------------
@@ -136,6 +135,11 @@ export function level(x: number, { hi = true, good = 0.9, ok = 0.8 } = {}): Leve
   return x <= good ? "ok" : x <= ok ? "warn" : "bad";
 }
 
+/** This month's spend and budget over every provider. */
+export function spendTotals(cost: Spend[]): { spent: number; budget: number } {
+  return { spent: cost.reduce((s, c) => s + c.spent, 0), budget: cost.reduce((s, c) => s + (c.budget ?? 0), 0) };
+}
+
 /** The spend bar's three marks as shares of its width: month to date, the projection, the budget tick. The widest
  * of the budget and the projection fills the bar. */
 export function spendBar(s: Spend): { spent: number; projected: number; budget: number | null } {
@@ -164,9 +168,8 @@ export function pipelineSide(item: SessionItem): "relevant or above" | "below" |
 export function differs(item: SessionItem): boolean {
   const fit = item.fit[item.topic];
   if (!fit || fit === "unsure") return false;
-  const ownerAbove = fit === "central" || fit === "related";
   const side = pipelineSide(item);
-  return side === "relevant or above" ? !ownerAbove : side === "below" ? ownerAbove : false;
+  return side === "relevant or above" ? !admits(fit) : side === "below" ? admits(fit) : false;
 }
 
 /** The first line of the re-run offer after a save (DESIGN.md, "The re-run offer"). */

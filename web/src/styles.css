@@ -180,7 +180,8 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 .nav .it.on, .nav .it[data-status="active"] { background: var(--sel); color: var(--sel-fg); box-shadow: inset 3px 0 0 var(--sel-fg); }
 .nav .it .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
 .nav .it .k { font: 500 11.5px var(--font-mono); color: var(--fg3); }
-.nav .it .k.hot { background: var(--sig); color: #fff; padding: 0 6px; }
+.nav .it .k.hot { margin-left: auto; background: var(--sig); color: #fff; padding: 0 6px; }
+.nav .it .k.ask { margin-left: auto; background: var(--acc); color: var(--acc-fg); padding: 0 6px; }
 .nav .sec { padding: 14px 8px 4px; }
 .side .foot { margin-top: auto; }
 .main { flex: 1; min-width: 0; overflow-y: auto; position: relative; }
@@ -479,16 +480,14 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 .side .it.leave:hover { color: var(--fg); }
 .side .sec.setttl { color: var(--fg); padding-top: 6px; }
 .side .sec.setttl::before { content: none; }
-.nav .it .k.hot { margin-left: auto; background: var(--acc); color: var(--acc-fg); padding: 0 6px; }
-.nav .it .k.bad { margin-left: auto; background: var(--sig); color: #fff; padding: 0 6px; }
 /* the phone's list of pages */
 .setlist .sec { padding: 14px 4px 6px; }
 .setlist > div:first-child .sec { padding-top: 2px; }
 .setlist .it { display: flex; align-items: baseline; gap: 10px; padding: 12px 10px; min-height: 44px; background: var(--surface); border: 1px solid var(--line2); margin-top: -1px; }
 .setlist .it .nm { font: 600 16px var(--font-name); letter-spacing: 0.04em; text-transform: uppercase; }
 .setlist .it .hint { margin-left: auto; font-size: 12px; color: var(--fg3); text-align: right; }
-.setlist .it .hint.hot { color: var(--warn); }
-.setlist .it .hint.bad { color: var(--sig); }
+.setlist .it .hint.ask { color: var(--warn); }
+.setlist .it .hint.hot { color: var(--sig); }
 /* page heads and groups */
 .sethd { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
 .sethd > div:first-child { flex: 1; min-width: 0; }
@@ -499,9 +498,6 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 .setpg .nsub { font-size: 12.5px; color: var(--fg3); margin: -2px 0 8px; }
 .caprow { display: flex; align-items: baseline; gap: 12px; }
 .caprow .inl { margin-left: auto; font-size: 12.5px; }
-.inl { color: var(--acc); cursor: pointer; }
-html[data-theme="light"] .inl { color: var(--fg); text-decoration: underline; }
-@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .inl { color: var(--fg); text-decoration: underline; } }
 .nact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .nact .sp { flex: 1; }
 .warnt { color: var(--warn); } .badt { color: var(--sig); }
@@ -588,6 +584,7 @@ a.nt:hover { text-decoration: underline; }
 .calprog button:hover i { height: 10px; margin-top: -2px; }
 .calprog button.done i { background: var(--cy); }
 .calprog button.cur i { background: var(--acc); height: 10px; margin-top: -2px; }
+.calp .rgist { --rc: var(--fg3); }
 .calp .h1 { margin-bottom: 6px; }
 .calp .calmeta { font-size: 12.5px; margin-bottom: 12px; }
 .calp .rgist.up { max-height: none; }
@@ -613,21 +610,21 @@ a.nt:hover { text-decoration: underline; }
 .cpk button .ck { color: var(--cy); }
 .cpk button.cur { background: var(--sel); box-shadow: inset 3px 0 0 var(--acc); }
 /* a past session's rows, and the list of past sessions */
-.srow { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto auto auto auto; gap: 14px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line2); font-size: 13px; box-shadow: inset 3px 0 0 var(--cy); text-align: left; }
-.srow:first-child { border-top: 0; }
-.srow:hover { background: var(--hover); }
-.srow.off { box-shadow: inset 3px 0 0 var(--warn); }
-.srow.blank { box-shadow: inset 3px 0 0 var(--line); }
-.srow .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.srow .fa { font-size: 12px; white-space: nowrap; }
-.srow.off .fa b { color: var(--warn); }
-.srow .fv { font-size: 12px; white-space: nowrap; }
-.srow[data-sub] { grid-template-columns: 80px minmax(0, 1fr) auto 14px; box-shadow: none; }
-.phone .srow:not([data-sub]) { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
-.phone .srow:not([data-sub]) .t { grid-column: 1 / -1; white-space: normal; }
-.phone .srow:not([data-sub]) .badge { display: none; }
-.phone .srow .fv { display: none; }
-.phone .srow[data-sub] { grid-template-columns: 56px minmax(0, 1fr) 10px; }
+.sess { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto auto auto auto; gap: 14px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line2); font-size: 13px; box-shadow: inset 3px 0 0 var(--cy); text-align: left; }
+.sess:first-child { border-top: 0; }
+.sess:hover { background: var(--hover); }
+.sess.off { box-shadow: inset 3px 0 0 var(--warn); }
+.sess.blank { box-shadow: inset 3px 0 0 var(--line); }
+.sess .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.sess .fa { font-size: 12px; white-space: nowrap; }
+.sess.off .fa b { color: var(--warn); }
+.sess .fv { font-size: 12px; white-space: nowrap; }
+.sess[data-sub] { grid-template-columns: 80px minmax(0, 1fr) auto 14px; box-shadow: none; }
+.phone .sess:not([data-sub]) { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+.phone .sess:not([data-sub]) .t { grid-column: 1 / -1; white-space: normal; }
+.phone .sess:not([data-sub]) .badge { display: none; }
+.phone .sess .fv { display: none; }
+.phone .sess[data-sub] { grid-template-columns: 56px minmax(0, 1fr) 10px; }
 /* a text field in a form */
 .tin { display: block; width: 100%; border: 1px solid var(--line); background: var(--bg); padding: 6px 9px; font-size: 13.5px; line-height: 1.5; resize: vertical; }
 .tin:focus { outline: 0; border-color: var(--acc); }
@@ -720,7 +717,7 @@ button.car:hover { color: var(--fg); background: var(--line2); }
 
 /* the phone, last so these win over the base rules: every control is at least 40px tall (DESIGN.md, "Every control has a hit area of at least 40 px") */
 @media (max-width: 55.99rem) {
-  :is(button.shh, .btn, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input, .trow .grip, .crow .car, .crow .nm, .cpk button, .kw, .srow, .tile, .setlist .it, .calprog button) { min-height: 40px; }
+  :is(button.shh, .btn, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input, .trow .grip, .crow .car, .crow .nm, .cpk button, .kw, .sess, .tile, .setlist .it, .calprog button) { min-height: 40px; }
   .sws button { width: 40px; height: 40px; }
   .trow .grip, .crow .car { width: 40px; }
   .tin.sm { min-height: 40px; }

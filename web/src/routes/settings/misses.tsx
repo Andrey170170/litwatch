@@ -2,10 +2,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { Schemas } from "@/api/client";
-import { missesQuery, topicsQuery } from "@/api/queries";
+import { missesQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
-import { Later, Load, PageHead, PaperLink } from "./parts";
+import { admits } from "@/lib/rarity";
+import { Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 type Miss = Schemas["Miss"];
 type Cell = { name: string; value: string; tone: "ok" | "bad" | "off" };
@@ -15,13 +16,12 @@ type Cell = { name: string; value: string; tone: "ok" | "bad" | "off" };
 export function cells(t: Miss["trace"]): Cell[] {
   const pending: Cell["tone"] = "off";
   const p = t.probability;
-  const admitted = (fit: Schemas["Fit"] | null | undefined) => fit === "central" || fit === "related";
   return [
     { name: "Classifier", value: !t.classified ? "pending" : p == null ? "no answer" : `${p.toFixed(2)} ${t.classifier ? "over" : "under"} ${t.threshold.toFixed(2)}`, tone: !t.classified ? pending : t.classifier ? "ok" : "bad" },
     { name: "Uncertain band", value: !t.classified ? "pending" : t.uncertain ? "member" : t.classifier ? "–" : "under", tone: !t.classified ? pending : t.uncertain ? "ok" : t.classifier ? "off" : "bad" },
     { name: "Keywords", value: !t.classified ? "pending" : t.keyword ? "match" : "no match", tone: !t.classified ? pending : t.keyword ? "ok" : "bad" },
-    { name: "Judge", value: !t.graded ? "pending" : (t.judge ?? "–"), tone: !t.graded ? pending : admitted(t.judge) ? "ok" : "bad" },
-    { name: "Check", value: !t.graded ? "pending" : (t.check ?? "not asked"), tone: !t.graded || !t.check ? pending : admitted(t.check) ? "ok" : "bad" },
+    { name: "Judge", value: !t.graded ? "pending" : (t.judge ?? "–"), tone: !t.graded ? pending : admits(t.judge) ? "ok" : "bad" },
+    { name: "Check", value: !t.graded ? "pending" : (t.check ?? "not asked"), tone: !t.graded || !t.check ? pending : admits(t.check) ? "ok" : "bad" },
   ];
 }
 
@@ -30,19 +30,17 @@ export function missedAt(t: Miss["trace"]): string {
   if (!t.classified) return "not classified yet";
   if (!t.classifier && !t.uncertain && !t.keyword) return "classification";
   if (!t.graded) return "not graded yet";
-  const admitted = (fit: Schemas["Fit"] | null | undefined) => fit === "central" || fit === "related";
-  if (!admitted(t.judge) && !(t.check && admitted(t.check))) return "grading";
+  if (!admits(t.judge) && !(t.check && admits(t.check))) return "grading";
   return "nowhere: the trace admits it";
 }
 
 export function MissesPage() {
   const misses = useQuery(missesQuery);
-  const topics = useQuery(topicsQuery);
-  const cards = Object.fromEntries((topics.data ?? []).flatMap((g) => g.topics).map((t) => [t.slug, t]));
+  const cards = useTopicCards();
   return (
     <>
       <PageHead title="Misses" sub="Papers reported as missed, with what each stage said. A trace shows where the pipeline let the paper go." />
-      <Load error={misses.isError} retry={() => void misses.refetch()} loading={misses.isPending} />
+      <Load q={misses} />
       {misses.data?.map((m) => {
         const t = cards[m.topic];
         const at = missedAt(m.trace);

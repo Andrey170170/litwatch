@@ -27,8 +27,20 @@ export function isDeeper(pathname: string): boolean {
 }
 
 /** Settings owns the sidebar on its pages, and on a paper opened from one of them. */
-function inSettings(location: { pathname: string; state: unknown }): boolean {
-  return location.pathname.startsWith("/settings") || !!(location.state as { settings?: boolean }).settings;
+function inSettings(location: { pathname: string; state: { settings?: boolean } }): boolean {
+  return location.pathname.startsWith("/settings") || !!location.state.settings;
+}
+
+/** The sidebar's head: the wordmark and the run's status. */
+export function SideHead() {
+  return (
+    <div className="wm">
+      <Link to="/" className="mark">
+        litwatch
+      </Link>
+      <RunStatus />
+    </div>
+  );
 }
 
 type Came = "go" | "back" | "top" | "keep";
@@ -81,12 +93,7 @@ function Desktop() {
         <SettingsSide />
       ) : (
         <aside className="side">
-          <div className="wm">
-            <Link to="/" className="mark">
-              litwatch
-            </Link>
-            <RunStatus />
-          </div>
+          <SideHead />
           <nav className="nav">
             <Tabs />
             <Following />

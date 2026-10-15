@@ -7,35 +7,18 @@ import { useState } from "react";
 import type { Schemas } from "@/api/client";
 import { useGradeNow, useLabel, useReact, useUnlabel, useUnreact } from "@/api/mutations";
 import { Badge } from "@/components/Badge";
+import { FITS, Seg } from "@/components/Seg";
 import { gradeLine, rc, type Weight } from "@/lib/rarity";
 import { REASONS, type ReactionValue, reasonLabel, speaks } from "@/lib/reactions";
 
 export type PaperTopic = Schemas["PaperTopic"];
-type LabelValue = Schemas["LabelValue"];
-const FITS: LabelValue[] = ["central", "related", "adjacent", "none", "unsure"];
-
 /** The Fit control: five equal segments; the owner's label filled, the verdict's underlined while unlabelled.
  * Tapping the filled segment removes the label. */
 export function FitControl({ paperId, t }: { paperId: string; t: PaperTopic }) {
   const label = useLabel(paperId);
   const unlabel = useUnlabel(paperId);
-  const on = t.label?.value;
-  const auto = !on ? t.verdict?.fit : null;
-  return (
-    <div className="fitseg" role="group" aria-label={`Fit for ${t.topic.name}`}>
-      {FITS.map((f) => (
-        <button
-          key={f}
-          className={`seg${on === f ? " on" : ""}${auto === f ? " auto" : ""}`}
-          aria-pressed={on === f}
-          disabled={label.isPending || unlabel.isPending}
-          onClick={() => (on === f ? unlabel.mutate(t.topic.slug) : label.mutate({ topic: t.topic.slug, value: f }))}
-        >
-          {f}
-        </button>
-      ))}
-    </div>
-  );
+  const on = t.label?.value ?? null;
+  return <Seg values={FITS} value={on} auto={t.verdict?.fit} clear disabled={label.isPending || unlabel.isPending} label={`Fit for ${t.topic.name}`} onPick={(f) => (f ? label.mutate({ topic: t.topic.slug, value: f }) : unlabel.mutate(t.topic.slug))} />;
 }
 
 /** The reasons for a thumb as chips, and Clear when the thumb is lit; nothing is recorded until a reason is picked. */

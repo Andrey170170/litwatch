@@ -7,6 +7,7 @@
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
 import { rememberCard } from "@/lib/remember";
+import { plural } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 type Ack = Schemas["Ack"];
@@ -287,7 +288,7 @@ export function useAnswer(sessionId: number) {
   return useMutation({
     mutationFn: async ({ position, answer }: { position: number; answer: Schemas["Answer"] }) =>
       ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: sessionId, position } }, body: answer })),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "calibrate"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId], exact: true }),
     onError: (e) => toast(said(e, "The answer did not go through"), "error"),
   });
 }
@@ -298,7 +299,7 @@ export function useMore(sessionId: number) {
   return useMutation({
     mutationFn: async () => ok(await api.POST("/api/settings/calibrate/{session_id}/more", { params: { path: { session_id: sessionId } } })),
     onSuccess: (r) => {
-      toast(r.added ? `${r.added} more ${r.added === 1 ? "paper" : "papers"} added` : "Nothing is waiting for a word");
+      toast(r.added ? `${plural(r.added, "more paper")} added` : "Nothing is waiting for a word");
       return qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId] });
     },
     onError: (e) => toast(said(e), "error"),

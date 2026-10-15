@@ -227,7 +227,7 @@ async def test_taxonomy_stats_and_export(client, conn):
     stats = (await client.get("/api/settings/taxonomy/stats")).json()
     # A member of the Focus class stands in its parent too.
     assert stats["members"] == {FAITH.slug: 1, "interpretability": 1}
-    assert stats["topic_revisions"][FAITH.slug] == 1 and stats["class_revisions"]["other"] == 1
+    assert stats["topic_revisions"][FAITH.slug] == 1
     # Each class at its own threshold, or the configured one for its depth (the test config: 0.8
     # by default, 0.5 for Focus).
     assert (stats["thresholds"][FAITH.slug], stats["thresholds"]["other"]) == (0.5, 0.8)

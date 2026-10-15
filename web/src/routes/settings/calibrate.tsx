@@ -5,41 +5,44 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { Schemas } from "@/api/client";
 import { useAnswer, useDrawSession, useMore } from "@/api/mutations";
-import { paperQuery, sessionQuery, sessionsQuery, taxonomyQuery, topicsQuery } from "@/api/queries";
+import { paperQuery, sessionQuery, sessionsQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
+import { Seg } from "@/components/Seg";
 import { Sheet } from "@/components/Sheet";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { authorsShort, rowDate } from "@/lib/format";
-import { differs, type LabelValue, pipelineSide, type Session, type SessionItem } from "@/lib/settings";
-import { FitSeg, Later, Load, PageHead, PaperLink } from "./parts";
+import { differs, type LabelValue, pipelineSide, type Session, type SessionItem, type SessionRow } from "@/lib/settings";
+import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 type Value = NonNullable<Schemas["Answer"]["value"]>;
-const VALUES: { v: Value; name: string }[] = [
-  { v: "matters", name: "matters" },
-  { v: "fine", name: "fine" },
-  { v: "not_for_me", name: "not for me" },
-];
+const VALUES: Value[] = ["matters", "fine", "not_for_me"];
+
+/** The way to a session: its first unanswered paper, a paper by position, or its review. */
+function useOpenSession() {
+  const navigate = useNavigate();
+  return (id: number, search: { at?: number; review?: boolean } = {}) => void navigate({ to: "/settings/calibrate/$id", params: { id: String(id) }, search });
+}
 
 export function CalibratePage() {
   const sessions = useQuery(sessionsQuery);
   const draw = useDrawSession();
-  const navigate = useNavigate();
+  const open = useOpenSession();
   return (
     <>
       <PageHead title="Calibrate" sub="One paper per screen, about twenty in a session: half from papers graded relevant or above and half from below, for each Focus topic. Grades, rarity and topic marks are hidden, so the answers are the owner's own." />
-      <button className="btn pri" disabled={draw.isPending} onClick={() => draw.mutate(undefined, { onSuccess: (r) => void navigate({ to: "/settings/calibrate/$id", params: { id: String(r.id) } }) })}>
+      <button className="btn pri" disabled={draw.isPending} onClick={() => draw.mutate(undefined, { onSuccess: (r) => r.id != null && open(r.id) })}>
         {draw.isPending ? "Drawing…" : "Start a session"}
       </button>
       <div className="cap">Past sessions</div>
-      <Load error={sessions.isError} retry={() => void sessions.refetch()} loading={sessions.isPending} />
+      <Load q={sessions} />
       {sessions.data && (
         <div className="list">
           {sessions.data.map((s) => (
-            <PastSessionRow key={s.id} id={s.id} drawn={s.drawn_at} answered={s.answered} papers={s.papers} seed={s.seed} />
+            <PastSessionRow key={s.id} s={s} />
           ))}
           {!sessions.data.length && <div className="empty">No session yet.</div>}
         </div>
@@ -48,15 +51,15 @@ export function CalibratePage() {
   );
 }
 
-function PastSessionRow({ id, drawn, answered, papers, seed }: { id: number; drawn: string; answered: number; papers: number; seed: number }) {
-  const navigate = useNavigate();
+function PastSessionRow({ s }: { s: SessionRow }) {
+  const open = useOpenSession();
   return (
-    <button className="srow" data-sub onClick={() => void navigate({ to: "/settings/calibrate/$id", params: { id: String(id) } })}>
-      <span className="t">{rowDate(drawn)}</span>
+    <button className="sess" data-sub onClick={() => open(s.id)}>
+      <span className="t">{rowDate(s.drawn_at)}</span>
       <span className="fa faint">
-        {answered} of {papers} answered · seed {seed}
+        {s.answered} of {s.papers} answered · seed {s.seed}
       </span>
-      <span className="fv faint">{answered < papers ? "unfinished" : ""}</span>
+      <span className="fv faint">{s.answered < s.papers ? "unfinished" : ""}</span>
       <span className="fv faint">›</span>
     </button>
   );
@@ -84,12 +87,12 @@ function BlindPaper({ item }: { item: SessionItem }) {
         {item.published ? ` · ${rowDate(item.published)}` : ""}
       </div>
       {paper.data?.gist && (
-        <div className="rgist up" style={{ "--rc": "var(--fg3)" } as React.CSSProperties}>
+        <div className="rgist up">
           <div className="rl">Gist</div>
           <p>{paper.data.gist.text}</p>
         </div>
       )}
-      <div className="rgist up" style={{ "--rc": "var(--fg3)" } as React.CSSProperties}>
+      <div className="rgist up">
         <div className="rl">Abstract</div>
         <p>{item.abstract}</p>
       </div>
@@ -98,24 +101,11 @@ function BlindPaper({ item }: { item: SessionItem }) {
   );
 }
 
-function Strip({ items, at, answered, go }: { items: SessionItem[]; at: number; answered: Set<number>; go: (position: number) => void }) {
-  return (
-    <div className="calprog" role="tablist" aria-label="Papers in the session">
-      {items.map((it) => (
-        <button key={it.position} className={it.position === at ? "cur" : answered.has(it.position) ? "done" : ""} onClick={() => go(it.position)} title={`Paper ${it.position}`} role="tab" aria-selected={it.position === at}>
-          <i />
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export function SessionPage() {
   const { id } = useParams({ from: "/settings/calibrate/$id" });
   const search = useSearch({ from: "/settings/calibrate/$id" });
-  const sessionId = Number(id);
-  const session = useQuery(sessionQuery(sessionId));
-  if (session.isPending || session.isError) return <Load error={session.isError} retry={() => void session.refetch()} loading />;
+  const session = useQuery(sessionQuery(Number(id)));
+  if (!session.data) return <Load q={session} />;
   const s = session.data;
   const unanswered = s.items.find((it) => !it.answered_at);
   if (search.at == null) {
@@ -124,78 +114,69 @@ export function SessionPage() {
   }
   const item = s.items.find((it) => it.position === search.at);
   if (!item) return <p className="empty">There is no such paper in the session.</p>;
-  return <Screen s={s} item={item} />;
+  // Keyed by position: each paper starts from its own recorded answer.
+  return <Screen key={item.position} s={s} item={item} />;
 }
 
 function Screen({ s, item }: { s: Session; item: SessionItem }) {
-  const navigate = useNavigate();
+  const open = useOpenSession();
   const desktop = useDesktop();
   const tree = useQuery(taxonomyQuery);
   const answer = useAnswer(s.id);
   const [draft, setDraft] = useState<Draft>(() => draftOf(item));
   const [pick, setPick] = useState(false);
-  useEffect(() => setDraft(draftOf(item)), [item]);
-  const focus = (tree.data?.topics ?? []).filter((t) => t.depth === "focus" && t.status === "active");
   const name = (slug: string) => tree.data?.classes.find((c) => c.slug === slug)?.name ?? slug;
+  // Each active Focus topic gets its Fit; the drawn topic at least, while the tree loads.
+  const focus = (tree.data?.topics ?? []).filter((t) => t.depth === "focus" && t.status === "active");
+  const asked = focus.length ? focus : [{ class: item.topic } as Partial<Schemas["Topic"]> & { class: string }];
   const answered = new Set(s.items.filter((it) => it.answered_at).map((it) => it.position));
   const n = s.items.length;
   const i = s.items.findIndex((it) => it.position === item.position);
-  const go = (position: number) => void navigate({ to: "/settings/calibrate/$id", params: { id: String(s.id) }, search: { at: position } });
-  const review = () => void navigate({ to: "/settings/calibrate/$id", params: { id: String(s.id) }, search: { review: true } });
+  const go = (position: number) => open(s.id, { at: position });
   const canRecord = !!draft.fit[item.topic];
   const changed = JSON.stringify(draft) !== JSON.stringify(draftOf(item));
   /** Next records the answer when the drawn topic has its Fit, then moves on; a paper left unanswered stays grey. */
   const next = () => {
-    const after = i + 1 < n ? () => go(s.items[i + 1]!.position) : review;
+    const after = i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true });
     if (canRecord && (changed || !item.answered_at)) answer.mutate({ position: item.position, answer: { fit: draft.fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
     else after();
   };
   const back = () => i > 0 && go(s.items[i - 1]!.position);
-  const title = `Calibrate · ${item.position} of ${n}`;
-  const strip = <Strip items={s.items} at={item.position} answered={answered} go={go} />;
-  const picker = (
-    <div className="cpk">
-      {s.items.map((it) => (
-        <button key={it.position} className={it.position === item.position ? "cur" : ""} onClick={() => (setPick(false), go(it.position))}>
-          <span className="n">{it.position}</span>
-          <span className="t">{it.title}</span>
-          <span className="ck">{answered.has(it.position) ? "✓" : ""}</span>
-        </button>
-      ))}
-    </div>
-  );
+  const last = i + 1 === n;
   return (
     <div className="setpg">
       <Fill name="title">
-        <span className="t">{title}</span>
+        <span className="t">
+          Calibrate · {item.position} of {n}
+        </span>
       </Fill>
-      {strip}
+      <div className="calprog" role="tablist" aria-label="Papers in the session">
+        {s.items.map((it) => (
+          <button key={it.position} className={it.position === item.position ? "cur" : answered.has(it.position) ? "done" : ""} onClick={() => go(it.position)} title={`Paper ${it.position}`} role="tab" aria-selected={it.position === item.position}>
+            <i />
+          </button>
+        ))}
+      </div>
       <BlindPaper item={item} />
       <div className="calqs">
         <div className="calq">
           <div className="cql">Fit, for each Focus topic</div>
           <div>
-            {(focus.length ? focus.map((t) => t.class) : [item.topic]).map((slug) => (
-              <div className="calfit" key={slug}>
-                {focus.find((t) => t.class === slug) ? <Badge topic={{ name: name(slug), ...focus.find((t) => t.class === slug)! }} /> : <span />}
+            {asked.map((t) => (
+              <div className="calfit" key={t.class}>
+                {t.depth ? <Badge topic={{ name: name(t.class), depth: t.depth, monogram: t.monogram!, colour: t.colour! }} /> : <span />}
                 <span className="nm">
-                  {name(slug)}
-                  {slug === item.topic && <span className="faint"> · drawn for</span>}
+                  {name(t.class)}
+                  {t.class === item.topic && <span className="faint"> · drawn for</span>}
                 </span>
-                <FitSeg value={draft.fit[slug] ?? null} label={`Fit for ${name(slug)}`} onPick={(f) => setDraft((d) => ({ ...d, fit: { ...d.fit, [slug]: f } }))} />
+                <FitSeg value={draft.fit[t.class] ?? null} label={`Fit for ${name(t.class)}`} onPick={(f) => setDraft((d) => ({ ...d, fit: { ...d.fit, [t.class]: f } }))} />
               </div>
             ))}
           </div>
         </div>
         <div className="calq">
           <div className="cql">Value, whatever the topic</div>
-          <div className="fitseg" role="group" aria-label="Value">
-            {VALUES.map(({ v, name: vn }) => (
-              <button key={v} className={`seg${draft.value === v ? " on" : ""}`} aria-pressed={draft.value === v} onClick={() => setDraft((d) => ({ ...d, value: d.value === v ? null : v }))}>
-                {vn}
-              </button>
-            ))}
-          </div>
+          <Seg values={VALUES} value={draft.value} clear label="Value" onPick={(value) => setDraft((d) => ({ ...d, value }))} />
         </div>
         <div className="calq">
           <div className="cql">Note</div>
@@ -212,7 +193,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
             {item.position} of {n}
           </span>
           <button className="btn pri" disabled={answer.isPending} onClick={next}>
-            {i + 1 === n ? "Done" : "Next ›"}
+            {last ? "Done" : "Next ›"}
           </button>
         </div>
       ) : (
@@ -225,12 +206,20 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
               {item.position}/{n} ▴
             </button>
             <button className="on" disabled={answer.isPending} onClick={next}>
-              <small>{i + 1 === n ? "Done" : "Next ›"}</small>
+              <small>{last ? "Done" : "Next ›"}</small>
             </button>
           </div>
           <Sheet open={pick} onClose={() => setPick(false)} label="Go to a paper">
             <div className="cap">Go to a paper</div>
-            {picker}
+            <div className="cpk">
+              {s.items.map((it) => (
+                <button key={it.position} className={it.position === item.position ? "cur" : ""} onClick={() => (setPick(false), go(it.position))}>
+                  <span className="n">{it.position}</span>
+                  <span className="t">{it.title}</span>
+                  <span className="ck">{answered.has(it.position) ? "✓" : ""}</span>
+                </button>
+              ))}
+            </div>
             <button className="done" onClick={() => setPick(false)}>
               Close
             </button>
@@ -243,20 +232,17 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
 
 /** A past or finished session: the owner's Fit against the pipeline's draw per paper, amber where they differ. */
 function Review({ s }: { s: Session }) {
-  const topics = useQuery(topicsQuery);
+  const cards = useTopicCards();
   const more = useMore(s.id);
-  const navigate = useNavigate();
-  const cards = Object.fromEntries((topics.data ?? []).flatMap((g) => g.topics).map((t) => [t.slug, t]));
-  const answered = s.items.filter((it) => it.answered_at);
+  const open = useOpenSession();
+  const unanswered = s.items.filter((it) => !it.answered_at);
   const off = s.items.filter(differs);
-  const left = s.items.length - answered.length;
-  const date = rowDate(s.drawn_at);
   return (
     <div className="setpg">
-      <PageHead title={`Calibrate · ${date}`} deeper sub={`${answered.length} of ${s.items.length} answered · seed ${s.seed}. The pipeline's side shows here: ${off.length} ${off.length === 1 ? "answer differs" : "answers differ"} from it; they count against precision on Overview.`}>
-        {left > 0 && (
-          <button className="btn pri" onClick={() => void navigate({ to: "/settings/calibrate/$id", params: { id: String(s.id) }, search: { at: s.items.find((it) => !it.answered_at)!.position } })}>
-            Continue · {left} left
+      <PageHead title={`Calibrate · ${rowDate(s.drawn_at)}`} deeper sub={`${s.items.length - unanswered.length} of ${s.items.length} answered · seed ${s.seed}. The pipeline's side shows here: ${off.length} ${off.length === 1 ? "answer differs" : "answers differ"} from it; they count against precision on Overview.`}>
+        {unanswered.length > 0 && (
+          <button className="btn pri" onClick={() => open(s.id, { at: unanswered[0]!.position })}>
+            Continue · {unanswered.length} left
           </button>
         )}
         <button className="btn" disabled={more.isPending} onClick={() => more.mutate()}>
@@ -266,17 +252,15 @@ function Review({ s }: { s: Session }) {
       <div className="list">
         {s.items.map((it) => {
           const t = cards[it.topic];
-          const fit = it.fit[it.topic];
-          const side = pipelineSide(it);
           return (
-            <PaperLink key={it.position} id={it.paper_id} topic={it.topic} className={`srow${differs(it) ? " off" : ""}${it.answered_at ? "" : " blank"}`}>
+            <PaperLink key={it.position} id={it.paper_id} topic={it.topic} className={`sess${differs(it) ? " off" : ""}${it.answered_at ? "" : " blank"}`}>
               <span className="t">{it.title}</span>
               {t ? <Badge topic={t} size="sm" /> : <span />}
               <span className="fa">
-                <span className="faint">you</span> <b>{fit ?? "–"}</b>
+                <span className="faint">you</span> <b>{it.fit[it.topic] ?? "–"}</b>
               </span>
               <span className="fa">
-                <span className="faint">pipeline</span> {side ?? it.why}
+                <span className="faint">pipeline</span> {pipelineSide(it) ?? it.why}
               </span>
               <span className="fv faint">{it.appraisal?.value?.replace("_", " ") ?? ""}</span>
             </PaperLink>

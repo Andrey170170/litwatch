@@ -5,30 +5,31 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis } from "@/api/mutations";
-import { qualityQuery, taxonomyQuery, topicsQuery } from "@/api/queries";
+import { qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { type LabelValue, type Quality, type Split, type Stuck, waiting } from "@/lib/settings";
-import { FitSeg, Later, Load, PageHead, PaperLink } from "./parts";
+import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 type Settled = Record<string, string>;
 
+/** The groups: their name, the line under it, and for a stuck step the name of what failed. */
 const KIND = {
-  split: { name: "Focus splits", line: "Judge and check disagree. The more inclusive Fit stands until it is labelled.", tone: "ask" },
-  escalated: { name: "Area escalations", line: "The check disagreed with the judge. The less inclusive Fit stands until it is labelled.", tone: "ask" },
-  awaiting: { name: "Awaiting classification", line: "Classification failed three runs; the paper is in no class.", tone: "fail" },
-  ungraded: { name: "Ungraded", line: "Grading failed three runs; the paper shows ungraded on its topic.", tone: "fail" },
-  analysis: { name: "Analysis", line: "Analysis failed three runs; the paper has no Gist or Weight and shows its title alone.", tone: "fail" },
+  split: { name: "Focus splits", line: "Judge and check disagree. The more inclusive Fit stands until it is labelled." },
+  escalated: { name: "Area escalations", line: "The check disagreed with the judge. The less inclusive Fit stands until it is labelled." },
+  awaiting: { name: "Awaiting classification", line: "Classification failed three runs; the paper is in no class.", step: "Classification" },
+  ungraded: { name: "Ungraded", line: "Grading failed three runs; the paper shows ungraded on its topic.", step: "Grading" },
+  analysis: { name: "Analysis", line: "Analysis failed three runs; the paper has no Gist or Weight and shows its title alone.", step: "Analysis" },
 } as const;
 
-function Group({ kind, n, children }: { kind: keyof typeof KIND; n: number; children: React.ReactNode }) {
-  if (!n) return null;
+function Group<T>({ kind, items, children }: { kind: keyof typeof KIND; items: T[]; children: (item: T) => React.ReactNode }) {
+  if (!items.length) return null;
   return (
     <div className="ngrp">
       <div className="cap">
-        {KIND[kind].name} · {n}
+        {KIND[kind].name} · {items.length}
       </div>
       <div className="nsub">{KIND[kind].line}</div>
-      {children}
+      {items.map(children)}
     </div>
   );
 }
@@ -75,7 +76,7 @@ function Stuck({ s, kind, badge, done, children }: { s: Stuck; kind: "awaiting" 
         {kind === "awaiting" && <span className="mono faint">{s.paper_id}</span>}
       </div>
       <div className="nb">
-        {kind === "awaiting" ? "Classification" : kind === "ungraded" ? "Grading" : "Analysis"} failed {s.failed_runs} runs{s.last_error ? `: ${s.last_error}` : "."}
+        {KIND[kind].step} failed {s.failed_runs} runs{s.last_error ? `: ${s.last_error}` : "."}
       </div>
       {done ? <div className="nres">{done}</div> : children}
     </div>
@@ -170,11 +171,10 @@ function Analysis({ s, done, settle }: { s: Stuck; done: string | undefined; set
 
 export function NeedsPage() {
   const quality = useQuery(qualityQuery);
-  const topics = useQuery(topicsQuery);
+  const cards = useTopicCards();
   // What was settled on this visit, by item: shown in place until the page is left.
   const [settled, setSettled] = useState<Settled>({});
   const q = quality.data;
-  const cards = Object.fromEntries((topics.data ?? []).flatMap((g) => g.topics).map((t) => [t.slug, t]));
   const badge = (slug: string | null | undefined) => (slug && cards[slug] ? <Badge topic={cards[slug]} /> : null);
   const settle = (key: string) => (what: string) => setSettled((x) => ({ ...x, [key]: what }));
   const open = q ? waiting(q) - Object.keys(settled).length : 0;
@@ -184,33 +184,28 @@ export function NeedsPage() {
   return (
     <>
       <PageHead title="Needs you" sub={q ? line(q) : undefined} />
-      <Load error={quality.isError} retry={() => void quality.refetch()} loading={quality.isPending} />
+      <Load q={quality} />
       {q && (
         <>
-          <Group kind="split" n={splits.length}>
-            {splits.map((s) => (
-              <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} done={settled[`${s.paper_id}:${s.topic}`]} settle={settle(`${s.paper_id}:${s.topic}`)} />
-            ))}
+          {(["split", "escalated"] as const).map((kind) => (
+            <Group key={kind} kind={kind} items={kind === "split" ? splits : escalations}>
+              {(s) => {
+                const key = `${s.paper_id}:${s.topic}`;
+                return <SplitItem key={key} s={s} badge={badge(s.topic)} done={settled[key]} settle={settle(key)} />;
+              }}
+            </Group>
+          ))}
+          <Group kind="awaiting" items={q.night.awaiting_classification}>
+            {(s) => <Awaiting key={s.paper_id} s={s} done={settled[`c:${s.paper_id}`]} settle={settle(`c:${s.paper_id}`)} />}
           </Group>
-          <Group kind="escalated" n={escalations.length}>
-            {escalations.map((s) => (
-              <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} done={settled[`${s.paper_id}:${s.topic}`]} settle={settle(`${s.paper_id}:${s.topic}`)} />
-            ))}
+          <Group kind="ungraded" items={q.night.ungraded}>
+            {(s) => {
+              const key = `g:${s.paper_id}:${s.topic}`;
+              return <Ungraded key={key} s={s} badge={badge(s.topic)} done={settled[key]} settle={settle(key)} />;
+            }}
           </Group>
-          <Group kind="awaiting" n={q.night.awaiting_classification.length}>
-            {q.night.awaiting_classification.map((s) => (
-              <Awaiting key={s.paper_id} s={s} done={settled[`c:${s.paper_id}`]} settle={settle(`c:${s.paper_id}`)} />
-            ))}
-          </Group>
-          <Group kind="ungraded" n={q.night.ungraded.length}>
-            {q.night.ungraded.map((s) => (
-              <Ungraded key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} done={settled[`g:${s.paper_id}:${s.topic}`]} settle={settle(`g:${s.paper_id}:${s.topic}`)} />
-            ))}
-          </Group>
-          <Group kind="analysis" n={q.night.analysis_failed.length}>
-            {q.night.analysis_failed.map((s) => (
-              <Analysis key={s.paper_id} s={s} done={settled[`a:${s.paper_id}`]} settle={settle(`a:${s.paper_id}`)} />
-            ))}
+          <Group kind="analysis" items={q.night.analysis_failed}>
+            {(s) => <Analysis key={s.paper_id} s={s} done={settled[`a:${s.paper_id}`]} settle={settle(`a:${s.paper_id}`)} />}
           </Group>
           <Later>Full text and digests join this page when their passes land (N3 stage 2, N4).</Later>
         </>

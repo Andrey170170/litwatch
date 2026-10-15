@@ -5,11 +5,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useParams } from "@tanstack/react-router";
 import { integrationsQuery, missesQuery, qualityQuery, sessionsQuery, taxonomyQuery } from "@/api/queries";
-import { RunStatus } from "@/components/RunStatus";
+import { SideHead } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
-import { GROUPS, isPage, type Page, usd, waiting } from "@/lib/settings";
+import { GROUPS, isPage, type Page, spendTotals, usd, waiting } from "@/lib/settings";
 import { CalibratePage } from "./settings/calibrate";
 import { ConfigurationPage } from "./settings/configuration";
 import { IntegrationsPage } from "./settings/integrations";
@@ -20,8 +20,8 @@ import { RunsPage } from "./settings/runs";
 import { TaxonomyPage } from "./settings/taxonomy";
 import { TopicsPage } from "./settings/topics";
 
-/** What each page's hint says, and the count beside it in the sidebar (needs: yellow; integrations: red). */
-function useHints(): Record<Page, { hint: string; count?: number; tone?: "hot" | "bad" }> {
+/** What each page's hint says, and the count beside it in the sidebar (Needs you asks, yellow; a failed integration, red). */
+function useHints(): Record<Page, { hint: string; count?: number; tone?: "ask" | "hot" }> {
   const quality = useQuery(qualityQuery).data;
   const sessions = useQuery(sessionsQuery).data;
   const misses = useQuery(missesQuery).data;
@@ -29,17 +29,16 @@ function useHints(): Record<Page, { hint: string; count?: number; tone?: "hot" |
   const cards = useQuery(integrationsQuery).data;
   const open = quality ? waiting(quality) : 0;
   const failing = cards?.filter((c) => c.enabled && c.failing) ?? [];
-  const spent = quality?.cost.reduce((s, c) => s + c.spent, 0) ?? 0;
-  const budget = quality?.cost.reduce((s, c) => s + (c.budget ?? 0), 0) ?? 0;
+  const { spent, budget } = spendTotals(quality?.cost ?? []);
   return {
     overview: { hint: "Recall, precision, reactions" },
-    needs: { hint: quality ? (open ? `${open} waiting` : "All settled") : "", count: open || undefined, tone: "hot" },
+    needs: { hint: quality ? (open ? `${open} waiting` : "All settled") : "", count: open || undefined, tone: "ask" },
     calibrate: { hint: sessions ? (sessions[0] ? `Last session ${rowDate(sessions[0].drawn_at)}` : "No session yet") : "" },
     misses: { hint: misses ? (misses.length ? `${misses.length} reported` : "None reported") : "" },
     topics: { hint: tree ? `${(tree.topics ?? []).length} followed` : "" },
     taxonomy: { hint: tree ? `${tree.classes.length} classes` : "" },
     runs: { hint: quality ? (budget ? `${usd(spent)} of ${usd(budget)} this month` : `${usd(spent)} this month`) : "" },
-    integrations: { hint: cards ? (failing.length ? `${failing.map((c) => c.name).join(", ")}: failed` : "Up to date") : "", count: failing.length || undefined, tone: "bad" },
+    integrations: { hint: cards ? (failing.length ? `${failing.map((c) => c.name).join(", ")}: failed` : "Up to date") : "", count: failing.length || undefined, tone: "hot" },
     configuration: { hint: "litwatch.toml, read-only" },
   };
 }
@@ -49,12 +48,7 @@ export function SettingsSide() {
   const hints = useHints();
   return (
     <aside className="side">
-      <div className="wm">
-        <Link to="/" className="mark">
-          litwatch
-        </Link>
-        <RunStatus />
-      </div>
+      <SideHead />
       <nav className="nav">
         <Link to="/" className="it leave">
           ‹ Back to reading

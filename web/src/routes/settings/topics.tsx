@@ -5,20 +5,22 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Schemas } from "@/api/client";
 import { useReorderTopics, useSaveTopic } from "@/api/mutations";
 import { keywordsQuery, taxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
+import { Seg } from "@/components/Seg";
 import { DEPTH_NAME, type Depth } from "@/lib/rarity";
 import { savedLine } from "@/lib/settings";
-import { Later, Load, PageHead } from "./parts";
+import { Field, Later, Load, PageHead } from "./parts";
 
 type Topic = Schemas["Topic"];
 type Tree = Schemas["Taxonomy"];
-type Status = Schemas["Status"];
+type Class = Schemas["TaxonomyClass"];
 
 const DEPTHS: Depth[] = ["focus", "area", "field"];
+const STATUSES: Schemas["Status"][] = ["active", "paused"];
 export const SWATCH = ["#c026d3", "#e11d48", "#ea580c", "#ca8a04", "#65a30d", "#0d9488", "#0891b2", "#0284c7", "#4f46e5"];
 
 /** "Interpretability › Chain-of-thought faithfulness": the class and its ancestors, top first. */
@@ -41,45 +43,42 @@ export function moved(order: string[], slug: string, over: string): string[] {
 
 /** One depth's rows; a row drags by its grip to a new place in the list. The order is sent once the drag ends. */
 function DepthList({ depth, topics, tree, revisions, onOrder }: { depth: Depth; topics: Topic[]; tree: Tree; revisions: Record<string, number>; onOrder: (depth: Depth, slugs: string[]) => void }) {
-  const [order, setOrder] = useState(() => topics.map((t) => t.class));
-  const [dragging, setDragging] = useState<string | null>(null);
-  const list = useRef<HTMLDivElement>(null);
-  useEffect(() => setOrder(topics.map((t) => t.class)), [topics]);
+  // The order while a row is dragged; the topics' own otherwise.
+  const [drag, setDrag] = useState<{ slug: string; order: string[] } | null>(null);
+  const order = drag?.order ?? topics.map((t) => t.class);
   const by = Object.fromEntries(topics.map((t) => [t.class, t]));
-  const name = (t: Topic) => tree.classes.find((c) => c.slug === t.class)?.name ?? t.class;
 
   const start = (slug: string) => (e: ReactPointerEvent<HTMLButtonElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDragging(slug);
+    setDrag({ slug, order });
   };
   const move = (e: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!dragging) return;
     const over = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-slug]")?.dataset.slug;
-    if (over && list.current?.querySelector(`[data-slug="${over}"]`)) setOrder((o) => moved(o, dragging, over));
+    if (over && by[over]) setDrag((d) => d && { ...d, order: moved(d.order, d.slug, over) });
   };
   const end = () => {
-    if (!dragging) return;
-    setDragging(null);
-    if (order.join() !== topics.map((t) => t.class).join()) onOrder(depth, order);
+    if (!drag) return;
+    setDrag(null);
+    if (drag.order.join() !== topics.map((t) => t.class).join()) onOrder(depth, drag.order);
   };
   if (!topics.length) return null;
   return (
     <>
       <div className="cap">{DEPTH_NAME[depth]}</div>
-      <div className="list" ref={list} data-depth={depth}>
+      <div className="list">
         {order.map((slug) => {
-          const t = by[slug];
-          if (!t) return null;
+          const t = by[slug]!;
           const path = classPath(tree, slug);
+          const name = path.at(-1) ?? slug;
           return (
-            <div className={`trow${dragging === slug ? " drag" : ""}`} key={slug} data-slug={slug}>
-              <button className="grip" aria-label={`Move ${name(t)}`} title="Drag to reorder" onPointerDown={start(slug)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+            <div className={`trow${drag?.slug === slug ? " drag" : ""}`} key={slug} data-slug={slug}>
+              <button className="grip" aria-label={`Move ${name}`} title="Drag to reorder" onPointerDown={start(slug)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
                 <i />
               </button>
               <Link to="/settings/topics/$slug" params={{ slug }} className="nm">
-                <Badge topic={{ name: name(t), depth: t.depth, monogram: t.monogram, colour: t.colour }} />
+                <Badge topic={{ name, depth: t.depth, monogram: t.monogram, colour: t.colour }} />
                 <span className="txt">
-                  {name(t)}
+                  {name}
                   {t.status !== "active" && <span className="faint"> · {t.status}</span>}
                   <span className="g">{path.join(" › ")}</span>
                 </span>
@@ -109,7 +108,7 @@ export function TopicsPage() {
           New topic
         </Link>
       </PageHead>
-      <Load error={tree.isError} retry={() => void tree.refetch()} loading={tree.isPending} />
+      <Load q={tree} />
       {t && DEPTHS.map((d) => <DepthList key={d} depth={d} topics={byDepth(d)} tree={t} revisions={stats.data?.topic_revisions ?? {}} onOrder={onOrder} />)}
       {t && !topics.length && <div className="empty">No topic is followed yet. Pick a class in the Taxonomy to follow it.</div>}
     </>
@@ -118,32 +117,13 @@ export function TopicsPage() {
 
 // -- the editor ----------------------------------------------------------------------------------------------------
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="fld">
-      <div className="fl">
-        {label}
-        {hint && <span className="faint"> · {hint}</span>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Seg<T extends string>({ values, value, onPick, label, names }: { values: T[]; value: T; onPick: (v: T) => void; label: string; names?: Record<T, string> }) {
-  return (
-    <div className="fitseg" role="group" aria-label={label}>
-      {values.map((v) => (
-        <button key={v} className={`seg${value === v ? " on" : ""}`} aria-pressed={value === v} onClick={() => onPick(v)}>
-          {names?.[v] ?? v}
-        </button>
-      ))}
-    </div>
-  );
+/** A topic as the form holds it: the optional texts as strings, so the form compares as it edits. */
+function asForm(t: Topic): Topic {
+  return { ...t, rubric: t.rubric ?? "", interests: t.interests ?? "", keywords: t.keywords ?? [] };
 }
 
 /** A new topic's defaults when a class is first followed: its description as the subject, initials as monogram. */
-function fresh(cls: Schemas["TaxonomyClass"]): Topic {
+function fresh(cls: Class): Topic {
   const initials = cls.name
     .split(/[\s-]+/)
     .filter((w) => /^[A-Za-z]/.test(w))
@@ -156,48 +136,47 @@ function fresh(cls: Schemas["TaxonomyClass"]): Topic {
 export function TopicEditorPage() {
   const { slug } = useParams({ from: "/settings/topics/$slug" });
   const tree = useQuery(taxonomyQuery);
+  if (!tree.data) return <Load q={tree} />;
+  const cls = tree.data.classes.find((c) => c.slug === slug);
+  if (!cls) return <p className="empty">There is no such class.</p>;
+  // Keyed by what was loaded: the form opens on the topic as it is, and on a fresh copy after a save.
+  const current = tree.data.topics?.find((t) => t.class === slug) ?? null;
+  return <TopicEditor key={JSON.stringify(current)} tree={tree.data} cls={cls} current={current} />;
+}
+
+function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: Topic | null }) {
   const stats = useQuery(taxonomyStatsQuery);
   const save = useSaveTopic();
   const navigate = useNavigate();
-  const cls = tree.data?.classes.find((c) => c.slug === slug);
-  const current = useMemo(() => tree.data?.topics?.find((t) => t.class === slug) ?? null, [tree.data, slug]);
-  const [form, setForm] = useState<Topic | null>(null);
+  const base = asForm(current ?? fresh(cls));
+  const [form, setForm] = useState(base);
   const [saved, setSaved] = useState<{ before: Topic | null } | null>(null);
-  const [newKeyword, setNewKeyword] = useState("");
-  const [adding, setAdding] = useState(false);
-  const matches = useQuery(keywordsQuery(slug, !!current));
-  // The form opens on the topic as loaded, and again after a save shows a fresh one.
-  useEffect(() => {
-    if (cls && !form) setForm(current ?? fresh(cls));
-  }, [cls, current, form]);
-  if (tree.isPending || !form) return <Load error={tree.isError} retry={() => void tree.refetch()} loading />;
-  if (!cls) return <p className="empty">There is no such class.</p>;
-  const name = cls.name;
-  const path = classPath(tree.data!, slug);
-  const base = current ?? fresh(cls);
-  const dirty = JSON.stringify({ ...form, rubric: form.rubric ?? "", interests: form.interests ?? "" }) !== JSON.stringify({ ...base, rubric: base.rubric ?? "", interests: base.interests ?? "" });
-  const version = stats.data?.topic_revisions[slug] ?? 1;
-  const set = (patch: Partial<Topic>) => setForm((f) => (f ? { ...f, ...patch } : f));
+  // The keyword being typed, or null while the "+ keyword" button shows.
+  const [typing, setTyping] = useState<string | null>(null);
+  const matches = useQuery(keywordsQuery(cls.slug, !!current));
+  const path = classPath(tree, cls.slug);
+  const dirty = JSON.stringify(form) !== JSON.stringify(base);
+  const version = stats.data?.topic_revisions[cls.slug] ?? 1;
+  const set = (patch: Partial<Topic>) => setForm((f) => ({ ...f, ...patch }));
   const keywords = form.keywords ?? [];
   const addKeyword = () => {
-    const k = newKeyword.trim();
+    const k = typing?.trim();
     if (k && !keywords.includes(k)) set({ keywords: [...keywords, k] });
-    setNewKeyword("");
-    setAdding(false);
+    setTyping(null);
   };
   const onSave = () => {
     const body: Topic = { ...form, rubric: form.depth === "focus" ? form.rubric || null : null, interests: form.interests || null };
-    save.mutate({ slug, topic: body }, { onSuccess: () => setSaved({ before: current }) });
+    save.mutate({ slug: cls.slug, topic: body }, { onSuccess: () => setSaved({ before: current }) });
   };
   return (
     <div className="setpg">
-      <PageHead title={name} sub={current ? `Version ${version} · follows ${path.join(" › ")}` : `Not followed yet · ${path.join(" › ")}`} deeper />
+      <PageHead title={cls.name} sub={current ? `Version ${version} · follows ${path.join(" › ")}` : `Not followed yet · ${path.join(" › ")}`} deeper />
       <div className="form">
         <Field label="Class">
           <div className="tin one faint">{path.join(" › ")}</div>
         </Field>
         <Field label="Depth" hint="Focus is graded by two labs, Area checked, Field graded once">
-          <Seg values={DEPTHS} value={form.depth} onPick={(depth) => set({ depth })} label="Depth" />
+          <Seg values={DEPTHS} value={form.depth} onPick={(depth) => depth && set({ depth })} label="Depth" />
         </Field>
         <Field label="Subject" hint="what the topic is about; the graders read it">
           <textarea className="tin" rows={3} value={form.subject} onChange={(e) => set({ subject: e.target.value })} aria-label="Subject" />
@@ -221,22 +200,22 @@ export function TopicEditorPage() {
                 </button>
               </span>
             ))}
-            {adding ? (
+            {typing != null ? (
               <input
                 className="kw"
                 autoFocus
-                value={newKeyword}
+                value={typing}
                 aria-label="New keyword"
                 placeholder="a regex, matched case-insensitively"
-                onChange={(e) => setNewKeyword(e.target.value)}
+                onChange={(e) => setTyping(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") addKeyword();
-                  if (e.key === "Escape") setAdding(false);
+                  if (e.key === "Escape") setTyping(null);
                 }}
                 onBlur={addKeyword}
               />
             ) : (
-              <button className="kw add" onClick={() => setAdding(true)}>
+              <button className="kw add" onClick={() => setTyping("")}>
                 + keyword
               </button>
             )}
@@ -244,7 +223,7 @@ export function TopicEditorPage() {
         </Field>
         <Field label="Look">
           <div className="look">
-            <Badge topic={{ name, depth: form.depth, monogram: form.monogram || "?", colour: form.colour }} size="lg" />
+            <Badge topic={{ name: cls.name, depth: form.depth, monogram: form.monogram || "?", colour: form.colour }} size="lg" />
             <input className="tin sm mono" value={form.monogram} maxLength={3} onChange={(e) => set({ monogram: e.target.value })} aria-label="Monogram" />
             <span className="sws" role="group" aria-label="Colour">
               {SWATCH.map((c) => (
@@ -254,7 +233,7 @@ export function TopicEditorPage() {
           </div>
         </Field>
         <Field label="Status" hint="a paused topic keeps its papers and gets no new ones">
-          <Seg values={["active", "paused"] as Status[]} value={form.status === "draft" ? "active" : form.status} onPick={(status) => set({ status })} label="Status" />
+          <Seg values={STATUSES} value={form.status === "draft" ? "active" : form.status} onPick={(status) => status && set({ status })} label="Status" />
         </Field>
       </div>
       <div className="mt-4">

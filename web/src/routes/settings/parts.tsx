@@ -1,20 +1,21 @@
-/** The pieces Settings' pages share: the head, a paper link that keeps the Settings sidebar, the Fit segments, a
- * number table's cells, and the states of a load. */
-import { Link, type LinkProps } from "@tanstack/react-router";
+/** The pieces Settings' pages share: the head, a paper link that keeps the Settings sidebar, the segmented
+ * Fit control, a form field, a share as a bar, the states of a load, and the topic cards by slug. */
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { topicsQuery } from "@/api/queries";
+import { FITS, Seg } from "@/components/Seg";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { level, type LabelValue } from "@/lib/settings";
 
-export const FITS: LabelValue[] = ["central", "related", "adjacent", "none", "unsure"];
-
 /** The page's head: the phone's title, "‹ Back" on a page inside a page, the title, a line under it, and the actions
  * at the right, which stack under on the phone. */
-export function PageHead({ title, sub, deeper, phoneTitle, children }: { title: string; sub?: ReactNode; deeper?: boolean; phoneTitle?: string; children?: ReactNode }) {
+export function PageHead({ title, sub, deeper, children }: { title: string; sub?: ReactNode; deeper?: boolean; children?: ReactNode }) {
   return (
     <>
       <Fill name="title">
-        <span className="t">{phoneTitle ?? title}</span>
+        <span className="t">{title}</span>
       </Fill>
       {deeper && <Back />}
       <div className="sethd">
@@ -31,21 +32,26 @@ export function PageHead({ title, sub, deeper, phoneTitle, children }: { title: 
 /** A link to a paper from Settings: the paper keeps the Settings sidebar (DESIGN.md, "Around the pages"). */
 export function PaperLink({ id, topic, className, children }: { id: string; topic?: string | null; className?: string; children: ReactNode }) {
   return (
-    <Link to="/paper/$" params={{ _splat: id }} search={topic ? { topic } : {}} state={{ settings: true } as LinkProps["state"]} className={className}>
+    <Link to="/paper/$" params={{ _splat: id }} search={topic ? { topic } : {}} state={{ settings: true }} className={className}>
       {children}
     </Link>
   );
 }
 
-/** The Fit control as five equal segments: the owner's word filled, the pipeline's underlined while unanswered. */
+/** The Fit control as five equal segments. */
 export function FitSeg({ value, auto, onPick, disabled, label }: { value: LabelValue | null | undefined; auto?: LabelValue | null; onPick: (f: LabelValue) => void; disabled?: boolean; label: string }) {
+  return <Seg values={FITS} value={value} auto={auto} disabled={disabled} label={label} onPick={(f) => f && onPick(f)} />;
+}
+
+/** A form field: its label, a hint after it, the control under. */
+export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="fitseg" role="group" aria-label={label}>
-      {FITS.map((f) => (
-        <button key={f} className={`seg${value === f ? " on" : ""}${!value && auto === f ? " auto" : ""}`} aria-pressed={value === f} disabled={disabled} onClick={() => onPick(f)}>
-          {f}
-        </button>
-      ))}
+    <div className="fld">
+      <div className="fl">
+        {label}
+        {hint && <span className="faint"> · {hint}</span>}
+      </div>
+      {children}
     </div>
   );
 }
@@ -64,21 +70,27 @@ export function Share({ x, hi, good, ok }: { x: number; hi?: boolean; good?: num
   );
 }
 
-/** A query that failed, with the way to try again; nothing while it loads. */
-export function Load({ error, retry, loading }: { error: boolean; retry: () => void; loading?: boolean }) {
-  if (error)
+/** A query that failed, with the way to try again; "Loading…" while it loads; nothing once it has data. */
+export function Load({ q }: { q: Pick<UseQueryResult, "isError" | "isPending" | "refetch"> }) {
+  if (q.isError)
     return (
       <div className="loadmore">
         Could not load this ·{" "}
-        <button className="inl" onClick={retry}>
+        <button className="inl" onClick={() => void q.refetch()}>
           Try again
         </button>
       </div>
     );
-  return loading ? <div className="loadmore">Loading…</div> : null;
+  return q.isPending ? <div className="loadmore">Loading…</div> : null;
 }
 
 /** A line that says the surface waits on an endpoint a later PR brings. */
 export function Later({ children }: { children: ReactNode }) {
   return <div className="later">{children}</div>;
+}
+
+/** The followed topics' cards by slug, for a badge or a name beside a row. */
+export function useTopicCards() {
+  const { data } = useQuery(topicsQuery);
+  return Object.fromEntries((data ?? []).flatMap((g) => g.topics).map((t) => [t.slug, t]));
 }

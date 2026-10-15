@@ -3,12 +3,13 @@ the counts the Topics and Taxonomy pages show."""
 
 from __future__ import annotations
 
-import re
+import asyncio
 from typing import Any
 
 import psycopg
 
 from litwatch.core import Taxonomy
+from litwatch.core.classification import keyword_hit, with_ancestors
 from litwatch.core.evaluation import recall
 from litwatch.store import evaluation
 from litwatch.store.reading import SHOWN_MEMBER
@@ -137,7 +138,7 @@ async def misses(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
 async def class_members(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str, int]:
     """Papers standing in each class or any class under it (the memberships a page shows), by
     class slug; a class with none is left out."""
-    pairs = [(c.slug, a) for c in tree.classes for a in [c.slug, *tree.ancestors(c.slug)]]
+    pairs = [(c.slug, a) for c in tree.classes for a in with_ancestors(tree, {c.slug})]
     rows = await _all(
         conn,
         f"""
@@ -153,33 +154,28 @@ async def class_members(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[s
     return {r["target"]: r["n"] for r in rows}
 
 
-async def revisions(conn: psycopg.AsyncConnection) -> tuple[dict[str, int], dict[str, int]]:
-    """The current revision of every class in the tree and of every followed topic."""
-    classes = await _all(conn, "SELECT slug, revision FROM classes WHERE retired_at IS NULL")
-    topics = await _all(conn, "SELECT class, revision FROM topics")
-    return {r["slug"]: r["revision"] for r in classes}, {r["class"]: r["revision"] for r in topics}
+async def topic_revisions(conn: psycopg.AsyncConnection) -> dict[str, int]:
+    """The current revision of every followed topic, by class slug."""
+    rows = await _all(conn, "SELECT class, revision FROM topics")
+    return {r["class"]: r["revision"] for r in rows}
 
 
 async def keyword_matches(
     conn: psycopg.AsyncConnection, patterns: list[str], days: int = 90
 ) -> dict[str, int]:
-    """How many papers published in the trailing days each keyword pattern matches, in the
-    title or abstract, as the keyword check matches them (core.classification.keyword)."""
-    found = dict.fromkeys(patterns, 0)
+    """How many papers published in the trailing days each keyword pattern matches, as the
+    keyword check matches them (core.classification.keyword_hit)."""
     if not patterns:
-        return found
-    compiled = [(k, re.compile(k, re.IGNORECASE)) for k in patterns]
-    # A server-side cursor streams the window; it needs a transaction to live in.
-    async with conn.transaction(), conn.cursor(name="keyword_matches") as cur:
-        cur.itersize = 1000
-        await cur.execute(
-            "SELECT title, abstract FROM papers WHERE dismissed_at IS NULL "
-            "AND published >= now() - make_interval(days => %s)",
-            (days,),
-        )
-        async for row in cur:
-            text = f"{row['title']}\n{row['abstract']}"
-            for k, rx in compiled:
-                if rx.search(text):
-                    found[k] += 1
-    return found
+        return {}
+    rows = await _all(
+        conn,
+        "SELECT title, abstract FROM papers WHERE dismissed_at IS NULL "
+        "AND published >= now() - make_interval(days => %s)",
+        (days,),
+    )
+
+    # The regexes run over the whole window; a thread keeps the event loop free meanwhile.
+    def count() -> dict[str, int]:
+        return {k: sum(keyword_hit(k, r["title"], r["abstract"]) for r in rows) for k in patterns}
+
+    return await asyncio.to_thread(count)

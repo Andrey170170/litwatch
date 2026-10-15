@@ -41,11 +41,11 @@ export function RunsPage() {
   const schedule = useQuery(scheduleQuery);
   const desktop = useDesktop();
   const cost = quality.data?.cost ?? [];
-  const next = schedule.data?.jobs.find((j) => j.kind === "night" || j.kind === "nightly") ?? schedule.data?.jobs[0];
+  const next = schedule.data?.jobs.find((j) => j.kind === "nightly") ?? schedule.data?.jobs[0];
   return (
     <>
       <PageHead title="Runs and cost" sub="Month to date per provider, the projection to the month's end, each night's run and the jobs outside it." />
-      <Load error={quality.isError} retry={() => void quality.refetch()} loading={quality.isPending} />
+      <Load q={quality} />
       {cost.map((s) => (
         <SpendRow key={s.provider} s={s} />
       ))}
@@ -57,7 +57,7 @@ export function RunsPage() {
         </div>
       )}
       <div className="cap">Nights</div>
-      <Load error={runs.isError} retry={() => void runs.refetch()} loading={runs.isPending} />
+      <Load q={runs} />
       {runs.data && (
         <div className={`mtbl runs ${desktop ? "c7" : "c4"}`}>
           <div className="mh">

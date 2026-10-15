@@ -55,22 +55,25 @@ async def taxonomy_yaml(c: Conn) -> str:
 class TaxonomyStats(BaseModel):
     """What the Taxonomy and Topics pages show beside the tree: papers standing in each class or
     under it, the threshold each class is admitted at (its own, or the configured default for
-    its depth), and the current revision of each class and followed topic."""
+    its depth), and the current revision of each followed topic."""
 
     members: dict[str, int]
     thresholds: dict[str, float]
-    class_revisions: dict[str, int]
     topic_revisions: dict[str, int]
+
+
+def _thresholds(request: Request, tree: Taxonomy | None) -> dict[str, float]:
+    """The threshold each class is admitted at, under the loaded configuration."""
+    return thresholds(tree, request.app.state.config.classification.thresholds) if tree else {}
 
 
 @router.get("/taxonomy/stats")
 async def taxonomy_stats(request: Request, c: Conn) -> TaxonomyStats:
     tree = await taxonomy_store.load(c)
     members = await quality.class_members(c, tree) if tree else {}
-    at = thresholds(tree, request.app.state.config.classification.thresholds) if tree else {}
-    classes, topics = await quality.revisions(c)
+    revisions = await quality.topic_revisions(c)
     return TaxonomyStats(
-        members=members, thresholds=at, class_revisions=classes, topic_revisions=topics
+        members=members, thresholds=_thresholds(request, tree), topic_revisions=revisions
     )
 
 
@@ -192,7 +195,7 @@ class Miss(BaseModel):
 async def misses(request: Request, c: Conn) -> list[Miss]:
     """Reported misses, newest first, each with its trace."""
     tree = await taxonomy_store.load(c)
-    at = thresholds(tree, request.app.state.config.classification.thresholds) if tree else {}
+    at = _thresholds(request, tree)
     found = []
     for r in await quality.misses(c):
         opinions = r["opinions"] or {}
