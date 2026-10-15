@@ -248,3 +248,85 @@ export async function copyText(text: string, done: string) {
     toast("Could not reach the clipboard", "error");
   }
 }
+
+// -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
+
+/** Follow a class, or save its topic's edit. The tree and the topic lists are refetched; the pages show the offer. */
+export function useSaveTopic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ slug, topic }: { slug: string; topic: Schemas["Topic"] }) =>
+      ok(await api.PUT("/api/settings/topics/{slug}", { params: { path: { slug } }, body: topic })),
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["taxonomy"] }), qc.invalidateQueries({ queryKey: ["topics"] }), qc.invalidateQueries({ queryKey: ["settings", "taxonomy-stats"] })]),
+    onError: (e) => toast(said(e, "Could not save it"), "error"),
+  });
+}
+
+/** The owner's order of the topics, which the sidebar and the Digest follow. */
+export function useReorderTopics() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (slugs: string[]) => ok(await api.PUT("/api/settings/topics-order", { body: { slugs } })),
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["taxonomy"] }), qc.invalidateQueries({ queryKey: ["topics"] })]),
+    onError: (e) => toast(said(e, "Could not save the order"), "error"),
+  });
+}
+
+export function useDrawSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => ok(await api.POST("/api/settings/calibrate", { body: {} })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "calibrate"] }),
+    onError: (e) => toast(said(e, "Could not draw a session"), "error"),
+  });
+}
+
+/** One paper's answers in a session; the session is refetched so the strip and the review follow. */
+export function useAnswer(sessionId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ position, answer }: { position: number; answer: Schemas["Answer"] }) =>
+      ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: sessionId, position } }, body: answer })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "calibrate"] }),
+    onError: (e) => toast(said(e, "The answer did not go through"), "error"),
+  });
+}
+
+/** Add the papers waiting for a word to a session. */
+export function useMore(sessionId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => ok(await api.POST("/api/settings/calibrate/{session_id}/more", { params: { path: { session_id: sessionId } } })),
+    onSuccess: (r) => {
+      toast(r.added ? `${r.added} more ${r.added === 1 ? "paper" : "papers"} added` : "Nothing is waiting for a word");
+      return qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId] });
+    },
+    onError: (e) => toast(said(e), "error"),
+  });
+}
+
+export function useRetryIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => ok(await api.POST("/api/settings/integrations/{name}/retry", { params: { path: { name } } })),
+    onSuccess: () => {
+      toast("Trying the event again");
+      return qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+    },
+    onError: (e) => toast(said(e), "error"),
+  });
+}
+
+/** Skip the failing event the card showed; a 409 means another is failing by now, and the cards are refetched. */
+export function useSkipEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name, eventId }: { name: string; eventId: number }) =>
+      ok(await api.POST("/api/settings/integrations/{name}/skip", { params: { path: { name }, query: { event_id: eventId } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "integrations"] }),
+    onError: (e) => {
+      toast(said(e), "error");
+      if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+    },
+  });
+}

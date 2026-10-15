@@ -4,7 +4,11 @@ import { listSearch, parseSearch, str, stringifySearch } from "@/lib/search";
 import { DigestPage } from "@/routes/digest";
 import { PaperPage } from "@/routes/paper";
 import { PapersPage } from "@/routes/papers";
-import { SettingsPage } from "@/routes/settings";
+import { SettingsIndex, SettingsPage } from "@/routes/settings";
+import { SessionPage } from "@/routes/settings/calibrate";
+import { EventsPage } from "@/routes/settings/integrations";
+import { JobsPage } from "@/routes/settings/runs";
+import { TopicEditorPage } from "@/routes/settings/topics";
 import { TopicPage } from "@/routes/topic";
 import { TopicsPage } from "@/routes/topics";
 
@@ -12,6 +16,8 @@ declare module "@tanstack/react-router" {
   interface HistoryState {
     /** The key of the list a paper was opened from (listContext.ts). */
     list?: string;
+    /** The paper was opened from Settings, so it keeps the Settings sidebar. */
+    settings?: boolean;
   }
 }
 
@@ -36,9 +42,25 @@ export const paperRoute = createRoute({
   },
   component: PaperPage,
 });
-export const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/$page", component: SettingsPage });
+// Settings: the index, a page, and the pages inside pages (a topic's editor, a Calibrate session, Jobs, events).
+export const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsIndex });
+export const settingsPageRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/$page", component: SettingsPage });
+export const settingsTopicRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/topics/$slug", component: TopicEditorPage });
+export const settingsSessionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/calibrate/$id",
+  // `at` is the paper on screen, 1-based; without it the session opens at its first unanswered paper, or its review
+  // once every paper is answered; `review` opens the review before that.
+  validateSearch: (s: Record<string, unknown>): { at?: number; review?: boolean } => {
+    const at = Number(s.at);
+    return { ...(Number.isInteger(at) && at > 0 ? { at } : {}), ...(s.review === "1" || s.review === true ? { review: true } : {}) };
+  },
+  component: SessionPage,
+});
+export const settingsJobsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/runs/jobs", component: JobsPage });
+export const settingsEventsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/integrations/$name", component: EventsPage });
 
-const routeTree = rootRoute.addChildren([digestRoute, topicsRoute, topicRoute, papersRoute, paperRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([digestRoute, topicsRoute, topicRoute, papersRoute, paperRoute, settingsRoute, settingsPageRoute, settingsTopicRoute, settingsSessionRoute, settingsJobsRoute, settingsEventsRoute]);
 
 export function createAppRouter(history?: RouterHistory) {
   return createRouter({ routeTree, history, scrollRestoration: true, scrollToTopSelectors: [".main", ".screen"], parseSearch, stringifySearch });

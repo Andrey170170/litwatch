@@ -8,6 +8,7 @@ import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { freshVisit, topicsQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
+import { SettingsSide } from "@/routes/settings";
 import { Badge } from "./Badge";
 import { RunStatus } from "./RunStatus";
 import { Sheet } from "./Sheet";
@@ -23,6 +24,11 @@ const TABS = [
 /** A deeper screen has "‹ Back" (desktop) or "‹" and its title (phone); a top-level one the tabs' chrome. */
 export function isDeeper(pathname: string): boolean {
   return !["/", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
+}
+
+/** Settings owns the sidebar on its pages, and on a paper opened from one of them. */
+function inSettings(location: { pathname: string; state: unknown }): boolean {
+  return location.pathname.startsWith("/settings") || !!(location.state as { settings?: boolean }).settings;
 }
 
 type Came = "go" | "back" | "top" | "keep";
@@ -68,25 +74,30 @@ function Tabs({ onPick, drawer }: { onPick?: () => void; drawer?: boolean }) {
 
 function Desktop() {
   const came = useCame();
+  const location = useLocation();
   return (
     <div className="app">
-      <aside className="side">
-        <div className="wm">
-          <Link to="/" className="mark">
-            litwatch
-          </Link>
-          <RunStatus />
-        </div>
-        <nav className="nav">
-          <Tabs />
-          <Following />
-        </nav>
-        <nav className="foot nav">
-          <Link to="/settings/$page" params={{ page: "overview" }} className="it" activeProps={{ className: "it on" }}>
-            ⚙ Settings
-          </Link>
-        </nav>
-      </aside>
+      {inSettings(location) ? (
+        <SettingsSide />
+      ) : (
+        <aside className="side">
+          <div className="wm">
+            <Link to="/" className="mark">
+              litwatch
+            </Link>
+            <RunStatus />
+          </div>
+          <nav className="nav">
+            <Tabs />
+            <Following />
+          </nav>
+          <nav className="foot nav">
+            <Link to="/settings" className="it">
+              ⚙ Settings
+            </Link>
+          </nav>
+        </aside>
+      )}
       <main className="main" data-came={came} data-scroll-restoration-id="main">
         <div className="inner">
           <Outlet />
@@ -125,7 +136,7 @@ function Phone() {
         )}
         <span className="sp" />
         <RunStatus />
-        <Link to="/settings/$page" params={{ page: "overview" }} className="ib" aria-label="Settings">
+        <Link to="/settings" className="ib" aria-label="Settings">
           ⚙
         </Link>
       </header>
@@ -147,7 +158,7 @@ function Phone() {
           <Following onPick={() => setMenu(false)} />
         </nav>
         <nav className="foot nav">
-          <Link to="/settings/$page" params={{ page: "overview" }} className="it" onClick={() => setMenu(false)}>
+          <Link to="/settings" className="it" onClick={() => setMenu(false)}>
             ⚙ Settings
           </Link>
         </nav>

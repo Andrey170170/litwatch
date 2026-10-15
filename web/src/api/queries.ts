@@ -2,6 +2,7 @@
 import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api, ok } from "./client";
 import type { Shelf } from "@/lib/rarity";
+import type { Quality, Run, Session, SessionRow } from "@/lib/settings";
 import { sortOf, type ListSearch } from "@/lib/search";
 
 export const statusQuery = queryOptions({
@@ -100,4 +101,73 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
     // Rows stay while the filter changes, but never another topic's rows under this topic's name.
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === slug ? previous : undefined),
     ...listOptions,
+  });
+
+// -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
+
+/** Fresh each visit: a page that waits on the owner must not show what was settled elsewhere as still open. */
+const settingsOptions = { staleTime: 0, refetchOnWindowFocus: false } as const;
+
+export const qualityQuery = queryOptions({
+  queryKey: ["settings", "quality"],
+  queryFn: async () => ok(await api.GET("/api/settings/quality")) as unknown as Quality,
+  ...settingsOptions,
+});
+
+export const missesQuery = queryOptions({
+  queryKey: ["settings", "misses"],
+  queryFn: async () => ok(await api.GET("/api/settings/misses")),
+  ...settingsOptions,
+});
+
+export const sessionsQuery = queryOptions({
+  queryKey: ["settings", "calibrate"],
+  queryFn: async () => ok(await api.GET("/api/settings/calibrate")) as unknown as SessionRow[],
+  ...settingsOptions,
+});
+
+export const sessionQuery = (id: number) =>
+  queryOptions({
+    queryKey: ["settings", "calibrate", id],
+    queryFn: async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session,
+    ...settingsOptions,
+  });
+
+export const runsQuery = queryOptions({
+  queryKey: ["settings", "runs"],
+  queryFn: async () => ok(await api.GET("/api/settings/runs")) as unknown as Run[],
+  ...settingsOptions,
+});
+
+export const scheduleQuery = queryOptions({
+  queryKey: ["settings", "schedule"],
+  queryFn: async () => ok(await api.GET("/api/settings/schedule")),
+  staleTime: 5 * 60_000,
+});
+
+export const configQuery = queryOptions({
+  queryKey: ["settings", "config"],
+  queryFn: async () => ok(await api.GET("/api/settings/config")) as Record<string, unknown>,
+  staleTime: 5 * 60_000,
+});
+
+export const integrationsQuery = queryOptions({
+  queryKey: ["settings", "integrations"],
+  queryFn: async () => ok(await api.GET("/api/settings/integrations")),
+  ...settingsOptions,
+});
+
+export const taxonomyStatsQuery = queryOptions({
+  queryKey: ["settings", "taxonomy-stats"],
+  queryFn: async () => ok(await api.GET("/api/settings/taxonomy/stats")),
+  ...settingsOptions,
+});
+
+/** How many papers of the last 90 days each of a topic's keywords matches, for the editor. */
+export const keywordsQuery = (slug: string, enabled = true) =>
+  queryOptions({
+    queryKey: ["settings", "keywords", slug],
+    queryFn: async () => ok(await api.GET("/api/settings/topics/{slug}/keywords", { params: { path: { slug } } })),
+    staleTime: 5 * 60_000,
+    enabled,
   });
