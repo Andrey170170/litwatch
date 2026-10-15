@@ -181,6 +181,12 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   W3); a page for an archive paper not yet fetched and the archive's size for the search box (N5); the "Among the
   collection" rows; rung ✓/✗ ratings; code and weights URLs on the facets; listing unclassified papers; splits and
   escalations on the status line; which source set the owner's word.
+- **W2 or W3, the Deep card's web parts** (from N3's Deep cards): "Asked for" and the pulsing status line from
+  `card_pass`; Write again on a paper that has a card (`card_requestable` is now true there; the phone layout and
+  Actions still hide it); the "Among the collection" rows from `card.among` (rarity, relation, note, each linking to
+  its paper) and links on prior work's arXiv ids; the card's label (revision, arXiv version, source, written); the
+  `card_failed` open state; Quality's `deep` usage (attempts, list cost shown as "at least", unknown);
+  `CardRequested.pass_id` in place of `event_id`.
 
 ## Decisions
 
