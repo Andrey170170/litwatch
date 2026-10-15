@@ -221,7 +221,7 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
 async def test_taxonomy_stats_and_export(client, conn):
     from datetime import UTC, datetime
 
-    recent = P.model_copy(update={"published": datetime.now(UTC)})
+    recent = P.model_copy(update={"published": datetime.now(UTC).isoformat()})
     await papers_store.upsert(conn, [recent])  # the keyword window is the last 90 days
     await _classify(conn, recent, {FAITH.slug: 0.9}, FAITH.slug)
     stats = (await client.get("/api/settings/taxonomy/stats")).json()
