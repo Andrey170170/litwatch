@@ -32,7 +32,7 @@ from litwatch.core import (
     mixed_rarity,
     owners_word,
 )
-from litwatch.core.fulltext import TEXT_PRIORITY, to_drop, to_queue, wanted
+from litwatch.core.fulltext import TEXT_PRIORITY, to_drop, to_queue, to_relabel, wanted
 from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
@@ -153,7 +153,8 @@ async def _text_pass(
 ) -> None:
     """Queue the paper's Brief or Weight re-check when it qualifies on its effective Fits and
     grades in active topics (pipeline.md, section 6), or again for a newer arXiv version
-    (section 8); drop one not started that it no longer qualifies for."""
+    (section 8); relabel one not started that it now wants for another reason, and drop one it
+    no longer qualifies for."""
     found = await fulltext_store.facts(conn, paper_id)
     if found is None or found.dismissed:
         return
@@ -168,6 +169,8 @@ async def _text_pass(
     )
     if to_drop(want, found.last):
         await fulltext_store.drop(conn, found.last.id)
+    elif want is not None and to_relabel(want, found.last):
+        await fulltext_store.relabel(conn, found.last.id, *want)
     elif want is not None and to_queue(want, found.last, found.version):
         kind, reason = want
         await fulltext_store.queue(conn, paper_id, found.revision, kind, reason, TEXT_PRIORITY)

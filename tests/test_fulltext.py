@@ -24,7 +24,15 @@ from litwatch.core import (
     Verdict,
     Weight,
 )
-from litwatch.core.fulltext import LEASE, PassKind, PassState, TextPass, to_queue, wanted
+from litwatch.core.fulltext import (
+    LEASE,
+    PassKind,
+    PassState,
+    TextPass,
+    to_queue,
+    to_relabel,
+    wanted,
+)
 from litwatch.feedback import word
 from litwatch.fulltext import brief
 from litwatch.jobs import nightly
@@ -170,11 +178,15 @@ def test_the_pass_a_paper_wants_and_when_it_is_queued_again():
     assert wanted(focus=False, area=False, has_text_result=True) == (PassKind.BRIEF, "revised")
     assert wanted(focus=False, area=False, has_text_result=False) is None
     want = (PassKind.BRIEF, "focus")
-    done = TextPass(1, PassKind.BRIEF, PassState.DONE, 2)
+    done = TextPass(1, PassKind.BRIEF, "focus", PassState.DONE, 2)
     assert to_queue(want, None, 2)
     assert not to_queue(want, done, 2)
     assert to_queue(want, done, 3)  # a new arXiv version
-    assert not to_queue(want, TextPass(1, PassKind.BRIEF, PassState.FAILED, None), 3)
+    assert not to_queue(want, TextPass(1, PassKind.BRIEF, "focus", PassState.FAILED, None), 3)
+    area = TextPass(1, PassKind.WEIGHT, "area", PassState.AWAITING_TEXT, None)
+    assert to_relabel(want, area)
+    assert not to_relabel(want, done)  # done: its result stands
+    assert not to_relabel((PassKind.WEIGHT, "area"), area)
 
 
 async def test_a_focus_paper_at_central_or_related_gets_a_brief_and_adjacent_none(db):
@@ -199,6 +211,9 @@ async def test_an_area_must_read_gets_a_weight_re_check(db):
     await analysed(db, "solid")  # central and solid: must read
     (row,) = await passes(db)
     assert (row["kind"], row["reason"]) == ("weight", "area")
+    await graded(db, "related")  # now a Focus paper too: the pass not started says so
+    (row,) = await passes(db)
+    assert (row["kind"], row["reason"]) == ("brief", "focus")
 
 
 async def test_the_owners_word_queues_a_pass_and_takes_back_one_not_started(db):

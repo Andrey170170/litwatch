@@ -39,6 +39,7 @@ class TextPass:
 
     id: int
     kind: PassKind
+    reason: str
     state: PassState
     arxiv_version: int | None  # of the text it read; None until read, or when unknown
 
@@ -78,6 +79,18 @@ def to_queue(want: tuple[PassKind, str] | None, last: TextPass | None, version: 
     if last.state != PassState.DONE or version is None:
         return False
     return last.arxiv_version is None or last.arxiv_version < version
+
+
+def to_relabel(want: tuple[PassKind, str] | None, last: TextPass | None) -> bool:
+    """Whether the last pass, not started, is wanted for another reason now: it is relabelled,
+    not queued again (one open per revision), so it says why it runs (a paper graded must read
+    in an Area before its Focus verdict)."""
+    return (
+        want is not None
+        and last is not None
+        and last.state in UNSTARTED
+        and (last.kind, last.reason) != want
+    )
 
 
 def to_drop(want: tuple[PassKind, str] | None, last: TextPass | None) -> bool:

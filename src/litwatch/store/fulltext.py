@@ -38,12 +38,12 @@ async def facts(conn: psycopg.AsyncConnection, paper_id: str) -> Facts | None:
         await conn.execute(
             """
             SELECT p.revision, p.version, p.dismissed_at IS NOT NULL AS dismissed,
-                   f.id, f.kind, f.state, f.arxiv_version,
+                   f.id, f.kind, f.reason, f.state, f.arxiv_version,
                    EXISTS (SELECT 1 FROM fulltext_passes d WHERE d.paper_id = p.id
                            AND d.kind <> 'deep' AND d.state = 'done') AS has_text_result
             FROM papers p
             LEFT JOIN LATERAL (
-                SELECT id, kind, state, arxiv_version FROM fulltext_passes
+                SELECT id, kind, reason, state, arxiv_version FROM fulltext_passes
                 WHERE paper_id = p.id AND paper_revision = p.revision AND kind <> 'deep'
                 ORDER BY id DESC LIMIT 1
             ) f ON true
@@ -55,7 +55,13 @@ async def facts(conn: psycopg.AsyncConnection, paper_id: str) -> Facts | None:
     if row is None:
         return None
     last = (
-        TextPass(row["id"], PassKind(row["kind"]), PassState(row["state"]), row["arxiv_version"])
+        TextPass(
+            row["id"],
+            PassKind(row["kind"]),
+            row["reason"],
+            PassState(row["state"]),
+            row["arxiv_version"],
+        )
         if row["id"]
         else None
     )
@@ -78,6 +84,14 @@ async def queue(
         )
     ).fetchone()
     return row["id"]
+
+
+async def relabel(conn: psycopg.AsyncConnection, pass_id: int, kind: PassKind, reason: str) -> None:
+    """Say why a pass that has not started runs now."""
+    await conn.execute(
+        "UPDATE fulltext_passes SET kind = %s, reason = %s WHERE id = %s AND state = ANY(%s)",
+        (kind.value, reason, pass_id, [s.value for s in UNSTARTED]),
+    )
 
 
 async def drop(conn: psycopg.AsyncConnection, pass_id: int) -> None:
