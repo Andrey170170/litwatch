@@ -3,6 +3,10 @@
 Version 0 means unknown (historical source only); acquisition jobs require a known
 positive version. Lower numeric priority runs first. Historical imports register
 existing inventory and scan only LaTeX IDs, never payload content or hashes.
+
+`paper_dates` indexes each paper by its first version's submission date, derived from
+its metadata on every write, for listing papers by date window. A catalog that held
+papers before the table existed lists nothing until `index_dates` has filled it.
 """
 from __future__ import annotations
 
@@ -17,6 +21,8 @@ import threading
 import time
 import uuid
 from typing import Any, Callable
+
+from .search import listing_item, published_date
 
 PAPER_ID = re.compile(r"(?:\d{4}\.\d{4,5}|[A-Za-z][A-Za-z0-9.-]*/\d{7})\Z")
 KINDS = {'pdf', 'source', 'text'}
@@ -49,7 +55,12 @@ CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(status,priority,created_at);
 CREATE TABLE IF NOT EXISTS import_checkpoints (
  source TEXT PRIMARY KEY, completed_at REAL NOT NULL, rows INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS paper_dates (
+ paper_id TEXT PRIMARY KEY, published TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS paper_dates_published ON paper_dates(published,paper_id);
 '''
+DATES_INDEXED = 'paper-dates'  # the import checkpoint saying every paper has its date row
 
 
 def _json(value: Any) -> str:
@@ -121,6 +132,10 @@ class Catalog:
         self.db.execute('PRAGMA synchronous=FULL')
         self.db.execute('PRAGMA foreign_keys=ON')
         self.db.executescript(SCHEMA)
+        with self.db:
+            # An empty catalog is completely indexed: every later write keeps it so.
+            self.db.execute('''INSERT OR IGNORE INTO import_checkpoints
+                SELECT ?,?,0 WHERE NOT EXISTS (SELECT 1 FROM papers)''', (DATES_INDEXED, time.time()))
 
     def close(self) -> None:
         with self.lock:
@@ -135,6 +150,14 @@ class Catalog:
             if field + '_json' in result:
                 result[field] = json.loads(result.pop(field + '_json'))
         return result
+
+    def _index_date(self, paper_id: str, metadata: dict) -> None:
+        """Keep the paper's date row in step with its metadata; call inside the write."""
+        if published := published_date(metadata):
+            self.db.execute('''INSERT INTO paper_dates VALUES (?,?) ON CONFLICT(paper_id)
+                DO UPDATE SET published=excluded.published''', (paper_id, published))
+        else:
+            self.db.execute('DELETE FROM paper_dates WHERE paper_id=?', (paper_id,))
 
     def _ensure_paper(self, paper_id: str) -> None:
         self.db.execute('INSERT OR IGNORE INTO papers(id,updated_at) VALUES (?,?)',
@@ -166,12 +189,68 @@ class Catalog:
                 DO UPDATE SET metadata_json=excluded.metadata_json,
                 latest_version=excluded.latest_version,updated_at=excluded.updated_at''',
                 (paper_id, _json(metadata), latest_version, time.time()))
+            self._index_date(paper_id, metadata)
         return self.get_paper(paper_id)
 
     def get_paper(self, paper_id: str) -> dict | None:
         validate_id(paper_id)
         with self.lock:
             return self._decode(self.db.execute('SELECT * FROM papers WHERE id=?', (paper_id,)).fetchone())
+
+    def dates_indexed(self) -> bool:
+        with self.lock:
+            return self.db.execute('SELECT 1 FROM import_checkpoints WHERE source=?',
+                                   (DATES_INDEXED,)).fetchone() is not None
+
+    def index_dates(self, batch: int = 5000, progress: Callable[[dict], None] | None = None) -> dict:
+        """Derive every paper's date row from its metadata, then mark the index complete.
+        Idempotent, and safe beside live writes, which keep their own rows current."""
+        last, count = 0, 0
+        while True:
+            with self.lock, self.db:
+                rows = self.db.execute('SELECT rowid,id,metadata_json FROM papers WHERE rowid>? '
+                                       'ORDER BY rowid LIMIT ?', (last, batch)).fetchall()
+                for row in rows:
+                    self._index_date(row['id'], json.loads(row['metadata_json']))
+            if not rows:
+                break
+            last, count = rows[-1]['rowid'], count + len(rows)
+            if progress:
+                progress({'papers': count})
+        with self.lock, self.db:
+            self.db.execute('INSERT OR REPLACE INTO import_checkpoints VALUES (?,?,?)',
+                            (DATES_INDEXED, time.time(), count))
+            dated = self.db.execute('SELECT count(*) FROM paper_dates').fetchone()[0]
+        return {'papers': count, 'dated': dated}
+
+    def list_papers(self, since: str, until: str, categories: set[str] | None = None,
+                    after: tuple[str, str] | None = None, limit: int = 500,
+                    scan: int = 20000) -> dict:
+        """Papers whose first version was submitted from `since` to `until` (YYYY-MM-DD,
+        both inclusive) in (date, id) order, as `listing_item`s; with `categories`, only
+        papers in at least one of them. `after` is the (date, id) key a previous page ended
+        at. A page reads at most `scan` date rows, so a sparse category can give a short or
+        empty page; `next` is the key to go on from, None once the window is exhausted."""
+        items, key = [], after or (since, '')
+        while len(items) < limit and scan > 0:
+            size = min(1000, scan)
+            with self.lock:
+                rows = self.db.execute('''SELECT d.published,d.paper_id,p.metadata_json,p.latest_version
+                    FROM paper_dates d JOIN papers p ON p.id=d.paper_id
+                    WHERE (d.published,d.paper_id)>(?,?) AND d.published<=?
+                    ORDER BY d.published,d.paper_id LIMIT ?''', (*key, until, size)).fetchall()
+            scan -= len(rows)
+            for row in rows:
+                key = (row['published'], row['paper_id'])
+                item = listing_item(row['paper_id'], json.loads(row['metadata_json']),
+                                    row['latest_version'])
+                if not categories or categories & set(item['categories']):
+                    items.append(item)
+                    if len(items) == limit:
+                        break
+            if len(rows) < size and len(items) < limit:
+                return {'items': items, 'next': None}
+        return {'items': items, 'next': key}
 
     def put_artifact(self, artifact: dict) -> dict:
         a = dict(artifact)
@@ -384,6 +463,10 @@ class Catalog:
                         DO UPDATE SET metadata_json=CASE WHEN papers.metadata_json='{}' THEN excluded.metadata_json
                         ELSE papers.metadata_json END,latest_version=max(coalesce(papers.latest_version,0),
                         coalesce(excluded.latest_version,0))''', values)
+                    for row in self.db.execute('SELECT id,metadata_json FROM papers WHERE id IN '
+                                               '(SELECT value FROM json_each(?))',
+                                               (_json([v[0] for v in values]),)).fetchall():
+                        self._index_date(row['id'], json.loads(row['metadata_json']))
                     checkpoint(key, len(rows))
                 report(key, len(rows))
 
