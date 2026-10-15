@@ -279,18 +279,8 @@ for name, off in [
     )
 table(["Offsets", *[r.value for r in Rarity], "Rare or above a night, median (range)"], body)
 
-print("## What gives a paper rare or above (current offsets)\n")
-source = Counter()
-for pid in submitted:
-    lv = current[pid]
-    if lv.level < Rarity.RARE.level:
-        continue
-    giving = [
-        v
-        for v in by_paper[pid]
-        if Rarity(v["topic_rarity"]).lowered(DEPTH_OFFSETS[Depth(v["depth"])]) == lv
-    ]
-    source[
-        (lv.value, giving[0]["depth"], giving[0]["grade"]) if giving else (lv.value, "Weight", "")
-    ] += 1
-table(["Level", "From", "Grade", "Papers"], [[*k, n] for k, n in source.most_common()])
+print("## What Field offset 2 takes below rare\n")
+field2 = levels({Depth.FIELD: 2})
+up = [p for p in submitted if current[p].level >= Rarity.RARE.level]
+moved = [p for p in up if field2[p].level < Rarity.RARE.level]
+print(f"{len(moved)} of the {len(up)} papers at rare or above; {len(up) - len(moved)} stay.\n")

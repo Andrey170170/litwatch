@@ -24,8 +24,8 @@ ROLE = "analyse"
 # The Gist asked for is 20–30 words. The accepted range is a guard against a broken answer (a
 # fragment, the abstract restated), not a second target: outside it the answer fails like any
 # invalid one. At 35 it failed 2.7 % of the two-week run's answers and left 11 papers with no
-# analysis; asked again, those papers' Gists ran a clause long (up to 42 words), never short
-# (evals/2026-10-15-tuning.md).
+# analysis; the failed replies were not kept, but asked again those papers' Gists ran long (up
+# to 42 words), never short (evals/2026-10-15-tuning.md).
 GIST_WORDS = (15, 45)
 
 SYSTEM = f"""\
