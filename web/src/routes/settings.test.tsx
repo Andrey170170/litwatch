@@ -78,6 +78,27 @@ describe("Settings", () => {
     expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
+  it("keeps the visit's rows on the way back from a paper, and starts afresh on a link", async () => {
+    viewport(true);
+    const paper = { id: "2610.00002", title: "A stuck paper", authors: ["A"], abstract: "A.", published: "2026-10-13", version: 1, revision: 1, arxiv_url: "", pdf_url: "", source_url: "", in_collection: true, saved: false, topics: [], states: [], publication_by_owner: false, card_requestable: false };
+    const calls = scriptFetch({ ...common, "GET /api/papers/2610.00002": paper, "POST /api/settings/analysis/2610.00002/retry": { saved: false } });
+    const { router } = renderApp("/settings/needs");
+    const item = (await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")!;
+    await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(item).toHaveClass("settled"));
+    const fetched = () => calls.filter((c) => c.url === "/api/settings/quality").length;
+    expect(fetched()).toBe(1);
+    // To the paper and back: the settled row is still there, settled, with no fetch in between.
+    await userEvent.click(screen.getByRole("link", { name: "A stuck paper" }));
+    await screen.findByRole("heading", { name: "A stuck paper" });
+    router.history.back();
+    expect((await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")).toHaveClass("settled");
+    expect(fetched()).toBe(1);
+    // A Settings page reached by a link is a fresh visit: the reads load again.
+    await userEvent.click(screen.getByRole("link", { name: /Overview/ }));
+    await waitFor(() => expect(fetched()).toBe(2));
+  });
+
   it("settles an item whose action answers 409 with the reason, in place", async () => {
     viewport(true);
     scriptFetch({ ...common, "POST /api/settings/fulltext/7/now": () => json({ detail: "the pass is not waiting for the owner" }, 409) });

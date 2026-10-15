@@ -241,7 +241,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
         <Field label="Look">
           <div className="look">
             <Badge topic={{ name: cls.name, depth: form.depth, monogram: form.monogram || "?", colour: form.colour }} size="lg" />
-            <input className="tin sm mono" value={form.monogram} maxLength={3} onChange={(e) => set({ monogram: e.target.value })} aria-label="Monogram" />
+            <input className="tin sm mono" value={form.monogram} maxLength={2} onChange={(e) => set({ monogram: e.target.value })} aria-label="Monogram" />
             <span className="sws" role="group" aria-label="Colour">
               {SWATCH.map((c) => (
                 <button key={c} style={{ background: c }} className={form.colour === c ? "on" : ""} aria-label={c} aria-pressed={form.colour === c} onClick={() => set({ colour: c })} />

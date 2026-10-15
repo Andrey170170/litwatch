@@ -190,7 +190,14 @@ export function settleFromPaper(q: Quality, paper: Schemas["Paper"]): Quality {
     return x.settled || !what ? x : { ...x, settled: what };
   };
   const night = { ...q.night };
-  night.splits = night.splits.map((s) => (s.label ? s : read(s, has(s.escalated ? "escalated" : "split", s.topic), labelOf(s.topic))));
+  // A split waits again when its state is back (the label taken back, whenever it was given); labelled, it shows
+  // the label the page now carries, a changed one included, where the visit lists it.
+  night.splits = night.splits.map((s) => {
+    if (s.paper_id !== paper.id) return s;
+    if (has(s.escalated ? "escalated" : "split", s.topic)) return s.settled || s.label ? { ...s, settled: undefined, label: null } : s;
+    const label = labelOf(s.topic);
+    return label && (!s.label || s.settled) && s.settled !== label ? { ...s, settled: label } : s;
+  });
   night.awaiting_classification = night.awaiting_classification.map((s) => read(s, has("awaiting_classification"), done));
   night.analysis_failed = night.analysis_failed.map((s) => read(s, has("analysis_stopped"), done));
   night.ungraded = night.ungraded.map((s) => read(s, has("ungraded", s.topic), done));

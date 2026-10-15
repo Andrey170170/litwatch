@@ -53,11 +53,12 @@ const loaded = (pages: { rows: unknown[] }[]) => pages.reduce((n, p) => n + p.ro
 const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
 /** A list reached going forward (a link, not Back) is a fresh visit: its cached pages are marked stale, so it loads
- * afresh when shown. Only the list gone to: the one left keeps its pages for the way back. */
+ * afresh when shown. Only the list gone to: the one left keeps its pages for the way back. A Settings page reached
+ * the same way marks every Settings read stale: the page shown loads afresh, the sidebar's hints follow. */
 export function freshVisit(qc: QueryClient, pathname: string) {
   const path = pathname.replace(/\/$/, "") || "/";
   const topic = /^\/topics\/([^/]+)$/.exec(path);
-  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : null;
+  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : path.startsWith("/settings") ? ["settings"] : null;
   if (key) void qc.invalidateQueries({ queryKey: key, refetchType: "none" });
 }
 
@@ -105,9 +106,10 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
 
 // -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
 
-/** Fresh each visit, and still for the visit: a page that waits on the owner must not show what was settled
- * elsewhere as still open, and nothing moves under the reader while it is open. */
-const settingsOptions = { staleTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
+/** Fresh on each visit by a link (`freshVisit`), and still for the visit: a page that waits on the owner must not
+ * show what was settled elsewhere as still open, and nothing moves under the reader while it is open or on the way
+ * back to it. What a write settles is patched into the cached page (`settle`, `settleFromPaper`). */
+const settingsOptions = { staleTime: Infinity, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
 export const qualityQuery = queryOptions({
   queryKey: ["settings", "quality"],

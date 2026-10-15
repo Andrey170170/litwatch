@@ -116,17 +116,19 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
         </div>
       );
     case "fulltext_failed":
-    case "awaiting_text":
+    case "awaiting_text": {
+      // An older revision's Brief is kept until the new one is written; without one the abstract stands in.
+      const meanwhile = paper.brief ? `the Brief from revision ${paper.brief.revision} stands meanwhile` : "the abstract stands in for the Brief";
       return (
         <div className="note fail">
           <div>
             {state.kind === "fulltext_failed" ? (
               <>
-                <b>Full text failed three runs in a row.</b> The abstract stands in for the Brief until a pass succeeds.
+                <b>Full text failed three runs in a row.</b> Until a pass succeeds, {meanwhile}.
               </>
             ) : (
               <>
-                <b>Awaiting the full text for over a week.</b> The archive has not delivered it; the abstract stands in for the Brief.
+                <b>Awaiting the full text for over a week.</b> The archive has not delivered it; {meanwhile}.
               </>
             )}
             {state.error && <div className="err">{state.error}</div>}
@@ -138,6 +140,7 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
           </div>
         </div>
       );
+    }
     case "awaiting_classification":
       return (
         <div className="note fail">

@@ -49,6 +49,17 @@ describe("settleFromPaper", () => {
     // The two splits and the other paper's pass wait; the grading and analysis the page settled stay settled.
     expect(waiting(back)).toBe(3);
   });
+  it("follows the label the paper's page carries now: a changed one replaces the result, one taken back reopens a row fetched labelled", () => {
+    const changed = settleFromPaper(settleFromPaper(q, paper("1", [], [topic("a", "central")])), paper("1", [], [topic("a", "related")]));
+    expect(changed.night.splits[0]!.settled).toBe("related");
+    const fetchedLabelled = { night: { ...night, splits: [{ ...split, label: { value: "none" } }] } } as Quality;
+    expect(waiting(fetchedLabelled)).toBe(0);
+    const back = settleFromPaper(fetchedLabelled, paper("1", [{ kind: "split", topic: "a" }], [topic("a")]));
+    expect(back.night.splits[0]!.label).toBeNull();
+    expect(waiting(back)).toBe(1);
+    // A label changed on the page of a row fetched labelled stays off the visit's list.
+    expect(settleFromPaper(fetchedLabelled, paper("1", [], [topic("a", "central")])).night.splits[0]!.settled).toBeUndefined();
+  });
   it("reads an escalation by its flag, as the paper's page does, even where the graders also split", () => {
     const both = { night: { ...night, splits: [{ ...split, depth: "area", split: true, escalated: true }] } } as Quality;
     expect(settleFromPaper(both, paper("1", [{ kind: "escalated", topic: "a" }], [topic("a")])).night.splits[0]!.settled).toBeUndefined();

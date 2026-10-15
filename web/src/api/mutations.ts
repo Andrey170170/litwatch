@@ -311,15 +311,15 @@ export function useDrawSession() {
   });
 }
 
-/** One paper's answers in a session; the session is refetched so the strip and the review follow, and the
- * paper's page and the status line, which the new labels change. */
+/** One paper's answers in a session; the session is refetched so the strip and the review follow, and the paper
+ * is settled as after any write on it: its page and the status line refetched, a split the labels settled marked
+ * so on Needs you. */
 export function useAnswer(sessionId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ position, answer }: { position: number; paperId: string; answer: Schemas["Answer"] }) =>
       ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: sessionId, position } }, body: answer })),
-    onSuccess: (_, { paperId }) =>
-      Promise.all([qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId], exact: true }), qc.invalidateQueries({ queryKey: ["paper", paperId] }), qc.invalidateQueries({ queryKey: ["status"] })]),
+    onSuccess: (_, { paperId }) => Promise.all([qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId], exact: true }), settled(qc, paperId)]),
     onError: (e) => toast(said(e, "The answer did not go through"), "error"),
   });
 }
