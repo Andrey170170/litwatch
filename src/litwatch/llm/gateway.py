@@ -217,7 +217,7 @@ class Gateway:
             except json.JSONDecodeError as exc:
                 raise CallError("invalid", "not JSON", reply.usage) from exc
             except ValidationError as exc:
-                # Where it failed, not what was said: out of debug mode the reply is not kept.
+                # Where it failed; in debug mode what the validator said there too.
                 errors = [(".".join(map(str, e["loc"])) or "reply", e["msg"]) for e in exc.errors()]
                 if self.debug:
                     said = "; ".join(f"{where}: {msg}" for where, msg in errors)
