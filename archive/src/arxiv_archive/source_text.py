@@ -203,13 +203,22 @@ def text_package(package: Path, output: Path, limit: int) -> dict:
 
 
 # The files a paper's text is read from, and how they pull each other in: `\input{name}`,
-# `\include{name}`, `\subfile{name}`, or TeX's bare `\input name`.
+# `\include{name}`, `\subfile{name}`, TeX's bare `\input name`, and the import package's
+# `\import{dir}{name}` and `\subimport{dir}{name}`.
 LATEX_SUFFIXES = ('.tex', '.ltx', '.latex')
-INPUT = re.compile(r'\\(?:input|include|subfile)\s*\{([^}]*)\}|\\input\s+([^\s{}\\%]+)')
+INPUT = re.compile(r'\\(?:input|include|subfile)\s*\{([^}]*)\}|\\input\s+([^\s{}\\%]+)'
+                   r'|\\(?:sub)?import\*?\s*\{([^}]*)\}\s*\{([^}]*)\}')
 BIBLIOGRAPHY = re.compile(r'\\bibliography\s*\{[^}]*\}')
 # A `%` after an even run of backslashes (none, or a `\\\\` line break) starts a comment.
 COMMENT = re.compile(r'((?:^|[^\\])(?:\\\\)*)%.*')
 MAX_INPUT_DEPTH = 8
+
+
+def _input(match: re.Match) -> str:
+    """The file an INPUT match names, relative as written."""
+    if match.group(3) is not None:
+        return posixpath.join(match.group(3).strip(), match.group(4).strip())
+    return match.group(1) or match.group(2)
 
 
 def _decode(body: bytes) -> str:
@@ -257,7 +266,7 @@ def _main(files: dict[str, str]) -> str | None:
     inputs = set()
     for here in latex:
         for match in INPUT.finditer(files[here]):
-            inputs.update(_candidates(match.group(1) or match.group(2), '', here))
+            inputs.update(_candidates(_input(match), '', here))
 
     def rank(n: str) -> tuple:
         return (n in inputs, '\\begin{document}' not in files[n],
@@ -302,8 +311,7 @@ def latex_text(package: Path, limit: int) -> str:
 
     def expand(body: str, here: str, depth: int) -> str:
         def inline(match: re.Match) -> str:
-            name = match.group(1) or match.group(2)
-            path = resolve(name, here) if depth < MAX_INPUT_DEPTH else None
+            path = resolve(_input(match), here) if depth < MAX_INPUT_DEPTH else None
             if path is None:
                 return ''
             used.add(path)

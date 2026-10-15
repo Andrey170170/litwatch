@@ -103,6 +103,17 @@ class LatexTextTests(unittest.TestCase):
         self.assertNotIn("\\input sections", text)
         self.assertIn("\\inputencoding{utf8}", text)  # not an input
 
+    def test_import_and_subimport_are_inlined(self):
+        text = self.text(
+            [
+                ("main.tex", b"\\documentclass{article}\\begin{document}\\import{chapters/}{one}\\end{document}"),
+                ("chapters/one.tex", b"One \\subimport*{parts/}{two.tex}\n"),
+                ("chapters/parts/two.tex", b"Two\n"),
+            ]
+        )
+        self.assertIn("One", text)
+        self.assertIn("Two", text)
+
     def test_a_commented_out_document_is_not_the_main_file(self):
         text = self.text(
             [
