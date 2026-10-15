@@ -30,9 +30,10 @@ export interface paths {
         };
         /**
          * Papers
-         * @description The table. A search also asks the search providers, on its first page, for papers the
-         *     collection lacks: the `outside` band. Topic and saved belong to the collection, so with
-         *     either filter set there is no outside band; `source` keeps one band only.
+         * @description Papers: the whole collection, rarest first. A search also asks the search providers, on
+         *     its first page, for papers the collection lacks: the `outside` band. A filter only the
+         *     collection has (topic, depth, a level, saved, code, Weight) leaves the band out; `source`
+         *     keeps one band only.
          */
         get: operations["papers_api_papers_get"];
         put?: never;
@@ -94,7 +95,7 @@ export interface paths {
         };
         /**
          * Bibtex Filter
-         * @description BibTeX for every paper the table's filter matches.
+         * @description BibTeX for every collection paper a Papers filter matches.
          */
         get: operations["bibtex_filter_api_bibtex_get"];
         put?: never;
@@ -139,7 +140,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Topics */
+        /**
+         * Topics
+         * @description The Topics tab: the shown topics grouped Focus, Area, Field, each in the owner's order.
+         */
         get: operations["topics_api_topics_get"];
         put?: never;
         post?: never;
@@ -149,17 +153,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/topics/{slug}/visit": {
+    "/api/topics/{slug}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Topic
+         * @description A topic's page: its papers (its subtree's), each as the topic shows it, rarest first.
+         */
+        get: operations["topic_api_topics__slug__get"];
         put?: never;
-        /** Visit */
-        post: operations["visit_api_topics__slug__visit_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -174,10 +181,17 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** React */
+        /**
+         * React
+         * @description A thumb for the topic of the surface it was given on, replacing the one there. Wrong
+         *     topic and great find on a Focus topic are the owner's word, and say so.
+         */
         put: operations["react_api_reactions__paper_id__put"];
         post?: never;
-        /** Unreact */
+        /**
+         * Unreact
+         * @description Clear a thumb: it takes back its own word and nothing else.
+         */
         delete: operations["unreact_api_reactions__paper_id__delete"];
         options?: never;
         head?: never;
@@ -192,7 +206,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Save */
+        /**
+         * Save
+         * @description Save or unsave by hand; the newest use outranks every other reason.
+         */
         put: operations["save_api_library__paper_id__put"];
         post?: never;
         delete?: never;
@@ -201,7 +218,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/word/{topic}/{paper_id}": {
+    "/api/labels/{topic}/{paper_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -211,12 +228,16 @@ export interface paths {
         get?: never;
         /**
          * Label
-         * @description The label row on a paper page: the owner's own word, origin `reader`.
+         * @description The Fit control on a paper's page: the owner's own word on any shown topic (origin
+         *     `reader`). Unsure is stored and counts nowhere.
          */
-        put: operations["label_api_word__topic___paper_id__put"];
+        put: operations["label_api_labels__topic___paper_id__put"];
         post?: never;
-        /** Unlabel */
-        delete: operations["unlabel_api_word__topic___paper_id__delete"];
+        /**
+         * Unlabel
+         * @description Tapping the filled segment: the label goes, and the verdict's Fit stands again.
+         */
+        delete: operations["unlabel_api_labels__topic___paper_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -233,7 +254,7 @@ export interface paths {
         put?: never;
         /**
          * Report Miss
-         * @description File a miss for a Focus topic.
+         * @description File a miss for a Focus topic: the owner's word, at once, and the paper saved.
          */
         post: operations["report_miss_api_misses_post"];
         delete?: never;
@@ -691,11 +712,13 @@ export interface components {
     schemas: {
         /**
          * Ack
-         * @description What happened, in the words the reader sees.
+         * @description What an action changed. The page shows the result where it was taken; `message` is set
+         *     only for what it cannot show (DESIGN.md, acknowledgement): a thumb that gives or takes back
+         *     the owner's word on a Focus topic, and a reported miss.
          */
         Ack: {
             /** Message */
-            message: string;
+            message?: string | null;
             /** Saved */
             saved: boolean;
             /** Grades */
@@ -728,31 +751,26 @@ export interface components {
             revision: number;
         };
         /**
-         * BibtexFilter
-         * @description A papers-table filter, as `GET /api/papers` takes it.
+         * Badge
+         * @description A followed topic as a badge shows it: its class's slug and name, its depth (the badge's
+         *     shape), monogram and colour.
          */
-        BibtexFilter: {
-            /** Q */
-            q?: string | null;
-            /** Topic */
-            topic?: string | null;
-            /**
-             * Adjacent
-             * @default false
-             */
-            adjacent: boolean;
-            /** Saved */
-            saved?: boolean | null;
-            /** Year */
-            year?: number | null;
-            /** Source */
-            source?: ("collection" | "outside") | null;
+        Badge: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            depth: components["schemas"]["Depth"];
+            /** Monogram */
+            monogram: string;
+            /** Colour */
+            colour: string;
         };
         /** BibtexIn */
         BibtexIn: {
             /** Ids */
             ids?: string[];
-            filter?: components["schemas"]["BibtexFilter"] | null;
+            filter?: components["schemas"]["PaperQuery"] | null;
             /** Cited */
             cited?: components["schemas"]["CitedIn"][];
         };
@@ -772,13 +790,86 @@ export interface components {
             next: string;
         };
         /**
-         * Chosen
-         * @description One followed topic's current verdict on the paper: the Fit that stands, each grader's
-         *     answer by role, and the paper revision it was made from.
+         * CitedIn
+         * @description A paper outside the collection, as a search hit gives it: enough for an arXiv entry.
          */
-        Chosen: {
-            /** Topic */
-            topic: string;
+        CitedIn: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Authors */
+            authors?: string[];
+            /** Year */
+            year?: number | null;
+        };
+        /** ClassSource */
+        ClassSource: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "classifier" | "uncertain" | "keyword" | "owner" | "miss";
+            /**
+             * Member
+             * @default true
+             */
+            member: boolean;
+            /** Probability */
+            probability?: number | null;
+        };
+        /** ClassesIn */
+        ClassesIn: {
+            /** Revision */
+            revision: number;
+            /** Classes */
+            classes: string[];
+            /** Primary */
+            primary?: string | null;
+        };
+        /**
+         * Classification
+         * @description The newest classification and the current memberships, classes of the current tree only
+         *     (a retired class leads nowhere).
+         */
+        Classification: {
+            /** Primary */
+            primary: string;
+            /** Primary Name */
+            primary_name: string;
+            /** Model */
+            model: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Paper Revision */
+            paper_revision: number;
+            /** Classes */
+            classes: components["schemas"]["PaperClass"][];
+        };
+        /**
+         * Contribution
+         * @description What kind of contribution a paper makes. Facts, not scores.
+         * @enum {string}
+         */
+        Contribution: "method" | "analysis" | "benchmark" | "theory" | "position" | "survey";
+        /** CorrectionIn */
+        CorrectionIn: {
+            /** Revision */
+            revision: number;
+            /** Title */
+            title?: string | null;
+            /** Abstract */
+            abstract?: string | null;
+        };
+        /**
+         * CurrentVerdict
+         * @description A topic's current verdict: the Fit that stands, each grader's answer by role, and the
+         *     paper revision it was made from.
+         */
+        CurrentVerdict: {
             fit: components["schemas"]["Fit"];
             /** Reason */
             reason: string;
@@ -803,38 +894,6 @@ export interface components {
             paper_revision: number;
             /** Recorded At */
             recorded_at?: string | null;
-        };
-        /**
-         * CitedIn
-         * @description A paper outside the collection, as a search hit gives it: enough for an arXiv entry.
-         */
-        CitedIn: {
-            /** Id */
-            id: string;
-            /** Title */
-            title: string;
-            /** Authors */
-            authors?: string[];
-            /** Year */
-            year?: number | null;
-        };
-        /** ClassesIn */
-        ClassesIn: {
-            /** Revision */
-            revision: number;
-            /** Classes */
-            classes: string[];
-            /** Primary */
-            primary?: string | null;
-        };
-        /** CorrectionIn */
-        CorrectionIn: {
-            /** Revision */
-            revision: number;
-            /** Title */
-            title?: string | null;
-            /** Abstract */
-            abstract?: string | null;
         };
         /**
          * DeepCard
@@ -882,6 +941,17 @@ export interface components {
             xid?: number | null;
         };
         /**
+         * Facets
+         * @description Facts about the paper, never combined into anything.
+         */
+        Facets: {
+            contribution: components["schemas"]["Contribution"];
+            /** Releases Code */
+            releases_code: boolean;
+            /** Releases Weights */
+            releases_weights: boolean;
+        };
+        /**
          * Failing
          * @description The event an integration is stuck on; its later events wait behind it.
          */
@@ -905,12 +975,68 @@ export interface components {
          * @enum {string}
          */
         Fit: "central" | "related" | "adjacent" | "none";
+        /** Gist */
+        Gist: {
+            /** Text */
+            text: string;
+        };
         /**
          * Grade
          * @description A paper's standing on one topic, from its Fit there and its Weight, most inclusive first.
          * @enum {string}
          */
         Grade: "must_read" | "relevant" | "adjacent" | "none";
+        /**
+         * GradeCounts
+         * @description Papers per grade on a topic's page; `ungraded` have none there.
+         */
+        GradeCounts: {
+            /**
+             * Must Read
+             * @default 0
+             */
+            must_read: number;
+            /**
+             * Relevant
+             * @default 0
+             */
+            relevant: number;
+            /**
+             * Adjacent
+             * @default 0
+             */
+            adjacent: number;
+            /**
+             * None
+             * @default 0
+             */
+            none: number;
+            /**
+             * Ungraded
+             * @default 0
+             */
+            ungraded: number;
+        };
+        /** @enum {string} */
+        GradeLevel: "must_read" | "relevant" | "adjacent" | "none" | "ungraded";
+        /**
+         * GradedBadge
+         * @description A badge on a paper: the paper's effective grade on that topic, and the topic page's
+         *     rarity it gives.
+         */
+        GradedBadge: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            depth: components["schemas"]["Depth"];
+            /** Monogram */
+            monogram: string;
+            /** Colour */
+            colour: string;
+            grade: components["schemas"]["Grade"];
+            rarity: components["schemas"]["Rarity"];
+        };
         /**
          * GradedOut
          * @description What grading now found: the Fit that stands, or why there is no verdict.
@@ -933,21 +1059,41 @@ export interface components {
          * @enum {string}
          */
         Hand: "save" | "unsave";
-        /** HistoryItem */
+        /**
+         * HistoryItem
+         * @description Something said about the paper, oldest first: every verdict (`value` its Fit), the
+         *     owner's label (its value) and thumb (its value and reason) as they stand, misses, and each
+         *     classification (`topic` is its primary class). `followed`: the topic is followed now.
+         */
         HistoryItem: {
             /**
              * What
              * @enum {string}
              */
-            what: "graded" | "missed";
-            /** Topic */
-            topic: string;
+            what: "graded" | "labelled" | "reacted" | "missed" | "classified";
             /**
              * At
              * Format: date-time
              */
             at: string;
-            fit?: components["schemas"]["Fit"] | null;
+            /** Topic */
+            topic?: string | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Followed
+             * @default false
+             */
+            followed: boolean;
+            /** Value */
+            value?: string | null;
+            reason?: components["schemas"]["ReactionReason"] | null;
+            /** Revision */
+            revision?: number | null;
+            /** Split */
+            split?: boolean | null;
+            /** Escalated */
+            escalated?: boolean | null;
         };
         /**
          * IntegrationCard
@@ -1043,6 +1189,26 @@ export interface components {
             next: string;
         };
         /**
+         * OpenState
+         * @description What waits on the owner for this paper, as Needs you lists it, with the paper revision
+         *     the action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the
+         *     text), `analysis_stopped` (try again), and a topic's `split`, `escalated` (label it) or
+         *     `ungraded` (grade it now).
+         */
+        OpenState: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "awaiting_classification" | "analysis_stopped" | "split" | "escalated" | "ungraded";
+            /** Revision */
+            revision: number;
+            /** Topic */
+            topic?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
          * Opinion
          * @description One grader's answer: a Fit with one sentence why, or, from `area_check`, whether the
          *     judge's Fit holds and the probability that it does.
@@ -1063,42 +1229,66 @@ export interface components {
             /** Slugs */
             slugs: string[];
         };
-        /** Paper */
+        /**
+         * OutsideRow
+         * @description A paper a search provider found that the collection lacks.
+         */
+        OutsideRow: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Authors */
+            authors?: string[];
+            /** Published */
+            published?: string | null;
+            /** Source */
+            source: string;
+            /** Score */
+            score?: number | null;
+        };
+        /**
+         * Paper
+         * @description A paper's page: its header, its ladder (Gist, abstract, deep card, the paper) and the
+         *     rail, its open states and its history. Outside the collection (never classified) it has no
+         *     rarity.
+         */
         Paper: {
             /** Id */
             id: string;
             /** Title */
             title: string;
-            /** Abstract */
-            abstract: string;
             /** Authors */
             authors: string[];
-            /** Categories */
-            categories: string[];
+            /** Abstract */
+            abstract: string;
             /** Published */
             published?: string | null;
             /** Updated */
             updated?: string | null;
-            /**
-             * Added
-             * Format: date-time
-             */
-            added: string;
             /** Version */
             version?: number | null;
+            /** Versions */
+            versions?: components["schemas"]["Version"][];
             /**
              * Revision
              * @default 1
              */
             revision: number;
-            /** Doi */
-            doi?: string | null;
-            /** Journal Ref */
-            journal_ref?: string | null;
             /** Arxiv Url */
             arxiv_url: string;
             /** Pdf Url */
             pdf_url: string;
+            /** Source Url */
+            source_url: string;
+            /** In Collection */
+            in_collection: boolean;
+            rarity?: components["schemas"]["Rarity"] | null;
+            /** Badges */
+            badges?: components["schemas"]["GradedBadge"][];
+            gist?: components["schemas"]["Gist"] | null;
+            weight?: components["schemas"]["WeightState"] | null;
+            facets?: components["schemas"]["Facets"] | null;
             /**
              * Saved
              * @default false
@@ -1107,16 +1297,12 @@ export interface components {
             hand?: components["schemas"]["Hand"] | null;
             /** Topics */
             topics: components["schemas"]["PaperTopic"][];
-            reaction?: components["schemas"]["ReactionValue"] | null;
-            reaction_reason?: components["schemas"]["ReactionReason"] | null;
+            reaction?: components["schemas"]["ReactionState"] | null;
+            classification?: components["schemas"]["Classification"] | null;
+            /** States */
+            states?: components["schemas"]["OpenState"][];
             /** History */
-            history: components["schemas"]["HistoryItem"][];
-            /** Versions */
-            versions?: {
-                [key: string]: unknown;
-            }[];
-            /** Chosen */
-            chosen: components["schemas"]["Chosen"][];
+            history?: components["schemas"]["HistoryItem"][];
             publication?: components["schemas"]["Publication"] | null;
             /**
              * Publication By Owner
@@ -1131,41 +1317,100 @@ export interface components {
             card_requestable: boolean;
         };
         /**
-         * PaperTopic
-         * @description The paper as one topic sees it: its effective Fit and grade there.
+         * PaperClass
+         * @description A class the paper has a membership of, by source. `member`: one stands that puts the
+         *     paper in the class (the uncertain band and the keyword check are for grading only). `path`
+         *     is its classes' names from the top down to it.
          */
-        PaperTopic: {
+        PaperClass: {
             /** Slug */
             slug: string;
             /** Name */
             name: string;
-            depth: components["schemas"]["Depth"];
-            /** Colour */
-            colour?: string | null;
+            /** Path */
+            path: string[];
+            /** Member */
+            member: boolean;
+            /** Sources */
+            sources: components["schemas"]["ClassSource"][];
+        };
+        /**
+         * PaperQuery
+         * @description Papers' filters: also the pages of one or more topics (each with its subtree), or of
+         *     every topic at a depth, and one band of a search.
+         */
+        PaperQuery: {
+            /** Q */
+            q?: string | null;
+            /** Rarity */
+            rarity?: components["schemas"]["Rarity"][];
+            /** Grade */
+            grade?: components["schemas"]["GradeLevel"][];
+            /** Saved */
+            saved?: boolean | null;
+            /** Code */
+            code?: boolean | null;
+            /** Weight */
+            weight?: components["schemas"]["Weight"][];
+            /** Since */
+            since?: string | null;
+            /** Until */
+            until?: string | null;
+            /** @default rarest */
+            sort: components["schemas"]["Sort"];
+            /** Topic */
+            topic?: string[];
+            depth?: components["schemas"]["Depth"] | null;
+            /** Source */
+            source?: ("collection" | "outside") | null;
+        };
+        /** PaperRef */
+        PaperRef: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * PaperTopic
+         * @description A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its
+         *     own effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),
+         *     its current verdict, the owner's word that stands (from the label, a thumb or a miss), the
+         *     label and thumb themselves, and its open state.
+         */
+        PaperTopic: {
+            topic: components["schemas"]["Badge"];
             fit?: components["schemas"]["Fit"] | null;
             grade?: components["schemas"]["Grade"] | null;
+            rarity?: components["schemas"]["Rarity"] | null;
+            /** Via */
+            via?: string | null;
+            verdict?: components["schemas"]["CurrentVerdict"] | null;
+            word?: components["schemas"]["Fit"] | null;
             label?: components["schemas"]["LabelState"] | null;
-            reaction?: components["schemas"]["ReactionValue"] | null;
-            reaction_reason?: components["schemas"]["ReactionReason"] | null;
+            reaction?: components["schemas"]["ReactionState"] | null;
             /**
              * Missed
              * @default false
              */
             missed: boolean;
+            state?: components["schemas"]["TopicState"] | null;
         };
         /**
          * Papers
-         * @description A page of the table. A search also brings the papers search providers found that the
-         *     collection lacks, as a second band under the first; a provider that failed or was too
-         *     slow is named in `left_out`.
+         * @description A page of Papers, the whole filter's total, and the papers per rarity under every filter
+         *     but the levels. A search also brings what search providers found that the collection lacks,
+         *     as a band of its own on the first page; a provider that failed or was too slow is named in
+         *     `left_out`.
          */
         Papers: {
             /** Rows */
             rows: components["schemas"]["Row"][];
             /** Total */
             total: number;
+            counts: components["schemas"]["RarityCounts"];
             /** Outside */
-            outside?: components["schemas"]["Row"][];
+            outside?: components["schemas"]["OutsideRow"][];
             /** Left Out */
             left_out?: string[];
         };
@@ -1217,6 +1462,48 @@ export interface components {
              */
             none: boolean;
         };
+        /**
+         * Rarity
+         * @description What a paper's colour shows, low to high.
+         * @enum {string}
+         */
+        Rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
+        /**
+         * RarityCounts
+         * @description Papers per rarity level; `unrated` have none yet (not classified).
+         */
+        RarityCounts: {
+            /**
+             * Legendary
+             * @default 0
+             */
+            legendary: number;
+            /**
+             * Epic
+             * @default 0
+             */
+            epic: number;
+            /**
+             * Rare
+             * @default 0
+             */
+            rare: number;
+            /**
+             * Uncommon
+             * @default 0
+             */
+            uncommon: number;
+            /**
+             * Common
+             * @default 0
+             */
+            common: number;
+            /**
+             * Unrated
+             * @default 0
+             */
+            unrated: number;
+        };
         /** ReactionIn */
         ReactionIn: {
             /** Topic */
@@ -1226,9 +1513,16 @@ export interface components {
         };
         /**
          * ReactionReason
+         * @description What a thumb says went wrong or right, each pointing at the stage that would have made the
+         *     mistake (feedback.md, reactions).
          * @enum {string}
          */
-        ReactionReason: "not_for_me" | "unrelated" | "already_knew" | "overrated" | "great_find";
+        ReactionReason: "wrong_topic" | "overrated" | "not_interesting" | "already_knew" | "underrated" | "great_find";
+        /** ReactionState */
+        ReactionState: {
+            value: components["schemas"]["ReactionValue"];
+            reason?: components["schemas"]["ReactionReason"] | null;
+        };
         /**
          * ReactionValue
          * @enum {string}
@@ -1236,7 +1530,8 @@ export interface components {
         ReactionValue: "up" | "down";
         /**
          * Row
-         * @description One paper in a table.
+         * @description One paper in a list. `rarity` is the list's: the mixed list's on Papers, the topic page's
+         *     on a topic. No Gist, Weight or facets until analysis succeeds; no rarity until classified.
          */
         Row: {
             /** Id */
@@ -1247,23 +1542,65 @@ export interface components {
             authors: string[];
             /** Published */
             published?: string | null;
-            /** Added */
-            added?: string | null;
-            grade?: components["schemas"]["Grade"] | null;
+            /** Gist */
+            gist?: string | null;
+            weight?: components["schemas"]["Weight"] | null;
+            facets?: components["schemas"]["Facets"] | null;
+            rarity?: components["schemas"]["Rarity"] | null;
+            /** Badges */
+            badges?: components["schemas"]["GradedBadge"][];
             /**
              * Saved
              * @default false
              */
             saved: boolean;
-            /** Also In */
-            also_in?: string[];
+            state?: components["schemas"]["RowState"] | null;
+        };
+        /** @enum {string} */
+        RowState: "word" | "failure";
+        /**
+         * RunStatus
+         * @description The latest nightly run: none yet, running, failed, or finished without an error, with
+         *     papers waiting for the owner (`attention`) or not (`quiet`).
+         */
+        RunStatus: {
             /**
-             * Source
-             * @default collection
+             * State
+             * @enum {string}
              */
-            source: string;
-            /** Score */
-            score?: number | null;
+            state: "none" | "running" | "failed" | "attention" | "quiet";
+            /** Run Id */
+            run_id?: number | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Papers
+             * @default 0
+             */
+            papers: number;
+            /** Waiting */
+            waiting?: number | null;
+            /**
+             * Awaiting Classification
+             * @default 0
+             */
+            awaiting_classification: number;
+            /**
+             * Analysis Failed
+             * @default 0
+             */
+            analysis_failed: number;
+            /**
+             * Ungraded
+             * @default 0
+             */
+            ungraded: number;
+            /** Over Budget */
+            over_budget?: string[];
         };
         /** SaveIn */
         SaveIn: {
@@ -1308,6 +1645,14 @@ export interface components {
             /** Token */
             token: string;
         };
+        /** @enum {string} */
+        Sort: "rarest" | "newest" | "added" | "title" | "best";
+        /**
+         * Status
+         * @description Whether a topic is in use.
+         * @enum {string}
+         */
+        Status: "draft" | "active" | "paused";
         /**
          * Taxonomy
          * @description The tree, parents before children and siblings in the owner's order, and the followed
@@ -1350,7 +1695,7 @@ export interface components {
             /** Colour */
             colour: string;
             /** @default active */
-            status: components["schemas"]["litwatch__core__types__Status"];
+            status: components["schemas"]["Status"];
             /** Subject */
             subject: string;
             /** Rubric */
@@ -1360,28 +1705,99 @@ export interface components {
             /** Keywords */
             keywords?: string[];
         };
-        /** TopicCard */
+        /**
+         * TopicCard
+         * @description A topic on the Topics tab: its page's papers, how many are saved, how many at each of
+         *     the page's rarity levels, and its newest must read.
+         */
         TopicCard: {
             /** Slug */
             slug: string;
             /** Name */
             name: string;
             depth: components["schemas"]["Depth"];
+            /** Monogram */
+            monogram: string;
             /** Colour */
-            colour?: string | null;
-            /** Status */
-            status: string;
-            /** Position */
-            position?: number | null;
+            colour: string;
+            status: components["schemas"]["Status"];
             /** Subject */
             subject: string;
             /** Papers */
             papers: number;
             /** Saved */
             saved: number;
-            /** Opened At */
-            opened_at?: string | null;
+            counts: components["schemas"]["RarityCounts"];
+            newest_must_read?: components["schemas"]["PaperRef"] | null;
         };
+        /** TopicGroup */
+        TopicGroup: {
+            depth: components["schemas"]["Depth"];
+            /** Topics */
+            topics: components["schemas"]["TopicCard"][];
+        };
+        /** TopicHead */
+        TopicHead: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            depth: components["schemas"]["Depth"];
+            /** Monogram */
+            monogram: string;
+            /** Colour */
+            colour: string;
+            status: components["schemas"]["Status"];
+            /** Subject */
+            subject: string;
+        };
+        /**
+         * TopicPage
+         * @description A page of a topic's papers, its total, and the papers per rarity and per grade under
+         *     every filter but the levels.
+         */
+        TopicPage: {
+            topic: components["schemas"]["TopicHead"];
+            /** Rows */
+            rows: components["schemas"]["TopicRow"][];
+            /** Total */
+            total: number;
+            counts: components["schemas"]["RarityCounts"];
+            grades: components["schemas"]["GradeCounts"];
+        };
+        /**
+         * TopicRow
+         * @description A paper on a topic's page: the topic's own grade, else the highest of the followed topics
+         *     under it (`via`), else none (ungraded there, coloured by its Weight).
+         */
+        TopicRow: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Authors */
+            authors: string[];
+            /** Published */
+            published?: string | null;
+            /** Gist */
+            gist?: string | null;
+            weight?: components["schemas"]["Weight"] | null;
+            facets?: components["schemas"]["Facets"] | null;
+            rarity?: components["schemas"]["Rarity"] | null;
+            /** Badges */
+            badges?: components["schemas"]["GradedBadge"][];
+            /**
+             * Saved
+             * @default false
+             */
+            saved: boolean;
+            state?: components["schemas"]["RowState"] | null;
+            grade?: components["schemas"]["Grade"] | null;
+            /** Via */
+            via?: string | null;
+        };
+        /** @enum {string} */
+        TopicState: "split" | "escalated" | "ungraded" | "grading_again";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1395,49 +1811,30 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
-        /**
-         * Status
-         * @description The latest nightly run: none yet, running, failed, or finished without an error, with
-         *     papers waiting for the owner (`attention`) or not (`quiet`).
-         */
-        litwatch__api__schemas__Status: {
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "none" | "running" | "failed" | "attention" | "quiet";
-            /** Run Id */
-            run_id?: number | null;
-            /** Started At */
-            started_at?: string | null;
-            /** Finished At */
-            finished_at?: string | null;
-            /** Error */
-            error?: string | null;
-            /**
-             * Awaiting Classification
-             * @default 0
-             */
-            awaiting_classification: number;
-            /**
-             * Analysis Failed
-             * @default 0
-             */
-            analysis_failed: number;
-            /**
-             * Ungraded
-             * @default 0
-             */
-            ungraded: number;
-            /** Over Budget */
-            over_budget?: string[];
+        /** Version */
+        Version: {
+            /** Version */
+            version: number;
+            /** Date */
+            date?: string | null;
         };
         /**
-         * Status
-         * @description Whether a topic is in use.
+         * Weight
+         * @description How much a paper matters in its own area, whatever topic it is graded for.
          * @enum {string}
          */
-        litwatch__core__types__Status: "draft" | "active" | "paused";
+        Weight: "landmark" | "solid" | "incremental";
+        /** WeightState */
+        WeightState: {
+            weight: components["schemas"]["Weight"];
+            /** Reason */
+            reason: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "abstract" | "full_text";
+        };
     };
     responses: never;
     parameters: never;
@@ -1462,7 +1859,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["litwatch__api__schemas__Status"];
+                    "application/json": components["schemas"]["RunStatus"];
                 };
             };
         };
@@ -1470,15 +1867,20 @@ export interface operations {
     papers_api_papers_get: {
         parameters: {
             query?: {
-                q?: string | null;
-                topic?: string | null;
-                adjacent?: boolean;
-                saved?: boolean | null;
-                year?: number | null;
-                sort?: string | null;
-                source?: ("collection" | "outside") | null;
                 limit?: number;
                 offset?: number;
+                q?: string | null;
+                rarity?: components["schemas"]["Rarity"][];
+                grade?: components["schemas"]["GradeLevel"][];
+                saved?: boolean | null;
+                code?: boolean | null;
+                weight?: components["schemas"]["Weight"][];
+                since?: string | null;
+                until?: string | null;
+                sort?: components["schemas"]["Sort"];
+                topic?: string[];
+                depth?: components["schemas"]["Depth"] | null;
+                source?: ("collection" | "outside") | null;
             };
             header?: never;
             path?: never;
@@ -1494,6 +1896,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Papers"];
                 };
+            };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1525,6 +1934,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Paper"];
                 };
+            };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1605,10 +2021,17 @@ export interface operations {
         parameters: {
             query?: {
                 q?: string | null;
-                topic?: string | null;
-                adjacent?: boolean;
+                rarity?: components["schemas"]["Rarity"][];
+                grade?: components["schemas"]["GradeLevel"][];
                 saved?: boolean | null;
-                year?: number | null;
+                code?: boolean | null;
+                weight?: components["schemas"]["Weight"][];
+                since?: string | null;
+                until?: string | null;
+                sort?: components["schemas"]["Sort"];
+                topic?: string[];
+                depth?: components["schemas"]["Depth"] | null;
+                source?: ("collection" | "outside") | null;
             };
             header?: never;
             path?: never;
@@ -1717,14 +2140,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TopicCard"][];
+                    "application/json": components["schemas"]["TopicGroup"][];
                 };
             };
         };
     };
-    visit_api_topics__slug__visit_post: {
+    topic_api_topics__slug__get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number;
+                q?: string | null;
+                rarity?: components["schemas"]["Rarity"][];
+                grade?: components["schemas"]["GradeLevel"][];
+                saved?: boolean | null;
+                code?: boolean | null;
+                weight?: components["schemas"]["Weight"][];
+                since?: string | null;
+                until?: string | null;
+                sort?: components["schemas"]["Sort"];
+            };
             header?: never;
             path: {
                 slug: string;
@@ -1734,7 +2169,16 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopicPage"];
+                };
+            };
+            /** @description No such paper or topic */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1774,6 +2218,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Ack"];
                 };
+            };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1843,6 +2294,13 @@ export interface operations {
                     "application/json": components["schemas"]["Ack"];
                 };
             };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1854,7 +2312,7 @@ export interface operations {
             };
         };
     };
-    label_api_word__topic___paper_id__put: {
+    label_api_labels__topic___paper_id__put: {
         parameters: {
             query?: never;
             header?: never;
@@ -1879,6 +2337,13 @@ export interface operations {
                     "application/json": components["schemas"]["Ack"];
                 };
             };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1890,7 +2355,7 @@ export interface operations {
             };
         };
     };
-    unlabel_api_word__topic___paper_id__delete: {
+    unlabel_api_labels__topic___paper_id__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -1943,6 +2408,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Ack"];
                 };
+            };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
