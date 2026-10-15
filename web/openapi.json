@@ -1115,6 +1115,49 @@
         }
       }
     },
+    "/api/settings/analysis/{paper_id}/retry": {
+      "post": {
+        "summary": "Retry Analysis",
+        "description": "Analysis failed three runs in a row on this text: give it three more, from the next run.",
+        "operationId": "retry_analysis_api_settings_analysis__paper_id__retry_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Awaiting"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/calibrate": {
       "get": {
         "summary": "Sessions",
