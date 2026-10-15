@@ -32,13 +32,13 @@ MUSE = RoleConfig(provider="openrouter", model="meta/muse-spark-1.3-contributor"
 MODELS = Models(writer=HAIKU)
 
 
-def gateway(models: Models, anthropic=None, openrouter=None, journal=None) -> Gateway:
+def gateway(models: Models, anthropic=None, openrouter=None, journal=None, debug=False) -> Gateway:
     providers = {}
     if anthropic is not None:
         providers["anthropic"] = AnthropicProvider(client=anthropic)
     if openrouter is not None:
         providers["openrouter"] = OpenRouterProvider(client=openrouter)
-    return Gateway(models, providers, journal, retry_delays=(0.0, 0.0))
+    return Gateway(models, providers, journal, retry_delays=(0.0, 0.0), debug=debug)
 
 
 def test_anthropic_request_carries_the_schema_effort_and_a_cached_system_prompt():
@@ -263,6 +263,67 @@ async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, jou
     assert (await calls(conn))[-1]["error"] == "refused: bio"
     # The raised error is clean too: its text becomes a paper's stored last error.
     assert str(CallError("provider", "bad\x00 gateway")) == "provider: bad gateway"
+
+
+INVALID = '{"yes": "maybe"}'
+
+
+async def test_in_debug_mode_a_failed_reply_is_kept_with_what_the_validator_said(conn, journal):
+    gw = gateway(MODELS, SdkClient(anthropic_message(INVALID)), journal=journal, debug=True)
+    with pytest.raises(CallError) as raised:
+        await gw.ask("writer", REQUEST)
+    (row,) = await calls(conn)
+    assert row["reply"] == INVALID and row["output"] is None
+    assert row["error"] == str(raised.value)
+    assert row["error"] == (
+        "invalid: 2 validation errors: yes: Input should be a valid boolean, unable to interpret "
+        "input; why: Field required"
+    )
+
+    cut = '{"yes": true, "why": "it sa'
+    truncated = SdkClient(anthropic_message(cut, stop_reason="max_tokens"))
+    with pytest.raises(CallError, match="truncated"):
+        await gateway(MODELS, truncated, journal=journal, debug=True).ask("judge", REQUEST)
+    assert (await calls(conn))[-1]["reply"] == cut
+
+
+async def test_out_of_debug_mode_a_failed_reply_is_not_kept(conn, journal):
+    with pytest.raises(CallError):
+        await gateway(MODELS, SdkClient(anthropic_message(INVALID)), journal=journal).ask(
+            "writer", REQUEST
+        )
+    (row,) = await calls(conn)
+    assert (row["reply"], row["error"]) == (None, "invalid: 2 validation errors: why, yes")
+
+
+async def test_in_debug_mode_a_kept_failed_reply_is_still_never_reused(conn, journal):
+    client = SdkClient(anthropic_message(INVALID), anthropic_message(GOOD))
+    gw = gateway(MODELS, client, journal=journal, debug=True)
+    with pytest.raises(CallError):
+        await gw.ask("writer", REQUEST)
+    answer = await gw.ask("writer", REQUEST)
+    assert not answer.usage.reused and len(client.sent) == 2
+    assert (await gw.ask("writer", REQUEST)).usage.source_call_id == answer.usage.source_call_id
+
+
+def test_debug_mode_is_off_unless_the_file_or_the_environment_turns_it_on(tmp_path, monkeypatch):
+    from litwatch import config  # noqa: PLC0415
+    from litwatch.jobs.context import default_gateway  # noqa: PLC0415
+
+    monkeypatch.delenv("LITWATCH_DEBUG", raising=False)
+    plain, on = tmp_path / "plain.toml", tmp_path / "debug.toml"
+    plain.write_text("")
+    on.write_text("debug = true\n")
+    assert not config.load(plain).debug and config.load(on).debug
+    monkeypatch.setenv("LITWATCH_DEBUG", "0")
+    assert not config.load(plain).debug
+    monkeypatch.setenv("LITWATCH_DEBUG", "1")
+    assert config.load(plain).debug
+    monkeypatch.delenv("LITWATCH_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)  # no litwatch.toml here: the defaults, and the environment
+    assert config.load().debug
+    assert default_gateway(config.load(plain), None).debug
+    assert not default_gateway(config.Config(), None).debug
 
 
 def test_the_sdk_clients_leave_retrying_to_the_gateway():

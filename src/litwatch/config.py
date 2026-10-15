@@ -190,6 +190,9 @@ class Schedule(_Section):
 
 
 class Config(_Section):
+    # Debug mode keeps what a model replied when the reply could not be used, and the
+    # validator's messages with it (`inference_calls.reply`). `LITWATCH_DEBUG=1` turns it on too.
+    debug: bool = False
     intake: Intake = Intake()
     models: Models = Models()
     classification: Classification = Classification()
@@ -200,14 +203,19 @@ class Config(_Section):
 
 
 def load(path: Path | None = None) -> Config:
-    """The file named, or `$LITWATCH_CONFIG`, or `./litwatch.toml`; defaults when absent."""
+    """The file named, or `$LITWATCH_CONFIG`, or `./litwatch.toml`; defaults when absent.
+    `$LITWATCH_DEBUG` turns debug mode on whatever the file says."""
     explicit = path or (Path(p) if (p := os.environ.get("LITWATCH_CONFIG")) else None)
     path = explicit or Path("litwatch.toml")
     if not path.exists():
         if explicit:
             raise SystemExit(f"configuration file {path} does not exist")
-        return Config()
-    return Config.model_validate(tomllib.loads(path.read_text()))
+        config = Config()
+    else:
+        config = Config.model_validate(tomllib.loads(path.read_text()))
+    if os.environ.get("LITWATCH_DEBUG", "").lower() in ("1", "true", "yes", "on"):
+        config = config.model_copy(update={"debug": True})
+    return config
 
 
 # -- secrets ---------------------------------------------------------------------------------------

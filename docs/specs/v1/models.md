@@ -25,6 +25,11 @@ effort, applies retries and the timeout, journals the call with its cost, and re
 (identical includes the resolved provider, model, effort and routing, so `judge` and `check` never share a reply).
 Providers: `anthropic` (prompt caching, cost from a price table) and `openrouter`.
 
+Debug mode (`debug = true` in `litwatch.toml`, or `LITWATCH_DEBUG=1`; off by default) is for catching problems over a
+stretch of nights. A call whose reply could not be used (invalid, truncated or refused) keeps the reply's text in
+`inference_calls.reply`, and an invalid one's error names what the validator said, not only where. Out of debug mode
+neither is kept. Either way only validated outputs are reused.
+
 New: a second request shape for decision models. `Gateway.decide(role, decision_request, *, paper_id)` sends content
 plus a list of questions, each a predicate (yes/no) or a choice among given options, and returns per predicate the
 probability of yes and per choice the option and its probability. A score question is added when a role needs one.

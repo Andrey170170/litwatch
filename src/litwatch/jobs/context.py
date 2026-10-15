@@ -20,7 +20,7 @@ GatewayFactory = Callable[[Config, CallJournal], llm.Gateway]
 
 
 def default_gateway(config: Config, journal: CallJournal) -> llm.Gateway:
-    return llm.build(config.models, journal)
+    return llm.build(config.models, journal, debug=config.debug)
 
 
 @dataclass
