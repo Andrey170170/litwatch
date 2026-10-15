@@ -74,3 +74,9 @@ export function stringifySearch(search: Record<string, unknown>): string {
 export function parseSearch(search: string): Record<string, string> {
   return Object.fromEntries(new URLSearchParams(search));
 }
+
+/** The papers a list shows under its rarity filter: the chosen levels' counts, else every level's. */
+export function visibleCount(counts: Record<Rarity, number>, search: ListSearch): number {
+  const levels: readonly Rarity[] = search.rarity?.length ? search.rarity : RARITIES;
+  return levels.reduce((n, r) => n + counts[r], 0);
+}

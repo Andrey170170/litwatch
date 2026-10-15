@@ -5,19 +5,19 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/api/client";
 import { useDeepRead, useProcess } from "@/api/mutations";
 import { paperQuery } from "@/api/queries";
+import { cardAsked, forgetCard, rememberCard } from "@/lib/remember";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rc } from "@/lib/rarity";
 import { DeepReadCell, linkCells, MissPicker, SaveCell, type Paper } from "@/components/paper/Actions";
 import { Header } from "@/components/paper/Header";
-import { Ladder, Rate } from "@/components/paper/Ladder";
+import { Ladder } from "@/components/paper/Ladder";
 import { Notes } from "@/components/paper/Notes";
 import { PhoneBar } from "@/components/paper/Phone";
 import { TopicRow } from "@/components/paper/TopicRow";
 
 function Rail({ paper, gistAway, asked, onAsked }: { paper: Paper; gistAway: boolean; asked: boolean; onAsked: () => void }) {
-  const [gistRate, setGistRate] = useState<"ok" | "off" | null>(null);
   const [miss, setMiss] = useState(false);
   const process = useProcess();
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
@@ -27,7 +27,6 @@ function Rail({ paper, gistAway, asked, onAsked }: { paper: Paper; gistAway: boo
         <div className={`rgist${gistAway ? " up" : ""}`} style={{ "--rc": rc(paper.rarity) } as React.CSSProperties} aria-hidden={!gistAway}>
           <div className="rl">
             Gist
-            <Rate what="Gist" value={gistRate} onChange={setGistRate} />
           </div>
           <p>{paper.gist.text}</p>
         </div>
@@ -67,15 +66,26 @@ export function PaperPage() {
   const { _splat: id = "" } = useParams({ from: "/paper/$" });
   const { topic: under } = useSearch({ from: "/paper/$" });
   const desktop = useDesktop();
-  const { data: paper, error, isPending } = useQuery(paperQuery(id));
+  const [asked, setAsked] = useState(() => cardAsked(id));
+  // While a card is asked for, the page polls until an integration has written it (the API has no queued state).
+  const { data: paper, error, isPending } = useQuery({ ...paperQuery(id), refetchInterval: asked ? 15_000 : false });
   const [gistAway, setGistAway] = useState(false);
-  const [asked, setAsked] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
   useEffect(() => {
-    setAsked(false);
+    setAsked(cardAsked(id));
     setSheet(null);
     setGistAway(false);
   }, [id]);
+  useEffect(() => {
+    if (asked && paper?.card) {
+      forgetCard(id);
+      setAsked(false);
+    }
+  }, [asked, paper?.card, id]);
+  const onAsked = () => {
+    rememberCard(id);
+    setAsked(true);
+  };
   const onGistAway = useCallback((away: boolean) => setGistAway(away), []);
   const onLabel = (topic: string) => {
     if (!desktop) setSheet("more");
@@ -89,7 +99,7 @@ export function PaperPage() {
         <div className="empty">{error instanceof ApiError && error.status === 404 ? `${id} is not in the collection.` : "Could not load the paper."}</div>
       </>
     );
-  const deepRead = paper.card_requestable && !asked ? <DeepReadInline paper={paper} onAsked={() => setAsked(true)} /> : null;
+  const deepRead = paper.card_requestable && !asked ? <DeepReadInline paper={paper} onAsked={onAsked} /> : null;
   return (
     <div className="pg">
       <Fill name="title">
@@ -100,9 +110,9 @@ export function PaperPage() {
       <Notes paper={paper} onLabel={onLabel} />
       <div className="pgcols">
         <Ladder paper={paper} asked={asked} deepRead={deepRead} onGistAway={onGistAway} />
-        {desktop && <Rail paper={paper} gistAway={gistAway} asked={asked} onAsked={() => setAsked(true)} />}
+        {desktop && <Rail paper={paper} gistAway={gistAway} asked={asked} onAsked={onAsked} />}
       </div>
-      {!desktop && <PhoneBar paper={paper} under={under} asked={asked} onAsked={() => setAsked(true)} sheet={sheet} setSheet={setSheet} />}
+      {!desktop && <PhoneBar paper={paper} under={under} asked={asked} onAsked={onAsked} sheet={sheet} setSheet={setSheet} />}
     </div>
   );
 }

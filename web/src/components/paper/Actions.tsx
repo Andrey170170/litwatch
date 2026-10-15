@@ -5,6 +5,7 @@ import type { Schemas } from "@/api/client";
 import { bibtexFor, copyText, useDeepRead, useMiss, usePublication, useSave } from "@/api/mutations";
 import { topicsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
+import { toast } from "@/lib/toast";
 
 export type Paper = Schemas["Paper"];
 
@@ -15,7 +16,7 @@ export async function copyBibtex(id: string) {
   try {
     await copyText(await bibtexFor(id), "BibTeX copied");
   } catch {
-    copyText("", "Could not build the BibTeX");
+    toast("Could not build the BibTeX", "error");
   }
 }
 

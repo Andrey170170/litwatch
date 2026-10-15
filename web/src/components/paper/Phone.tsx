@@ -12,11 +12,11 @@ import { gradeLine, rc } from "@/lib/rarity";
 import type { ReactionValue } from "@/lib/reactions";
 import { DeepReadCell, linkCells, MissPicker, type Paper } from "./Actions";
 import { Classes, Published } from "./Ladder";
-import { FitControl, Reasons, type PaperTopic } from "./TopicRow";
+import { FitControl, Reasons, whoseFit, type PaperTopic } from "./TopicRow";
 
 function ReactSheet({ paper, value, under, onClose }: { paper: Paper; value: ReactionValue; under: string | undefined; onClose: () => void }) {
-  const topics = paper.topics.filter((t) => t.grade || t.fit || t.state);
-  const [topic, setTopic] = useState<string | null>(topics.length === 1 ? topics[0]!.topic.slug : topics.find((t) => t.topic.slug === under)?.topic.slug ?? null);
+  const topics = paper.topics;
+  const [topic, setTopic] = useState<string | null>(topics.find((t) => t.topic.slug === under)?.topic.slug ?? (topics.length === 1 ? topics[0]!.topic.slug : null));
   const current = topic ? paper.topics.find((t) => t.topic.slug === topic)?.reaction : paper.reaction;
   return (
     <Sheet open onClose={onClose} label={value === "up" ? "Thumbs up" : "Thumbs down"}>
@@ -65,7 +65,7 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
         ) : (
           <>
             <span className="gr">{gradeLine(t.grade, paper.weight?.weight)}</span>
-            {t.label && t.label.value !== "unsure" ? " · your label" : t.fit ? ` · pipeline: ${t.fit}` : ""}
+            {whoseFit(t) ? ` · ${whoseFit(t)}` : ""}
           </>
         )}
       </div>

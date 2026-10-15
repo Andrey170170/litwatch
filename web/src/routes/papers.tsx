@@ -8,8 +8,8 @@ import { Shelves } from "@/components/Shelves";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
-import { PAPER_SHELVES, RARITIES, shelvesFor, type Rarity, type Shelf } from "@/lib/rarity";
-import type { ListSearch } from "@/lib/search";
+import { PAPER_SHELVES, shelvesFor, type Shelf } from "@/lib/rarity";
+import { visibleCount, type ListSearch } from "@/lib/search";
 
 function Outside({ q, search }: { q: string; search: ListSearch }) {
   const { data, isPending } = useQuery(outsideQuery(q, search));
@@ -64,12 +64,12 @@ export function PapersPage() {
         <span className="t">Papers</span>
       </Fill>
       {desktop && <div className="h1 mb-3">Papers</div>}
-      <ListControls search={search} onChange={onChange} counts={page0?.counts} total={page0 ? sumVisible(page0.counts, search) : undefined} topics={groups?.flatMap((g) => g.topics)} />
+      <ListControls search={search} onChange={onChange} counts={page0?.counts} total={page0 ? visibleCount(page0.counts, search) : undefined} topics={groups?.flatMap((g) => g.topics)} />
       <Shelves
         shelves={shelves}
         query={query}
         listKey={`papers:${JSON.stringify(search)}`}
-        empty={page0 && sumVisible(page0.counts, search) === 0 ? <div className="empty">{filtered ? "Nothing matches." : "Nothing in the collection yet."}</div> : null}
+        empty={page0 && visibleCount(page0.counts, search) === 0 ? <div className="empty">{filtered ? "Nothing matches." : "Nothing in the collection yet."}</div> : null}
       />
       {page0 && page0.counts.unrated > 0 && !search.rarity?.length && <div className="loadmore">{page0.counts.unrated} not yet classified</div>}
       {search.q && <Outside q={search.q} search={search} />}
@@ -77,8 +77,3 @@ export function PapersPage() {
   );
 }
 
-/** How many papers the filters leave: the level counts under the other filters, narrowed to the chosen levels. */
-function sumVisible(counts: Record<Rarity, number>, search: ListSearch): number {
-  const levels: readonly Rarity[] = search.rarity?.length ? search.rarity : RARITIES;
-  return levels.reduce((n, r) => n + counts[r], 0);
-}

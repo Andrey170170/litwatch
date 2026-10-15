@@ -8,7 +8,7 @@ import { Back } from "@/components/Shell";
 import { Shelves } from "@/components/Shelves";
 import { Fill } from "@/components/slots";
 import { CADENCE, TOPIC_SHELVES, type Shelf } from "@/lib/rarity";
-import type { ListSearch } from "@/lib/search";
+import { visibleCount, type ListSearch } from "@/lib/search";
 
 export function TopicPage() {
   const { slug } = useParams({ from: "/topics/$slug" });
@@ -20,7 +20,7 @@ export function TopicPage() {
   const query = (shelf: Shelf, limit: number) => topicQuery(slug, search, shelf, limit);
   const onChange = (next: ListSearch) => void navigate({ search: next, replace: true });
   if (first.isError) return <div className="empty">No such topic.</div>;
-  const total = page0 ? Object.values(page0.grades).reduce((a, b) => a + b, 0) : undefined;
+  const total = page0 ? visibleCount(page0.counts, search) : undefined;
   return (
     <>
       <Fill name="title">

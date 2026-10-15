@@ -34,7 +34,7 @@ export const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path
 const routeTree = rootRoute.addChildren([digestRoute, topicsRoute, topicRoute, papersRoute, paperRoute, settingsRoute]);
 
 export function createAppRouter(history?: RouterHistory) {
-  return createRouter({ routeTree, history, scrollRestoration: true, parseSearch, stringifySearch });
+  return createRouter({ routeTree, history, scrollRestoration: true, scrollToTopSelectors: [".main", ".screen"], parseSearch, stringifySearch });
 }
 
 export const router = createAppRouter();

@@ -5,6 +5,7 @@
 import { useInfiniteQuery, type InfiniteData, type QueryKey, type UseInfiniteQueryOptions } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { rc, type Shelf } from "@/lib/rarity";
+import { setShelfOpen, shelfOpen } from "@/lib/remember";
 import { ReadingRow, TableRow, type Row } from "./Rows";
 
 type Page = { rows: Row[]; total: number };
@@ -28,17 +29,22 @@ function Sentinel({ onSeen }: { onSeen: () => void }) {
 }
 
 function ShelfView<P extends Page, K extends QueryKey>({ shelf, query, topic, listKey }: { shelf: Shelf; query: ShelfQuery<P, K>; topic?: string; listKey: string }) {
-  const [open, setOpen] = useState(shelf.open);
+  const shelfKey = `${listKey}:${shelf.key}`;
+  const [open, setOpen] = useState(() => shelf.open || shelfOpen(shelfKey));
+  const toggle = () => {
+    setShelfOpen(shelfKey, !open);
+    setOpen(!open);
+  };
   const q = useInfiniteQuery(query(shelf, open ? 50 : 1));
   const total = q.data?.pages[0]?.total;
   if (total === 0 || (total === undefined && !q.isPending)) return null;
   const rows = open ? (q.data?.pages.flatMap((p) => p.rows) ?? []) : [];
   const style = { "--rc": rc(shelf.colour) } as React.CSSProperties;
-  const list = { key: `${listKey}:${shelf.key}`, ids: rows.map((r) => r.id) };
+  const list = { key: shelfKey, ids: rows.map((r) => r.id) };
   const Head = shelf.open ? "div" : "button";
   return (
     <section aria-label={shelf.name}>
-      <Head className={`shh${open ? "" : " fold"}`} style={style} onClick={shelf.open ? undefined : () => setOpen((o) => !o)}>
+      <Head className={`shh${open ? "" : " fold"}`} style={style} onClick={shelf.open ? undefined : toggle}>
         <span className="sq" />
         {shelf.name}
         <span className="k">{total ?? ""}</span>

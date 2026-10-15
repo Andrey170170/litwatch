@@ -46,6 +46,10 @@ function shelfFilter(search: ListSearch, shelf: Shelf) {
 
 const loaded = (pages: { rows: unknown[] }[]) => pages.reduce((n, p) => n + p.rows.length, 0);
 
+/** A list keeps its order while it is read (DESIGN.md, "Positions stay put"): no refetch on focus, on reconnect or on
+ * the way back from a paper. Actions patch rows in place or invalidate on purpose. */
+const listOptions = { staleTime: 5 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
+
 /** One shelf of Papers, loading more as it scrolls. `limit` 1 fetches only the count for a folded shelf. */
 export const papersQuery = (search: ListSearch, shelf: Shelf, limit = 50) =>
   infiniteQueryOptions({
@@ -59,6 +63,7 @@ export const papersQuery = (search: ListSearch, shelf: Shelf, limit = 50) =>
     initialPageParam: 0,
     getNextPageParam: (last, pages) => (loaded(pages) < last.total ? loaded(pages) : undefined),
     placeholderData: (previous) => previous,
+    ...listOptions,
   });
 
 /** The papers a search finds outside the collection, on the first page only. */
@@ -82,5 +87,7 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
       ),
     initialPageParam: 0,
     getNextPageParam: (last, pages) => (loaded(pages) < last.total ? loaded(pages) : undefined),
-    placeholderData: (previous) => previous,
+    // Rows stay while the filter changes, but never another topic's rows under this topic's name.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === slug ? previous : undefined),
+    ...listOptions,
   });

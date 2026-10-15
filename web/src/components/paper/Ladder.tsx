@@ -17,20 +17,6 @@ export function Rung({ name, extra, className, children }: { name: string; extra
   );
 }
 
-/** ✓ and ✗ on a rung: whether the text is accurate. Kept on the page only: the API has no rating endpoint yet. */
-export function Rate({ what, value, onChange }: { what: string; value: "ok" | "off" | null; onChange: (v: "ok" | "off" | null) => void }) {
-  return (
-    <span className="rate" title={`Is the ${what} accurate?`}>
-      <button className={value === "ok" ? "on" : ""} onClick={() => onChange(value === "ok" ? null : "ok")} aria-label={`${what} accurate`} aria-pressed={value === "ok"}>
-        ✓
-      </button>
-      <button className={value === "off" ? "on bad" : ""} onClick={() => onChange(value === "off" ? null : "off")} aria-label={`${what} off`} aria-pressed={value === "off"}>
-        ✗
-      </button>
-    </span>
-  );
-}
-
 /** The paper's classes with their parents, members only. */
 export function Classes({ paper }: { paper: Paper }) {
   const members = paper.classification?.classes.filter((c) => c.member) ?? [];
@@ -119,7 +105,6 @@ type Props = { paper: Paper; asked: boolean; deepRead: ReactNode; onGistAway: (a
 
 export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
   const desktop = useDesktop();
-  const [gistRate, setGistRate] = useState<"ok" | "off" | null>(null);
   const gistRef = useRef<HTMLDivElement>(null);
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
   useEffect(() => {
@@ -133,7 +118,7 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
     <div className="ladder">
       {paper.gist && !analysisFailed && (
         <div ref={gistRef}>
-          <Rung name="Gist" extra={<Rate what="Gist" value={gistRate} onChange={setGistRate} />}>
+          <Rung name="Gist">
             <p className="prose gist">{paper.gist.text}</p>
           </Rung>
         </div>

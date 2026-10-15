@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
@@ -68,5 +69,30 @@ describe("Papers", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Rare: 1" }));
     await waitFor(() => expect(router.state.location.searchStr).toBe("?rarity=rare"));
     expect(screen.queryByRole("region", { name: "Epic and legendary" })).toBeNull();
+  });
+
+  it("keeps an opened shelf open on the way back, without refetching the list", async () => {
+    viewport(true);
+    const calls = scriptFetch({
+      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
+      "GET /api/topics": [],
+      "GET /api/papers": ({ url }) => {
+        const q = new URL(url, "http://x").searchParams;
+        if (q.get("rarity") !== "uncommon") return { rows: [], total: 0, counts };
+        return q.get("limit") === "1" ? { rows: [], total: 1, counts } : { rows: [row("2610.00004", "Uncommon one", "uncommon")], total: 1, counts };
+      },
+    });
+    // The app's own cache lifetime, so the list survives leaving the page as it does in use.
+    const { router } = renderApp("/papers", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    const shelf = await screen.findByRole("region", { name: "Uncommon" });
+    await userEvent.click(within(shelf).getByRole("button"));
+    expect(await screen.findByText("Uncommon one")).toBeInTheDocument();
+    const gets = () => calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/papers")).length;
+    const before = gets();
+    await router.navigate({ to: "/topics" });
+    await screen.findByText("No topics are followed yet.");
+    router.history.back();
+    expect(await screen.findByText("Uncommon one")).toBeInTheDocument();
+    expect(gets()).toBe(before);
   });
 });

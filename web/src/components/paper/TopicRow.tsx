@@ -64,6 +64,17 @@ export function Reasons({ paperId, topic, value, current, onDone, big }: { paper
 }
 
 /** "Fit central · Weight landmark", "your label: related", or the open state's line. */
+/** Whose Fit the row shows: the owner's word and where it came from, else the pipeline's (feedback.md, "The owner's
+ * word"). The API names the word but not which of a label, a reaction or a miss set it, so a label that matches the
+ * word is named first. */
+export function whoseFit(t: PaperTopic): string | null {
+  if (!t.word) return t.fit ? `pipeline: ${t.fit}` : null;
+  if (t.label && t.label.value !== "unsure" && t.label.value === t.word) return `your label: ${t.word}`;
+  if (t.reaction) return `your mark: ${t.word}`;
+  if (t.missed) return `reported as missed: ${t.word}`;
+  return `your word: ${t.word}`;
+}
+
 export function verdictLine(t: PaperTopic, weight: Weight | null | undefined): React.ReactNode {
   if (t.state === "split" || t.state === "escalated") {
     const v = t.verdict;
@@ -76,9 +87,7 @@ export function verdictLine(t: PaperTopic, weight: Weight | null | undefined): R
   }
   if (t.state === "ungraded") return <b className="badt">Grading failed 3 runs</b>;
   if (t.state === "grading_again") return "Grading again";
-  if (t.label && t.label.value !== "unsure") return <b>your label: {t.label.value}</b>;
-  if (t.missed && t.word) return <b>reported as missed · {t.word}</b>;
-  if (t.word && t.reaction) return <b>your mark: {t.word}</b>;
+  if (t.word) return <b>{whoseFit(t)}</b>;
   if (!t.fit) return "not graded here";
   return (
     <>

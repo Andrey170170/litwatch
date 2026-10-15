@@ -188,7 +188,7 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 .side .foot { margin-top: auto; }
 .main { flex: 1; min-width: 0; overflow-y: auto; position: relative; }
 .inner { max-width: 860px; padding: 18px 24px 40px; }
-.inner.wide { max-width: 1080px; }
+.inner:has(.pg) { max-width: 1080px; } /* the paper page: reading column and rail */
 .back { display: inline-block; font-size: 13px; color: var(--fg2); margin-bottom: 10px; }
 .back:hover { color: var(--fg); }
 /* going deeper or back: the page slides in 28px from the side it comes from; a top-level switch fades */
@@ -370,11 +370,6 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
   .rung { display: grid; grid-template-columns: 104px 1fr; gap: 16px; }
   .rung .rl { flex-direction: column; align-items: flex-start; padding-top: 3px; }
 }
-.rate { display: inline-flex; gap: 2px; opacity: 0.35; transition: opacity 0.15s; }
-.rung:hover .rate, .rate:has(.on) { opacity: 1; }
-.rate button { font: 600 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--line); color: var(--fg3); letter-spacing: 0; }
-.rate button.on { color: var(--cy); border-color: currentColor; }
-.rate button.on.bad { color: var(--sig); }
 .prose { font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; }
 .prose.gist { font-size: 16px; line-height: 1.5; color: var(--fg); }
 .overst { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--sig); background: color-mix(in srgb, var(--sig) 10%, transparent); font-size: 13.5px; font-weight: 600; }

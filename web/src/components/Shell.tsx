@@ -85,7 +85,7 @@ function Desktop() {
           </Link>
         </nav>
       </aside>
-      <main className="main" data-came={came}>
+      <main className="main" data-came={came} data-scroll-restoration-id="main">
         <div className="inner">
           <Outlet />
         </div>
@@ -127,7 +127,7 @@ function Phone() {
           ⚙
         </Link>
       </header>
-      <div className="scroll screen" data-came={came} key={location.pathname}>
+      <div className="scroll screen" data-came={came} key={location.pathname} data-scroll-restoration-id="screen">
         <div className="pp">
           <Outlet />
         </div>
