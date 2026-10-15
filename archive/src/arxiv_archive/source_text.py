@@ -207,7 +207,8 @@ def text_package(package: Path, output: Path, limit: int) -> dict:
 LATEX_SUFFIXES = ('.tex', '.ltx', '.latex')
 INPUT = re.compile(r'\\(?:input|include|subfile)\s*\{([^}]*)\}|\\input\s+([^\s{}\\%]+)')
 BIBLIOGRAPHY = re.compile(r'\\bibliography\s*\{[^}]*\}')
-COMMENT = re.compile(r'(?<!\\)%.*')
+# A `%` after an even run of backslashes (none, or a `\\\\` line break) starts a comment.
+COMMENT = re.compile(r'((?:^|[^\\])(?:\\\\)*)%.*')
 MAX_INPUT_DEPTH = 8
 
 
@@ -216,7 +217,7 @@ def _decode(body: bytes) -> str:
         text = body.decode('utf-8')
     except UnicodeDecodeError:
         text = body.decode('latin-1')  # older submissions; every byte decodes
-    return '\n'.join(COMMENT.sub('', line) for line in text.splitlines())
+    return '\n'.join(COMMENT.sub(r'\1', line) for line in text.splitlines())
 
 
 def _members(package: Path, limit: int) -> dict[str, str]:
@@ -248,11 +249,13 @@ def _members(package: Path, limit: int) -> dict[str, str]:
 
 
 def _main(files: dict[str, str]) -> str | None:
-    """The file that starts the document: one with \\documentclass, preferring one that also
-    begins the document, then the shallowest path, then by name."""
-    roots = [n for n, body in files.items()
-             if n.lower().endswith(LATEX_SUFFIXES) and '\\documentclass' in body]
-    roots.sort(key=lambda n: ('\\begin{document}' not in files[n], n.count('/'), n))
+    """The file that starts the document: one that begins it (its \\documentclass may sit in
+    a preamble it inputs), else one with \\documentclass; then the one with both, the
+    shallowest path, and by name."""
+    def marks(n: str) -> tuple[bool, bool]:
+        return '\\begin{document}' in files[n], '\\documentclass' in files[n]
+    roots = [n for n in files if n.lower().endswith(LATEX_SUFFIXES) and any(marks(n))]
+    roots.sort(key=lambda n: (*(not m for m in marks(n)), n.count('/'), n))
     return roots[0] if roots else None
 
 

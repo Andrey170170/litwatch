@@ -19,7 +19,7 @@ from litwatch.core import Paper
 
 log = logging.getLogger(__name__)
 
-MIN_BODY_CHARS = 2000  # anything shorter is not a paper
+MIN_BODY_CHARS = 500  # shorter is a stub or a scan with no text layer; an erratum is longer
 DONE = ("failed", "unavailable")  # a job the archive has given up on
 
 

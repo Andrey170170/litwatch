@@ -113,6 +113,25 @@ class LatexTextTests(unittest.TestCase):
         self.assertIn("Paper", text)
         self.assertNotIn("Template", text)
 
+    def test_the_entry_point_wins_over_a_preamble_it_inputs(self):
+        text = self.text(
+            [
+                ("main.tex", b"\\input{preamble}\n\\begin{document}Body\\end{document}\n"),
+                ("preamble.tex", b"\\documentclass{article}\n\\usepackage{amsmath}\n"),
+            ]
+        )
+        self.assertIn("Body", text)
+        self.assertIn("\\usepackage{amsmath}", text)
+
+    def test_a_comment_after_a_line_break_is_dropped_and_an_escaped_percent_kept(self):
+        text = self.text(
+            [("main.tex", b"\\documentclass{article}\\begin{document}a & b \\\\% hidden claim\n"
+                          b"50\\% better \\\\\\% kept % hidden\n\\end{document}")]
+        )
+        self.assertNotIn("hidden", text)
+        self.assertIn("a & b \\\\\n", text)
+        self.assertIn("50\\% better \\\\\\% kept", text)
+
     def test_without_a_main_file_every_latex_file_in_order_and_without_latex_none(self):
         self.assertEqual(
             self.text([("b.tex", b"Second"), ("a.tex", b"First")]), "First\n\nSecond\n"

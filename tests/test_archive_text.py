@@ -58,6 +58,12 @@ async def test_a_source_too_short_to_be_a_paper_falls_back_to_the_pdf(monkeypatc
     assert (await read_text(client(fake), paper("2610.00001", version=1))).source == "pdf"
 
 
+async def test_a_short_paper_is_still_a_paper():
+    fake = FakeArchive()
+    fake.texts["2610.00001"] = (1, "\\section{Erratum} " + "Table 2 should read 0.81. " * 40)
+    assert (await read_text(client(fake), paper("2610.00001", version=1))).source == "latex"
+
+
 async def test_no_text_to_be_had_says_why(monkeypatch):
     fake = FakeArchive(status="failed")
     with pytest.raises(TextUnavailable, match="source failed; PDF failed"):
