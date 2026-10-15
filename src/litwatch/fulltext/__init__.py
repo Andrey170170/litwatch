@@ -6,8 +6,9 @@ With the text, the `brief` role writes the Brief, a Gist and the Weight from the
 `record` stores and settles. Both kinds of pass make that one call.
 
 A pass is held by a lease while it runs; one whose lease ran out (its worker died) is tried
-again. A failed pass is tried again on the next nightly run (`retry_failed`); after
-`FAILED_RUNS` failed runs, or a week awaiting text, it waits for the owner on Quality."""
+again. A failed pass is tried again on the next nightly run (`retry_failed`), and the archive
+is asked to try again what it gave up on; after `FAILED_RUNS` failed runs, or a week awaiting
+text, it waits for the owner on Quality."""
 
 from __future__ import annotations
 
@@ -43,8 +44,10 @@ from litwatch.store.fulltext import Claimed
 
 log = logging.getLogger(__name__)
 
-BATCH = 16  # passes claimed at a time; their calls finish well within the lease
 CONCURRENCY = 4  # `brief` calls at a time
+# Passes claimed at a time: one wave of calls, which ends well within the lease even when each
+# call takes its whole timeout and retries.
+BATCH = CONCURRENCY
 TICK_SECONDS = 30  # how often the service's worker looks at the queue
 
 
@@ -71,7 +74,8 @@ def archive_for(config: Config) -> ArchiveClient | None:
 
 async def _read(archive: ArchiveClient, c: Claimed) -> Attempt:
     try:
-        text = await read_text(archive, c.paper, URGENT)
+        # Tried again: what the archive gave up on is tried again too.
+        text = await read_text(archive, c.paper, URGENT, retry=c.again)
     except ArchiveUnavailable as exc:
         return Attempt(c, waiting=True, error=f"the archive: {exc}")
     except ArchiveError as exc:  # TextUnavailable included: no text to be had

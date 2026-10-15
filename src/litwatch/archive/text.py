@@ -12,6 +12,7 @@ from litwatch.archive.client import (
     URGENT,
     ArchiveClient,
     ArchiveError,
+    ArchiveUnavailable,
     ArchiveVersionUnknown,
     PaperText,
 )
@@ -50,15 +51,30 @@ def _why(job: dict) -> str:
     return str(job.get("error") or job.get("status"))[:200]
 
 
+async def _retried(archive: ArchiveClient, job: dict) -> bool:
+    """Ask the archive to try a failed job again; False when it is not failed (unavailable
+    means arXiv has no such file) or another retry came first."""
+    if job.get("status") != "failed":
+        return False
+    try:
+        await archive.retry(job["id"])
+    except ArchiveUnavailable:
+        raise
+    except ArchiveError:
+        return False
+    return True
+
+
 async def read_text(
-    archive: ArchiveClient, paper: Paper, priority: int = URGENT
+    archive: ArchiveClient, paper: Paper, priority: int = URGENT, *, retry: bool = False
 ) -> PaperText | None:
     """The paper's text, of its arXiv version, or None while the archive is still fetching it.
     Its source is asked for at `priority`; when arXiv has no usable source for it, its PDF.
     A paper of no known version is read from the archive's historical LaTeX alone, of no known
     version either: a newer source the archive holds may be of another text. Raises
     TextUnavailable when there is no text to be had, and ArchiveUnavailable while the archive
-    cannot be reached."""
+    cannot be reached. With `retry`, a job the archive gave up on after failing is tried again,
+    and the text awaited."""
     try:
         paper = await archive.resolve(paper)
     except ArchiveVersionUnknown:
@@ -67,12 +83,16 @@ async def read_text(
         raise TextUnavailable(f"{paper.id}: no arXiv version known and no LaTeX text") from None
     assert paper.version is not None
     source = await archive.request(paper, "source", priority)
+    if retry and await _retried(archive, source):
+        return None
     if source.get("status") == "complete":
         if found := _usable(await archive.latex(paper.id, paper.version)):
             return found
     elif source.get("status") not in DONE:
         return None
     pdf = await archive.request(paper, "pdf", priority)
+    if retry and await _retried(archive, pdf):
+        return None
     if pdf.get("status") in DONE:
         raise TextUnavailable(f"{paper.id}v{paper.version}: source {_why(source)}; PDF {_why(pdf)}")
     if pdf.get("status") != "complete":

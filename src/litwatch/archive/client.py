@@ -184,6 +184,12 @@ class ArchiveClient:
         assert result is not None
         return result
 
+    async def retry(self, job_id: int | str) -> dict:
+        """Try a failed acquisition again, its attempts reset (the archive's operator retry)."""
+        result = await self._json("POST", f"/v1/jobs/{int(job_id)}/retry", json={})
+        assert result is not None
+        return result
+
     async def job(self, job_id: int | str) -> dict:
         result = await self._json("GET", f"/v1/jobs/{int(job_id)}")
         assert result is not None

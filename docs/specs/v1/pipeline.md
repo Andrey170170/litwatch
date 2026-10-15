@@ -234,7 +234,8 @@ with the old revision (section 8), does not replace the current Weight, and a pa
 running pass holds a lease (default 30 minutes); when the lease runs out, because the worker died, the pass goes back
 to ready.
 
-A pass that fails, including a model response that is truncated or invalid, is retried on the next run; after three
+A pass that fails, including a model response that is truncated or invalid, is retried on the next run (a download
+the archive gave up on is asked for again with it); after three
 failed runs it is listed on Quality with the error and a button to run it now. A pass awaiting text for more than
 seven days is listed there too. Both count as terminal for the digest wait ([digests.md](digests.md), timing).
 

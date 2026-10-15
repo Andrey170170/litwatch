@@ -325,11 +325,26 @@ async def test_failures_count_only_without_text_or_a_usable_answer(db):
     assert (await passes(db))[0]["failed_runs"] == 2
 
 
+async def test_a_pass_tried_again_has_the_archive_try_again_what_it_gave_up_on(db):
+    await graded(db, "central")
+    fake = FakeArchive(status="failed")
+    fake.statuses["pdf"] = "unavailable"  # arXiv has none: never retried
+    assert await work(db, fake, Writer()) == {"fulltext_failed": 1}
+    assert fake.retried == []  # a first try takes the archive's word
+    await fulltext_store.retry_failed(db, FAILED_RUNS)
+    assert await work(db, fake, Writer()) == {"awaiting_text": 1}
+    assert fake.retried == [3]  # the failed source job, asked for again
+    fake.status = "complete"
+    assert await work(db, ready(fake), Writer()) == {"briefs_written": 1}
+    assert fake.retried == [3]
+
+
 async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_now(db):
     await graded(db, "central")
     fake, writer = FakeArchive(status="failed"), Writer()
     for _ in range(FAILED_RUNS):
         await fulltext_store.retry_failed(db, FAILED_RUNS)
+        await work(db, fake, writer)  # tried again: the archive is asked to try again first
         await work(db, fake, writer)
     assert await fulltext_store.retry_failed(db, FAILED_RUNS) == 0  # no longer tried
     (row,) = await passes(db)
