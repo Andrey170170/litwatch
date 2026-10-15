@@ -33,9 +33,8 @@ import psycopg
 from litwatch import classification, grading
 from litwatch.config import Config, RoleConfig
 from litwatch.core import Depth, Fit, Paper, Status, Taxonomy
-from litwatch.core.classification import Source, keyword
+from litwatch.core.classification import Source, keyword, with_ancestors
 from litwatch.core.evaluation import Outcome, Recall, Share
-from litwatch.core.grading import grading_topics
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
 from litwatch.llm.decisions import chat_request
 from litwatch.llm.gateway import VALIDATION_VERSION
@@ -216,7 +215,8 @@ async def prepare(
     left_out = [p for p in ids if p not in papers]
     kept = [p for p in ids if p in papers][:limit]
     chosen = set(kept)
-    return Replay(tree, [x for x in labels if x.paper_id in chosen], papers, left_out)
+    held = {p: papers[p] for p in kept}
+    return Replay(tree, [x for x in labels if x.paper_id in chosen], held, left_out)
 
 
 async def resume(conn: psycopg.AsyncConnection, config: Config, eval_run_id: int) -> Replay:
@@ -302,14 +302,15 @@ async def start(
 
 def _concluded(tree: Taxonomy, c: classification.Classification, topic: str) -> dict[str, Any]:
     """What one classification says for a Focus topic: whether the classifier alone, or the
-    uncertain band, makes the paper a member there (the topic would grade it, as the nightly run
-    decides), the highest probability in the topic's subtree, and the keyword check's hit, which
-    needs no model and stands when the call failed."""
+    uncertain band, makes the paper a member there (directly or through a class under it, as
+    membership is inherited, whichever topic would grade it), the highest probability in the
+    topic's subtree, and the keyword check's hit, which needs no model and stands when the call
+    failed."""
     hit = keyword(tree, c.paper.title, c.paper.abstract).get(topic)
     if c.classified is None:
         return {"keyword": hit, "error": c.error or "no answer"}
     ms = c.memberships
-    alone = grading_topics(tree, [m for m in ms if m.source == Source.CLASSIFIER])
+    alone = with_ancestors(tree, {m.slug for m in ms if m.source == Source.CLASSIFIER})
     probabilities = c.classified.probabilities
     return {
         "classifier": topic in alone,

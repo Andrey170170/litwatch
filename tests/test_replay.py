@@ -271,6 +271,26 @@ async def test_a_routing_change_refuses_a_resume(conn, models):
         await replay.resume(conn, CONFIG, r.eval_run_id)
 
 
+async def test_a_classifier_member_through_a_followed_class_below_is_the_classifiers(conn, models):
+    """Membership is inherited: a paper the classifier puts in a class under the Focus topic is
+    the topic's member, even when a followed Area there would grade it instead."""
+    subject = "Probes that read hidden reasoning steps from a model's activations."
+    probes = Topic(slug="cot-probes", depth=Depth.AREA, monogram="CP", colour="#123456",
+                   subject=subject)  # fmt: skip
+    child = TaxonomyClass(slug="cot-probes", name="Probes of reasoning traces",
+                          description=subject, parent=TOPIC)  # fmt: skip
+    await taxonomy_store.save(
+        conn, Taxonomy(classes=[*TREE.classes, child], topics=[*TREE.topics, probes])
+    )
+    # The classifier puts A in the class below only (no probability on the Focus class itself).
+    models.decisions[A.title] = decision(**{"cot-probes": 0.9}) | {
+        "primary_class": {"option": child.name, "probability": 0.9}
+    }
+    r = await start(conn, models)
+    found = {(o.cohort, o.paper_id): o for o in await evaluation.outcomes(conn, r.eval_run_id)}
+    assert found[("owner", A.id)].classifier is True
+
+
 async def test_a_prompt_change_refuses_a_resume(conn, models, monkeypatch):
     r = await start(conn, models)
     monkeypatch.setattr(grading, "SYSTEM", grading.SYSTEM + " Answer briefly.")
