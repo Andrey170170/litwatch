@@ -19,6 +19,7 @@ from litwatch import events
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn
 from litwatch.core import SearchFilters, SearchHit, SearchProvider
+from litwatch.core.fulltext import REQUESTED
 from litwatch.fulltext import deep as deep_passes
 from litwatch.integrations.deep import Deep
 from litwatch.store import fulltext as fulltext_store
@@ -203,8 +204,11 @@ async def card(
         )
     if not answers_card_requests(loaded(request)):
         return found, None, False
+    # The owner may ask unless they already have: their request takes an automatic pass over,
+    # one held back by the daily cap or failed included.
     open_pass = await fulltext_store.open_deep(c, paper_id)
-    return found, s.CardPass(**open_pass) if open_pass else None, open_pass is None
+    requestable = open_pass is None or open_pass["reason"] != REQUESTED
+    return found, s.CardPass(**open_pass) if open_pass else None, requestable
 
 
 def _among(entry: dict[str, Any], mark: dict[str, Any] | None) -> s.AmongRow:

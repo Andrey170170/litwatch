@@ -672,12 +672,15 @@ async def paper_of(conn: psycopg.AsyncConnection, pass_id: int) -> str | None:
 
 async def run_now(conn: psycopg.AsyncConnection, pass_id: int, runs: int) -> bool:
     """The owner's "run it now" on a pass waiting for them: three more runs, and first in line.
+    A Deep pass becomes the owner's request, ahead of the automatic ones and past the daily cap.
     Returns False when it does not wait for the owner."""
     cur = await conn.execute(
         "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, tried_at = NULL, "
-        "queued_at = now(), retry_text = true FROM papers p "
+        "queued_at = now(), retry_text = true, "
+        "reason = CASE WHEN f.kind = 'deep' THEN %(requested)s ELSE f.reason END, "
+        "priority = CASE WHEN f.kind = 'deep' THEN %(first)s ELSE f.priority END FROM papers p "
         f"WHERE f.id = %(id)s AND p.id = f.paper_id AND {STUCK}",
-        {"id": pass_id} | stuck_params(runs),
+        {"id": pass_id, "requested": REQUESTED, "first": REQUEST_PRIORITY} | stuck_params(runs),
     )
     return cur.rowcount == 1
 

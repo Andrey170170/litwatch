@@ -121,11 +121,13 @@ function find(pattern, context, limit) {
 
 // The bibliography's entries: each \bibitem of a thebibliography environment, else each "- " line
 // under a References or Bibliography heading. Empty for a bibliography in another form (biblatex).
+// LaTeX comments are dropped first, so a commented-out \bibitem is no entry; an escaped \% stays.
 function refs() {
   var tex = /\\begin\{thebibliography\}/.exec(paper);
   if (tex) {
     var close = paper.indexOf('\\end{thebibliography}', tex.index);
     return paper.slice(tex.index, close === -1 ? paper.length : close)
+      .replace(/(^|[^\\])%.*$/gm, '$1')
       .split(/\\bibitem\s*(?:\[[^\]]*\])?\s*\{[^}]*\}/).slice(1)
       .map(function (e) { return e.replace(/\\newblock\s*/g, '').replace(/\s+/g, ' ').trim(); })
       .filter(function (e) { return e.length > 0; });

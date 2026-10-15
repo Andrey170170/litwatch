@@ -52,7 +52,9 @@ class Entry(BaseModel):
 
 
 def load(path: Path) -> list[Entry]:
-    return [Entry.model_validate(e) for e in yaml.safe_load(path.read_text())["papers"]]
+    return [
+        Entry.model_validate(e) for e in yaml.safe_load(path.read_text(encoding="utf-8"))["papers"]
+    ]
 
 
 class Result(BaseModel):
@@ -74,7 +76,11 @@ class Result(BaseModel):
 def results(path: Path) -> dict[str, Result]:
     if not path.exists():
         return {}
-    found = (Result.model_validate_json(line) for line in path.read_text().splitlines() if line)
+    found = (
+        Result.model_validate_json(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line
+    )
     return {r.paper_id: r for r in found}
 
 
@@ -82,7 +88,7 @@ def spent(path: Path) -> float:
     """What every call of the run cost, failed ones and those answered again included."""
     if not path.exists():
         return 0.0
-    lines = (line for line in path.read_text().splitlines() if line)
+    lines = (line for line in path.read_text(encoding="utf-8").splitlines() if line)
     return sum(Result.model_validate_json(line).cost or 0 for line in lines)
 
 

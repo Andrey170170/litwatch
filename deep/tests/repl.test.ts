@@ -84,7 +84,8 @@ Numbers.
 \bibitem[Turpin et al.(2023)]{turpin} M.~Turpin.
 \newblock Language models don't always say what they think.
 \newblock arXiv:2305.04388.
-\bibitem{lanham} T.~Lanham. Measuring faithfulness.
+\bibitem{lanham} T.~Lanham. Measuring faithfulness, 100\% of it.
+% \bibitem{draft} D.~Draft. Left out.
 \end{thebibliography}
 \appendix
 \section{Extra}
@@ -101,7 +102,8 @@ test("paper helpers read LaTeX source: sections, nesting, comments and the bibli
     assert.equal((await r.run("find('needle')[0].section")).output, "Introduction");
     assert.doesNotMatch((await r.run("section('references')")).output, /More\./);
     const refs = JSON.parse((await r.run("JSON.stringify(refs())")).output);
-    assert.equal(refs.length, 2);
+    assert.equal(refs.length, 2, "a commented-out entry is not a reference");
+    assert.match(refs[1], /100\\% of it\.$/, "an escaped percent sign is text");
     assert.match(refs[0], /^M.~Turpin. Language models don't always say what they think. arXiv:2305.04388.$/);
   } finally {
     r.dispose();

@@ -269,6 +269,8 @@ async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_thre
     (stuck,) = await fulltext_store.stuck(db, FAILED_RUNS)
     assert (stuck["id"], stuck["kind"]) == (row["id"], "deep")
     assert await fulltext_store.run_now(db, row["id"], FAILED_RUNS)
+    (row,) = await deep_rows(db)  # the owner's now: first in line, past the daily cap
+    assert (row["state"], row["reason"], row["priority"]) == ("ready", "request", 0)
 
 
 async def test_the_owners_request_tries_a_failed_pass_again(db):
@@ -450,6 +452,19 @@ def client(conn, integrations) -> tuple:
         headers={"Authorization": f"Bearer {TOKEN}"},
     )
     return app, http
+
+
+async def test_the_owner_may_ask_for_a_card_an_automatic_pass_waits_for(db):
+    """Held back by the daily cap, the automatic pass is open; asking takes it over."""
+    await grade(db, Fit.CENTRAL)
+    _, http = client(db, [make(FakeDeep(DONE), max_per_day=0)])
+    async with http:
+        page = (await http.get(f"/api/papers/{P.id}")).json()
+        asked = await http.post(f"/api/papers/{P.id}/card")
+        after = (await http.get(f"/api/papers/{P.id}")).json()
+    assert (page["card_pass"]["reason"], page["card_requestable"]) == ("focus", True)
+    assert asked.status_code == 202 and asked.json()["pass_id"] == page["card_pass"]["id"]
+    assert (after["card_pass"]["reason"], after["card_requestable"]) == ("request", False)
 
 
 async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(db):
