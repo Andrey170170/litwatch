@@ -60,7 +60,7 @@ class Integration(Protocol):
   and serves one event at a time.
 - Optional, used when present:
   - `async def setup(self, conn)`: awaited once whenever the dispatcher starts, before any event.
-    Take over existing state here; it must be safe to run again.
+    It must be safe to run again.
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.

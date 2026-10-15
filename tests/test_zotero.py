@@ -129,16 +129,14 @@ async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_
     assert "litwatch:dropped" not in fake.tags(key)
 
 
-async def test_an_item_0x_made_is_taken_over_not_made_again(world):
+async def test_an_item_0x_made_is_found_and_updated_not_made_again(world):
     conn, fake = world, FakeZotero()
-    await conn.execute("ALTER TABLE papers ADD COLUMN zotero_key text")
-    await conn.execute("UPDATE papers SET zotero_key = 'OLDITEM1' WHERE id = %s", (P.id,))
-    # Titled differently, so only the stored key can find it.
+    # Found by its title; 0.x's tier and selection tags give way to v1's grade tag.
     fake.add_item(
         "OLDITEM1",
         {
             "itemType": "preprint",
-            "title": "As 0.x saved it",
+            "title": P.title,
             "collections": ["MINE"],
             "tags": [{"tag": "litwatch:tier:1"}, {"tag": "litwatch:sel:cot-faithfulness:1"}],
         },
@@ -236,9 +234,7 @@ async def test_whats_there_is_looked_for_past_the_first_page(world):
         fake.collections[f"COL{i:05d}"] = fake.items.pop(f"COL{i:05d}")
         fake.collections[f"COL{i:05d}"]["data"]["name"] = f"Reading {i}"
     fake.collections["COL00119"]["data"]["name"] = "Litwatch"  # on the second page
-    await conn.execute("ALTER TABLE papers ADD COLUMN zotero_key text")
-    await conn.execute("UPDATE papers SET zotero_key = 'OLDITEM1' WHERE id = %s", (P.id,))
-    fake.add_item("OLDITEM1", {"itemType": "preprint", "title": "T", "collections": []})
+    fake.add_item("OLDITEM1", {"itemType": "preprint", "title": P.title, "collections": []})
     for i in range(130):
         fake.add_item(f"N{i:05d}", {"itemType": "note", "parentItem": "OLDITEM1", "note": "mine"})
     fake.add_item(

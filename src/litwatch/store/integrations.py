@@ -10,18 +10,6 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core import Paper
 
-
-async def _has_column(conn: psycopg.AsyncConnection, table: str, column: str) -> bool:
-    row = await (
-        await conn.execute(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE "
-            "table_schema = current_schema() AND table_name = %s AND column_name = %s) AS found",
-            (table, column),
-        )
-    ).fetchone()
-    return row["found"]
-
-
 # -- zotero ----------------------------------------------------------------------------------------
 
 
@@ -41,18 +29,6 @@ async def set_zotero_item(conn: psycopg.AsyncConnection, paper_id: str, key: str
         "DO UPDATE SET item_key = EXCLUDED.item_key, updated_at = now()",
         (paper_id, key),
     )
-
-
-async def seed_zotero(conn: psycopg.AsyncConnection) -> int:
-    """Take over the items 0.x made (`papers.zotero_key` on an adopted database), so they are
-    updated and never made twice. Keys already known are kept."""
-    if not await _has_column(conn, "papers", "zotero_key"):
-        return 0
-    cur = await conn.execute(
-        "INSERT INTO zotero_items (paper_id, item_key) SELECT id, zotero_key FROM papers "
-        "WHERE zotero_key IS NOT NULL ON CONFLICT (paper_id) DO NOTHING"
-    )
-    return cur.rowcount
 
 
 # -- webdav ----------------------------------------------------------------------------------------
@@ -80,19 +56,6 @@ async def set_webdav_file(
         "state = EXCLUDED.state, updated_at = now()",
         (paper_id, item, key, state),
     )
-
-
-async def seed_webdav(conn: psycopg.AsyncConnection) -> int:
-    """The PDFs 0.x attached (`papers.zotero_attachment_key`), so none is stored twice."""
-    if not await _has_column(conn, "papers", "zotero_attachment_key"):
-        return 0
-    cur = await conn.execute(
-        "INSERT INTO webdav_files (paper_id, item_key, attachment_key, state) "
-        "SELECT id, zotero_key, zotero_attachment_key, 'stored' FROM papers "
-        "WHERE zotero_key IS NOT NULL AND zotero_attachment_key IS NOT NULL "
-        "ON CONFLICT (paper_id) DO NOTHING"
-    )
-    return cur.rowcount
 
 
 # -- deep cards ------------------------------------------------------------------------------------

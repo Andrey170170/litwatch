@@ -12,8 +12,8 @@ handling an event twice, or in a different order, ends in the same place:
   tagged `litwatch:dropped`. Its item is never deleted.
 
 Only the litwatch namespace is ever managed: the collection tree, `litwatch:*` tags and the
-two notes. Everything else on an item is preserved verbatim. The items 0.x made are taken
-over from `papers.zotero_key` at start-up, so none is made twice.
+two notes. Everything else on an item is preserved verbatim. An item 0.x made is found like any
+other (by arXiv id or title) and updated, not made again.
 
 Options: `user_id` (or $LITWATCH_ZOTERO_USER_ID), the API key in $ZOTERO_API_KEY,
 `subcollections` ({grade: name}, default 0.x's "Tier 1" and "Tier 2"), and `inbox_collection`
@@ -401,10 +401,6 @@ class Zotero:
 
     def wants(self, event: Event) -> bool:
         return event.type in EVENTS and event.paper_id is not None
-
-    async def setup(self, conn: psycopg.AsyncConnection) -> None:
-        if taken := await state.seed_zotero(conn):
-            log.info("zotero: took over %d items made by 0.x", taken)
 
     async def aclose(self) -> None:
         await self.zotero.aclose()
