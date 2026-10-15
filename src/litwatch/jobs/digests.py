@@ -28,9 +28,13 @@ async def window(
     """The daily digests of every day from `first` to `last` in order, and the weekly digests
     of every Monday-to-Sunday week inside it, each after the next Monday's dailies (the last
     week's after its Sunday's, when the window ends there): what the nightly run would have
-    written on those days, over the papers due now. Published ones stay. Returns the run id."""
+    written on those days, over the papers due now, after the failed digests are written again
+    (as the nightly run does) so a day of the window does not take their papers. Published ones
+    stay. Returns the run id."""
     async with run_lock(conn), model_run(conn, config, "digests", gateway=gateway) as run:
         tree = await taxonomy_store.load(conn)
+        if tree is not None:
+            await digests.retry_failed(conn, run, tree)
         day = first
         while tree is not None and day <= last:
             await digests.write_day(conn, run, tree, day)

@@ -20,6 +20,7 @@ from litwatch.core.classification import Source
 from litwatch.core.digests import DigestPeriod, listing_day, voice_problems
 from litwatch.digests import writer
 from litwatch.feedback import word
+from litwatch.jobs import digests as digests_job
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, ProviderError
@@ -363,6 +364,26 @@ async def test_a_rewritten_paper_graded_again_where_it_was_held_is_due_there(db)
     assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(P.id, "listed")])
 
 
+async def test_an_owners_class_label_taking_a_held_paper_out_keeps_it_from_being_due(db):
+    """Held on the Focus topic from its older text, but the owner has since taken it out of
+    that class: grading follows it there, and its new verdict makes it due nowhere."""
+    await focus(db, P, "adjacent")
+    await verdicts.passed(db, [(P.id, 1)])
+    rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
+    await papers_store.upsert(db, [rewritten])
+    await classify(db, rewritten)
+    await classifications_store.put_owner(
+        db, rewritten, FAITH.slug, False, TREE.get(FAITH.slug).version
+    )
+    await analyse(db, rewritten)
+    await grade(db, rewritten, "related")
+    await verdicts.passed(db, [(P.id, 2)])
+    await listed(db, TUE, P)
+    await day(db, Writer(), TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
+    assert await shown(db, INTERP.slug, "day", TUE) == ("nothing_new", [])
+
+
 async def test_a_rewritten_focus_paper_waits_for_its_new_texts_grading(db):
     await focus(db, P, "central")
     rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
@@ -583,6 +604,22 @@ async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(d
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
     assert await store_.count_failed(db) == 0
+
+
+async def test_a_window_writes_a_failed_digest_again_before_its_days(db):
+    """A failed Tuesday digest is written again before a recovery window's Wednesday, so
+    Wednesday's does not take its paper."""
+    w = Writer()
+    w.failures = [ProviderError("down")]
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"
+    await focus(db, Q, "central")
+    await listed(db, WED, Q)
+    await digests_job.window(db, Config(), WED, WED, gateway=w.gateway)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
+    assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
 
 
 async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db):

@@ -122,13 +122,14 @@ def _member(narrow: str) -> str:
 
 def _held(topic: str) -> str:
     """Grading follows paper `p` to `topic` from an older text (`held`, pipeline.md, section 8):
-    its latest verdict there on an earlier revision had a Fit above none, and no class label or
-    reported miss of the owner's put it in that class."""
+    its latest verdict there on an earlier revision had a Fit above none, and the owner's word
+    has no say on that class: no class label of the owner's put it in or took it out, and no
+    reported miss put it in."""
     return f"""(
     {_fit(topic, older=True)} <> 'none'
     AND NOT EXISTS (SELECT 1 FROM memberships o
                     WHERE o.paper_id = p.id AND o.class = {topic}
-                      AND o.source IN ('owner', 'miss') AND o.member))"""
+                      AND (o.source = 'owner' OR (o.source = 'miss' AND o.member))))"""
 
 
 # A Focus topic's papers reach it by the pipeline: a member of its class, or held there.
