@@ -63,45 +63,66 @@ async def for_paper(conn: psycopg.AsyncConnection, paper_id: str) -> list[Verdic
     return [_verdict(r) for r in rows]
 
 
-async def candidates(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
-    """What decides which gradings are due, oldest paper first, for every paper not dismissed
-    whose current text is classified and either has had no grading pass yet, or has gradings
-    that failed or a reported miss on it: its direct membership rows (`memberships`), whether
-    its grading pass is done (`passed`), the topics already graded on its current text
-    (`graded`), the topics whose current verdict on an earlier revision has a Fit above none
-    (`held`; pipeline.md, section 8), the failed grading runs in a row per topic on its current
-    text (`failed`) and the topics a miss was reported for (`missed`)."""
+async def candidates(
+    conn: psycopg.AsyncConnection, runs: int, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """The papers with grading work, at most `limit`, those without a grading pass on their
+    current text first, then oldest first. A paper not dismissed and classified at its current
+    revision has work when it has no grading pass yet on that text, a grading on an active topic
+    that failed fewer than `runs` runs, or a miss reported for an active topic with no verdict
+    on that text. Each comes with its direct membership rows (`memberships`), whether its
+    grading pass is done (`passed`), the topics graded on its current text (`graded`), the
+    topics whose current verdict on an earlier revision has a Fit above none (`held`;
+    pipeline.md, section 8), the failed grading runs in a row per topic on its current text
+    (`failed`) and the active topics a miss was reported for (`missed`)."""
     rows = await (
         await conn.execute(
             """
-            SELECT * FROM (
-                SELECT p.id AS paper_id, p.revision,
-                       EXISTS (SELECT 1 FROM grading_passes g WHERE g.paper_id = p.id
-                               AND g.paper_revision = p.revision) AS passed,
-                       (SELECT coalesce(jsonb_agg(jsonb_build_object(
-                            'slug', m.class, 'source', m.source, 'member', m.member)), '[]')
-                        FROM memberships m WHERE m.paper_id = p.id) AS memberships,
-                       (SELECT coalesce(array_agg(DISTINCT v.topic), '{}') FROM verdicts v
-                        WHERE v.paper_id = p.id AND v.paper_revision = p.revision) AS graded,
-                       (SELECT coalesce(array_agg(o.topic), '{}') FROM (
-                            SELECT DISTINCT ON (v.topic) v.topic, v.fit FROM verdicts v
-                            WHERE v.paper_id = p.id AND v.paper_revision < p.revision
-                            ORDER BY v.topic, v.paper_revision DESC, v.recorded_at DESC, v.id DESC
-                        ) o WHERE o.fit <> 'none') AS held,
-                       (SELECT coalesce(jsonb_object_agg(f.topic, f.failed_runs), '{}')
-                        FROM step_failures f WHERE f.paper_id = p.id AND f.step = 'grading'
-                        AND f.paper_revision = p.revision) AS failed,
-                       (SELECT coalesce(array_agg(DISTINCT x.topic), '{}') FROM misses x
-                        WHERE x.paper_id = p.id) AS missed,
-                       p.fetched_at
-                FROM papers p
-                WHERE p.dismissed_at IS NULL
-                  AND EXISTS (SELECT 1 FROM classifications c
-                              WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
-            ) c
-            WHERE NOT passed OR failed <> '{}' OR missed <> '{}'
-            ORDER BY fetched_at, paper_id
-            """
+            WITH chosen AS (
+                SELECT * FROM (
+                    SELECT p.id, p.revision, p.fetched_at,
+                           EXISTS (SELECT 1 FROM grading_passes g WHERE g.paper_id = p.id
+                                   AND g.paper_revision = p.revision) AS passed
+                    FROM papers p
+                    WHERE p.dismissed_at IS NULL
+                      AND EXISTS (SELECT 1 FROM classifications c
+                                  WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
+                ) p
+                WHERE NOT p.passed
+                   OR EXISTS (SELECT 1 FROM step_failures f
+                              JOIN topics t ON t.class = f.topic AND t.status = 'active'
+                              WHERE f.paper_id = p.id AND f.step = 'grading'
+                                AND f.paper_revision = p.revision AND f.failed_runs < %(runs)s)
+                   OR EXISTS (SELECT 1 FROM misses x
+                              JOIN topics t ON t.class = x.topic AND t.status = 'active'
+                              WHERE x.paper_id = p.id
+                                AND NOT EXISTS (SELECT 1 FROM verdicts v
+                                                WHERE v.paper_id = p.id AND v.topic = x.topic
+                                                  AND v.paper_revision = p.revision))
+                ORDER BY p.passed, p.fetched_at, p.id
+                LIMIT %(limit)s
+            )
+            SELECT p.id AS paper_id, p.revision, p.passed,
+                   (SELECT coalesce(jsonb_agg(jsonb_build_object(
+                        'slug', m.class, 'source', m.source, 'member', m.member)), '[]')
+                    FROM memberships m WHERE m.paper_id = p.id) AS memberships,
+                   (SELECT coalesce(array_agg(DISTINCT v.topic), '{}') FROM verdicts v
+                    WHERE v.paper_id = p.id AND v.paper_revision = p.revision) AS graded,
+                   (SELECT coalesce(array_agg(o.topic), '{}') FROM (
+                        SELECT DISTINCT ON (v.topic) v.topic, v.fit FROM verdicts v
+                        WHERE v.paper_id = p.id AND v.paper_revision < p.revision
+                        ORDER BY v.topic, v.paper_revision DESC, v.recorded_at DESC, v.id DESC
+                    ) o WHERE o.fit <> 'none') AS held,
+                   (SELECT coalesce(jsonb_object_agg(f.topic, f.failed_runs), '{}')
+                    FROM step_failures f WHERE f.paper_id = p.id AND f.step = 'grading'
+                    AND f.paper_revision = p.revision) AS failed,
+                   (SELECT coalesce(array_agg(DISTINCT x.topic), '{}') FROM misses x
+                    JOIN topics t ON t.class = x.topic AND t.status = 'active'
+                    WHERE x.paper_id = p.id) AS missed
+            FROM chosen p
+            ORDER BY p.passed, p.fetched_at, p.id
+            """,
+            {"runs": runs, "limit": limit},
         )
     ).fetchall()
     for r in rows:

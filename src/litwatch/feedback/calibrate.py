@@ -36,8 +36,9 @@ async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[
         conn,
         """
         SELECT paper_id, id AS verdict_id, fit,
-               (SELECT w.weight FROM weights w WHERE w.paper_id = v.paper_id
-                ORDER BY w.paper_revision DESC, w.id DESC LIMIT 1) AS weight
+               (SELECT w.weight FROM weights w JOIN papers p ON p.id = w.paper_id
+                AND p.revision = w.paper_revision WHERE w.paper_id = v.paper_id
+                ORDER BY w.id DESC LIMIT 1) AS weight
         FROM (
             SELECT DISTINCT ON (paper_id) * FROM verdicts WHERE topic = %s
             ORDER BY paper_id, paper_revision DESC, recorded_at DESC, id DESC

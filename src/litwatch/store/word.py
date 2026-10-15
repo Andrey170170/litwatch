@@ -110,6 +110,15 @@ async def rarity_of(
     return (Rarity(row["level"]), row["best_topic"]) if row else None
 
 
+async def in_collection(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Whether the paper has been processed: classified, by the classifier or by hand, at some
+    revision. A paper outside the collection has no rarity (pipeline.md, section 5)."""
+    row = await (
+        await conn.execute("SELECT 1 FROM classifications WHERE paper_id = %s LIMIT 1", (paper_id,))
+    ).fetchone()
+    return row is not None
+
+
 async def set_rarity(
     conn: psycopg.AsyncConnection, paper_id: str, level: Rarity, best_topic: str | None
 ) -> None:
@@ -170,7 +179,7 @@ async def touched(conn: psycopg.AsyncConnection) -> list[str]:
             """
             SELECT paper_id FROM verdicts UNION SELECT paper_id FROM labels
             UNION SELECT paper_id FROM reactions UNION SELECT paper_id FROM library
-            UNION SELECT paper_id FROM effective_grades UNION SELECT paper_id FROM weights
+            UNION SELECT paper_id FROM effective_grades UNION SELECT paper_id FROM classifications
             UNION SELECT paper_id FROM rarities ORDER BY 1
             """
         )

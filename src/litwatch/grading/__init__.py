@@ -195,43 +195,32 @@ async def grade(
 async def due(
     conn: psycopg.AsyncConnection, tree: Taxonomy, runs: int, limit: int | None = None
 ) -> tuple[list[Due], list[tuple[str, int]]]:
-    """The gradings due, for at most `limit` papers, and the (paper, revision) whose grading pass
-    they make, to record with `store.passed` once they are recorded. A paper's first pass on its
-    current text grades each active topic it leads to (`core.grading.grading_topics`); after
-    that only a grading that failed is tried again, and a topic a miss was reported for is
-    graded whatever classification said (feedback.md). A topic the paper leads to later waits
-    for a re-run (pipeline.md, section 10), as does a topic edit, whatever the topic's version.
-    New gradings first, oldest paper first; a grading that failed comes after them, and after
-    `runs` failed runs it is not tried at all: it waits for the owner. A paused or draft topic
-    grades nothing."""
+    """The gradings due, for at most `limit` papers (`store.candidates`), and the (paper,
+    revision) whose grading pass they make, to record with `store.passed` once they are
+    recorded. A paper's first pass on its current text grades each active topic it leads to
+    (`core.grading.grading_topics`); after that only a grading that failed is tried again, and
+    a topic a miss was reported for is graded whatever classification said (feedback.md). A
+    topic the paper leads to later waits for a re-run (pipeline.md, section 10), as does a
+    topic edit, whatever the topic's version. First passes first, oldest paper first, and new
+    gradings before failed ones; after `runs` failed runs a grading is not tried at all: it
+    waits for the owner. A paused or draft topic grades nothing."""
     active = {t.slug: t for t in tree.topics if t.status == Status.ACTIVE}
-    found: list[tuple[int, str, str]] = []  # (failed runs, paper, topic), oldest paper first
-    fresh: dict[str, int] = {}  # paper → revision, for a first pass
-    for row in await store.candidates(conn):
+    found: list[tuple[str, str, bool]] = []  # (paper, topic, failed before)
+    passes: list[tuple[str, int]] = []
+    for row in await store.candidates(conn, runs, limit):
+        failed = row["failed"]
         if row["passed"]:
-            should = set(row["failed"])
+            should = set(failed)
         else:
             should = grading_topics(tree, row["memberships"], row["held"])
-            fresh[row["paper_id"]] = row["revision"]
+            passes.append((row["paper_id"], row["revision"]))
         should |= set(row["missed"])
         for slug in sorted(should & active.keys() - set(row["graded"])):
-            failed = row["failed"].get(slug, 0)
-            if failed < runs:
-                found.append((failed, row["paper_id"], slug))
-    found.sort(key=lambda f: f[0] > 0)  # stable: new ones first, in paper order
-    papers: list[str] = []
-    for _, paper_id, _ in found:
-        if paper_id not in papers:
-            papers.append(paper_id)
-    chosen = set(papers[:limit] if limit is not None else papers)
-    by_id = {p.id: p for p in await papers_store.get_many(conn, sorted(chosen))}
-    due = [
-        Due(by_id[p], active[slug], tree.get(slug).name)
-        for _, p, slug in found
-        if p in chosen and p in by_id
-    ]
-    # A first pass with nothing to grade is done now; one left out by the limit is not.
-    passes = [(p, rev) for p, rev in fresh.items() if p in chosen or p not in papers]
+            if failed.get(slug, 0) < runs:
+                found.append((row["paper_id"], slug, slug in failed))
+    found.sort(key=lambda f: f[2])  # stable: new gradings first, in paper order
+    by_id = {p.id: p for p in await papers_store.get_many(conn, sorted({p for p, _, _ in found}))}
+    due = [Due(by_id[p], active[s], tree.get(s).name) for p, s, _ in found if p in by_id]
     return due, passes
 
 

@@ -55,6 +55,15 @@ async def succeeded(
     )
 
 
+async def reset(conn: psycopg.AsyncConnection, paper_id: str, step: Step, topic: str = "") -> None:
+    """Forget the failed runs but keep the failure: the step is still pending on the paper,
+    and the next run tries it again if nothing records it first."""
+    await conn.execute(
+        "UPDATE step_failures SET failed_runs = 0 WHERE paper_id = %s AND step = %s AND topic = %s",
+        (paper_id, step, topic),
+    )
+
+
 async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[dict[str, Any]]:
     """Papers `step` failed on for at least `runs` runs in a row on their current text, with the
     last error (and the topic, for grading); dismissed papers left out. Most failed first."""

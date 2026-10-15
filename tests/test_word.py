@@ -58,10 +58,20 @@ def test_a_reason_must_go_with_its_thumb():
         thumb("overrated", "up")
 
 
+async def classified(conn, revision: int = 1) -> None:
+    await conn.execute(
+        "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
+        "primary_class, model) VALUES (%s, %s, 'x', 'other', 'm')",
+        (P.id, revision),
+    )
+
+
 @pytest.fixture
 async def db(conn):
+    """P classified: in the collection."""
     await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [P])
+    await classified(conn)
     return conn
 
 
@@ -89,13 +99,8 @@ async def weighed(conn, weight: Weight) -> None:
             contribution=Contribution.METHOD, releases_code=False, releases_weights=False
         ),
     )
-    async with conn.transaction():
-        await conn.execute(
-            "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
-            "primary_class, model) VALUES (%s, 1, 'x', 'other', 'm')",
-            (P.id,),
-        )
-        await analyses_store.add(conn, P, "other", analysis, "m")
+    current = await papers_store.get(conn, P.id)
+    await analyses_store.add(conn, current, "other", analysis, "m")
     await word.settle(conn, P.id)
 
 
@@ -163,6 +168,28 @@ async def test_a_paper_with_a_weight_alone_has_its_floor(db):
     await weighed(db, Weight.LANDMARK)
     (rarity,) = await stored(db, "rarities")
     assert (rarity["level"], rarity["best_topic"]) == ("rare", None)
+
+
+async def test_a_rewrite_drops_the_old_weight_until_the_new_text_is_analysed(db):
+    await graded(db, "related")
+    await weighed(db, Weight.INCREMENTAL)
+    rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
+    await papers_store.upsert(db, [rewritten])
+    assert (await papers_store.get(db, P.id)).revision == 2
+    await word.settle(db, P.id)
+    (row,) = await stored(db, "effective_grades")
+    # The old verdict stands until the new text is graded, but its Weight went with the text.
+    assert (row["fit"], row["grade"]) == ("related", "relevant")
+
+
+async def test_only_a_paper_in_the_collection_has_a_rarity(db):
+    await word.settle(db, P.id)
+    (rarity,) = await stored(db, "rarities")  # classified, nothing else: solid's floor
+    assert (rarity["level"], rarity["best_topic"]) == ("uncommon", None)
+    unprocessed = paper("2610.00009")
+    await papers_store.upsert(db, [unprocessed])
+    await word.settle(db, unprocessed.id)
+    assert [r["paper_id"] for r in await stored(db, "rarities")] == [P.id]
 
 
 async def test_wrong_topic_takes_the_paper_out_and_clearing_the_thumb_brings_it_back(db):

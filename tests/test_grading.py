@@ -17,6 +17,7 @@ from litwatch.store import classifications as classifications_store
 from litwatch.store import failures
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store import verdicts as verdicts_store
 from tests.conftest import FAITH, INTERP, TREE
 from tests.test_steps import CONFIG, A, B, Scripted, decision, night, rows
 
@@ -108,6 +109,13 @@ async def test_an_area_topic_escalates_to_check_on_doubt_and_the_less_inclusive_
     assert await rows(conn, "SELECT 1 FROM library WHERE saved AND paper_id = %s", A.id) == []
 
 
+async def test_a_classified_paper_has_a_rarity_whatever_else_fails(conn, models):
+    models.analyses[A.title] = {"gist": "Too short."}  # invalid: no Weight
+    await night(conn, models)  # A leads to no topic either
+    (rarity,) = await rows(conn, "SELECT * FROM rarities WHERE paper_id = %s", A.id)
+    assert (rarity["level"], rarity["best_topic"]) == ("uncommon", None)  # solid's floor
+
+
 async def test_a_field_topic_is_graded_by_field_grade_alone(conn, models):
     models.decisions[A.title] = decision("agents", agents=0.9)
     await night(conn, models)
@@ -151,6 +159,7 @@ async def test_a_topic_followed_later_grades_nothing_until_a_rerun_but_a_miss_do
     await misses.report(conn, A.id, INTERP.slug, Fit.RELATED)
     await night(conn, models)
     assert [v["topic"] for v in await verdicts(conn, A.id)] == [INTERP.slug]
+    assert await verdicts_store.candidates(conn, FAILED_RUNS) == []  # the miss is done
 
 
 async def test_the_limit_caps_papers_not_gradings(conn, models):
@@ -158,6 +167,7 @@ async def test_the_limit_caps_papers_not_gradings(conn, models):
         models.decisions[p.title] = decision("other", interpretability=0.9)
         models.fits[("judge", p.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models)  # classified; every grading left to try again
+    assert len(await verdicts_store.candidates(conn, FAILED_RUNS, limit=1)) == 1
     tree = await taxonomy_store.load(conn)
     due, _ = await grading.due(conn, tree, FAILED_RUNS, limit=1)
     assert [(d.paper.id, d.topic.slug) for d in due] == [(A.id, INTERP.slug)]
@@ -194,14 +204,21 @@ async def api(conn, models):
         yield c
 
 
-async def test_an_unusable_answer_is_no_verdict_and_three_leave_it_for_the_owner(conn, models):
-    # One grader answering unusably is enough: the other's answer alone is no verdict.
+async def stuck(conn, models) -> None:
+    """B's grading for its Focus topic failed three runs in a row: an unusable judge."""
     models.fits[("judge", B.title)] = fit("very central")
     for n in range(1, FAILED_RUNS + 1):
         assert (await night(conn, models))["grading_failed"] == 1
         (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
         assert failure["failed_runs"] == n and failure["last_error"].startswith("invalid")
+    del models.fits[("judge", B.title)]
+
+
+async def test_an_unusable_answer_is_no_verdict_and_three_leave_it_for_the_owner(conn, models):
+    # One grader answering unusably is enough: the other's answer alone is no verdict.
+    await stuck(conn, models)
     assert await verdicts(conn, B.id) == []
+    assert await verdicts_store.candidates(conn, FAILED_RUNS) == []
     models.asked.clear()
     await night(conn, models)
     assert ("judge", B.title) not in models.asked  # it waits for the owner now
@@ -221,10 +238,44 @@ async def test_an_unusable_answer_is_no_verdict_and_three_leave_it_for_the_owner
         unknown = url.format("nope", B.id)
         assert (await client.post(unknown, json={"revision": 1})).status_code == 404
 
-        del models.fits[("judge", B.title)]
         done = await client.post(now, json={"revision": 1})
         assert done.json() == {"graded": True, "fit": "related", "error": None}
         assert (await client.post(now, json={"revision": 1})).status_code == 409  # done
     (v,) = await verdicts(conn, B.id)
     assert v["fit"] == "related"
     assert await failures.stuck(conn, "grading", FAILED_RUNS) == []
+
+
+NOW = f"/api/settings/grading/{FAITH.slug}/{B.id}/now"
+
+
+async def test_grading_now_cut_short_is_left_to_the_next_night(conn, models, monkeypatch):
+    await stuck(conn, models)
+
+    async def crash(conn, g):
+        raise RuntimeError("the request went away")
+
+    monkeypatch.setattr(grading, "record", crash)
+    async with api(conn, models) as client:
+        with pytest.raises(RuntimeError):
+            await client.post(NOW, json={"revision": 1})
+    monkeypatch.undo()
+    (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
+    assert failure["failed_runs"] == 0  # pending, with three runs to go
+    assert (await night(conn, models))["graded"] == 1
+    assert [v["fit"] for v in await verdicts(conn, B.id)] == ["related"]
+
+
+async def test_grading_now_on_text_that_changed_meanwhile_is_refused(conn, models, monkeypatch):
+    await stuck(conn, models)
+
+    async def rewritten(conn, paper):
+        return False
+
+    monkeypatch.setattr(papers_store, "still_current", rewritten)
+    async with api(conn, models) as client:
+        assert (await client.post(NOW, json={"revision": 1})).status_code == 409
+    monkeypatch.undo()
+    assert await verdicts(conn, B.id) == []
+    (run,) = await rows(conn, "SELECT counts FROM runs WHERE kind = 'grading'")
+    assert "graded" not in run["counts"] and "grading_failed" not in run["counts"]

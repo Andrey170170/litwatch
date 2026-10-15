@@ -121,11 +121,13 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
                     fit_after=a["fit"],
                 )
 
-        # Rarity: the followed topics' page levels in the owner's order, lowered by depth.
-        levels = [(s, t.depth, after[s].rarity) for s, t in topics.items() if s in after]
-        rarity = mixed_rarity(levels, weight)
-        if rarity != await word_store.rarity_of(conn, paper_id):
-            await word_store.set_rarity(conn, paper_id, *rarity)
+        # Rarity, for a paper in the collection: the followed topics' page levels in the owner's
+        # order, lowered by depth, never below the Weight's floor.
+        if await word_store.in_collection(conn, paper_id):
+            levels = [(s, t.depth, after[s].rarity) for s, t in topics.items() if s in after]
+            rarity = mixed_rarity(levels, weight)
+            if rarity != await word_store.rarity_of(conn, paper_id):
+                await word_store.set_rarity(conn, paper_id, *rarity)
 
         row = await word_store.library_row(conn, paper_id)
         hand = Hand(row["hand"]) if row and row["hand"] else None
@@ -206,8 +208,8 @@ async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
 
 
 async def sync(conn: psycopg.AsyncConnection) -> dict[str, int]:
-    """Settle every paper that has a verdict, a word or a library row: after anything that
-    wrote verdicts or labels around `settle`."""
+    """Settle every paper in the collection or with a verdict, a word or a library row: after
+    anything that wrote verdicts, Weights or labels around `settle`."""
     counts = {"papers": 0, "grades_changed": 0, "saved": 0, "unsaved": 0}
     touched = await word_store.touched(conn)
     for paper_id in touched:

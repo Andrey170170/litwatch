@@ -418,7 +418,9 @@ export interface paths {
         /**
          * Grade Now
          * @description A grading failed three runs in a row on this text: grade it now, as a run of its own.
-         *     It counts as the first of three more runs, so a nightly run tries it again if this fails.
+         *     It counts as the first of three more runs. Until it is recorded the grading stays a pending
+         *     failure, so a request cut short leaves it to the next nightly run; 409 when the paper's text
+         *     changed or it was dismissed while it was graded.
          */
         post: operations["grade_now_api_settings_grading__topic___paper_id__now_post"];
         delete?: never;

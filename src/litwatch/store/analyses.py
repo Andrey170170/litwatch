@@ -79,13 +79,13 @@ async def add(
 
 
 async def current_weight(conn: psycopg.AsyncConnection, paper_id: str) -> Weight | None:
-    """The paper's current Weight: the newest of its latest revision that has one, so an older
-    revision's stands until the new text is analysed. The full-text queue (N3) refines this
-    to the pass queued last for the current revision."""
+    """The paper's current Weight: the newest for its current revision, or None until the
+    current text is analysed (pipeline.md, section 4: it is then treated as solid). The
+    full-text queue (N3) refines this to the pass queued last for the current revision."""
     row = await (
         await conn.execute(
-            "SELECT weight FROM weights WHERE paper_id = %s "
-            "ORDER BY paper_revision DESC, id DESC LIMIT 1",
+            "SELECT w.weight FROM weights w JOIN papers p ON p.id = w.paper_id "
+            "AND p.revision = w.paper_revision WHERE w.paper_id = %s ORDER BY w.id DESC LIMIT 1",
             (paper_id,),
         )
     ).fetchone()

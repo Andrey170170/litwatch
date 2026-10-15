@@ -163,6 +163,7 @@ async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str,
                 await classification.by_hand(c, paper, tree, body.classes, body.primary)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await word.settle(c, paper_id)  # classified: in the collection, with a rarity
     return {
         "classes": list(dict.fromkeys(body.classes)),
         "primary": body.primary or body.classes[0],
@@ -206,22 +207,27 @@ async def grade_now(
     topic: str, paper_id: str, body: Awaiting, request: Request, c: Conn
 ) -> GradedOut:
     """A grading failed three runs in a row on this text: grade it now, as a run of its own.
-    It counts as the first of three more runs, so a nightly run tries it again if this fails."""
+    It counts as the first of three more runs. Until it is recorded the grading stays a pending
+    failure, so a request cut short leaves it to the next nightly run; 409 when the paper's text
+    changed or it was dismissed while it was graded."""
     tree = await taxonomy_store.load(c)
     followed = tree.topic(topic) if tree else None
     if tree is None or followed is None:
         raise HTTPException(status_code=404, detail="no such topic")
     async with _awaiting(c, paper_id, body.revision, "grading", topic) as paper:
-        await failures.succeeded(c, paper_id, "grading", topic)  # forgets the count
+        await failures.reset(c, paper_id, "grading", topic)
     config = request.app.state.config
     due = [grading.Due(paper, followed, tree.get(topic).name)]
+    recorded = False
     async with (
         model_run(c, config, "grading", gateway=request.app.state.gateway) as run,
         aclosing(grading.grade(due, run.gateway, config.grading)) as found,
     ):
         async for g in found:
-            await grading.record(c, g)
-            run.add("graded" if g.verdict is not None else "grading_failed")
+            if recorded := await grading.record(c, g):
+                run.add("graded" if g.verdict is not None else "grading_failed")
+    if not recorded:
+        raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
     v = g.verdict
     return GradedOut(graded=v is not None, fit=v.fit if v else None, error=g.error)
 
