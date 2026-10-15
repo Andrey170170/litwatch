@@ -12,7 +12,7 @@ from litwatch import events, store
 from litwatch.api import create_app
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
-from litwatch.core import FAILED_RUNS, Fit, Hand, Status, Verdict
+from litwatch.core import FAILED_RUNS, Fit, Hand, Label, LabelOrigin, LabelValue, Status, Verdict
 from litwatch.core.fulltext import (
     FOCUS,
     RECONCILE_LOOKBACK,
@@ -26,6 +26,7 @@ from litwatch.core.fulltext import (
 from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.integrations.deep import Deep, DeepClient
+from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
@@ -200,6 +201,23 @@ async def test_a_missed_settle_is_swept_up_though_the_paper_has_its_brief(db):
             opinions={},
         ),
     )  # and no settle
+    await word.settle_all(db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK))
+    assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
+
+
+async def test_a_missed_settle_of_an_unsure_label_is_swept_up(db):
+    await grade(db, Fit.CENTRAL)  # must read, with its Deep pass and its Brief pass, done
+    await db.execute(
+        "UPDATE fulltext_passes SET state = 'done', arxiv_version = 2 WHERE kind = 'brief'"
+    )
+    await db.execute("UPDATE verdicts SET recorded_at = now() - interval '60 days'")
+    said = Label(
+        paper_id=P.id, topic=FAITH.slug, value=LabelValue.RELATED, origin=LabelOrigin.READER
+    )
+    await word.label(db, said)  # relevant: the pass is dropped
+    assert await deep_rows(db) == []
+    unsure = said.model_copy(update={"value": LabelValue.UNSURE})
+    await feedback_store.set_label(db, unsure)  # the central verdict counts again; no settle
     await word.settle_all(db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK))
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
 

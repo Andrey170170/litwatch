@@ -542,7 +542,7 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
     (an active Focus topic's central or related, an active Area's must read, its own or a
     followed descendant's; or such a verdict or label from the last `lookback`, whose settle
     may have been missed); the `outdated` ones; and every saved Focus must read with no card,
-    or one with such a recent Focus verdict or label, whatever text pass it has.
+    or one with a recent Focus verdict or label of any value, whatever text pass it has.
     Bounded by the queue and what qualifies but has no pass, not by the library; never cut
     short, as settling spends nothing and a cut could leave the same papers out every night."""
     rows = await (
@@ -567,20 +567,21 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
                     SELECT 1 FROM effective_grades own
                     WHERE own.paper_id = g.paper_id AND own.topic = a.root))
             ), recent AS (
-                -- Verdicts and labels whose settle may have been missed.
-                SELECT paper_id, topic FROM verdicts
-                WHERE recorded_at >= now() - %(lookback)s AND fit IN ('central', 'related')
+                -- Verdicts and labels whose settle may have been missed, of any value: an
+                -- unsure label can let an older verdict count again.
+                SELECT paper_id, topic, fit AS value FROM verdicts
+                WHERE recorded_at >= now() - %(lookback)s
                 UNION
-                SELECT paper_id, topic FROM labels
-                WHERE labelled_at >= now() - %(lookback)s AND value IN ('central', 'related')
+                SELECT paper_id, topic, value FROM labels
+                WHERE labelled_at >= now() - %(lookback)s
             ), qualifying AS (
                 SELECT paper_id FROM effective_grades
                 WHERE topic IN (SELECT class FROM focus) AND fit IN ('central', 'related')
                 UNION
                 SELECT paper_id FROM area_must_read
                 UNION
-                SELECT paper_id FROM recent
-                WHERE topic IN (SELECT class FROM focus) OR topic IN (SELECT class FROM area)
+                SELECT paper_id FROM recent WHERE value IN ('central', 'related')
+                AND (topic IN (SELECT class FROM focus) OR topic IN (SELECT class FROM area))
             )
             SELECT p.id FROM papers p
             WHERE p.dismissed_at IS NULL AND (
