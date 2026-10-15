@@ -917,6 +917,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_api_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -2247,6 +2264,30 @@ export interface components {
             /** Token */
             token: string;
         };
+        /**
+         * SettingsHints
+         * @description What the Settings sidebar says beside each page: how many things wait on the owner, the
+         *     last Calibrate session, the misses reported, the topics followed and the classes, the
+         *     month's spend against its budget, and the integrations failing.
+         */
+        SettingsHints: {
+            /** Waiting */
+            waiting: number;
+            /** Last Session */
+            last_session?: string | null;
+            /** Misses */
+            misses: number;
+            /** Topics */
+            topics: number;
+            /** Classes */
+            classes: number;
+            /** Spent */
+            spent: number;
+            /** Budget */
+            budget?: number | null;
+            /** Failing */
+            failing?: string[];
+        };
         /** @enum {string} */
         Sort: "rarest" | "newest" | "added" | "title" | "best";
         /**
@@ -2270,6 +2311,17 @@ export interface components {
             day: string;
             state: components["schemas"]["DigestState"];
             best_rarity?: components["schemas"]["Rarity"] | null;
+        };
+        /**
+         * Summary
+         * @description What the shell shows on every page (the status line, the sidebar's topics, the Settings
+         *     hints), read by one poll and never through a page's own reads: counts only.
+         */
+        Summary: {
+            status: components["schemas"]["RunStatus"];
+            /** Topics */
+            topics: components["schemas"]["Badge"][];
+            settings: components["schemas"]["SettingsHints"];
         };
         /**
          * Taxonomy
@@ -4211,6 +4263,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    summary_api_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Summary"];
                 };
             };
         };

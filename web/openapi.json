@@ -2483,6 +2483,24 @@
         }
       }
     },
+    "/api/summary": {
+      "get": {
+        "summary": "Summary",
+        "operationId": "summary_api_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Summary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/session": {
       "post": {
         "summary": "Sign In",
@@ -5931,6 +5949,70 @@
         ],
         "title": "SessionIn"
       },
+      "SettingsHints": {
+        "properties": {
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting"
+          },
+          "last_session": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Session"
+          },
+          "misses": {
+            "type": "integer",
+            "title": "Misses"
+          },
+          "topics": {
+            "type": "integer",
+            "title": "Topics"
+          },
+          "classes": {
+            "type": "integer",
+            "title": "Classes"
+          },
+          "spent": {
+            "type": "number",
+            "title": "Spent"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "failing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "waiting",
+          "misses",
+          "topics",
+          "classes",
+          "spent"
+        ],
+        "title": "SettingsHints",
+        "description": "What the Settings sidebar says beside each page: how many things wait on the owner, the\nlast Calibrate session, the misses reported, the topics followed and the classes, the\nmonth's spend against its budget, and the integrations failing."
+      },
       "Sort": {
         "type": "string",
         "enum": [
@@ -5984,6 +6066,31 @@
         ],
         "title": "StripDigest",
         "description": "One square of a topic's digest strip: a digest, coloured by its best rarity (none for\nnothing new), red when it failed."
+      },
+      "Summary": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/Badge"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/SettingsHints"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "topics",
+          "settings"
+        ],
+        "title": "Summary",
+        "description": "What the shell shows on every page (the status line, the sidebar's topics, the Settings\nhints), read by one poll and never through a page's own reads: counts only."
       },
       "Taxonomy": {
         "properties": {

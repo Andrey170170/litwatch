@@ -249,3 +249,36 @@ async def test_taxonomy_stats_and_export(client, conn):
     assert (await client.get("/api/settings/topics/other/keywords")).status_code == 404
     text = (await client.get("/api/settings/taxonomy.yaml")).text
     assert text.startswith("classes:") and f"class: {FAITH.slug}" in text
+
+
+async def test_the_summary_carries_the_status_line_the_badges_and_the_hints(client, conn):
+    """One read for the shell: the run status, the shown topics in the fixed order as badges, and
+    the Settings sidebar's counts, which follow the misses reported and the digests that failed."""
+    before = (await client.get("/api/summary")).json()
+    assert before["status"]["state"] == "none"
+    assert [t["slug"] for t in before["topics"]] == [t.slug for t in TREE.shown()]
+    hints = before["settings"]
+    assert isinstance(hints.pop("budget"), float | None)  # the configured budgets' sum
+    assert hints == {
+        "waiting": 0,
+        "last_session": None,
+        "misses": 0,
+        "topics": len(TREE.topics),
+        "classes": len(TREE.classes),
+        "spent": 0.0,
+        "failing": [],
+    }
+    assert (
+        await client.post("/api/misses", json={"paper_id": P.id, "topic": FAITH.slug})
+    ).status_code in (200, 201)
+    await conn.execute(
+        "INSERT INTO runs (kind, started_at, finished_at) VALUES ('nightly', now(), now())"
+    )
+    await conn.execute(
+        "INSERT INTO digests (topic, period, day, state, error) "
+        "VALUES (%s, 'day', '2026-10-08', 'failed', 'timed out')",
+        (FAITH.slug,),
+    )
+    after = (await client.get("/api/summary")).json()
+    assert (after["settings"]["misses"], after["settings"]["waiting"]) == (1, 1)
+    assert after["status"]["digests_failed"] == 1

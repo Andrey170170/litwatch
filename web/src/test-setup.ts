@@ -6,4 +6,7 @@ import { afterEach } from "vitest";
 import { clearToasts } from "@/lib/toast";
 
 // Toasts are a module-level store and outlive a test's render: start each case without the last one's.
-afterEach(() => clearToasts());
+afterEach(() => {
+  clearToasts();
+  delete (globalThis as { __renders?: unknown }).__renders;
+});

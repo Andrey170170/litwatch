@@ -5,12 +5,19 @@ import type { Shelf } from "@/lib/rarity";
 import type { Quality, Run, Session, SessionRow } from "@/lib/settings";
 import { sortOf, type ListSearch } from "@/lib/search";
 
-export const statusQuery = queryOptions({
-  queryKey: ["status"],
-  queryFn: async () => ok(await api.GET("/api/status")),
+/** The shell's summary (the status line, the sidebar's topics, the Settings hints): one read on every page,
+ * polled, refreshed on focus and after the owner's own writes that change a count (`refreshSummary`), and never by
+ * navigation. Counts only; the pages keep their own reads. */
+export const summaryQuery = queryOptions({
+  queryKey: ["summary"],
+  queryFn: async () => ok(await api.GET("/api/summary")),
   staleTime: 30_000,
   refetchInterval: 60_000,
+  // Only the data: a refetch that changes nothing re-renders nothing (structural sharing).
+  notifyOnChangeProps: ["data"],
 });
+
+export const refreshSummary = (qc: QueryClient) => void qc.invalidateQueries({ queryKey: summaryQuery.queryKey });
 
 export const topicsQuery = queryOptions({
   queryKey: ["topics"],
@@ -52,15 +59,13 @@ const loaded = (pages: { rows: unknown[] }[]) => pages.reduce((n, p) => n + p.ro
  * place or invalidate on purpose; a page load starts afresh. */
 const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
-/** A list reached going forward (a link, not Back) is a fresh visit: its cached pages are marked stale, so it loads
- * afresh when shown. Only the list gone to: the one left keeps its pages for the way back. A Settings page reached
- * the same way starts every Settings read afresh: the ones shown (the sidebar's hints stay mounted across pages, so
- * they are refetched, not only marked) now, the rest when a page next shows them. */
+/** A page reached going forward (a link, not Back) is a fresh visit: its cached reads are marked stale, so the page
+ * refetches them in the background when shown, its cached rows on screen meanwhile. Only the page gone to: the one
+ * left keeps its reads for the way back. The shell's summary is never touched here. */
 export function freshVisit(qc: QueryClient, pathname: string) {
   const path = pathname.replace(/\/$/, "") || "/";
   const topic = /^\/topics\/([^/]+)$/.exec(path);
-  if (path.startsWith("/settings")) return void qc.invalidateQueries({ queryKey: ["settings"] });
-  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : null;
+  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : path.startsWith("/settings") ? ["settings"] : null;
   if (key) void qc.invalidateQueries({ queryKey: key, refetchType: "none" });
 }
 
@@ -108,9 +113,9 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
 
 // -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
 
-/** Fresh on each visit by a link (`freshVisit`), and still for the visit: a page that waits on the owner must not
- * show what was settled elsewhere as still open, and nothing moves under the reader while it is open or on the way
- * back to it. What a write settles is patched into the cached page (`settle`, `settleFromPaper`). */
+/** Refetched in the background on each visit by a link (`freshVisit`), and still for the visit: nothing moves under
+ * the reader while a page is open or on the way back to it. What a write settles is patched into the cached page
+ * (`settle`, `settleFromPaper`). */
 const settingsOptions = { staleTime: Infinity, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
 export const qualityQuery = queryOptions({

@@ -72,8 +72,9 @@ export function Share({ x, hi, good, ok }: { x: number; hi?: boolean; good?: num
   );
 }
 
-/** A query that failed, with the way to try again; "Loading…" while it loads; nothing once it has data. */
-export function Load({ q }: { q: Pick<UseQueryResult, "isError" | "isPending" | "refetch"> }) {
+/** A query that failed, with the way to try again; "Loading…" while it loads with nothing to show; a quiet
+ * "Updating…" while a fresh visit refetches it behind its cached rows; nothing otherwise. */
+export function Load({ q }: { q: Pick<UseQueryResult, "isError" | "isPending" | "isFetching" | "refetch"> }) {
   if (q.isError)
     return (
       <div className="loadmore">
@@ -83,7 +84,8 @@ export function Load({ q }: { q: Pick<UseQueryResult, "isError" | "isPending" | 
         </button>
       </div>
     );
-  return q.isPending ? <div className="loadmore">Loading…</div> : null;
+  if (q.isPending) return <div className="loadmore">Loading…</div>;
+  return q.isFetching ? <div className="loadmore quiet">Updating…</div> : null;
 }
 
 /** A line that says the surface waits on an endpoint a later PR brings. */

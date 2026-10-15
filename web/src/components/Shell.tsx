@@ -5,9 +5,10 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
-import { freshVisit, topicsQuery } from "@/api/queries";
+import { memo, useEffect, useRef, useState } from "react";
+import { freshVisit, summaryQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
+import { countRender } from "@/lib/renders";
 import { SettingsSide } from "@/routes/settings";
 import { Badge } from "./Badge";
 import { RunStatus } from "./RunStatus";
@@ -58,10 +59,11 @@ function useCame(): Came {
   return index < before.index ? "back" : "go";
 }
 
-function Following({ onPick }: { onPick?: () => void }) {
-  const { data } = useQuery(topicsQuery);
-  const topics = data?.flatMap((g) => g.topics) ?? [];
-  if (!topics.length) return null;
+/** The followed topics, from the shell's summary: the list re-renders only when the topics themselves change. */
+const Following = memo(function Following({ onPick }: { onPick?: () => void }) {
+  const { data: topics } = useQuery({ ...summaryQuery, select: (s) => s.topics });
+  countRender("following");
+  if (!topics?.length) return null;
   return (
     <>
       <div className="sec">Following</div>
@@ -73,7 +75,7 @@ function Following({ onPick }: { onPick?: () => void }) {
       ))}
     </>
   );
-}
+});
 
 function Tabs({ onPick, drawer }: { onPick?: () => void; drawer?: boolean }) {
   return TABS.map((t) => (
@@ -84,27 +86,31 @@ function Tabs({ onPick, drawer }: { onPick?: () => void; drawer?: boolean }) {
   ));
 }
 
+/** The reading sidebar; memoised, with nothing passed in, so a route change re-renders only its active links. */
+const ReadingSide = memo(function ReadingSide() {
+  countRender("side");
+  return (
+    <aside className="side">
+      <SideHead />
+      <nav className="nav">
+        <Tabs />
+        <Following />
+      </nav>
+      <nav className="foot nav">
+        <Link to="/settings" className="it">
+          ⚙ Settings
+        </Link>
+      </nav>
+    </aside>
+  );
+});
+
 function Desktop() {
   const came = useCame();
   const location = useLocation();
   return (
     <div className="app">
-      {inSettings(location) ? (
-        <SettingsSide />
-      ) : (
-        <aside className="side">
-          <SideHead />
-          <nav className="nav">
-            <Tabs />
-            <Following />
-          </nav>
-          <nav className="foot nav">
-            <Link to="/settings" className="it">
-              ⚙ Settings
-            </Link>
-          </nav>
-        </aside>
-      )}
+      {inSettings(location) ? <SettingsSide /> : <ReadingSide />}
       <main className="main" data-came={came} data-scroll-restoration-id="main">
         <div className="inner">
           <Outlet />

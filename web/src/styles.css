@@ -293,6 +293,7 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
 .shh.fold { padding: 8px 10px; border: 1px dashed var(--line); margin-top: 8px; }
 .shh.fold:hover { color: var(--fg); border-color: var(--fg3); }
 .loadmore { padding: 10px 0; font-size: 12px; color: var(--fg3); }
+.loadmore.quiet { opacity: 0.55; font-size: 12px; }
 /* the table row: one line */
 .tbl { border-top: 1px solid var(--line2); }
 .tbl .tr { display: grid; grid-template-columns: minmax(0, 1fr) 82px 44px 52px 30px; gap: 10px; align-items: center; height: 34px; padding-left: 10px; border-bottom: 1px solid var(--line2); cursor: pointer; }

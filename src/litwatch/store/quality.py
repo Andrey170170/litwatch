@@ -107,6 +107,11 @@ async def reactions_by_topic(conn: psycopg.AsyncConnection, days: int = 30) -> l
     )
 
 
+async def count_misses(conn: psycopg.AsyncConnection) -> int:
+    row = await (await conn.execute("SELECT count(*) AS n FROM misses")).fetchone()
+    return row["n"]
+
+
 async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[dict[str, Any]]:
     """Reported misses, newest first, each with what the stages concluded for the owner's topic
     on the paper's current text (feedback.md, misses): whether it has been classified and the

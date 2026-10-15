@@ -6,7 +6,7 @@
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
-import { qualityQuery } from "./queries";
+import { qualityQuery, refreshSummary } from "./queries";
 import { rememberCard } from "@/lib/remember";
 import { type Quality, settleFromPaper } from "@/lib/settings";
 import { plural } from "@/lib/format";
@@ -32,7 +32,7 @@ function patchSaved(qc: QueryClient, paperId: string, saved: boolean) {
  * the cached Needs you page (DESIGN.md: settling one settles it there too). */
 export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
-  void qc.invalidateQueries({ queryKey: ["status"] });
+  refreshSummary(qc);
   await qc.invalidateQueries({ queryKey: ["paper", paperId] });
   if (qc.getQueryState(["paper", paperId])?.status === "error") toast("Recorded, but the page could not be refreshed", "error");
   const paper = qc.getQueryData<Schemas["Paper"]>(["paper", paperId]);
@@ -266,7 +266,7 @@ export function useWriteAgain() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (digestId: number) => ok(await api.POST("/api/digests/{digest_id}/write", { params: { path: { digest_id: digestId } } })),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["status"] }),
+    onSuccess: () => refreshSummary(qc),
     onError: (e) => toast(said(e), "error"),
   });
 }
@@ -297,6 +297,7 @@ export function useSaveTopic() {
       Promise.all([
         qc.invalidateQueries({ queryKey: ["taxonomy"] }),
         qc.invalidateQueries({ queryKey: ["topics"] }),
+        qc.invalidateQueries({ queryKey: ["summary"] }),
         qc.invalidateQueries({ queryKey: ["settings", "taxonomy-stats"] }),
         qc.invalidateQueries({ queryKey: ["settings", "keywords", slug] }),
       ]),
@@ -309,7 +310,7 @@ export function useReorderTopics() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (slugs: string[]) => ok(await api.PUT("/api/settings/topics-order", { body: { slugs } })),
-    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["taxonomy"] }), qc.invalidateQueries({ queryKey: ["topics"] })]),
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["taxonomy"] }), qc.invalidateQueries({ queryKey: ["topics"] }), qc.invalidateQueries({ queryKey: ["summary"] })]),
     onError: (e) => toast(said(e, "Could not save the order"), "error"),
   });
 }

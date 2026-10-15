@@ -4,12 +4,14 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useParams } from "@tanstack/react-router";
-import { integrationsQuery, missesQuery, qualityQuery, sessionsQuery, taxonomyQuery } from "@/api/queries";
+import { memo } from "react";
+import { summaryQuery } from "@/api/queries";
 import { SideHead } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
-import { GROUPS, isPage, type Page, spendTotals, usd, waiting } from "@/lib/settings";
+import { countRender } from "@/lib/renders";
+import { GROUPS, isPage, type Page, usd } from "@/lib/settings";
 import { CalibratePage } from "./settings/calibrate";
 import { ConfigurationPage } from "./settings/configuration";
 import { IntegrationsPage } from "./settings/integrations";
@@ -20,32 +22,30 @@ import { RunsPage } from "./settings/runs";
 import { TaxonomyPage } from "./settings/taxonomy";
 import { TopicsPage } from "./settings/topics";
 
-/** What each page's hint says, and the count beside it in the sidebar (Needs you asks, yellow; a failed integration, red). */
+/** What each page's hint says, and the count beside it in the sidebar (Needs you asks, yellow; a failed integration,
+ * red), from the shell's summary: the pages' own reads never feed the sidebar. Empty before the first read. */
 function useHints(): Record<Page, { hint: string; count?: number; tone?: "ask" | "hot" }> {
-  const quality = useQuery(qualityQuery).data;
-  const sessions = useQuery(sessionsQuery).data;
-  const misses = useQuery(missesQuery).data;
-  const tree = useQuery(taxonomyQuery).data;
-  const cards = useQuery(integrationsQuery).data;
-  const open = quality ? waiting(quality) : 0;
-  const failing = cards?.filter((c) => c.enabled && c.failing) ?? [];
-  const { spent, budget } = spendTotals(quality?.cost ?? []);
+  const { data: h } = useQuery({ ...summaryQuery, select: (s) => s.settings });
+  const failing = h?.failing ?? [];
+  if (!h) return Object.fromEntries(GROUPS.flatMap((g) => g.pages).map((p) => [p.id, { hint: "" }])) as Record<Page, { hint: string }>;
   return {
     overview: { hint: "Recall, precision, reactions" },
-    needs: { hint: quality ? (open ? `${open} waiting` : "All settled") : "", count: open || undefined, tone: "ask" },
-    calibrate: { hint: sessions ? (sessions[0] ? `Last session ${rowDate(sessions[0].drawn_at)}` : "No session yet") : "" },
-    misses: { hint: misses ? (misses.length ? `${misses.length} reported` : "None reported") : "" },
-    topics: { hint: tree ? `${(tree.topics ?? []).length} followed` : "" },
-    taxonomy: { hint: tree ? `${tree.classes.length} classes` : "" },
-    runs: { hint: quality ? (budget ? `${usd(spent)} of ${usd(budget)} this month` : `${usd(spent)} this month`) : "" },
-    integrations: { hint: cards ? (failing.length ? `${failing.map((c) => c.name).join(", ")}: failed` : "Up to date") : "", count: failing.length || undefined, tone: "hot" },
+    needs: { hint: h.waiting ? `${h.waiting} waiting` : "All settled", count: h.waiting || undefined, tone: "ask" },
+    calibrate: { hint: h.last_session ? `Last session ${rowDate(h.last_session)}` : "No session yet" },
+    misses: { hint: h.misses ? `${h.misses} reported` : "None reported" },
+    topics: { hint: `${h.topics} followed` },
+    taxonomy: { hint: `${h.classes} classes` },
+    runs: { hint: h.budget ? `${usd(h.spent)} of ${usd(h.budget)} this month` : `${usd(h.spent)} this month` },
+    integrations: { hint: failing.length ? `${failing.join(", ")}: failed` : "Up to date", count: failing.length || undefined, tone: "hot" },
     configuration: { hint: "litwatch.toml, read-only" },
   };
 }
 
-/** The desktop sidebar while Settings is open: a way back to reading, then the index with its counts. */
-export function SettingsSide() {
+/** The desktop sidebar while Settings is open: a way back to reading, then the index with its counts. Memoised:
+ * the page changing under it re-renders only its active links. */
+export const SettingsSide = memo(function SettingsSide() {
   const hints = useHints();
+  countRender("settings-side");
   return (
     <aside className="side">
       <SideHead />
@@ -68,7 +68,7 @@ export function SettingsSide() {
       </nav>
     </aside>
   );
-}
+});
 
 /** The gear's landing: the phone's list of pages; the desktop goes straight to Overview. */
 export function SettingsIndex() {

@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
@@ -33,8 +34,12 @@ const quality = {
   collected: {},
   reactions: [],
 };
+const badge = { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" };
+/** The shell's summary with `waiting` things on Needs you. */
+const summaryOf = (waiting: number) => ({ status, topics: [badge], settings: { waiting, last_session: null, misses: 0, topics: 1, classes: 1, spent: 1.5, budget: 20, failing: [] } });
 const common = {
   "GET /api/status": status,
+  "GET /api/summary": summaryOf(4),
   "GET /api/topics": [{ depth: "focus", topics: [{ slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600", papers: 3, saved: 0, counts: {}, newest_must_read: null }] }],
   "GET /api/settings/taxonomy": tree,
   "GET /api/settings/taxonomy/stats": stats,
@@ -57,9 +62,11 @@ describe("Settings", () => {
 
   it("settles a split in place: the label is recorded, the item keeps its spot and the count drops", async () => {
     viewport(true);
-    const calls = scriptFetch({ ...common, "PUT /api/labels/mi/2610.00001": { saved: false }, "DELETE /api/labels/mi/2610.00001": { saved: false } });
+    const calls = scriptFetch({ ...common, "GET /api/summary": () => summaryOf(4 - calls.filter((c) => c.method === "PUT").length + calls.filter((c) => c.method === "DELETE").length), "PUT /api/labels/mi/2610.00001": { saved: false }, "DELETE /api/labels/mi/2610.00001": { saved: false } });
     renderApp("/settings/needs");
     expect(await screen.findByText("4 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    // The sidebar's count comes from the summary, refetched after the write; the node stays, its text changes.
+    const count = await within(screen.getByRole("link", { name: /Needs you/ })).findByText("4");
     const item = screen.getByText("A split paper").closest(".need")!;
     expect(item).toHaveTextContent("adjacent stands");
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "related" }));
@@ -70,7 +77,8 @@ describe("Settings", () => {
     const titles = screen.getAllByRole("link", { name: /paper$/ }).map((l) => l.textContent);
     expect(titles).toEqual(["A split paper", "A stuck paper", "A textless paper"]);
     expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("3");
+    await waitFor(() => expect(count).toHaveTextContent("3"));
+    expect(within(screen.getByRole("link", { name: /Needs you/ })).getByText("3")).toBe(count);
     // Tapping the label's segment again takes it back: the split waits once more, where it was.
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "related" }));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/labels/mi/2610.00001")).toBe(true));
@@ -79,8 +87,10 @@ describe("Settings", () => {
     expect(screen.getByText("4 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
-  it("keeps the visit's rows on the way back from a paper, and starts afresh on a link", async () => {
+  it("keeps the visit's rows on the way back, refetching a fresh visit behind them, and never refetches the sidebar on the way", async () => {
     viewport(true);
+    const renders: Record<string, number> = {};
+    (globalThis as { __renders?: Record<string, number> }).__renders = renders;
     const paper = { id: "2610.00002", title: "A stuck paper", authors: ["A"], abstract: "A.", published: "2026-10-13", version: 1, revision: 1, arxiv_url: "", pdf_url: "", source_url: "", in_collection: true, saved: false, topics: [], states: [], publication_by_owner: false, card_requestable: false };
     // The second read of /quality finds the failure gone and the split too, and lands only when told to.
     let reads = 0;
@@ -88,36 +98,50 @@ describe("Settings", () => {
     const later = { ...quality, night: { ...quality.night, splits: [], analysis_failed: [] } };
     const calls = scriptFetch({
       ...common,
+      "GET /api/summary": () => summaryOf(4 - calls.filter((c) => c.method === "POST").length),
       "GET /api/settings/quality": () => (++reads > 1 ? new Promise<typeof later>((r) => (land = () => r(later))) : quality),
+      "GET /api/settings/config": {},
       "GET /api/papers/2610.00002": paper,
       "POST /api/settings/analysis/2610.00002/retry": { saved: false },
     });
-    const { router } = renderApp("/settings/needs");
+    // The app's client keeps a page's read while no page shows it (the harness's drops it at once).
+    const { router } = renderApp("/settings/needs", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
     const item = (await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")!;
+    const needs = screen.getByRole("link", { name: /Needs you/ });
+    const count = await within(needs).findByText("4");
+    const sideRenders = renders["settings-side"]!;
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(item).toHaveClass("settled"));
-    const fetched = () => calls.filter((c) => c.url === "/api/settings/quality").length;
-    expect(fetched()).toBe(1);
+    const fetched = (url: string) => calls.filter((c) => c.url === url).length;
+    expect(fetched("/api/settings/quality")).toBe(1);
+    // The write refreshes the summary: the count changes in place, the node the same.
+    await waitFor(() => expect(count).toHaveTextContent("3"));
+    expect(fetched("/api/summary")).toBe(2);
     // To the paper and back: the settled row is still there, settled, with no fetch in between.
     await userEvent.click(screen.getByRole("link", { name: "A stuck paper" }));
     await screen.findByRole("heading", { name: "A stuck paper" });
     router.history.back();
     expect((await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")).toHaveClass("settled");
-    expect(fetched()).toBe(1);
-    // A Settings page reached by a link is a fresh visit: the reads load again, the sidebar's count with them, on a
-    // page that does not read /quality itself.
-    const needs = screen.getByRole("link", { name: /Needs you/ });
-    expect(within(needs).getByText("3")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("link", { name: /Taxonomy/ }));
-    await waitFor(() => expect(fetched()).toBe(2));
-    // Back before the read lands: the page waits for it rather than showing the old rows and swapping them.
+    expect(fetched("/api/settings/quality")).toBe(1);
+    // A link to a sibling page marks the page's read stale, nothing more: no page reads it, the sidebar is its own.
+    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
+    expect(fetched("/api/settings/quality")).toBe(1);
+    // Back: the cached rows show at once, the fresh read behind them; no "Loading…", a quiet "Updating…" instead.
     router.history.back();
-    expect(await screen.findByText("Loading…")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
+    const back = (await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")!;
+    expect(back).toHaveClass("settled");
+    expect(screen.queryByText("Loading…")).toBeNull();
+    await screen.findByText("Updating…");
+    expect(fetched("/api/settings/quality")).toBe(2);
     land();
-    expect(await screen.findByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
-    expect(within(needs).getByText("2")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull());
+    expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(screen.queryByText("Updating…")).toBeNull();
+    // Through all of it the sidebar read the summary once more, after the write, and did not render again.
+    expect(fetched("/api/summary")).toBe(2);
+    expect(within(needs).getByText("3")).toBe(count);
+    expect(renders["settings-side"]).toBe(sideRenders + 1);
   });
 
   it("lists a failed digest and writes it again, settling it in place with what came of it", async () => {
@@ -173,7 +197,6 @@ describe("Settings", () => {
     await waitFor(() => expect(item).toHaveClass("settled"));
     expect(item).toHaveTextContent("Running now, first in line, with three more runs.");
     expect(within(item as HTMLElement).queryByRole("button", { name: "Run it now" })).toBeNull();
-    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("3");
   });
 
   it("saves a topic only once something changed, then offers the re-run in place of Save", async () => {
@@ -210,6 +233,7 @@ describe("Settings", () => {
     const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items }, "PUT /api/settings/calibrate/1/items/1": { recorded: true } });
     const { router } = renderApp("/settings/calibrate/1");
     expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
     await userEvent.click(within(screen.getByRole("group", { name: "Fit for Mech interp" })).getByRole("button", { name: "related" }));
     await userEvent.click(screen.getByRole("button", { name: "matters" }));
     await userEvent.click(screen.getByRole("button", { name: "Next ›" }));
