@@ -40,8 +40,9 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
     names are roles; a rung's length depends on how many items are scanned at once.
 28. **Gists replace takes.** One Gist per paper, 20–30 words, about the paper and not any topic, for every paper in
     the collection; it replaces the per-topic take.
-29. **Briefs from the full text for Focus papers.** Central or related Focus papers get a Brief written from the full
-    text; others show the abstract. A Brief says when the full text does not support the abstract.
+29. **Briefs from the full text.** Central or related Focus papers, and Area pick candidates through their Weight
+    re-check, get a Brief written from the full text; papers without a written Brief show the abstract. A Brief says
+    when the full text does not support the abstract.
 30. **A hand-written taxonomy.** Every paper is sorted into a tree of classes, one primary and any secondary. The tree
     is written by hand, edited in Settings, applied forward.
 31. **Topics are followed classes.** Two concepts: the taxonomy (what a paper is) and topics (what the owner follows

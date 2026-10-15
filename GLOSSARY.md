@@ -131,9 +131,9 @@ paper gets a written Brief. A digest's is a short paragraph.
 _Avoid_: Take, one-liner, TL;DR
 
 **Brief** (L2):
-What the owner reads on opening a paper to decide whether to read it: the abstract, or for a paper that gets a
-full-text pass (a Focus paper at central or related, an Area pick candidate) a short account written from the full
-text.
+What the owner reads on opening a paper to decide whether to read it: the abstract, or a short account written from
+the full text by a Brief pass or a Weight re-check (for a Focus paper at central or related, an Area pick
+candidate).
 _Avoid_: Semi-deep, summary
 
 **Deep card** (L3):
