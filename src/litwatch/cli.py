@@ -138,11 +138,14 @@ def intake_archive(
 def nightly(
     fetch: Annotated[bool, typer.Option(help="Harvest arXiv first.")] = True,
     days: Annotated[int | None, typer.Option(help="Look back this many days.")] = None,
+    limit: Annotated[
+        int | None, typer.Option(help="At most this many papers per step (a trial run).")
+    ] = None,
     config: ConfigPath = None,
 ) -> None:
-    """The nightly run as the scheduler runs it: intake, for now."""
+    """The nightly run as the scheduler runs it: intake, classification and analysis."""
     cfg = configuration.load(config)
-    run_id = _run(lambda conn: nightly_job.run(conn, cfg, fetch=fetch, days=days))
+    run_id = _run(lambda conn: nightly_job.run(conn, cfg, fetch=fetch, days=days, limit=limit))
     run = _run(lambda conn: runs.get(conn, run_id))
     console.print(f"run {run_id}: cost ${run['cost']}")
     console.print_json(data=run["counts"])
@@ -350,7 +353,7 @@ def openapi(out: Annotated[Path, typer.Argument(help="Where to write the schema.
 
 @app.command()
 def ping(
-    role: Annotated[str, typer.Argument(help="classify, judge, check or writer")],
+    role: Annotated[str, typer.Argument(help="classify, analyse, judge, check or writer")],
     config: ConfigPath = None,
 ) -> None:
     """Send one small request through a role, to check its key, model and price."""

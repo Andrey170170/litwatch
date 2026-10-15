@@ -1,20 +1,24 @@
-"""Settings, the kitchen behind the gear: the taxonomy and its topics, Quality, Calibrate,
-runs, and the configuration (read-only, spec decision 11)."""
+"""Settings, the kitchen behind the gear: the taxonomy and its topics, Quality and the papers
+awaiting classification, Calibrate, runs, and the configuration (read-only, spec decision 11)."""
 
 from __future__ import annotations
 
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
+from litwatch import classification
 from litwatch.api.deps import Conn
-from litwatch.core import Taxonomy, Topic
+from litwatch.core import FAILED_RUNS, Paper, Taxonomy, Topic
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
-from litwatch.store import quality
+from litwatch.store import failures, quality
+from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 
 router = APIRouter(prefix="/api/settings")
@@ -79,11 +83,92 @@ async def quality_page(c: Conn) -> dict[str, Any]:
             "run": night["id"] if night else None,
             "error": night["error"] if night else None,
             "splits": await quality.splits_since(c, since),
+            # Classification failed three runs in a row: these wait for the owner.
+            "awaiting_classification": await failures.stuck(c, "classification", FAILED_RUNS),
+            # Analysis failed three runs in a row; it is tried again every run.
+            "analysis_failed": await failures.stuck(c, "analysis", FAILED_RUNS),
         },
         "calibration": await calibrate.precision(c),
         "matters_no_topic": await calibrate.matters_no_topic(c),
         "collected": await quality.collected_reactions(c),
     }
+
+
+# -- papers classification kept failing on (pipeline.md, section 9) -------------------------------
+
+
+class Awaiting(BaseModel):
+    """What every action on a paper awaiting classification names: the paper revision the
+    owner saw on Quality. The action applies only to that text."""
+
+    revision: int
+
+
+@asynccontextmanager
+async def _awaiting(c: Any, paper_id: str, revision: int) -> AsyncIterator[Paper]:
+    """The paper, locked to the end of the action's transaction, if it is still awaiting
+    classification at `revision`; 409 if its text changed or it no longer waits (a nightly
+    rewrite, another action). Eligibility is read after the lock, in the transaction that
+    acts."""
+    async with c.transaction():
+        paper = await papers_store.lock(c, paper_id)
+        if paper is None:
+            raise HTTPException(status_code=404, detail="no such paper")
+        if paper.revision != revision:
+            raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
+        if not await failures.waiting(c, paper, "classification", FAILED_RUNS):
+            raise HTTPException(status_code=409, detail="not awaiting classification")
+        yield paper
+
+
+@router.post("/classification/{paper_id:path}/dismiss", status_code=204)
+async def dismiss(paper_id: str, body: Awaiting, c: Conn) -> None:
+    """Litwatch drops the paper from processing; it stays searchable in the archive."""
+    async with _awaiting(c, paper_id, body.revision):
+        await papers_store.dismiss(c, paper_id)
+
+
+class ClassesIn(Awaiting):
+    classes: list[str]  # class slugs, the primary one first unless `primary` names it
+    primary: str | None = None
+
+
+@router.put("/classification/{paper_id:path}")
+async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
+    """The owner names the paper's classes, which go on as usual with source `owner`."""
+    # The taxonomy is read in the action's transaction, so its shared lock holds the tree still
+    # until the classification is recorded; and before the paper's lock, since locks are
+    # taken taxonomy first (`feedback.word.lock`).
+    async with c.transaction():
+        tree = await taxonomy_store.load(c)
+        if tree is None:
+            raise HTTPException(status_code=409, detail="no taxonomy")
+        async with _awaiting(c, paper_id, body.revision) as paper:
+            try:
+                await classification.by_hand(c, paper, tree, body.classes, body.primary)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "classes": list(dict.fromkeys(body.classes)),
+        "primary": body.primary or body.classes[0],
+    }
+
+
+class CorrectionIn(Awaiting):
+    title: str | None = None
+    abstract: str | None = None
+
+
+@router.post("/classification/{paper_id:path}/correction", status_code=204)
+async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
+    """Fix the text classification choked on. It counts as a rewrite: the next run classifies
+    the corrected paper."""
+    title = (body.title or "").strip() or None
+    abstract = (body.abstract or "").strip() or None
+    if not (title or abstract):
+        raise HTTPException(status_code=422, detail="give a title or an abstract")
+    async with _awaiting(c, paper_id, body.revision):
+        await papers_store.correct(c, paper_id, title, abstract)
 
 
 # -- calibrate -------------------------------------------------------------------------------------

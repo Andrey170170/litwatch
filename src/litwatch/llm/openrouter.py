@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx2  # the HTTP client this SDK is built on
 import openai
 from openai import AsyncOpenAI
 from openai.lib._pydantic import to_strict_json_schema
@@ -195,6 +196,9 @@ class OpenRouterProvider:
         try:
             return await pending
         except openai.APITimeoutError as exc:
+            if isinstance(exc.__cause__, httpx2.ConnectTimeout):
+                # The connection never opened, so nothing was sent: worth another attempt.
+                raise ProviderError("APITimeoutError while connecting", transient=True) from exc
             raise ProviderError(type(exc).__name__, timeout=True) from exc
         # OpenRouter answers 404 when a model's only provider has no endpoint up, which the
         # SDK never retries.

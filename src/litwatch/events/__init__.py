@@ -12,6 +12,10 @@ from litwatch.core import Event
 
 PAPER_ADDED = "paper.added"
 PAPER_REVISED = "paper.revised"
+# Classification recorded the paper's classes for its current text, by the classifier or by hand.
+PAPER_CLASSIFIED = "paper.classified"
+# A Gist was written for the paper: from the abstract by analysis, from the full text later.
+GIST_WRITTEN = "gist.written"
 VERDICT_RECORDED = "verdict.recorded"
 # A paper's effective grade for a Focus topic changed, by a verdict or the owner's word.
 GRADE_CHANGED = "grade.changed"

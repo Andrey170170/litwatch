@@ -977,6 +977,144 @@
         }
       }
     },
+    "/api/settings/classification/{paper_id}/dismiss": {
+      "post": {
+        "summary": "Dismiss",
+        "description": "Litwatch drops the paper from processing; it stays searchable in the archive.",
+        "operationId": "dismiss_api_settings_classification__paper_id__dismiss_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Awaiting"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/classification/{paper_id}": {
+      "put": {
+        "summary": "Classify By Hand",
+        "description": "The owner names the paper's classes, which go on as usual with source `owner`.",
+        "operationId": "classify_by_hand_api_settings_classification__paper_id__put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassesIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Classify By Hand Api Settings Classification  Paper Id  Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/classification/{paper_id}/correction": {
+      "post": {
+        "summary": "Correct",
+        "description": "Fix the text classification choked on. It counts as a rewrite: the next run classifies\nthe corrected paper.",
+        "operationId": "correct_api_settings_classification__paper_id__correction_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/calibrate": {
       "get": {
         "summary": "Sessions",
@@ -1556,6 +1694,20 @@
         "title": "Answer",
         "description": "One paper's answers. Fit for the topic it was drawn or taken for is required."
       },
+      "Awaiting": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "title": "Awaiting",
+        "description": "What every action on a paper awaiting classification names: the paper revision the\nowner saw on Quality. The action applies only to that text."
+      },
       "BibtexFilter": {
         "properties": {
           "q": {
@@ -1788,6 +1940,73 @@
         ],
         "title": "CitedIn",
         "description": "A paper outside the collection, as a search hit gives it: enough for an arXiv entry."
+      },
+      "ClassesIn": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision",
+          "classes"
+        ],
+        "title": "ClassesIn"
+      },
+      "CorrectionIn": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstract"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "title": "CorrectionIn"
       },
       "DeepCard": {
         "properties": {
@@ -3344,6 +3563,7 @@
               "none",
               "running",
               "failed",
+              "attention",
               "quiet"
             ],
             "title": "State"
@@ -3393,6 +3613,11 @@
               }
             ],
             "title": "Error"
+          },
+          "awaiting_classification": {
+            "type": "integer",
+            "title": "Awaiting Classification",
+            "default": 0
           }
         },
         "type": "object",
@@ -3400,7 +3625,7 @@
           "state"
         ],
         "title": "Status",
-        "description": "The latest nightly run: none yet, running, failed, or finished without an error."
+        "description": "The latest nightly run: none yet, running, failed, or finished without an error, with\npapers waiting for the owner (`attention`) or not (`quiet`)."
       },
       "litwatch__core__types__Status": {
         "type": "string",

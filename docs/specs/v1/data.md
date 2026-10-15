@@ -37,10 +37,13 @@ evaluation calls the same functions and writes only to evaluation tables.
   `topic_versions`, and following it again continues from the last one. A class taken out of the tree is retired, its
   row kept; putting the same slug back brings it back, with its memberships.
 - `classifications` (paper, paper revision, taxonomy revision, primary class, the decision response with every class's
-  probability, model, at) and `memberships` (paper, class, paper revision, class version, source classifier |
+  probability, model, at; the taxonomy revision is the hash of every class's version in tree order, which is what the
+  request is built from) and `memberships` (paper, class, paper revision, class version, source classifier |
   uncertain | keyword | owner | miss, member yes | no, probability): direct memberships only, a "no" being the
   owner's class label removing the paper from a class; inherited ones come from the tree, and
-  the classifier's raw outcome stays in `classifications` whatever the owner says.
+  the classifier's raw outcome stays in `classifications` whatever the owner says. Memberships are the
+  current projection, replaced by each classification; their history is `classifications`, whose probabilities replay
+  any threshold.
 - `analyses` (paper, paper revision, gist, weight, weight reason, facets, model, at).
 - `weights` (paper, paper revision, weight, source abstract | full_text, pass, reason, at): the current Weight is the
   one from the full-text pass queued last for the current revision, the same pass as the current Brief and Gist, else
@@ -100,9 +103,10 @@ The first v1 had no reactions, misses or take ratings to map.
 `litwatch.toml` stays the source of truth and read-only in the web app (first v1, decision 11). Changed sections:
 
 ```toml
-[models.classify]          # decision model
+[models.classify]          # decision model, chosen in N1
 provider = "openrouter"
-model = "openai/gpt-6-luna-decisions"
+model = "typesafe/jev-1.13"
+decisions = true           # OpenRouter's Decisions endpoint
 
 [models.analyse]
 provider = "anthropic"
@@ -132,9 +136,10 @@ model = "claude-opus-5-5"
 provider = "anthropic"
 model = "claude-opus-5-5"
 
-[classification]
-default_threshold = 0.5
-uncertain_floor = 0.2
+[classification]           # chosen in N1
+default_threshold = 0.8    # a class without its own threshold
+focus_threshold = 0.5      # a class at or under a Focus topic
+uncertain_floor = 0.1
 
 [archive]                  # required
 url = "http://archive:8787"

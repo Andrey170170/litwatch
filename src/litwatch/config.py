@@ -15,7 +15,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-ROLES = ("classify", "judge", "check", "writer")
+from litwatch.core.classification import CHOSEN, Thresholds
+
+ROLES = ("classify", "analyse", "judge", "check", "writer")
 
 
 class _Section(BaseModel):
@@ -60,6 +62,7 @@ class Models(_Section):
     classify: RoleConfig = RoleConfig(
         provider="openrouter", model="typesafe/jev-1.13", decisions=True
     )
+    analyse: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5")
     judge: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
     check: RoleConfig = RoleConfig(
         provider="openrouter", model="meta/muse-spark-1.3-contributor", effort="high"
@@ -84,6 +87,27 @@ class Intake(_Section):
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     # Nightly runs look back a few days so announcement lag and outages overlap.
     window_days: int = Field(default=3, gt=0)
+
+
+class Classification(_Section):
+    """Where membership is drawn for classes without a threshold of their own (pipeline.md,
+    section 2); the defaults were chosen in N1."""
+
+    default_threshold: float = Field(default=CHOSEN.default, gt=0, lt=1)
+    focus_threshold: float = Field(default=CHOSEN.focus, gt=0, lt=1)  # at or under a Focus topic
+    uncertain_floor: float = Field(default=CHOSEN.floor, gt=0, lt=1)
+
+    @model_validator(mode="after")
+    def _floor_below(self) -> Classification:
+        if self.uncertain_floor >= min(self.default_threshold, self.focus_threshold):
+            raise ValueError("uncertain_floor must be below both thresholds")
+        return self
+
+    @property
+    def thresholds(self) -> Thresholds:
+        return Thresholds(
+            default=self.default_threshold, focus=self.focus_threshold, floor=self.uncertain_floor
+        )
 
 
 def system_zone() -> tzinfo:
@@ -143,6 +167,7 @@ class Schedule(_Section):
 class Config(_Section):
     intake: Intake = Intake()
     models: Models = Models()
+    classification: Classification = Classification()
     schedule: Schedule = Schedule()
     integrations: dict[str, dict] = Field(default_factory=dict)
 

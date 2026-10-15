@@ -132,6 +132,7 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
         "started_at": None,
         "finished_at": None,
         "error": None,
+        "awaiting_classification": 0,
     }
     await conn.execute("INSERT INTO runs (kind) VALUES ('nightly')")
     assert (await client.get("/api/status")).json()["state"] == "running"

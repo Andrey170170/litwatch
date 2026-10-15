@@ -47,7 +47,7 @@ async def lock_shared(conn: psycopg.AsyncConnection) -> None:
     await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (TAXONOMY_LOCK,))
 
 
-def _class(row: dict[str, Any]) -> TaxonomyClass:
+def row_to_class(row: dict[str, Any]) -> TaxonomyClass:
     return TaxonomyClass(
         slug=row["slug"],
         name=row["name"],
@@ -92,7 +92,7 @@ async def load(conn: psycopg.AsyncConnection) -> Taxonomy | None:
         ).fetchall()
         if not rows:
             return None
-        return Taxonomy(classes=[_class(r) for r in rows], topics=await topics(conn))
+        return Taxonomy(classes=[row_to_class(r) for r in rows], topics=await topics(conn))
 
 
 async def _latest(conn: psycopg.AsyncConnection, table: str) -> dict[str, dict[str, Any]]:

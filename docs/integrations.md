@@ -106,7 +106,9 @@ Every event below carries the paper's id in `paper_id`.
 | Type | When | Payload |
 | --- | --- | --- |
 | `paper.added` | Intake stored a paper new to the collection | `version`: arXiv version or null; `source`: where intake read it (`oai`, `atom`, `archive`) |
-| `paper.revised` | A stored paper got a new arXiv version, or arXiv rewrote its title or abstract | `version`, `previous_version`, `rewritten`: bool, `source` |
+| `paper.revised` | A stored paper got a new arXiv version, or its title or abstract was rewritten (by arXiv, or corrected by the owner) | `version`, `previous_version`, `rewritten`: bool, `source`; an owner's correction has `rewritten: true, corrected: true` and no versions or source |
+| `paper.classified` | Classification recorded the paper's classes for its current text, by the classifier or by the owner's hand | `revision`: the paper revision; `primary`: the primary class; `classes`: the classes it is now a direct member of, the owner's class labels applied; `by_owner`: bool |
+| `gist.written` | A Gist was written for the paper (from the abstract by analysis; from the full text later) | `revision`, `source`: `abstract` or `full_text`, `gist_id` |
 | `verdict.recorded` | Grading recorded a verdict for a Focus topic | `topic`, `grade`, `split`: bool, `verdict_id` |
 | `grade.changed` | A paper's effective grade for a Focus topic changed, by a verdict or the owner's word | `topic`, `before`, `after`: `must_read`, `relevant`, `adjacent`, `none` or null |
 | `paper.saved` | The paper entered the library | none |
