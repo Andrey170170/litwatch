@@ -1,0 +1,525 @@
+"""Digests: the arXiv listing a paper belongs to, which papers are due for each depth's digests,
+quiet days, a published digest as a record, the bounded wait before them, failed digests, the
+voice check, and the Digest tab's API. The `writer` role is scripted."""
+
+import asyncio
+import json
+import re
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+
+import httpx
+import pytest
+
+from litwatch import digests, fulltext
+from litwatch.api import create_app
+from litwatch.config import Config, Digests
+from litwatch.core import Label, LabelValue, Status
+from litwatch.core.digests import listing_day, voice_problems
+from litwatch.digests import writer
+from litwatch.feedback import word
+from litwatch.jobs import nightly
+from litwatch.jobs.context import model_run
+from litwatch.llm import Gateway, ProviderError
+from litwatch.store import digests as store_
+from litwatch.store import papers as papers_store
+from litwatch.store import reading, runs, verdicts
+from litwatch.store import taxonomy as taxonomy_store
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
+from tests.fakes import ScriptedProvider
+from tests.test_reading import analyse, classify, grade
+
+TUE, WED, THU, SAT = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8), date(2026, 10, 10)
+MON = date(2026, 10, 5)
+TOKEN = "t"
+P = paper("2610.00001", title="Traces that hide steps")
+Q = paper("2610.00002", title="A near neighbour")
+R = paper("2610.00003", title="A distant cousin")
+S = paper("2610.00004", title="Late to the party")
+
+
+class Writer:
+    """The `writer` role, scripted: a valid answer built from the request's answer model (the
+    first candidates as picks), or each of `failures` raised in turn first."""
+
+    def __init__(self) -> None:
+        self.failures: list[Exception] = []
+        self.asked: list[str] = []
+
+    def respond(self, role, request) -> str:
+        self.asked.append(request.user)
+        if self.failures:
+            raise self.failures.pop(0)
+        out = request.output
+        answer = {"text": " ".join(["Probes recover hidden steps."] * 20), "gist": "words " * 40}
+        if issubclass(out, writer.Picked):
+            n = out.picks_range[1] if out.picks_range[0] else min(1, out.picks_range[1])
+            picks = sorted(out.candidates)[:n]
+            answer |= {"picks": [{"paper": p, "why": "It stands out."} for p in picks]}
+            answer["mentioned"] = []
+        if issubclass(out, writer.FocusWeek):
+            answer["recalled"] = next(iter(sorted(out.papers)), None)
+        return json.dumps(answer)
+
+    def gateway(self, config: Config, journal) -> Gateway:
+        providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
+        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+
+
+@pytest.fixture
+async def db(conn):
+    await taxonomy_store.save(conn, TREE)
+    await papers_store.upsert(conn, [P, Q, R, S])
+    return conn
+
+
+async def listed(conn, day: date, *papers) -> None:
+    await conn.execute(
+        "UPDATE papers SET announced = %s WHERE id = ANY(%s)", (day, [p.id for p in papers])
+    )
+
+
+async def focus(conn, p, fit: str) -> None:
+    """Graded on the Focus topic at `fit`."""
+    await classify(conn, p, FAITH.slug)
+    await analyse(conn, p)
+    await grade(conn, p, fit)
+
+
+async def area(conn, p, fit: str, weight: str = "solid") -> None:
+    """A member of the Area topic's class, graded there at `fit`, grading finished."""
+    await classify(conn, p, INTERP.slug)
+    await analyse(conn, p, weight)
+    await grade(conn, p, fit, INTERP)
+    await verdicts.passed(conn, [(p.id, 1)])
+
+
+async def day(conn, w: Writer, on: date, config: Config | None = None) -> bool:
+    tree = await taxonomy_store.load(conn)
+    async with model_run(conn, config or Config(), "digests", gateway=w.gateway) as run:
+        return await digests.write_day(conn, run, tree, on)
+
+
+async def week(conn, w: Writer, monday: date) -> None:
+    tree = await taxonomy_store.load(conn)
+    async with model_run(conn, Config(), "digests", gateway=w.gateway) as run:
+        await digests.write_week(conn, run, tree, monday)
+
+
+async def shown(conn, topic: str, period: str, on: date) -> tuple[str, list[tuple[str, str]]]:
+    """The digest's state, and its papers with their roles in its order."""
+    row = await (
+        await conn.execute(
+            "SELECT id, state FROM digests WHERE topic = %s AND period = %s AND day = %s",
+            (topic, period, on),
+        )
+    ).fetchone()
+    if row is None:
+        return None, []
+    return row["state"], [
+        (p["paper_id"], p["role"]) for p in await store_.papers_of(conn, row["id"])
+    ]
+
+
+# -- the listing a paper belongs to ----------------------------------------------------------------
+
+
+def eastern(day: date, hour: int, minute: int = 0) -> datetime:
+    from litwatch.core.digests import ARXIV_ZONE  # noqa: PLC0415
+
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=ARXIV_ZONE)
+
+
+def test_a_paper_is_listed_the_weekday_after_the_deadline_it_made():
+    assert listing_day(eastern(MON, 13, 59)) == TUE
+    assert listing_day(eastern(MON, 14, 0)) == WED
+    assert listing_day(eastern(date(2026, 10, 9), 15)) == date(2026, 10, 13)  # Fri late: Tue
+    assert listing_day(eastern(SAT, 10)) == date(2026, 10, 13)
+    assert listing_day(MON) == TUE  # a date alone is taken as before its deadline
+    # 18:30 UTC is 14:30 Eastern in October (late), 13:30 in December (in time).
+    assert listing_day(datetime(2026, 10, 5, 18, 30, tzinfo=UTC)) == WED
+    assert listing_day(datetime(2026, 12, 7, 18, 30, tzinfo=UTC)) == date(2026, 12, 8)
+
+
+async def test_the_migration_dates_stored_papers_as_the_code_does(conn):
+    """0024 backfills `announced` in SQL; it agrees with `core.digests.announced`."""
+    late = paper("2610.00011", version_history=[{"version": 1, "date": "2026-10-05T18:30:00Z"}])
+    early = paper("2610.00012", version_history=[{"version": 1, "date": "2026-10-05T17:00:00Z"}])
+    weekend = paper("2610.00013", version_history=[{"version": 1, "date": "2026-10-10T12:00:00Z"}])
+    friday = paper("2610.00014", published="2026-10-09")
+    found = [late, early, weekend, friday]
+    await papers_store.upsert(conn, found)
+    by_code = {
+        r["id"]: r["announced"]
+        for r in await (await conn.execute("SELECT id, announced FROM papers")).fetchall()
+    }
+    assert by_code == {
+        late.id: WED,
+        early.id: TUE,
+        weekend.id: date(2026, 10, 13),
+        friday.id: date(2026, 10, 12),
+    }
+    sql = Path("src/litwatch/store/migrations/0024_digests.sql").read_text()
+    backfill = re.search(r"WITH submitted AS .*?;", sql, re.S).group(0)
+    await conn.execute("UPDATE papers SET announced = NULL")
+    await conn.execute(backfill)
+    by_sql = {
+        r["id"]: r["announced"]
+        for r in await (await conn.execute("SELECT id, announced FROM papers")).fetchall()
+    }
+    assert by_sql == by_code
+
+
+# -- due, per depth --------------------------------------------------------------------------------
+
+
+async def test_a_focus_daily_lists_central_then_related_and_each_paper_once(db):
+    w = Writer()
+    await focus(db, P, "related")
+    await focus(db, Q, "central")
+    await focus(db, R, "adjacent")
+    await listed(db, TUE, P, Q, R)
+    assert await day(db, w, TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == (
+        "written",
+        [(Q.id, "listed"), (P.id, "listed")],
+    )
+    # The next day lists only what became due since; P and Q were announced already.
+    await focus(db, S, "central")
+    await listed(db, WED, S)
+    await day(db, w, WED)
+    assert await shown(db, FAITH.slug, "day", WED) == ("written", [(S.id, "listed")])
+
+
+async def test_the_owners_word_never_makes_a_paper_due(db):
+    await focus(db, P, "adjacent")
+    await listed(db, TUE, P)
+    label = Label(paper_id=P.id, topic=FAITH.slug, value=LabelValue.CENTRAL, origin="reader")
+    await word.label(db, label)
+    await day(db, Writer(), TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
+
+
+async def test_a_late_paper_is_in_the_next_daily_with_its_own_listing_day(db):
+    """Graded after Tuesday's digest (its grading failed that night), P is due on Wednesday."""
+    w = Writer()
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    await focus(db, P, "central")
+    await listed(db, WED, S)
+    await day(db, w, WED)
+    assert await shown(db, FAITH.slug, "day", WED) == ("written", [(P.id, "listed")])
+    assert "(listed Tue 6 Oct 2026)" in w.asked[-1]
+
+
+async def test_an_area_must_read_waits_for_its_weight_recheck(db):
+    """Graded must read from its abstract, P waits for the re-check its grading queued; Q,
+    relevant, does not. Once the re-check is done P is due, and a pick candidate."""
+    w = Writer()
+    await area(db, P, "central")  # central and solid: must read
+    await area(db, Q, "related")  # related and solid: relevant
+    await listed(db, TUE, P, Q)
+    checks = await (
+        await db.execute("SELECT kind, state FROM fulltext_passes WHERE paper_id = %s", (P.id,))
+    ).fetchall()
+    assert ("weight", "awaiting_text") in {(c["kind"], c["state"]) for c in checks}
+    await day(db, w, TUE)
+    assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(Q.id, "listed")])
+    await db.execute("UPDATE fulltext_passes SET state = 'done' WHERE paper_id = %s", (P.id,))
+    await listed(db, WED, S)
+    await day(db, w, WED)
+    assert await shown(db, INTERP.slug, "day", WED) == ("written", [(P.id, "pick")])
+
+
+async def test_a_terminal_recheck_makes_the_paper_due_on_its_abstract_weight(db):
+    await area(db, P, "central")
+    await listed(db, TUE, P)
+    await db.execute(
+        "UPDATE fulltext_passes SET state = 'failed', failed_runs = 3 WHERE paper_id = %s",
+        (P.id,),
+    )
+    await day(db, Writer(), TUE)
+    assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(P.id, "pick")])
+
+
+async def test_an_area_paper_waits_while_its_grading_is_unfinished(db):
+    await classify(db, P, INTERP.slug)
+    await analyse(db, P)
+    await listed(db, TUE, P)
+    await day(db, Writer(), TUE)  # classified, not graded yet: no grading pass
+    assert await shown(db, INTERP.slug, "day", TUE) == ("nothing_new", [])
+
+
+async def test_a_field_paper_is_due_until_a_weekly_digest_covers_it(db):
+    w = Writer()
+    for p in (P, Q):
+        await classify(db, p, AGENTS.slug)
+        await analyse(db, p)
+        await grade(db, p, "related", AGENTS)
+        await verdicts.passed(db, [(p.id, 1)])
+    await listed(db, TUE, P)
+    await listed(db, date(2026, 10, 13), Q)
+    await week(db, w, MON)
+    state, papers = await shown(db, AGENTS.slug, "week", MON)
+    assert (state, {p for p, _ in papers}) == ("written", {P.id})
+    assert len([p for p, role in papers if role == "pick"]) == 1  # min(3, the week's papers)
+    await week(db, w, date(2026, 10, 12))
+    assert {p for p, _ in (await shown(db, AGENTS.slug, "week", date(2026, 10, 12)))[1]} == {Q.id}
+
+
+async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_paper(db):
+    w = Writer()
+    await focus(db, P, "central")
+    await listed(db, date(2026, 9, 29), P)  # the week before
+    await day(db, w, date(2026, 9, 29))
+    await focus(db, Q, "central")
+    await focus(db, R, "related")
+    await listed(db, TUE, Q)
+    await listed(db, THU, R)
+    await day(db, w, TUE)
+    await day(db, w, THU)
+    await week(db, w, MON)
+    state, papers = await shown(db, FAITH.slug, "week", MON)
+    assert (state, papers) == ("written", [(Q.id, "listed"), (R.id, "listed"), (P.id, "mentioned")])
+    row = await (
+        await db.execute(
+            "SELECT counts FROM digests WHERE topic = %s AND period = 'week'", (FAITH.slug,)
+        )
+    ).fetchone()
+    assert row["counts"]["papers"] == 2  # the paper brought back is not the week's
+
+
+# -- quiet days and records ------------------------------------------------------------------------
+
+
+async def test_a_day_without_a_listing_has_no_digests_and_a_quiet_topic_says_nothing_new(db):
+    w = Writer()
+    assert not await day(db, w, SAT)
+    assert (await (await db.execute("SELECT count(*) AS n FROM digests")).fetchone())["n"] == 0
+    await area(db, P, "related")
+    await listed(db, TUE, P)
+    assert await day(db, w, TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
+    assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(P.id, "listed")])
+    assert len(w.asked) == 1  # nothing new is written without a call
+
+
+async def test_a_paused_topic_gets_no_digest(db):
+    paused = TREE.following(FAITH.model_copy(update={"status": Status.PAUSED}))
+    await taxonomy_store.save(db, paused)
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, Writer(), TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == (None, [])
+
+
+async def test_a_published_digest_is_a_record_but_for_the_set_aside_mark(db):
+    w = Writer()
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    before = await db.execute("SELECT * FROM digests WHERE topic = %s", (FAITH.slug,))
+    before = await before.fetchone()
+    # The owner sets P aside; a re-run of the day rewrites nothing.
+    label = Label(paper_id=P.id, topic=FAITH.slug, value=LabelValue.ADJACENT, origin="reader")
+    await word.label(db, label)
+    await day(db, w, TUE)
+    after = await (
+        await db.execute("SELECT * FROM digests WHERE topic = %s", (FAITH.slug,))
+    ).fetchone()
+    assert after == before and len(w.asked) == 1
+    [shown_p] = await store_.papers_of(db, before["id"])
+    assert (shown_p["fit"], shown_p["grade"], shown_p["set_aside"]) == (
+        "central",
+        "must_read",
+        True,
+    )
+
+
+# -- failed digests --------------------------------------------------------------------------------
+
+
+async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(db):
+    w = Writer()
+    w.failures = [ProviderError("down")]
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"
+    assert await store_.count_failed(db) == 1
+    # Wednesday's run writes Tuesday's again first, so Wednesday's does not take P.
+    await focus(db, Q, "central")
+    await listed(db, WED, Q)
+    tree = await taxonomy_store.load(db)
+    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+        await digests.nightly(db, run, tree, WED)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
+    assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
+    assert await store_.count_failed(db) == 0
+
+
+async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db):
+    w = Writer()
+    w.failures = [ProviderError("down")]
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    await runs.finish(db, await runs.start(db, "nightly"))
+    status = await reading.status(db)
+    assert (status["state"], status["digests_failed"]) == ("attention", 1)
+    await taxonomy_store.save(
+        db, TREE.following(FAITH.model_copy(update={"status": Status.PAUSED}))
+    )
+    status = await reading.status(db)
+    assert (status["state"], status["digests_failed"]) == ("quiet", 0)
+    tree = await taxonomy_store.load(db)
+    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+        await digests.retry_failed(db, run, tree)
+    assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"  # not written while paused
+
+
+async def test_an_answer_naming_a_paper_that_is_not_a_candidate_fails_the_digest(db):
+    class Wrong(Writer):
+        def respond(self, role, request) -> str:
+            answer = json.loads(super().respond(role, request))
+            answer["picks"] = [{"paper": "2610.99999", "why": "Made up."}]
+            return json.dumps(answer)
+
+    await area(db, P, "central")
+    await db.execute("UPDATE fulltext_passes SET state = 'done' WHERE paper_id = %s", (P.id,))
+    await listed(db, TUE, P)
+    await day(db, Wrong(), TUE)
+    assert (await shown(db, INTERP.slug, "day", TUE))[0] == "failed"
+
+
+# -- the bounded wait ------------------------------------------------------------------------------
+
+
+class Archive:
+    async def aclose(self) -> None:
+        pass
+
+
+async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db, monkeypatch):
+    await focus(db, P, "central")  # queues P's Brief
+    since = datetime.now(UTC) - timedelta(minutes=1)
+    worked = []
+
+    async def work(conn, config, archive, run=None):
+        worked.append(1)
+        if len(worked) == 2:
+            await conn.execute("UPDATE fulltext_passes SET state = 'done'")
+        return {}
+
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
+    monkeypatch.setattr(fulltext, "work", work)
+    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
+        assert await store_.waiting_passes(db, since) == 1
+        await nightly.wait_for_texts(db, Config(), run, since, nightly.time.monotonic(), 0.01)
+    assert len(worked) == 2 and "digest_wait_ended" not in run.counts
+
+
+async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, monkeypatch):
+    await focus(db, P, "central")
+    since = datetime.now(UTC) - timedelta(minutes=1)
+
+    async def work(conn, config, archive, run=None):
+        return {}
+
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
+    monkeypatch.setattr(fulltext, "work", work)
+    config = Config(digests=Digests(wait_minutes=0.001))
+    async with model_run(db, config, "nightly", gateway=Writer().gateway) as run:
+        wait = nightly.wait_for_texts(db, config, run, since, nightly.time.monotonic(), 0.01)
+        await asyncio.wait_for(wait, 5)  # the pass never finishes: only the bound ends it
+    assert run.counts["digest_wait_ended"] == 1
+    # A pass that failed in this run is not waited for: it is tried on the next one.
+    await db.execute("UPDATE fulltext_passes SET state = 'failed', failed_runs = 1")
+    assert await store_.waiting_passes(db, since) == 0
+
+
+# -- the voice check -------------------------------------------------------------------------------
+
+
+def test_the_voice_check_names_each_rule_broken_and_spares_titles():
+    assert voice_problems("Required reading for agent builders: you will like it.") == [
+        "addresses the reader",
+        "names an audience",
+        "advises reading",
+    ]
+    assert voice_problems("It is a must read.") == ["names a grade"]
+    text = "Attention Is All You Need set the architecture the papers build on."
+    assert voice_problems(text, ["Attention Is All You Need"]) == []
+
+
+# -- the Digest tab --------------------------------------------------------------------------------
+
+
+def client(conn, w: Writer) -> httpx.AsyncClient:
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    app = create_app(dsn, TOKEN, Config(), gateway=w.gateway)
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+
+
+async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db):
+    w = Writer()
+    await focus(db, P, "central")
+    await area(db, Q, "related")
+    await listed(db, TUE, P, Q)
+    await day(db, w, TUE)
+    await week(db, w, MON)
+    async with client(db, w) as http:
+        today = (await http.get(f"/api/digests/days/{TUE}")).json()
+        assert today["released"] and [d["topic"]["slug"] for d in today["digests"]] == [
+            FAITH.slug,
+            INTERP.slug,
+        ]
+        card = today["digests"][0]
+        assert (card["state"], card["counts"]["central"], card["more"]) == ("written", 1, 0)
+        assert [p["id"] for p in card["papers"]] == [P.id]
+        assert (today["previous"], today["next"]) == (None, None)
+        sat = (await http.get(f"/api/digests/days/{SAT}")).json()
+        assert (sat["released"], sat["digests"], sat["previous"]) == (False, [], str(TUE))
+        monday = (await http.get(f"/api/digests/days/{date(2026, 10, 12)}")).json()
+        assert monday["weekly"] == str(MON)
+        weekly = (await http.get(f"/api/digests/weeks/{THU}")).json()
+        assert weekly["monday"] == str(MON)
+        assert [d["topic"]["slug"] for d in weekly["digests"]] == [
+            FAITH.slug,
+            INTERP.slug,
+            AGENTS.slug,
+        ]
+        history = (await http.get("/api/digests", params={"since": MON, "until": SAT})).json()
+        assert [d["day"] for d in history["days"]][:2] == [str(SAT), str(date(2026, 10, 9))]
+        assert [len(d["marks"]) for d in history["days"] if d["day"] == str(TUE)] == [2]
+        assert [len(x["marks"]) for x in history["weeks"]] == [3]
+        assert history["start"] == str(MON)
+        wide = {"since": "2026-01-01", "until": str(SAT)}
+        assert (await http.get("/api/digests", params=wide)).status_code == 422
+        full = (await http.get(f"/api/digests/{card['id']}")).json()
+        assert full["text"] and [p["role"] for p in full["papers"]] == ["listed"]
+        topics = (await http.get("/api/topics")).json()
+        assert [len(t["strip"]) for g in topics for t in g["topics"]] == [1, 1, 1]
+        assert (await http.get("/api/digests/999999")).status_code == 404
+
+
+async def test_a_failed_digest_is_written_again_at_the_owners_word(db):
+    w = Writer()
+    w.failures = [ProviderError("down")]
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    async with client(db, w) as http:
+        today = (await http.get(f"/api/digests/days/{TUE}")).json()
+        failed = today["digests"][0]
+        assert failed["state"] == "failed"
+        quality = (await http.get("/api/settings/quality")).json()
+        assert [d["id"] for d in quality["night"]["digests"]] == [failed["id"]]
+        again = await http.post(f"/api/digests/{failed['id']}/write")
+        assert (again.status_code, again.json()["state"]) == (200, "written")
+        assert [p["id"] for p in again.json()["papers"]] == [P.id]
+        assert (await http.post(f"/api/digests/{failed['id']}/write")).status_code == 409
