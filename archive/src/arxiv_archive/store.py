@@ -22,7 +22,7 @@ import zstandard as zstd
 
 from .storage import CHUNK, storage_guard, safe_relative, sync_directory
 from .catalog import Catalog
-from .source_text import (FILTER, BoundedTarInfo, NoTextSource, is_tar,
+from .source_text import (FILTER, BoundedTarInfo, NoTextSource, is_tar, latex_text,
                           source_stream, text_package)
 
 ID = re.compile(r'(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})\Z')
@@ -487,6 +487,25 @@ class Store:
                     return target
                 finally:
                     partial.unlink(missing_ok=True)
+
+    def text(self, paper_id, version=None):
+        """The paper's LaTeX as one text (`latex_text`), with the arXiv version it is of:
+        `version`'s stored source (0: the historical LaTeX alone), else the newest stored, else
+        the historical LaTeX, whose version is unknown (None). FileNotFoundError when there is
+        no such source or it holds no LaTeX."""
+        identity(paper_id, version)
+        self._guard()
+        with self.read_lock:
+            artifact = None if version == 0 else self.catalog.get_artifact(paper_id, 'source', version)
+            if artifact is None and version:
+                raise FileNotFoundError(f'No source for {paper_id} version {version}')
+            found = artifact['version'] if artifact else None
+            package = self.get(paper_id, 'source', found or 0)
+            try:
+                body = latex_text(package, self.max_bytes)
+            except NoTextSource as exc:
+                raise FileNotFoundError(str(exc)) from None
+        return dict(version=found, text=body)
 
     def status(self):
         self._guard()

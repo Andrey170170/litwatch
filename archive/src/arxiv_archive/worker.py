@@ -297,12 +297,14 @@ def main():
     parser.add_argument('--once', action='store_true', help='process one eligible job and exit')
     parser.add_argument('--max-attempts', type=int, default=8)
     parser.add_argument('--user-agent', default='LocalPaperArchive/1.0')
+    parser.add_argument('--no-mount-guard', action='store_true',
+                        help='skip the data-mount checks: only for a disposable archive (verification)')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
-    store = Store(args.work, args.archive)
+    store = Store(args.work, args.archive, guard=not args.no_mount_guard)
     client = ArxivClient(store.work / 'pacing', user_agent=args.user_agent, stop=stop)
     worker = Worker(store, client, args.max_attempts, stop)
     try:

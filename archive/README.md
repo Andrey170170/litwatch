@@ -14,7 +14,7 @@ The installable package is `src/arxiv_archive/`:
 
 - `catalog.py`: paper and version metadata, the artifact inventory, LaTeX locators and durable priority jobs.
 - `store.py`: PDF and source publication, retrieval and a bounded reading cache.
-- `source_text.py`: bounded source-package parsing and the text-only filter.
+- `source_text.py`: bounded source-package parsing, the text-only filter and a paper's text read from its source.
 - `storage.py`: mount guards and filesystem durability primitives.
 - `api.py`: authenticated internal HTTP endpoints.
 - `cli.py`: administration commands and server lifecycle.

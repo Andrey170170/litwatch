@@ -21,6 +21,7 @@ from litwatch.archive import (
     ArchiveError,
     ArchiveUnavailable,
     ArchiveVersionUnknown,
+    pdf_to_markdown,
 )
 from litwatch.core import Paper
 
@@ -113,22 +114,6 @@ def _equation_block(table: Tag) -> None:
         table.replace_with(NavigableString("\n\n$$\n" + " \\\\\n".join(lines) + "\n$$\n\n"))
     else:
         table.decompose()
-
-
-def pdf_to_markdown(pdf: bytes) -> str | None:
-    """The PDF's text, or None without the `pdf` extra (pymupdf4llm, AGPL)."""
-    try:
-        import pymupdf  # noqa: PLC0415 - heavy and optional, only on the fallback path
-        import pymupdf4llm  # noqa: PLC0415
-    except ImportError:
-        log.warning("no PDF text without the `pdf` extra (pip install 'litwatch[pdf]')")
-        return None
-    try:
-        with pymupdf.open(stream=pdf, filetype="pdf") as doc:
-            return pymupdf4llm.to_markdown(doc)
-    except Exception as exc:  # a broken PDF is no text, not a reason to retry forever
-        log.warning("unreadable PDF: %s", type(exc).__name__)
-        return None
 
 
 class BodyFetcher:

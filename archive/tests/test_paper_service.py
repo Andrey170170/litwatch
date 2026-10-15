@@ -13,6 +13,8 @@ from urllib.parse import quote
 from arxiv_archive.api import PaperServer, read_token
 from arxiv_archive.store import Store
 
+from test_paper_store import tar_bytes
+
 PDF = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
 
 
@@ -79,6 +81,28 @@ class ServiceTests(unittest.TestCase):
                 with tarfile.open(fileobj=io.BytesIO(body)) as tar:
                     self.assertEqual(tar.extractfile("main.tex").read(), original)
         self.assertFalse(list(self.store.scratch.glob("http-upload-*")))
+
+    def test_text_route(self):
+        source = self.root / "input"
+        source.write_bytes(
+            tar_bytes(
+                [("main.tex", b"\\documentclass{article}\\begin{document}Served\\end{document}")]
+            )
+        )
+        self.store.put("2609.12345", 2, "source", source)
+        status, _, body = self.request("GET", "/v1/papers/2609.12345/text?version=2")
+        self.assertEqual(status, 200, body)
+        answer = json.loads(body)
+        self.assertEqual(
+            (answer["paper_id"], answer["version"], answer["source"]), ("2609.12345", 2, "latex")
+        )
+        self.assertIn("Served", answer["text"])
+        status, _, _ = self.request("GET", "/v1/papers/2609.12345/text?version=1")
+        self.assertEqual(status, 404)
+        status, _, _ = self.request("GET", "/v1/papers/2609.99999/text")
+        self.assertEqual(status, 404)
+        status, _, _ = self.request("GET", "/v1/papers/2609.12345/text", auth=False)
+        self.assertEqual(status, 401)
 
     def test_rejects_oversized_unversioned_and_corrupt_upload(self):
         status, _, _ = self.request("PUT", "/v1/papers/2609.12345/pdf", PDF)
