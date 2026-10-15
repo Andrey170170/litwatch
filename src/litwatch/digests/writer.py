@@ -149,6 +149,8 @@ def _paper(d: Due, day: date | None = None) -> str:
         lines.append(f"  Gist: {d.gist}")
     if d.brief:
         lines.append(f"  Brief: {d.brief}")
+    elif d.abstract:  # a Focus paper whose Brief is not written yet
+        lines.append(f"  Abstract: {d.abstract}")
     return "\n".join(lines)
 
 

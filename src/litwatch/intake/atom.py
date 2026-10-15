@@ -2,7 +2,7 @@
 
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from litwatch.core import Paper
@@ -23,6 +23,7 @@ class AtomBatch:
     raw: bytes
     generated_at: datetime
     announcements: dict[str, str]
+    listed: dict[str, date] = field(default_factory=dict)  # each paper's announcement date
 
 
 def _text(element: ET.Element, name: str) -> str:
@@ -110,6 +111,7 @@ def parse_feed(raw: bytes) -> AtomBatch:
         raw=raw,
         generated_at=generated_at,
         announcements=announcements,
+        listed=dates,
     )
 
 

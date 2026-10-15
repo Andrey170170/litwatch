@@ -105,7 +105,12 @@ async def compose(
         else:
             dailies = await store_.daily_texts(conn, topic.slug, day)
             if topic.depth == Depth.FOCUS:
-                earlier = await store_.earlier_central(conn, topic.slug, day)
+                ids = {d.paper_id for d in found}
+                earlier = [
+                    e
+                    for e in await store_.earlier_central(conn, topic.slug, day)
+                    if e.paper_id not in ids
+                ]
                 request = writer.focus_week(topic, name, day, found, dailies, earlier)
                 out = await _ask(run, request)
                 back = [

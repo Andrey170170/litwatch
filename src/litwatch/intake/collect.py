@@ -158,12 +158,14 @@ async def collect(
 
         # Canonical records win over lower-fidelity feeds, including across categories.
         fallback: dict[str, Paper] = {}
+        listed: dict[str, date] = {}
         for category, batches in feeds.items():
             info = result.details["categories"][category]
             for batch in batches:
                 for p in batch.papers:
                     if batch.announcements[p.id] in ("new", "cross"):
                         fallback[p.id] = p
+                        listed[p.id] = batch.listed[p.id]
             if not info["complete"]:
                 info["source"] = (
                     "atom"
@@ -173,7 +175,9 @@ async def collect(
                 info["cached_feed_dates"] = sorted(
                     {d.isoformat() for batch in batches for d in batch.announcement_dates}
                 )
-        stored = await papers_store.upsert(conn, list(fallback.values()), source="atom")
+        stored = await papers_store.upsert(
+            conn, list(fallback.values()), source="atom", listed=listed
+        )
         result.inserted += stored.inserted
         seen.update(fallback)
     result.fetched = len(seen)

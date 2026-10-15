@@ -13,7 +13,7 @@ import pytest
 
 from litwatch import digests, fulltext
 from litwatch.api import create_app
-from litwatch.config import Config, Digests
+from litwatch.config import Config
 from litwatch.core import Label, LabelValue, Status
 from litwatch.core.digests import listing_day, voice_problems
 from litwatch.digests import writer
@@ -272,6 +272,7 @@ async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_p
     await focus(db, P, "central")
     await listed(db, date(2026, 9, 29), P)  # the week before
     await day(db, w, date(2026, 9, 29))
+    await week(db, w, date(2026, 9, 28))
     await focus(db, Q, "central")
     await focus(db, R, "related")
     await listed(db, TUE, Q)
@@ -283,10 +284,76 @@ async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_p
     assert (state, papers) == ("written", [(Q.id, "listed"), (R.id, "listed"), (P.id, "mentioned")])
     row = await (
         await db.execute(
-            "SELECT counts FROM digests WHERE topic = %s AND period = 'week'", (FAITH.slug,)
+            "SELECT counts FROM digests WHERE topic = %s AND period = 'week' AND day = %s",
+            (FAITH.slug, MON),
         )
     ).fetchone()
     assert row["counts"]["papers"] == 2  # the paper brought back is not the week's
+
+
+async def test_the_owners_word_neither_makes_an_area_paper_due_nor_keeps_one(db):
+    """A label related on a paper outside the Area's subtree makes it no member; a label
+    adjacent on a member takes it out."""
+    await classify(db, P, AGENTS.slug)
+    await analyse(db, P)
+    await verdicts.passed(db, [(P.id, 1)])
+    await word.label(
+        db, Label(paper_id=P.id, topic=INTERP.slug, value=LabelValue.RELATED, origin="reader")
+    )
+    await area(db, Q, "related")
+    await word.label(
+        db, Label(paper_id=Q.id, topic=INTERP.slug, value=LabelValue.ADJACENT, origin="reader")
+    )
+    await area(db, R, "related")
+    await listed(db, TUE, P, Q, R)
+    await day(db, Writer(), TUE)
+    assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(R.id, "listed")])
+
+
+async def test_a_focus_paper_without_its_brief_is_written_from_its_abstract(db):
+    w = Writer()
+    late = paper("2610.00021", title="No Brief yet", abstract="Probes read the hidden steps.")
+    await papers_store.upsert(db, [late])
+    await focus(db, late, "central")
+    await listed(db, TUE, late)
+    await day(db, w, TUE)
+    assert "Abstract: Probes read the hidden steps." in w.asked[0]
+
+
+async def test_a_feed_without_submission_times_dates_a_paper_by_its_listing(db):
+    """Atom, the fallback when OAI is out, carries the listing day and no submission time."""
+    from litwatch.intake.atom import parse_feed  # noqa: PLC0415
+    from tests.test_intake_atom import entry, feed  # noqa: PLC0415
+
+    batch = parse_feed(feed(entry("2609.11999v1")))
+    await papers_store.upsert(db, batch.papers, source="atom", listed=batch.listed)
+    row = await (
+        await db.execute("SELECT announced FROM papers WHERE id = '2609.11999'")
+    ).fetchone()
+    assert row["announced"] == date(2026, 9, 14)
+
+
+async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
+    """P's re-check finishes on Saturday, after Friday's digest: Monday's daily covers it,
+    and the weekly of P's week, written after it, has it; the next weekly does not, and the
+    weekly before does not take Monday's own paper."""
+    w = Writer()
+    fri, mon2 = date(2026, 10, 9), date(2026, 10, 12)
+    await area(db, P, "central")  # must read: waits for its re-check
+    await area(db, Q, "related")
+    await listed(db, fri, P, Q)
+    await day(db, w, fri)
+    await db.execute("UPDATE fulltext_passes SET state = 'done' WHERE paper_id = %s", (P.id,))
+    await area(db, R, "related")
+    await listed(db, mon2, R)
+    tree = await taxonomy_store.load(db)
+    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+        await digests.nightly(db, run, tree, mon2)
+    assert {p for p, _ in (await shown(db, INTERP.slug, "day", mon2))[1]} == {P.id, R.id}
+    assert {p for p, _ in (await shown(db, INTERP.slug, "week", MON))[1]} == {P.id, Q.id}
+    await listed(db, date(2026, 10, 19), S)
+    await week(db, w, mon2)
+    assert {p for p, _ in (await shown(db, INTERP.slug, "week", mon2))[1]} == {R.id}
 
 
 # -- quiet days and records ------------------------------------------------------------------------
@@ -334,6 +401,41 @@ async def test_a_published_digest_is_a_record_but_for_the_set_aside_mark(db):
         "must_read",
         True,
     )
+
+
+async def test_a_published_digest_keeps_its_titles_and_its_set_aside_mark(db):
+    """The set-aside mark is the owner's word in force, so a later verdict that agrees with it
+    keeps it; a title arXiv rewrites later stays as the digest showed it."""
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, Writer(), TUE)
+    label = Label(paper_id=P.id, topic=FAITH.slug, value=LabelValue.ADJACENT, origin="reader")
+    await word.label(db, label)
+    await grade(db, P, "adjacent")
+    await db.execute("UPDATE papers SET title = 'A new title' WHERE id = %s", (P.id,))
+    row = await (
+        await db.execute("SELECT id FROM digests WHERE topic = %s", (FAITH.slug,))
+    ).fetchone()
+    [shown_p] = await store_.papers_of(db, row["id"])
+    assert (shown_p["title"], shown_p["set_aside"]) == (P.title, True)
+
+
+async def test_publishing_a_digest_emits_its_event_and_a_failed_one_none(db):
+    w = Writer()
+    w.failures = [ProviderError("down")]
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)  # Focus fails, Area says nothing new
+    await day(db, w, TUE)  # Focus written again on the retry; Area stays as it is
+    rows = await (
+        await db.execute("SELECT paper_id, payload FROM outbox WHERE type = 'digest.written'")
+    ).fetchall()
+    assert sorted((r["payload"]["topic"], r["payload"]["state"]) for r in rows) == [
+        (FAITH.slug, "written"),
+        (INTERP.slug, "nothing_new"),
+    ]
+    assert {r["paper_id"] for r in rows} == {None}
+    assert all(r["payload"]["day"] == str(TUE) for r in rows)
 
 
 # -- failed digests --------------------------------------------------------------------------------
@@ -405,37 +507,49 @@ async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db, monkeypatch
     since = datetime.now(UTC) - timedelta(minutes=1)
     worked = []
 
-    async def work(conn, config, archive, run=None):
-        worked.append(1)
+    async def work(conn, config, archive, run=None, deadline=None):
+        worked.append(deadline)
         if len(worked) == 2:
             await conn.execute("UPDATE fulltext_passes SET state = 'done'")
         return {}
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
     monkeypatch.setattr(fulltext, "work", work)
+    deadline = nightly.time.monotonic() + 60
     async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
         assert await store_.waiting_passes(db, since) == 1
-        await nightly.wait_for_texts(db, Config(), run, since, nightly.time.monotonic(), 0.01)
-    assert len(worked) == 2 and "digest_wait_ended" not in run.counts
+        await nightly.wait_for_texts(db, Config(), run, since, deadline, 0.01)
+    assert worked == [deadline, deadline] and "digest_wait_ended" not in run.counts
 
 
 async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, monkeypatch):
     await focus(db, P, "central")
     since = datetime.now(UTC) - timedelta(minutes=1)
 
-    async def work(conn, config, archive, run=None):
+    async def work(conn, config, archive, run=None, deadline=None):
         return {}
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
     monkeypatch.setattr(fulltext, "work", work)
-    config = Config(digests=Digests(wait_minutes=0.001))
-    async with model_run(db, config, "nightly", gateway=Writer().gateway) as run:
-        wait = nightly.wait_for_texts(db, config, run, since, nightly.time.monotonic(), 0.01)
+    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
+        deadline = nightly.time.monotonic() + 0.06
+        wait = nightly.wait_for_texts(db, Config(), run, since, deadline, 0.01)
         await asyncio.wait_for(wait, 5)  # the pass never finishes: only the bound ends it
     assert run.counts["digest_wait_ended"] == 1
     # A pass that failed in this run is not waited for: it is tried on the next one.
     await db.execute("UPDATE fulltext_passes SET state = 'failed', failed_runs = 1")
     assert await store_.waiting_passes(db, since) == 0
+
+
+async def test_no_batch_of_passes_starts_after_the_deadline(db):
+    """The full-text work before the digests stops at the wait's deadline; the worker takes
+    the passes left."""
+    await focus(db, P, "central")
+    await db.execute("UPDATE fulltext_passes SET state = 'ready'")
+    past = nightly.time.monotonic() - 1
+    assert await fulltext.work(db, Config(), None, deadline=past) == {}
+    state = await (await db.execute("SELECT state, tried_at FROM fulltext_passes")).fetchone()
+    assert (state["state"], state["tried_at"]) == ("ready", None)
 
 
 # -- the voice check -------------------------------------------------------------------------------

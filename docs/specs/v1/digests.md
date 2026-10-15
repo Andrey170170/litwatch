@@ -89,7 +89,7 @@ configured timezone.
 
 A digest is **published** when it is written or says "Nothing new". A published digest is final: a re-run of the
 same day does not rewrite it, and papers that become due afterwards go into the next one. Each of its papers is frozen
-as it was shown: paper revision, Gist, effective Fit, grade, rarity, and its role (pick, listed or mentioned). The one
+as it was shown: paper revision, title, Gist, effective Fit, grade, rarity, and its role (pick, listed or mentioned). The one
 live element is the set-aside mark: when the owner later sets a paper below relevant, it stays in the digest, shown
 struck through. A paper is announced as new in a topic's daily digests once (first v1, decisions 15 and 19).
 

@@ -75,8 +75,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   ([digests.md](digests.md)). `papers.announced` is the date of the arXiv listing that first showed the paper.
 - `digests` (topic, period day | week, day (a week's Monday), state written | nothing_new | failed, gist, text, counts,
   best rarity, error, run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
-  role pick | listed | mentioned, position, why, and frozen at writing: paper revision, gist, fit, grade, rarity, and
-  the topic whose grade it showed).
+  role pick | listed | mentioned, position, why, and frozen at writing: paper revision, title, gist, fit, grade, rarity,
+  and the topic whose grade it showed).
 - `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`; a Gist rating
   names the `gists` row it rated.
 - `eval_labels` (evaluation run, paper, topic, cohort, positive): the labels a replay is measured against, frozen when

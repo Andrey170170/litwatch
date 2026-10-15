@@ -65,6 +65,7 @@ CREATE TABLE digest_papers (
     position        integer NOT NULL,
     why             text,                       -- a pick's reason
     paper_revision  integer NOT NULL,
+    title           text NOT NULL,
     gist            text,
     fit             text CHECK (fit IN ('central', 'related', 'adjacent', 'none')),
     grade           text CHECK (grade IN ('must_read', 'relevant', 'adjacent', 'none')),

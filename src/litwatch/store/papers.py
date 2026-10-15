@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import psycopg
@@ -69,7 +70,11 @@ def _iso(value: datetime | None) -> str | None:
 
 
 async def upsert(
-    conn: psycopg.AsyncConnection, papers: list[Paper], *, source: str = "arxiv"
+    conn: psycopg.AsyncConnection,
+    papers: list[Paper],
+    *,
+    source: str = "arxiv",
+    listed: Mapping[str, date] | None = None,
 ) -> Upserted:
     """Insert new papers and refresh metadata on replacements, emitting `paper.added` and
     `paper.revised` with the `source` in their payload.
@@ -79,6 +84,10 @@ async def upsert(
     but never replace canonical metadata. The archive's metadata is canonical (it came from
     OAI) and, like OAI's, dated by day, but it replaces stored metadata only when it is known
     to be newer: a higher version, or the same version on a later day.
+
+    A paper's listing day (`announced`) is set once: from its first version's submission time
+    (`core.digests.announced`), else from `listed`, the day a feed listed it (Atom carries no
+    submission time).
     """
     result = Upserted()
     async with conn.transaction():
@@ -152,7 +161,7 @@ async def upsert(
                         **p.model_dump(),
                         "authors": Jsonb(p.authors),
                         "version_history": Jsonb(p.version_history),
-                        "announced": announced(p),
+                        "announced": announced(p) or (listed or {}).get(p.id),
                         "source": source,
                         "by_day": source in _BY_DAY,
                     },

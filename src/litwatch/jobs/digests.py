@@ -26,17 +26,19 @@ async def window(
     gateway: GatewayFactory = default_gateway,
 ) -> int:
     """The daily digests of every day from `first` to `last` in order, and the weekly digests
-    of every Monday-to-Sunday week inside it, each after its Sunday's: what the nightly run
-    would have written on those days, over the papers due now. Published ones stay. Returns
-    the run id."""
+    of every Monday-to-Sunday week inside it, each after the next Monday's dailies (the last
+    week's after its Sunday's, when the window ends there): what the nightly run would have
+    written on those days, over the papers due now. Published ones stay. Returns the run id."""
     async with run_lock(conn), model_run(conn, config, "digests", gateway=gateway) as run:
         tree = await taxonomy_store.load(conn)
         day = first
         while tree is not None and day <= last:
             await digests.write_day(conn, run, tree, day)
-            if day.weekday() == 6 and day - timedelta(days=6) >= first:
-                await digests.write_week(conn, run, tree, day - timedelta(days=6))
+            if day.weekday() == 0 and day - timedelta(days=7) >= first:
+                await digests.write_week(conn, run, tree, day - timedelta(days=7))
             day += timedelta(days=1)
+        if tree is not None and last.weekday() == 6 and last - timedelta(days=6) >= first:
+            await digests.write_week(conn, run, tree, last - timedelta(days=6))
         return run.run_id
 
 

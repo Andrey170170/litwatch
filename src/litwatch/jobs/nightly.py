@@ -78,16 +78,19 @@ async def grade(
 
 
 async def text_passes(
-    conn: psycopg.AsyncConnection, config: Config, run: ModelRun, limit: int | None = None
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    run: ModelRun,
+    limit: int | None = None,
+    deadline: float | None = None,
 ) -> None:
     """Reconcile the full-text queue with the database: settle every candidate paper
     (`store.fulltext.candidates`: those with a pass open, those the rule may give one, those
     read for an older version or revision), so a trigger missed costs at most a night
     (pipeline.md, sections 6 and 8); all of them, as `limit` caps what is spent. Then make
     the failed passes ready again, those with fewer than `FAILED_RUNS` failed runs; and try
-    every pass that is due once, up to `limit`: the passes
-    this run queued have their text asked for now, and the service's worker runs each once its
-    text is there."""
+    every pass that is due once, up to `limit` and until `deadline`: the passes this run queued
+    have their text asked for now, and the service's worker runs each once its text is there."""
     reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK)
     await word.settle_all(conn, reconciled)
     run.add("fulltext_reconciled", len(reconciled))
@@ -97,7 +100,7 @@ async def text_passes(
         log.warning("no archive configured: full-text passes wait")
         return
     try:
-        await fulltext.work(conn, config, archive, run=run, limit=limit)
+        await fulltext.work(conn, config, archive, run=run, limit=limit, deadline=deadline)
     finally:
         await archive.aclose()
 
@@ -110,15 +113,15 @@ async def wait_for_texts(
     config: Config,
     run: ModelRun,
     since: datetime,
-    graded: float,
+    deadline: float,
     tick: float = WAIT_TICK_SECONDS,
 ) -> None:
     """The bounded wait before the digests (digests.md, timing): until every Brief and Weight
     re-check the run queued (since `since`) has finished, failed in this run or is terminal,
-    or for `[digests] wait_minutes` from when grading ended (`graded`, `time.monotonic()`),
+    or until `deadline` (`time.monotonic()`: `[digests] wait_minutes` after grading ended),
     whichever comes first, working the queue meanwhile so a pass runs as soon as its text
-    arrives. Without an archive no pass can run, so there is no wait."""
-    deadline = graded + config.digests.wait_minutes * 60
+    arrives. No batch of passes starts after the deadline, so the wait ends at most one batch
+    late. Without an archive no pass can run, so there is no wait."""
     archive = fulltext.archive_for(config)
     if archive is None:
         return
@@ -129,7 +132,7 @@ async def wait_for_texts(
                 run.add("digest_wait_ended", 1)  # some passes still running: digests went on
                 return
             await asyncio.sleep(min(tick, left))
-            await fulltext.work(conn, config, archive, run=run)
+            await fulltext.work(conn, config, archive, run=run, deadline=deadline)
     finally:
         await archive.aclose()
 
@@ -182,8 +185,9 @@ async def run(
         await classify(conn, config, run, limit)
         await analyse(conn, run, limit)
         await grade(conn, config, run, limit)
-        graded = time.monotonic()
-        await text_passes(conn, config, run, limit)
-        await wait_for_texts(conn, config, run, until, graded)
+        # The digests wait for the passes they depend on, from now and at most this long.
+        deadline = time.monotonic() + config.digests.wait_minutes * 60
+        await text_passes(conn, config, run, limit, deadline)
+        await wait_for_texts(conn, config, run, until, deadline)
         await write_digests(conn, config, run, today)
         return run.run_id

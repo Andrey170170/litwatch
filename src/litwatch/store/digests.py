@@ -17,9 +17,11 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from litwatch import events
 from litwatch.core import Depth, Taxonomy, Topic
 from litwatch.core.digests import DUE_WINDOW, PUBLISHED, DigestPeriod, DigestRole, DigestState
 from litwatch.core.fulltext import AWAITING_TOO_LONG
+from litwatch.core.rules import REACTION_WORDS
 from litwatch.store.analyses import CURRENT_GIST
 from litwatch.store.reading import SCOPE, STANDING, _rank, _scope
 
@@ -43,6 +45,7 @@ class Due:
     graded_on: str | None
     fit_reason: str | None
     brief: str | None
+    abstract: str | None = None  # a Focus paper's, which the writer reads when it has no Brief
 
 
 # The covering digests of topic %(topic)s that clear paper `p` for %(period)s.
@@ -80,13 +83,36 @@ _WRITER_READS = f"""
      ORDER BY b.pass_id DESC LIMIT 1) AS brief"""
 
 
+def _word(paper: str, topic: str) -> str:
+    """Whether the owner's word on `paper` for `topic` is in force (`core.rules.owners_word`):
+    a label other than unsure, or on a Focus topic a reaction that carries a word."""
+    words = ", ".join(f"'{r.value}'" for r in REACTION_WORDS)
+    return f"""(
+    EXISTS (SELECT 1 FROM labels l
+            WHERE l.paper_id = {paper} AND l.topic = {topic} AND l.value <> 'unsure')
+    OR EXISTS (SELECT 1 FROM reactions r JOIN topics t ON t.class = r.topic
+               WHERE r.paper_id = {paper} AND r.topic = {topic} AND t.depth = 'focus'
+                 AND r.reason IN ({words})))"""
+
+
+# A member of the topic's subtree by classification, not by the owner's word (a class label, a
+# reported miss), and not taken out of that class by a class label.
+_MEMBER = """EXISTS (
+    SELECT 1 FROM memberships m
+    WHERE m.paper_id = p.id AND m.class = ANY(%(map_classes)s) AND m.member
+      AND m.source = 'classifier'
+      AND NOT EXISTS (SELECT 1 FROM memberships o
+                      WHERE o.paper_id = m.paper_id AND o.class = m.class AND o.source = 'owner'
+                        AND NOT o.member))"""
+
+
 def _focus(which: str) -> str:
     """A Focus topic's eligible papers: graded there, at effective Fit central or related, and
     at a verdict's Fit that was too, so the owner's word, which the owner already knows, never
     makes a paper due."""
     return f"""
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, g.grade, g.rarity,
-           g.topic AS graded_on, v.reason AS fit_reason, {_WRITER_READS}
+           g.topic AS graded_on, v.reason AS fit_reason, p.abstract, {_WRITER_READS}
     FROM papers p
     JOIN effective_grades g ON g.paper_id = p.id AND g.topic = %(topic)s
     JOIN LATERAL (SELECT v.fit, v.reason FROM verdicts v
@@ -99,7 +125,8 @@ def _focus(which: str) -> str:
 
 
 def _subtree(which: str, gates: str) -> str:
-    """An Area or Field topic's papers: its subtree's, at its page's standing."""
+    """An Area or Field topic's papers: its subtree's members by classification, at its page's
+    standing, less those the owner's word sets below related where they are graded."""
     return f"""
     WITH {SCOPE}{STANDING}
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, s.grade,
@@ -112,7 +139,8 @@ def _subtree(which: str, gates: str) -> str:
                        WHERE v.paper_id = p.id AND v.topic = g.topic
                        ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC
                        LIMIT 1) v ON true
-    WHERE p.dismissed_at IS NULL AND {which} {gates}
+    WHERE p.dismissed_at IS NULL AND {which} AND {_MEMBER}
+      AND (g.fit IN ('adjacent', 'none') AND {_word("p.id", "g.topic")}) IS NOT TRUE {gates}
     ORDER BY {_rank("coalesce(s.rarity, 'common')")} DESC, p.announced, p.id
     """
 
@@ -162,14 +190,22 @@ async def due(
 async def of_week(
     conn: psycopg.AsyncConnection, tree: Taxonomy, topic: Topic, monday: date
 ) -> list[Due]:
-    """The papers of the topic's published daily digests of the week from `monday`, as they
-    stand now, those still eligible (for Focus) or still in its subtree, rarest first: what its
-    weekly digest covers."""
-    which = """EXISTS (
+    """What the weekly digest of a topic with daily digests covers, rarest first: the papers
+    announced by the week's Sunday that its published daily digests covered, up to the
+    Monday after (written the same night, before the weekly), and no weekly digest of it has,
+    as they stand now and still eligible. A paper that became due late in the week is in it;
+    one whose daily digest failed until after it is in the next."""
+    sunday = monday + timedelta(days=6)
+    which = f"""p.announced BETWEEN %(first)s AND %(sunday)s AND NOT {_COVERED} AND EXISTS (
         SELECT 1 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
         WHERE dp.paper_id = p.id AND d.topic = %(topic)s AND d.period = 'day'
-          AND d.state = 'written' AND d.day BETWEEN %(monday)s AND %(sunday)s)"""
-    params = _params(tree, topic, 0) | {"monday": monday, "sunday": monday + timedelta(days=6)}
+          AND d.state = 'written' AND d.day <= %(after)s)"""
+    params = _params(tree, topic, 0) | {
+        "period": DigestPeriod.WEEK.value,
+        "first": sunday - DUE_WINDOW,
+        "sunday": sunday,
+        "after": sunday + timedelta(days=1),
+    }
     query = _focus(which) if topic.depth == Depth.FOCUS else _subtree(which, "")
     return _rows(await (await conn.execute(query, params)).fetchall())
 
@@ -265,7 +301,8 @@ class Outcome:
 
 async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) -> int | None:
     """Store the outcome, in place of a failed digest of the same topic and period; a published
-    one stays as it is (None). Returns the digest's id."""
+    one stays as it is (None). Publishing emits `digest.written` with it. Returns the digest's
+    id."""
     async with conn.transaction():
         row = await (
             await conn.execute(
@@ -301,8 +338,8 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
         async with conn.cursor() as cur:
             await cur.executemany(
                 "INSERT INTO digest_papers (digest_id, paper_id, role, position, why, "
-                "paper_revision, gist, fit, grade, rarity, graded_on) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "paper_revision, title, gist, fit, grade, rarity, graded_on) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 [
                     (
                         row["id"],
@@ -311,6 +348,7 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
                         i,
                         s.why,
                         s.due.revision,
+                        s.due.title,
                         s.due.gist,
                         s.due.fit,
                         s.due.grade,
@@ -319,6 +357,16 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
                     )
                     for i, s in enumerate(o.papers)
                 ],
+            )
+        if o.state in PUBLISHED:
+            await events.emit(
+                conn,
+                events.DIGEST_WRITTEN,
+                digest=row["id"],
+                topic=o.topic,
+                period=o.period.value,
+                day=o.day.isoformat(),
+                state=o.state.value,
             )
         return row["id"]
 
@@ -387,20 +435,15 @@ async def digests_on(
     ).fetchall()
 
 
-# A digest's papers as it shows them: frozen, with whether the owner has since set each aside.
-# The owner's word is in force where its grade was shown (the effective Fit is not the
-# verdict's) and puts it below relevant.
-_SHOWN = """
+# A digest's papers as it shows them: frozen, with whether the owner has since set each aside:
+# the owner's word is in force where its grade was shown and puts it below relevant.
+_SHOWN = f"""
     SELECT dp.digest_id, dp.paper_id, dp.role, dp.position, dp.why, dp.paper_revision, dp.gist,
-           dp.fit, dp.grade, dp.rarity, dp.graded_on, p.title, p.announced, p.published,
-           (g.grade IS NOT NULL AND g.grade NOT IN ('must_read', 'relevant')
-            AND g.fit IS DISTINCT FROM v.fit) AS set_aside
+           dp.fit, dp.grade, dp.rarity, dp.graded_on, dp.title, p.announced, p.published,
+           (g.grade NOT IN ('must_read', 'relevant')
+            AND {_word("dp.paper_id", "dp.graded_on")}) IS TRUE AS set_aside
     FROM digest_papers dp JOIN papers p ON p.id = dp.paper_id
     LEFT JOIN effective_grades g ON g.paper_id = dp.paper_id AND g.topic = dp.graded_on
-    LEFT JOIN LATERAL (SELECT v.fit FROM verdicts v
-                       WHERE v.paper_id = dp.paper_id AND v.topic = dp.graded_on
-                       ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC
-                       LIMIT 1) v ON true
 """
 
 
@@ -490,8 +533,7 @@ async def written(conn: psycopg.AsyncConnection, first: date, last: date) -> lis
         await conn.execute(
             """
             SELECT d.id, d.topic, d.period, d.day, d.gist, d.text, d.counts,
-                   array(SELECT p.title FROM digest_papers dp JOIN papers p ON p.id = dp.paper_id
-                         WHERE dp.digest_id = d.id) AS titles
+                   array(SELECT dp.title FROM digest_papers dp WHERE dp.digest_id = d.id) AS titles
             FROM digests d WHERE d.state = 'written' AND d.day BETWEEN %s AND %s
             ORDER BY d.day, d.period, d.topic
             """,
