@@ -350,9 +350,10 @@ async def add(
 
 async def outdated(conn: psycopg.AsyncConnection) -> list[str]:
     """The papers, not dismissed, given a Brief or full-text Weight, or with a text pass for an
-    older revision, whose current revision has no text pass open or done on its arXiv version
-    (on its latest update, when the version is unknown): a new version or revision came after
-    what was read or queued (`to_queue`'s rule, found from the database)."""
+    older revision, whose newest text pass for its current revision is neither open nor done on
+    its arXiv version (on its latest update, when the version is unknown): a new version or
+    revision came after what was read or queued (`to_queue`'s rule, found from the
+    database)."""
     rows = await (await conn.execute(f"{OUTDATED} ORDER BY p.id")).fetchall()
     return [r["id"] for r in rows]
 
@@ -361,11 +362,14 @@ OUTDATED = f"""
     SELECT DISTINCT p.id FROM fulltext_passes d JOIN papers p ON p.id = d.paper_id
     WHERE d.kind <> 'deep' AND (d.state = 'done' OR d.paper_revision < p.revision)
       AND p.dismissed_at IS NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM fulltext_passes f
+      -- Unless the newest pass for the current revision, the one `facts` reads, is open or read
+      -- the paper's version (its latest update, the version unknown).
+      AND NOT coalesce((
+          SELECT f.state <> 'done' OR f.arxiv_version >= p.version
+                 OR (p.version IS NULL AND {COVERS_UPDATE})
+          FROM fulltext_passes f
           WHERE f.paper_id = p.id AND f.paper_revision = p.revision AND f.kind <> 'deep'
-            AND (f.state <> 'done' OR f.arxiv_version >= p.version
-                 OR (p.version IS NULL AND {COVERS_UPDATE})))
+          ORDER BY f.id DESC LIMIT 1), false)
 """
 
 

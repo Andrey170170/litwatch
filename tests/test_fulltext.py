@@ -637,6 +637,11 @@ async def test_a_new_update_of_unknown_version_is_read_again_once(db):
     assert await fulltext_store.outdated(db) == []  # once, not again
     await word.settle(db, P.id)
     assert len(await passes(db)) == 2
+    # The archive then says which version it was: the version the first pass read, not the
+    # one the last pass read, which is unknown, so it is read again.
+    known = later.model_copy(update={"version": 1})
+    await papers_store.upsert(db, [known], source="archive")
+    assert await fulltext_store.outdated(db) == [P.id]
 
 
 async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revision(db):
