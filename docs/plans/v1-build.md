@@ -131,9 +131,7 @@ cost) recorded with its attempt, the lease, revisions; the "among the collection
 verification. The harness gains Briefs.
 
 **N4 · Digests.** Due, daily and weekly digests per depth with their Gists and picks, quiet days, records and set
-asides, the bounded wait, failed digests; the day, week, history and digest API; reviews and issues removed. Deep
-passes for Area picks (N3 queues them for saved Focus must reads and the owner's requests; a pick's pass checks at
-claim that its digest is published, integrations.md). Owner
+asides, the bounded wait, failed digests; the day, week, history and digest API; reviews and issues removed. Owner
 check: the restart weeks' digests read against 0.14's Notion.
 
 **N5 · The archive in the stack.** The compose file runs the archive; the storage policy; the relevance fixes (exact
@@ -166,6 +164,11 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   says "Already in the collection" (#56, Codex). N5's page for papers outside the collection shows the fetched state,
   read from the API. Also N5: DESIGN.md's "Use the PDF", for a paper whose LaTeX reads badly, has no endpoint yet
   (#59); it belongs with the archive's text assembly and its PDF fallback, and the paper page takes it once merged.
+  Also N5: the stack smoke test shows a Deep card with live "Among the collection" rows, the deep service reaching
+  litwatch with `LITWATCH_URL` and `LITWATCH_TOKEN`; #61 wrote a real card only without them.
+- **N4b, after N3's Deep cards (#61):** Deep passes for Area picks. N3 queues them for saved Focus must reads and the
+  owner's requests; N4 merged (#60) before them. A pick's pass checks at claim that its digest is published
+  (integrations.md).
 - **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
   paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
   the restart's digests.
