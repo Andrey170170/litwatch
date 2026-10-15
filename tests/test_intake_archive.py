@@ -94,7 +94,7 @@ async def test_the_source_stores_new_papers_and_applies_revisions(conn):
     revised = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
     assert (revised.updated, revised.rewritten) == (1, ["2610.00001"])
     again = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
-    assert again.inserted == 0 and again.rewritten == []
+    assert (again.inserted, again.updated, again.rewritten) == (0, 0, [])
     assert await outbox(conn) == [
         ("paper.added", "2610.00001", {"version": 1, "source": "archive"}),
         (
@@ -110,14 +110,23 @@ async def test_the_archive_never_rolls_back_what_arxiv_sent(conn):
     oai = paper("2610.00001", version=2, abstract="Current.", published=at, updated=at)
     await papers.upsert(conn, [oai], source="oai")
     fake = FakeArchive()
-    fake.listing = [item(1, abstract="Stale.", updated="2026-10-02")]  # version 1, older day
-    stale = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
-    assert stale.updated == 0
-    fake.listing = [item(1, version=2, title=oai.title, abstract="Current.", updated="2026-10-09")]
-    same = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
-    assert same.updated == 1 and same.rewritten == []
+    unproven = [
+        item(1, abstract="Stale.", updated="2026-10-02"),  # an older version on an older day
+        item(1, version=None, abstract="Unknown.", updated="2026-10-09"),  # no version, same day
+        item(1, version=2, abstract="Same version.", updated="2026-10-09"),  # nothing newer
+    ]
+    for listed in unproven:
+        fake.listing = [listed]
+        result = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
+        assert result.updated == 0, listed
     stored = await papers.get(conn, oai.id)
-    assert stored.abstract == "Current." and stored.updated == at  # the same day keeps its time
+    assert (stored.abstract, stored.version, stored.updated) == ("Current.", 2, at)
+
+    fake.listing = [item(1, version=2, title=oai.title, abstract="Fixed.", updated="2026-10-10")]
+    later = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
+    assert later.updated == 1
+    stored = await papers.get(conn, oai.id)
+    assert (stored.abstract, stored.updated) == ("Fixed.", "2026-10-10T00:00:00+00:00")
 
 
 async def test_the_job_records_its_run_and_arxiv_intake_does_not_go_on_from_it(conn):

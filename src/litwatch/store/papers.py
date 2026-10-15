@@ -76,7 +76,8 @@ async def upsert(
     A revision counts as rewritten only when its title or abstract changed beyond a touch-up
     (`core.rewritten`); only then is the paper triaged again. Atom metadata can insert a paper
     but never replace canonical metadata. The archive's metadata is canonical (it came from
-    OAI) and, like OAI's, dated by day.
+    OAI) and, like OAI's, dated by day, but it replaces stored metadata only when it is known
+    to be newer: a higher version, or the same version on a later day.
     """
     result = Upserted()
     async with conn.transaction():
@@ -137,6 +138,11 @@ async def upsert(
                            OR EXCLUDED.version >= papers.version)
                       AND (NOT %(by_day)s OR papers.updated IS NULL
                            OR EXCLUDED.updated::date >= papers.updated::date)
+                      -- The archive replaces only what it is known to be newer than.
+                      AND (%(source)s <> 'archive' OR EXCLUDED.version > papers.version
+                           OR (papers.version IS NULL AND EXCLUDED.version IS NOT NULL)
+                           OR (EXCLUDED.version = papers.version
+                               AND EXCLUDED.updated::date > papers.updated::date))
                     RETURNING (xmax = 0) AS inserted, version, title, abstract
                     """,
                     {

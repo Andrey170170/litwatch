@@ -32,7 +32,16 @@ while (( $# )); do
        exit 2 ;;
   esac
 done
+# PostgreSQL cuts names to 63 bytes: a longer base would make `<db>_next` the target itself.
+if (( ${#db} > 58 )); then
+  echo "the database name '$db' is longer than 58 characters" >&2
+  exit 1
+fi
 readonly NEXT=${db}_next OLD=${db}_old
+if [[ "$db" == "$NEXT" || "$db" == "$OLD" || "$NEXT" == "$OLD" ]]; then
+  echo "the database names '$db', '$NEXT' and '$OLD' are not distinct" >&2
+  exit 1
+fi
 for name in "$db" "$NEXT" "$OLD"; do
   if [[ ! "$name" =~ ^[a-z][a-z0-9_]*$ ]] || [[ "$name" =~ ^(litwatch|test|postgres|template[0-9]*)$ ]]
   then

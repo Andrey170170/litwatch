@@ -207,11 +207,19 @@ class Catalog:
         Idempotent, and safe beside live writes, which keep their own rows current."""
         last, count = 0, 0
         while True:
-            with self.lock, self.db:
-                rows = self.db.execute('SELECT rowid,id,metadata_json FROM papers WHERE rowid>? '
-                                       'ORDER BY rowid LIMIT ?', (last, batch)).fetchall()
-                for row in rows:
-                    self._index_date(row['id'], json.loads(row['metadata_json']))
+            with self.lock:
+                # Write-lock before reading, so another process's write cannot fall between
+                # this read and the rows derived from it.
+                self.db.execute('BEGIN IMMEDIATE')
+                try:
+                    rows = self.db.execute('SELECT rowid,id,metadata_json FROM papers WHERE rowid>? '
+                                           'ORDER BY rowid LIMIT ?', (last, batch)).fetchall()
+                    for row in rows:
+                        self._index_date(row['id'], json.loads(row['metadata_json']))
+                    self.db.commit()
+                except BaseException:
+                    self.db.rollback()
+                    raise
             if not rows:
                 break
             last, count = rows[-1]['rowid'], count + len(rows)
@@ -235,15 +243,14 @@ class Catalog:
         while len(items) < limit and scan > 0:
             size = min(1000, scan)
             with self.lock:
-                rows = self.db.execute('''SELECT d.published,d.paper_id,p.metadata_json,p.latest_version
+                rows = self.db.execute('''SELECT d.published,d.paper_id,p.metadata_json
                     FROM paper_dates d JOIN papers p ON p.id=d.paper_id
                     WHERE (d.published,d.paper_id)>(?,?) AND d.published<=?
                     ORDER BY d.published,d.paper_id LIMIT ?''', (*key, until, size)).fetchall()
             scan -= len(rows)
             for row in rows:
                 key = (row['published'], row['paper_id'])
-                item = listing_item(row['paper_id'], json.loads(row['metadata_json']),
-                                    row['latest_version'])
+                item = listing_item(row['paper_id'], json.loads(row['metadata_json']))
                 if not categories or categories & set(item['categories']):
                     items.append(item)
                     if len(items) == limit:

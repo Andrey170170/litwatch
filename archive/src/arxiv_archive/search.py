@@ -57,25 +57,26 @@ def _text(value: Any) -> str:
 
 
 def _date(value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
-        return ''
+    """The UTC calendar date of an ISO or RFC 2822 timestamp (a bare date is taken as UTC)."""
+    if stamp := _timestamp(value):
+        return stamp[:10]
     try:
-        return date.fromisoformat(value[:10]).isoformat()
+        return date.fromisoformat(value[:10]).isoformat() if isinstance(value, str) else ''
     except ValueError:
-        try:
-            return parsedate_to_datetime(value).date().isoformat()
-        except (ValueError, TypeError, OverflowError):
-            return ''
+        return ''
 
 
 def published_date(metadata: dict) -> str:
-    """The first version's submission date (YYYY-MM-DD, UTC), '' when no record says it."""
+    """The first version's submission date (YYYY-MM-DD, UTC), '' when no record says it. An
+    explicit v1 in the version history wins: a record's `published` or `created` may describe
+    a later revision."""
+    for entry in metadata.get('version_history') or metadata.get('versions') or []:
+        if isinstance(entry, dict) and entry.get('version') in (1, 'v1', '1'):
+            if published := _date(entry.get('date') or entry.get('created')):
+                return published
     for key in ('published', 'first_version_date', 'submitted', 'created'):
         if published := _date(metadata.get(key)):
             return published
-    for entry in metadata.get('version_history') or metadata.get('versions') or []:
-        if isinstance(entry, dict) and entry.get('version') in (1, 'v1', '1'):
-            return _date(entry.get('date') or entry.get('created'))
     return ''
 
 
@@ -151,9 +152,11 @@ def _history(metadata: dict) -> list[dict]:
     return sorted(result, key=lambda entry: entry['version'])
 
 
-def listing_item(paper_id: str, metadata: dict, latest_version: int | None) -> dict:
+def listing_item(paper_id: str, metadata: dict) -> dict:
     """A catalog record in one shape whatever representation it was stored in. Dates are
-    YYYY-MM-DD (UTC); a field no record says is null."""
+    YYYY-MM-DD (UTC); a field no record says is null. `version` is the one the metadata
+    describes (its history or its own `version`), never the catalog's `latest_version`, which
+    a stored artifact can advance past the text."""
     categories = metadata.get('categories') or []
     if isinstance(categories, str):
         categories = categories.split()
@@ -161,8 +164,11 @@ def listing_item(paper_id: str, metadata: dict, latest_version: int | None) -> d
     published = published_date(metadata)
     updated = (_date(metadata.get('updated') or metadata.get('update_date'))
                or _date((history[-1]['date'] or '') if history else '') or published)
+    own = metadata.get('version')
+    versions = [entry['version'] for entry in history]
+    versions += [own] if type(own) is int and own >= 1 else []
     return {'id': paper_id,
-            'version': latest_version or (history[-1]['version'] if history else None),
+            'version': max(versions, default=None),
             'title': _text(metadata.get('title')), 'abstract': _text(metadata.get('abstract')),
             'authors': _authors(metadata),
             'categories': list(dict.fromkeys(c for c in map(_text, categories) if c)),

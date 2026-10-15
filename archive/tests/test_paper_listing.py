@@ -1,9 +1,13 @@
 """Listing papers by the date window they were submitted in."""
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
+from unittest.mock import patch
 
 from arxiv_archive.catalog import Catalog
+from arxiv_archive.search import published_date
 
 # The three forms metadata arrives in: the HF snapshot, the archive's own arXivRaw
 # discovery, and litwatch's registration of a paper it took in.
@@ -93,6 +97,52 @@ class ListingTests(unittest.TestCase):
         sparse, pages = self.every('2026-10-01', '2026-10-31', {'cs.AI'}, limit=50, scan=3)
         self.assertEqual(sparse, [i for i in everything if i['categories'] == ['cs.AI']])
         self.assertGreater(pages, 3)
+
+    def test_the_date_is_v1s_in_utc(self):
+        # `published` here describes a later revision; the history's v1 says when it began.
+        revised = {'published': '2026-10-09T00:00:00Z',
+                   'version_history': [{'version': 1, 'date': '2026-10-02T23:30:00-05:00'},
+                                       {'version': 2, 'date': '2026-10-09T00:00:00Z'}]}
+        self.assertEqual(published_date(revised), '2026-10-03')
+        self.assertEqual(published_date({'published': '2026-10-02T23:30:00-05:00'}), '2026-10-03')
+        self.assertEqual(published_date({'created': '2026-10-02'}), '2026-10-02')
+        self.assertEqual(published_date({'versions': [{'version': 'v1',
+                                                       'created': 'Fri, 2 Oct 2026 23:30:00 -0500'}]}),
+                         '2026-10-03')
+        self.db.upsert_paper('2610.00001', {'title': 't', **revised}, 2)
+        self.assertEqual([i['id'] for i in self.every('2026-10-03', '2026-10-03')[0]], ['2610.00001'])
+
+    def test_the_version_is_the_one_the_text_describes(self):
+        self.db.upsert_paper('2610.00002', DISCOVERY, 1)
+        self.db.put_artifact(dict(paper_id='2610.00002', version=3, kind='pdf', location='pdf/x.zst',
+                                  original_size=10, stored_size=12, compression='zstd',
+                                  media_type='application/pdf'))
+        self.assertEqual(self.db.get_paper('2610.00002')['latest_version'], 3)
+        (item,), _ = self.every('2026-10-01', '2026-10-31')
+        self.assertEqual(item['version'], 1)
+
+    def test_indexing_holds_the_write_lock_from_its_read(self):
+        """A write from another process while a batch is read waits for that batch, so its own
+        date row is not overwritten from the stale read."""
+        self.db.upsert_paper('2610.00002', DISCOVERY, 1)
+        other = Catalog(Path(self.temp.name) / 'catalog.sqlite')
+        later = {**DISCOVERY, 'version_history': [{'version': 1, 'date': '2026-10-20T00:00:00+00:00'}]}
+        writer, real = [], published_date
+        def reading(metadata):
+            if not writer:  # the batch has been read: another process writes now
+                writer.append(threading.Thread(target=other.upsert_paper,
+                                               args=('2610.00002', later, 2)))
+                writer[0].start()
+                time.sleep(0.3)
+            return real(metadata)
+        try:
+            with patch('arxiv_archive.catalog.published_date', reading):
+                self.db.index_dates()
+            writer[0].join()
+        finally:
+            other.close()
+        (row,) = self.db.db.execute('SELECT published FROM paper_dates').fetchall()
+        self.assertEqual(row[0], '2026-10-20')
 
     def test_a_catalog_dated_before_the_index_lists_once_indexed(self):
         self.assertTrue(self.db.dates_indexed())  # an empty catalog is complete
