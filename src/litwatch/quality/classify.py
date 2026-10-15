@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
 import random
 import statistics
 import time
@@ -27,6 +28,7 @@ from litwatch.core.classification import (
     Classified,
     band,
     direct,
+    grading_topics,
     keyword,
     with_ancestors,
 )
@@ -50,8 +52,11 @@ class Labels:
 
     # cohort -> Focus class -> papers that are central (or 0.14 tier 1–2) on it
     focus: dict[str, dict[str, set[str]]] = field(default_factory=dict)
-    # paper -> (primary, members, unsettled), the two labs' agreement
-    silver: dict[str, tuple[str, set[str], set[str]]] = field(default_factory=dict)
+    # paper -> the primary class both labs named
+    silver: dict[str, str] = field(default_factory=dict)
+    # paper -> (members, unsettled): the classes both labs put it in, and those only one did;
+    # from every paper both labs sorted, whether or not they agreed on the primary class
+    memberships: dict[str, tuple[set[str], set[str]]] = field(default_factory=dict)
     adjudicated: dict[str, str] = field(default_factory=dict)
     # the draw from 0.14's screened papers, with each paper's tier per selection
     draw: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -73,8 +78,11 @@ def load(root: Path) -> Labels:
         if r["tier"] in ("1", "2"):
             positive(f"regression-{r['source']}", r["topic"], r["paper_id"])
     for r in _rows(root / "silver.csv"):
-        members, unsettled = set(r["members"].split()), set(r["unsettled"].split())
-        labels.silver[r["paper_id"]] = (r["primary"], members, unsettled)
+        labels.silver[r["paper_id"]] = r["primary"]
+    for r in [*_rows(root / "silver.csv"), *_rows(root / "disputed.csv")]:
+        if r.get("opus") == "" or r.get("sol") == "":
+            continue  # one lab refused: no agreement to score
+        labels.memberships[r["paper_id"]] = (set(r["members"].split()), set(r["unsettled"].split()))
     labels.adjudicated = {r["paper_id"]: r["primary"] for r in _rows(root / "adjudicated.csv")}
     tiers = _rows(root / "tiers-0.14.csv")
     picked = random.Random(SEED).sample(sorted(r["paper_id"] for r in tiers), DRAW)
@@ -96,6 +104,7 @@ class Result(BaseModel):
     cost: float | None = None
     seconds: float = 0.0
     error: str | None = None
+    request: str = ""  # what was asked and of whom; a run resumes only on the same
 
     @property
     def classified(self) -> Classified:
@@ -110,6 +119,13 @@ def results(path: Path) -> dict[str, Result]:
     return {r.paper_id: r for r in (Result.model_validate_json(x) for x in lines if x)}
 
 
+def fingerprint(gateway: Gateway, tree: Taxonomy) -> str:
+    """The role's configuration and the questions, hashed."""
+    role = gateway.models.role(classification.ROLE).model_dump_json()
+    asked = repr(classification.questions(tree))
+    return hashlib.sha256(f"{role}\n{asked}".encode()).hexdigest()[:12]
+
+
 async def run(
     gateway: Gateway,
     tree: Taxonomy,
@@ -119,8 +135,14 @@ async def run(
     concurrency: int = 8,
     progress: Callable[[Result], None] | None = None,
 ) -> list[Result]:
-    """Sort every paper not yet in `out`, appending each answer as it arrives."""
+    """Sort every paper not yet in `out`, appending each answer as it arrives. Refuses to resume
+    a run made with another model, configuration or tree."""
+    asked = fingerprint(gateway, tree)
     done = results(out)
+    if other := {r.request for r in done.values()} - {asked}:
+        raise ValueError(
+            f"{out} holds answers to another request ({sorted(other)}); use a new file"
+        )
     gate = asyncio.Semaphore(concurrency)
     found: list[Result] = []
 
@@ -135,7 +157,7 @@ async def run(
                     paper_id=paper.id,
                 )
             except CallError as exc:
-                result = Result(paper_id=paper.id, keywords=hits, error=str(exc))
+                result = Result(paper_id=paper.id, keywords=hits, error=str(exc), request=asked)
             else:
                 c = classification.classified(tree, answer.value)
                 result = Result(
@@ -144,6 +166,7 @@ async def run(
                     primary=c.primary,
                     keywords=hits,
                     cost=answer.usage.cost,
+                    request=asked,
                 )
             result.seconds = round(time.monotonic() - started, 2)
         with out.open("a") as f:
@@ -172,13 +195,17 @@ AT_DEFAULT = Setting()
 
 
 def members(tree: Taxonomy, r: Result, s: Setting = AT_DEFAULT) -> set[str]:
-    """Classes the classifier puts the paper in, inherited ones included."""
+    """Classes the classifier puts the paper in, inherited ones included; none if it failed."""
+    if r.error:
+        return set()
     return with_ancestors(tree, direct(tree, r.classified, s.threshold))
 
 
 def focus_routes(tree: Taxonomy, r: Result, cls: str, s: Setting = AT_DEFAULT) -> tuple[bool, ...]:
     """Whether the paper reaches a Focus class: by the classifier, with the band, with the
-    band and the keyword check."""
+    band and the keyword check. A failed paper reaches a class by keyword alone."""
+    if r.error:
+        return False, False, cls in r.keywords
     by_class = cls in members(tree, r, s)
     by_band = by_class or cls in band(tree, r.classified, s.threshold, s.floor)
     return by_class, by_band, by_band or cls in r.keywords
@@ -212,38 +239,61 @@ def _top(tree: Taxonomy, slug: str) -> str:
     return [slug, *tree.ancestors(slug)][-1]
 
 
+def graded(tree: Taxonomy, r: Result, s: Setting = AT_DEFAULT) -> set[str]:
+    """The topics that would grade the paper: from its direct memberships, the band and the
+    keyword check (each a direct membership of a Focus topic's class)."""
+    if r.error:
+        joined = set(r.keywords)
+    else:
+        c = r.classified
+        joined = direct(tree, c, s.threshold) | band(tree, c, s.threshold, s.floor)
+        joined |= set(r.keywords)
+    return grading_topics(tree, joined)
+
+
 def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -> str:
-    """The comparison as markdown tables, one section per metric, a column per candidate."""
+    """The comparison as markdown tables, one section per metric, a column per candidate. A
+    paper a candidate failed on counts against it (it reaches classes by keyword alone); papers
+    with no answer at all (no text in the database) are left out."""
     names = list(runs)
-    ok = {n: {pid: r for pid, r in rs.items() if r.error is None} for n, rs in runs.items()}
     focus = [t.class_ for t in tree.topics if t.depth == Depth.FOCUS]
     lines: list[str] = ["## Runs", ""]
 
+    def mean(values: Iterable[float], fmt: str) -> str:
+        values = list(values)
+        return format(statistics.fmean(values), fmt) if values else "–"
+
     rows = []
     for n, rs in runs.items():
-        costs = [r.cost for r in ok[n].values() if r.cost is not None]
-        secs = sorted(r.seconds for r in ok[n].values())
-        p90 = secs[int(0.9 * (len(secs) - 1))] if secs else 0
-        rows.append([
-            n, len(rs), _pct(len(rs) - len(ok[n]), len(rs)),
-            f"${1000 * statistics.fmean(costs):.2f}" if costs else "–",
-            f"{statistics.fmean(secs):.1f} / {p90:.1f} / {max(secs):.1f}" if secs else "–",
-        ])  # fmt: skip
+        failed = sum(r.error is not None for r in rs.values())
+        secs = sorted(r.seconds for r in rs.values())
+        spread = (
+            f"{mean(secs, '.1f')} / {secs[int(0.9 * (len(secs) - 1))]:.1f} / {secs[-1]:.1f}"
+            if secs else "–"
+        )  # fmt: skip
+        costs = [r.cost for r in rs.values() if r.cost is not None]
+        cost = f"${1000 * statistics.fmean(costs):.2f}" if costs else "–"
+        rows.append([n, len(rs), _pct(failed, len(rs)), cost, spread])
     lines += _table(
         ["Candidate", "Papers", "Failed", "Cost per 1,000", "Seconds: mean / p90 / max"], rows
     )
+    lines += [
+        "",
+        "Cost is over answered papers; failed calls were provider errors and timeouts, which "
+        "are not billed.",
+    ]
 
     lines += ["", "## Focus membership recall", ""]
     lines += [
         "Of the papers each cohort holds central (0.14 and regression: tier 1–2) on a Focus "
         "topic, those that reach its class: classifier at 0.5 / with the uncertain band "
         "[0.2, 0.5) / with the band and the keyword check. Silver: both labs put the paper in "
-        "the class. Papers a candidate failed on are left out of its denominator.",
+        "the class, whether or not they agreed on its primary class.",
         "",
     ]
     cohorts = dict(labels.focus)
     cohorts["silver"] = {
-        cls: {p for p, (_, mem, _) in labels.silver.items() if cls in mem} for cls in focus
+        cls: {p for p, (mem, _) in labels.memberships.items() if cls in mem} for cls in focus
     }
     rows = []
     for cohort, by_class in cohorts.items():
@@ -252,7 +302,7 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
                 continue
             row: list[object] = [cohort, cls, len(pids)]
             for n in names:
-                got = [focus_routes(tree, ok[n][p], cls) for p in pids if p in ok[n]]
+                got = [focus_routes(tree, runs[n][p], cls) for p in pids if p in runs[n]]
                 row.append(" / ".join(_share(sum(g[i] for g in got), len(got)) for i in range(3)))
             rows.append(row)
     lines += _table(["Cohort", "Class", "Positives", *names], rows)
@@ -262,13 +312,13 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
 
     def volume_and_recall(n: str, s: Setting, routes: range) -> list[str]:
         drawn = [
-            [any(focus_routes(tree, ok[n][p], c, s)[i] for c in focus) for i in routes]
+            [any(focus_routes(tree, runs[n][p], c, s)[i] for c in focus) for i in routes]
             for p in labels.draw
-            if p in ok[n]
+            if p in runs[n]
         ]
-        got = [focus_routes(tree, ok[n][p], c, s) for c, p in provisional if p in ok[n]]
+        got = [focus_routes(tree, runs[n][p], c, s) for c, p in provisional if p in runs[n]]
         return [
-            " / ".join(f"{sum(d[j] for d in drawn) / max(len(drawn), 1):.1%}"
+            " / ".join(f"{sum(d[j] for d in drawn) / len(drawn):.1%}" if drawn else "–"
                        for j in range(len(routes))),
             " / ".join(_share(sum(g[i] for g in got), len(got)) for i in routes),
         ]  # fmt: skip
@@ -298,62 +348,58 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
     ]
     lines += _table(["Floor", *heads], rows)
 
-    lines += ["", "## Followed topics reached on the 0.14 draw", ""]
+    lines += ["", "## Grading on the 0.14 draw", ""]
     lines += [
-        "Share of the drawn papers in each followed topic's subtree at 0.5 (Focus: with the band "
-        "and the keyword check), which sets how much grading follows; and the mean number of "
-        "direct memberships per paper.",
+        "Share of the drawn papers each followed topic would grade at 0.5 with the band at 0.2: "
+        "for each direct membership, the nearest followed class at or above it (pipeline.md, "
+        "section 4), the band and the keyword check included. And the mean number of direct "
+        "memberships per answered paper.",
         "",
     ]
     rows = []
     for t in tree.topics:
         row: list[object] = [t.class_, t.depth.value]
         for n in names:
-            drawn = [ok[n][p] for p in labels.draw if p in ok[n]]
-            if t.depth == Depth.FOCUS:
-                hit = sum(focus_routes(tree, r, t.class_)[2] for r in drawn)
-            else:
-                hit = sum(t.class_ in members(tree, r) for r in drawn)
-            row.append(f"{hit / max(len(drawn), 1):.1%}")
+            drawn = [runs[n][p] for p in labels.draw if p in runs[n]]
+            hit = sum(t.class_ in graded(tree, r) for r in drawn)
+            row.append(f"{hit / len(drawn):.1%}" if drawn else "–")
         rows.append(row)
-    mean = ["direct memberships per paper", ""]
+    per_paper = ["direct memberships per paper", ""]
     for n in names:
-        drawn = [ok[n][p] for p in labels.draw if p in ok[n]]
-        mean.append(f"{statistics.fmean(len(direct(tree, r.classified)) for r in drawn):.1f}")
-    lines += _table(["Topic", "Depth", *names], [*rows, mean])
+        answered = [runs[n][p] for p in labels.draw if p in runs[n] and not runs[n][p].error]
+        per_paper.append(mean((len(direct(tree, r.classified)) for r in answered), ".1f"))
+    lines += _table(["Topic", "Depth", *names], [*rows, per_paper])
 
     lines += ["", "## Primary class", "", "Exact class / same top-level class.", ""]
     rows = []
-    for cohort, truth in (
-        ("silver", {p: v[0] for p, v in labels.silver.items()}),
-        ("adjudicated", labels.adjudicated),
-    ):
+    for cohort, truth in (("silver", labels.silver), ("adjudicated", labels.adjudicated)):
         row = [cohort, len(truth)]
         for n in names:
-            got = [(ok[n][p].primary or "", want) for p, want in truth.items() if p in ok[n]]
+            got = [(runs[n][p].primary, want) for p, want in truth.items() if p in runs[n]]
             exact = sum(a == b for a, b in got)
-            top = sum(_top(tree, a) == _top(tree, b) for a, b in got)
+            top = sum(a is not None and _top(tree, a) == _top(tree, b) for a, b in got)
             row.append(f"{_pct(exact, len(got))} / {_pct(top, len(got))}")
         rows.append(row)
     lines += _table(["Cohort", "Papers", *names], rows)
 
     lines += ["", "## Classes on the silver sample (levels 1–2)", ""]
     lines += [
-        "Precision / recall at 0.5, inherited memberships included; a class only one lab gave "
-        "the paper counts neither way. Classes with at least 3 silver members.",
+        "Precision / recall at 0.5, inherited memberships included, over every paper both labs "
+        "sorted; a class only one lab gave the paper counts neither way. Classes with at least "
+        "3 members.",
         "",
     ]
     rows = []
     for c in tree.classes:
-        held = [p for p, (_, mem, _) in labels.silver.items() if c.slug in mem]
+        held = [p for p, (mem, _) in labels.memberships.items() if c.slug in mem]
         if tree.level(c.slug) > 2 or len(held) < 3:
             continue
         row = [c.name, len(held)]
         for n in names:
             judged = [
-                (c.slug in members(tree, ok[n][p]), c.slug in mem)
-                for p, (_, mem, unsettled) in labels.silver.items()
-                if p in ok[n] and c.slug not in unsettled
+                (c.slug in members(tree, runs[n][p]), c.slug in mem)
+                for p, (mem, unsettled) in labels.memberships.items()
+                if p in runs[n] and c.slug not in unsettled
             ]
             row.append(_pr(judged))
         rows.append(row)
@@ -373,9 +419,9 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
         row = [cls, len(held)]
         for n in names:
             judged = [
-                (cls in members(tree, ok[n][p]), t[cls] in ("1", "2"))
+                (cls in members(tree, runs[n][p]), t[cls] in ("1", "2"))
                 for p, t in labels.draw.items()
-                if p in ok[n] and t[cls] in ("1", "2", "4")
+                if p in runs[n] and t[cls] in ("1", "2", "4")
             ]
             row.append(_pr(judged))
         rows.append(row)

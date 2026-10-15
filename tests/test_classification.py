@@ -1,7 +1,14 @@
 """Classification's request from the tree, and what its answer makes a paper a member of."""
 
 from litwatch import classification, seeds
-from litwatch.core.classification import Classified, band, direct, keyword, with_ancestors
+from litwatch.core.classification import (
+    Classified,
+    band,
+    direct,
+    grading_topics,
+    keyword,
+    with_ancestors,
+)
 from litwatch.llm.decisions import Chosen, Decision
 
 TREE = seeds.taxonomy()
@@ -42,3 +49,14 @@ def test_the_keyword_check_matches_focus_patterns_without_a_model():
     hits = keyword(TREE, "Is the chain of thought faithful?", "We test unfaithful reasoning.")
     assert "cot-faithfulness" in hits
     assert keyword(TREE, "Robot grasping", "A gripper.") == {}
+
+
+def test_each_direct_membership_is_graded_by_the_nearest_followed_class_at_or_above_it():
+    # Sparse autoencoders is under Interpretability (Area); CoT faithfulness is followed itself.
+    assert grading_topics(TREE, {"sparse-autoencoders"}) == {"interpretability"}
+    assert grading_topics(TREE, {"cot-faithfulness"}) == {"cot-faithfulness"}
+    assert grading_topics(TREE, {"cot-faithfulness", "sparse-autoencoders"}) == {
+        "cot-faithfulness",
+        "interpretability",
+    }
+    assert grading_topics(TREE, {"robotics"}) == set()

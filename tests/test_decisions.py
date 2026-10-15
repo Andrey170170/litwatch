@@ -8,6 +8,7 @@ import pytest
 from litwatch.config import Models, RoleConfig
 from litwatch.llm import CallError, Gateway
 from litwatch.llm.anthropic import AnthropicProvider
+from litwatch.llm.decisions import Chosen
 from litwatch.llm.openrouter import DECISIONS_URL, OpenRouterProvider
 from litwatch.llm.types import Choice, DecisionRequest, Predicate
 from tests.fakes import SdkClient, anthropic_message, decisions_reply
@@ -89,8 +90,15 @@ async def test_an_answer_that_misses_or_breaks_a_question_is_invalid(change):
     assert caught.value.kind == "invalid"
 
 
-async def test_a_decisions_reply_missing_an_answer_is_invalid():
-    client = SdkClient(decisions_reply({"circuits": {"type": "noul", "noul": 0.9}}))
+@pytest.mark.parametrize(
+    "answers",
+    [
+        {"circuits": {"type": "noul", "noul": 0.9}},  # answers missing
+        ["not", "an", "object"],
+    ],
+)  # fmt: skip
+async def test_a_missing_or_malformed_decisions_reply_is_invalid(answers):
+    client = SdkClient(decisions_reply(answers))
     with pytest.raises(CallError) as caught:
         await gateway(JEV, client).decide("classify", REQUEST)
     assert caught.value.kind == "invalid"
@@ -109,3 +117,15 @@ async def test_a_decision_is_journalled_and_reused(conn, journal):  # noqa: F811
 def test_only_openrouter_serves_a_decisions_endpoint():
     with pytest.raises(ValueError, match="only OpenRouter"):
         RoleConfig(provider="anthropic", model="claude-haiku-5-5", decisions=True)
+
+
+async def test_a_malformed_choice_distribution_leaves_the_choice_without_a_probability():
+    client = SdkClient(
+        decisions_reply({
+            "circuits": {"type": "noul", "noul": 0.9},
+            "robotics": {"type": "noul", "noul": 0.1},
+            "primary_class": {"type": "choice", "choice": "Circuits", "probabilities": [0.9]},
+        })
+    )  # fmt: skip
+    answer = await gateway(JEV, client).decide("classify", REQUEST)
+    assert answer.value.choices["primary_class"] == Chosen(option="Circuits", probability=None)

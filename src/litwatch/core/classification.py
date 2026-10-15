@@ -80,3 +80,15 @@ def keyword(tree: Taxonomy, title: str, abstract: str) -> dict[str, str]:
             if hit:
                 found[t.class_] = hit
     return found
+
+
+def grading_topics(tree: Taxonomy, direct_members: set[str]) -> set[str]:
+    """The topics that grade a paper: for each direct membership, the nearest followed class at
+    or above it (pipeline.md, section 4). Inherited memberships add none."""
+    followed = {t.class_ for t in tree.topics}
+    found = set()
+    for slug in direct_members:
+        nearest = next((s for s in [slug, *tree.ancestors(slug)] if s in followed), None)
+        if nearest:
+            found.add(nearest)
+    return found

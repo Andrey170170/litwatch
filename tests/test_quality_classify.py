@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from litwatch import seeds
 from litwatch.quality import classify
 
@@ -17,6 +19,9 @@ def test_the_labels_load_into_cohorts_with_a_fixed_draw():
         "cot-monitoring": 51,
     }
     assert len(labels.silver) == 165 and len(labels.adjudicated) == 20
+    # Memberships come from every paper both labs sorted, disputed primaries included.
+    assert "2607.03502" in labels.memberships and "2607.03502" not in labels.silver
+    assert len(labels.memberships) == 198
     assert len(labels.draw) == classify.DRAW
     assert list(labels.draw) == list(classify.load(LABELS).draw)
     assert set(labels.draw) <= set(labels.papers)
@@ -36,3 +41,21 @@ def test_a_focus_class_is_reached_by_classifier_band_or_keyword_in_that_order():
 def test_precision_and_recall_say_when_there_is_nothing_to_score():
     assert classify.precision_recall([(True, True), (True, False), (False, True)]) == (0.5, 0.5)
     assert classify.precision_recall([(False, False)]) == (None, None)
+
+
+def test_a_failed_paper_reaches_a_focus_class_by_keyword_alone():
+    failed = classify.Result(paper_id="1", error="timeout", keywords={"cot-faithfulness": "x"})
+    assert classify.focus_routes(TREE, failed, "cot-faithfulness") == (False, False, True)
+    assert classify.members(TREE, failed) == set()
+
+
+async def test_a_run_refuses_to_resume_answers_to_another_request(tmp_path):
+    from litwatch.config import Models, RoleConfig
+    from litwatch.llm import Gateway
+
+    out = tmp_path / "jev.jsonl"
+    out.write_text(classify.Result(paper_id="1", request="older").model_dump_json() + "\n")
+    role = RoleConfig(provider="openrouter", model="typesafe/jev-1.13", decisions=True)
+    gateway = Gateway(Models(classify=role), {})
+    with pytest.raises(ValueError, match="another request"):
+        await classify.run(gateway, TREE, [], out)

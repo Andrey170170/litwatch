@@ -93,22 +93,27 @@ def decisions_request(
     return body
 
 
-def decision_reply(raw: dict[str, Any], request: DecisionRequest, role: RoleConfig) -> Reply:
+def _mapping(value: Any) -> dict[str, Any]:
+    """A reply's object, or an empty one when it is malformed, so validation rejects it."""
+    return value if isinstance(value, dict) else {}
+
+
+def decision_reply(raw: Any, request: DecisionRequest, role: RoleConfig) -> Reply:
     """The answers as the JSON a chat model gives for the same request. An answer that is
     missing or of the wrong type is left out, so the gateway rejects the reply as invalid."""
-    answers = raw.get("answers") or {}
+    raw = raw if isinstance(raw, dict) else {}
+    answers = _mapping(raw.get("answers"))
     out: dict[str, Any] = {}
     for q in request.questions:
-        a = answers.get(q.name)
-        if not isinstance(a, dict):
-            continue
+        a = _mapping(answers.get(q.name))
         if isinstance(q, Predicate) and a.get("type") == "noul":
             out[q.name] = a.get("noul")
         elif isinstance(q, Choice) and a.get("type") == "choice":
             option = a.get("choice")
-            probability = (a.get("probabilities") or {}).get(option, a.get("confidence"))
+            probabilities = _mapping(a.get("probabilities"))
+            probability = probabilities.get(option, a.get("confidence"))
             out[q.name] = {"option": option, "probability": probability}
-    values = raw.get("usage") or {}
+    values = _mapping(raw.get("usage"))
     usage = Usage(
         model=role.model,
         via="openrouter",
