@@ -288,11 +288,12 @@ Published digests are records and are never re-projected.
 ## 11. Volumes and cost
 
 From the side-by-side database (2026-09-29 to 2026-10-12): 700–1,550 papers on a weekday, about 2,500 on the first day
-after a weekend, none announced on Saturday and Sunday. Those are nightly intake records, nearly a third of them new
-versions of older papers, in a fortnight that began in the busiest week of the first v1's data. Measured in N2c on the
-papers first submitted 2026-10-01 to 10-14 (6,305, read from the archive): 425–595 on a submission weekday (424 on the partial
-last day), 975 and 1,156 on a Monday with Saturday and Sunday folded in ([evals/2026-10-15-tuning.md](../../../evals/2026-10-15-tuning.md)). Estimates per weekday at
-about 1,000 papers, with what N2c measured per 1,000 papers:
+after a weekend, none announced on Saturday and Sunday. Those are nightly intake records, 31 % of them a version after
+the first, in a fortnight that began in the busiest week of the first v1's data. Measured in N2c on the papers first
+submitted 2026-10-01 to 10-14 (6,305, read from the archive): 425–595 on a submission weekday (424 on the partial last
+day), 975 and 1,156 on a Monday with Saturday and Sunday folded in
+([evals/2026-10-15-tuning.md](../../../evals/2026-10-15-tuning.md)). Estimates per weekday at about 1,000 papers, with
+what N2c measured per 1,000 papers:
 
 | Step | Calls | Estimate | Measured (N2c) |
 | --- | --- | --- | --- |

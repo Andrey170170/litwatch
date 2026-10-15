@@ -181,12 +181,12 @@ for topic in sorted(
     body = []
     for f in FITS:
         row = [f]
-        for w in WEIGHTS:
+        for w in [*WEIGHTS, ""]:
             n = cell[(f, w)]
             t = tier[(f, w)]
             row.append(f"{n} ({t['1']}/{t['2']}/{t['3']}/{t['4']})" if has_tiers and n else n)
         body.append(row)
-    table(["Fit \\ Weight", *WEIGHTS], body)
+    table(["Fit \\ Weight", *WEIGHTS, "no analysis (graded as solid)"], body)
     if has_tiers:
         print(
             "Cells: verdicts (0.14's tier 1/2/3/4 on the same selection; the rest 0.14 did not "
