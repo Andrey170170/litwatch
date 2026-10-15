@@ -46,13 +46,14 @@ def _without_nul(value: Any) -> Any:
 
 class CallError(Exception):
     """A call produced no usable answer. `kind` is `truncated`, `refused`, `invalid`,
-    `timeout` or `provider`; the message carries the detail."""
+    `timeout` or `provider`; the message carries the detail. `usage` is the reply's, when one
+    came back and was billed."""
 
-    def __init__(self, kind: str, detail: str | None = None) -> None:
+    def __init__(self, kind: str, detail: str | None = None, usage: Usage | None = None) -> None:
         # Provider text can carry a NUL, which Postgres text cannot hold; the message is
         # stored as a paper's last error.
         detail = detail.replace("\x00", "") if detail else detail
-        self.kind, self.detail = kind, detail
+        self.kind, self.detail, self.usage = kind, detail, usage
         super().__init__(f"{kind}: {detail}" if detail else kind)
 
 
@@ -198,15 +199,17 @@ class Gateway:
             log.info("inference role=%s usage=%s", role_name, reply.usage.model_dump_json())
             if reply.stop == Stop.REFUSED:
                 log.warning("role=%s paper=%s refused: %s", role_name, paper_id, reply.refusal)
-                raise CallError("refused", reply.refusal)
+                raise CallError("refused", reply.refusal, reply.usage)
             if reply.stop == Stop.TRUNCATED:
-                raise CallError("truncated")
+                raise CallError("truncated", usage=reply.usage)
             try:
                 value = request.output.model_validate(_without_nul(json.loads(reply.text)))
             except json.JSONDecodeError as exc:
-                raise CallError("invalid", "not JSON") from exc
+                raise CallError("invalid", "not JSON", reply.usage) from exc
             except ValidationError as exc:
-                raise CallError("invalid", f"{exc.error_count()} validation errors") from exc
+                raise CallError(
+                    "invalid", f"{exc.error_count()} validation errors", reply.usage
+                ) from exc
         except CallError as exc:
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.

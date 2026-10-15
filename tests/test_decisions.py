@@ -102,6 +102,7 @@ async def test_a_missing_or_malformed_decisions_reply_is_invalid(answers):
     with pytest.raises(CallError) as caught:
         await gateway(JEV, client).decide("classify", REQUEST)
     assert caught.value.kind == "invalid"
+    assert caught.value.usage.cost == 0.00005  # billed, though unusable
 
 
 async def test_a_decision_is_journalled_and_reused(conn, journal):  # noqa: F811

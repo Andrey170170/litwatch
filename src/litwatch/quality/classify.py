@@ -119,7 +119,7 @@ def results(path: Path) -> dict[str, Result]:
     packed = path.with_name(path.name + ".gz")
     lines = gzip.decompress(packed.read_bytes()).decode().splitlines() if packed.exists() else []
     if path.exists():
-        lines += path.read_text().splitlines()
+        lines += path.read_text(encoding="utf-8").splitlines()
     return {r.paper_id: r for r in (Result.model_validate_json(x) for x in lines if x)}
 
 
@@ -162,7 +162,10 @@ async def run(
                     paper_id=paper.id,
                 )
             except CallError as exc:
-                result = Result(paper_id=paper.id, keywords=hits, error=str(exc), request=asked)
+                cost = exc.usage.cost if exc.usage else None  # a billed reply that was unusable
+                result = Result(
+                    paper_id=paper.id, keywords=hits, error=str(exc), cost=cost, request=asked
+                )
             else:
                 c = classification.classified(tree, answer.value)
                 result = Result(
@@ -174,7 +177,7 @@ async def run(
                     request=asked,
                 )
             result.seconds = round(time.monotonic() - started, 2)
-        with out.open("a") as f:
+        with out.open("a", encoding="utf-8") as f:
             f.write(result.model_dump_json() + "\n")
         found.append(result)
         if progress:
