@@ -213,8 +213,9 @@ class ArchiveClient:
         return bytes(result)
 
     async def latex(self, paper_id: str, version: int | None = None) -> PaperText | None:
-        """The text of a paper's LaTeX source: of `version`, or without one the newest the
-        archive has (its historical LaTeX, of no known version, last). None when it has none."""
+        """The text of a paper's LaTeX source: of `version` (0: its historical LaTeX, of no
+        known version), or without one the newest the archive has (its historical LaTeX last).
+        None when it has none."""
         params = {"version": version} if version is not None else {}
         body = await self._json("GET", self._path(paper_id) + "/text", missing=True, params=params)
         if body is None:
@@ -222,7 +223,7 @@ class ArchiveClient:
         text, found = body.get("text"), body.get("version")
         if not isinstance(text, str) or not (found is None or type(found) is int):
             raise ArchiveError("invalid archive text")
-        if version is not None and found != version:
+        if version is not None and found != (version or None):
             raise ArchiveError("archive text of another version")
         return PaperText(text, found, "latex")
 

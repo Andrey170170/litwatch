@@ -55,13 +55,14 @@ async def read_text(
 ) -> PaperText | None:
     """The paper's text, of its arXiv version, or None while the archive is still fetching it.
     Its source is asked for at `priority`; when arXiv has no usable source for it, its PDF.
-    A paper of no known version is read from whatever LaTeX the archive holds, its version as
-    the archive gives it. Raises TextUnavailable when there is no text to be had, and
-    ArchiveUnavailable while the archive cannot be reached."""
+    A paper of no known version is read from the archive's historical LaTeX alone, of no known
+    version either: a newer source the archive holds may be of another text. Raises
+    TextUnavailable when there is no text to be had, and ArchiveUnavailable while the archive
+    cannot be reached."""
     try:
         paper = await archive.resolve(paper)
     except ArchiveVersionUnknown:
-        if found := _usable(await archive.latex(paper.id)):
+        if found := _usable(await archive.latex(paper.id, 0)):
             return found
         raise TextUnavailable(f"{paper.id}: no arXiv version known and no LaTeX text") from None
     assert paper.version is not None

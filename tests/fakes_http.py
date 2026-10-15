@@ -213,7 +213,7 @@ class FakeArchive:
         if path.endswith("/text"):
             pid = path.removeprefix("/v1/papers/").removesuffix("/text")
             asked = req.url.params.get("version")
-            if pid not in self.texts or asked not in (None, str(self.texts[pid][0])):
+            if pid not in self.texts or asked not in (None, str(self.texts[pid][0] or 0)):
                 return httpx.Response(404, json={"error": "paper, artifact or job not found"})
             version, text = self.texts[pid]
             return httpx.Response(

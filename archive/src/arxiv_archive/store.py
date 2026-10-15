@@ -490,17 +490,17 @@ class Store:
 
     def text(self, paper_id, version=None):
         """The paper's LaTeX as one text (`latex_text`), with the arXiv version it is of:
-        `version`'s stored source, else the newest stored, else the historical LaTeX, whose
-        version is unknown (None). FileNotFoundError when there is no such source or it holds
-        no LaTeX."""
+        `version`'s stored source (0: the historical LaTeX alone), else the newest stored, else
+        the historical LaTeX, whose version is unknown (None). FileNotFoundError when there is
+        no such source or it holds no LaTeX."""
         identity(paper_id, version)
         self._guard()
         with self.read_lock:
-            artifact = self.catalog.get_artifact(paper_id, 'source', version or None)
+            artifact = None if version == 0 else self.catalog.get_artifact(paper_id, 'source', version)
             if artifact is None and version:
                 raise FileNotFoundError(f'No source for {paper_id} version {version}')
             found = artifact['version'] if artifact else None
-            package = self.get(paper_id, 'source', found)
+            package = self.get(paper_id, 'source', found or 0)
             try:
                 body = latex_text(package, self.max_bytes)
             except NoTextSource as exc:

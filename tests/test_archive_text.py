@@ -85,6 +85,13 @@ async def test_a_paper_of_no_known_version_reads_the_archives_latex():
         await read_text(client(fake), paper("2610.00002"))
 
 
+async def test_a_paper_of_no_known_version_is_never_read_from_a_versioned_source():
+    fake = FakeArchive()
+    fake.texts["2610.00001"] = (3, BODY)  # v3, which the paper's metadata may not be
+    with pytest.raises(TextUnavailable, match="no arXiv version known"):
+        await read_text(client(fake), paper("2610.00001"))
+
+
 async def test_text_of_another_version_than_asked_is_refused():
     fake = FakeArchive()
     fake.texts["2610.00001"] = (2, BODY)

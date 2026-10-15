@@ -221,6 +221,11 @@ class StoreTextTests(unittest.TestCase):
         self.assertIn("Historical", found["text"])
         with self.assertRaises(FileNotFoundError):
             self.store.text("2609.12345", 1)  # an explicit version is never the historical LaTeX
+        self.put(2, b"\\documentclass{article}\\begin{document}Second version\\end{document}")
+        self.assertEqual(self.store.text("2609.12345")["version"], 2)
+        historical = self.store.text("2609.12345", 0)  # asked for by name, beside a newer source
+        self.assertIsNone(historical["version"])
+        self.assertIn("Historical", historical["text"])
 
 
 if __name__ == "__main__":
