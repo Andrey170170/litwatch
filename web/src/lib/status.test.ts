@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { statusLine, type RunStatus } from "./status";
 
-const base: RunStatus = { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 };
+const base: RunStatus = {
+  state: "quiet",
+  papers: 212,
+  awaiting_classification: 0,
+  analysis_failed: 0,
+  ungraded: 0,
+  fulltext_failed: 0,
+};
 
 describe("statusLine", () => {
   it("says nothing before the first run", () => {
@@ -13,6 +20,7 @@ describe("statusLine", () => {
   it("counts papers waiting on the owner as failed, ahead of running and budget", () => {
     const s = statusLine({ ...base, state: "running", waiting: 30, analysis_failed: 2, ungraded: 1, over_budget: ["gist"] });
     expect(s).toMatchObject({ text: "3 failed", tone: "failed", page: "needs" });
+    expect(statusLine({ ...base, fulltext_failed: 1 })).toMatchObject({ text: "1 failed", page: "needs" });
   });
   it("shows progress while running", () => {
     expect(statusLine({ ...base, state: "running", papers: 47, waiting: 165 })).toMatchObject({ text: "47/212", tone: "running" });
