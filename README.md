@@ -7,8 +7,8 @@ the results are served through litwatch's own web app.
 This branch is v1 in progress. The specification is in `docs/specs/v1/` and the terms in
 `GLOSSARY.md`. The first v1 design's pipeline (triage, takes, reviews and issues) has been taken
 out, and the redesigned core (classes, detail levels, digests per depth) is being built in its
-place before the switch; until it lands, the nightly run is intake alone and the web app is a
-placeholder. Release 0.14 lives on `main`.
+place before the switch; until grading lands, the nightly run is intake, classification and
+analysis, and the web app is a placeholder. Release 0.14 lives on `main`.
 
 ## Setup
 
@@ -27,7 +27,8 @@ through a role.
 ## Commands
 
 ```sh
-litwatch nightly                     # the nightly run: intake, for now
+litwatch nightly                     # the nightly run: intake, classification, analysis
+litwatch nightly --no-fetch --limit 20   # classify and analyse a few stored papers, no intake
 litwatch intake --days 1             # intake alone
 litwatch intake archive --days 14    # a window's papers read from the archive instead of arXiv
 litwatch eval classify jev | classify-report jev    # the classifier comparison (candidates in evals/configs/classify.toml)
