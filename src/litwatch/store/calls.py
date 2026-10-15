@@ -95,3 +95,20 @@ async def spent_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[st
         )
     ).fetchall()
     return {r["via"]: float(r["cost"]) for r in rows}
+
+
+async def mean_cost(
+    conn: psycopg.AsyncConnection, role: str, model: str, last: int = 200
+) -> float | None:
+    """What a call of `role` on `model` cost on average over its latest `last` billed calls
+    (reused replies left out), or None when it has none: what an estimate goes by."""
+    row = await (
+        await conn.execute(
+            "SELECT avg(cost) AS cost FROM (SELECT (usage->>'cost')::float AS cost "
+            "FROM inference_calls WHERE operation = %s AND usage->>'model' = %s "
+            "AND usage->>'cost' IS NOT NULL AND NOT coalesce((usage->>'reused')::boolean, false) "
+            "ORDER BY id DESC LIMIT %s) recent",
+            (role, model, last),
+        )
+    ).fetchone()
+    return row["cost"]

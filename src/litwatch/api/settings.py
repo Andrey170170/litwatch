@@ -94,6 +94,7 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
         "cost": [
             line.model_dump() for line in await budget_lines(c, request.app.state.config.budget)
         ],
+        "recall": await quality.replay_recall(c),
         "calibration": await calibrate.precision(c),
         "matters_no_topic": await calibrate.matters_no_topic(c),
         "collected": await quality.collected_reactions(c),

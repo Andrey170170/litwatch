@@ -275,6 +275,117 @@ def eval_classify_report(
     print(classify.report(seeds.taxonomy(), classify.load(labels), results), end="")
 
 
+def _counts(pairs: list[str], name: str) -> dict[str, int]:
+    """`COHORT=N` options as a mapping."""
+    found = {}
+    for pair in pairs:
+        cohort, _, n = pair.partition("=")
+        if not n.isdigit():
+            raise typer.BadParameter(f"{pair!r}: expected COHORT=N", param_hint=name)
+        found[cohort] = int(n)
+    return found
+
+
+@eval_app.command("replay")
+def eval_replay(
+    cohort: Annotated[
+        list[str] | None,
+        typer.Option(help="Only these cohorts: owner, provisional, legacy, silver, miss."),
+    ] = None,
+    negatives: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="COHORT=N: at most N of the cohort's negatives, drawn with a fixed seed."
+        ),
+    ] = None,
+    labels: Annotated[Path, typer.Option(help="The evaluation labels.")] = Path("evals/labels"),
+    limit: Annotated[int | None, typer.Option(help="Only the first N papers.")] = None,
+    resume: Annotated[int | None, typer.Option(help="Go on with this replay.")] = None,
+    note: Annotated[str | None, typer.Option(help="A note kept with the run.")] = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Spend without asking.")] = False,
+    config: ConfigPath = None,
+) -> None:
+    """Run the labelled and missed papers through the current classification, keyword check
+    and grading (feedback.md, evaluation). A dry run: it writes to the evaluation tables only.
+    Shows what it would cost and asks first; a run cut short goes on with --resume."""
+    from litwatch.quality import replay  # noqa: PLC0415
+
+    cfg = configuration.load(config)
+    sample = _counts(negatives or [], "--negatives")
+    if unknown := (set(cohort or []) | set(sample)) - set(replay.COHORTS):
+        raise typer.BadParameter(f"no cohort {', '.join(sorted(unknown))}")
+
+    async def prepare(conn: psycopg.AsyncConnection) -> tuple[Any, dict[str, float]]:
+        if resume is not None:
+            r = await replay.resume(conn, cfg, resume)
+        else:
+            tree = await taxonomy_store.load(conn)
+            if tree is None:
+                raise ValueError("no taxonomy yet: `litwatch taxonomy import` the seed first")
+            every = replay.load(labels) + await replay.misses(conn)
+            chosen = replay.select(every, replay.focus(tree), cohorts=cohort, negatives=sample)
+            r = await replay.prepare(conn, chosen, limit=limit)
+        return r, await replay.estimate(conn, cfg, r)
+
+    try:
+        r, cost = _run(prepare)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if r.left_out:
+        console.print(f"[yellow]{len(r.left_out)} labelled papers are not in the database and "
+                      "are left out[/yellow]")  # fmt: skip
+    by_cohort = Counter(x.cohort for x in r.labels)
+    console.print(
+        f"{len(r.labels)} labels ({', '.join(f'{c} {n}' for c, n in by_cohort.items())}) on "
+        f"{len(r.papers)} papers; to do: classify {len(r.to_classify)} papers, grade "
+        f"{len(r.to_grade)} paper-topic pairs; estimated ${sum(cost.values()):.2f} "
+        f"(classification ${cost['classification']:.2f}, grading ${cost['grading']:.2f})"
+    )
+    if not r.to_classify and not r.to_grade:
+        return
+    if not yes and not typer.confirm("Spend it?"):
+        raise typer.Exit(1)
+
+    async def work(conn: psycopg.AsyncConnection) -> dict[str, Any]:
+        if r.eval_run_id is None:
+            params = {"cohorts": cohort, "negatives": sample, "seed": replay.SEED, "limit": limit}
+            await replay.start(conn, cfg, r, params, note)
+            console.print(f"replay {r.eval_run_id}")
+        return await replay.run(conn, cfg, r)
+
+    counts = _run(work)
+    console.print_json(data=counts)
+    console.print(f"report: litwatch eval report {r.eval_run_id}")
+
+
+@eval_app.command("report")
+def eval_report(
+    eval_run: Annotated[int | None, typer.Argument(help="Default: the latest replay.")] = None,
+    out: Annotated[Path | None, typer.Option(help="Also write the report here.")] = None,
+) -> None:
+    """A replay's recall per Focus topic and cohort, as markdown, from what it recorded: no
+    calls."""
+    from litwatch.core.evaluation import recall  # noqa: PLC0415
+    from litwatch.quality import replay  # noqa: PLC0415
+    from litwatch.store import evaluation  # noqa: PLC0415
+
+    async def work(conn: psycopg.AsyncConnection) -> str | None:
+        found = eval_run if eval_run is not None else await evaluation.latest(conn, replay.KIND)
+        run = await evaluation.get(conn, found) if found is not None else None
+        if run is None or run["kind"] != replay.KIND:
+            return None
+        outcomes = await evaluation.outcomes(conn, found)
+        rows = await evaluation.results(conn, found)
+        return replay.report(run, recall(outcomes), outcomes, rows)
+
+    text = _run(work)
+    if text is None:
+        raise SystemExit("no such replay")
+    print(text, end="")
+    if out is not None:
+        out.write_text(text)
+
+
 # -- library ---------------------------------------------------------------------------------------
 
 
