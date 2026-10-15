@@ -166,24 +166,35 @@ export function settle(q: Quality, list: Waiting, item: Settled, what: string | 
   return { ...q, night };
 }
 
-/** The quality page after the paper's own page settled something: an item whose open state the refetched paper no
- * longer carries is marked settled in place, a split with the label it got. The sidebar's count follows, and the
- * way back to Needs you finds the row where it was. */
+/** Last night's splits and escalations still waiting for a label, or settled on this visit, in their two groups.
+ * An Area escalation whose graders also disagreed carries both flags; it is an escalation (the less inclusive Fit
+ * stands), as the paper's page reads it. */
+export function openSplits(splits: Split[]): { splits: Split[]; escalations: Split[] } {
+  const open = splits.filter((s) => !s.label || s.settled);
+  return { splits: open.filter((s) => s.split && !s.escalated), escalations: open.filter((s) => s.escalated) };
+}
+
+/** The quality page reconciled with the paper's own page after a write there: an item whose open state the
+ * refetched paper no longer carries is marked settled in place (a split with the label it got), and one whose
+ * state is back (a label taken back) waits again. The sidebar's count follows, and the way back to Needs you finds
+ * the row where it was. */
 export function settleFromPaper(q: Quality, paper: Schemas["Paper"]): Quality {
   const states = paper.states ?? [];
   const has = (kind: Schemas["OpenState"]["kind"], topic?: string | null, id?: number) => states.some((s) => s.kind === kind && (topic == null || s.topic === topic) && (id == null || s.pass_id === id));
   const labelOf = (topic: string) => paper.topics.find((t) => t.topic.slug === topic)?.label?.value;
-  const open = <T extends { paper_id: string; settled?: string }>(x: T) => x.paper_id === paper.id && !x.settled;
   const done = "Settled on the paper's page.";
+  // The item as the paper's page leaves it: settled with `what` while its state is gone, open while it is back.
+  const read = <T extends { paper_id: string; settled?: string }>(x: T, open: boolean, what: string | undefined): T => {
+    if (x.paper_id !== paper.id) return x;
+    if (open) return x.settled ? { ...x, settled: undefined } : x;
+    return x.settled || !what ? x : { ...x, settled: what };
+  };
   const night = { ...q.night };
-  night.splits = night.splits.map((s) => {
-    const label = open(s) && !s.label && !has(s.split ? "split" : "escalated", s.topic) ? labelOf(s.topic) : undefined;
-    return label ? { ...s, settled: label } : s;
-  });
-  night.awaiting_classification = night.awaiting_classification.map((s) => (open(s) && !has("awaiting_classification") ? { ...s, settled: done } : s));
-  night.analysis_failed = night.analysis_failed.map((s) => (open(s) && !has("analysis_stopped") ? { ...s, settled: done } : s));
-  night.ungraded = night.ungraded.map((s) => (open(s) && !has("ungraded", s.topic) ? { ...s, settled: done } : s));
-  night.fulltext = night.fulltext.map((s) => (open(s) && !has(s.state === "failed" ? "fulltext_failed" : "awaiting_text", null, s.id) ? { ...s, settled: done } : s));
+  night.splits = night.splits.map((s) => (s.label ? s : read(s, has(s.escalated ? "escalated" : "split", s.topic), labelOf(s.topic))));
+  night.awaiting_classification = night.awaiting_classification.map((s) => read(s, has("awaiting_classification"), done));
+  night.analysis_failed = night.analysis_failed.map((s) => read(s, has("analysis_stopped"), done));
+  night.ungraded = night.ungraded.map((s) => read(s, has("ungraded", s.topic), done));
+  night.fulltext = night.fulltext.map((s) => read(s, has(s.state === "failed" ? "fulltext_failed" : "awaiting_text", null, s.id), done));
   return { ...q, night };
 }
 

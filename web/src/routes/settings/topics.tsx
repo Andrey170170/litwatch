@@ -5,7 +5,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Schemas } from "@/api/client";
 import { useReorderTopics, useSaveTopic } from "@/api/mutations";
 import { keywordsQuery, taxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
@@ -170,14 +170,17 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
     if (k && !keywords.includes(k)) set({ keywords: [...keywords, k] });
     setTyping(null);
   };
+  // The form as it is now, for a save that returns after further edits: the offer describes only what was sent.
+  const latest = useRef(form);
+  latest.current = form;
   const onSave = () => {
     const body: Topic = { ...form, rubric: form.depth === "focus" ? form.rubric || null : null, interests: form.interests || null };
     save.mutate(
       { slug: cls.slug, topic: body },
       {
         onSuccess: () => {
-          setSaved({ before: current, after: form });
           setBase(form);
+          if (latest.current === form) setSaved({ before: current, after: form });
         },
       },
     );

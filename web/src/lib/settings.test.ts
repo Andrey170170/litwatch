@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { answerFits, differs, level, savedLine, settle, settleFromPaper, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
+import { answerFits, differs, level, openSplits, savedLine, settle, settleFromPaper, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
 
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
@@ -41,6 +41,27 @@ describe("settleFromPaper", () => {
     expect(after.night.splits.map((s) => s.settled)).toEqual([undefined, undefined]);
     expect(after.night.ungraded[0]!.settled).toBe("Graded");
     expect(settleFromPaper(q, paper("9", []))).toEqual(q);
+  });
+  it("lets an item wait again when the paper's page carries its state once more: a label taken back", () => {
+    const settled = settleFromPaper(q, paper("1", [{ kind: "split", topic: "b" }], [topic("a", "central"), topic("b")]));
+    const back = settleFromPaper(settled, paper("1", [{ kind: "split", topic: "a" }, { kind: "split", topic: "b" }], [topic("a"), topic("b")]));
+    expect(back.night.splits.map((s) => s.settled)).toEqual([undefined, undefined]);
+    // The two splits and the other paper's pass wait; the grading and analysis the page settled stay settled.
+    expect(waiting(back)).toBe(3);
+  });
+  it("reads an escalation by its flag, as the paper's page does, even where the graders also split", () => {
+    const both = { night: { ...night, splits: [{ ...split, depth: "area", split: true, escalated: true }] } } as Quality;
+    expect(settleFromPaper(both, paper("1", [{ kind: "escalated", topic: "a" }], [topic("a")])).night.splits[0]!.settled).toBeUndefined();
+    expect(settleFromPaper(both, paper("1", [], [topic("a", "adjacent")])).night.splits[0]!.settled).toBe("adjacent");
+  });
+});
+
+describe("openSplits", () => {
+  it("groups by the escalation flag, drops splits labelled before the visit and keeps those settled on it", () => {
+    const area = { ...split, paper_id: "2", depth: "area", split: true, escalated: true } as const;
+    const { splits, escalations } = openSplits([split, area, { ...split, paper_id: "3", label: { value: "none" } }, { ...split, paper_id: "4", label: { value: "none" }, settled: "none" }]);
+    expect(splits.map((s) => s.paper_id)).toEqual(["1", "4"]);
+    expect(escalations.map((s) => s.paper_id)).toEqual(["2"]);
   });
 });
 

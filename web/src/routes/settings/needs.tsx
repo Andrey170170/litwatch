@@ -10,7 +10,7 @@ import { said, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel,
 import { qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
-import { type LabelValue, type Quality, settle, type Settled, type Split, type Stuck, type TextPassStuck, type Waiting, waiting } from "@/lib/settings";
+import { type LabelValue, openSplits, type Quality, settle, type Settled, type Split, type Stuck, type TextPassStuck, type Waiting, waiting } from "@/lib/settings";
 import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 type Settle = (what: string | undefined) => void;
@@ -218,8 +218,7 @@ export function NeedsPage() {
   const settler = (list: Waiting, s: Settled) => (what: string | undefined) => qc.setQueryData(qualityQuery.queryKey, (old: Quality | undefined) => old && settle(old, list, s, what));
   const open = q ? waiting(q) : 0;
   // A split labelled before this visit no longer waits; one labelled on it stays, settled.
-  const splits = q?.night.splits.filter((s) => s.split && (!s.label || s.settled)) ?? [];
-  const escalations = q?.night.splits.filter((s) => !s.split && s.escalated && (!s.label || s.settled)) ?? [];
+  const { splits, escalations } = openSplits(q?.night.splits ?? []);
   const line = (q: Quality) => (q.night.error ? `Last night's run failed: ${q.night.error}` : open > 0 ? `${open} ${open === 1 ? "thing waits" : "things wait"} on the owner. Each also shows on its paper's page.` : "Nothing waits on the owner.");
   return (
     <>

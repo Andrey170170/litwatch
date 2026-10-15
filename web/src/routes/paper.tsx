@@ -75,11 +75,17 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   const desktop = useDesktop();
   const process = useProcess();
   // While a card is asked for, the page polls until an integration has written it (the API has no queued state);
-  // likewise while a full-text pass is queued or running, so the Brief appears once written.
+  // likewise while a full-text pass is queued or running, and more slowly while it awaits its text, so the Brief
+  // appears once written. A pass waiting on the owner (its note above) is not polled for.
   const asked = useCardAsked(id);
   const { data: paper, error, isPending } = useQuery({
     ...paperQuery(id),
-    refetchInterval: (q) => (asked || ["ready", "running"].includes(q.state.data?.text_pass?.state ?? "") ? 15_000 : false),
+    refetchInterval: (q) => {
+      const p = q.state.data;
+      const stuck = (p?.states ?? []).some((s) => s.kind === "fulltext_failed" || s.kind === "awaiting_text");
+      if (asked || p?.text_pass?.state === "ready" || p?.text_pass?.state === "running") return 15_000;
+      return p?.text_pass?.state === "awaiting_text" && !stuck ? 60_000 : false;
+    },
   });
   const [gistAway, setGistAway] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
