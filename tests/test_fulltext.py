@@ -251,6 +251,13 @@ async def test_an_area_counts_a_must_read_its_descendant_graded(db):
     assert await passes(db) == []
     await status(INTERP.slug, Status.ACTIVE)  # the Area's own papers include its subtree's
     assert [(r["kind"], r["reason"]) for r in await passes(db)] == [("weight", "area")]
+    # Moved out from under the Area, the class's papers are no longer its pick candidates.
+    tree = await taxonomy_store.load(db)
+    moved = [
+        c.model_copy(update={"parent": None}) if c.slug == FAITH.slug else c for c in tree.classes
+    ]
+    await word.save_taxonomy(db, tree.model_copy(update={"classes": moved}))
+    assert await passes(db) == []
 
 
 @pytest.mark.parametrize(

@@ -230,12 +230,15 @@ async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Se
 
 async def save_taxonomy(conn: psycopg.AsyncConnection, tree: Taxonomy) -> taxonomy_store.Saved:
     """Save the taxonomy and, in the same transaction, settle the papers of every topic it
-    changed: a topic no longer followed takes its grades with it, a new depth moves its
-    papers' rarity, and one no longer at Focus its papers' place in the library."""
+    changed, or under a topic or class it changed: a topic no longer followed takes its grades
+    with it, a new depth moves its papers' rarity, one no longer at Focus its papers' place in
+    the library, and an Area's standing follows the topics under it."""
     async with conn.transaction():
         saved = await taxonomy_store.save(conn, tree)
-        # And those of the topics under each: an Area's standing comes from them too.
-        below = {t.slug for slug in saved.changed_topics for t in tree.under(slug)}
+        # And those of the topics under each, and under a class revised (moved, say): an Area's
+        # standing comes from the topics under it too.
+        roots = [*saved.changed_topics, *saved.revised_classes]
+        below = {t.slug for slug in roots for t in tree.under(slug)}
         for slug in sorted(set(saved.changed_topics) | below):
             await settle_topic(conn, slug)
         if saved.reordered:
