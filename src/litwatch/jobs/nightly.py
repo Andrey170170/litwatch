@@ -145,14 +145,12 @@ async def wait_for_texts(
         await archive.aclose()
 
 
-async def write_digests(
-    conn: psycopg.AsyncConnection, config: Config, run: ModelRun, today: date | None = None
-) -> None:
-    """The night's digests, for `today` in the schedule's zone."""
+async def write_digests(conn: psycopg.AsyncConnection, run: ModelRun, today: date) -> None:
+    """The night's digests, those of `today`."""
     tree = await taxonomy_store.load(conn)
     if tree is None:
         return
-    await digests.nightly(conn, run, tree, today or datetime.now(config.schedule.zone).date())
+    await digests.nightly(conn, run, tree, today)
 
 
 async def run(
@@ -170,10 +168,12 @@ async def run(
     An incomplete harvest does not stop the rest: what arrived is classified, analysed and
     graded, and the gap stays open for the next run. `limit` caps the papers each step that
     spends takes, and the full-text passes tried; the full-text reconcile spends nothing and
-    takes all. The digests are those of `today`, by default the day in the schedule's zone.
+    takes all. The digests are those of `today`, by default the day the run started on in the
+    schedule's zone, however long it runs.
     """
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
+    today = today or until.astimezone(config.schedule.zone).date()
     async with (
         run_lock(conn),
         model_run(conn, config, "nightly", window=(since, until), gateway=gateway) as run,
@@ -198,5 +198,5 @@ async def run(
         done = await text_passes(conn, config, run, limit, deadline)
         left = None if limit is None else limit - fulltext.worked(done)
         await wait_for_texts(conn, config, run, until, deadline, limit=left)
-        await write_digests(conn, config, run, today)
+        await write_digests(conn, run, today)
         return run.run_id

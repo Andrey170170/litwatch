@@ -660,6 +660,30 @@ async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(db, monk
     assert limits == [2, 1]  # then the allowance is spent and the wait only waits
 
 
+async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_started(
+    db, monkeypatch
+):
+    """Started Monday 23:59 in the schedule's zone and ending after midnight, the run writes
+    Monday's dailies and the week before's weeklies."""
+    starts = iter([datetime(2026, 10, 6, 3, 59, tzinfo=UTC)])  # Monday 23:59 in New York
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            at = next(starts, datetime(2026, 10, 6, 5, 0, tzinfo=UTC))  # then Tuesday 01:00
+            return at.astimezone(tz) if tz else at
+
+    monkeypatch.setattr(nightly, "datetime", Clock)
+    await focus(db, P, "central")
+    await verdicts.passed(db, [(P.id, 1)])
+    await db.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))  # no calls
+    await listed(db, MON, P)
+    config = Config.model_validate({"schedule": {"timezone": "America/New_York"}})
+    await nightly.run(db, config, fetch=False, gateway=Writer().gateway)
+    assert await shown(db, FAITH.slug, "day", MON) == ("written", [(P.id, "listed")])
+    assert (await shown(db, FAITH.slug, "week", MON - timedelta(days=7)))[0] == "nothing_new"
+
+
 async def test_no_batch_of_passes_starts_after_the_deadline(db):
     """The full-text work before the digests stops at the wait's deadline; the worker takes
     the passes left."""
