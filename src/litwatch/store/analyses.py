@@ -124,3 +124,16 @@ async def current_gist_id(conn: psycopg.AsyncConnection, paper_id: str) -> int |
         )
     ).fetchone()
     return row["id"] if row else None
+
+
+async def abstract_gists(conn: psycopg.AsyncConnection, ids: list[str]) -> dict[str, str]:
+    """The newest Gist written from each paper's abstract, of its current revision."""
+    rows = await (
+        await conn.execute(
+            "SELECT DISTINCT ON (g.paper_id) g.paper_id, g.text FROM gists g "
+            "JOIN papers p ON p.id = g.paper_id AND p.revision = g.paper_revision "
+            "WHERE g.paper_id = ANY(%s) AND g.source = 'abstract' ORDER BY g.paper_id, g.id DESC",
+            (ids,),
+        )
+    ).fetchall()
+    return {r["paper_id"]: r["text"] for r in rows}
