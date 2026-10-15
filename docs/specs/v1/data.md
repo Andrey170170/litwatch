@@ -40,8 +40,9 @@ evaluation calls the same functions and writes only to evaluation tables.
   owner's class label removing the paper from a class; inherited ones come from the tree, and
   the classifier's raw outcome stays in `classifications` whatever the owner says.
 - `analyses` (paper, paper revision, gist, weight, weight reason, facets, model, at).
-- `weights` (paper, paper revision, weight, source abstract | full_text, reason, at): the current Weight is the newest
-  from full text, else from the abstract.
+- `weights` (paper, paper revision, weight, source abstract | full_text, pass, reason, at): the current Weight is the
+  one from the full-text pass queued last for the current revision, the same pass as the current Brief and Gist, else
+  from the abstract.
 - `verdicts` (paper, topic, topic version, paper revision, fit, reason, opinions per grader, split, escalated, at),
   one row per grading as before; the grade is derived, not stored here.
 - `effective_grades` (paper, topic, fit, grade) and `rarities` (paper, mixed-list level, best topic): kept current so

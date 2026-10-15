@@ -60,8 +60,9 @@ overview, where an error costs little.
 - A monthly budget per provider in configuration. When the month's projected spend exceeds it, the status line turns
   amber. Nightly runs are never downgraded or stopped automatically.
 - Deep cards, for observation only. The `deep` service counts each card's tokens, turns and list cost (what the run
-  would cost at API prices); litwatch records them with the card's attempt. Settings and Quality show the month to
-  date as a subscription estimate beside the providers, with no budget and no amber.
+  would cost at API prices); litwatch records them with the card's attempt. Settings' Runs and cost shows the month to
+  date as a subscription estimate beside the providers, with no budget and no amber, and says how many attempts' usage
+  is unknown, so the estimate reads as a lower bound when any is.
 - Re-runs and backfills show their estimated cost (calls by role times the role's average cost over the last 30 days)
   before they start, and take a hard ceiling they cannot exceed; reaching it stops the job and records where.
 
