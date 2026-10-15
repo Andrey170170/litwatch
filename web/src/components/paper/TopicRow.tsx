@@ -8,7 +8,7 @@ import type { Schemas } from "@/api/client";
 import { useGradeNow, useLabel, useReact, useUnlabel, useUnreact } from "@/api/mutations";
 import { Badge } from "@/components/Badge";
 import { gradeLine, rc, type Weight } from "@/lib/rarity";
-import { REASONS, reasonLabel, type ReactionValue } from "@/lib/reactions";
+import { REASONS, type ReactionValue, reasonLabel, speaks } from "@/lib/reactions";
 
 export type PaperTopic = Schemas["PaperTopic"];
 type LabelValue = Schemas["LabelValue"];
@@ -42,6 +42,8 @@ export function FitControl({ paperId, t }: { paperId: string; t: PaperTopic }) {
 export function Reasons({ paperId, topic, value, current, onDone, big }: { paperId: string; topic: string | null; value: ReactionValue; current: PaperTopic["reaction"] | null | undefined; onDone: () => void; big?: boolean }) {
   const react = useReact(paperId);
   const unreact = useUnreact(paperId);
+  // One write at a time, so a Clear cannot land before a slower change and be undone by it.
+  const busy = react.isPending || unreact.isPending;
   return (
     <div className={`why${big ? " big" : ""}`} role="group" aria-label="Reason">
       {REASONS[value].map((r) => (
@@ -49,13 +51,13 @@ export function Reasons({ paperId, topic, value, current, onDone, big }: { paper
           key={r.reason}
           className={current?.value === value && current.reason === r.reason ? "on" : ""}
           onClick={() => react.mutate({ topic, value, reason: r.reason }, { onSuccess: onDone })}
-          disabled={react.isPending}
+          disabled={busy}
         >
           {r.label}
         </button>
       ))}
       {current && (
-        <button className="clr" onClick={() => unreact.mutate(topic, { onSuccess: onDone })} disabled={unreact.isPending}>
+        <button className="clr" onClick={() => unreact.mutate(topic, { onSuccess: onDone })} disabled={busy}>
           Clear
         </button>
       )}
@@ -70,7 +72,7 @@ export function Reasons({ paperId, topic, value, current, onDone, big }: { paper
 export function whoseFit(t: PaperTopic): string | null {
   if (!t.word) return t.fit ? `pipeline: ${t.fit}` : null;
   if (t.label && t.label.value !== "unsure" && t.label.value === t.word) return `your label: ${t.word}`;
-  if (t.reaction) return `your mark: ${t.word}`;
+  if (t.reaction && speaks(t.topic.depth, t.reaction.reason)) return `your mark: ${t.word}`;
   if (t.missed) return `reported as missed: ${t.word}`;
   return `your word: ${t.word}`;
 }

@@ -92,7 +92,8 @@ export function PaperPage() {
     else document.getElementById("rail-topics")?.querySelector<HTMLElement>(`[data-topic="${topic}"]`)?.scrollIntoView({ block: "nearest" });
   };
   if (isPending) return <div className="loadmore">Loading…</div>;
-  if (error || !paper)
+  // A failed poll while a card is awaited keeps the page: only a paper that never loaded shows the error.
+  if (!paper)
     return (
       <>
         <Back />

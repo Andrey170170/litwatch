@@ -46,9 +46,10 @@ function shelfFilter(search: ListSearch, shelf: Shelf) {
 
 const loaded = (pages: { rows: unknown[] }[]) => pages.reduce((n, p) => n + p.rows.length, 0);
 
-/** A list keeps its order while it is read (DESIGN.md, "Positions stay put"): no refetch on focus, on reconnect or on
- * the way back from a paper. Actions patch rows in place or invalidate on purpose. */
-const listOptions = { staleTime: 5 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
+/** A list keeps its order for the visit (DESIGN.md, "Positions stay put"): never refetched on its own, not on focus,
+ * reconnect or the way back from a paper, and kept half an hour after the reader leaves it. Actions patch rows in
+ * place or invalidate on purpose; a page load starts afresh. */
+const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
 /** One shelf of Papers, loading more as it scrolls. `limit` 1 fetches only the count for a folded shelf. */
 export const papersQuery = (search: ListSearch, shelf: Shelf, limit = 50) =>
