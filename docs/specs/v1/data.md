@@ -46,6 +46,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   one row per grading as before; the grade is derived, not stored here.
 - `effective_grades` (paper, topic, fit, grade) and `rarities` (paper, mixed-list level, best topic): kept current so
   every surface reads one answer and lists sort by it.
+- `gists` (paper, paper revision, text, source abstract | full_text, model, at): the current Gist is the newest from
+  full text for the current revision, else from the abstract. `analyses.gist` is the abstract one.
 - `briefs` (paper, paper revision, arXiv version or unknown, text, overstatement line, text source latex | pdf, text
   hash, model, at).
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
@@ -56,7 +58,8 @@ evaluation calls the same functions and writes only to evaluation tables.
 - `digests` (topic, period day | week, day, state pending | written | nothing_new | failed, gist, text, counts, best
   rarity, written at; published means written or nothing_new) and `digest_papers` (digest, paper, role pick | listed
   | mentioned, order, why, and frozen at writing: paper revision, gist, fit, grade, rarity).
-- `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`.
+- `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`; a Gist rating
+  names the `gists` row it rated.
 
 **Removed:** `triage`, `candidates`, `takes`, `take_ratings`, `issues`, `issue_entries`, `reviews`,
 `review_picks`; the first v1's `memberships` (paper in a field) is replaced by the new one. `set_asides` is kept for
@@ -67,7 +70,7 @@ evaluation history.
 class labels), `reactions` (reason values changed), `appraisals`, `calibration_sessions`,
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
-`zotero_items`, `webdav_files`, `deep_cards`, `deep_attempts`, `deep_waiting`, `eval_runs`, `eval_results` (columns
+`zotero_items`, `webdav_files`, `deep_cards`, `deep_attempts` (plus the job's usage: tokens, turns, list cost), `deep_waiting`, `eval_runs`, `eval_results` (columns
 for classification instead of triage), `eval_samples`, `schema_migrations`.
 
 The restart ([milestones.md](milestones.md), N6) starts from an empty database (decision 48): the migrations run on

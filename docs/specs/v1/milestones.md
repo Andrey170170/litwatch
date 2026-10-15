@@ -41,9 +41,9 @@ with Area escalation; the grade table and rarity; the library rule; budgets; rep
 0.14 positives at least as high as the first v1's, or each loss looked at; grade-table and rarity offsets tuned on the
 labels; measured cost per weekday written next to the estimates in [pipeline.md](pipeline.md).
 
-**N3 · The full-text queue.** Urgent archive requests, text reading (LaTeX first), Briefs with the overstatement line,
-Weight re-checks, Deep card requests through the queue, the "among the collection" section and linked prior work in
-`deep`. *Check:* on a test night, every Focus paper at central or related has a Brief and every Area must-read
+**N3 · The full-text queue.** Urgent archive requests, text reading (LaTeX first), Briefs with the overstatement line
+and the Gist from the full text, Weight re-checks, Deep card requests through the queue, the "among the collection" section and linked prior work in
+`deep`, and its usage recorded per card. *Check:* on a test night, every Focus paper at central or related has a Brief and every Area must-read
 candidate a re-checked Weight within the digest wait, or its pass is on Quality as failed or awaiting text and the
 digest used the abstract; on ten hand-read papers, the overstatement line appears where
 the owner agrees the abstract overstates and nowhere else.

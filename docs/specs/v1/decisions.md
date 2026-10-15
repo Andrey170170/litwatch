@@ -121,6 +121,11 @@ The build plan is [`docs/plans/v1-build.md`](../../plans/v1-build.md).
 56. **The build.** The first v1's deployment was stopped on 2026-10-14 (its database dumped first); the owner reads
     0.14 until the restart, and 0.14 keeps registering new papers with the archive. The archive's code moves in
     first; the web app is built from N2 onward, in parallel with the core.
+57. **The Gist follows the Brief.** A full-text pass that writes a Brief rewrites the paper's Gist in the same call,
+    so the two never disagree and the text is read once. Every other paper keeps its Gist from the abstract
+    (`analyse`, Haiku 5.5), which the N2 Gist evaluation checks.
+58. **Deep card cost is observed, not budgeted.** Cards run on the `deep` service's own subscription; litwatch records
+    each card's usage and shows the month's estimate beside gateway spend.
 
 ## Open
 

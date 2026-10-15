@@ -44,7 +44,8 @@ switch. The note on an item carries the Gist and Brief instead of a take, and th
 the text is there. The card gains a section placing the paper among the collection: recent papers in the same
 classes that it agrees with, contradicts, extends or supersedes, linked by arXiv id, using deep's existing search over
 the collection (its own search-only token, built in M7). Its prior-work entries, which already carry an arXiv id
-where one is known, become links to paper pages. An integration acting on a grade checks the effective grade and the
+where one is known, become links to paper pages. When it collects a card, `deep` also reads the job's usage and
+records it with the attempt, for the cost figures in [models.md](models.md). An integration acting on a grade checks the effective grade and the
 library when it handles the event (first v1).
 
 A card's automatic reasons are its own, not the library's: picks are not saved (decision 3) and still get cards. When
