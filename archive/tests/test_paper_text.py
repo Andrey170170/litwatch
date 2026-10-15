@@ -72,21 +72,28 @@ class LatexTextTests(unittest.TestCase):
         self.assertIn("Vaswani et al.", text)
         self.assertNotIn("\\bibliography{refs}", text)
 
-    def test_another_documents_bbl_is_never_the_papers_bibliography(self):
+    def test_independent_documents_are_all_kept_each_with_its_own_bbl(self):
         text = self.text(
             [
                 (
-                    "main.tex",
-                    b"\\documentclass{article}\\begin{document}Paper.\\bibliography{refs}\\end{document}\n",
+                    "paper.tex",
+                    b"\\documentclass{article}\\begin{document}Paper body.\\bibliography{refs}"
+                    b"\\end{document}\n",
                 ),
-                ("supplement.tex", b"\\documentclass{article}\\begin{document}S.\\end{document}\n"),
                 (
-                    "supplement.bbl",
-                    b"\\begin{thebibliography}{1}\\bibitem{y} Supplement only.\\end{thebibliography}\n",
+                    "appendix.tex",
+                    b"\\documentclass{article}\\begin{document}Appendix body.\\end{document}\n",
+                ),
+                (
+                    "appendix.bbl",
+                    b"\\begin{thebibliography}{1}\\bibitem{y} Appendix only.\\end{thebibliography}\n",
                 ),
             ]
         )
-        self.assertNotIn("Supplement only.", text)
+        # Both documents, in path order as arXiv compiles them; neither dropped for its name.
+        self.assertLess(text.index("Appendix body."), text.index("Paper body."))
+        self.assertLess(text.index("Appendix only."), text.index("Paper body."))
+        self.assertIn("\\bibliography{refs}", text)  # the paper has no .bbl of its own
 
     def test_inputs_that_loop_or_are_missing_end(self):
         text = self.text(

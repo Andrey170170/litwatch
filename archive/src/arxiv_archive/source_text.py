@@ -236,10 +236,13 @@ def _members(package: Path, limit: int) -> dict[str, str]:
     total = 0
     with source_stream(package, limit) as raw:
         if not is_tar(raw):
-            body = b''.join(iter(lambda: raw.read(CHUNK), b''))
-            if len(body) > MAX_TEXT_BYTES:
-                raise ValueError('Source text exceeds size limit')
-            return {'main.tex': _decode(body)}
+            blocks, size = [], 0
+            for block in iter(lambda: raw.read(CHUNK), b''):
+                size += len(block)
+                if size > MAX_TEXT_BYTES:
+                    raise ValueError('Source text exceeds size limit')
+                blocks.append(block)
+            return {'main.tex': _decode(b''.join(blocks))}
         with tarfile.open(fileobj=raw, mode='r|', tarinfo=BoundedTarInfo) as archive:
             for count, member in enumerate(archive, 1):
                 total += member.size
@@ -257,11 +260,13 @@ def _members(package: Path, limit: int) -> dict[str, str]:
     return found
 
 
-def _main(files: dict[str, str]) -> str | None:
-    """The file that starts the document: one no other file inputs (a preamble, or a subfile
+def _mains(files: dict[str, str]) -> list[str]:
+    """The files that start a document: one no other file inputs (a preamble, or a subfile
     with a \\documentclass of its own, is not it), then one that begins the document (its
-    \\documentclass may sit in a preamble it inputs), then one with \\documentclass, the
-    shallowest path, and by name."""
+    \\documentclass may sit in a preamble it inputs), then one with \\documentclass, then the
+    shallowest path. Independent documents that tie (a paper and its supplement) are all kept,
+    in path order, as arXiv compiles them into one PDF: picking one by name could drop the
+    paper."""
     latex = [n for n in files if n.lower().endswith(LATEX_SUFFIXES)]
     inputs = set()
     for here in latex:
@@ -270,9 +275,10 @@ def _main(files: dict[str, str]) -> str | None:
 
     def rank(n: str) -> tuple:
         return (n in inputs, '\\begin{document}' not in files[n],
-                '\\documentclass' not in files[n], n.count('/'), n)
+                '\\documentclass' not in files[n], n.count('/'))
     roots = [n for n in latex if '\\begin{document}' in files[n] or '\\documentclass' in files[n]]
-    return min(roots, key=rank) if roots else None
+    best = min(map(rank, roots), default=None)
+    return sorted(n for n in roots if rank(n) == best)
 
 
 def _inside(path: str) -> str | None:
@@ -296,35 +302,39 @@ def latex_text(package: Path, limit: int) -> str:
     """The paper's text from its source package: the main file with every input inlined (each
     file once, at most `MAX_INPUT_DEPTH` deep), comments dropped, and `\\bibliography` replaced
     by the main file's .bbl (arXiv names it after the main file) where there is one; another
-    document's .bbl in the package is never taken. Without a main file, every LaTeX file in path
-    order. Raises NoTextSource when the package holds no LaTeX."""
+    document's .bbl in the package is never taken. Several independent documents follow each
+    other in path order (`_mains`). Without a main file, every LaTeX file in path order. Raises NoTextSource when the package holds no LaTeX."""
     files = _members(package, limit)
     latex = sorted(n for n in files if n.lower().endswith(LATEX_SUFFIXES))
     if not latex:
         raise NoTextSource('Source package has no LaTeX files')
-    main = _main(files)
-    if main is None:
+    mains = _mains(files)
+    if not mains:
         return '\n\n'.join(files[n] for n in latex).strip() + '\n'
-    used = {main}
+    used = set(mains)
 
-    def resolve(name: str, here: str) -> str | None:
-        return next((p for p in _candidates(name, main, here) if p in files and p not in used), None)
+    def document(main: str) -> str:
+        def resolve(name: str, here: str) -> str | None:
+            return next((p for p in _candidates(name, main, here) if p in files and p not in used), None)
 
-    def expand(body: str, here: str, depth: int) -> str:
-        def inline(match: re.Match) -> str:
-            path = resolve(_input(match), here) if depth < MAX_INPUT_DEPTH else None
-            if path is None:
-                return ''
-            used.add(path)
-            return expand(files[path], path, depth + 1)
-        return INPUT.sub(inline, body)
+        def expand(body: str, here: str, depth: int) -> str:
+            def inline(match: re.Match) -> str:
+                path = resolve(_input(match), here) if depth < MAX_INPUT_DEPTH else None
+                if path is None:
+                    return ''
+                used.add(path)
+                return expand(files[path], path, depth + 1)
+            return INPUT.sub(inline, body)
 
-    text = expand(files[main], main, 0)
-    bbl = files.get(str(PurePosixPath(main).with_suffix('.bbl')))
-    if bbl is not None:
-        if BIBLIOGRAPHY.search(text):
-            text = BIBLIOGRAPHY.sub(lambda _: bbl, text, count=1)
-            text = BIBLIOGRAPHY.sub('', text)
-        elif '\\begin{thebibliography}' not in text:
-            text += '\n' + bbl
+        text = expand(files[main], main, 0)
+        bbl = files.get(str(PurePosixPath(main).with_suffix('.bbl')))
+        if bbl is not None:
+            if BIBLIOGRAPHY.search(text):
+                text = BIBLIOGRAPHY.sub(lambda _: bbl, text, count=1)
+                text = BIBLIOGRAPHY.sub('', text)
+            elif '\\begin{thebibliography}' not in text:
+                text += '\n' + bbl
+        return text
+
+    text = '\n\n'.join(document(main) for main in mains)
     return re.sub(r'\n{3,}', '\n\n', text).strip() + '\n'

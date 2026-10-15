@@ -34,6 +34,12 @@ start() {
     nohup "$bin/paper-archive-worker" "${args[@]}" > "$dir/worker.log" 2>&1 &
     echo $! > "$dir/worker.pid"
     for _ in $(seq 50); do
+        if ! ours "$(cat "$dir/worker.pid")" "$dir"; then
+            echo "the worker exited:" >&2
+            tail -20 "$dir/worker.log" >&2
+            stop "$dir"
+            exit 1
+        fi
         if curl -sf -H "Authorization: Bearer $(cat "$dir/token")" \
             "http://127.0.0.1:$port/v1/status" > /dev/null; then
             echo "export LITWATCH_ARCHIVE_URL=http://127.0.0.1:$port"
@@ -50,7 +56,9 @@ start() {
 
 stop() {
     local dir=$1
-    [[ "$dir" == /tmp/litwatch-archive.* && -d "$dir" ]] || { echo "not a disposable archive: $dir" >&2; exit 1; }
+    # Exactly a directory `start` made (mktemp's six characters), so `rm -rf` reaches nothing else.
+    [[ "$dir" =~ ^/tmp/litwatch-archive\.[A-Za-z0-9]{6}$ && -d "$dir" && ! -L "$dir" ]] \
+        || { echo "not a disposable archive: $dir" >&2; exit 1; }
     local alive=0
     for file in "$dir"/serve.pid "$dir"/worker.pid; do
         [[ -f "$file" ]] || continue
