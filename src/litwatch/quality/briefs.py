@@ -87,9 +87,9 @@ def spent(path: Path) -> float:
 
 
 def inputs(paper: Paper, entry: Entry) -> str:
-    """What one paper's request is made from besides its text (the version stands for it),
-    hashed."""
-    asked = repr((paper.title, paper.abstract, paper.version, entry.area))
+    """What one paper's request is made from besides its text, which its version stands for (its
+    last update where the version is unknown), hashed."""
+    asked = repr((paper.title, paper.abstract, paper.version, paper.updated, entry.area))
     return hashlib.sha256(asked.encode()).hexdigest()[:12]
 
 
@@ -132,8 +132,8 @@ async def run(
 ) -> list[Result]:
     """Write the Brief of every paper not yet answered in `out`, appending each answer as it
     arrives; a paper whose text could not be had is left to the next run. Refuses to resume a
-    run made with another configuration of the role; a paper whose title, abstract, version or
-    area changed since its answer is written again."""
+    run made with another configuration of the role; a paper whose title, abstract, version, update
+    or area changed since its answer is written again."""
     asked = fingerprint(gateway)
     now = {p.id: inputs(p, e) for p, e in papers}
     done = {pid for pid, r in results(out).items() if r.output and r.inputs == now.get(pid)}

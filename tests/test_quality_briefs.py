@@ -117,3 +117,8 @@ def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():
     text = briefs.report("Briefs", entries(), {P.id: revised, Q.id: Q}, found, {}, 0.6)
     assert f"| {P.id} | answered for other inputs: run it again |" in text
     assert "We detect all hidden steps." not in text
+
+    # Nor is one to a paper updated since while its version stays unknown.
+    later = Q.model_copy(update={"updated": "2026-10-14T00:00:00Z"})
+    text = briefs.report("Briefs", entries(), {P.id: P, Q.id: later}, found, {}, 0.6)
+    assert f"| {Q.id} | answered for other inputs: run it again |" in text
