@@ -48,7 +48,8 @@ them. The owner's word never makes a paper due: the owner already knows it. A pa
 before a digest's day is never due for it: late papers arrive within days, and one the collection gains much later (a
 re-run after a topic edit, a reported miss, an old paper read on demand) was never news. A paper's day is the arXiv
 listing that first showed it, from its first version's submission time (before 14:00 US Eastern on a weekday, the
-next weekday's listing); arXiv's holidays are not known, so a paper due on a holiday is shown the day after.
+next weekday's listing). arXiv's holidays are not known: the papers a holiday delays keep the holiday's date and
+are in the next day's digests.
 
 ## Quiet days
 
