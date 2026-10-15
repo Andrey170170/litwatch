@@ -162,7 +162,14 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
 - **N5:** after Process fetches a paper outside the collection, `/api/lookup` stores only its metadata and
   `in_collection` stays false until it is classified, so the paper page offers Process again and a second tap only
   says "Already in the collection" (#56, Codex). N5's page for papers outside the collection shows the fetched state,
-  read from the API.
+  read from the API. Also N5: DESIGN.md's "Use the PDF", for a paper whose LaTeX reads badly, has no endpoint yet
+  (#59); it belongs with the archive's text assembly and its PDF fallback, and the paper page takes it once merged.
+- **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
+  paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
+  the restart's digests.
+- **N8:** the n8n Notion workflow and its README still read the first v1's shapes (`take.written`, a topic's `take`,
+  `kind: watch`). Rewrite them against v1's events (`brief.written`, `gist.written`, `digest.written`) with the
+  switch, which owns the Notion export.
 - **N6 (the owner, 2026-10-15):** the Area must-read volume (a median of 20 a night for Alignment and safety, 12 for
   Interpretability) and the full-text cost it brings (about $9 per 1,000 papers) are accepted for the restart.
   Reassess them after one to two weeks of running, together with the cost, and tune then. The Focus related ×
