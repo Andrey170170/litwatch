@@ -111,7 +111,9 @@ def decision_reply(raw: Any, request: DecisionRequest, role: RoleConfig) -> Repl
         elif isinstance(q, Choice) and a.get("type") == "choice":
             option = a.get("choice")
             probabilities = _mapping(a.get("probabilities"))
-            probability = probabilities.get(option, a.get("confidence"))
+            # A choice that is not a label is left for validation to reject.
+            known = isinstance(option, str)
+            probability = probabilities.get(option, a.get("confidence")) if known else None
             out[q.name] = {"option": option, "probability": probability}
     values = _mapping(raw.get("usage"))
     usage = Usage(

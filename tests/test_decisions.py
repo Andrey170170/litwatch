@@ -95,6 +95,7 @@ async def test_an_answer_that_misses_or_breaks_a_question_is_invalid(change):
     [
         {"circuits": {"type": "noul", "noul": 0.9}},  # answers missing
         ["not", "an", "object"],
+        {"primary_class": {"type": "choice", "choice": ["Circuits"], "probabilities": {}}},
     ],
 )  # fmt: skip
 async def test_a_missing_or_malformed_decisions_reply_is_invalid(answers):
