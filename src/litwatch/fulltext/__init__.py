@@ -195,11 +195,15 @@ async def _still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None
     """Settle the paper of a claimed pass before anything is spent on it, under its lock, as
     `word.settle` judges the database now, whatever trigger was missed: None when the pass
     still runs as claimed; else why not. One no longer wanted is dropped; one wanted for
-    another reason is relabelled and given back, to run on its next claim."""
+    another reason is relabelled and given back, to run on its next claim; one for a paper
+    dismissed since its claim is given back, left for the owner's word as `record` leaves it."""
     async with conn.transaction():
         await word.lock(conn, c.paper.id)
         if not await store_.held(conn, c):
             return "lost"
+        if await store_.dismissed(conn, c.paper.id):  # `settle` leaves its pass alone
+            await store_.release(conn, c)
+            return "fulltext_dismissed"
         await word.settle(conn, c.paper.id, claimed=c.id)
         label = await store_.label_of(conn, c.id)
         if label is None:

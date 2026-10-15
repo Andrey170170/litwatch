@@ -124,7 +124,7 @@ async def graded(conn, fit: str, topic: str = FAITH.slug) -> None:
     await word.settle(conn, P.id)
 
 
-async def analysed(conn, weight: str) -> None:
+async def analysed(conn, weight: str, paper_id: str = P.id) -> None:
     found = Analysis(
         gist="An abstract Gist of the paper.",
         weight=Weight(weight),
@@ -133,9 +133,9 @@ async def analysed(conn, weight: str) -> None:
             contribution=Contribution.ANALYSIS, releases_code=False, releases_weights=False
         ),
     )
-    current = await papers_store.get(conn, P.id)
+    current = await papers_store.get(conn, paper_id)
     await analyses_store.add(conn, current, "interpretability", found, "m")
-    await word.settle(conn, P.id)
+    await word.settle(conn, paper_id)
 
 
 async def passes(conn) -> list[dict]:
@@ -455,6 +455,23 @@ async def test_a_pass_wanted_for_another_reason_at_claim_runs_on_its_next_claim(
     assert await work(db, fake, writer) == {"briefs_written": 1}
 
 
+async def test_a_paper_dismissed_after_its_pass_is_claimed_spends_nothing(db, monkeypatch):
+    await graded(db, "central")
+    claim = fulltext_store.claim
+
+    async def claim_then_dismiss(conn, *args):
+        claimed = await claim(conn, *args)
+        await papers_store.dismiss(conn, P.id)
+        return claimed
+
+    monkeypatch.setattr(fulltext_store, "claim", claim_then_dismiss)
+    fake, writer = ready(FakeArchive()), Writer()
+    assert await work(db, fake, writer) == {"fulltext_dismissed": 1}
+    assert (writer.asked, fake.jobs) == ([], [])
+    (row,) = await passes(db)
+    assert row["state"] == "awaiting_text"  # left for the owner's word, as `record` leaves it
+
+
 async def test_a_paper_that_came_to_qualify_by_no_trigger_gets_its_pass_on_the_nightly_run(
     db, monkeypatch
 ):
@@ -468,6 +485,37 @@ async def test_a_paper_that_came_to_qualify_by_no_trigger_gets_its_pass_on_the_n
     await nightly.run(db, CONFIG, fetch=False, gateway=Writer().gateway)
     (row,) = await passes(db)
     assert (row["kind"], row["reason"], row["state"]) == ("brief", "focus", "awaiting_text")
+
+
+async def test_the_nightly_reconcile_is_not_cut_short_by_the_limit(db, monkeypatch):
+    await analysed(db, "solid")
+    await graded(db, "central")
+    stuck = "UPDATE fulltext_passes SET state = 'failed', failed_runs = %s"
+    await db.execute(stuck, (FAILED_RUNS,))
+    other = paper("2610.00002", version=1)  # after P, which waits for the owner
+    await papers_store.upsert(db, [other])
+    await db.execute(
+        "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
+        "primary_class, model) SELECT %s, paper_revision, taxonomy_revision, primary_class, model "
+        "FROM classifications WHERE paper_id = %s",
+        (other.id, P.id),
+    )
+    await analysed(db, "solid", other.id)  # nothing left for the night's other steps
+    found = Verdict(
+        paper_id=other.id,
+        topic=FAITH.slug,
+        topic_version="v",
+        fit=Fit.CENTRAL,
+        reason="r",
+        opinions={},
+    )
+    await verdicts.add(db, found)  # and no settle
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: None)
+    await nightly.run(db, CONFIG, fetch=False, limit=1, gateway=Writer().gateway)
+    (row,) = await (
+        await db.execute("SELECT * FROM fulltext_passes WHERE paper_id = %s", (other.id,))
+    ).fetchall()
+    assert (row["kind"], row["state"]) == ("brief", "awaiting_text")
 
 
 # -- the lease and the limit -----------------------------------------------------------------------

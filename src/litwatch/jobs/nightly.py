@@ -79,11 +79,12 @@ async def text_passes(
     """Reconcile the full-text queue with the database: settle every candidate paper
     (`store.fulltext.candidates`: those with a pass open, those the rule may give one, those
     read for an older version or revision), so a trigger missed costs at most a night
-    (pipeline.md, sections 6 and 8). Then make the failed passes ready again, those with fewer than
-    `FAILED_RUNS` failed runs; and try every pass that is due once, up to `limit`: the passes
+    (pipeline.md, sections 6 and 8); all of them, as `limit` caps what is spent. Then make
+    the failed passes ready again, those with fewer than `FAILED_RUNS` failed runs; and try
+    every pass that is due once, up to `limit`: the passes
     this run queued have their text asked for now, and the service's worker runs each once its
     text is there."""
-    reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK, limit)
+    reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK)
     await word.settle_all(conn, reconciled)
     run.add("fulltext_reconciled", len(reconciled))
     run.add("fulltext_retried", await fulltext_store.retry_failed(conn, FAILED_RUNS))

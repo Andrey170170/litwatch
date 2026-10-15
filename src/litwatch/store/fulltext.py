@@ -357,16 +357,15 @@ OUTDATED = """
 """
 
 
-async def candidates(
-    conn: psycopg.AsyncConnection, lookback: timedelta, limit: int | None = None
-) -> list[str]:
+async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list[str]:
     """The papers, not dismissed, whose text pass the nightly run settles from the database
-    whatever triggered or missed it (pipeline.md, section 6), up to `limit`: every paper with a
+    whatever triggered or missed it (pipeline.md, section 6): every paper with a
     pass open; every one without a pass for its current revision that the rule may give one
     (an active Focus topic's central or related, an active Area's must read, its own or a
     followed descendant's; or such a verdict or label from the last `lookback`, whose settle
     may have been missed); and the `outdated` ones. Bounded by the queue and what qualifies but
-    has no pass, not by the library."""
+    has no pass, not by the library; never cut short, as settling spends nothing and a cut
+    could leave the same papers out every night."""
     rows = await (
         await conn.execute(
             f"""
@@ -402,9 +401,9 @@ async def candidates(
                                     AND f.paper_revision = p.revision AND f.kind <> 'deep'))
                 OR p.id IN ({OUTDATED})
             )
-            ORDER BY p.id LIMIT %(limit)s
+            ORDER BY p.id
             """,
-            {"lookback": lookback, "limit": limit},
+            {"lookback": lookback},
         )
     ).fetchall()
     return [r["id"] for r in rows]
