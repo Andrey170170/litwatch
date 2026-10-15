@@ -334,6 +334,9 @@ def eval_replay(
     if r.left_out:
         console.print(f"[yellow]{len(r.left_out)} labelled papers are not in the database and "
                       "are left out[/yellow]")  # fmt: skip
+    if r.stale:
+        console.print(f"{len(r.stale)} papers' text changed since the run read them: both stages "
+                      "run again on them")  # fmt: skip
     by_cohort = Counter(x.cohort for x in r.labels)
     console.print(
         f"{len(r.labels)} labels ({', '.join(f'{c} {n}' for c, n in by_cohort.items())}) on "

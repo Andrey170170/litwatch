@@ -36,6 +36,8 @@ from litwatch.core.classification import Source, keyword
 from litwatch.core.evaluation import Outcome, Recall, Share
 from litwatch.core.grading import grading_topics
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
+from litwatch.llm.decisions import chat_request
+from litwatch.llm.gateway import VALIDATION_VERSION
 from litwatch.store import calls
 from litwatch.store import evaluation as store
 from litwatch.store import papers as papers_store
@@ -107,16 +109,38 @@ def select(
     return kept
 
 
+# A paper and topic no request is ever about: what renders each prompt's fixed parts.
+_PROBE = Paper(id="probe", title="", abstract="")
+
+
 def fingerprint(config: Config, tree: Taxonomy) -> str:
-    """The roles asked, the thresholds, the classes and the Focus topics, hashed: a run resumes
-    only under the same."""
+    """Everything that decides what a replay concludes, hashed, so a run resumes only under the
+    same: the roles asked, the thresholds, the classes, the routing of memberships to topics
+    (every followed topic's depth, status and version), the answer validation, and the requests
+    themselves (the classification questions and each Focus topic's grading prompt, rendered for
+    an empty paper), whose instructions are code."""
+    by_slug = {t.slug: t for t in tree.topics}
+    asked = {
+        classification.ROLE: chat_request(classification.request(tree, "", "")).key_material(),
+        **{
+            s: grading.request(_PROBE, by_slug[s], tree.get(s).name).key_material()
+            for s in focus(tree)
+        },
+    }
     material = {
         "roles": {r: config.models.role(r).model_dump(mode="json") for r in ROLES},
         "thresholds": config.classification.model_dump(mode="json"),
         "classes": tree.classes_version,
-        "topics": {s: next(t.version for t in tree.topics if t.slug == s) for s in focus(tree)},
+        "followed": [
+            [t.slug, t.depth.value, t.status.value, t.version]
+            for t in tree.topics
+            if t.status != Status.DRAFT
+        ],
+        "validation": VALIDATION_VERSION,
+        "requests": asked,
     }
-    return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()[:12]
+    text = json.dumps(material, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
 @dataclass
@@ -131,6 +155,8 @@ class Replay:
     eval_run_id: int | None = None
     classified: set[str] = field(default_factory=set)  # papers classification concluded on
     graded: set[tuple[str, str]] = field(default_factory=set)
+    # Papers whose text changed since the run concluded on them: both stages run again.
+    stale: set[str] = field(default_factory=set)
 
     @property
     def pairs(self) -> list[tuple[str, str]]:
@@ -169,8 +195,8 @@ async def prepare(
 
 
 async def resume(conn: psycopg.AsyncConnection, config: Config, eval_run_id: int) -> Replay:
-    """The replay `eval_run_id` as far as it got. Refuses a run made under other roles,
-    thresholds, classes or Focus topics."""
+    """The replay `eval_run_id` as far as it got. Refuses a run made under another
+    `fingerprint`. A paper whose text changed since the run concluded on it is done again."""
     run = await store.get(conn, eval_run_id)
     if run is None or run["kind"] != KIND:
         raise ValueError(f"no replay {eval_run_id}")
@@ -185,14 +211,28 @@ async def resume(conn: psycopg.AsyncConnection, config: Config, eval_run_id: int
     ids = list(dict.fromkeys(x.paper_id for x in labels))
     papers = {p.id: p for p in await papers_store.get_many(conn, ids)}
     done = await store.pairs(conn, eval_run_id)
-    unclassified = {r["paper_id"] for r in done if r["classifier"] is None}
+    # A stage concluded on other text than the paper's current one: what the run said about the
+    # paper is dropped and both stages run again, so classification and grading read one text.
+    stale = {
+        r["paper_id"]
+        for r in done
+        if r["paper_revision"] is not None
+        and r["paper_id"] in papers
+        and r["paper_revision"] != papers[r["paper_id"]].revision
+    }
+    unclassified = {r["paper_id"] for r in done if r["classifier"] is None} | stale
     return Replay(
         tree,
         labels,
         papers,
         eval_run_id=eval_run_id,
         classified={p for p in ids if p not in unclassified},
-        graded={(r["paper_id"], r["topic"]) for r in done if r["fit"] is not None},
+        graded={
+            (r["paper_id"], r["topic"])
+            for r in done
+            if r["fit"] is not None and r["paper_id"] not in stale
+        },
+        stale=stale,
     )
 
 
@@ -269,6 +309,8 @@ async def run(
     by_slug = {t.slug: t for t in tree.topics}
     async with model_run(conn, config, "eval", gateway=gateway) as mr:
         await store.ran_under(conn, eval_run_id, mr.run_id)
+        if r.stale:
+            await store.forget(conn, eval_run_id, sorted(r.stale))
         thresholds = config.classification.thresholds
         found = classification.classify(r.to_classify, tree, mr.gateway, thresholds)
         async with aclosing(found) as found:

@@ -81,7 +81,7 @@ async def pairs(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[dict[st
     return await (
         await conn.execute(
             """
-            SELECT DISTINCT l.paper_id, l.topic, r.classifier, r.fit
+            SELECT DISTINCT l.paper_id, l.topic, r.paper_revision, r.classifier, r.fit
             FROM eval_labels l LEFT JOIN eval_results r
               ON r.eval_run_id = l.eval_run_id AND r.paper_id = l.paper_id AND r.topic = l.topic
             WHERE l.eval_run_id = %s ORDER BY l.paper_id, l.topic
@@ -89,6 +89,14 @@ async def pairs(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[dict[st
             (eval_run_id,),
         )
     ).fetchall()
+
+
+async def forget(conn: psycopg.AsyncConnection, eval_run_id: int, paper_ids: list[str]) -> None:
+    """Drop what the run concluded on these papers, so both stages run on them again."""
+    await conn.execute(
+        "DELETE FROM eval_results WHERE eval_run_id = %s AND paper_id = ANY(%s)",
+        (eval_run_id, paper_ids),
+    )
 
 
 async def put_classified(

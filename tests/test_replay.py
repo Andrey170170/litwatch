@@ -7,9 +7,10 @@ from pathlib import Path
 import httpx
 import pytest
 
+from litwatch import grading
 from litwatch.api import create_app
 from litwatch.config import Classification, Config
-from litwatch.core import Fit
+from litwatch.core import Depth, Fit, Status, Taxonomy, TaxonomyClass, Topic
 from litwatch.core.classification import Source
 from litwatch.core.evaluation import Outcome, recall
 from litwatch.feedback import misses as misses_feedback
@@ -245,6 +246,56 @@ async def test_a_replay_resumes_only_under_the_same_configuration(conn, models):
     with pytest.raises(ValueError, match="another configuration"):
         await replay.resume(conn, stricter, r.eval_run_id)
     assert (await replay.resume(conn, CONFIG, r.eval_run_id)).to_grade == []
+
+
+async def test_a_routing_change_refuses_a_resume(conn, models):
+    # An Area topic under the Focus topic, draft when the run starts: once active, a classifier
+    # membership of its class would grade there instead, so finished and unfinished papers
+    # would be routed differently.
+    subject = "Probes that read hidden reasoning steps from a model's activations."
+    probes = Topic(slug="cot-probes", depth=Depth.AREA, monogram="CP", colour="#123456",
+                   subject=subject, status=Status.DRAFT)  # fmt: skip
+    child = TaxonomyClass(slug="cot-probes", name="Probes of reasoning traces",
+                          description=subject, parent=TOPIC)  # fmt: skip
+    drafted = Taxonomy(classes=[*TREE.classes, child], topics=[*TREE.topics, probes])
+    await taxonomy_store.save(conn, drafted)
+    r = await start(conn, models)
+    active = probes.model_copy(update={"status": Status.ACTIVE})
+    await taxonomy_store.save(
+        conn, Taxonomy(classes=drafted.classes, topics=[*TREE.topics, active])
+    )
+    with pytest.raises(ValueError, match="another configuration"):
+        await replay.resume(conn, CONFIG, r.eval_run_id)
+
+
+async def test_a_prompt_change_refuses_a_resume(conn, models, monkeypatch):
+    r = await start(conn, models)
+    monkeypatch.setattr(grading, "SYSTEM", grading.SYSTEM + " Answer briefly.")
+    with pytest.raises(ValueError, match="another configuration"):
+        await replay.resume(conn, CONFIG, r.eval_run_id)
+
+
+async def test_a_paper_whose_text_changed_is_classified_and_graded_again_on_resume(conn, models):
+    # Classified on its first text, its grading failed; then its abstract was rewritten.
+    models.decisions[A.title] = decision("cot-faithfulness")
+    models.fits[("judge", A.title)] = {"fit": "not a fit"}
+    r = await start(conn, models)
+    rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
+    await papers_store.upsert(conn, [rewritten])
+    del models.fits[("judge", A.title)]
+    models.decisions[A.title] = decision("other")
+    models.users.clear()
+
+    again = await replay.resume(conn, CONFIG, r.eval_run_id)
+    assert again.stale == {A.id}
+    assert [p.id for p in again.to_classify] == [A.id] and again.to_grade == [(A.id, TOPIC)]
+    await replay.run(conn, CONFIG, again, gateway=models.gateway)
+    # Both stages read the new text, and the row says which.
+    asked = [u for u in models.users if A.title in u]
+    assert len(asked) == 3 and all(rewritten.abstract in u for u in asked)  # classify, judge, check
+    (row,) = [x for x in await evaluation.results(conn, r.eval_run_id) if x["paper_id"] == A.id]
+    assert (row["paper_revision"], row["classifier"], row["fit"]) == (2, False, "related")
+    assert (await replay.resume(conn, CONFIG, r.eval_run_id)).stale == set()
 
 
 async def test_the_estimate_goes_by_the_journal_and_counts_what_is_left(conn, models):
