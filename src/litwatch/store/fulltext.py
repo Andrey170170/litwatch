@@ -108,13 +108,17 @@ async def deep_facts(conn: psycopg.AsyncConnection, paper_id: str) -> DeepFacts 
 
 async def request_card(conn: psycopg.AsyncConnection, paper_id: str, revision: int) -> int:
     """The owner asks for a Deep card: their request takes over the paper's open Deep pass, an
-    automatic one included, so an Unsave never cancels it and it goes first in line; without an
-    open one, one is queued. Call it under the paper's settle lock. Returns the pass's id."""
+    automatic one included, so an Unsave never cancels it and it goes first in line, and a
+    failed one is tried again afresh; without an open one, one is queued. Call it under the
+    paper's settle lock. Returns the pass's id."""
     found = await deep_facts(conn, paper_id)
     open_pass = found.open_pass if found else None
     if open_pass is not None:
         await conn.execute(
-            "UPDATE fulltext_passes SET reason = %s, priority = %s WHERE id = %s",
+            "UPDATE fulltext_passes SET reason = %s, priority = %s, "
+            "retry_text = retry_text OR state = 'failed', "
+            "failed_runs = CASE WHEN state = 'failed' THEN 0 ELSE failed_runs END, "
+            "state = CASE WHEN state = 'failed' THEN 'ready' ELSE state END WHERE id = %s",
             (REQUESTED, REQUEST_PRIORITY, open_pass.id),
         )
         return open_pass.id

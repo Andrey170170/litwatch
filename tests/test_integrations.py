@@ -82,6 +82,12 @@ def test_a_configuration_that_cannot_work_is_refused_with_its_section(secrets, m
         integrations.load(Config(integrations={"zotero": {"user_id": "1"}}))
 
 
+def test_deep_is_refused_without_an_archive_to_read_papers_from(secrets, monkeypatch):
+    monkeypatch.delenv("LITWATCH_ARCHIVE_URL", raising=False)
+    with pytest.raises(IntegrationError, match="deep reads papers from the archive"):
+        integrations.load(Config(integrations={"deep": {"url": "http://deep.test"}}))
+
+
 def test_webdav_finds_its_zotero_by_module_whatever_the_section_is_called(secrets):
     config = Config(
         integrations={

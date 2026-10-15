@@ -29,7 +29,7 @@ import psycopg
 from litwatch.archive import PaperText
 from litwatch.config import Config
 from litwatch.core import Depth, Event, Grade, Paper, Status, Topic
-from litwatch.integrations import IntegrationError, required
+from litwatch.integrations import IntegrationError, enabled_using, required, required_secret
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
@@ -198,6 +198,13 @@ def load(name: str, options: dict[str, Any], config: Config) -> Deep:
     max_per_day = int(options.get("max_per_day", 10))
     if max_per_day < 0:
         raise IntegrationError("max_per_day cannot be negative")
+    # The Deep worker reads each paper's text from the archive; without one it never starts,
+    # and a card the owner asks for would wait for ever.
+    try:
+        required(enabled_using(config, "archive") or {}, "url", env="LITWATCH_ARCHIVE_URL")
+        required_secret("LITWATCH_ARCHIVE_TOKEN")
+    except IntegrationError as e:
+        raise IntegrationError(f"deep reads papers from the archive: {e}") from e
     client = DeepClient(
         required(options, "url", env="LITWATCH_DEEP_URL"),
         poll_seconds=float(options.get("poll_seconds", 15.0)),

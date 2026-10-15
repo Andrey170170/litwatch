@@ -271,6 +271,19 @@ async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_thre
     assert await fulltext_store.run_now(db, row["id"], FAILED_RUNS)
 
 
+async def test_the_owners_request_tries_a_failed_pass_again(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep({"error": "cell budget exhausted", "stats": USAGE, "trace": []})
+    d = make(fake)
+    for _ in range(FAILED_RUNS):
+        await fulltext_store.retry_failed(db, FAILED_RUNS)
+        assert await work(db, with_text(P), d) == {"card_failed": 1}
+    (failed,) = await deep_rows(db)
+    fake.outcome = DONE
+    assert await deep_passes.request(db, P.id) == failed["id"]
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+
+
 async def test_a_lost_job_or_an_answer_that_never_came_has_its_usage_unknown(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
