@@ -1,89 +1,86 @@
 #!/usr/bin/env bash
-# Rebuild the sandbox database from the v1 deployment's, for end-to-end runs
-# (docs/agents/verification.md). Run from the repository root on the owner's server
-# (docs/agents/dev-host.md).
+# Rebuild the sandbox database for end-to-end runs (docs/agents/verification.md): a fresh
+# schema (the migrations) plus the papers of a window read from the archive, as the restart
+# builds one. Run from the repository root on the owner's server (docs/agents/dev-host.md).
 #
-# The deployment is only read: pg_dump takes a consistent snapshot. The copy is built as
-# `sandbox_next` and replaces `sandbox` only once it is complete, so a failed refresh leaves
-# the previous sandbox as it was. The copy keeps the deployment's pipeline backlog (it is
-# realistic state), but none of its external work: copied events count as already
-# delivered, so an integration enabled in dev starts after them, and the deep jobs and the
-# Zotero and WebDAV items that point at the deployment's targets are dropped.
+# The new database is built as `<db>_next` and replaces `<db>` only once it is complete, so a
+# failed refresh leaves the previous sandbox as it was. It runs only against the dev Postgres
+# (container litwatch-v1-dev, 127.0.0.1:55432) and never touches `litwatch` or `test`.
 #
-#   --exact   an exact copy at the deployment's schema, nothing detached: the baseline for a
-#             migration check. Enable no integration on it; refresh normally afterwards.
+#   --days N        the N days ending today (UTC); the default, with N = 14
+#   --since DATE    the window's first day instead (YYYY-MM-DD)
+#   --until DATE    its last day; default today (UTC)
+#   --db NAME       build NAME instead of `sandbox`, e.g. a scratch database
+#   --env FILE      where the dev DSN is; default ./.env.v1 (a worktree names the main checkout's)
+#
+# The archive is only read: $LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN (from the
+# environment, else ./.env), or the archive integration in litwatch.toml. The categories are
+# litwatch.toml's.
 set -Eeuo pipefail
 
-readonly SOURCE=litwatch-v1-db TARGET=litwatch-v1-dev DB=sandbox NEXT=sandbox_next OLD=sandbox_old
+readonly CONTAINER=litwatch-v1-dev SERVER=127.0.0.1:55432
 
-exact=0
-case "${1:-}" in
-  "") ;;
-  --exact) exact=1 ;;
-  *) echo "usage: $0 [--exact]" >&2; exit 2 ;;
-esac
+db=sandbox days=14 since="" until="" env_file=.env.v1
+while (( $# )); do
+  case "$1" in
+    --days) days=$2; shift 2 ;;
+    --since) since=$2; shift 2 ;;
+    --until) until=$2; shift 2 ;;
+    --db) db=$2; shift 2 ;;
+    --env) env_file=$2; shift 2 ;;
+    *) echo "usage: $0 [--days N | --since DATE] [--until DATE] [--db NAME] [--env FILE]" >&2
+       exit 2 ;;
+  esac
+done
+readonly NEXT=${db}_next OLD=${db}_old
+for name in "$db" "$NEXT" "$OLD"; do
+  if [[ ! "$name" =~ ^[a-z][a-z0-9_]*$ ]] || [[ "$name" =~ ^(litwatch|test|postgres|template[0-9]*)$ ]]
+  then
+    echo "refusing to build or replace the database '$name'" >&2
+    exit 1
+  fi
+done
 
-# Migrations connect through .env.v1's DSN; it must reach the same container the copy is
-# restored into.
-set -a; . ./.env.v1; set +a
-dsn_server=$(sed -E 's#^[a-z]+://[^@]*@([^/]+)/.*#\1#' <<<"$LITWATCH_DATABASE_URL")
-if [[ "$dsn_server" != "$(docker port "$TARGET" 5432/tcp | head -1)" ]]; then
-  echo "LITWATCH_DATABASE_URL in .env.v1 does not point at $TARGET" >&2
+# Every database this script touches is on the server of the dev DSN, which must be the dev
+# Postgres: the one known address, and the port the container publishes.
+set -a; . "$env_file"; set +a
+dsn=$LITWATCH_DATABASE_URL
+dsn_server=$(sed -E 's#^[a-z]+://[^@/]*@([^/?]+)/[^/?]+$#\1#' <<<"$dsn")
+dsn_user=$(sed -E 's#^[a-z]+://([^:@/]+)[:@].*#\1#' <<<"$dsn")
+if [[ "$dsn_server" != "$SERVER" || "$(docker port "$CONTAINER" 5432/tcp | head -1)" != "$SERVER" ]]
+then
+  echo "LITWATCH_DATABASE_URL in $env_file is not a database on the dev Postgres ($SERVER)" >&2
   exit 1
 fi
+next_dsn="${dsn%/*}/$NEXT"
 
-target_psql() {
-  docker exec -i "$TARGET" psql -v ON_ERROR_STOP=1 -q -U postgres "$@"
+admin() {
+  docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -q -U postgres -d postgres "$@"
 }
 
-drop_next() { target_psql -d postgres -c "DROP DATABASE IF EXISTS $NEXT WITH (FORCE)"; }
-trap 'echo "refresh failed; $NEXT dropped" >&2; drop_next' ERR
+drop_next() { admin -c "DROP DATABASE IF EXISTS $NEXT WITH (FORCE)"; }
+trap 'echo "refresh failed; $NEXT dropped, $db untouched" >&2; drop_next' ERR
 
-echo "copying $SOURCE into $TARGET/$NEXT"
+window=(--days "$days")
+[[ -n "$since" ]] && window=(--since "$since")
+[[ -n "$until" ]] && window+=(--until "$until")
+
+echo "building $NEXT on $CONTAINER"
 drop_next
-target_psql -d postgres -c "CREATE DATABASE $NEXT"
-docker exec "$SOURCE" pg_dump -U litwatch -d litwatch -Fc --no-owner --no-privileges \
-  | docker exec -i "$TARGET" pg_restore -U postgres -d "$NEXT" --no-owner --no-privileges --exit-on-error
+admin -c "CREATE DATABASE $NEXT OWNER \"$dsn_user\""
+LITWATCH_DATABASE_URL=$next_dsn uv run litwatch db migrate
+LITWATCH_DATABASE_URL=$next_dsn uv run litwatch intake archive "${window[@]}"
 
-if (( ! exact )); then
-  # Transaction ids belong to the cluster that wrote them. Every copied event gets xid 1,
-  # below any transaction here, so all of them count as settled and ahead of anything the
-  # sandbox writes, even while another transaction in this cluster is still open. What ties
-  # the copy to the deployment's targets goes: deep jobs, attempts and queue, and the Zotero and
-  # WebDAV items (with the 0.x keys Zotero's setup would take over again), so integrations
-  # enabled in dev work against their test targets from scratch.
-  target_psql -d "$NEXT" -1 <<'SQL'
-UPDATE outbox SET xid = '1'::xid8;
-DELETE FROM integration_cursors;
-DELETE FROM deep_waiting;
-DELETE FROM deep_attempts;
-UPDATE deep_cards SET job_id = NULL, job_since = NULL, job_revision = NULL, job_version = NULL,
-                      job_event = NULL, job_automatic = NULL
- WHERE job_id IS NOT NULL;
-DELETE FROM zotero_items;
-DELETE FROM webdav_files;
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-              WHERE table_name = 'papers' AND column_name = 'zotero_key') THEN
-    UPDATE papers SET zotero_key = NULL, zotero_attachment_key = NULL
-     WHERE zotero_key IS NOT NULL OR zotero_attachment_key IS NOT NULL;
-  END IF;
-END $$;
-SQL
-
-  LITWATCH_DATABASE_URL="${LITWATCH_DATABASE_URL%/*}/$NEXT" uv run litwatch db migrate
-fi
-
-# Swap the two in one transaction, so `sandbox` is always either the old copy or the new one.
-target_psql -d postgres -c "DROP DATABASE IF EXISTS $OLD WITH (FORCE)"
-target_psql -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB'" >/dev/null
-if [[ -n "$(target_psql -d postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '$DB'")" ]]; then
-  target_psql -d postgres -1 -c "ALTER DATABASE $DB RENAME TO $OLD" -c "ALTER DATABASE $NEXT RENAME TO $DB"
+# Swap the two in one transaction, so `$db` is always either the old sandbox or the new one.
+admin -c "DROP DATABASE IF EXISTS $OLD WITH (FORCE)"
+admin -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db'" >/dev/null
+if [[ -n "$(admin -Atc "SELECT 1 FROM pg_database WHERE datname = '$db'")" ]]; then
+  admin -1 -c "ALTER DATABASE $db RENAME TO $OLD" -c "ALTER DATABASE $NEXT RENAME TO $db"
 else
-  target_psql -d postgres -c "ALTER DATABASE $NEXT RENAME TO $DB"
+  admin -c "ALTER DATABASE $NEXT RENAME TO $db"
 fi
 trap - ERR
-target_psql -d postgres -c "DROP DATABASE IF EXISTS $OLD WITH (FORCE)"
+admin -c "DROP DATABASE IF EXISTS $OLD WITH (FORCE)"
 
-target_psql -d "$DB" -Atc "SELECT 'papers: ' || count(*) FROM papers"
-echo "done: point LITWATCH_DATABASE_URL at the database '$DB'"
+docker exec "$CONTAINER" psql -U postgres -d "$db" -Atc "SELECT 'papers: ' || count(*) FROM papers"
+echo "done: point LITWATCH_DATABASE_URL at the database '$db'"
