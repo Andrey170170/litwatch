@@ -377,13 +377,11 @@ CARD_PAPERS = 3
 async def digests_on(
     conn: psycopg.AsyncConnection, period: DigestPeriod, first: date, last: date
 ) -> list[dict[str, Any]]:
-    """The digests of `period` from `first` to `last`, newest first, with the class name of
-    each topic."""
+    """The digests of `period` from `first` to `last`, newest first."""
     return await (
         await conn.execute(
-            "SELECT d.id, d.topic, d.period, d.day, d.state, d.gist, d.counts, d.best_rarity, "
-            "d.written_at, c.name FROM digests d LEFT JOIN classes c ON c.slug = d.topic "
-            "WHERE d.period = %s AND d.day BETWEEN %s AND %s ORDER BY d.day DESC, d.topic",
+            "SELECT id, topic, period, day, state, gist, counts, best_rarity FROM digests "
+            "WHERE period = %s AND day BETWEEN %s AND %s ORDER BY day DESC, topic",
             (period.value, first, last),
         )
     ).fetchall()
