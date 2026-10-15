@@ -9,8 +9,10 @@ from contextlib import asynccontextmanager
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from litwatch import classification
+from litwatch.analysis import Output
 from litwatch.api import create_app
 from litwatch.api import settings as settings_api
 from litwatch.config import Classification, Config, Models, RoleConfig
@@ -235,6 +237,21 @@ async def test_analysis_records_gist_weight_and_facets_with_its_event(conn, mode
     assert len(asked) == 2 and all(u.startswith("Area: Other: ") for u in asked)
     await night(conn, models)
     assert len(await rows(conn, "SELECT 1 FROM analyses")) == 2  # done once per revision
+
+
+def test_a_gist_over_the_target_is_kept_and_only_a_broken_one_fails():
+    # 38 words, from the two-week run (2610.02632): over the 30 asked for, still a Gist.
+    long = (
+        "Introduces OMVV, which routes each step among a pool of weak verifiers with differing "
+        "cost via exponential weights, giving distribution-free error guarantees and sublinear "
+        "regret. It reaches higher accuracy at lower verification cost than any single fixed "
+        "verifier."
+    )
+    assert len(long.split()) == 38
+    assert Output.model_validate(ANALYSIS | {"gist": long}).gist == long
+    for broken in ("Too short.", " ".join([GIST] * 3)):  # a fragment, an abstract's length
+        with pytest.raises(ValidationError):
+            Output.model_validate(ANALYSIS | {"gist": broken})
 
 
 async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_again(conn, models):
