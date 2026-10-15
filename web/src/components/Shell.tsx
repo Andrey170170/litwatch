@@ -3,10 +3,10 @@
  * the page's bottom bar, and the drawer. The main column records how it was reached (go, back, top) so the page
  * can slide in from the right side.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { topicsQuery } from "@/api/queries";
+import { freshVisit, topicsQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { Badge } from "./Badge";
 import { RunStatus } from "./RunStatus";
@@ -158,6 +158,13 @@ function Phone() {
 }
 
 export function Shell() {
+  const router = useRouter();
+  const qc = useQueryClient();
+  // A list reached by a link loads afresh; Back finds it as it was left.
+  useEffect(
+    () => router.history.subscribe(({ location, action }) => action.type === "PUSH" && freshVisit(qc, location.pathname)),
+    [router, qc],
+  );
   return useDesktop() ? <Desktop /> : <Phone />;
 }
 

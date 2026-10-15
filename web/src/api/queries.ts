@@ -1,5 +1,5 @@
 /** TanStack Query options over the typed client: one per endpoint, and one per shelf of a list. */
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api, ok } from "./client";
 import type { Shelf } from "@/lib/rarity";
 import { sortOf, type ListSearch } from "@/lib/search";
@@ -50,6 +50,15 @@ const loaded = (pages: { rows: unknown[] }[]) => pages.reduce((n, p) => n + p.ro
  * reconnect or the way back from a paper, and kept half an hour after the reader leaves it. Actions patch rows in
  * place or invalidate on purpose; a page load starts afresh. */
 const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
+
+/** A list reached going forward (a link, not Back) is a fresh visit: its cached pages are marked stale, so it loads
+ * afresh when shown. Only the list gone to: the one left keeps its pages for the way back. */
+export function freshVisit(qc: QueryClient, pathname: string) {
+  const path = pathname.replace(/\/$/, "") || "/";
+  const topic = /^\/topics\/([^/]+)$/.exec(path);
+  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : null;
+  if (key) void qc.invalidateQueries({ queryKey: key, refetchType: "none" });
+}
 
 /** One shelf of Papers, loading more as it scrolls. `limit` 1 fetches only the count for a folded shelf. */
 export const papersQuery = (search: ListSearch, shelf: Shelf, limit = 50) =>

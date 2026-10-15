@@ -1,7 +1,8 @@
 /**
- * The owner's actions. Each shows its result in place: the paper's page is refetched, a changed Save is patched
- * into every list row that shows it, and lists are marked stale without refetching, so nothing reorders under
- * the reader. A toast carries only what the API says the page cannot show.
+ * The owner's actions. Each shows its result in place: the paper's page is refetched and a changed Save is patched
+ * into every list row that shows it. Lists are otherwise left as they are, so the way back finds them unchanged and
+ * nothing reorders under the reader; a list reached going forward starts afresh (`freshVisit`). A toast carries only
+ * what the API says the page cannot show.
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
@@ -22,13 +23,11 @@ function patchSaved(qc: QueryClient, paperId: string, saved: boolean) {
     );
 }
 
-/** After a write on a paper: refetch its page, patch its star in lists, leave the rest to the next visit. The
- * write counts as pending until the page is refetched, so the controls show the new state before they re-enable. */
+/** After a write on a paper: refetch its page and patch its star in lists; the lists change no further until the
+ * reader goes to one afresh. The write counts as pending until the page is refetched, so the controls show the new
+ * state before they re-enable. */
 export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
-  void qc.invalidateQueries({ queryKey: ["papers"], refetchType: "none" });
-  void qc.invalidateQueries({ queryKey: ["topic"], refetchType: "none" });
-  void qc.invalidateQueries({ queryKey: ["topics"], refetchType: "none" });
   void qc.invalidateQueries({ queryKey: ["status"] });
   await qc.invalidateQueries({ queryKey: ["paper", paperId] });
   if (qc.getQueryState(["paper", paperId])?.status === "error") toast("Recorded, but the page could not be refreshed", "error");
@@ -130,7 +129,6 @@ export function useProcess() {
     mutationFn: async (id: string) => ok(await api.POST("/api/lookup", { body: { q: id } })),
     onSuccess: (r, id) => {
       toast(r.fetched ? "Fetched into the collection; it is processed on the next run" : "Already in the collection");
-      void qc.invalidateQueries({ queryKey: ["papers"], refetchType: "none" });
       return qc.invalidateQueries({ queryKey: ["paper", id] });
     },
     onError: (e) => toast(said(e, "Could not fetch it"), "error"),

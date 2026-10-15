@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { settled } from "@/api/mutations";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const counts = { legendary: 1, epic: 1, rare: 1, uncommon: 4, common: 9, unrated: 2 };
@@ -130,7 +131,8 @@ describe("Papers", () => {
     expect(calls.filter((c) => c.url.includes("offset=50")).length).toBe(2);
   });
 
-  it("keeps an opened shelf open on the way back, without refetching the list", async () => {
+  /** Papers with its Uncommon shelf opened, cached with the app's own lifetime as in use; then on to Topics. */
+  async function leaveAnOpenedList() {
     viewport(true);
     const calls = scriptFetch({
       "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
@@ -141,17 +143,38 @@ describe("Papers", () => {
         return q.get("limit") === "1" ? { rows: [], total: 1, counts } : { rows: [row("2610.00004", "Uncommon one", "uncommon")], total: 1, counts };
       },
     });
-    // The app's own cache lifetime, so the list survives leaving the page as it does in use.
-    const { router } = renderApp("/papers", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { router } = renderApp("/papers", client);
     const shelf = await screen.findByRole("region", { name: "Uncommon" });
-    await userEvent.click(within(shelf).getByRole("button"));
+    const head = within(shelf).getByRole("button");
+    // The session remembers opened shelves, so an earlier test may have left this one open.
+    if (head.getAttribute("aria-expanded") !== "true") await userEvent.click(head);
     expect(await screen.findByText("Uncommon one")).toBeInTheDocument();
     const gets = () => calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/papers")).length;
     const before = gets();
     await router.navigate({ to: "/topics" });
     await screen.findByText("No topics are followed yet.");
+    return { client, router, gets, before };
+  }
+
+  it("keeps an opened shelf open on the way back, without refetching the list", async () => {
+    const { router, gets, before } = await leaveAnOpenedList();
     router.history.back();
     expect(await screen.findByText("Uncommon one")).toBeInTheDocument();
     expect(gets()).toBe(before);
+  });
+
+  it("finds the list as it was on the way back after a write on one of its papers", async () => {
+    const { client, router, gets, before } = await leaveAnOpenedList();
+    await settled(client, "2610.00004", { message: null, saved: true, grades: {} });
+    router.history.back();
+    expect(await screen.findByText("Uncommon one")).toBeInTheDocument();
+    expect(gets()).toBe(before);
+  });
+
+  it("loads the list afresh when it is reached by a link", async () => {
+    const { router, gets, before } = await leaveAnOpenedList();
+    await router.navigate({ to: "/papers" });
+    await waitFor(() => expect(gets()).toBeGreaterThan(before));
   });
 });
