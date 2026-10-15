@@ -72,6 +72,22 @@ class LatexTextTests(unittest.TestCase):
         self.assertIn("Vaswani et al.", text)
         self.assertNotIn("\\bibliography{refs}", text)
 
+    def test_another_documents_bbl_is_never_the_papers_bibliography(self):
+        text = self.text(
+            [
+                (
+                    "main.tex",
+                    b"\\documentclass{article}\\begin{document}Paper.\\bibliography{refs}\\end{document}\n",
+                ),
+                ("supplement.tex", b"\\documentclass{article}\\begin{document}S.\\end{document}\n"),
+                (
+                    "supplement.bbl",
+                    b"\\begin{thebibliography}{1}\\bibitem{y} Supplement only.\\end{thebibliography}\n",
+                ),
+            ]
+        )
+        self.assertNotIn("Supplement only.", text)
+
     def test_inputs_that_loop_or_are_missing_end(self):
         text = self.text(
             [

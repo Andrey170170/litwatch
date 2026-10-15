@@ -295,7 +295,8 @@ def _candidates(name: str, main: str, here: str) -> list[str]:
 def latex_text(package: Path, limit: int) -> str:
     """The paper's text from its source package: the main file with every input inlined (each
     file once, at most `MAX_INPUT_DEPTH` deep), comments dropped, and `\\bibliography` replaced
-    by the package's .bbl where there is one. Without a main file, every LaTeX file in path
+    by the main file's .bbl (arXiv names it after the main file) where there is one; another
+    document's .bbl in the package is never taken. Without a main file, every LaTeX file in path
     order. Raises NoTextSource when the package holds no LaTeX."""
     files = _members(package, limit)
     latex = sorted(n for n in files if n.lower().endswith(LATEX_SUFFIXES))
@@ -319,8 +320,7 @@ def latex_text(package: Path, limit: int) -> str:
         return INPUT.sub(inline, body)
 
     text = expand(files[main], main, 0)
-    stem = str(PurePosixPath(main).with_suffix('.bbl'))
-    bbl = files.get(stem) or next((files[n] for n in sorted(files) if n.lower().endswith('.bbl')), None)
+    bbl = files.get(str(PurePosixPath(main).with_suffix('.bbl')))
     if bbl is not None:
         if BIBLIOGRAPHY.search(text):
             text = BIBLIOGRAPHY.sub(lambda _: bbl, text, count=1)
