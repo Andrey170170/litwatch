@@ -446,25 +446,30 @@ async def done(conn: psycopg.AsyncConnection, c: Claimed, text: TextRead) -> Non
     )
 
 
-async def submitted(conn: psycopg.AsyncConnection, c: Claimed, text: TextRead) -> None:
+async def submitted(conn: psycopg.AsyncConnection, c: Claimed, text: TextRead) -> str | None:
     """A Deep pass's text is about to be sent: the pass records what it read, of the paper's
     revision now, which is what its card is labelled with, even when the job is followed by a
-    later claim."""
-    await conn.execute(
-        """
+    later claim. Returns the pass's reason now (the owner's request may have taken it over since
+    the claim), or None when the worker no longer holds it."""
+    row = await (
+        await conn.execute(
+            """
         UPDATE fulltext_passes SET paper_revision = %(revision)s,
             text_arrived_at = coalesce(text_arrived_at, now()), arxiv_version = %(version)s,
             text_source = %(source)s, text_hash = %(hash)s, paper_updated = %(updated)s::timestamptz
         WHERE id = %(id)s AND state = 'running' AND lease_until = %(lease)s
+        RETURNING reason
         """,
-        {
-            "id": c.id,
-            "lease": c.lease_until,
-            "revision": c.paper.revision,
-            "updated": c.paper.updated,
-            **_read(text),
-        },
-    )
+            {
+                "id": c.id,
+                "lease": c.lease_until,
+                "revision": c.paper.revision,
+                "updated": c.paper.updated,
+                **_read(text),
+            },
+        )
+    ).fetchone()
+    return row["reason"] if row else None
 
 
 async def read_of(conn: psycopg.AsyncConnection, pass_id: int) -> tuple[int, TextRead | None]:

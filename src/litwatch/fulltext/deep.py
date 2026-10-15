@@ -95,10 +95,17 @@ async def _work_one(
         if a.text is None:  # awaiting text, or none to be had
             await record(conn, a)
             return "awaiting_text" if a.waiting else "card_failed"
-        await store_.submitted(conn, c, TextRead(a.text.version, a.text.source, a.text.sha256))
-        requested = c.reason == REQUESTED
-        submission = await deep.submission(conn, c.paper, a.text, requested)
-        attempt_id = await cards.add_attempt(conn, c.paper.id, c.id, automatic=not requested)
+        text = TextRead(a.text.version, a.text.source, a.text.sha256)
+        async with conn.transaction():
+            # Under the paper's lock: the owner's request may have taken the pass over since
+            # its claim, and then the submission and its attempt are theirs.
+            await word.lock(conn, c.paper.id)
+            reason = await store_.submitted(conn, c, text)
+            if reason is None:
+                return "lost"
+            requested = reason == REQUESTED
+            submission = await deep.submission(conn, c.paper, a.text, requested)
+            attempt_id = await cards.add_attempt(conn, c.paper.id, c.id, automatic=not requested)
         try:
             job_id = await deep.client.submit(submission)
         except httpx.HTTPError as exc:

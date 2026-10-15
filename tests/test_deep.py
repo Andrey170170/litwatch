@@ -304,6 +304,23 @@ async def test_a_submitted_job_is_followed_past_the_daily_cap_and_a_dismissal(db
     assert len(fake.requests) == 2
 
 
+async def test_a_request_that_takes_over_a_claimed_pass_makes_the_attempt_the_owners(
+    db, monkeypatch
+):
+    await grade(db, Fit.CENTRAL)
+    reading = deep_passes.read
+
+    async def read_then_request(archive, c):
+        found = await reading(archive, c)
+        await deep_passes.request(db, P.id)  # while the worker reads the text
+        return found
+
+    monkeypatch.setattr(deep_passes, "read", read_then_request)
+    d = make(FakeDeep(DONE), max_per_day=1)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert [a["automatic"] for a in await attempts(db)] == [False]
+
+
 async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db):
     await grade(db, Fit.CENTRAL)
     # Unsaved by a write that missed its settle: the claim settles it first.
