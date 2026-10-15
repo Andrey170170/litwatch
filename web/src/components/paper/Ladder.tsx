@@ -103,16 +103,18 @@ export function ThePaper({ paper }: { paper: Paper }) {
 
 type Props = { paper: Paper; asked: boolean; deepRead: ReactNode; onGistAway: (away: boolean) => void };
 
-/** The quiet line over the abstract when it stands in for the Brief: where the Brief is, or why there is none. */
+/** The quiet line over the abstract when it stands in for the Brief: where the Brief is, or why there is none. A
+ * pass waiting on the owner has its note above, with Run it now. */
 export function whyAbstract(paper: Paper): string {
+  const stuck = (paper.states ?? []).some((s) => s.kind === "fulltext_failed" || s.kind === "awaiting_text");
   switch (paper.text_pass?.state) {
     case "awaiting_text":
-      return "The Brief waits for the paper's full text; the abstract stands in.";
+      return stuck ? "The Brief has waited for the paper's full text over a week; the abstract stands in." : "The Brief waits for the paper's full text; the abstract stands in.";
     case "ready":
     case "running":
       return "The Brief is being written from the full text; the abstract stands in.";
     case "failed":
-      return "The full-text pass failed; it is tried again on the next run. The abstract stands in.";
+      return stuck ? "The full-text pass failed three runs in a row; the abstract stands in until it is run again." : "The full-text pass failed; it is tried again on the next run. The abstract stands in.";
     default:
       return "No Brief yet: Briefs are written for Focus papers at central or related and for Area must reads, so the abstract stands in.";
   }

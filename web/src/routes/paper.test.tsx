@@ -71,7 +71,7 @@ describe("a paper's page", () => {
     const calls = scriptFetch({
       "GET /api/status": status,
       "GET /api/topics": [],
-      "GET /api/papers/2610.00002": () => (calls.some((c) => c.method === "POST") ? { ...paper, states: [states[1]] } : { ...paper, states }),
+      "GET /api/papers/2610.00002": () => (calls.some((c) => c.method === "POST") ? { ...paper, states: [states[1]] } : { ...paper, states, text_pass: { id: 7, kind: "brief", state: "failed", queued_at: "2026-10-14T03:00:00Z" } }),
       "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }),
       "POST /api/settings/fulltext/8/now": () => json({ detail: "the pass is not waiting for the owner" }, 409),
     });
@@ -79,6 +79,7 @@ describe("a paper's page", () => {
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByText(/Full text failed three runs in a row/)).toBeInTheDocument();
     expect(screen.getByText("the LaTeX did not build")).toBeInTheDocument();
+    expect(screen.getByText("The full-text pass failed three runs in a row; the abstract stands in until it is run again.")).toBeInTheDocument();
     expect(screen.getByText(/Awaiting the full text for over a week/)).toBeInTheDocument();
     const [failed] = screen.getAllByRole("button", { name: "Run it now" });
     await userEvent.click(failed!);
