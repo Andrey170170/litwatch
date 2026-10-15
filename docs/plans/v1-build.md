@@ -136,7 +136,12 @@ check: the restart weeks' digests read against 0.14's Notion.
 
 **N5 · The archive in the stack.** The compose file runs the archive; the storage policy; the relevance fixes (exact
 title and phrase first, title over abstract) and litwatch keeping the archive's order; paper pages, Process and Deep
-read for papers outside the collection; the stack smoke test.
+read for papers outside the collection; the stack smoke test. Deferred from #54 (the owner, 2026-10-15: a
+heuristic is fine to start with): the archive's text assembly (`archive/src/arxiv_archive/source_text.py`) picks a
+source package's documents by heuristic, so it keeps only the shallowest of independent documents at different depths
+(a root-level `cover.tex` beside `paper/main.tex` keeps the cover; the depth rule is there so standalone figure files
+in subfolders stay out) and drops inputs nested deeper than eight levels. If Briefs show it matters, read arXiv's
+`00README` directives, which name the top-level files, and take the PDF's text when a package stays ambiguous.
 
 **N6 · Restart.** A fresh stack, the two most recent weeks read from the archive and run through the whole pipeline,
 unlabelled; no data carried from 0.14 or the first v1 (decision 48). Check: the run's counts and costs, every Focus
