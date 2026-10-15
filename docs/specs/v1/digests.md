@@ -44,7 +44,11 @@ A **daily digest** covers the topic's due papers at the time it is written. Norm
 paper that became eligible late (its grading failed on Friday and succeeded on Monday, its re-check finished after the
 wait) is in the next daily digest, shown with its announcement date. A **weekly digest** covers the papers that became
 due for the topic during its week; for a Field topic, which has no daily digest, writing the weekly is what clears
-them. The owner's word never makes a paper due: the owner already knows it.
+them. The owner's word never makes a paper due: the owner already knows it. A paper announced more than three weeks
+before a digest's day is never due for it: late papers arrive within days, and one the collection gains much later (a
+re-run after a topic edit, a reported miss, an old paper read on demand) was never news. A paper's day is the arXiv
+listing that first showed it, from its first version's submission time (before 14:00 US Eastern on a weekday, the
+next weekday's listing); arXiv's holidays are not known, so a paper due on a holiday is shown the day after.
 
 ## Quiet days
 

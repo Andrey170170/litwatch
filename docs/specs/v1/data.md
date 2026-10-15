@@ -69,11 +69,14 @@ evaluation calls the same functions and writes only to evaluation tables.
   done | failed, priority, queued at, tried at, text arrived at, arXiv version read, text source latex | pdf, text
   hash, paper's update read for, lease until, failed runs, retry text, last error): one Brief or Weight re-check open per paper revision; a worker takes
   the least recently tried first. `weights` and `gists` name the pass a full-text row came from.
-- `due` is reshaped: (topic, paper, due since, daily digest, weekly digest), the durable record of what a digest still
-  has to cover ([digests.md](digests.md)).
-- `digests` (topic, period day | week, day, state pending | written | nothing_new | failed, gist, text, counts, best
-  rarity, written at; published means written or nothing_new) and `digest_papers` (digest, paper, role pick | listed
-  | mentioned, order, why, and frozen at writing: paper revision, gist, fit, grade, rarity).
+- What a digest still has to cover is not stored: a paper is due for a topic while it is eligible there, was announced
+  within three weeks of the digest's day, and is in no published digest of the topic that clears it (a daily one for
+  Focus and Area, a weekly one for Field), found from the database when a digest is written
+  ([digests.md](digests.md)). `papers.announced` is the date of the arXiv listing that first showed the paper.
+- `digests` (topic, period day | week, day (a week's Monday), state written | nothing_new | failed, gist, text, counts,
+  best rarity, error, run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
+  role pick | listed | mentioned, position, why, and frozen at writing: paper revision, gist, fit, grade, rarity, and
+  the topic whose grade it showed).
 - `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`; a Gist rating
   names the `gists` row it rated.
 - `eval_labels` (evaluation run, paper, topic, cohort, positive): the labels a replay is measured against, frozen when
@@ -81,8 +84,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   evaluation).
 
 **Removed:** `triage`, `candidates`, `takes`, `take_ratings`, `issues`, `issue_entries`, `reviews`,
-`review_picks`; the first v1's `memberships` (paper in a field) is replaced by the new one. `set_asides` is kept for
-digests (a listed paper the owner later set below relevant). `regression` and the M2 labelling tables stay as
+`review_picks`, `set_asides` (a digest reads the set-aside mark live from the effective grade); the first v1's
+`memberships` (paper in a field) is replaced by the new one. `regression` and the M2 labelling tables stay as
 evaluation history.
 
 **Kept as they are:** `papers`, `intake_checkpoints`, `intake_snapshots`, `runs`, `inference_calls` (plus the reply of a failed call, kept in debug mode), `labels` (plus
