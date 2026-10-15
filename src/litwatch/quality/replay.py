@@ -31,7 +31,7 @@ from typing import Any
 import psycopg
 
 from litwatch import classification, grading
-from litwatch.config import Config
+from litwatch.config import Config, RoleConfig
 from litwatch.core import Depth, Fit, Paper, Status, Taxonomy
 from litwatch.core.classification import Source, keyword
 from litwatch.core.evaluation import Outcome, Recall, Share
@@ -39,6 +39,7 @@ from litwatch.core.grading import grading_topics
 from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
 from litwatch.llm.decisions import chat_request
 from litwatch.llm.gateway import VALIDATION_VERSION
+from litwatch.llm.openrouter import DEFAULT_ROUTING
 from litwatch.store import calls
 from litwatch.store import evaluation as store
 from litwatch.store import papers as papers_store
@@ -129,7 +130,7 @@ def fingerprint(config: Config, tree: Taxonomy) -> str:
         },
     }
     material = {
-        "roles": {r: config.models.role(r).model_dump(mode="json") for r in ROLES},
+        "roles": {r: _served(config.models.role(r)) for r in ROLES},
         "thresholds": config.classification.model_dump(mode="json"),
         "classes": tree.classes_version,
         "followed": [
@@ -143,6 +144,14 @@ def fingerprint(config: Config, tree: Taxonomy) -> str:
     }
     text = json.dumps(material, sort_keys=True, default=str)
     return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def _served(role: RoleConfig) -> dict[str, Any]:
+    """A role as it is served: its configuration with OpenRouter's default routing resolved."""
+    served = role.model_dump(mode="json")
+    if role.provider == "openrouter":
+        served["routing"] = list(role.routing or DEFAULT_ROUTING.get(role.model, ()))
+    return served
 
 
 # The code a replay's conclusions come from: routing, keywords, Fit aggregation and the four

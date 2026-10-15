@@ -177,6 +177,9 @@ async def test_a_replay_writes_only_to_the_evaluation_tables(conn, models):
     assert changed == {"eval_runs", "eval_labels", "eval_results", "runs", "inference_calls"}
     run = await evaluation.get(conn, r.eval_run_id)
     assert run["finished_at"] is not None and float(run["cost"]) > 0
+    # An attempt killed before its run record was finished still counts what it spent.
+    await conn.execute("UPDATE runs SET cost = 0")  # what a killed attempt leaves
+    assert (await evaluation.get(conn, r.eval_run_id))["cost"] == run["cost"]
 
 
 async def test_the_owners_memberships_never_count_and_grading_runs_whatever_classification_said(
@@ -271,6 +274,13 @@ async def test_a_routing_change_refuses_a_resume(conn, models):
 async def test_a_prompt_change_refuses_a_resume(conn, models, monkeypatch):
     r = await start(conn, models)
     monkeypatch.setattr(grading, "SYSTEM", grading.SYSTEM + " Answer briefly.")
+    with pytest.raises(ValueError, match="another configuration"):
+        await replay.resume(conn, CONFIG, r.eval_run_id)
+
+
+async def test_a_change_to_the_default_routing_refuses_a_resume(conn, models, monkeypatch):
+    r = await start(conn, models)
+    monkeypatch.setitem(replay.DEFAULT_ROUTING, CONFIG.models.check.model, ("another-provider",))
     with pytest.raises(ValueError, match="another configuration"):
         await replay.resume(conn, CONFIG, r.eval_run_id)
 

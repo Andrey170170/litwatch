@@ -32,10 +32,12 @@ async def start(
 
 
 async def get(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str, Any] | None:
-    """The run with its cost: the sum over every run record it ran under (None before any)."""
+    """The run with its cost: the journal's calls under every run record it ran under (None
+    before any), so an attempt killed before its run record was finished still counts."""
     return await (
         await conn.execute(
-            "SELECT e.*, (SELECT sum(r.cost) FROM runs r WHERE r.id = ANY(e.run_ids)) AS cost "
+            "SELECT e.*, (SELECT sum((c.usage->>'cost')::numeric) FROM inference_calls c "
+            "WHERE c.run_id = ANY(e.run_ids)) AS cost "
             "FROM eval_runs e WHERE e.id = %s",
             (eval_run_id,),
         )
