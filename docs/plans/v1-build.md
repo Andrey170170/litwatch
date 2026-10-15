@@ -116,8 +116,9 @@ sandbox's two weeks run through the pipeline (the estimate shown and approved fi
 offsets tuned on the labels; measured cost per weekday written beside the estimates in pipeline.md.
 
 **N3 · The full-text queue.** The archive client's urgent requests and text reads, and whatever the archive needs for
-them (the arXiv version of the text it serves); Briefs with the overstatement line, Weight re-checks, Deep card
-passes, the lease, revisions; the "among the collection" section in `deep/`. A disposable archive started per run for
+them (the arXiv version of the text it serves); Briefs with the overstatement line and the Gist from the full text
+(the `gists` table, `gist.written`), Weight re-checks, Deep card passes with each card's usage (tokens, turns, list
+cost) recorded with its attempt, the lease, revisions; the "among the collection" section in `deep/`. A disposable archive started per run for
 verification. The harness gains Briefs.
 
 **N4 · Digests.** Due, daily and weekly digests per depth with their Gists and picks, quiet days, records and set
@@ -135,7 +136,7 @@ central paper with its Brief or a stated reason, and the digests written.
 **W1–W4 · The web app** (Fable 5.1, worktree, PRs into `v1`). W1: the shell (sidebar, drawer, header, run status),
 the look's tokens and faces, Papers, the Topics tab and topic page, the paper page with its ladder, rail and open
 states. W2: Settings (Overview, Needs you, Calibrate, Misses, Topics and the editor with the re-run offer, Taxonomy,
-Runs and cost with Jobs, Integrations, Configuration). W3: the Digest's Day, Week, History (list and calendar) and the
+Runs and cost with Jobs and the Deep card estimate, Integrations, Configuration). W3: the Digest's Day, Week, History (list and calendar) and the
 digest slide-over. W4: phone gestures (edge swipe back, stepping, sheet drag), the PWA and share target, and the stack
 smoke test's page list. A web PR starts on a surface only once its endpoints are merged.
 
@@ -214,7 +215,7 @@ reactions show the need. Not taken: a rubric per topic at every depth (the bar w
 | V3 | A default classifier is chosen with threshold and band, and Focus membership recall on the CoT positives is at least the first v1's candidate recall (N1) | The report in `evals/`; one real `decide` call per provider; the owner's pick |
 | V4 | Classification, analysis, grading per depth, the grade table, rarity, effective grades and the library rule do what pipeline.md says (N2a–b) | pytest per rule on real Postgres (section 4's grading-topic examples, both tables, the floors, the lab-diversity refusal, Area escalation); a sandbox night with its run record |
 | V5 | End-to-end Focus recall is at least the first v1's, or each loss looked at; cost per weekday measured (N2c) | `eval replay` and `eval report` per cohort; the two-week sandbox run; the cost table in pipeline.md |
-| V6 | Every Focus central or related paper has a Brief and every Area must-read candidate a re-checked Weight within the wait, or shows failed or awaiting text (N3) | A test night on the sandbox against a disposable archive; pytest for the lease, revisions and what a pass read; the overstatement line on ten hand-read papers (owner check, added to the preference set) |
+| V6 | Every Focus central or related paper has a Brief and every Area must-read candidate a re-checked Weight within the wait, or shows failed or awaiting text; a paper with a Brief shows the Gist written with it; every finished Deep attempt, carded or failed, has its usage or says it is unknown (N3) | A test night on the sandbox against a disposable archive; pytest for the lease, revisions, what a pass read, the current Gist and Deep usage; the overstatement line on ten hand-read papers, whose Gists repeat no claim the Brief corrects (owner check, added to the preference set) |
 | V7 | Digests per depth for the restart weeks; every Focus central paper appears; Area dailies have a few picks at most (N4) | pytest for due, quiet days, records, the wait and failed digests; the owner's read against 0.14's Notion; the harness on digest voice |
 | V8 | "attention is all you need" returns 1706.03762 first; a fresh stack with an empty archive ingests a night and serves full text (N5) | A search test in `archive/`; the stack smoke test |
 | V9 | The restart produces a readable v1 from nothing (N6) | Counts and cost per step for the window; every Focus central paper with its Brief or reason; digests written |

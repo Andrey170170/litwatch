@@ -82,7 +82,8 @@ Facets are facts, not scores, and are not combined into anything. No other dimen
 novelty) is scored: each would need its own calibration against the owner's word, and an abstract cannot show most of
 them. Rigour and limitations are the Deep card's job.
 
-Analysis is bound to the paper revision. A rewrite (section 8) analyses the paper again.
+Analysis is bound to the paper revision. A rewrite (section 8) analyses the paper again. A paper that gets a written
+Brief has its Gist written again from the full text (section 6).
 
 ## 4. Grading
 
@@ -190,8 +191,8 @@ A **full-text pass** reads the paper's text, not its abstract. Three kinds:
 
 | Pass | For which papers | Does |
 | --- | --- | --- |
-| Brief | Focus papers at effective Fit central or related | writes the Brief; also re-checks Weight |
-| Weight re-check | Area papers whose grade from the abstract is must read (the pick candidates) | judges Weight again from the full text, and writes a Brief |
+| Brief | Focus papers at effective Fit central or related | writes the Brief and the Gist; also re-checks Weight |
+| Weight re-check | Area papers whose grade from the abstract is must read (the pick candidates) | judges Weight again from the full text, and writes a Brief and the Gist |
 | Deep card | Focus papers at an effective grade of must read; Area picks; any paper on request | asks the `deep` integration for a card (see [integrations.md](integrations.md)) |
 
 A pass is queued when its paper qualifies, judged on the effective Fit and grade, so the owner's word can queue one
@@ -204,7 +205,13 @@ background downloads.
 **The Brief** is one paragraph (about 120–200 words): what was done, the main result with its numbers, and the main
 limit. When the full text does not support the abstract's claim, the Brief opens with one line saying so, for example
 "The abstract overstates: the gain holds only for 7B models on GSM8K." A paper without a Brief shows its abstract in
-the Brief's place (a Radar or Field paper, an adjacent Focus paper, or a pass still awaiting text).
+the Brief's place (a Field paper, an Area paper that is not a pick candidate, an adjacent Focus paper, or a pass
+still awaiting text).
+
+**The Gist from the full text.** The call that writes a Brief also returns Weight and a new Gist, so the text is read
+once and the Gist cannot repeat a claim the Brief corrects. The Gist keeps the rules of section 3 and has its own
+instructions in the response schema. It replaces the Gist from the abstract as Weight does: the current Gist is the
+one from the full-text pass queued last for the current revision, else the one from analysis; a new one emits `gist.written`.
 
 **Weight from the full text** replaces Weight from the abstract (source `full_text`) and the grade, rarity and
 library follow. A digest already written does not change (it is a record, [digests.md](digests.md)).
@@ -232,7 +239,8 @@ Carried from the first v1 (0.14's rule). A new arXiv version whose title or abst
 0.8) raises the paper's own revision number; classification, analysis and grading run again on it, and every record
 says which revision it was made from. A revision whose earlier text held a grade above none is graded again even when
 classification no longer puts it in that topic's subtree, so a grade on text that no longer exists cannot stay
-current. A Brief or Deep card made from an older revision is kept and labelled with it until a new one exists.
+current. A Brief or Deep card made from an older revision is kept and labelled with it until a new one exists. A
+Gist from an older revision's full text is not: the new revision's analysis gives the current Gist.
 
 A new arXiv version that leaves title and abstract close enough does not raise the revision, but its body may have
 changed: a paper that has a Brief or a Weight from the full text gets those passes queued again for the new version.

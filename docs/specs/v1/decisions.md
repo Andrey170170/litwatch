@@ -40,8 +40,9 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
     names are roles; a rung's length depends on how many items are scanned at once.
 28. **Gists replace takes.** One Gist per paper, 20–30 words, about the paper and not any topic, for every paper in
     the collection; it replaces the per-topic take.
-29. **Briefs from the full text for Focus papers.** Central or related Focus papers get a Brief written from the full
-    text; others show the abstract. A Brief says when the full text does not support the abstract.
+29. **Briefs from the full text.** Central or related Focus papers, and Area pick candidates through their Weight
+    re-check, get a Brief written from the full text; papers without a written Brief show the abstract. A Brief says
+    when the full text does not support the abstract.
 30. **A hand-written taxonomy.** Every paper is sorted into a tree of classes, one primary and any secondary. The tree
     is written by hand, edited in Settings, applied forward.
 31. **Topics are followed classes.** Two concepts: the taxonomy (what a paper is) and topics (what the owner follows
@@ -121,6 +122,11 @@ The build plan is [`docs/plans/v1-build.md`](../../plans/v1-build.md).
 56. **The build.** The first v1's deployment was stopped on 2026-10-14 (its database dumped first); the owner reads
     0.14 until the restart, and 0.14 keeps registering new papers with the archive. The archive's code moves in
     first; the web app is built from N2 onward, in parallel with the core.
+57. **The Gist follows the Brief.** A full-text pass that writes a Brief rewrites the paper's Gist in the same call,
+    so the two never disagree and the text is read once. Every other paper keeps its Gist from the abstract
+    (`analyse`, Haiku 5.5), which the N2 Gist evaluation checks.
+58. **Deep card cost is observed, not budgeted.** Cards run on the `deep` service's own subscription; litwatch records
+    each card's usage and shows the month's estimate beside gateway spend.
 
 ## Open
 
