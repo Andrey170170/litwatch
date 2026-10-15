@@ -2,19 +2,22 @@ import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
 import { answerFits, differs, level, openSplits, savedLine, settle, settleFromPaper, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
 
-const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [] };
+const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
 const stuck = { paper_id: "1", revision: 1, title: "t", failed_runs: 3, last_error: null, failed_at: "2026-10-15" };
 const split = { paper_id: "1", topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
 
 describe("waiting", () => {
-  const q = { night: { ...night, splits: [split, { ...split, paper_id: "2", label: { value: "central" } }], ungraded: [stuck], analysis_failed: [stuck], fulltext: [pass, { ...pass, id: 8, kind: "weight" }] } } as Quality;
-  it("counts unlabelled splits, the stuck steps and the full-text passes, not labelled splits", () => {
-    expect(waiting(q)).toBe(5);
+  const digest = { id: 4, topic: "a", period: "day", day: "2026-10-08", error: "timed out", written_at: "" } as const;
+  const q = { night: { ...night, splits: [split, { ...split, paper_id: "2", label: { value: "central" } }], ungraded: [stuck], analysis_failed: [stuck], fulltext: [pass, { ...pass, id: 8, kind: "weight" }], digests: [digest, { ...digest, id: 5 }] } } as Quality;
+  it("counts unlabelled splits, the stuck steps, the full-text passes and the failed digests, not labelled splits", () => {
+    expect(waiting(q)).toBe(7);
   });
   it("drops what this visit settled, which keeps its place", () => {
-    const after = settle(settle(settle(q, "splits", { paper_id: "1", topic: "a" }, "related"), "analysis_failed", { paper_id: "1" }, "Tried again"), "fulltext", { paper_id: "3", id: 8 }, "Running");
-    expect(waiting(after)).toBe(2);
+    const after = settle(settle(settle(settle(q, "splits", { paper_id: "1", topic: "a" }, "related"), "analysis_failed", { paper_id: "1" }, "Tried again"), "fulltext", { paper_id: "3", id: 8 }, "Running"), "digests", { id: 5 }, "Written");
+    expect(waiting(after)).toBe(3);
+    // A digest settles by its id alone; the other with the same topic stays.
+    expect(after.night.digests.map((d) => d.settled)).toEqual([undefined, "Written"]);
     expect(after.night.splits.map((s) => s.settled)).toEqual(["related", undefined]);
     expect(after.night.analysis_failed[0]!.settled).toBe("Tried again");
     expect(after.night.ungraded[0]!.settled).toBeUndefined();

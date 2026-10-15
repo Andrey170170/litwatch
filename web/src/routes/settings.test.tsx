@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
-const status = { state: "quiet", papers: 2, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 };
+const status = { state: "quiet", papers: 2, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
 const cls = { slug: "mi", name: "Mech interp", description: "Circuits and features.", parent: null, threshold: null };
 const topic = { class: "mi", depth: "focus", monogram: "MI", colour: "#f3e600", status: "active", subject: "Circuits and features.", rubric: "central: it studies circuits", interests: "", keywords: ["circuit"] };
 const tree = { classes: [cls], topics: [topic] };
@@ -23,8 +23,9 @@ const split = {
 };
 const stuck = { paper_id: "2610.00002", revision: 1, title: "A stuck paper", failed_runs: 3, last_error: "invalid", failed_at: "2026-10-14T03:00:00Z" };
 const pass = { id: 7, paper_id: "2610.00003", revision: 1, title: "A textless paper", kind: "brief", state: "failed", failed_runs: 3, last_error: "the LaTeX did not build", queued_at: "2026-10-08T03:00:00Z" };
+const digest = { id: 3, topic: "mi", period: "day", day: "2026-10-08", error: "the writer timed out twice", written_at: "2026-10-09T03:00:00Z" };
 const quality = {
-  night: { run: 6, error: null, splits: [split], awaiting_classification: [], analysis_failed: [stuck], ungraded: [], fulltext: [pass] },
+  night: { run: 6, error: null, splits: [split], awaiting_classification: [], analysis_failed: [stuck], ungraded: [], fulltext: [pass], digests: [digest] },
   cost: [{ provider: "anthropic", spent: 1.5, projected: 4, budget: 20, over: false }],
   recall: null,
   calibration: [],
@@ -49,7 +50,7 @@ describe("Settings", () => {
     scriptFetch(common);
     renderApp("/settings");
     const needs = await screen.findByRole("link", { name: /Needs you/ });
-    await waitFor(() => expect(needs).toHaveTextContent("3 waiting"));
+    await waitFor(() => expect(needs).toHaveTextContent("4 waiting"));
     expect(screen.getByRole("link", { name: /Topics/ })).toHaveTextContent("1 followed");
     expect(screen.getByRole("link", { name: /Runs and cost/ })).toHaveTextContent("$1.50 of $20.00 this month");
   });
@@ -58,7 +59,7 @@ describe("Settings", () => {
     viewport(true);
     const calls = scriptFetch({ ...common, "PUT /api/labels/mi/2610.00001": { saved: false }, "DELETE /api/labels/mi/2610.00001": { saved: false } });
     renderApp("/settings/needs");
-    expect(await screen.findByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(await screen.findByText("4 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     const item = screen.getByText("A split paper").closest(".need")!;
     expect(item).toHaveTextContent("adjacent stands");
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "related" }));
@@ -68,14 +69,14 @@ describe("Settings", () => {
     // Still first in its group, before the stuck paper.
     const titles = screen.getAllByRole("link", { name: /paper$/ }).map((l) => l.textContent);
     expect(titles).toEqual(["A split paper", "A stuck paper", "A textless paper"]);
-    expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("2");
+    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("3");
     // Tapping the label's segment again takes it back: the split waits once more, where it was.
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "related" }));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/labels/mi/2610.00001")).toBe(true));
     await waitFor(() => expect(item).not.toHaveClass("settled"));
     expect(item).toHaveTextContent("adjacent stands");
-    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(screen.getByText("4 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
   it("keeps the visit's rows on the way back from a paper, and starts afresh on a link", async () => {
@@ -106,7 +107,7 @@ describe("Settings", () => {
     // A Settings page reached by a link is a fresh visit: the reads load again, the sidebar's count with them, on a
     // page that does not read /quality itself.
     const needs = screen.getByRole("link", { name: /Needs you/ });
-    expect(within(needs).getByText("2")).toBeInTheDocument();
+    expect(within(needs).getByText("3")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("link", { name: /Taxonomy/ }));
     await waitFor(() => expect(fetched()).toBe(2));
     // Back before the read lands: the page waits for it rather than showing the old rows and swapping them.
@@ -114,9 +115,39 @@ describe("Settings", () => {
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
     land();
-    expect(await screen.findByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(await screen.findByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
-    expect(within(needs).getByText("1")).toBeInTheDocument();
+    expect(within(needs).getByText("2")).toBeInTheDocument();
+  });
+
+  it("lists a failed digest and writes it again, settling it in place with what came of it", async () => {
+    viewport(true);
+    const written = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "day", day: "2026-10-08", state: "written", counts: {}, gist: "g", text: "t", error: null, written_at: "2026-10-15T10:00:00Z", papers: [] };
+    const calls = scriptFetch({ ...common, "POST /api/digests/3/write": written });
+    renderApp("/settings/needs");
+    expect(await screen.findByText("Digests · 1")).toBeInTheDocument();
+    const item = screen.getByText("Daily digest · 8 Oct").closest(".need")!;
+    expect(item).toHaveTextContent("Could not be written: the writer timed out twice");
+    await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Write it again" }));
+    await waitFor(() => expect(item).toHaveClass("settled"));
+    expect(item).toHaveTextContent("Written again; it shows in the Digest.");
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/digests/3/write"]);
+    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+  });
+
+  it("settles a digest that failed again with the new error, and one written meanwhile with the 409's reason", async () => {
+    viewport(true);
+    const failed = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "week", day: "2026-10-05", state: "failed", counts: {}, error: "the writer timed out again", written_at: "2026-10-15T10:00:00Z", papers: [] };
+    const twice = { ...quality, night: { ...quality.night, digests: [{ ...digest, period: "week", day: "2026-10-05" }, { ...digest, id: 4 }] } };
+    scriptFetch({ ...common, "GET /api/settings/quality": twice, "POST /api/digests/3/write": failed, "POST /api/digests/4/write": () => json({ detail: "the digest is not one to write again" }, 409) });
+    renderApp("/settings/needs");
+    const weekly = (await screen.findByText("Weekly digest · the week of 5 Oct")).closest(".need")!;
+    await userEvent.click(within(weekly as HTMLElement).getByRole("button", { name: "Write it again" }));
+    await waitFor(() => expect(weekly).toHaveTextContent("Failed again: the writer timed out again. The next run writes it again."));
+    const daily = screen.getByText("Daily digest · 8 Oct").closest(".need")!;
+    await userEvent.click(within(daily as HTMLElement).getByRole("button", { name: "Write it again" }));
+    await waitFor(() => expect(daily).toHaveTextContent("No longer waits on the owner: the digest is not one to write again."));
+    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
   it("settles an item whose action answers 409 with the reason, in place", async () => {
@@ -127,7 +158,7 @@ describe("Settings", () => {
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Run it now" }));
     await waitFor(() => expect(item).toHaveClass("settled"));
     expect(item).toHaveTextContent("No longer waits on the owner: the pass is not waiting for the owner.");
-    expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
   it("lists a full-text pass that failed three runs and runs it now, settling it in place", async () => {
@@ -142,7 +173,7 @@ describe("Settings", () => {
     await waitFor(() => expect(item).toHaveClass("settled"));
     expect(item).toHaveTextContent("Running now, first in line, with three more runs.");
     expect(within(item as HTMLElement).queryByRole("button", { name: "Run it now" })).toBeNull();
-    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("2");
+    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("3");
   });
 
   it("saves a topic only once something changed, then offers the re-run in place of Save", async () => {

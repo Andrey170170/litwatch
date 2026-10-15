@@ -29,7 +29,7 @@ const paper = {
   publication_by_owner: false,
   card_requestable: true,
 };
-const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0 };
+const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
 const brief = { id: 1, text: "The brief, from the full text.", overstatement: "The abstract overstates: the gain holds only for 7B models.", revision: 1, arxiv_version: 1, source: "latex", written_at: "2026-10-14T03:00:00Z" };
 
 describe("a paper's page", () => {
@@ -79,7 +79,7 @@ describe("a paper's page", () => {
     // The Needs you page the reader came from lists both passes; each is settled there as it leaves the paper.
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const row = (id: number, state: string) => ({ id, paper_id: "2610.00002", revision: 1, title: "Epic one", kind: "brief", state, failed_runs: 0, last_error: null, queued_at: "2026-10-08T03:00:00Z" });
-    client.setQueryData(["settings", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
+    client.setQueryData(["settings", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")], digests: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
     const settledRows = () => (client.getQueryData(["settings", "quality"]) as { night: { fulltext: { id: number; settled?: string }[] } }).night.fulltext.map((r) => r.settled);
     renderApp("/paper/2610.00002", client);
     await screen.findByRole("heading", { name: "Epic one" });

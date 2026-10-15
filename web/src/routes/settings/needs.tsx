@@ -6,12 +6,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError } from "@/api/client";
-import { said, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel } from "@/api/mutations";
+import { said, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
 import { qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
-import { type LabelValue, openSplits, type Quality, settle, type Settled, type Split, type Stuck, type TextPassStuck, type Waiting, waiting } from "@/lib/settings";
-import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
+import { type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, settle, type Settled, type Split, type Stuck, type TextPassStuck, type Waiting, waiting } from "@/lib/settings";
+import { FitSeg, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 type Settle = (what: string | undefined) => void;
 
@@ -27,6 +27,7 @@ const KIND = {
   ungraded: { name: "Ungraded", line: "Grading failed three runs; the paper shows ungraded on its topic.", step: "Grading" },
   analysis: { name: "Analysis", line: "Analysis failed three runs; the paper has no Gist or Weight and shows its title alone.", step: "Analysis" },
   fulltext: { name: "Full text", line: "A full-text pass failed three runs, or has waited for its text over a week; the abstract stands in for the Brief." },
+  digests: { name: "Digests", line: "A digest could not be written; its papers stay due and the next run writes it again." },
 } as const;
 
 function Group<T>({ kind, items, children }: { kind: keyof typeof KIND; items: T[]; children: (item: T) => React.ReactNode }) {
@@ -195,6 +196,31 @@ function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
   );
 }
 
+/** A failed digest: which one and why; Write it again runs the writer now, and a run that fails again settles the
+ * item too, since the nightly runs write it again from here. */
+function FailedDigest({ d, badge, settle }: { d: FailedDigestRow; badge: React.ReactNode; settle: Settle }) {
+  const write = useWriteAgain();
+  const when = d.period === "day" ? `Daily digest · ${rowDate(d.day)}` : `Weekly digest · the week of ${rowDate(d.day)}`;
+  return (
+    <div className={`need fail${d.settled ? " settled" : ""}`}>
+      <div className="nh">
+        {badge}
+        <span className="nt">{when}</span>
+      </div>
+      <div className="nb">{d.error ? `Could not be written: ${d.error}` : "Could not be written."}</div>
+      {d.settled ? (
+        <div className="nres">{d.settled}</div>
+      ) : (
+        <div className="nact">
+          <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id, { onSuccess: (r) => settle(r.state === "failed" ? `Failed again: ${r.error ?? "no text"}. The next run writes it again.` : "Written again; it shows in the Digest."), onError: gone(settle) })}>
+            {write.isPending ? "Writing…" : "Write it again"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Analysis({ s, settle }: { s: Stuck; settle: Settle }) {
   const retry = useRetryAnalysis(s.paper_id);
   return (
@@ -246,7 +272,9 @@ export function NeedsPage() {
           <Group kind="fulltext" items={q.night.fulltext}>
             {(s) => <TextPass key={s.id} s={s} settle={settler("fulltext", { paper_id: s.paper_id, id: s.id })} />}
           </Group>
-          <Later>Digests that could not be written join this page with N4.</Later>
+          <Group kind="digests" items={q.night.digests}>
+            {(d) => <FailedDigest key={d.id} d={d} badge={badge(d.topic)} settle={settler("digests", { id: d.id })} />}
+          </Group>
         </>
       )}
     </>

@@ -80,6 +80,10 @@ export type TextPassStuck = {
   settled?: string;
 };
 
+/** A digest whose writer call failed (`store.digests.failed`): the next run writes it again, or the owner now. A
+ * weekly digest's `day` is its Monday. */
+export type FailedDigest = { id: number; topic: string; period: "day" | "week"; day: string; error: string | null; written_at: string; settled?: string };
+
 export type Spend = { provider: string; spent: number; projected: number; budget: number | null; over: boolean };
 
 export type Recall = {
@@ -95,7 +99,7 @@ export type Recall = {
 };
 
 export type Quality = {
-  night: { run: number | null; error: string | null; splits: Split[]; awaiting_classification: Stuck[]; analysis_failed: Stuck[]; ungraded: Stuck[]; fulltext: TextPassStuck[] };
+  night: { run: number | null; error: string | null; splits: Split[]; awaiting_classification: Stuck[]; analysis_failed: Stuck[]; ungraded: Stuck[]; fulltext: TextPassStuck[]; digests: FailedDigest[] };
   cost: Spend[];
   recall: { eval_run: number; started_at: string; finished_at: string | null; cost: number; recall: Recall[] } | null;
   calibration: { topic: string; precision: number | null; precision_n: number; dropped: number | null; dropped_n: number }[];
@@ -141,27 +145,28 @@ export type Session = { id: number; seed: number; drawn_at: string; items: Sessi
 
 // -- rules ---------------------------------------------------------------------------------------------------------
 
-export type Waiting = "splits" | "awaiting_classification" | "analysis_failed" | "ungraded" | "fulltext";
+export type Waiting = "splits" | "awaiting_classification" | "analysis_failed" | "ungraded" | "fulltext" | "digests";
 
-/** How many things wait on the owner: splits and escalations still unlabelled, the three stuck steps and the
- * full-text passes, less what this visit settled. */
+/** How many things wait on the owner: splits and escalations still unlabelled, the three stuck steps, the
+ * full-text passes and the failed digests, less what this visit settled. */
 export function waiting(q: Quality): number {
   const n = q.night;
   const open = (xs: { settled?: string }[]) => xs.filter((x) => !x.settled).length;
-  return open(n.splits.filter((s) => !s.label)) + open(n.awaiting_classification) + open(n.analysis_failed) + open(n.ungraded) + open(n.fulltext);
+  return open(n.splits.filter((s) => !s.label)) + open(n.awaiting_classification) + open(n.analysis_failed) + open(n.ungraded) + open(n.fulltext) + open(n.digests);
 }
 
-/** Which item settled: its paper, and its topic or pass where a paper can have several. */
-export type Settled = { paper_id: string; topic?: string | null; id?: number };
+/** Which item settled: its paper, and its topic or pass where a paper can have several; a digest by its id alone. */
+export type Settled = { paper_id?: string; topic?: string | null; id?: number };
 
 /** The quality page with one item marked settled, in place: the page and the sidebar read the same copy. `what`
  * undefined unsettles it (a label taken back). */
 export function settle(q: Quality, list: Waiting, item: Settled, what: string | undefined): Quality {
-  const same = (x: Settled) => x.paper_id === item.paper_id && (item.topic == null || x.topic === item.topic) && (item.id == null || x.id === item.id);
+  const same = (x: Settled) => (item.paper_id == null || x.paper_id === item.paper_id) && (item.topic == null || x.topic === item.topic) && (item.id == null || x.id === item.id);
   const mark = <T extends Settled>(xs: T[]): T[] => xs.map((x) => (same(x) ? { ...x, settled: what } : x));
   const night = { ...q.night };
   if (list === "splits") night.splits = mark(night.splits);
   else if (list === "fulltext") night.fulltext = mark(night.fulltext);
+  else if (list === "digests") night.digests = mark(night.digests);
   else night[list] = mark(night[list]);
   return { ...q, night };
 }

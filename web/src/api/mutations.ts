@@ -260,6 +260,17 @@ export function useRunPassNow(paperId: string) {
   );
 }
 
+/** Write a failed digest again now, as a run of its own. The API answers 409 when it no longer waits (written
+ * meanwhile, its topic paused) or another job holds the run lock; the digest comes back with its new state. */
+export function useWriteAgain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (digestId: number) => ok(await api.POST("/api/digests/{digest_id}/write", { params: { path: { digest_id: digestId } } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["status"] }),
+    onError: (e) => toast(said(e), "error"),
+  });
+}
+
 /** BibTeX for one paper, as text; the API looks the published version up first. */
 export async function bibtexFor(id: string): Promise<string> {
   return ok(await api.POST("/api/bibtex", { body: { ids: [id] }, parseAs: "text" }));
