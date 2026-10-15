@@ -486,7 +486,7 @@ def fulltext_queue(
     ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration)."""
     from litwatch import fulltext  # noqa: PLC0415
 
-    cfg = configuration.load(config)
+    cfg = _config(config)
     archive = fulltext.archive_for(cfg)
     if archive is None:
         raise SystemExit("no archive configured")
