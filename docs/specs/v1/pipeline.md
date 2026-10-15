@@ -167,9 +167,9 @@ The grade for a topic is derived from Fit there and the paper's Weight:
 | adjacent | adjacent | adjacent | adjacent |
 | none | none | none | none |
 
-This table was checked in N2c against the two-week run and 0.14's tiers and kept: no disagreement traced to a
-cell rather than to Fit or Weight ([evals/2026-10-15-tuning.md](../../../evals/2026-10-15-tuning.md)). A paper
-whose analysis has not produced a Weight yet is treated as solid. A Focus topic's digest lists papers by Fit, not grade (see [digests.md](digests.md)).
+This table was checked in N2c against the two-week run and 0.14's tiers and kept for now: the labels available did
+not establish a cell change ([evals/2026-10-15-tuning.md](../../../evals/2026-10-15-tuning.md)). A paper whose
+analysis has not produced a Weight yet is treated as solid. A Focus topic's digest lists papers by Fit, not grade (see [digests.md](digests.md)).
 
 **Effective Fit and effective grade.** The owner's word is always a Fit (see [feedback.md](feedback.md)). The
 **effective Fit** is the owner's word where there is one, otherwise the verdict's. The **effective grade** is the
