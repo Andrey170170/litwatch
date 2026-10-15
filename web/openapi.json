@@ -809,7 +809,7 @@
     "/api/misses": {
       "post": {
         "summary": "Report Miss",
-        "description": "File a miss for a Watch topic.",
+        "description": "File a miss for a Focus topic.",
         "operationId": "report_miss_api_misses_post",
         "requestBody": {
           "content": {
@@ -845,21 +845,26 @@
         }
       }
     },
-    "/api/settings/topics": {
+    "/api/settings/taxonomy": {
       "get": {
-        "summary": "Topics",
-        "operationId": "topics_api_settings_topics_get",
+        "summary": "Taxonomy",
+        "description": "The class tree and the followed topics; null before one is imported.",
+        "operationId": "taxonomy_api_settings_taxonomy_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Topic"
-                  },
-                  "type": "array",
-                  "title": "Response Topics Api Settings Topics Get"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Taxonomy"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Taxonomy Api Settings Taxonomy Get"
                 }
               }
             }
@@ -870,7 +875,7 @@
     "/api/settings/topics/{slug}": {
       "put": {
         "summary": "Save Topic",
-        "description": "Create or edit a topic. Edits apply forward; a change of kind or content settles the\ntopic's papers again (see feedback.word.settle_topic).",
+        "description": "Follow class `slug`, or edit its topic. The class takes the subject as its description.\nEdits apply forward; a change of depth or content settles the topic's papers again (see\nfeedback.word.save_taxonomy).",
         "operationId": "save_topic_api_settings_topics__slug__put",
         "parameters": [
           {
@@ -922,7 +927,7 @@
     "/api/settings/topics-order": {
       "put": {
         "summary": "Order",
-        "description": "The owner's order, which topic lists and cards follow. The list must name every topic\nonce. Rows are locked as a topic save locks them.",
+        "description": "The owner's order, which topic lists and cards follow. The list must name every topic\nonce.",
         "operationId": "order_api_settings_topics_order_put",
         "requestBody": {
           "content": {
@@ -954,7 +959,7 @@
     "/api/settings/quality": {
       "get": {
         "summary": "Quality Page",
-        "description": "At the top, what last night left; below, how well the Watch topics are doing.",
+        "description": "At the top, what last night left; below, how well the Focus topics are doing.",
         "operationId": "quality_page_api_settings_quality_get",
         "responses": {
           "200": {
@@ -1745,7 +1750,7 @@
           "grade"
         ],
         "title": "Chosen",
-        "description": "One Watch topic's current verdict on the paper."
+        "description": "One Focus topic's current verdict on the paper."
       },
       "CitedIn": {
         "properties": {
@@ -1821,6 +1826,16 @@
         ],
         "title": "DeepCard",
         "description": "A deep card: the reading card the deep service wrote, as it wrote it."
+      },
+      "Depth": {
+        "type": "string",
+        "enum": [
+          "focus",
+          "area",
+          "field"
+        ],
+        "title": "Depth",
+        "description": "How closely the owner follows a topic: the research question, the area, the wider field."
       },
       "DrawIn": {
         "properties": {
@@ -1998,7 +2013,7 @@
           "none"
         ],
         "title": "Grade",
-        "description": "A Watch topic's judgement of a paper, most inclusive first."
+        "description": "A Focus topic's judgement of a paper, most inclusive first."
       },
       "HTTPValidationError": {
         "properties": {
@@ -2553,8 +2568,8 @@
             "type": "string",
             "title": "Name"
           },
-          "kind": {
-            "$ref": "#/components/schemas/TopicKind"
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
           },
           "colour": {
             "anyOf": [
@@ -2617,7 +2632,7 @@
         "required": [
           "slug",
           "name",
-          "kind"
+          "depth"
         ],
         "title": "PaperTopic",
         "description": "The paper as one topic sees it."
@@ -3055,7 +3070,33 @@
         ],
         "title": "SessionIn"
       },
-      "Topic": {
+      "Taxonomy": {
+        "properties": {
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyClass"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Classes"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/Topic"
+            },
+            "type": "array",
+            "title": "Topics"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "classes"
+        ],
+        "title": "Taxonomy",
+        "description": "The tree, parents before children and siblings in the owner's order, and the followed\ntopics in the owner's order. Construction fails with every problem found."
+      },
+      "TaxonomyClass": {
         "properties": {
           "slug": {
             "type": "string",
@@ -3068,8 +3109,69 @@
             "minLength": 2,
             "title": "Name"
           },
-          "kind": {
-            "$ref": "#/components/schemas/TopicKind"
+          "description": {
+            "type": "string",
+            "minLength": 10,
+            "title": "Description"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMaximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description"
+        ],
+        "title": "TaxonomyClass",
+        "description": "One node of the tree. `parent` is the parent's slug, None at the top."
+      },
+      "Topic": {
+        "properties": {
+          "class": {
+            "type": "string",
+            "title": "Class"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "monogram": {
+            "type": "string",
+            "maxLength": 2,
+            "minLength": 1,
+            "title": "Monogram"
+          },
+          "colour": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "title": "Colour"
+          },
+          "status": {
+            "$ref": "#/components/schemas/litwatch__core__types__Status",
+            "default": "active"
           },
           "subject": {
             "type": "string",
@@ -3104,55 +3206,19 @@
             },
             "type": "array",
             "title": "Keywords"
-          },
-          "status": {
-            "$ref": "#/components/schemas/litwatch__core__types__Status",
-            "default": "active"
-          },
-          "revision": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Revision"
-          },
-          "position": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Position"
-          },
-          "colour": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^#[0-9a-fA-F]{6}$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Colour"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "slug",
-          "name",
-          "kind",
+          "class",
+          "depth",
+          "monogram",
+          "colour",
           "subject"
         ],
         "title": "Topic",
-        "description": "Something the owner follows. `revision` is set by the store when the topic is saved."
+        "description": "A class the owner follows, keyed by the class's slug (`class` in YAML and JSON). The\ngraders read its subject (the Fit definition) and, for a Focus topic, its rubric (what each\nFit level means for it)."
       },
       "TopicCard": {
         "properties": {
@@ -3164,8 +3230,8 @@
             "type": "string",
             "title": "Name"
           },
-          "kind": {
-            "$ref": "#/components/schemas/TopicKind"
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
           },
           "colour": {
             "anyOf": [
@@ -3222,23 +3288,13 @@
         "required": [
           "slug",
           "name",
-          "kind",
+          "depth",
           "status",
           "subject",
           "papers",
           "saved"
         ],
         "title": "TopicCard"
-      },
-      "TopicKind": {
-        "type": "string",
-        "enum": [
-          "watch",
-          "radar",
-          "pulse"
-        ],
-        "title": "TopicKind",
-        "description": "The service a topic gets. Only Watch topics are graded per paper."
       },
       "ValidationError": {
         "properties": {
@@ -3353,7 +3409,8 @@
           "active",
           "paused"
         ],
-        "title": "Status"
+        "title": "Status",
+        "description": "Whether a topic is in use."
       }
     }
   }
