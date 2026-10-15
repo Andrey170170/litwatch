@@ -96,6 +96,15 @@ def _word(paper: str, topic: str) -> str:
                  AND r.reason IN ({words})))"""
 
 
+def _fit(topic: str, older: bool = False) -> str:
+    """The Fit of the latest verdict on paper `p` for `topic`; with `older`, on an earlier
+    revision."""
+    before = "AND v.paper_revision < p.revision" if older else ""
+    return f"""(
+    SELECT v.fit FROM verdicts v WHERE v.paper_id = p.id AND v.topic = {topic} {before}
+    ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC LIMIT 1)"""
+
+
 def _member(narrow: str) -> str:
     """Paper `p` is a member of the topic's subtree by the pipeline, not by the owner's word (a
     class label, a reported miss, which grading follows too): by classification, or by the
@@ -111,18 +120,33 @@ def _member(narrow: str) -> str:
                                 AND o.source = 'owner' AND NOT o.member))"""
 
 
-# An uncertain-band or keyword member of a Focus class in an Area's or Field's subtree counts
-# once graded central or related on that Focus topic, so it is not admitted ungraded.
-_SUBTREE_MEMBER = _member("""(
-    SELECT v.fit FROM verdicts v WHERE v.paper_id = p.id AND v.topic = m.class
-    ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC LIMIT 1
-) IN ('central', 'related')""")
+def _held(topic: str) -> str:
+    """Grading follows paper `p` to `topic` from an older text (`held`, pipeline.md, section 8):
+    its latest verdict there on an earlier revision had a Fit above none, and no class label or
+    reported miss of the owner's put it in that class."""
+    return f"""(
+    {_fit(topic, older=True)} <> 'none'
+    AND NOT EXISTS (SELECT 1 FROM memberships o
+                    WHERE o.paper_id = p.id AND o.class = {topic}
+                      AND o.source IN ('owner', 'miss') AND o.member))"""
+
+
+# A Focus topic's papers reach it by the pipeline: a member of its class, or held there.
+_FOCUS_LED = f"""({_member("m.class = %(topic)s")} OR {_held("%(topic)s")})"""
+
+# An Area's or Field's: a member of its subtree, an uncertain-band or keyword member of a Focus
+# class there counting once graded central or related on it, so it is not admitted ungraded;
+# or held on a topic in the subtree and graded central or related there now.
+_SUBTREE_LED = f"""(
+    {_member(f"{_fit('m.class')} IN ('central', 'related')")}
+    OR EXISTS (SELECT 1 FROM unnest(%(up_below)s::text[]) u (topic)
+               WHERE {_held("u.topic")} AND {_fit("u.topic")} IN ('central', 'related')))"""
 
 
 def _focus(which: str) -> str:
     """A Focus topic's eligible papers: graded there, at effective Fit central or related, and
     at a verdict's Fit that was too, so the owner's word, which the owner already knows, never
-    makes a paper due, and a member of it by the pipeline (`_member`)."""
+    makes a paper due, and led there by the pipeline (`_FOCUS_LED`)."""
     return f"""
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, g.grade, g.rarity,
            g.topic AS graded_on, v.reason AS fit_reason, p.abstract, {_WRITER_READS}
@@ -132,14 +156,15 @@ def _focus(which: str) -> str:
                   WHERE v.paper_id = p.id AND v.topic = %(topic)s
                   ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC LIMIT 1) v ON true
     WHERE p.dismissed_at IS NULL AND g.fit IN ('central', 'related')
-      AND v.fit IN ('central', 'related') AND {which} AND {_member("m.class = %(topic)s")}
+      AND v.fit IN ('central', 'related') AND {which} AND {_FOCUS_LED}
     ORDER BY {_rank("g.rarity")} DESC, p.announced, p.id
     """
 
 
 def _subtree(which: str, gates: str) -> str:
-    """An Area or Field topic's papers: its subtree's members by the pipeline, at its page's
-    standing, less those the owner's word sets below related where they are graded."""
+    """An Area or Field topic's papers: its subtree's papers by the pipeline (`_SUBTREE_LED`),
+    at its page's standing, less those the owner's word sets below related where they are
+    graded."""
     return f"""
     WITH {SCOPE}{STANDING}
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, s.grade,
@@ -152,7 +177,7 @@ def _subtree(which: str, gates: str) -> str:
                        WHERE v.paper_id = p.id AND v.topic = g.topic
                        ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC
                        LIMIT 1) v ON true
-    WHERE p.dismissed_at IS NULL AND {which} AND {_SUBTREE_MEMBER}
+    WHERE p.dismissed_at IS NULL AND {which} AND {_SUBTREE_LED}
       AND (g.fit IN ('adjacent', 'none') AND {_word("p.id", "g.topic")}) IS NOT TRUE {gates}
     ORDER BY {_rank("coalesce(s.rarity, 'common')")} DESC, p.announced, p.id
     """

@@ -343,6 +343,24 @@ async def test_a_reported_miss_graded_central_is_due_neither_for_its_topic_nor_a
     assert await shown(db, INTERP.slug, "day", TUE) == ("nothing_new", [])
 
 
+async def test_a_rewritten_paper_graded_again_where_it_was_held_is_due_there(db):
+    """Graded adjacent, then rewritten and classified elsewhere: grading follows it to the topic
+    from its older text (pipeline.md, section 8), and a related verdict makes it due there and
+    in the Area above."""
+    await focus(db, P, "adjacent")
+    await verdicts.passed(db, [(P.id, 1)])
+    rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
+    await papers_store.upsert(db, [rewritten])
+    await classify(db, rewritten)
+    await analyse(db, rewritten)
+    await grade(db, rewritten, "related")
+    await verdicts.passed(db, [(P.id, 2)])
+    await listed(db, TUE, P)
+    await day(db, Writer(), TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
+    assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(P.id, "listed")])
+
+
 async def test_a_grading_failed_on_a_paused_topic_does_not_hold_back_its_area(db):
     """A paused topic grades nothing, so its failed grading is not waited for."""
     await area(db, Q, "related")
