@@ -61,7 +61,7 @@ up AS (SELECT * FROM unnest(%(up_below)s::text[], %(up_topics)s::text[]) AS up (
 pairs AS (
     SELECT map.topic, m.paper_id FROM memberships m JOIN map ON map.class = m.class
     WHERE {SHOWN_MEMBER}
-    UNION
+    UNION ALL
     SELECT up.topic, g.paper_id FROM effective_grades g JOIN up ON up.below = g.topic)
 """
 # ...and how each shows there (`standing`): the topic's own grade, else its best followed
@@ -77,7 +77,7 @@ standing AS (
     SELECT s.topic, s.paper_id, coalesce(own.grade, best.grade) AS grade,
            coalesce(own.rarity, best.rarity, {FLOOR}) AS rarity,
            CASE WHEN own.paper_id IS NULL THEN best.via END AS via
-    FROM pairs s
+    FROM (SELECT DISTINCT topic, paper_id FROM pairs) s
     LEFT JOIN effective_grades own ON own.paper_id = s.paper_id AND own.topic = s.topic
     LEFT JOIN best ON best.topic = s.topic AND best.paper_id = s.paper_id
     LEFT JOIN rarities r ON r.paper_id = s.paper_id)
@@ -314,7 +314,7 @@ async def papers(
     shown = tree.shown() if tree else []
     where, params = _filters(query)
     in_view = [t.slug for t in shown]
-    ctes = ""
+    ctes, scoped = "", ""
     if query.topics or query.depth:
         chosen = [
             t.slug
@@ -324,7 +324,7 @@ async def papers(
         ]
         ctes = SCOPE
         params |= _scope(tree, chosen)
-        where.append("p.id IN (SELECT paper_id FROM pairs)")
+        scoped = "JOIN (SELECT DISTINCT paper_id FROM pairs) sc ON sc.paper_id = p.id "
         in_view = list(dict.fromkeys(params["up_below"]))
     params["in_view"] = in_view
     graded = (
@@ -340,7 +340,7 @@ async def papers(
         conn,
         query,
         ctes=ctes,
-        source="papers p LEFT JOIN rarities r ON r.paper_id = p.id "
+        source=f"papers p {scoped}LEFT JOIN rarities r ON r.paper_id = p.id "
         "LEFT JOIN library l ON l.paper_id = p.id",
         where=where,
         levels=levels,
@@ -447,40 +447,38 @@ async def topic_cards(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str
     slugs = [t.slug for t in tree.shown()]
     params = _scope(tree, slugs)
     levels = [r.value for r in reversed(Rarity)]
-    cards: dict[str, dict[str, Any]] = {
-        s: {"papers": 0, "saved": 0, "rarities": dict.fromkeys(levels, 0), "newest": None}
-        for s in slugs
-    }
+    by_level = ", ".join(f"count(*) FILTER (WHERE st.rarity = '{r}') AS {r}" for r in levels)
     counted = await _all(
         conn,
         f"""
         WITH {SCOPE}{STANDING}
-        SELECT st.topic, st.rarity, count(*) AS n, count(*) FILTER (WHERE l.saved) AS saved
+        SELECT st.topic, count(*) AS papers, count(*) FILTER (WHERE l.saved) AS saved, {by_level},
+               (array_agg(p.id ORDER BY p.published DESC NULLS LAST, p.id)
+                    FILTER (WHERE st.grade = 'must_read'))[1] AS newest
         FROM standing st JOIN papers p ON p.id = st.paper_id AND p.dismissed_at IS NULL
         LEFT JOIN library l ON l.paper_id = p.id
-        GROUP BY 1, 2
+        GROUP BY st.topic
         """,
         params,
     )
+    newest = [r["newest"] for r in counted if r["newest"]]
+    titles = {
+        r["id"]: r["title"]
+        for r in await _all(conn, "SELECT id, title FROM papers WHERE id = ANY(%s)", (newest,))
+    }
+    cards: dict[str, dict[str, Any]] = {
+        s: {"papers": 0, "saved": 0, "rarities": dict.fromkeys(levels, 0), "newest": None}
+        for s in slugs
+    }
     for row in counted:
-        card = cards[row["topic"]]
-        card["papers"] += row["n"]
-        card["saved"] += row["saved"]
-        if row["rarity"]:
-            card["rarities"][row["rarity"]] += row["n"]
-    newest = await _all(
-        conn,
-        f"""
-        WITH {SCOPE}{STANDING}
-        SELECT DISTINCT ON (st.topic) st.topic, p.id, p.title
-        FROM standing st JOIN papers p ON p.id = st.paper_id AND p.dismissed_at IS NULL
-        WHERE st.grade = 'must_read'
-        ORDER BY st.topic, p.published DESC NULLS LAST, p.id
-        """,
-        params,
-    )
-    for row in newest:
-        cards[row["topic"]]["newest"] = {"id": row["id"], "title": row["title"]}
+        cards[row["topic"]] = {
+            "papers": row["papers"],
+            "saved": row["saved"],
+            "rarities": {r: row[r] for r in levels},
+            "newest": {"id": row["newest"], "title": titles[row["newest"]]}
+            if row["newest"]
+            else None,
+        }
     return cards
 
 
