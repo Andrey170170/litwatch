@@ -333,6 +333,17 @@ def test_debug_mode_is_off_unless_the_file_or_the_environment_turns_it_on(tmp_pa
     assert not default_gateway(config.Config(), None).debug
 
 
+def test_the_commands_see_a_debug_switch_kept_in_dotenv(tmp_path, monkeypatch):
+    from litwatch.cli import _config  # noqa: PLC0415
+
+    monkeypatch.setenv("LITWATCH_DEBUG", "")  # recorded, so the undo removes what .env sets
+    monkeypatch.delenv("LITWATCH_DEBUG")
+    monkeypatch.delenv("LITWATCH_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("LITWATCH_DEBUG=1\n")
+    assert _config(None).debug
+
+
 def test_the_sdk_clients_leave_retrying_to_the_gateway():
     assert AnthropicProvider(api_key="k").client.max_retries == 0
     assert OpenRouterProvider(api_key="k").client.max_retries == 0
