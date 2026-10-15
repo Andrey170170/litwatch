@@ -110,8 +110,9 @@ async def run(
     """One run under the run lock. Returns the run id.
 
     An incomplete harvest does not stop the rest: what arrived is classified, analysed and
-    graded, and the gap stays open for the next run. `limit` caps the papers each step takes,
-    and the full-text passes tried.
+    graded, and the gap stays open for the next run. `limit` caps the papers each step that
+    spends takes, and the full-text passes tried; the full-text reconcile spends nothing and
+    takes all.
     """
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
