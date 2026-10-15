@@ -192,6 +192,18 @@ async def held(conn: psycopg.AsyncConnection, c: Claimed) -> bool:
     return row is not None
 
 
+async def dismissed(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Whether the paper is dismissed, read with a share lock that waits for a dismissal in
+    progress (as `papers.still_current`)."""
+    row = await (
+        await conn.execute(
+            "SELECT dismissed_at IS NOT NULL AS dismissed FROM papers WHERE id = %s FOR SHARE",
+            (paper_id,),
+        )
+    ).fetchone()
+    return row is not None and row["dismissed"]
+
+
 async def awaiting(conn: psycopg.AsyncConnection, c: Claimed, error: str | None = None) -> None:
     """The archive has no text for it yet (or cannot be reached: `error`): it waits again."""
     await conn.execute(

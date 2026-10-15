@@ -117,55 +117,63 @@ def _read_of(text: PaperText | None) -> TextRead | None:
 async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
     """Store one try's outcome. With an answer: the Brief, the Weight and the Gist from the full
     text, labelled with the revision the pass was queued for, with `brief.written` and, when
-    that revision is still the paper's, `gist.written`; then settle the paper, whose grades
-    follow the Weight and whose next pass this may queue (section 8). Without: the pass fails
-    or waits for its text. Returns False when the worker no longer held the pass."""
+    that revision is still the paper's, `gist.written`. Without: the pass fails or waits for its
+    text, as one for a dismissed paper does whatever it got. Then settle the paper: its grades
+    follow the Weight, its next pass may be queued (section 8), and a pass back in the queue
+    that is no longer wanted (a topic paused while it ran) is dropped. Returns False when the
+    worker no longer held the pass."""
     c = a.claimed
-    if a.waiting:
-        await store_.awaiting(conn, c, a.error)
-        return True
     async with conn.transaction():
         await word.lock(conn, c.paper.id)  # before any write, as every write that settles
         if not await store_.held(conn, c):
             return False
         read = _read_of(a.text)
-        if a.output is None or a.model is None or read is None:
+        if a.waiting or await store_.dismissed(conn, c.paper.id):
+            a.waiting = True  # a dismissed paper's pass writes nothing; `claim` leaves it alone
+            await store_.awaiting(conn, c, a.error)
+        elif a.output is None or a.model is None or read is None:
             await store_.failed(conn, c, a.error or "no answer", counts=a.counts, text=read)
-            return True
-        queued_for = c.paper.model_copy(update={"revision": c.revision})
-        current = await papers_store.still_current(conn, queued_for)
-        out = a.output
-        written = await store_.add(
-            conn,
-            c,
-            read,
-            brief=out.brief,
-            overstatement=out.overstatement,
-            gist=out.gist,
-            weight=out.weight,
-            weight_reason=out.weight_reason,
-            model=a.model,
-        )
-        await events.emit(
-            conn,
-            events.BRIEF_WRITTEN,
-            c.paper.id,
-            revision=c.revision,
-            arxiv_version=read.version,
-            brief_id=written.brief,
-        )
-        # A Gist from an older revision's full text is never current (section 8).
-        if current:
-            await events.emit(
-                conn,
-                events.GIST_WRITTEN,
-                c.paper.id,
-                revision=c.revision,
-                source="full_text",
-                gist_id=written.gist,
-            )
+        else:
+            await _add(conn, c, a, read)
         await word.settle(conn, c.paper.id)
     return True
+
+
+async def _add(conn: psycopg.AsyncConnection, c: Claimed, a: Attempt, read: TextRead) -> None:
+    """The Brief, the Weight and the Gist from the full text, with their events."""
+    assert a.output is not None and a.model is not None
+    queued_for = c.paper.model_copy(update={"revision": c.revision})
+    current = await papers_store.still_current(conn, queued_for)
+    out = a.output
+    written = await store_.add(
+        conn,
+        c,
+        read,
+        brief=out.brief,
+        overstatement=out.overstatement,
+        gist=out.gist,
+        weight=out.weight,
+        weight_reason=out.weight_reason,
+        model=a.model,
+    )
+    await events.emit(
+        conn,
+        events.BRIEF_WRITTEN,
+        c.paper.id,
+        revision=c.revision,
+        arxiv_version=read.version,
+        brief_id=written.brief,
+    )
+    # A Gist from an older revision's full text is never current (section 8).
+    if current:
+        await events.emit(
+            conn,
+            events.GIST_WRITTEN,
+            c.paper.id,
+            revision=c.revision,
+            source="full_text",
+            gist_id=written.gist,
+        )
 
 
 def _outcome(a: Attempt) -> str:

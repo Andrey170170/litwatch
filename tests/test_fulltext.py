@@ -236,6 +236,22 @@ async def test_a_paused_topic_queues_nothing_and_drops_its_pass(db):
     assert await passes(db) == []
 
 
+@pytest.mark.parametrize(
+    "attempt",
+    [{"waiting": True}, {"error": "no text", "counts": True}],
+    ids=["still-fetching", "failed"],
+)
+async def test_a_pass_running_when_its_topic_is_paused_is_dropped_once_it_stops(db, attempt):
+    await graded(db, "central")
+    (claimed,) = await fulltext_store.claim(db, LEASE)
+    tree = await taxonomy_store.load(db)
+    faith = next(t for t in tree.topics if t.slug == FAITH.slug)
+    await word.save_taxonomy(db, tree.following(faith.model_copy(update={"status": Status.PAUSED})))
+    assert len(await passes(db)) == 1  # running: left to finish
+    assert await fulltext.record(db, fulltext.Attempt(claimed, **attempt))
+    assert await passes(db) == []  # back in the queue, no longer wanted: dropped
+
+
 # -- working a pass --------------------------------------------------------------------------------
 
 
@@ -436,6 +452,22 @@ async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revisi
         (1, "done"),
         (2, "awaiting_text"),
     ]
+
+
+async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(db):
+    await graded(db, "central")
+    (claimed,) = await fulltext_store.claim(db, LEASE)
+    assert await papers_store.dismiss(db, P.id)
+    answer = brief.Output.model_validate(ANSWER)
+    text = PaperText(BODY, 1, "latex")
+    done = fulltext.Attempt(claimed, text=text, output=answer, model="test-brief")
+    assert await fulltext.record(db, done)
+    assert await (await db.execute("SELECT * FROM briefs")).fetchall() == []
+    assert await analyses_store.weight_of(db, P.id) is None
+    assert await events(db, "brief.written", "gist.written") == []
+    (row,) = await passes(db)
+    assert (row["state"], row["failed_runs"]) == ("awaiting_text", 0)  # left for the owner's word
+    assert await fulltext_store.claim(db, LEASE) == []
 
 
 async def test_a_pass_not_started_before_a_rewrite_is_dropped(db):
