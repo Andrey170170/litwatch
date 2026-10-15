@@ -17,7 +17,9 @@ in first (decision 49), and the web app (N7) is built from N2 onward, beside the
 Built for the redesign: the archive's code in `archive/` (#41); N0, the seed tree with its topics and the evaluation
 labels (#42); N1, the decision request and the classifier comparison, with Jev chosen (#43,
 `evals/2026-10-14-classifiers.md`); N2a's teardown, the first v1's pipeline and web app taken out (D8, D9 in the
-build plan; the nightly run is intake alone and the web app a placeholder until N2 and N7). Next: the rest of N2a.
+build plan; the nightly run is intake alone and the web app a placeholder until N2 and N7); N2a's taxonomy in the
+database, the class tree and its topics versioned in `classes` and `topics`, imported and exported as YAML
+(`litwatch taxonomy import`, `export`). Next: the rest of N2a.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).

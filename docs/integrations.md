@@ -107,8 +107,8 @@ Every event below carries the paper's id in `paper_id`.
 | --- | --- | --- |
 | `paper.added` | Intake stored a paper new to the collection | `version`: arXiv version or null; `source`: where intake read it (`oai`, `atom`, `archive`) |
 | `paper.revised` | A stored paper got a new arXiv version, or arXiv rewrote its title or abstract | `version`, `previous_version`, `rewritten`: bool, `source` |
-| `verdict.recorded` | Grading recorded a verdict for a Watch topic | `topic`, `grade`, `split`: bool, `verdict_id` |
-| `grade.changed` | A paper's effective grade for a Watch topic changed, by a verdict or the owner's word | `topic`, `before`, `after`: `must_read`, `relevant`, `adjacent`, `none` or null |
+| `verdict.recorded` | Grading recorded a verdict for a Focus topic | `topic`, `grade`, `split`: bool, `verdict_id` |
+| `grade.changed` | A paper's effective grade for a Focus topic changed, by a verdict or the owner's word | `topic`, `before`, `after`: `must_read`, `relevant`, `adjacent`, `none` or null |
 | `paper.saved` | The paper entered the library | none |
 | `paper.unsaved` | The paper left the library (its last reason went, or the owner unsaved it) | none |
 | `publication.found` | A published record was stored for the paper, by lookup or by the owner | `dblp_key`, `venue`, `year`, `doi`, `by_owner`: bool |
@@ -119,7 +119,7 @@ Every event below carries the paper's id in `paper_id`.
 record and can disagree with what the owner sees. The **effective grade** is the owner's word
 where there is one, else the current verdict; every reader-facing surface uses it, and so should
 an integration. The **library** is every paper at an effective grade of `relevant` or above for
-some Watch topic, plus what the owner saved by hand, minus what the owner unsaved.
+some Focus topic, plus what the owner saved by hand, minus what the owner unsaved.
 
 ## Reading litwatch's data
 
@@ -129,11 +129,11 @@ Through the repositories in `litwatch.store`. Each function takes the connection
 | --- | --- |
 | `store.papers.get(conn, paper_id)` | `core.Paper` (title, abstract, authors, categories, published, url, version, doi, ...) or None |
 | `store.papers.body(conn, paper_id)` | `(text, "html" or "pdf")` when the full text was fetched for the paper's current revision, else None |
-| `store.word.effective_for(conn, paper_id)` | `{topic slug: core.Grade}` for the Watch topics that have one |
+| `store.word.effective_for(conn, paper_id)` | `{topic slug: core.Grade}` for the Focus topics that have one |
 | `store.word.library_row(conn, paper_id)` | a dict with `saved` (bool) and `hand` (`save`, `unsave` or None), or None |
-| `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug`, `name`, `kind` (`watch`, `radar`, `pulse`) and `grade` |
+| `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug` (its class's), `name`, `depth` (`focus`, `area`, `field`) and `grade` |
 | `store.publications.found(conn, [paper_id])` | `{paper_id: core.Publication}` for those with a published record |
-| `store.topics.all(conn)` | the active `core.Topic`s, in the owner's order |
+| `store.taxonomy.topics(conn, core.Status.ACTIVE)` | the active `core.Topic`s, in the owner's order; `store.taxonomy.load(conn)` gives the whole `core.Taxonomy`, class names included |
 | `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `written_at`, `error`) or None |
 
 ## Configuration and loading

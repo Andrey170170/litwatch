@@ -17,7 +17,7 @@ uv sync --extra dev
 export LITWATCH_DATABASE_URL=postgresql://…    # or put these in .env
 export ANTHROPIC_API_KEY=… OPENROUTER_API_KEY=…
 litwatch db migrate
-litwatch topics import --starter                # or a directory of your own YAML topics
+litwatch taxonomy import                       # the seed tree and topics, or a YAML file of your own
 ```
 
 Models, categories and the schedule are set in `litwatch.toml` (see `docs/specs/v1/data.md`,
@@ -30,10 +30,10 @@ through a role.
 litwatch nightly                     # the nightly run: intake, for now
 litwatch intake --days 1             # intake alone
 litwatch intake archive --days 14    # a window's papers read from the archive instead of arXiv
-litwatch topics list | import | export
 litwatch eval classify jev | classify-report jev    # the classifier comparison (candidates in evals/configs/classify.toml)
 litwatch serve                       # the API and web app; needs LITWATCH_API_TOKEN
-litwatch taxonomy check              # load the class tree and its followed topics
+litwatch taxonomy check [PATH]       # validate a taxonomy file (default: the seed)
+litwatch taxonomy import | export    # the taxonomy in the database, as YAML in and out
 litwatch library sync                # settle effective grades and the library again
 litwatch publications                # look up published versions
 ```
