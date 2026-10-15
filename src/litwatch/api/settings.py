@@ -1,52 +1,25 @@
-"""Settings, the kitchen behind the gear: topics, Quality, misses, runs and cost, and the
+"""Settings, the kitchen behind the gear: topics, Quality, Calibrate, runs, and the
 configuration (read-only, spec decision 11)."""
 
 from __future__ import annotations
 
-import logging
-import re
 import secrets
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
-from litwatch import screening, store, watch
 from litwatch.api.deps import Conn
-from litwatch.core import Status, Topic, TopicKind
-from litwatch.feedback import calibrate, metrics, misses, replay, word
-from litwatch.jobs import reruns, scheduler
-from litwatch.jobs.context import model_run
-from litwatch.jobs.lock import RUN_LOCK, BusyError, run_lock
-from litwatch.store import feedback as feedback_store
-from litwatch.store import papers as papers_store
+from litwatch.core import Topic
+from litwatch.feedback import calibrate, word
+from litwatch.jobs import scheduler
 from litwatch.store import quality
-from litwatch.store import runs as runs_store
 from litwatch.store import topics as topics_store
-from litwatch.store import triage as triage_store
 
 router = APIRouter(prefix="/api/settings")
-log = logging.getLogger(__name__)
 
 SECRET_WORDS = ("key", "token", "password", "secret", "authorization", "credential")
-
-
-def _errors(exc: ValidationError) -> list[Any]:
-    """Validation errors as JSON: a custom validator's exception object is left out."""
-    return exc.errors(include_url=False, include_context=False)
-
-
-@asynccontextmanager
-async def _logged(what: str) -> AsyncIterator[None]:
-    """Background work logs its failure rather than raising into the server: the failure is
-    already on its run record, where Settings shows it."""
-    try:
-        yield
-    except Exception:
-        log.exception("%s failed", what)
 
 
 # -- topics ----------------------------------------------------------------------------------------
@@ -82,8 +55,8 @@ class Order(BaseModel):
 
 @router.put("/topics-order", status_code=204)
 async def order(body: Order, c: Conn) -> None:
-    """The owner's order: sections, cards and the Papers table's take column follow it. The
-    list must name every topic once. Rows are locked as a topic save locks them."""
+    """The owner's order, which topic lists and cards follow. The list must name every topic
+    once. Rows are locked as a topic save locks them."""
     async with c.transaction():
         rows = await (
             await c.execute("SELECT slug FROM topics ORDER BY slug FOR UPDATE")
@@ -94,196 +67,24 @@ async def order(body: Order, c: Conn) -> None:
             await c.execute("UPDATE topics SET position = %s WHERE slug = %s", (position, slug))
 
 
-@router.get("/topics/{slug}/keywords")
-async def keywords(
-    slug: str, c: Conn, pattern: Annotated[list[str] | None, Query()] = None
-) -> dict[str, int]:
-    """How many stored papers each keyword pattern matches, as the keyword audit matches:
-    the topic's saved patterns, or the `pattern`s given (an editor's unsaved draft). A
-    pattern that is not a valid regular expression counts -1."""
-    topic = await topics_store.get(c, slug)
-    if topic is None and pattern is None:
-        raise HTTPException(status_code=404, detail="no such topic")
-    patterns = pattern if pattern is not None else topic.keywords
-    valid = [p for p in patterns if _compiles(p)]
-    return dict.fromkeys(patterns, -1) | await quality.keyword_counts(c, valid)
-
-
-def _compiles(pattern: str) -> bool:
-    try:
-        re.compile(pattern)
-    except re.error:
-        return False
-    return True
-
-
-@router.post("/topics/{slug}/preview")
-async def preview(
-    slug: str, body: dict[str, Any], request: Request, c: Conn, background: BackgroundTasks
-) -> dict[str, Any]:
-    """Run a draft of the topic over its labelled papers and misses, as a dry run. Returns at
-    once; the evaluation's metrics appear under /evaluations/{id} when it finishes."""
-    try:
-        draft = Topic.model_validate(body | {"slug": slug})
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=422, detail=exc.errors(include_url=False, include_context=False)
-        ) from exc
-    estimate = await reruns.estimate(c, draft, "evidence")
-    background.add_task(_preview, request.app.state, draft)
-    return estimate
-
-
-async def _preview(state: Any, draft: Topic) -> None:
-    async with _logged("preview"), await store.connect(state.dsn) as conn:
-        ids = await quality.evidence_papers(conn, draft.slug)
-        papers = await papers_store.get_many(conn, ids)
-        await replay(
-            conn,
-            state.config,
-            papers,
-            kind="preview",
-            params={"topic": draft.slug},
-            gateway=state.gateway,
-            draft=draft,
-        )
-
-
-@router.get("/topics/{slug}/reruns")
-async def rerun_estimates(
-    slug: str, c: Conn, since: date | None = None, until: date | None = None
-) -> list[dict[str, Any]]:
-    topic = await topics_store.get(c, slug)
-    if topic is None or topic.kind != TopicKind.WATCH:
-        raise HTTPException(status_code=404, detail="not a Watch topic")
-    scopes = [s for s in reruns.SCOPES if s != "range" or (since and until)]
-    return [await reruns.estimate(c, topic, s, since, until) for s in scopes]
-
-
-class RerunIn(BaseModel):
-    scope: reruns.Scope
-    since: date | None = None
-    until: date | None = None
-
-
-@router.post("/topics/{slug}/reruns", status_code=202)
-async def rerun(
-    slug: str, body: RerunIn, request: Request, c: Conn, background: BackgroundTasks
-) -> dict[str, Any]:
-    topic = await topics_store.get(c, slug)
-    if topic is None or topic.kind != TopicKind.WATCH:
-        raise HTTPException(status_code=404, detail="not a Watch topic")
-    if body.scope == "range" and not (body.since and body.until):
-        raise HTTPException(status_code=422, detail="a date range needs since and until")
-    if body.scope != "evidence" and await _busy(c):
-        raise HTTPException(status_code=409, detail="another litwatch job is running")
-    estimate = await reruns.estimate(c, topic, body.scope, body.since, body.until)
-    background.add_task(_rerun, request.app.state, slug, body)
-    return estimate
-
-
-async def _busy(c: Any) -> bool:
-    """Whether a job holds the run lock now. A race with a job starting just after is caught
-    when the re-run takes the lock, and recorded as a failed run."""
-    row = await (await c.execute("SELECT pg_try_advisory_lock(%s) AS got", (RUN_LOCK,))).fetchone()
-    if row["got"]:
-        await c.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
-    return not row["got"]
-
-
-async def _rerun(state: Any, slug: str, body: RerunIn) -> None:
-    async with _logged("re-run"), await store.connect(state.dsn) as conn:
-        try:
-            await reruns.run(
-                conn, state.config, slug, body.scope, body.since, body.until, gateway=state.gateway
-            )
-        except BusyError as exc:
-            run_id = await runs_store.start(conn, f"rerun:{body.scope}")
-            await runs_store.finish(conn, run_id, error=str(exc), counts={"topic": slug})
-
-
-@router.get("/evaluations")
-async def evaluations(c: Conn, kind: str | None = None) -> list[dict[str, Any]]:
-    return await (
-        await c.execute(
-            "SELECT e.id, e.kind, e.note, e.params, e.started_at, e.finished_at, r.cost "
-            "FROM eval_runs e LEFT JOIN runs r ON r.id = e.run_id "
-            "WHERE %s::text IS NULL OR e.kind = %s ORDER BY e.id DESC LIMIT 50",
-            (kind, kind),
-        )
-    ).fetchall()
-
-
-@router.get("/evaluations/{eval_run_id}")
-async def evaluation(eval_run_id: int, c: Conn) -> dict[str, Any]:
-    run = await feedback_store.get_eval(c, eval_run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="no such evaluation")
-    if run["finished_at"] is None:
-        return {"eval_run": eval_run_id, "finished": False}
-    if run["error"]:
-        return {"eval_run": eval_run_id, "finished": True, "error": run["error"]}
-    return {"finished": True, **await metrics(c, eval_run_id)}
-
-
 # -- quality ---------------------------------------------------------------------------------------
 
 
 @router.get("/quality")
-async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
+async def quality_page(c: Conn) -> dict[str, Any]:
     """At the top, what last night left; below, how well the Watch topics are doing."""
-    limits = request.app.state.config.limits
     night = await quality.last_night(c)
     since = night["started_at"] if night else date.today() - timedelta(days=1)
-    latest_replay = await feedback_store.latest_eval(c, "replay")
     return {
         "night": {
             "run": night["id"] if night else None,
             "error": night["error"] if night else None,
             "splits": await quality.splits_since(c, since),
-            "ungraded": await quality.ungraded(c, limits.grading_attempts),
-            "awaiting_triage": await quality.awaiting_triage(c, limits.triage_stuck_after),
-            "reviews_failed": await quality.failed_reviews(c, since),
         },
-        "evaluation": await metrics(c, latest_replay["id"]) if latest_replay else None,
         "calibration": await calibrate.precision(c),
         "matters_no_topic": await calibrate.matters_no_topic(c),
-        "correction_rate": await quality.correction_rate(c),
         "collected": await quality.collected_reactions(c),
     }
-
-
-class Pair(BaseModel):
-    paper_id: str
-    topic: str
-
-
-@router.post("/quality/grade-now")
-async def grade_now(body: Pair, request: Request, c: Conn) -> dict[str, Any]:
-    """Grade an ungraded candidate now, under the run lock, and say what came of it."""
-    state = request.app.state
-    paper = await papers_store.get(c, body.paper_id)
-    topic = await topics_store.get(c, body.topic)
-    newest = {x.paper_id: x for x in await quality.newest_candidates(c, body.topic)}
-    if paper is None or topic is None or body.paper_id not in newest:
-        raise HTTPException(status_code=404, detail="no such candidate")
-    if topic.kind != TopicKind.WATCH:
-        raise HTTPException(status_code=409, detail="the topic is no longer a Watch topic")
-    if newest[body.paper_id].state != "pending":
-        raise HTTPException(status_code=409, detail="already graded")
-    try:
-        async with run_lock(c):
-            # Read again under the lock: another request may have graded it meanwhile.
-            again = {x.paper_id: x for x in await quality.newest_candidates(c, body.topic)}
-            candidate = again.get(body.paper_id)
-            if candidate is None or candidate.state != "pending":
-                raise HTTPException(status_code=409, detail="already graded")
-            async with model_run(c, state.config, "grade-now", gateway=state.gateway) as run:
-                graded = await watch.grade(paper, topic, run.gateway)
-                verdict = await watch.record(c, graded, candidate.topic_revision)
-    except BusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"graded": verdict is not None, "error": graded.error}
 
 
 # -- calibrate -------------------------------------------------------------------------------------
@@ -338,79 +139,7 @@ async def answer(session_id: int, position: int, body: calibrate.Answer, c: Conn
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-# -- papers triage kept failing on (spec decision 24) ----------------------------------------------
-
-
-async def _awaiting(request: Request, c: Any, paper_id: str) -> None:
-    attempts = request.app.state.config.limits.triage_stuck_after
-    waiting = {r["paper_id"] for r in await quality.awaiting_triage(c, attempts)}
-    if paper_id not in waiting:
-        raise HTTPException(status_code=404, detail="not a paper awaiting triage")
-
-
-@router.post("/triage/{paper_id:path}/dismiss", status_code=204)
-async def dismiss(paper_id: str, request: Request, c: Conn) -> None:
-    """Litwatch drops the paper; it stays in the collection and the archive."""
-    await _awaiting(request, c, paper_id)
-    await triage_store.dismiss(c, paper_id)
-
-
-class AnswersIn(BaseModel):
-    answers: dict[str, bool]  # topic slug -> could it belong / is it in the field
-
-
-@router.put("/triage/{paper_id:path}")
-async def triage_by_hand(
-    paper_id: str, body: AnswersIn, request: Request, c: Conn
-) -> dict[str, Any]:
-    """The owner's own triage answers; the paper goes on to the keyword audit and grading."""
-    await _awaiting(request, c, paper_id)
-    topics = await topics_store.all(c, Status.ACTIVE)
-    if unknown := sorted(set(body.answers) - {t.slug for t in topics}):
-        raise HTTPException(status_code=422, detail=f"not active topics: {', '.join(unknown)}")
-    paper = await papers_store.get(c, paper_id)
-    made = await screening.by_hand(c, paper, body.answers, topics)
-    return {"candidates": [m.topic for m in made]}
-
-
-class CorrectionIn(BaseModel):
-    title: str | None = None
-    abstract: str | None = None
-
-
-@router.post("/triage/{paper_id:path}/correction", status_code=204)
-async def correct(paper_id: str, body: CorrectionIn, request: Request, c: Conn) -> None:
-    """Fix the text triage choked on; the next run triages the corrected paper."""
-    await _awaiting(request, c, paper_id)
-    title = (body.title or "").strip() or None
-    abstract = (body.abstract or "").strip() or None
-    if not (title or abstract):
-        raise HTTPException(status_code=422, detail="give a title or an abstract")
-    async with c.transaction():
-        await word.lock(c, paper_id)
-        await papers_store.correct(c, paper_id, title, abstract)
-        # Its takes were written from the old text: stale now, as after any rewrite.
-        await word.settle(c, paper_id, announce=False)
-
-
-# -- misses, runs, configuration -------------------------------------------------------------------
-
-
-@router.get("/misses")
-async def reported(c: Conn) -> list[dict[str, Any]]:
-    return await misses.reported(c)
-
-
-@router.post("/misses/{miss_id}/trace", status_code=202)
-async def retrace(miss_id: int, request: Request, background: BackgroundTasks) -> dict[str, str]:
-    """Trace a miss again, after a failure. The owner's word on it is untouched."""
-    background.add_task(_retrace, request.app.state, miss_id)
-    return {"status": "tracing"}
-
-
-async def _retrace(state: Any, miss_id: int) -> None:
-    async with await store.connect(state.dsn) as conn:
-        await misses.trace(conn, state.config, miss_id, gateway=state.gateway)
+# -- runs and configuration ------------------------------------------------------------------------
 
 
 @router.get("/runs")

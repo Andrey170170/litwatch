@@ -1,13 +1,14 @@
 # litwatch
 
 Insurance against missing a paper on a research question you watch. Every new arXiv paper in
-the configured categories is stored; a cheap model triages each one against your topics, a
-keyword audit catches what the model drops, and two models from different labs grade every
-candidate for a Watch topic.
+the configured categories is stored, sorted into classes and judged against your topics, and
+the results are served through litwatch's own web app.
 
 This branch is v1 in progress. The specification is in `docs/specs/v1/` and the terms in
-`GLOSSARY.md`; milestones M0 to M6 of the first v1 design are built, and the core is being
-redesigned (classes, detail levels, digests per depth) before the switch. Release 0.14 lives on `main`.
+`GLOSSARY.md`. The first v1 design's pipeline (triage, takes, reviews and issues) has been taken
+out, and the redesigned core (classes, detail levels, digests per depth) is being built in its
+place before the switch; until it lands, the nightly run is intake alone and the web app is a
+placeholder. Release 0.14 lives on `main`.
 
 ## Setup
 
@@ -19,27 +20,28 @@ litwatch db migrate
 litwatch topics import --starter                # or a directory of your own YAML topics
 ```
 
-Models, categories and limits are set in `litwatch.toml` (see `docs/specs/v1/data.md`, configuration); with
-no file the defaults apply. `litwatch ping judge` sends one small request through a role.
+Models, categories and the schedule are set in `litwatch.toml` (see `docs/specs/v1/data.md`,
+configuration); with no file the defaults apply. `litwatch ping judge` sends one small request
+through a role.
 
 ## Commands
 
 ```sh
-litwatch nightly                     # intake, triage with the keyword audit, grading
+litwatch nightly                     # the nightly run: intake, for now
 litwatch intake --days 1             # intake alone
 litwatch intake archive --days 14    # a window's papers read from the archive instead of arXiv
-litwatch mark-triaged                # count stored papers as triaged, so runs start from new ones
 litwatch topics list | import | export
-litwatch eval seed | replay | sample-rejects | report    # dry runs against your labels
+litwatch eval classify jev | classify-report jev    # the classifier comparison (candidates in evals/configs/classify.toml)
 litwatch serve                       # the API and web app; needs LITWATCH_API_TOKEN
-litwatch db adopt | migrate-0x       # turn a copy of a 0.14 database into v1's (first spec at e6940ea, section 7)
-litwatch db import-feedback --source <dsn>   # the owner's feedback from another v1 database
+litwatch taxonomy check              # load the class tree and its followed topics
+litwatch library sync                # settle effective grades and the library again
+litwatch publications                # look up published versions
 ```
 
 `LITWATCH_READ_TOKEN`, when set, is a second token that may only search and read papers
 (`GET /api/papers` and `/api/papers/{id}`); the deep service uses it.
 
-Evaluation runs never write to candidates, verdicts or the outbox. Results are in `evals/`.
+Evaluation runs never write to verdicts or the outbox. Results are in `evals/`.
 
 ## Tests
 

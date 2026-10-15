@@ -18,9 +18,9 @@ Choices made without asking the owner:
   page and component is rewritten to `DESIGN.md`; the shadcn-styled parts are replaced where they fight the look.
   Fonts are self-hosted through Fontsource (no CDN: the stack is self-contained). Sheets and the drawer use `vaul`;
   swipe-back and stepping are one small pointer-events hook.
-- **Old code goes with the milestone that replaces it**: triage, the keyword audit and takes in N2; reviews and
-  issues in N4; each old web page when its new one lands. No dual paths: nothing deployed runs the branch until the
-  restart (D1).
+- **Old code goes when its input goes** (D8): N2a removes triage, the keyword audit, takes, Watch grading, field
+  reviews, issues and everything built on them, and retires the old web app to a shell (D9). No dual paths: nothing
+  deployed runs the branch until the restart (D1).
 - **The API is reshaped per surface**, as each core milestone lands, with `web/openapi.json` and the client types
   regenerated in the same PR.
 - **The taxonomy seed** is `src/litwatch/seeds/taxonomy.yaml`, built from [`taxonomy.md`](../specs/v1/taxonomy.md):
@@ -100,7 +100,12 @@ band and the keyword check (owner, provisional, regression, 0.14), primary-class
 per-class precision on the top levels (silver, 0.14), and cost per 1,000 papers, latency and failure rate. The
 quality harness starts here, for classification. Owner check: the default.
 
-**N2a · Classification, analysis and intake from the archive.** Classification and analysis as nightly steps with
+**N2a · Classification, analysis and intake from the archive.** Four PRs: the teardown (D8, D9); the taxonomy and
+topics in the database; classification and analysis as nightly steps; intake from the archive, which runs beside the
+other three in its own worktree. Between the teardown and N2b the nightly run is intake, classification and analysis
+only.
+
+**N2a, in full.** Classification and analysis as nightly steps with
 their records and events (pipeline.md sections 2–3), the uncertain band and the keyword check; the Fit and Weight
 definitions in the prompts that judge them; triage, the keyword audit and takes removed. The archive gains a list of
 papers by date window and category, and intake a second source that reads it and stores papers as the arXiv source
@@ -180,6 +185,18 @@ definition of each level, written into every prompt that judges it. A topic's su
 topic's rubric spells out what central, related and adjacent mean for it. 0.14's must-read bar becomes the Weight definition.
 Weight is one per paper, judged against the paper's primary class; a per-topic Weight is added only if "overrated"
 reactions show the need. Not taken: a rubric per topic at every depth (the bar would count twice).
+
+**D8 · The old pipeline goes when its input goes, not when its replacement lands** (owner, 2026-10-14). N2a
+removes triage, the keyword audit, candidates, takes, Watch grading, field reviews, issues, the triage-based replay,
+metrics, miss traces and reject samples, and the carrying of data from 0.14 and the first v1 (decision 48). Grading
+returns in N2b, digests in N4, recall per stage with N2c's replay. *Why:* from N2a on these get no input; keeping them
+alive meant adapters for code deleted one to three PRs later. Not taken: keep each old step running on the new data
+until its replacement lands.
+
+**D9 · The old web app is retired at N2a** (owner, 2026-10-14). `web/` becomes a minimal shell that still builds,
+typechecks and tests in CI; W1 builds the new app on it, and the old components stay in git history to borrow from.
+Between N2a and W1, data is checked through the CLI and the API. *Why:* W1–W4 rewrite every page, and nothing reads
+the branch's UI before then. Not taken: prune page by page, patching pages W1 deletes.
 
 ## Risks
 

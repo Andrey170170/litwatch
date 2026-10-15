@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
@@ -12,27 +11,14 @@ from litwatch.core.types import (
     Hand,
     Label,
     LabelValue,
-    Opinion,
     Paper,
     Reaction,
     ReactionReason,
-    Topic,
     Verdict,
     Word,
 )
 
 REWRITE_SIMILARITY = 0.8  # texts less similar than this were rewritten, not touched up
-
-
-def reconcile(judge: Opinion, check: Opinion) -> tuple[Grade, bool]:
-    """The verdict's grade and whether it is split.
-
-    Agreement is the grade. On disagreement the more inclusive grade stands and the verdict
-    is marked split, so a person settles it.
-    """
-    if judge.grade == check.grade:
-        return judge.grade, False
-    return min(judge.grade, check.grade, key=lambda g: g.rank), True
 
 
 def current_verdict(verdicts: Iterable[Verdict]) -> Verdict | None:
@@ -103,15 +89,6 @@ def in_library(hand: Hand | None, grades: Iterable[Grade | None]) -> bool:
     if hand is not None:
         return hand == Hand.SAVE
     return any(g is not None and g.at_least(Grade.RELEVANT) for g in grades)
-
-
-def keyword_match(topic: Topic, paper: Paper) -> str | None:
-    """The first of the topic's keyword patterns found in the title or abstract, if any."""
-    text = f"{paper.title}\n{paper.abstract}"
-    for pattern in topic.keywords:
-        if re.search(pattern, text, re.IGNORECASE):
-            return pattern
-    return None
 
 
 def rewritten(title: str, abstract: str, new: Paper) -> bool:

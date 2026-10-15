@@ -13,7 +13,7 @@ import random
 from typing import Any, Literal
 
 import psycopg
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 
 from litwatch.core import Grade, Label, LabelOrigin, LabelValue, TopicKind
 from litwatch.feedback import word
@@ -171,7 +171,6 @@ class Answer(BaseModel):
     fit: dict[str, Fit]
     value: Literal["matters", "fine", "not_for_me"] | None = None
     note: str | None = None
-    takes: dict[int, bool] = Field(default_factory=dict)  # take id -> accurate
 
 
 async def answer(
@@ -190,14 +189,6 @@ async def answer(
     watched = {t.slug for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
     if unknown := sorted(set(given.fit) - watched):
         raise ValueError(f"not Watch topics: {', '.join(unknown)}")
-    if given.takes:
-        mine = await _all(
-            conn,
-            "SELECT id FROM takes WHERE paper_id = %s AND id = ANY(%s)",
-            (item["paper_id"], list(given.takes)),
-        )
-        if len(mine) != len(given.takes):
-            raise ValueError("a rated take is not one of this paper's")
     async with conn.transaction():
         for topic, fit in given.fit.items():
             # The drawn topic's answer is the sample; any other is the owner's own choice.
@@ -227,13 +218,6 @@ async def answer(
                 "INSERT INTO appraisals (paper_id, value, note) VALUES (%s, %s, %s)",
                 (item["paper_id"], *said),
             )
-        for take_id, accurate in given.takes.items():
-            await conn.execute(
-                "INSERT INTO take_ratings (take_id, accurate) VALUES (%s, %s) "
-                "ON CONFLICT (take_id) DO UPDATE SET accurate = EXCLUDED.accurate, "
-                "at = clock_timestamp()",
-                (take_id, accurate),
-            )
         await conn.execute(
             "UPDATE calibration_items SET answer = %s, answered_at = now() "
             "WHERE session_id = %s AND position = %s",
@@ -242,7 +226,7 @@ async def answer(
 
 
 async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, Any] | None:
-    """A session's papers in order, each with its takes and what the owner has said."""
+    """A session's papers in order, each with what the owner has said."""
     found = await (
         await conn.execute("SELECT * FROM calibration_sessions WHERE id = %s", (session_id,))
     ).fetchone()
@@ -253,11 +237,6 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
         """
         SELECT i.position, i.paper_id, i.topic, i.why, i.answered_at, p.title, p.abstract,
                p.authors, p.published,
-               (SELECT coalesce(jsonb_agg(jsonb_build_object('id', k.id, 'topic', k.topic,
-                    'text', k.text, 'accurate', r.accurate) ORDER BY k.topic), '[]')
-                FROM (SELECT DISTINCT ON (topic) * FROM takes WHERE paper_id = i.paper_id
-                      ORDER BY topic, id DESC) k
-                LEFT JOIN take_ratings r ON r.take_id = k.id) AS takes,
                (SELECT coalesce(jsonb_object_agg(l.topic, jsonb_build_object('value', l.value,
                     'grade', l.grade)), '{}') FROM labels l
                 WHERE l.paper_id = i.paper_id AND NOT l.provisional) AS fit,

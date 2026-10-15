@@ -1,42 +1,34 @@
-"""The reading side's routes: the Digest, issues, papers, topics, and the owner's word."""
+"""The reading side's routes: the status line, papers, topics, and the owner's word."""
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Annotated, Any, Literal
 
 import psycopg
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 
-from litwatch import store
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, set_token_cookie, token_ok
 from litwatch.core import (
-    Grade,
     Hand,
     Label,
     LabelOrigin,
     Publication,
     Reaction,
     ReactionReason,
-    ReactionValue,
     SearchFilters,
-    Status,
     TopicKind,
 )
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
 from litwatch.jobs import publications as lookups
-from litwatch.jobs import scheduler
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
-from litwatch.store import fields as fields_store
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import reading
-from litwatch.store import reviews as reviews_store
 from litwatch.store import topics as topics_store
 
 router = APIRouter(prefix="/api")
@@ -50,113 +42,12 @@ async def _topics(c: psycopg.AsyncConnection) -> dict[str, Any]:
     return {t.slug: t for t in await topics_store.all(c, None)}
 
 
-# -- the Digest ------------------------------------------------------------------------------------
+# -- the status line -------------------------------------------------------------------------------
 
 
 @router.get("/status")
-async def status(request: Request, c: Conn) -> s.Status:
-    limits = _config(request).limits
-    return s.Status(
-        **await reading.status(
-            c,
-            grading_attempts=limits.grading_attempts,
-            triage_attempts=limits.triage_stuck_after,
-        )
-    )
-
-
-@router.get("/digest")
-async def digest(
-    request: Request,
-    c: Conn,
-    before: date | None = None,
-    limit: Annotated[int, Query(ge=1, le=60)] = 14,
-) -> s.Digest:
-    weekly = await reading.latest_weekly(c)
-    return s.Digest(
-        weekly=s.IssueSummary(**weekly) if weekly else None,
-        issues=[s.IssueSummary(**i) for i in await reading.issue_feed(c, before, limit)],
-        status=await status(request, c),
-    )
-
-
-@router.get("/issues/{issue_id}")
-async def issue(issue_id: int, request: Request, c: Conn) -> s.Issue:
-    found = await reading.issue(c, issue_id)
-    if found is None:
-        raise HTTPException(status_code=404, detail="no such issue")
-    topics = await _topics(c)
-    sections: dict[str, s.Section] = {}
-    for row in found["entries"]:
-        topic = topics[row["topic"]]
-        section = sections.setdefault(topic.slug, s.Section(topic=_ref(topic), entries=[]))
-        section.entries.append(
-            s.Entry(
-                **{k: row[k] for k in s.Entry.model_fields if k in row and k != "lead"},
-                lead=row["grade"] == Grade.MUST_READ,
-                set_aside=row["grade_now"] not in reading.SHOWN,
-            )
-        )
-    for slug, n in found["folds"].items():
-        if slug in topics:
-            ref = _ref(topics[slug])
-            sections.setdefault(slug, s.Section(topic=ref, entries=[])).near = n
-    period = "day" if found["kind"] == "daily" else "week"
-    for row in await reviews_store.for_period(c, period, found["day"]):
-        if row["topic"] not in topics:
-            continue
-        section = sections.setdefault(
-            row["topic"], s.Section(topic=_ref(topics[row["topic"]]), entries=[])
-        )
-        topic, schedule = topics[row["topic"]], _config(request).schedule
-        if row["kind"] == "watch":
-            section.recap = await _recap(c, row, found["day"], schedule, topic)
-        else:
-            section.review = _review(row, schedule, topic)
-    order = {slug: i for i, slug in enumerate(topics)}
-    return s.Issue(
-        id=found["id"],
-        kind=found["kind"],
-        day=found["day"],
-        lede=found["lede"],
-        sections=sorted(sections.values(), key=lambda x: order.get(x.topic.slug, 99)),
-    )
-
-
-def _review(row: Any, schedule: Any, topic: Any) -> s.Review:
-    return s.Review(
-        will_retry=row["state"] == "failed"
-        and scheduler.will_retry(schedule, row["period"], row["day"], topic=topic),
-        period=row["period"],
-        day=row["day"],
-        state=row["state"],
-        text=row["text"],
-        picks=[s.Pick(**p) for p in row["picks"]],
-        members=row["members"],
-    )
-
-
-async def _recap(
-    c: psycopg.AsyncConnection, row: Any, monday: date, schedule: Any, topic: Any
-) -> s.Recap:
-    since, until = schedule.window(monday, 7)  # the week, in the configured zone
-    slug = row["topic"]
-    entries = await reviews_store.week_entries(c, slug, monday)
-    set_aside = await reviews_store.week_set_aside(c, slug, since, until)
-    missed = await reviews_store.week_misses(c, slug, since, until)
-    return s.Recap(
-        will_retry=row["state"] == "failed"
-        and scheduler.will_retry(schedule, "week", monday, topic=topic),
-        state=row["state"],
-        text=row["text"],
-        papers=[s.Listed(**{k: e[k] for k in s.Listed.model_fields}) for e in entries],
-        set_aside=[s.Listed(**r) for r in set_aside],
-        misses=[s.Listed(**r) for r in missed],
-    )
-
-
-def _ref(topic: Any) -> s.TopicRef:
-    return s.TopicRef(slug=topic.slug, name=topic.name, kind=topic.kind, colour=topic.colour)
+async def status(c: Conn) -> s.Status:
+    return s.Status(**await reading.status(c))
 
 
 # -- papers ----------------------------------------------------------------------------------------
@@ -201,7 +92,7 @@ async def papers(
 
 
 # Paper fields built below rather than copied from the row.
-_SET_HERE = {"topics", "reaction", "reaction_reason", "history", "triage", "chosen"}
+_SET_HERE = {"topics", "reaction", "reaction_reason", "history", "chosen"}
 
 
 @router.get("/papers/{paper_id:path}")
@@ -211,29 +102,14 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         raise HTTPException(status_code=404, detail="no such paper")
     topics = [
         s.PaperTopic(
-            **{
-                k: t[k]
-                for k in (
-                    "slug",
-                    "name",
-                    "kind",
-                    "colour",
-                    "grade",
-                    "take",
-                    "member",
-                    "by_owner",
-                    "missed",
-                )
-            },
-            grading=t["grading"] and t["grade"] is None,
+            **{k: t[k] for k in ("slug", "name", "kind", "colour", "grade", "missed")},
             label=s.LabelState(**t["label"]) if t["label"] else None,
             reaction=(t["reaction"] or {}).get("value"),
             reaction_reason=(t["reaction"] or {}).get("reason"),
         )
         for t in found["topics"]
-        if t["grade"] or t["member"] or t["reaction"] or t["label"] or t["grading"]
+        if t["grade"] or t["reaction"] or t["label"]
     ]
-    answers = (found["triage"] or {}).get("answers") or None
     published = await publications_store.get(c, paper_id)
     card, card_requestable = await integrations_api.card(request, c, paper_id)
     return s.Paper(
@@ -245,7 +121,6 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         reaction_reason=(found["reaction"] or {}).get("reason"),
         history=[s.HistoryItem(**h) for h in found["history"]],
         versions=list(found["version_history"] or []),
-        triage=answers,
         chosen=[s.Chosen(**v) for v in found["verdicts"]],
         publication=published["record"] if published else None,
         publication_by_owner=bool(published and published["by_owner"]),
@@ -375,13 +250,6 @@ async def topics(c: Conn) -> list[s.TopicCard]:
     return [s.TopicCard(**t) for t in await reading.topic_cards(c)]
 
 
-@router.get("/topics/{slug}/reviews")
-async def topic_reviews(slug: str, request: Request, c: Conn) -> list[s.Review]:
-    """A Radar or Pulse topic's reviews, newest first, shown above its picks."""
-    schedule, topic = _config(request).schedule, await topics_store.get(c, slug)
-    return [_review(r, schedule, topic) for r in await reviews_store.for_topic(c, slug)]
-
-
 @router.post("/topics/{slug}/visit", status_code=204)
 async def visit(slug: str, c: Conn) -> None:
     await reading.visit(c, slug)
@@ -472,66 +340,17 @@ async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
     return _ack("Taken back", await word.unlabel(c, paper_id, topic))
 
 
-# -- "Important for <field>" (M7): the owner puts a paper into a Radar or Pulse field ---------
-
-
-async def _field(c: psycopg.AsyncConnection, slug: str) -> Any:
-    topic = (await _topics(c)).get(slug)
-    if topic is None or topic.kind == TopicKind.WATCH or topic.status != Status.ACTIVE:
-        raise HTTPException(status_code=404, detail="not an active Radar or Pulse topic")
-    return topic
-
-
-@router.put("/papers/{paper_id:path}/fields/{slug}")
-async def important_for(paper_id: str, slug: str, c: Conn) -> s.Ack:
-    """The paper matters for the field: it joins the library, gets a thumb up for the
-    field, and becomes a member as the owner's own addition, which the field's next review
-    sees and its page lists as added by the owner. Never a Watch miss. The whole action is
-    one transaction under the paper's lock (topics first, as every settle), so an undo in
-    flight waits for all of it and the topic is read as it is then."""
-    await _known(c, paper_id)
-    async with c.transaction():
-        await word.lock(c, paper_id)
-        topic = await _field(c, slug)
-        await fields_store.add(c, paper_id, slug, topic.revision)
-        settled = await word.toggle(c, paper_id, Hand.SAVE)
-        await word.react(c, Reaction(paper_id=paper_id, topic=slug, value=ReactionValue.UP))
-    return _ack(f"Important for {topic.name}", settled)
-
-
-@router.delete("/papers/{paper_id:path}/fields/{slug}")
-async def not_important_for(paper_id: str, slug: str, c: Conn) -> s.Ack:
-    """Take it back: the owner's membership and the thumb go; the library is left as it is,
-    since the Save toggle is the owner's word on that. Under the same lock as the action."""
-    await _known(c, paper_id)
-    async with c.transaction():
-        await word.lock(c, paper_id)
-        topic = await _field(c, slug)
-        await fields_store.remove(c, paper_id, slug)
-        settled = await word.unreact(c, paper_id, slug)
-    return _ack(f"No longer marked important for {topic.name}", settled)
-
-
 @router.post("/misses")
-async def report_miss(
-    request: Request, body: s.MissIn, c: Conn, background: BackgroundTasks
-) -> s.Ack:
-    """File a miss for a Watch topic. The trace of what each stage said runs afterwards."""
+async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
+    """File a miss for a Watch topic."""
     known = (await _topics(c)).get(body.topic)
     if known is None or known.kind != TopicKind.WATCH:
         raise HTTPException(status_code=404, detail="not a Watch topic")
     await _known(c, body.paper_id)
-    miss_id, settled, new, needs_trace = await misses.report(c, body.paper_id, body.topic)
-    if needs_trace:
-        background.add_task(_trace, request.app.state, miss_id)
+    _, settled, new = await misses.report(c, body.paper_id, body.topic)
     if not new:
         return _ack(f"Already reported as missed for {known.name}", settled)
     return _ack(f"Reported as missed for {known.name}", settled)
-
-
-async def _trace(state: Any, miss_id: int) -> None:
-    async with await store.connect(state.dsn) as conn:
-        await misses.trace(conn, state.config, miss_id, gateway=state.gateway)
 
 
 # -- the session -----------------------------------------------------------------------------------

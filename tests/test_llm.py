@@ -25,6 +25,8 @@ GOOD = json.dumps({"yes": True, "why": "it says so"})
 HAIKU = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
 OPUS = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 MUSE = RoleConfig(provider="openrouter", model="meta/muse-spark-1.3-contributor", effort="high")
+# Haiku in a chat role, for the cases that price it.
+MODELS = Models(writer=HAIKU)
 
 
 def gateway(models: Models, anthropic=None, openrouter=None, journal=None) -> Gateway:
@@ -50,11 +52,11 @@ def test_anthropic_request_carries_the_schema_effort_and_a_cached_system_prompt(
 async def test_the_same_request_runs_through_either_provider_by_configuration_alone():
     anthropic = SdkClient(anthropic_message(GOOD))
     openrouter = SdkClient(openrouter_completion(GOOD))
-    for triage in (HAIKU, MUSE):
-        gw = gateway(Models(triage=triage), anthropic, openrouter)
-        answer = await gw.ask("triage", REQUEST)
+    for writer in (HAIKU, MUSE):
+        gw = gateway(Models(writer=writer), anthropic, openrouter)
+        answer = await gw.ask("writer", REQUEST)
         assert answer.value == Answer(yes=True, why="it says so")
-        assert answer.model == triage.label
+        assert answer.model == writer.label
     (to_anthropic,), (to_openrouter,) = anthropic.sent, openrouter.sent
     assert to_anthropic["model"] == "claude-haiku-5-5"
     assert to_openrouter["model"] == "meta/muse-spark-1.3-contributor"
@@ -66,10 +68,8 @@ async def test_the_same_request_runs_through_either_provider_by_configuration_al
 
 
 async def test_cost_is_computed_for_anthropic_and_taken_as_reported_from_openrouter():
-    gw = gateway(
-        Models(), SdkClient(anthropic_message(GOOD)), SdkClient(openrouter_completion(GOOD))
-    )
-    haiku = (await gw.ask("triage", REQUEST)).usage
+    gw = gateway(MODELS, SdkClient(anthropic_message(GOOD)), SdkClient(openrouter_completion(GOOD)))
+    haiku = (await gw.ask("writer", REQUEST)).usage
     assert (haiku.prompt_tokens, haiku.completion_tokens, haiku.cached_tokens) == (3400, 200, 3000)
     # 400 fresh and 3000 cached input tokens at $0.10 and $0.01, 200 output tokens at $0.50.
     assert haiku.cost == pytest.approx((400 * 0.10 + 3000 * 0.01 + 200 * 0.50) / 1e6)
@@ -81,12 +81,12 @@ async def test_cost_is_computed_for_anthropic_and_taken_as_reported_from_openrou
 
 async def test_haiku_charges_a_long_prompt_five_times_and_an_unlisted_model_has_no_cost():
     long = SdkClient(anthropic_message(GOOD, fresh=1000, read=100_000, write=2000, output=100))
-    usage = (await gateway(Models(), long).ask("triage", REQUEST)).usage
+    usage = (await gateway(MODELS, long).ask("writer", REQUEST)).usage
     assert usage.cost == pytest.approx(
         5 * ((1000 + 100_000 * 0.1 + 2000 * 1.25) * 0.10 + 100 * 0.50) / 1e6
     )
-    unlisted = Models(triage=RoleConfig(provider="anthropic", model="claude-next"))
-    assert (await gateway(unlisted, long).ask("triage", REQUEST)).usage.cost is None
+    unlisted = Models(writer=RoleConfig(provider="anthropic", model="claude-next"))
+    assert (await gateway(unlisted, long).ask("writer", REQUEST)).usage.cost is None
 
 
 @pytest.mark.parametrize(
@@ -99,7 +99,7 @@ async def test_haiku_charges_a_long_prompt_five_times_and_an_unlisted_model_has_
 )
 async def test_an_unusable_reply_is_an_error_that_says_which_kind(reply, kind, detail):
     with pytest.raises(CallError) as raised:
-        await gateway(Models(), SdkClient(reply)).ask("triage", REQUEST)
+        await gateway(MODELS, SdkClient(reply)).ask("writer", REQUEST)
     assert (raised.value.kind, raised.value.detail) == (kind, detail)
 
 
@@ -109,7 +109,7 @@ async def test_openrouter_refusals_and_filtered_replies_are_refusals():
         openrouter_completion("", finish_reason="content_filter"),
     ):
         with pytest.raises(CallError, match="refused"):
-            await gateway(Models(), openrouter=SdkClient(reply)).ask("check", REQUEST)
+            await gateway(MODELS, openrouter=SdkClient(reply)).ask("check", REQUEST)
 
 
 async def test_a_briefly_absent_provider_is_tried_again_and_a_timeout_is_not():
@@ -122,8 +122,8 @@ async def test_a_briefly_absent_provider_is_tried_again_and_a_timeout_is_not():
         return GOOD
 
     flaky.respond = respond
-    gw = Gateway(Models(), {"anthropic": flaky}, retry_delays=(0.0, 0.0))
-    assert (await gw.ask("triage", REQUEST)).value.yes
+    gw = Gateway(MODELS, {"anthropic": flaky}, retry_delays=(0.0, 0.0))
+    assert (await gw.ask("writer", REQUEST)).value.yes
     assert len(flaky.calls) == 3
 
     def slow(role, request):
@@ -131,21 +131,21 @@ async def test_a_briefly_absent_provider_is_tried_again_and_a_timeout_is_not():
 
     timing_out = ScriptedProvider("anthropic", slow)
     with pytest.raises(CallError, match="timeout"):
-        await Gateway(Models(), {"anthropic": timing_out}).ask("triage", REQUEST)
+        await Gateway(MODELS, {"anthropic": timing_out}).ask("writer", REQUEST)
     assert len(timing_out.calls) == 1
 
     def broken(role, request):
         raise ProviderError("BadRequestError: no")
 
     with pytest.raises(CallError, match="provider: BadRequestError"):
-        await Gateway(Models(), {"anthropic": ScriptedProvider("anthropic", broken)}).ask(
-            "triage", REQUEST
+        await Gateway(MODELS, {"anthropic": ScriptedProvider("anthropic", broken)}).ask(
+            "writer", REQUEST
         )
 
 
 async def test_a_role_without_credentials_fails_as_a_call_error():
     with pytest.raises(CallError, match="no credentials for openrouter"):
-        await gateway(Models(), SdkClient(anthropic_message(GOOD))).ask("check", REQUEST)
+        await gateway(MODELS, SdkClient(anthropic_message(GOOD))).ask("check", REQUEST)
 
 
 @pytest.fixture
@@ -161,14 +161,14 @@ async def calls(conn):
 
 async def test_calls_are_journalled_and_an_identical_call_is_reused_for_free(conn, journal):
     client = SdkClient(anthropic_message(GOOD))
-    gw = gateway(Models(), client, journal=journal)
-    first = await gw.ask("triage", REQUEST, paper_id="2609.1")
-    again = await gw.ask("triage", REQUEST, paper_id="2609.1")
+    gw = gateway(MODELS, client, journal=journal)
+    first = await gw.ask("writer", REQUEST, paper_id="2609.1")
+    again = await gw.ask("writer", REQUEST, paper_id="2609.1")
     assert len(client.sent) == 1
     assert again.value == first.value and again.usage.reused and again.usage.cost == 0.0
     assert again.usage.original_cost == first.usage.cost
     (row,) = await calls(conn)
-    assert (row["operation"], row["paper_id"], row["error"]) == ("triage", "2609.1", None)
+    assert (row["operation"], row["paper_id"], row["error"]) == ("writer", "2609.1", None)
     assert row["output"] == {"yes": True, "why": "it says so"}
     assert await journal.total() == pytest.approx(first.usage.cost)
 
@@ -184,8 +184,8 @@ async def test_reuse_is_keyed_by_who_answers_so_judge_and_check_never_share_a_re
     gw = Gateway(Models(), providers, journal)
     await gw.ask("judge", REQUEST)
     await gw.ask("check", REQUEST)
-    # The review role is configured exactly like the judge, so it may share its reply.
-    assert (await gw.ask("review", REQUEST)).usage.reused
+    # The writer is configured exactly like the judge, so it may share its reply.
+    assert (await gw.ask("writer", REQUEST)).usage.reused
     # A replay after a model, effort or routing change calls the new model.
     for changed in (
         OPUS.model_copy(update={"effort": "high"}),
@@ -199,10 +199,10 @@ async def test_reuse_is_keyed_by_who_answers_so_judge_and_check_never_share_a_re
 
 async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn, journal):
     client = SdkClient(anthropic_message("", stop_reason="refusal", category="bio"))
-    gw = gateway(Models(), client, journal=journal)
+    gw = gateway(MODELS, client, journal=journal)
     for _ in range(2):
         with pytest.raises(CallError):
-            await gw.ask("triage", REQUEST)
+            await gw.ask("writer", REQUEST)
     rows = await calls(conn)
     assert [r["error"] for r in rows] == ["refused: bio", "refused: bio"]
     assert all(r["output"] is None and r["usage"]["cost"] > 0 for r in rows)
@@ -210,10 +210,10 @@ async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn, journal
     def down(role, request):
         raise ProviderError("APIConnectionError", transient=True)
 
-    offline = Gateway(Models(), {"anthropic": ScriptedProvider("anthropic", down)}, journal)
+    offline = Gateway(MODELS, {"anthropic": ScriptedProvider("anthropic", down)}, journal)
     offline.retry_delays = ()
     with pytest.raises(CallError):
-        await offline.ask("triage", REQUEST)
+        await offline.ask("writer", REQUEST)
     # No cost is invented for a call that never got an answer.
     last = (await calls(conn))[-1]
     assert last["error"] == "provider: APIConnectionError" and last["usage"]["cost"] is None
@@ -221,13 +221,13 @@ async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn, journal
 
 async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, journal):
     client = SdkClient(anthropic_message(json.dumps({"yes": True, "why": "it\x00 says so"})))
-    answer = await gateway(Models(), client, journal=journal).ask("triage", REQUEST)
+    answer = await gateway(MODELS, client, journal=journal).ask("writer", REQUEST)
     assert answer.value.why == "it says so"
     assert (await calls(conn))[0]["output"]["why"] == "it says so"
 
     refused = SdkClient(anthropic_message("", stop_reason="refusal", category="bio\x00"))
     with pytest.raises(CallError):
-        await gateway(Models(), refused, journal=journal).ask("judge", REQUEST)
+        await gateway(MODELS, refused, journal=journal).ask("judge", REQUEST)
     assert (await calls(conn))[-1]["error"] == "refused: bio"
     # The raised error is clean too: its text becomes a paper's stored last error.
     assert str(CallError("provider", "bad\x00 gateway")) == "provider: bad gateway"

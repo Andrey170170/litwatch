@@ -18,9 +18,10 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 
 ### What the models write or decide (prompts, request shapes, roles, models, thresholds)
 - Works means: quality holds or improves on the gold set at a known cost.
-- Evidence: the quality harness before and after on the same gold set; for classification and grading,
-  `litwatch eval replay` and `litwatch eval report` against the labels (recall per Focus class, cost per call). A report
-  in `evals/` is committed when it sets a default or records a milestone check.
+- Evidence: the quality harness before and after on the same gold set; for classification,
+  `litwatch eval classify` and `litwatch eval classify-report` against the evaluation labels (recall per Focus class,
+  cost per call), and for grading the replay N2 builds. A report in `evals/` is committed when it sets a default or
+  records a milestone check.
 - How: the harness command for the artifact (built with the milestone that introduces it, see Known gaps).
 
 ### Model providers (`llm/`)

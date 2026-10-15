@@ -21,40 +21,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/digest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Digest */
-        get: operations["digest_api_digest_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/issues/{issue_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Issue */
-        get: operations["issue_api_issues__issue_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/papers": {
         parameters: {
             query?: never;
@@ -183,26 +149,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/topics/{slug}/reviews": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Topic Reviews
-         * @description A Radar or Pulse topic's reviews, newest first, shown above its picks.
-         */
-        get: operations["topic_reviews_api_topics__slug__reviews_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/topics/{slug}/visit": {
         parameters: {
             query?: never;
@@ -276,35 +222,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/papers/{paper_id}/fields/{slug}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Important For
-         * @description The paper matters for the field: it joins the library, gets a thumb up for the
-         *     field, and becomes a member as the owner's own addition, which the field's next review
-         *     sees and its page lists as added by the owner. Never a Watch miss. The whole action is
-         *     one transaction under the paper's lock (topics first, as every settle), so an undo in
-         *     flight waits for all of it and the topic is read as it is then.
-         */
-        put: operations["important_for_api_papers__paper_id__fields__slug__put"];
-        post?: never;
-        /**
-         * Not Important For
-         * @description Take it back: the owner's membership and the thumb go; the library is left as it is,
-         *     since the Save toggle is the owner's word on that. Under the same lock as the action.
-         */
-        delete: operations["not_important_for_api_papers__paper_id__fields__slug__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/misses": {
         parameters: {
             query?: never;
@@ -316,7 +233,7 @@ export interface paths {
         put?: never;
         /**
          * Report Miss
-         * @description File a miss for a Watch topic. The trace of what each stage said runs afterwards.
+         * @description File a miss for a Watch topic.
          */
         post: operations["report_miss_api_misses_post"];
         delete?: never;
@@ -373,105 +290,10 @@ export interface paths {
         get?: never;
         /**
          * Order
-         * @description The owner's order: sections, cards and the Papers table's take column follow it. The
-         *     list must name every topic once. Rows are locked as a topic save locks them.
+         * @description The owner's order, which topic lists and cards follow. The list must name every topic
+         *     once. Rows are locked as a topic save locks them.
          */
         put: operations["order_api_settings_topics_order_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/topics/{slug}/keywords": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Keywords
-         * @description How many stored papers each keyword pattern matches, as the keyword audit matches:
-         *     the topic's saved patterns, or the `pattern`s given (an editor's unsaved draft). A
-         *     pattern that is not a valid regular expression counts -1.
-         */
-        get: operations["keywords_api_settings_topics__slug__keywords_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/topics/{slug}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview
-         * @description Run a draft of the topic over its labelled papers and misses, as a dry run. Returns at
-         *     once; the evaluation's metrics appear under /evaluations/{id} when it finishes.
-         */
-        post: operations["preview_api_settings_topics__slug__preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/topics/{slug}/reruns": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Rerun Estimates */
-        get: operations["rerun_estimates_api_settings_topics__slug__reruns_get"];
-        put?: never;
-        /** Rerun */
-        post: operations["rerun_api_settings_topics__slug__reruns_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/evaluations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Evaluations */
-        get: operations["evaluations_api_settings_evaluations_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/evaluations/{eval_run_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Evaluation */
-        get: operations["evaluation_api_settings_evaluations__eval_run_id__get"];
-        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -493,26 +315,6 @@ export interface paths {
         get: operations["quality_page_api_settings_quality_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/quality/grade-now": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Grade Now
-         * @description Grade an ungraded candidate now, under the run lock, and say what came of it.
-         */
-        post: operations["grade_now_api_settings_quality_grade_now_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -588,103 +390,6 @@ export interface paths {
         /** Answer */
         put: operations["answer_api_settings_calibrate__session_id__items__position__put"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/triage/{paper_id}/dismiss": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Dismiss
-         * @description Litwatch drops the paper; it stays in the collection and the archive.
-         */
-        post: operations["dismiss_api_settings_triage__paper_id__dismiss_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/triage/{paper_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Triage By Hand
-         * @description The owner's own triage answers; the paper goes on to the keyword audit and grading.
-         */
-        put: operations["triage_by_hand_api_settings_triage__paper_id__put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/triage/{paper_id}/correction": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Correct
-         * @description Fix the text triage choked on; the next run triages the corrected paper.
-         */
-        post: operations["correct_api_settings_triage__paper_id__correction_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/misses": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Reported */
-        get: operations["reported_api_settings_misses_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/misses/{miss_id}/trace": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retrace
-         * @description Trace a miss again, after a failure. The owner's word on it is untouched.
-         */
-        post: operations["retrace_api_settings_misses__miss_id__trace_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -872,58 +577,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/labelling": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Labelling */
-        get: operations["labelling_api_labelling_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/labelling/{key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Queue */
-        get: operations["queue_api_labelling__key__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/labels/{topic}/{paper_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Put Label */
-        put: operations["put_label_api_labels__topic___paper_id__put"];
-        post?: never;
-        /** Delete Label */
-        delete: operations["delete_label_api_labels__topic___paper_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -955,17 +608,6 @@ export interface components {
             value?: ("matters" | "fine" | "not_for_me") | null;
             /** Note */
             note?: string | null;
-            /** Takes */
-            takes?: {
-                [key: string]: boolean;
-            };
-        };
-        /** AnswersIn */
-        AnswersIn: {
-            /** Answers */
-            answers: {
-                [key: string]: boolean;
-            };
         };
         /**
          * BibtexFilter
@@ -996,13 +638,6 @@ export interface components {
             /** Cited */
             cited?: components["schemas"]["CitedIn"][];
         };
-        /**
-         * Cadence
-         * @description How often a Radar or Pulse topic is reviewed. Weekly always; daily adds a review after
-         *     each nightly run, for a Radar field followed closely.
-         * @enum {string}
-         */
-        Cadence: "weekly" | "daily";
         /** CardRequested */
         CardRequested: {
             /** Event Id */
@@ -1020,7 +655,7 @@ export interface components {
         };
         /**
          * Chosen
-         * @description The folded "how this was chosen" for one Watch topic.
+         * @description One Watch topic's current verdict on the paper.
          */
         Chosen: {
             /** Topic */
@@ -1055,13 +690,6 @@ export interface components {
             /** Year */
             year?: number | null;
         };
-        /** CorrectionIn */
-        CorrectionIn: {
-            /** Title */
-            title?: string | null;
-            /** Abstract */
-            abstract?: string | null;
-        };
         /**
          * DeepCard
          * @description A deep card: the reading card the deep service wrote, as it wrote it.
@@ -1076,59 +704,10 @@ export interface components {
             /** Written At */
             written_at?: string | null;
         };
-        /**
-         * Digest
-         * @description The feed: daily issues newest first, and the week's weekly issue pinned above them.
-         */
-        Digest: {
-            weekly?: components["schemas"]["IssueSummary"] | null;
-            /** Issues */
-            issues: components["schemas"]["IssueSummary"][];
-            status: components["schemas"]["litwatch__api__schemas__Status"];
-        };
         /** DrawIn */
         DrawIn: {
             /** Seed */
             seed?: number | null;
-        };
-        /**
-         * Entry
-         * @description One paper in an issue, for one Watch topic.
-         */
-        Entry: {
-            /** Paper Id */
-            paper_id: string;
-            /** Topic */
-            topic: string;
-            /** Lead */
-            lead: boolean;
-            /** Take */
-            take?: string | null;
-            /** Title */
-            title: string;
-            /** Authors */
-            authors: string[];
-            /** Published */
-            published?: string | null;
-            /**
-             * Revised
-             * @default false
-             */
-            revised: boolean;
-            /**
-             * Set Aside
-             * @default false
-             */
-            set_aside: boolean;
-            /** Also In */
-            also_in?: string[];
-            /**
-             * Saved
-             * @default false
-             */
-            saved: boolean;
-            reaction?: components["schemas"]["ReactionValue"] | null;
-            reaction_reason?: components["schemas"]["ReactionReason"] | null;
         };
         /**
          * Event
@@ -1196,7 +775,7 @@ export interface components {
              * What
              * @enum {string}
              */
-            what: "candidate" | "graded" | "missed";
+            what: "graded" | "missed";
             /** Topic */
             topic: string;
             /**
@@ -1239,73 +818,11 @@ export interface components {
             answers_card_requests: boolean;
             search?: components["schemas"]["SearchStats"] | null;
         };
-        /** Issue */
-        Issue: {
-            /** Id */
-            id: number;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "daily" | "weekly";
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /** Lede */
-            lede?: string | null;
-            /** Sections */
-            sections: components["schemas"]["Section"][];
-        };
-        /** IssueSummary */
-        IssueSummary: {
-            /** Id */
-            id: number;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "daily" | "weekly";
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /** Lede */
-            lede?: string | null;
-        };
-        /**
-         * Label
-         * @description The owner's word on one paper for one Watch topic. It outranks any verdict.
-         */
-        Label: {
-            /** Paper Id */
-            paper_id: string;
-            /** Topic */
-            topic: string;
+        /** LabelIn */
+        LabelIn: {
             value: components["schemas"]["LabelValue"];
             grade?: components["schemas"]["Grade"] | null;
-            origin: components["schemas"]["LabelOrigin"];
-            /**
-             * Provisional
-             * @default false
-             */
-            provisional: boolean;
-            /** Note */
-            note?: string | null;
-            /** Labelled At */
-            labelled_at?: string | null;
         };
-        /**
-         * LabelOrigin
-         * @description How the labelled paper was chosen, which decides what its label can be evidence for.
-         *
-         *     A label keeps the origin it was created with when the owner later changes its value, so a
-         *     change of mind never moves a paper out of the sample it was drawn in.
-         * @enum {string}
-         */
-        LabelOrigin: "sample" | "candidate_sample" | "reject_sample" | "legacy_positive" | "gold" | "reader" | "miss";
         /** LabelState */
         LabelState: {
             value: components["schemas"]["LabelValue"];
@@ -1323,18 +840,6 @@ export interface components {
          * @enum {string}
          */
         LabelValue: "relevant" | "adjacent" | "not_relevant" | "unsure";
-        /**
-         * Listed
-         * @description A paper named in a recap, with the owner's thumb on it for the recap's topic.
-         */
-        Listed: {
-            /** Paper Id */
-            paper_id: string;
-            /** Title */
-            title: string;
-            reaction?: components["schemas"]["ReactionValue"] | null;
-            reaction_reason?: components["schemas"]["ReactionReason"] | null;
-        };
         /** Lookup */
         Lookup: {
             row: components["schemas"]["Row"];
@@ -1380,13 +885,6 @@ export interface components {
         Order: {
             /** Slugs */
             slugs: string[];
-        };
-        /** Pair */
-        Pair: {
-            /** Paper Id */
-            paper_id: string;
-            /** Topic */
-            topic: string;
         };
         /** Paper */
         Paper: {
@@ -1440,10 +938,6 @@ export interface components {
             versions?: {
                 [key: string]: unknown;
             }[];
-            /** Triage */
-            triage?: {
-                [key: string]: unknown;
-            } | null;
             /** Chosen */
             chosen: components["schemas"]["Chosen"][];
             publication?: components["schemas"]["Publication"] | null;
@@ -1472,31 +966,14 @@ export interface components {
             /** Colour */
             colour?: string | null;
             grade?: components["schemas"]["Grade"] | null;
-            /** Take */
-            take?: string | null;
             label?: components["schemas"]["LabelState"] | null;
             reaction?: components["schemas"]["ReactionValue"] | null;
             reaction_reason?: components["schemas"]["ReactionReason"] | null;
-            /**
-             * Member
-             * @default false
-             */
-            member: boolean;
-            /**
-             * By Owner
-             * @default false
-             */
-            by_owner: boolean;
             /**
              * Missed
              * @default false
              */
             missed: boolean;
-            /**
-             * Grading
-             * @default false
-             */
-            grading: boolean;
         };
         /**
          * Papers
@@ -1513,29 +990,6 @@ export interface components {
             outside?: components["schemas"]["Row"][];
             /** Left Out */
             left_out?: string[];
-        };
-        /**
-         * Pick
-         * @description A paper a review picked, with its sentence on why.
-         */
-        Pick: {
-            /** Paper Id */
-            paper_id: string;
-            /** Title */
-            title: string;
-            /** Authors */
-            authors?: string[];
-            /** Published */
-            published?: string | null;
-            /** Why */
-            why: string;
-            /**
-             * Saved
-             * @default false
-             */
-            saved: boolean;
-            reaction?: components["schemas"]["ReactionValue"] | null;
-            reaction_reason?: components["schemas"]["ReactionReason"] | null;
         };
         /**
          * Publication
@@ -1603,79 +1057,6 @@ export interface components {
          */
         ReactionValue: "up" | "down";
         /**
-         * Recap
-         * @description A Watch topic's week: prose over its entries, then the entries as one-liners, what
-         *     the owner set aside and the misses reported.
-         */
-        Recap: {
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "written" | "failed" | "quiet";
-            /** Text */
-            text?: string | null;
-            /** Papers */
-            papers?: components["schemas"]["Listed"][];
-            /** Set Aside */
-            set_aside?: components["schemas"]["Listed"][];
-            /** Misses */
-            misses?: components["schemas"]["Listed"][];
-            /**
-             * Will Retry
-             * @default false
-             */
-            will_retry: boolean;
-        };
-        /** RerunIn */
-        RerunIn: {
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "evidence" | "candidates" | "keywords" | "range";
-            /** Since */
-            since?: string | null;
-            /** Until */
-            until?: string | null;
-        };
-        /**
-         * Review
-         * @description A Radar or Pulse topic's review of a day or a week. A failed one says so in one line;
-         *     a quiet one had no papers to read.
-         */
-        Review: {
-            /**
-             * Period
-             * @enum {string}
-             */
-            period: "day" | "week";
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "written" | "failed" | "quiet";
-            /** Text */
-            text?: string | null;
-            /** Picks */
-            picks?: components["schemas"]["Pick"][];
-            /**
-             * Members
-             * @default 0
-             */
-            members: number;
-            /**
-             * Will Retry
-             * @default false
-             */
-            will_retry: boolean;
-        };
-        /**
          * Row
          * @description One paper in a table.
          */
@@ -1692,15 +1073,6 @@ export interface components {
             added?: string | null;
             grade?: components["schemas"]["Grade"] | null;
             /**
-             * Grading
-             * @default false
-             */
-            grading: boolean;
-            /** Take */
-            take?: string | null;
-            /** Take Topic */
-            take_topic?: string | null;
-            /**
              * Saved
              * @default false
              */
@@ -1712,16 +1084,6 @@ export interface components {
              * @default collection
              */
             source: string;
-            /**
-             * By Owner
-             * @default false
-             */
-            by_owner: boolean;
-            /**
-             * Picked
-             * @default false
-             */
-            picked: boolean;
             /** Score */
             score?: number | null;
         };
@@ -1763,19 +1125,6 @@ export interface components {
             /** Last Error At */
             last_error_at?: string | null;
         };
-        /** Section */
-        Section: {
-            topic: components["schemas"]["TopicRef"];
-            /** Entries */
-            entries: components["schemas"]["Entry"][];
-            /**
-             * Near
-             * @default 0
-             */
-            near: number;
-            review?: components["schemas"]["Review"] | null;
-            recap?: components["schemas"]["Recap"] | null;
-        };
         /** SessionIn */
         SessionIn: {
             /** Token */
@@ -1807,8 +1156,6 @@ export interface components {
             position?: number | null;
             /** Colour */
             colour?: string | null;
-            /** @default weekly */
-            cadence: components["schemas"]["Cadence"];
         };
         /** TopicCard */
         TopicCard: {
@@ -1821,14 +1168,6 @@ export interface components {
             colour?: string | null;
             /** Status */
             status: string;
-            /**
-             * Cadence
-             * @default weekly
-             * @enum {string}
-             */
-            cadence: "weekly" | "daily";
-            /** Last Review */
-            last_review?: string | null;
             /** Position */
             position?: number | null;
             /** Subject */
@@ -1837,29 +1176,15 @@ export interface components {
             papers: number;
             /** Saved */
             saved: number;
-            /** New */
-            new: number;
-            /** New Saved */
-            new_saved: number;
             /** Opened At */
             opened_at?: string | null;
         };
         /**
          * TopicKind
-         * @description The service a topic gets: graded per paper, reviewed weekly, or summarised weekly.
+         * @description The service a topic gets. Only Watch topics are graded per paper.
          * @enum {string}
          */
         TopicKind: "watch" | "radar" | "pulse";
-        /** TopicRef */
-        TopicRef: {
-            /** Slug */
-            slug: string;
-            /** Name */
-            name: string;
-            kind: components["schemas"]["TopicKind"];
-            /** Colour */
-            colour?: string | null;
-        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1873,68 +1198,24 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
-        /** LabelIn */
-        litwatch__api__app__LabelIn: {
-            value: components["schemas"]["LabelValue"];
-            grade?: components["schemas"]["Grade"] | null;
-            /** Note */
-            note?: string | null;
-            /**
-             * Queue
-             * @default rejects
-             */
-            queue: string;
-        };
-        /** LabelIn */
-        litwatch__api__schemas__LabelIn: {
-            value: components["schemas"]["LabelValue"];
-            grade?: components["schemas"]["Grade"] | null;
-        };
         /**
          * Status
-         * @description The printer's line under the masthead.
+         * @description The latest nightly run: none yet, running, failed, or finished without an error.
          */
         litwatch__api__schemas__Status: {
             /**
              * State
              * @enum {string}
              */
-            state: "none" | "running" | "failed" | "attention" | "quiet";
+            state: "none" | "running" | "failed" | "quiet";
             /** Run Id */
             run_id?: number | null;
             /** Started At */
             started_at?: string | null;
             /** Finished At */
             finished_at?: string | null;
-            /**
-             * Read
-             * @default 0
-             */
-            read: number;
             /** Error */
             error?: string | null;
-            /** Showing */
-            showing?: string | null;
-            /**
-             * Splits
-             * @default 0
-             */
-            splits: number;
-            /**
-             * Ungraded
-             * @default 0
-             */
-            ungraded: number;
-            /**
-             * Awaiting Triage
-             * @default 0
-             */
-            awaiting_triage: number;
-            /**
-             * Reviews Failed
-             * @default 0
-             */
-            reviews_failed: number;
         };
         /**
          * Status
@@ -1966,69 +1247,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["litwatch__api__schemas__Status"];
-                };
-            };
-        };
-    };
-    digest_api_digest_get: {
-        parameters: {
-            query?: {
-                before?: string | null;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Digest"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    issue_api_issues__issue_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                issue_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Issue"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2288,37 +1506,6 @@ export interface operations {
             };
         };
     };
-    topic_reviews_api_topics__slug__reviews_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Review"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     visit_api_topics__slug__visit_post: {
         parameters: {
             query?: never;
@@ -2463,7 +1650,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["litwatch__api__schemas__LabelIn"];
+                "application/json": components["schemas"]["LabelIn"];
             };
         };
         responses: {
@@ -2494,70 +1681,6 @@ export interface operations {
             path: {
                 topic: string;
                 paper_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Ack"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    important_for_api_papers__paper_id__fields__slug__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                paper_id: string;
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Ack"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    not_important_for_api_papers__paper_id__fields__slug__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                paper_id: string;
-                slug: string;
             };
             cookie?: never;
         };
@@ -2704,219 +1827,6 @@ export interface operations {
             };
         };
     };
-    keywords_api_settings_topics__slug__keywords_get: {
-        parameters: {
-            query?: {
-                pattern?: string[] | null;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preview_api_settings_topics__slug__preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rerun_estimates_api_settings_topics__slug__reruns_get: {
-        parameters: {
-            query?: {
-                since?: string | null;
-                until?: string | null;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rerun_api_settings_topics__slug__reruns_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RerunIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    evaluations_api_settings_evaluations_get: {
-        parameters: {
-            query?: {
-                kind?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    evaluation_api_settings_evaluations__eval_run_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                eval_run_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     quality_page_api_settings_quality_get: {
         parameters: {
             query?: never;
@@ -2935,41 +1845,6 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
-                };
-            };
-        };
-    };
-    grade_now_api_settings_quality_grade_now_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Pair"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3119,160 +1994,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dismiss_api_settings_triage__paper_id__dismiss_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                paper_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    triage_by_hand_api_settings_triage__paper_id__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                paper_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AnswersIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    correct_api_settings_triage__paper_id__correction_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                paper_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CorrectionIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reported_api_settings_misses_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    retrace_api_settings_misses__miss_id__trace_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                miss_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
             };
             /** @description Validation Error */
             422: {
@@ -3506,127 +2227,6 @@ export interface operations {
                 "application/json": components["schemas"]["SessionIn"];
             };
         };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    labelling_api_labelling_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    queue_api_labelling__key__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_label_api_labels__topic___paper_id__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                topic: string;
-                paper_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["litwatch__api__app__LabelIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Label"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_label_api_labels__topic___paper_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                topic: string;
-                paper_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description Successful Response */
             204: {

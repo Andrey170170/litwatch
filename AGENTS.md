@@ -23,7 +23,7 @@ the results through its own web app. It is single-user and self-hosted. Branch `
 - `store` is the only package with SQL; its functions take a connection and return `core` types. Schema changes are
   migrations in `store/migrations/`.
 - Pipeline code names an `llm` role, never a model; models are configuration (`litwatch.toml`).
-- Evaluation runs are dry runs: they write to the evaluation tables only, never to candidates, verdicts or the outbox.
+- Evaluation runs are dry runs: they write to the evaluation tables only, never to verdicts or the outbox.
 - A pipeline step writes its event to the outbox in the same transaction as its data. Integrations react to events
   and are off unless configured.
 
@@ -33,7 +33,8 @@ CI (`.github/workflows/ci.yaml`) runs all of these; run the ones your change tou
 
 - `uv run ruff check src tests`, `uv run ruff format --check src tests`
 - `uv run pytest --strict-markers`. Tests that need PostgreSQL create and drop their own schema in
-  `TEST_DATABASE_URL`, which must be a disposable database, and skip without it.
+  `TEST_DATABASE_URL`, which must be a disposable database, and skip without it. Run one suite at a time per database
+  cluster: the outbox reads the cluster-wide snapshot, so another run's open transactions hide fresh events.
 - In `deep/`: `npm run typecheck`, `npm test`. In `web/`: `pnpm typecheck`, `pnpm test`. In `archive/`:
   `.venv/bin/python -m unittest discover -s tests` (setup in its README).
 

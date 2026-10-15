@@ -130,10 +130,6 @@ class WebDav:
             return True
         return event.type == events.GRADE_CHANGED and event.payload.get("after") == "must_read"
 
-    async def setup(self, conn: psycopg.AsyncConnection) -> None:
-        if taken := await state.seed_webdav(conn):
-            log.info("webdav: took over %d PDFs attached by 0.x", taken)
-
     async def aclose(self) -> None:
         for http in (self.http, self.zotero.http, self.webdav.http):
             await http.aclose()

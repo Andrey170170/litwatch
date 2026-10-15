@@ -58,7 +58,7 @@ async def test_a_draw_is_even_across_groups_seeded_and_skips_labelled_papers(db)
     assert [i["paper_id"] for i in again] == [i["paper_id"] for i in first]
 
 
-async def test_answers_become_labels_appraisals_and_take_ratings(db):
+async def test_answers_become_labels_and_appraisals(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     with pytest.raises(ValueError, match="required"):
@@ -166,35 +166,6 @@ def test_relevant_takes_must_read_or_worth_reading_and_nothing_else_takes_a_grad
     with pytest.raises(ValueError, match="a grade goes only"):
         Fit(value="not_relevant", grade="relevant")
     assert Fit(value="relevant", grade="must_read").grade == Grade.MUST_READ
-
-
-async def test_a_take_rating_must_belong_to_the_paper(db):
-    from litwatch.core import Take, TakeSource
-    from litwatch.store import digest as digest_store
-
-    other = await digest_store.add_take(
-        db,
-        Take(
-            paper_id=BELOW[2].id,
-            topic=FAITH.slug,
-            paper_revision=1,
-            topic_revision=1,
-            grade=Grade.RELEVANT,
-            source=TakeSource.OWNER,
-            text="t",
-        ),
-    )
-    session_id = await calibrate.draw(db, seed=1, size=2)
-    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
-    with pytest.raises(ValueError, match="not one of this paper's"):
-        await calibrate.answer(
-            db,
-            session_id,
-            item["position"],
-            Answer(
-                fit={FAITH.slug: Fit(value="relevant", grade="relevant")}, takes={other.id: True}
-            ),
-        )
 
 
 async def test_more_takes_in_an_unmarked_miss(db):

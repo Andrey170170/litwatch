@@ -443,13 +443,19 @@ async def test_the_automatic_limit_says_why_a_paper_got_no_card(world, deep):
     assert "stopped" in (await state.card(conn, P.id))["error"]
 
 
+async def rewrite(conn, paper, title: str) -> None:
+    """Intake brings a rewritten text: the paper's revision goes up."""
+    new = paper.model_copy(update={"title": title, "abstract": "Written again from scratch."})
+    assert (await papers_store.upsert(conn, [new])).rewritten == [paper.id]
+
+
 async def test_a_text_fetched_before_a_rewrite_or_a_new_version_is_not_used(world):
     conn = world
     await papers_store.upsert(conn, [P])
     first = await papers_store.get(conn, P.id)
     assert await papers_store.set_body(conn, first, "the old text", "html")
     assert await papers_store.body(conn, P.id) == ("the old text", "html")
-    await papers_store.correct(conn, P.id, "A rewritten title", None)  # revision 2
+    await rewrite(conn, P, "A rewritten title")  # revision 2
     assert await papers_store.body(conn, P.id) is None
     rewritten = await papers_store.get(conn, P.id)
     assert await papers_store.set_body(conn, rewritten, "the new text", "html")
@@ -481,7 +487,7 @@ async def test_a_text_fetched_while_the_paper_was_revised_is_not_stored(world):
     conn = world
     await papers_store.upsert(conn, [P])
     fetched_for = await papers_store.get(conn, P.id)
-    await papers_store.correct(conn, P.id, "Rewritten during the fetch", None)
+    await rewrite(conn, P, "Rewritten during the fetch")
     assert not await papers_store.set_body(conn, fetched_for, "the old text", "html")
     assert await papers_store.body(conn, P.id) is None
 
@@ -495,7 +501,7 @@ async def test_a_card_is_not_made_from_text_of_an_older_revision(world, deep):
         """Fetches the text while intake rewrites the paper."""
 
         async def fetch(self, paper):
-            await papers_store.correct(conn, paper.id, "Rewritten during the fetch", None)
+            await rewrite(conn, paper, "Rewritten during the fetch")
             return await real.fetch(paper)
 
         async def aclose(self):
@@ -525,7 +531,7 @@ async def test_a_card_made_for_text_the_paper_no_longer_has_is_made_again(world,
     asked = await events.emit(conn, events.CARD_REQUESTED, P.id)
     await deliver(conn, d)
     assert len(fake.requests) == 1
-    await papers_store.correct(conn, P.id, "Rewritten while the card was made", None)
+    await rewrite(conn, P, "Rewritten while the card was made")
 
     await outbox.retry(conn, d.name)
     await deliver(conn, d)  # the job ends; its card is of the old text and is dropped
@@ -638,4 +644,4 @@ async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(con
     assert last.headers["X-Litwatch-Event"] == str(saved)
     expected = hmac.new(b"s3cret", last.content, hashlib.sha256).hexdigest()
     assert last.headers["X-Litwatch-Signature"] == f"sha256={expected}"
-    assert not hook.wants(events.Event(type=events.TAKE_WRITTEN))
+    assert not hook.wants(events.Event(type=events.GRADE_CHANGED))

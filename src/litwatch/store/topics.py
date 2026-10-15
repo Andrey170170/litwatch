@@ -23,7 +23,6 @@ def _topic(row: dict[str, Any]) -> Topic:
         revision=row["revision"],
         position=row["position"],
         colour=row["colour"],
-        cadence=row["cadence"],
     )
 
 
@@ -70,15 +69,15 @@ async def save(conn: psycopg.AsyncConnection, topic: Topic) -> Topic:
         cur = await conn.execute(
             """
             INSERT INTO topics (slug, name, kind, subject, rubric, interests, keywords, status,
-                                version, revision, position, colour, cadence)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                version, revision, position, colour)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (slug) DO UPDATE SET
                 name = EXCLUDED.name, kind = EXCLUDED.kind, subject = EXCLUDED.subject,
                 rubric = EXCLUDED.rubric, interests = EXCLUDED.interests,
                 keywords = EXCLUDED.keywords, status = EXCLUDED.status,
                 version = EXCLUDED.version, revision = EXCLUDED.revision,
                 position = coalesce(EXCLUDED.position, topics.position),
-                colour = coalesce(EXCLUDED.colour, topics.colour), cadence = EXCLUDED.cadence,
+                colour = coalesce(EXCLUDED.colour, topics.colour),
                 updated_at = now()
             RETURNING position, colour
             """,
@@ -95,14 +94,13 @@ async def save(conn: psycopg.AsyncConnection, topic: Topic) -> Topic:
                 revision,
                 position,
                 colour,
-                topic.cadence.value,
             ),
         )
         placed = await cur.fetchone()
         if changed:
             content = topic.model_dump(
                 mode="json",
-                exclude={"revision", "status", "name", "position", "colour", "cadence"},
+                exclude={"revision", "status", "name", "position", "colour"},
             )
             await conn.execute(
                 "INSERT INTO topic_versions (topic, revision, hash, content) "
@@ -139,35 +137,3 @@ async def kind_for_update(conn: psycopg.AsyncConnection, slug: str) -> TopicKind
 async def get(conn: psycopg.AsyncConnection, slug: str) -> Topic | None:
     row = await (await conn.execute("SELECT * FROM topics WHERE slug = %s", (slug,))).fetchone()
     return _topic(row) if row else None
-
-
-async def kinds_at(
-    conn: psycopg.AsyncConnection, revisions: dict[str, int]
-) -> dict[str, TopicKind]:
-    """Each topic's kind at the given revision: what it was when a run used it, whatever it
-    has been changed to since."""
-    rows = await (
-        await conn.execute(
-            "SELECT topic, revision, content->>'kind' AS kind FROM topic_versions "
-            "WHERE topic = ANY(%s)",
-            (list(revisions),),
-        )
-    ).fetchall()
-    return {
-        r["topic"]: TopicKind(r["kind"]) for r in rows if revisions[r["topic"]] == r["revision"]
-    }
-
-
-async def at_revision(conn: psycopg.AsyncConnection, slug: str, revision: int) -> Topic | None:
-    """The topic as a model saw it at that revision: its content then, its name now."""
-    current = await get(conn, slug)
-    row = await (
-        await conn.execute(
-            "SELECT content FROM topic_versions WHERE topic = %s AND revision = %s",
-            (slug, revision),
-        )
-    ).fetchone()
-    if current is None or row is None:
-        return current
-    content = {k: v for k, v in row["content"].items() if k in Topic.model_fields}
-    return Topic.model_validate(current.model_dump() | content | {"revision": revision})

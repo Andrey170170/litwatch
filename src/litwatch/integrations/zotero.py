@@ -6,14 +6,14 @@ handling an event twice, or in a different order, ends in the same place:
 - a library paper gets a preprint item (found by arXiv id or title before one is made) in
   the `Litwatch` collection, and in a subcollection for its best Watch grade;
 - tags `litwatch:watch:<topic>:<grade>` for each Watch topic at `relevant` or above;
-- a `litwatch:screen` note with the takes and the published version, and a
+- a `litwatch:screen` note with the Watch grades and the published version, and a
   `litwatch:enrichment` note and tags from the deep card when one is stored;
 - a paper the owner unsaved, or that left the library, is taken out of the collections and
   tagged `litwatch:dropped`. Its item is never deleted.
 
 Only the litwatch namespace is ever managed: the collection tree, `litwatch:*` tags and the
-two notes. Everything else on an item is preserved verbatim. The items 0.x made are taken
-over from `papers.zotero_key` at start-up, so none is made twice.
+two notes. Everything else on an item is preserved verbatim. An item 0.x made is found like any
+other (by arXiv id or title) and updated, not made again.
 
 Options: `user_id` (or $LITWATCH_ZOTERO_USER_ID), the API key in $ZOTERO_API_KEY,
 `subcollections` ({grade: name}, default 0.x's "Tier 1" and "Tier 2"), and `inbox_collection`
@@ -81,7 +81,6 @@ EVENTS = {
     events.PAPER_SAVED,
     events.PAPER_UNSAVED,
     events.GRADE_CHANGED,
-    events.TAKE_WRITTEN,
     events.PUBLICATION_FOUND,
     events.CARD_READY,
 }
@@ -383,7 +382,7 @@ def client(options: dict[str, Any], subcollections: dict[Grade, str] | None = No
 class Zotero:
     name = "zotero"
     description = (
-        "Keeps a Zotero item for every library paper, with its grades as tags and its takes, "
+        "Keeps a Zotero item for every library paper, with its grades as tags and its "
         "published version and deep card as notes. Never deletes an item."
     )
 
@@ -402,10 +401,6 @@ class Zotero:
 
     def wants(self, event: Event) -> bool:
         return event.type in EVENTS and event.paper_id is not None
-
-    async def setup(self, conn: psycopg.AsyncConnection) -> None:
-        if taken := await state.seed_zotero(conn):
-            log.info("zotero: took over %d items made by 0.x", taken)
 
     async def aclose(self) -> None:
         await self.zotero.aclose()
@@ -567,13 +562,11 @@ GRADE_WORDS = {"must_read": "must read", "relevant": "relevant"}
 
 
 def screen_note(paper: Paper, watch: list[dict[str, Any]], record: Publication | None) -> str:
-    """The `litwatch:screen` note: litwatch's take per Watch topic, then the published
+    """The `litwatch:screen` note: litwatch's grade per Watch topic, then the published
     version when one is known."""
     parts = [NOTE_MARKER, "<p><b>litwatch</b></p>"]
     for topic in watch:
         parts.append(f"<p><b>{_esc(topic['name'])}</b> · {GRADE_WORDS[topic['grade']]}</p>")
-        if topic.get("take"):
-            parts.append(f"<p>{_esc(topic['take'])}</p>")
     if record is not None:
         where = " ".join(str(x) for x in (record.venue or record.container, record.year) if x)
         doi = f", doi:{_esc(record.doi)}" if record.doi else ""

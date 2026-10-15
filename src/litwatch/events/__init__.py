@@ -17,8 +17,6 @@ VERDICT_RECORDED = "verdict.recorded"
 GRADE_CHANGED = "grade.changed"
 PAPER_SAVED = "paper.saved"
 PAPER_UNSAVED = "paper.unsaved"
-# A take was written for (paper, topic); it may arrive after `paper.saved`.
-TAKE_WRITTEN = "take.written"
 # A published record was found for a paper, or the owner set one.
 PUBLICATION_FOUND = "publication.found"
 # The owner asked for a deep card by hand, whatever the paper's grade.

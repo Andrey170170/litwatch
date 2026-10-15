@@ -19,7 +19,6 @@ from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
 from tests.conftest import FAITH, TOPICS, deliver, paper, start
 from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
-from tests.test_reading import night
 
 P = paper(
     "2610.00001",
@@ -130,16 +129,14 @@ async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_
     assert "litwatch:dropped" not in fake.tags(key)
 
 
-async def test_an_item_0x_made_is_taken_over_not_made_again(world):
+async def test_an_item_0x_made_is_found_and_updated_not_made_again(world):
     conn, fake = world, FakeZotero()
-    await conn.execute("ALTER TABLE papers ADD COLUMN zotero_key text")
-    await conn.execute("UPDATE papers SET zotero_key = 'OLDITEM1' WHERE id = %s", (P.id,))
-    # Titled differently, so only the stored key can find it.
+    # Found by its title; 0.x's tier and selection tags give way to v1's grade tag.
     fake.add_item(
         "OLDITEM1",
         {
             "itemType": "preprint",
-            "title": "As 0.x saved it",
+            "title": P.title,
             "collections": ["MINE"],
             "tags": [{"tag": "litwatch:tier:1"}, {"tag": "litwatch:sel:cot-faithfulness:1"}],
         },
@@ -158,7 +155,7 @@ async def test_an_item_0x_made_is_taken_over_not_made_again(world):
     assert fake.collection_names("OLDITEM1") == {"MINE", "Litwatch", "Tier 1"}
 
 
-async def test_takes_published_versions_and_cards_reach_the_notes(world):
+async def test_grades_published_versions_and_cards_reach_the_notes(world):
     conn, fake = world, FakeZotero()
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
     await start(conn, z)
@@ -166,15 +163,14 @@ async def test_takes_published_versions_and_cards_reach_the_notes(world):
     await run(conn, z)
     (item,) = fake.tops()
     key = item["key"]
-    assert "A take." not in fake.notes(key)[0]
+    assert "CoT faithfulness</b> · must read" in fake.notes(key)[0]
 
-    await night(conn)  # writes the take: take.written
     await lookups.store_record(
         conn, P.id, Publication(venue="NeurIPS", year=2026, doi="10.1/x"), by_owner=True
     )
     await run(conn, z)
     (note,) = fake.notes(key)
-    assert "A take." in note and "NeurIPS 2026" in note and "doi:10.1/x" in note
+    assert "NeurIPS 2026" in note and "doi:10.1/x" in note
 
     await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, [])
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
@@ -238,9 +234,7 @@ async def test_whats_there_is_looked_for_past_the_first_page(world):
         fake.collections[f"COL{i:05d}"] = fake.items.pop(f"COL{i:05d}")
         fake.collections[f"COL{i:05d}"]["data"]["name"] = f"Reading {i}"
     fake.collections["COL00119"]["data"]["name"] = "Litwatch"  # on the second page
-    await conn.execute("ALTER TABLE papers ADD COLUMN zotero_key text")
-    await conn.execute("UPDATE papers SET zotero_key = 'OLDITEM1' WHERE id = %s", (P.id,))
-    fake.add_item("OLDITEM1", {"itemType": "preprint", "title": "T", "collections": []})
+    fake.add_item("OLDITEM1", {"itemType": "preprint", "title": P.title, "collections": []})
     for i in range(130):
         fake.add_item(f"N{i:05d}", {"itemType": "note", "parentItem": "OLDITEM1", "note": "mine"})
     fake.add_item(

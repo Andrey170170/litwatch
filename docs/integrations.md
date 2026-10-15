@@ -60,7 +60,7 @@ class Integration(Protocol):
   and serves one event at a time.
 - Optional, used when present:
   - `async def setup(self, conn)`: awaited once whenever the dispatcher starts, before any event.
-    Take over existing state here; it must be safe to run again.
+    It must be safe to run again.
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.
@@ -106,12 +106,11 @@ Every event below carries the paper's id in `paper_id`.
 | Type | When | Payload |
 | --- | --- | --- |
 | `paper.added` | Intake stored a paper new to the collection | `version`: arXiv version or null; `source`: where intake read it (`oai`, `atom`, `archive`) |
-| `paper.revised` | A stored paper got a new arXiv version, or its title or abstract was rewritten (by arXiv, or corrected by the owner) | `version`, `previous_version`, `rewritten`: bool, `source`; an owner's correction has `rewritten: true, corrected: true` and no versions or source |
+| `paper.revised` | A stored paper got a new arXiv version, or arXiv rewrote its title or abstract | `version`, `previous_version`, `rewritten`: bool, `source` |
 | `verdict.recorded` | Grading recorded a verdict for a Watch topic | `topic`, `grade`, `split`: bool, `verdict_id` |
 | `grade.changed` | A paper's effective grade for a Watch topic changed, by a verdict or the owner's word | `topic`, `before`, `after`: `must_read`, `relevant`, `adjacent`, `none` or null |
 | `paper.saved` | The paper entered the library | none |
 | `paper.unsaved` | The paper left the library (its last reason went, or the owner unsaved it) | none |
-| `take.written` | A take was written for (paper, topic); may come after `paper.saved` | `topic`, `take_id` |
 | `publication.found` | A published record was stored for the paper, by lookup or by the owner | `dblp_key`, `venue`, `year`, `doi`, `by_owner`: bool |
 | `card.requested` | The owner asked for a deep card (`POST /api/papers/<id>/card`), whatever the grade | none |
 | `card.ready` | The `deep` integration stored a card | `model` |
@@ -132,8 +131,7 @@ Through the repositories in `litwatch.store`. Each function takes the connection
 | `store.papers.body(conn, paper_id)` | `(text, "html" or "pdf")` when the full text was fetched for the paper's current revision, else None |
 | `store.word.effective_for(conn, paper_id)` | `{topic slug: core.Grade}` for the Watch topics that have one |
 | `store.word.library_row(conn, paper_id)` | a dict with `saved` (bool) and `hand` (`save`, `unsave` or None), or None |
-| `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug`, `name`, `kind` (`watch`, `radar`, `pulse`), `grade` and the current `take` |
-| `store.digest.latest_take(conn, paper_id, topic)` | the newest `core.Take` for the pair |
+| `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug`, `name`, `kind` (`watch`, `radar`, `pulse`) and `grade` |
 | `store.publications.found(conn, [paper_id])` | `{paper_id: core.Publication}` for those with a published record |
 | `store.topics.all(conn)` | the active `core.Topic`s, in the owner's order |
 | `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `written_at`, `error`) or None |
@@ -149,7 +147,7 @@ user_id = "1234567"
 [integrations.notion]          # several of one kind: name the module with `use`
 use = "webhook"
 url = "https://n8n.example.org/webhook/litwatch"
-events = ["grade.changed", "take.written", "paper.unsaved"]
+events = ["grade.changed", "paper.unsaved"]
 
 [integrations.phone]           # one kept outside litwatch: its module path
 use = "my_litwatch_ntfy"
@@ -207,7 +205,7 @@ The built-in `archive` integration is a search provider.
 
 | Name | Reacts to | Does |
 | --- | --- | --- |
-| `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `take.written`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it |
+| `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it |
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source), unless intake read it from the archive; answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers |
 | `deep` | `grade.changed` to `must_read`, `paper.saved`, `card.requested` | Asks the deep service for a reading card; emits `card.ready` |

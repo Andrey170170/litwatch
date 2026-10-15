@@ -74,7 +74,7 @@ async def upsert(
     `paper.revised` with the `source` in their payload.
 
     A revision counts as rewritten only when its title or abstract changed beyond a touch-up
-    (`core.rewritten`); only then is the paper triaged again. Atom metadata can insert a paper
+    (`core.rewritten`); only then is the paper judged again. Atom metadata can insert a paper
     but never replace canonical metadata. The archive's metadata is canonical (it came from
     OAI) and, like OAI's, dated by day, but it replaces stored metadata only when it is known
     to be newer: a higher version, or the same version on a later day.
@@ -168,10 +168,8 @@ async def upsert(
                 stored = p.model_copy(update={"title": row["title"], "abstract": row["abstract"]})
                 changed = rewritten(old["title"], old["abstract"], stored)
                 if changed:
-                    # What triage said was about other text: the paper is untriaged again.
-                    # Its candidates and verdicts stay as history under the old revision.
+                    # A new revision: what was judged of the old text stays as its history.
                     result.rewritten.append(p.id)
-                    await cur.execute("DELETE FROM triage WHERE paper_id = %s", (p.id,))
                     await cur.execute(
                         "UPDATE papers SET revision = revision + 1 WHERE id = %s", (p.id,)
                     )
@@ -213,38 +211,6 @@ async def revision(conn: psycopg.AsyncConnection, paper_id: str) -> int:
         await conn.execute("SELECT revision FROM papers WHERE id = %s", (paper_id,))
     ).fetchone()
     return row["revision"] if row else 1
-
-
-async def still_current(conn: psycopg.AsyncConnection, paper: Paper) -> bool:
-    """Whether a result about `paper` may still be recorded: the stored paper has the same
-    text (revision) and has not been dismissed. Call it inside the recording transaction: the
-    share lock waits for a correction or dismissal in progress, which update the row."""
-    row = await (
-        await conn.execute(
-            "SELECT revision, dismissed_at FROM papers WHERE id = %s FOR SHARE", (paper.id,)
-        )
-    ).fetchone()
-    return row is not None and row["dismissed_at"] is None and row["revision"] == paper.revision
-
-
-async def correct(
-    conn: psycopg.AsyncConnection, paper_id: str, title: str | None, abstract: str | None
-) -> bool:
-    """The owner's fix of a title or abstract (a broken character, a garbled abstract). It
-    counts as a rewrite: the revision goes up and the paper is triaged again, its failures
-    forgotten. The caller settles the paper, so its takes are known to be stale."""
-    async with conn.transaction():
-        cur = await conn.execute(
-            "UPDATE papers SET title = coalesce(%s, title), abstract = coalesce(%s, abstract), "
-            "corrected_at = now(), revision = revision + 1, "
-            f"corrected_from = coalesce(corrected_from, {fingerprint('papers')}) WHERE id = %s",
-            (title, abstract, paper_id),
-        )
-        if cur.rowcount == 0:
-            return False
-        await conn.execute("DELETE FROM triage WHERE paper_id = %s", (paper_id,))
-        await events.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
-    return True
 
 
 async def body(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str, str | None] | None:
