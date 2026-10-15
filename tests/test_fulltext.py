@@ -2,12 +2,13 @@
 pass against the archive and the `brief` role, what it writes and settles, its failures, the
 lease, revisions, and what the owner sees of it."""
 
+import asyncio
 import json
 
 import httpx
 import pytest
 
-from litwatch import fulltext
+from litwatch import fulltext, store
 from litwatch.api import create_app
 from litwatch.archive import URGENT, ArchiveClient, PaperText
 from litwatch.config import Config, Models, RoleConfig
@@ -430,6 +431,18 @@ async def test_the_nightly_run_retries_failed_passes_and_works_the_queue(db, mon
     assert (counts["fulltext_retried"], counts["briefs_written"]) == (1, 1)
     assert counts["calls"]["brief"]["calls"] == 1  # on the nightly run
     assert (await passes(db))[0]["state"] == "done"
+
+
+async def test_failed_passes_are_retried_only_after_a_taxonomy_save_in_flight(db):
+    await graded(db, "central")
+    await db.execute("UPDATE fulltext_passes SET state = 'failed', failed_runs = 1")
+    async with await store.connect(db.test_dsn, db.test_schema) as other:
+        async with other.transaction():
+            await taxonomy_store.lock(other)  # as a save that drops passes holds it
+            retry = asyncio.create_task(fulltext_store.retry_failed(db, FAILED_RUNS))
+            await asyncio.sleep(0.3)
+            assert not retry.done()  # taxonomy first, as every settle: no deadlock
+        assert await retry == 1
 
 
 # -- the backstop: the database, not the triggers, decides -----------------------------------------

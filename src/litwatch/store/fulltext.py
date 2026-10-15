@@ -19,7 +19,7 @@ from litwatch.core.fulltext import (
     TextRead,
 )
 from litwatch.store.papers import COLUMNS, row_to_paper
-from litwatch.store.taxonomy import row_to_class
+from litwatch.store.taxonomy import lock_shared, row_to_class
 
 
 @dataclass(frozen=True)
@@ -424,12 +424,15 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
 
 async def retry_failed(conn: psycopg.AsyncConnection, runs: int) -> int:
     """Make every failed pass with fewer than `runs` failed runs ready: the run tries it again,
-    and the archive what it gave up on."""
-    cur = await conn.execute(
-        "UPDATE fulltext_passes SET state = 'ready', retry_text = true "
-        "WHERE state = 'failed' AND failed_runs < %s",
-        (runs,),
-    )
+    and the archive what it gave up on. The taxonomy lock is taken shared first, as every
+    settle takes it, so this never deadlocks with a taxonomy save dropping passes."""
+    async with conn.transaction():
+        await lock_shared(conn)
+        cur = await conn.execute(
+            "UPDATE fulltext_passes SET state = 'ready', retry_text = true "
+            "WHERE state = 'failed' AND failed_runs < %s",
+            (runs,),
+        )
     return cur.rowcount
 
 
