@@ -100,8 +100,8 @@ def test_the_label_files_load_into_their_cohorts_with_their_own_positives():
         n, pos = by_cohort.get(x.cohort, (0, 0))
         by_cohort[x.cohort] = (n + 1, pos + x.positive)
     assert by_cohort == {
-        "owner": (212, 7),  # central or related
-        "provisional": (90, 90),  # every one a positive
+        "owner": (217, 8),  # central or related
+        "provisional": (86, 86),  # every one a positive
         "legacy": (953, 91),  # 0.14 tier 1–2
         "silver": (200, 42),
     }

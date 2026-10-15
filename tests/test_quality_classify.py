@@ -16,8 +16,8 @@ def test_the_labels_load_into_cohorts_with_a_fixed_draw():
     labels = classify.load(LABELS)
     provisional = labels.focus["provisional"]
     assert {k: len(v) for k, v in provisional.items()} == {
-        "cot-faithfulness": 39,
-        "cot-monitoring": 51,
+        "cot-faithfulness": 38,
+        "cot-monitoring": 48,
     }
     assert len(labels.silver) == 165 and len(labels.adjudicated) == 20
     # Memberships come from every paper both labs sorted, disputed primaries included.
