@@ -77,3 +77,13 @@ ALTER TABLE step_failures ADD COLUMN topic text NOT NULL DEFAULT '';
 ALTER TABLE step_failures ADD PRIMARY KEY (paper_id, step, topic);
 ALTER TABLE step_failures ADD CONSTRAINT step_failures_step_check
     CHECK (step IN ('classification', 'analysis', 'grading') AND (step = 'grading') = (topic <> ''));
+
+-- A paper revision's grading pass: the topics its classification led to were graded, or failed
+-- and are retried. A topic it leads to later (a topic followed, a class moved) grades it only by
+-- a re-run: nothing retroactive runs by itself (pipeline.md, section 10).
+CREATE TABLE grading_passes (
+    paper_id        text NOT NULL REFERENCES papers (id) ON DELETE CASCADE,
+    paper_revision  integer NOT NULL,
+    passed_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (paper_id, paper_revision)
+);

@@ -9,9 +9,11 @@ import pytest
 
 from litwatch import grading
 from litwatch.api import create_app
-from litwatch.core import FAILED_RUNS
+from litwatch.core import FAILED_RUNS, Fit
 from litwatch.core.grading import FIT_DEFINITIONS
+from litwatch.feedback import misses
 from litwatch.llm import ProviderError
+from litwatch.store import classifications as classifications_store
 from litwatch.store import failures
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -137,15 +139,29 @@ async def test_a_rewrite_leaves_a_topic_that_held_none(conn, models):
     assert [v["paper_revision"] for v in await verdicts(conn, A.id)] == [1]
 
 
+async def test_a_topic_followed_later_grades_nothing_until_a_rerun_but_a_miss_does(conn, models):
+    await night(conn, models)  # A leads to no topic; its pass is done all the same
+    assert await verdicts(conn, A.id) == []
+    models.decisions[A.title] = decision("other", interpretability=0.9)
+    await classifications_store.put_owner(
+        conn, A, "interpretability", True, TREE.get("interpretability").version
+    )  # now under a followed topic, as if a class had moved
+    await night(conn, models)
+    assert await verdicts(conn, A.id) == []
+    await misses.report(conn, A.id, INTERP.slug, Fit.RELATED)
+    await night(conn, models)
+    assert [v["topic"] for v in await verdicts(conn, A.id)] == [INTERP.slug]
+
+
 async def test_the_limit_caps_papers_not_gradings(conn, models):
     for p in (A, B):
         models.decisions[p.title] = decision("other", interpretability=0.9)
         models.fits[("judge", p.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models)  # classified; every grading left to try again
     tree = await taxonomy_store.load(conn)
-    due = await grading.due(conn, tree, FAILED_RUNS, limit=1)
+    due, _ = await grading.due(conn, tree, FAILED_RUNS, limit=1)
     assert [(d.paper.id, d.topic.slug) for d in due] == [(A.id, INTERP.slug)]
-    due = await grading.due(conn, tree, FAILED_RUNS)
+    due, _ = await grading.due(conn, tree, FAILED_RUNS)
     assert {(d.paper.id, d.topic.slug) for d in due} == {
         (A.id, INTERP.slug),
         (B.id, INTERP.slug),

@@ -19,6 +19,7 @@ from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store import verdicts as verdicts_store
 
 log = logging.getLogger(__name__)
 
@@ -56,16 +57,17 @@ async def grade(
     conn: psycopg.AsyncConnection, config: Config, run: ModelRun, limit: int | None = None
 ) -> None:
     """Grade every paper whose current text is due a grading for some topic, up to `limit`
-    papers. A grading whose answers were unusable `FAILED_RUNS` runs in a row is left for the
-    owner, who can have it graded now."""
+    papers (`grading.due`). A grading whose answers were unusable `FAILED_RUNS` runs in a row is
+    left for the owner, who can have it graded now."""
     tree = await taxonomy_store.load(conn)
     if tree is None:
         return
-    due = await grading.due(conn, tree, FAILED_RUNS, limit)
+    due, passes = await grading.due(conn, tree, FAILED_RUNS, limit)
     async with aclosing(grading.grade(due, run.gateway, config.grading)) as found:
         async for g in found:
             if await grading.record(conn, g):
                 run.add("graded" if g.verdict is not None else "grading_failed")
+    await verdicts_store.passed(conn, passes)  # only once every grading is recorded
 
 
 async def run(
