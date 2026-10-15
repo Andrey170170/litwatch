@@ -1,12 +1,14 @@
-"""arxiv-archive's authenticated API: catalog records, acquisition jobs, bounded PDF reads and
-the papers of a date window."""
+"""arxiv-archive's authenticated API: catalog records, acquisition jobs, bounded PDF reads, a
+paper's LaTeX text and the papers of a date window."""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import AsyncIterator, Iterable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
@@ -15,7 +17,8 @@ from pydantic import ValidationError
 from litwatch.core import Paper
 
 MAX_PDF_BYTES = 128 * 1024 * 1024
-BACKGROUND = 100  # the archive's priority for papers nobody is waiting on; 0 is urgent
+BACKGROUND = 100  # the archive's priority for papers nobody is waiting on
+URGENT = 0  # for a paper a full-text pass is waiting on
 
 
 class ArchiveError(RuntimeError):
@@ -28,6 +31,20 @@ class ArchiveUnavailable(ArchiveError):  # noqa: N818 - public outage signal
 
 class ArchiveVersionUnknown(ArchiveError):  # noqa: N818 - public resolution signal
     """No explicit revision can safely be associated with this metadata."""
+
+
+@dataclass(frozen=True)
+class PaperText:
+    """A paper's full text as read: the arXiv version it is of (None when the archive cannot
+    say, as for its historical LaTeX) and where it came from."""
+
+    body: str
+    version: int | None
+    source: Literal["latex", "pdf"]
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.body.encode()).hexdigest()
 
 
 def _same_timestamp(left: str | None, right: str | None) -> bool:
@@ -194,6 +211,20 @@ class ArchiveClient:
         if not result.startswith(b"%PDF-"):
             raise ArchiveError("archive returned an invalid PDF")
         return bytes(result)
+
+    async def latex(self, paper_id: str, version: int | None = None) -> PaperText | None:
+        """The text of a paper's LaTeX source: of `version`, or without one the newest the
+        archive has (its historical LaTeX, of no known version, last). None when it has none."""
+        params = {"version": version} if version is not None else {}
+        body = await self._json("GET", self._path(paper_id) + "/text", missing=True, params=params)
+        if body is None:
+            return None
+        text, found = body.get("text"), body.get("version")
+        if not isinstance(text, str) or not (found is None or type(found) is int):
+            raise ArchiveError("invalid archive text")
+        if version is not None and found != version:
+            raise ArchiveError("archive text of another version")
+        return PaperText(text, found, "latex")
 
     async def pdf(self, paper: Paper) -> bytes | None:
         """The PDF, asked for urgently and waited on for at most `wait_seconds`. None when the

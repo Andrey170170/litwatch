@@ -68,6 +68,9 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
   `register = false`. Registration and PDF fetches write to the archive (a fetch queues a job), so they run only
   against a disposable archive.
 - How: integration configured in a dev `litwatch.toml` on the sandbox; the dispatcher run; the target inspected.
+  A disposable archive: `scripts/disposable-archive.sh start <port>` (this checkout's `archive/`, its API and its
+  worker over a scratch directory; it prints the URL and token to export) and `stop <dir>` when done. Its worker
+  downloads from arXiv, so ask it for a handful of papers.
 
 ### Deep-card service (`deep/`)
 - Works means: a paper submitted gets a card back with the lab's fields filled from the paper.
@@ -120,5 +123,3 @@ preference set.
 - **The stack smoke test** (a fresh stack on a seeded database built from real papers, headless Playwright visiting
   every page at both widths, failing on console errors, 5xx or an empty page, screenshots kept as CI artifacts)
   comes with N5, when the archive joins the stack; its page list grows with N7.
-- **A disposable archive** for registration and PDF fetches comes with N3, run from `archive/`; until then those
-  are shown by faked HTTP only.

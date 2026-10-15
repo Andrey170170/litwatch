@@ -372,7 +372,7 @@ class PaperHandler(BaseHTTPRequestHandler):
             paper_id = route.removeprefix("/v1/papers/")
             action = "metadata"
             # Suffix dispatch preserves historical IDs such as hep-th/9901001.
-            for suffix in ("source-file", "sources", "source", "pdf", "bibtex"):
+            for suffix in ("source-file", "sources", "source", "pdf", "bibtex", "text"):
                 if paper_id.endswith("/" + suffix):
                     paper_id = paper_id[:-(len(suffix) + 1)]
                     action = suffix
@@ -393,6 +393,12 @@ class PaperHandler(BaseHTTPRequestHandler):
                 with store.read_lock:
                     result = store.sources(paper_id, version=version)
                 return self.json_response(200, {"files": result})
+            elif action == "text" and method == "GET":
+                # The paper's LaTeX as one text, and the arXiv version it is of (null when
+                # unknown: the historical LaTeX). Only a source's text: a paper without one
+                # is read from its PDF by the client.
+                result = store.text(paper_id, version=version)
+                return self.json_response(200, {"paper_id": paper_id, "source": "latex", **result})
             elif action == "source-file" and method == "GET":
                 paths = query.get("path", [])
                 if len(paths) != 1 or not paths[0]:

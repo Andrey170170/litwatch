@@ -4,6 +4,10 @@ Figures, data and other binaries are already in the PDF, so stored sources keep 
 what serves as text. The output is a deterministic tar (sorted members, fixed metadata),
 so the same upstream package always yields the same bytes and hash. Parsing is bounded
 like reads: decompressed size, member count and tar extension headers are capped.
+
+`latex_text` reads a package back as the paper's text: its main file with the files it
+inputs inlined, comments dropped and the bibliography in place, which is what a reader
+of the full text (litwatch's Briefs, Deep cards) is given.
 """
 
 from __future__ import annotations
@@ -195,3 +199,104 @@ def text_package(package: Path, output: Path, limit: int) -> dict:
         'dropped_members': dropped,
         'dropped_bytes': dropped_bytes,
     }
+
+
+# The files a paper's text is read from, and how they pull each other in.
+LATEX_SUFFIXES = ('.tex', '.ltx', '.latex')
+INPUT = re.compile(r'\\(?:input|include|subfile)\s*\{([^}]*)\}')
+BIBLIOGRAPHY = re.compile(r'\\bibliography\s*\{[^}]*\}')
+COMMENT = re.compile(r'(?<!\\)%.*')
+MAX_INPUT_DEPTH = 8
+
+
+def _decode(body: bytes) -> str:
+    try:
+        return body.decode('utf-8')
+    except UnicodeDecodeError:
+        return body.decode('latin-1')  # older submissions; every byte decodes
+
+
+def _members(package: Path, limit: int) -> dict[str, str]:
+    """The package's LaTeX and .bbl files, decoded, by path. A bare file is `main.tex`."""
+    found: dict[str, str] = {}
+    total = 0
+    with source_stream(package, limit) as raw:
+        if not is_tar(raw):
+            body = b''.join(iter(lambda: raw.read(CHUNK), b''))
+            if len(body) > MAX_TEXT_BYTES:
+                raise ValueError('Source text exceeds size limit')
+            return {'main.tex': _decode(body)}
+        with tarfile.open(fileobj=raw, mode='r|', tarinfo=BoundedTarInfo) as archive:
+            for count, member in enumerate(archive, 1):
+                total += member.size
+                if count > MAX_MEMBERS or total > min(limit, MAX_TEXT_BYTES):
+                    raise ValueError('Source package exceeds expansion limits')
+                if not member.isfile():
+                    continue
+                try:
+                    name = safe_relative(member.name)
+                except ValueError:
+                    continue
+                if name.lower().endswith(LATEX_SUFFIXES + ('.bbl',)):
+                    with archive.extractfile(member) as f:
+                        found[name] = _decode(f.read())
+    return found
+
+
+def _main(files: dict[str, str]) -> str | None:
+    """The file that starts the document: one with \\documentclass, preferring one that also
+    begins the document, then the shallowest path, then by name."""
+    roots = [n for n, body in files.items()
+             if n.lower().endswith(LATEX_SUFFIXES) and '\\documentclass' in body]
+    roots.sort(key=lambda n: ('\\begin{document}' not in files[n], n.count('/'), n))
+    return roots[0] if roots else None
+
+
+def _uncommented(body: str) -> str:
+    return '\n'.join(COMMENT.sub('', line) for line in body.splitlines())
+
+
+def latex_text(package: Path, limit: int) -> str:
+    """The paper's text from its source package: the main file with every `\\input`,
+    `\\include` and `\\subfile` inlined (each file once, at most `MAX_INPUT_DEPTH` deep),
+    comments dropped, and `\\bibliography` replaced by the package's .bbl where there is one.
+    Without a main file, every LaTeX file in path order. Raises NoTextSource when the
+    package holds no LaTeX."""
+    files = _members(package, limit)
+    latex = sorted(n for n in files if n.lower().endswith(LATEX_SUFFIXES))
+    if not latex:
+        raise NoTextSource('Source package has no LaTeX files')
+    main = _main(files)
+    if main is None:
+        return '\n\n'.join(_uncommented(files[n]) for n in latex).strip() + '\n'
+    used = {main}
+
+    def resolve(name: str, here: str) -> str | None:
+        name = name.strip()
+        base = str(PurePosixPath(here).parent)
+        for candidate in (name, name + '.tex'):
+            for path in (candidate, str(PurePosixPath(base) / candidate)):
+                path = str(PurePosixPath(path))
+                if path in files and path not in used:
+                    return path
+        return None
+
+    def expand(body: str, here: str, depth: int) -> str:
+        def inline(match: re.Match) -> str:
+            path = resolve(match.group(1), here) if depth < MAX_INPUT_DEPTH else None
+            if path is None:
+                return ''
+            used.add(path)
+            return expand(_uncommented(files[path]), path, depth + 1)
+        return INPUT.sub(inline, body)
+
+    text = expand(_uncommented(files[main]), main, 0)
+    stem = str(PurePosixPath(main).with_suffix('.bbl'))
+    bbl = files.get(stem) or next((files[n] for n in sorted(files) if n.lower().endswith('.bbl')), None)
+    if bbl is not None:
+        if BIBLIOGRAPHY.search(text):
+            text = BIBLIOGRAPHY.sub(lambda _: bbl, text, count=1)
+            text = BIBLIOGRAPHY.sub('', text)
+        elif '\\begin{thebibliography}' not in text:
+            text += '\n' + bbl
+    return re.sub(r'\n{3,}', '\n\n', text).strip() + '\n'

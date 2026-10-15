@@ -19,6 +19,9 @@ def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--work", type=Path, default=Path("/srv/arxiv-work"))
     cli.add_argument("--archive", type=Path, default=Path("/srv/arxiv-archive"))
+    cli.add_argument("--no-mount-guard", action="store_true",
+                     help="skip the data-mount checks: only for a disposable archive in a scratch "
+                          "directory (verification), never for an instance's data")
     commands = cli.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
     retry = commands.add_parser("retry", help="retry a failed or unavailable acquisition")
@@ -56,7 +59,7 @@ def run(argv=None) -> int:
     args = parser().parse_args(argv)
     # Validate token before initializing runtime state for serve.
     token = read_token(args.token_file) if args.command == "serve" else None
-    store = Store(work=args.work, archive=args.archive)
+    store = Store(work=args.work, archive=args.archive, guard=not args.no_mount_guard)
     try:
         if args.command == "serve":
             server = PaperServer((args.host, args.port), store, token, args.max_workers)

@@ -169,12 +169,16 @@ class FakeArxiv:
 
 
 class FakeArchive:
-    """arxiv-archive's API: catalog records, jobs, PDFs, search, and window listings over
-    `listing` (items as `/v1/papers` gives them), a page of `limit` at a time with the next
-    index as the cursor."""
+    """arxiv-archive's API: catalog records, jobs, PDFs, LaTeX text, search, and window listings
+    over `listing` (items as `/v1/papers` gives them), a page of `limit` at a time with the next
+    index as the cursor. Jobs end in `status`, or in `statuses[kind]` for that kind; `texts` holds
+    each paper's LaTeX text as `(version, text)`, served for that version or none asked."""
 
     def __init__(self, status: str = "complete", records: dict[str, int] | None = None) -> None:
         self.status = status
+        self.statuses: dict[str, str] = {}
+        self.texts: dict[str, tuple[int | None, str]] = {}
+        self.pdf = PDF
         self.records: dict[str, dict[str, Any]] = {
             pid: {"id": pid, "latest_version": v, "metadata": {}}
             for pid, v in (records or {}).items()
@@ -201,14 +205,24 @@ class FakeArchive:
             return httpx.Response(200, json=body)
         if path == "/v1/jobs":
             body = json.loads(req.content)
-            job = {"id": len(self.jobs) + 1, "status": self.status, **body}
+            status = self.statuses.get(body["kind"], self.status)
+            job = {"id": len(self.jobs) + 1, "status": status, **body}
             self.jobs.append(job)
             return httpx.Response(202, json=job)
         if path.startswith("/v1/jobs/"):
             return httpx.Response(200, json={"id": 1, "status": self.status})
+        if path.endswith("/text"):
+            pid = path.removeprefix("/v1/papers/").removesuffix("/text")
+            asked = req.url.params.get("version")
+            if pid not in self.texts or asked not in (None, str(self.texts[pid][0])):
+                return httpx.Response(404, json={"error": "paper, artifact or job not found"})
+            version, text = self.texts[pid]
+            return httpx.Response(
+                200, json={"paper_id": pid, "version": version, "source": "latex", "text": text}
+            )
         pid = path.removeprefix("/v1/papers/").removesuffix("/pdf")
         if path.endswith("/pdf"):
-            return httpx.Response(200, content=PDF)
+            return httpx.Response(200, content=self.pdf)
         if req.method == "PUT":
             body = json.loads(req.content)
             self.records[pid] = {"id": pid, **body}
