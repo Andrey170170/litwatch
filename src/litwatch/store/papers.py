@@ -213,6 +213,47 @@ async def revision(conn: psycopg.AsyncConnection, paper_id: str) -> int:
     return row["revision"] if row else 1
 
 
+async def still_current(conn: psycopg.AsyncConnection, paper: Paper) -> bool:
+    """Whether a result about `paper` may still be recorded: the stored paper has the same text
+    (revision) and has not been dismissed. Call it inside the recording transaction: the share
+    lock waits for a correction or dismissal in progress, which update the row."""
+    row = await (
+        await conn.execute(
+            "SELECT revision, dismissed_at FROM papers WHERE id = %s FOR SHARE", (paper.id,)
+        )
+    ).fetchone()
+    return row is not None and row["dismissed_at"] is None and row["revision"] == paper.revision
+
+
+async def dismiss(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Drop the paper from processing: never classified, analysed or graded again, even after a
+    rewrite. It stays in the collection, and in the archive."""
+    cur = await conn.execute(
+        "UPDATE papers SET dismissed_at = now() WHERE id = %s AND dismissed_at IS NULL",
+        (paper_id,),
+    )
+    return cur.rowcount == 1
+
+
+async def correct(
+    conn: psycopg.AsyncConnection, paper_id: str, title: str | None, abstract: str | None
+) -> bool:
+    """The owner's fix of a title or abstract (a broken character, a garbled abstract). It
+    counts as a rewrite: the revision goes up, so the paper is classified and analysed again
+    with its failures forgotten, and `paper.revised` says so."""
+    async with conn.transaction():
+        cur = await conn.execute(
+            "UPDATE papers SET title = coalesce(%s, title), abstract = coalesce(%s, abstract), "
+            "corrected_at = now(), revision = revision + 1, "
+            f"corrected_from = coalesce(corrected_from, {fingerprint('papers')}) WHERE id = %s",
+            (title, abstract, paper_id),
+        )
+        if cur.rowcount == 0:
+            return False
+        await events.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
+    return True
+
+
 async def body(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str, str | None] | None:
     """The fetched full text and where it came from (`html` or `pdf`), when there is one for
     the paper's current revision and arXiv version. A text from before a rewrite or a new

@@ -1,6 +1,8 @@
 """Domain types and pure rules. Imports nothing from the rest of litwatch and does no I/O."""
 
+from litwatch.core.analysis import Analysis, Contribution, Facets, Weight
 from litwatch.core.rules import (
+    FAILED_RUNS,
     current_verdict,
     effective_grade,
     in_library,
@@ -33,9 +35,13 @@ from litwatch.core.types import (
 )
 
 __all__ = [
+    "FAILED_RUNS",
     "SEARCH_TIMEOUT_SECONDS",
+    "Analysis",
+    "Contribution",
     "Depth",
     "Event",
+    "Facets",
     "Grade",
     "Hand",
     "Label",
@@ -55,6 +61,7 @@ __all__ = [
     "TaxonomyClass",
     "Topic",
     "Verdict",
+    "Weight",
     "Word",
     "current_verdict",
     "effective_grade",

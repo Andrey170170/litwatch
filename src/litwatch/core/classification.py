@@ -31,11 +31,13 @@ CHOSEN = Thresholds()
 
 
 class Source(StrEnum):
-    """Why a paper is a direct member of a class."""
+    """Why a paper is a direct member of a class (data.md, `memberships`)."""
 
-    CLASSIFIER = "classifier"
-    BAND = "band"
-    KEYWORD = "keyword"
+    CLASSIFIER = "classifier"  # at or above the threshold, or the primary class
+    UNCERTAIN = "uncertain"  # the uncertain band, for grading only
+    KEYWORD = "keyword"  # the keyword check, for grading only
+    OWNER = "owner"  # the owner's class label, which outranks every other source
+    MISS = "miss"  # a miss the owner reported
 
 
 class Classified(BaseModel):
@@ -43,6 +45,16 @@ class Classified(BaseModel):
 
     probabilities: dict[str, float]
     primary: str
+
+
+class Membership(BaseModel):
+    """A direct membership of class `slug`. `member` is False only for the owner's label taking
+    the paper out of the class. `probability` is what brought it in, where a model did."""
+
+    slug: str
+    source: Source
+    member: bool = True
+    probability: float | None = None
 
 
 def _focus(tree: Taxonomy) -> list[str]:
@@ -91,6 +103,39 @@ def keyword(tree: Taxonomy, title: str, abstract: str) -> dict[str, str]:
             if hit:
                 found[t.slug] = hit
     return found
+
+
+def memberships(
+    tree: Taxonomy,
+    c: Classified,
+    title: str,
+    abstract: str,
+    t: Thresholds = CHOSEN,
+) -> list[Membership]:
+    """Every direct membership one classification makes, each with its source: the classifier's
+    (the primary class at its own probability), then the uncertain band's and the keyword
+    check's for Focus topics' classes. A class reached two ways has a row per way."""
+    at = thresholds(tree, t)
+    found = [
+        Membership(slug=s, source=Source.CLASSIFIER, probability=c.probabilities.get(s))
+        for s in sorted(direct(tree, c, t))
+    ]
+    for f in sorted(band(tree, c, t)):
+        # The highest probability in the subtree that falls in its class's band.
+        p = max(x for s in tree.subtree(f) if t.floor <= (x := c.probabilities.get(s, 0.0)) < at[s])
+        found.append(Membership(slug=f, source=Source.UNCERTAIN, probability=p))
+    found += [
+        Membership(slug=f, source=Source.KEYWORD) for f in sorted(keyword(tree, title, abstract))
+    ]
+    return found
+
+
+def standing(rows: list[Membership]) -> list[Membership]:
+    """The direct memberships that stand. Where the owner labelled a class, the label alone
+    decides it: a yes is the owner's membership, a no leaves the paper out of the class whatever
+    the other sources say. Elsewhere every source's membership stands."""
+    owner = {m.slug: m for m in rows if m.source == Source.OWNER}
+    return [m for m in rows if (m.source == Source.OWNER and m.member) or m.slug not in owner]
 
 
 def grading_topics(tree: Taxonomy, direct_members: set[str]) -> set[str]:

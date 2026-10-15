@@ -19,6 +19,9 @@ from litwatch.core.types import (
 )
 
 REWRITE_SIMILARITY = 0.8  # texts less similar than this were rewritten, not touched up
+# Runs in a row a step may fail on a paper's text before the owner is shown it (pipeline.md,
+# section 9): classification then waits for the owner, analysis is listed on Quality.
+FAILED_RUNS = 3
 
 
 def current_verdict(verdicts: Iterable[Verdict]) -> Verdict | None:

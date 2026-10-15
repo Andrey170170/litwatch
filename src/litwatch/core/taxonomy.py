@@ -152,6 +152,12 @@ class Taxonomy(BaseModel):
                 found.append(f"{t.depth.value} topic {t.slug!r} has a rubric; only Focus topics do")
         return found
 
+    @property
+    def classes_version(self) -> str:
+        """The taxonomy revision a classification records: the hash of every class's version in
+        tree order, which is what the classifier's request is built from. Topics do not count."""
+        return _digest({"classes": [[c.slug, c.version] for c in self.classes]})
+
     def get(self, slug: str) -> TaxonomyClass:
         return next(c for c in self.classes if c.slug == slug)
 
