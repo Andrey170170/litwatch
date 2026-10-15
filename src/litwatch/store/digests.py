@@ -147,32 +147,36 @@ def _focus(which: str) -> str:
     """A Focus topic's eligible papers: graded there, at effective Fit central or related, and
     at a verdict's Fit on the current text that was too (a rewritten paper waits for its
     grading), so the owner's word, which the owner already knows, never
-    makes a paper due, and led there by the pipeline (`_FOCUS_LED`)."""
+    makes a paper due, and led there by the pipeline (`_FOCUS_LED`). Its rarity is a mixed
+    list's, as in every digest (pipeline.md, section 5)."""
     return f"""
-    SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, g.grade, g.rarity,
-           g.topic AS graded_on, v.reason AS fit_reason, p.abstract, {_WRITER_READS}
+    SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, g.grade,
+           coalesce(r.level, g.rarity) AS rarity, g.topic AS graded_on, v.reason AS fit_reason,
+           p.abstract, {_WRITER_READS}
     FROM papers p
     JOIN effective_grades g ON g.paper_id = p.id AND g.topic = %(topic)s
+    LEFT JOIN rarities r ON r.paper_id = p.id
     JOIN LATERAL (SELECT v.fit, v.reason FROM verdicts v
                   WHERE v.paper_id = p.id AND v.topic = %(topic)s
                     AND v.paper_revision = p.revision
                   ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) v ON true
     WHERE p.dismissed_at IS NULL AND g.fit IN ('central', 'related')
       AND v.fit IN ('central', 'related') AND {which} AND {_FOCUS_LED}
-    ORDER BY {_rank("g.rarity")} DESC, p.announced, p.id
+    ORDER BY {_rank("coalesce(r.level, g.rarity)")} DESC, p.announced, p.id
     """
 
 
 def _subtree(which: str, gates: str) -> str:
     """An Area or Field topic's papers: its subtree's papers by the pipeline (`_SUBTREE_LED`),
-    at its page's standing, less those the owner's word sets below related where they are
-    graded."""
+    at its page's standing (its rarity a mixed list's), less those the owner's word sets below
+    related where they are graded."""
     return f"""
     WITH {SCOPE}{STANDING}
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, s.grade,
-           coalesce(s.rarity, 'common') AS rarity, g.topic AS graded_on, v.reason AS fit_reason,
-           {_WRITER_READS}
+           coalesce(r.level, s.rarity, 'common') AS rarity, g.topic AS graded_on,
+           v.reason AS fit_reason, {_WRITER_READS}
     FROM standing s JOIN papers p ON p.id = s.paper_id
+    LEFT JOIN rarities r ON r.paper_id = p.id
     LEFT JOIN effective_grades g
          ON g.paper_id = p.id AND s.grade IS NOT NULL AND g.topic = coalesce(s.via, s.topic)
     LEFT JOIN LATERAL (SELECT v.reason FROM verdicts v
@@ -181,7 +185,7 @@ def _subtree(which: str, gates: str) -> str:
                        LIMIT 1) v ON true
     WHERE p.dismissed_at IS NULL AND {which} AND {_SUBTREE_LED}
       AND (g.fit IN ('adjacent', 'none') AND {_word("p.id", "g.topic")}) IS NOT TRUE {gates}
-    ORDER BY {_rank("coalesce(s.rarity, 'common')")} DESC, p.announced, p.id
+    ORDER BY {_rank("coalesce(r.level, s.rarity, 'common')")} DESC, p.announced, p.id
     """
 
 
@@ -261,7 +265,7 @@ async def earlier_central(
             SELECT paper_id, revision, title, announced, gist, fit, grade, rarity, graded_on,
                    NULL AS fit_reason, NULL AS brief FROM (
                 SELECT DISTINCT ON (dp.paper_id) dp.paper_id, dp.paper_revision AS revision,
-                       p.title, p.announced, dp.gist, dp.fit, dp.grade, dp.rarity, dp.graded_on,
+                       dp.title, p.announced, dp.gist, dp.fit, dp.grade, dp.rarity, dp.graded_on,
                        d.day
                 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
                 JOIN papers p ON p.id = dp.paper_id

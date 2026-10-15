@@ -278,6 +278,7 @@ async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_p
     await listed(db, date(2026, 9, 29), P)  # the week before
     await day(db, w, date(2026, 9, 29))
     await week(db, w, date(2026, 9, 28))
+    await db.execute("UPDATE papers SET title = 'Renamed since' WHERE id = %s", (P.id,))
     await focus(db, Q, "central")
     await focus(db, R, "related")
     await listed(db, TUE, Q)
@@ -294,6 +295,7 @@ async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_p
         )
     ).fetchone()
     assert row["counts"]["papers"] == 2  # the paper brought back is not the week's
+    assert P.title in w.asked[-1] and "Renamed since" not in w.asked[-1]  # as it was shown
 
 
 async def test_the_owners_word_neither_makes_an_area_paper_due_nor_keeps_one(db):
@@ -458,6 +460,28 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
 
 
 # -- quiet days and records ------------------------------------------------------------------------
+
+
+async def test_a_digest_shows_a_papers_rarity_as_a_mixed_list_does(db):
+    """A Field topic's must read shows on its page at its grade's level, in a digest lowered by
+    the Field's depth offset, as on every mixed list."""
+    await classify(db, P, AGENTS.slug)
+    await analyse(db, P)
+    await grade(db, P, "central", AGENTS)
+    await verdicts.passed(db, [(P.id, 1)])
+    await listed(db, TUE, P)
+    await week(db, Writer(), MON)
+    row = await (
+        await db.execute(
+            """SELECT dp.rarity, r.level, g.rarity AS page
+               FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
+               JOIN rarities r ON r.paper_id = dp.paper_id
+               JOIN effective_grades g ON g.paper_id = dp.paper_id AND g.topic = d.topic
+               WHERE d.topic = %s""",
+            (AGENTS.slug,),
+        )
+    ).fetchone()
+    assert row["rarity"] == row["level"] != row["page"]
 
 
 async def test_a_day_without_a_listing_has_no_digests_and_a_quiet_topic_says_nothing_new(db):
