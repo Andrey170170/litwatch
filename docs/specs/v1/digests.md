@@ -43,7 +43,9 @@ label takes it out of the subtree). Eligible means:
 A **daily digest** covers the topic's due papers at the time it is written. Normally those are the day's papers; a
 paper that became eligible late (its grading failed on Friday and succeeded on Monday, its re-check finished after the
 wait) is in the next daily digest, shown with its announcement date. A **weekly digest** covers the papers that became
-due for the topic during its week; for a Field topic, which has no daily digest, writing the weekly is what clears
+due for the topic during its week, and any paper a published daily digest covered that no weekly digest has yet (a
+daily digest written again after its week's weekly, the days before a recovery window's first Monday), so none is
+left out of every weekly; for a Field topic, which has no daily digest, writing the weekly is what clears
 them. The owner's word never makes a paper due: the owner already knows it. A paper announced more than three weeks
 before a digest's day is never due for it: late papers arrive within days, and one the collection gains much later (a
 re-run after a topic edit, a reported miss, an old paper read on demand) was never news. A paper's day is the arXiv

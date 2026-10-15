@@ -584,6 +584,14 @@ async def test_publishing_a_digest_emits_its_event_and_a_failed_one_none(db):
     assert all(r["payload"]["day"] == str(TUE) for r in rows)
 
 
+async def test_a_day_stays_released_when_its_papers_are_dismissed(db):
+    """Dismissing stops processing; it does not undo arXiv's listing."""
+    await listed(db, TUE, P)
+    await db.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (P.id,))
+    assert await store_.released(db, TUE)
+    assert await store_.released_days(db, MON, WED) == {TUE}
+
+
 # -- failed digests --------------------------------------------------------------------------------
 
 

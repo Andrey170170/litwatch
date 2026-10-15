@@ -293,11 +293,11 @@ async def daily_texts(conn: psycopg.AsyncConnection, topic: str, monday: date) -
 
 
 async def released(conn: psycopg.AsyncConnection, day: date) -> bool:
-    """Whether arXiv listed papers on `day`: a paper in the collection is announced on it."""
+    """Whether arXiv listed papers on `day`: a paper litwatch holds is announced on it, dismissed
+    or not (dismissing stops processing; it does not undo the listing)."""
     row = await (
         await conn.execute(
-            "SELECT EXISTS (SELECT 1 FROM papers WHERE announced = %s "
-            "AND dismissed_at IS NULL) AS released",
+            "SELECT EXISTS (SELECT 1 FROM papers WHERE announced = %s) AS released",
             (day,),
         )
     ).fetchone()
@@ -521,11 +521,11 @@ async def papers_of(conn: psycopg.AsyncConnection, digest_id: int) -> list[dict[
 
 
 async def released_days(conn: psycopg.AsyncConnection, first: date, last: date) -> set[date]:
-    """The days from `first` to `last` on which arXiv listed papers the collection holds."""
+    """The days from `first` to `last` on which arXiv listed papers litwatch holds, dismissed or
+    not."""
     rows = await (
         await conn.execute(
-            "SELECT DISTINCT announced FROM papers WHERE announced BETWEEN %s AND %s "
-            "AND dismissed_at IS NULL",
+            "SELECT DISTINCT announced FROM papers WHERE announced BETWEEN %s AND %s",
             (first, last),
         )
     ).fetchall()
