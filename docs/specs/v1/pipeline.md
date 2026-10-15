@@ -290,8 +290,8 @@ Published digests are records and are never re-projected.
 From the side-by-side database (2026-09-29 to 2026-10-12): 700–1,550 papers on a weekday, about 2,500 on the first day
 after a weekend, none announced on Saturday and Sunday. Those are nightly intake records, nearly a third of them new
 versions of older papers, in a fortnight that began in the busiest week of the first v1's data. Measured in N2c on the
-papers first submitted 2026-10-01 to 10-14 (6,305, read from the archive): 425–595 a weekday, 975 and 1,156 on a night
-that folds in Saturday and Sunday ([evals/2026-10-15-tuning.md](../../../evals/2026-10-15-tuning.md)). Estimates per weekday at
+papers first submitted 2026-10-01 to 10-14 (6,305, read from the archive): 425–595 on a submission weekday (424 on the partial
+last day), 975 and 1,156 on a Monday with Saturday and Sunday folded in ([evals/2026-10-15-tuning.md](../../../evals/2026-10-15-tuning.md)). Estimates per weekday at
 about 1,000 papers, with what N2c measured per 1,000 papers:
 
 | Step | Calls | Estimate | Measured (N2c) |
@@ -305,7 +305,8 @@ about 1,000 papers, with what N2c measured per 1,000 papers:
 | Deep cards | Focus must reads, Area picks, requests: a few a week | the `deep` service's own subscription | not run; Focus must reads alone are about 4 |
 | Digests | one call per digest written | as the first v1's reviews | not run |
 
-Classification, analysis and grading came to $2.68 per 1,000 papers, two thirds of it the `judge` on Opus 5.5: a
-night cost $1.04–1.70 Tuesday to Friday and $2.45–3.29 on a Monday.
+Classification, analysis and grading came to $2.68 per 1,000 papers, two thirds of it the `judge` on Opus 5.5. The
+run processed the fortnight at once; its costs split by submission day, weekends folded into Monday, give $1.04–1.70
+for a night Tuesday to Friday and $2.45–3.29 for a Monday.
 
 The restart (milestone N6) runs this over the two most recent weeks of papers, read from the archive.
