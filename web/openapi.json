@@ -23,104 +23,6 @@
         }
       }
     },
-    "/api/digest": {
-      "get": {
-        "summary": "Digest",
-        "operationId": "digest_api_digest_get",
-        "parameters": [
-          {
-            "name": "before",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 60,
-              "minimum": 1,
-              "default": 14,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Digest"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/issues/{issue_id}": {
-      "get": {
-        "summary": "Issue",
-        "operationId": "issue_api_issues__issue_id__get",
-        "parameters": [
-          {
-            "name": "issue_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Issue Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Issue"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/papers": {
       "get": {
         "summary": "Papers",
@@ -616,50 +518,6 @@
         }
       }
     },
-    "/api/topics/{slug}/reviews": {
-      "get": {
-        "summary": "Topic Reviews",
-        "description": "A Radar or Pulse topic's reviews, newest first, shown above its picks.",
-        "operationId": "topic_reviews_api_topics__slug__reviews_get",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Slug"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Review"
-                  },
-                  "title": "Response Topic Reviews Api Topics  Slug  Reviews Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/topics/{slug}/visit": {
       "post": {
         "summary": "Visit",
@@ -873,7 +731,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/litwatch__api__schemas__LabelIn"
+                "$ref": "#/components/schemas/LabelIn"
               }
             }
           }
@@ -948,106 +806,10 @@
         }
       }
     },
-    "/api/papers/{paper_id}/fields/{slug}": {
-      "put": {
-        "summary": "Important For",
-        "description": "The paper matters for the field: it joins the library, gets a thumb up for the\nfield, and becomes a member as the owner's own addition, which the field's next review\nsees and its page lists as added by the owner. Never a Watch miss. The whole action is\none transaction under the paper's lock (topics first, as every settle), so an undo in\nflight waits for all of it and the topic is read as it is then.",
-        "operationId": "important_for_api_papers__paper_id__fields__slug__put",
-        "parameters": [
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          },
-          {
-            "name": "slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Slug"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Ack"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "Not Important For",
-        "description": "Take it back: the owner's membership and the thumb go; the library is left as it is,\nsince the Save toggle is the owner's word on that. Under the same lock as the action.",
-        "operationId": "not_important_for_api_papers__paper_id__fields__slug__delete",
-        "parameters": [
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          },
-          {
-            "name": "slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Slug"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Ack"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/misses": {
       "post": {
         "summary": "Report Miss",
-        "description": "File a miss for a Watch topic. The trace of what each stage said runs afterwards.",
+        "description": "File a miss for a Watch topic.",
         "operationId": "report_miss_api_misses_post",
         "requestBody": {
           "content": {
@@ -1160,7 +922,7 @@
     "/api/settings/topics-order": {
       "put": {
         "summary": "Order",
-        "description": "The owner's order: sections, cards and the Papers table's take column follow it. The\nlist must name every topic once. Rows are locked as a topic save locks them.",
+        "description": "The owner's order, which topic lists and cards follow. The list must name every topic\nonce. Rows are locked as a topic save locks them.",
         "operationId": "order_api_settings_topics_order_put",
         "requestBody": {
           "content": {
@@ -1189,342 +951,6 @@
         }
       }
     },
-    "/api/settings/topics/{slug}/keywords": {
-      "get": {
-        "summary": "Keywords",
-        "description": "How many stored papers each keyword pattern matches, as the keyword audit matches:\nthe topic's saved patterns, or the `pattern`s given (an editor's unsaved draft). A\npattern that is not a valid regular expression counts -1.",
-        "operationId": "keywords_api_settings_topics__slug__keywords_get",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Slug"
-            }
-          },
-          {
-            "name": "pattern",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Pattern"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "integer"
-                  },
-                  "title": "Response Keywords Api Settings Topics  Slug  Keywords Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/topics/{slug}/preview": {
-      "post": {
-        "summary": "Preview",
-        "description": "Run a draft of the topic over its labelled papers and misses, as a dry run. Returns at\nonce; the evaluation's metrics appear under /evaluations/{id} when it finishes.",
-        "operationId": "preview_api_settings_topics__slug__preview_post",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Slug"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Preview Api Settings Topics  Slug  Preview Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/topics/{slug}/reruns": {
-      "get": {
-        "summary": "Rerun Estimates",
-        "operationId": "rerun_estimates_api_settings_topics__slug__reruns_get",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Slug"
-            }
-          },
-          {
-            "name": "since",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Since"
-            }
-          },
-          {
-            "name": "until",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Until"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": true
-                  },
-                  "title": "Response Rerun Estimates Api Settings Topics  Slug  Reruns Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "Rerun",
-        "operationId": "rerun_api_settings_topics__slug__reruns_post",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Slug"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RerunIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Rerun Api Settings Topics  Slug  Reruns Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/evaluations": {
-      "get": {
-        "summary": "Evaluations",
-        "operationId": "evaluations_api_settings_evaluations_get",
-        "parameters": [
-          {
-            "name": "kind",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Kind"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": true
-                  },
-                  "title": "Response Evaluations Api Settings Evaluations Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/evaluations/{eval_run_id}": {
-      "get": {
-        "summary": "Evaluation",
-        "operationId": "evaluation_api_settings_evaluations__eval_run_id__get",
-        "parameters": [
-          {
-            "name": "eval_run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Eval Run Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Evaluation Api Settings Evaluations  Eval Run Id  Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/settings/quality": {
       "get": {
         "summary": "Quality Page",
@@ -1539,47 +965,6 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Quality Page Api Settings Quality Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/quality/grade-now": {
-      "post": {
-        "summary": "Grade Now",
-        "description": "Grade an ungraded candidate now, under the run lock, and say what came of it.",
-        "operationId": "grade_now_api_settings_quality_grade_now_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Pair"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Grade Now Api Settings Quality Grade Now Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1773,201 +1158,6 @@
         "responses": {
           "204": {
             "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/triage/{paper_id}/dismiss": {
-      "post": {
-        "summary": "Dismiss",
-        "description": "Litwatch drops the paper; it stays in the collection and the archive.",
-        "operationId": "dismiss_api_settings_triage__paper_id__dismiss_post",
-        "parameters": [
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/triage/{paper_id}": {
-      "put": {
-        "summary": "Triage By Hand",
-        "description": "The owner's own triage answers; the paper goes on to the keyword audit and grading.",
-        "operationId": "triage_by_hand_api_settings_triage__paper_id__put",
-        "parameters": [
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AnswersIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Triage By Hand Api Settings Triage  Paper Id  Put"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/triage/{paper_id}/correction": {
-      "post": {
-        "summary": "Correct",
-        "description": "Fix the text triage choked on; the next run triages the corrected paper.",
-        "operationId": "correct_api_settings_triage__paper_id__correction_post",
-        "parameters": [
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CorrectionIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/misses": {
-      "get": {
-        "summary": "Reported",
-        "operationId": "reported_api_settings_misses_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "type": "array",
-                  "title": "Response Reported Api Settings Misses Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/settings/misses/{miss_id}/trace": {
-      "post": {
-        "summary": "Retrace",
-        "description": "Trace a miss again, after a failure. The owner's word on it is untouched.",
-        "operationId": "retrace_api_settings_misses__miss_id__trace_post",
-        "parameters": [
-          {
-            "name": "miss_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Miss Id"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Retrace Api Settings Misses  Miss Id  Trace Post"
-                }
-              }
-            }
           },
           "422": {
             "description": "Validation Error",
@@ -2280,167 +1470,6 @@
           }
         }
       }
-    },
-    "/api/labelling": {
-      "get": {
-        "summary": "Labelling",
-        "operationId": "labelling_api_labelling_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Labelling Api Labelling Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/labelling/{key}": {
-      "get": {
-        "summary": "Queue",
-        "operationId": "queue_api_labelling__key__get",
-        "parameters": [
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": true
-                  },
-                  "title": "Response Queue Api Labelling  Key  Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/labels/{topic}/{paper_id}": {
-      "put": {
-        "summary": "Put Label",
-        "operationId": "put_label_api_labels__topic___paper_id__put",
-        "parameters": [
-          {
-            "name": "topic",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Topic"
-            }
-          },
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/litwatch__api__app__LabelIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Label"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete Label",
-        "operationId": "delete_label_api_labels__topic___paper_id__delete",
-        "parameters": [
-          {
-            "name": "topic",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Topic"
-            }
-          },
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -2513,13 +1542,6 @@
               }
             ],
             "title": "Note"
-          },
-          "takes": {
-            "additionalProperties": {
-              "type": "boolean"
-            },
-            "type": "object",
-            "title": "Takes"
           }
         },
         "type": "object",
@@ -2528,22 +1550,6 @@
         ],
         "title": "Answer",
         "description": "One paper's answers. Fit for the topic it was drawn or taken for is required."
-      },
-      "AnswersIn": {
-        "properties": {
-          "answers": {
-            "additionalProperties": {
-              "type": "boolean"
-            },
-            "type": "object",
-            "title": "Answers"
-          }
-        },
-        "type": "object",
-        "required": [
-          "answers"
-        ],
-        "title": "AnswersIn"
       },
       "BibtexFilter": {
         "properties": {
@@ -2646,15 +1652,6 @@
         "type": "object",
         "title": "BibtexIn"
       },
-      "Cadence": {
-        "type": "string",
-        "enum": [
-          "weekly",
-          "daily"
-        ],
-        "title": "Cadence",
-        "description": "How often a Radar or Pulse topic is reviewed. Weekly always; daily adds a review after\neach nightly run, for a Radar field followed closely."
-      },
       "CardRequested": {
         "properties": {
           "event_id": {
@@ -2748,7 +1745,7 @@
           "grade"
         ],
         "title": "Chosen",
-        "description": "The folded \"how this was chosen\" for one Watch topic."
+        "description": "One Watch topic's current verdict on the paper."
       },
       "CitedIn": {
         "properties": {
@@ -2786,34 +1783,6 @@
         ],
         "title": "CitedIn",
         "description": "A paper outside the collection, as a search hit gives it: enough for an arXiv entry."
-      },
-      "CorrectionIn": {
-        "properties": {
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "abstract": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Abstract"
-          }
-        },
-        "type": "object",
-        "title": "CorrectionIn"
       },
       "DeepCard": {
         "properties": {
@@ -2853,37 +1822,6 @@
         "title": "DeepCard",
         "description": "A deep card: the reading card the deep service wrote, as it wrote it."
       },
-      "Digest": {
-        "properties": {
-          "weekly": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/IssueSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "issues": {
-            "items": {
-              "$ref": "#/components/schemas/IssueSummary"
-            },
-            "type": "array",
-            "title": "Issues"
-          },
-          "status": {
-            "$ref": "#/components/schemas/litwatch__api__schemas__Status"
-          }
-        },
-        "type": "object",
-        "required": [
-          "issues",
-          "status"
-        ],
-        "title": "Digest",
-        "description": "The feed: daily issues newest first, and the week's weekly issue pinned above them."
-      },
       "DrawIn": {
         "properties": {
           "seed": {
@@ -2900,108 +1838,6 @@
         },
         "type": "object",
         "title": "DrawIn"
-      },
-      "Entry": {
-        "properties": {
-          "paper_id": {
-            "type": "string",
-            "title": "Paper Id"
-          },
-          "topic": {
-            "type": "string",
-            "title": "Topic"
-          },
-          "lead": {
-            "type": "boolean",
-            "title": "Lead"
-          },
-          "take": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Take"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "authors": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Authors"
-          },
-          "published": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Published"
-          },
-          "revised": {
-            "type": "boolean",
-            "title": "Revised",
-            "default": false
-          },
-          "set_aside": {
-            "type": "boolean",
-            "title": "Set Aside",
-            "default": false
-          },
-          "also_in": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Also In"
-          },
-          "saved": {
-            "type": "boolean",
-            "title": "Saved",
-            "default": false
-          },
-          "reaction": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReactionValue"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reaction_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReactionReason"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "paper_id",
-          "topic",
-          "lead",
-          "title",
-          "authors"
-        ],
-        "title": "Entry",
-        "description": "One paper in an issue, for one Watch topic."
       },
       "Event": {
         "properties": {
@@ -3191,7 +2027,6 @@
           "what": {
             "type": "string",
             "enum": [
-              "candidate",
               "graded",
               "missed"
             ],
@@ -3313,102 +2148,8 @@
         "title": "IntegrationCard",
         "description": "One integration under Settings \u2192 Integrations."
       },
-      "Issue": {
+      "LabelIn": {
         "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "daily",
-              "weekly"
-            ],
-            "title": "Kind"
-          },
-          "day": {
-            "type": "string",
-            "format": "date",
-            "title": "Day"
-          },
-          "lede": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lede"
-          },
-          "sections": {
-            "items": {
-              "$ref": "#/components/schemas/Section"
-            },
-            "type": "array",
-            "title": "Sections"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "kind",
-          "day",
-          "sections"
-        ],
-        "title": "Issue"
-      },
-      "IssueSummary": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "daily",
-              "weekly"
-            ],
-            "title": "Kind"
-          },
-          "day": {
-            "type": "string",
-            "format": "date",
-            "title": "Day"
-          },
-          "lede": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lede"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "kind",
-          "day"
-        ],
-        "title": "IssueSummary"
-      },
-      "Label": {
-        "properties": {
-          "paper_id": {
-            "type": "string",
-            "title": "Paper Id"
-          },
-          "topic": {
-            "type": "string",
-            "title": "Topic"
-          },
           "value": {
             "$ref": "#/components/schemas/LabelValue"
           },
@@ -3421,62 +2162,13 @@
                 "type": "null"
               }
             ]
-          },
-          "origin": {
-            "$ref": "#/components/schemas/LabelOrigin"
-          },
-          "provisional": {
-            "type": "boolean",
-            "title": "Provisional",
-            "default": false
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "labelled_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Labelled At"
           }
         },
         "type": "object",
         "required": [
-          "paper_id",
-          "topic",
-          "value",
-          "origin"
+          "value"
         ],
-        "title": "Label",
-        "description": "The owner's word on one paper for one Watch topic. It outranks any verdict."
-      },
-      "LabelOrigin": {
-        "type": "string",
-        "enum": [
-          "sample",
-          "candidate_sample",
-          "reject_sample",
-          "legacy_positive",
-          "gold",
-          "reader",
-          "miss"
-        ],
-        "title": "LabelOrigin",
-        "description": "How the labelled paper was chosen, which decides what its label can be evidence for.\n\nA label keeps the origin it was created with when the owner later changes its value, so a\nchange of mind never moves a paper out of the sample it was drawn in."
+        "title": "LabelIn"
       },
       "LabelState": {
         "properties": {
@@ -3519,45 +2211,6 @@
           "unsure"
         ],
         "title": "LabelValue"
-      },
-      "Listed": {
-        "properties": {
-          "paper_id": {
-            "type": "string",
-            "title": "Paper Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "reaction": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReactionValue"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reaction_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReactionReason"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "paper_id",
-          "title"
-        ],
-        "title": "Listed",
-        "description": "A paper named in a recap, with the owner's thumb on it for the recap's topic."
       },
       "Lookup": {
         "properties": {
@@ -3675,24 +2328,6 @@
           "slugs"
         ],
         "title": "Order"
-      },
-      "Pair": {
-        "properties": {
-          "paper_id": {
-            "type": "string",
-            "title": "Paper Id"
-          },
-          "topic": {
-            "type": "string",
-            "title": "Topic"
-          }
-        },
-        "type": "object",
-        "required": [
-          "paper_id",
-          "topic"
-        ],
-        "title": "Pair"
       },
       "Paper": {
         "properties": {
@@ -3854,18 +2489,6 @@
             "type": "array",
             "title": "Versions"
           },
-          "triage": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Triage"
-          },
           "chosen": {
             "items": {
               "$ref": "#/components/schemas/Chosen"
@@ -3954,17 +2577,6 @@
               }
             ]
           },
-          "take": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Take"
-          },
           "label": {
             "anyOf": [
               {
@@ -3995,24 +2607,9 @@
               }
             ]
           },
-          "member": {
-            "type": "boolean",
-            "title": "Member",
-            "default": false
-          },
-          "by_owner": {
-            "type": "boolean",
-            "title": "By Owner",
-            "default": false
-          },
           "missed": {
             "type": "boolean",
             "title": "Missed",
-            "default": false
-          },
-          "grading": {
-            "type": "boolean",
-            "title": "Grading",
             "default": false
           }
         },
@@ -4060,74 +2657,6 @@
         ],
         "title": "Papers",
         "description": "A page of the table. A search also brings the papers search providers found that the\ncollection lacks, as a second band under the first; a provider that failed or was too\nslow is named in `left_out`."
-      },
-      "Pick": {
-        "properties": {
-          "paper_id": {
-            "type": "string",
-            "title": "Paper Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "authors": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Authors"
-          },
-          "published": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Published"
-          },
-          "why": {
-            "type": "string",
-            "title": "Why"
-          },
-          "saved": {
-            "type": "boolean",
-            "title": "Saved",
-            "default": false
-          },
-          "reaction": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReactionValue"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reaction_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReactionReason"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "paper_id",
-          "title",
-          "why"
-        ],
-        "title": "Pick",
-        "description": "A paper a review picked, with its sentence on why."
       },
       "Publication": {
         "properties": {
@@ -4344,167 +2873,6 @@
         ],
         "title": "ReactionValue"
       },
-      "Recap": {
-        "properties": {
-          "state": {
-            "type": "string",
-            "enum": [
-              "written",
-              "failed",
-              "quiet"
-            ],
-            "title": "State"
-          },
-          "text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Text"
-          },
-          "papers": {
-            "items": {
-              "$ref": "#/components/schemas/Listed"
-            },
-            "type": "array",
-            "title": "Papers"
-          },
-          "set_aside": {
-            "items": {
-              "$ref": "#/components/schemas/Listed"
-            },
-            "type": "array",
-            "title": "Set Aside"
-          },
-          "misses": {
-            "items": {
-              "$ref": "#/components/schemas/Listed"
-            },
-            "type": "array",
-            "title": "Misses"
-          },
-          "will_retry": {
-            "type": "boolean",
-            "title": "Will Retry",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "state"
-        ],
-        "title": "Recap",
-        "description": "A Watch topic's week: prose over its entries, then the entries as one-liners, what\nthe owner set aside and the misses reported."
-      },
-      "RerunIn": {
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "evidence",
-              "candidates",
-              "keywords",
-              "range"
-            ],
-            "title": "Scope"
-          },
-          "since": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Since"
-          },
-          "until": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Until"
-          }
-        },
-        "type": "object",
-        "required": [
-          "scope"
-        ],
-        "title": "RerunIn"
-      },
-      "Review": {
-        "properties": {
-          "period": {
-            "type": "string",
-            "enum": [
-              "day",
-              "week"
-            ],
-            "title": "Period"
-          },
-          "day": {
-            "type": "string",
-            "format": "date",
-            "title": "Day"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "written",
-              "failed",
-              "quiet"
-            ],
-            "title": "State"
-          },
-          "text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Text"
-          },
-          "picks": {
-            "items": {
-              "$ref": "#/components/schemas/Pick"
-            },
-            "type": "array",
-            "title": "Picks"
-          },
-          "members": {
-            "type": "integer",
-            "title": "Members",
-            "default": 0
-          },
-          "will_retry": {
-            "type": "boolean",
-            "title": "Will Retry",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "period",
-          "day",
-          "state"
-        ],
-        "title": "Review",
-        "description": "A Radar or Pulse topic's review of a day or a week. A failed one says so in one line;\na quiet one had no papers to read."
-      },
       "Row": {
         "properties": {
           "id": {
@@ -4556,33 +2924,6 @@
               }
             ]
           },
-          "grading": {
-            "type": "boolean",
-            "title": "Grading",
-            "default": false
-          },
-          "take": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Take"
-          },
-          "take_topic": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Take Topic"
-          },
           "saved": {
             "type": "boolean",
             "title": "Saved",
@@ -4599,16 +2940,6 @@
             "type": "string",
             "title": "Source",
             "default": "collection"
-          },
-          "by_owner": {
-            "type": "boolean",
-            "title": "By Owner",
-            "default": false
-          },
-          "picked": {
-            "type": "boolean",
-            "title": "Picked",
-            "default": false
           },
           "score": {
             "anyOf": [
@@ -4711,51 +3042,6 @@
         "title": "SearchStats",
         "description": "How a search provider has answered since the service started."
       },
-      "Section": {
-        "properties": {
-          "topic": {
-            "$ref": "#/components/schemas/TopicRef"
-          },
-          "entries": {
-            "items": {
-              "$ref": "#/components/schemas/Entry"
-            },
-            "type": "array",
-            "title": "Entries"
-          },
-          "near": {
-            "type": "integer",
-            "title": "Near",
-            "default": 0
-          },
-          "review": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Review"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "recap": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Recap"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "topic",
-          "entries"
-        ],
-        "title": "Section"
-      },
       "SessionIn": {
         "properties": {
           "token": {
@@ -4856,10 +3142,6 @@
               }
             ],
             "title": "Colour"
-          },
-          "cadence": {
-            "$ref": "#/components/schemas/Cadence",
-            "default": "weekly"
           }
         },
         "type": "object",
@@ -4900,27 +3182,6 @@
             "type": "string",
             "title": "Status"
           },
-          "cadence": {
-            "type": "string",
-            "enum": [
-              "weekly",
-              "daily"
-            ],
-            "title": "Cadence",
-            "default": "weekly"
-          },
-          "last_review": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Review"
-          },
           "position": {
             "anyOf": [
               {
@@ -4944,14 +3205,6 @@
             "type": "integer",
             "title": "Saved"
           },
-          "new": {
-            "type": "integer",
-            "title": "New"
-          },
-          "new_saved": {
-            "type": "integer",
-            "title": "New Saved"
-          },
           "opened_at": {
             "anyOf": [
               {
@@ -4973,9 +3226,7 @@
           "status",
           "subject",
           "papers",
-          "saved",
-          "new",
-          "new_saved"
+          "saved"
         ],
         "title": "TopicCard"
       },
@@ -4987,40 +3238,7 @@
           "pulse"
         ],
         "title": "TopicKind",
-        "description": "The service a topic gets: graded per paper, reviewed weekly, or summarised weekly."
-      },
-      "TopicRef": {
-        "properties": {
-          "slug": {
-            "type": "string",
-            "title": "Slug"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/TopicKind"
-          },
-          "colour": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Colour"
-          }
-        },
-        "type": "object",
-        "required": [
-          "slug",
-          "name",
-          "kind"
-        ],
-        "title": "TopicRef"
+        "description": "The service a topic gets. Only Watch topics are graded per paper."
       },
       "ValidationError": {
         "properties": {
@@ -5062,66 +3280,6 @@
         ],
         "title": "ValidationError"
       },
-      "litwatch__api__app__LabelIn": {
-        "properties": {
-          "value": {
-            "$ref": "#/components/schemas/LabelValue"
-          },
-          "grade": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Grade"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "queue": {
-            "type": "string",
-            "title": "Queue",
-            "default": "rejects"
-          }
-        },
-        "type": "object",
-        "required": [
-          "value"
-        ],
-        "title": "LabelIn"
-      },
-      "litwatch__api__schemas__LabelIn": {
-        "properties": {
-          "value": {
-            "$ref": "#/components/schemas/LabelValue"
-          },
-          "grade": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Grade"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "value"
-        ],
-        "title": "LabelIn"
-      },
       "litwatch__api__schemas__Status": {
         "properties": {
           "state": {
@@ -5130,7 +3288,6 @@
               "none",
               "running",
               "failed",
-              "attention",
               "quiet"
             ],
             "title": "State"
@@ -5170,11 +3327,6 @@
             ],
             "title": "Finished At"
           },
-          "read": {
-            "type": "integer",
-            "title": "Read",
-            "default": 0
-          },
           "error": {
             "anyOf": [
               {
@@ -5185,38 +3337,6 @@
               }
             ],
             "title": "Error"
-          },
-          "showing": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Showing"
-          },
-          "splits": {
-            "type": "integer",
-            "title": "Splits",
-            "default": 0
-          },
-          "ungraded": {
-            "type": "integer",
-            "title": "Ungraded",
-            "default": 0
-          },
-          "awaiting_triage": {
-            "type": "integer",
-            "title": "Awaiting Triage",
-            "default": 0
-          },
-          "reviews_failed": {
-            "type": "integer",
-            "title": "Reviews Failed",
-            "default": 0
           }
         },
         "type": "object",
@@ -5224,7 +3344,7 @@
           "state"
         ],
         "title": "Status",
-        "description": "The printer's line under the masthead."
+        "description": "The latest nightly run: none yet, running, failed, or finished without an error."
       },
       "litwatch__core__types__Status": {
         "type": "string",

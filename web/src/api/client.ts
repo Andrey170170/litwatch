@@ -1,38 +1,11 @@
 /**
  * The typed client over `openapi.json` (regenerate with `pnpm generate`). Every call rides on
- * the session cookie; a 401 anywhere surfaces as the token prompt, through `onUnauthorised`.
+ * the session cookie; a 401 anywhere is handed to `onUnauthorised`.
  */
 import createClient, { type Middleware } from "openapi-fetch";
 import type { paths, components } from "./schema";
 
 export type Schemas = components["schemas"];
-export type Status = Schemas["litwatch__api__schemas__Status"];
-export type Digest = Schemas["Digest"];
-export type Issue = Schemas["Issue"];
-export type IssueSummary = Schemas["IssueSummary"];
-export type Section = Schemas["Section"];
-export type Entry = Schemas["Entry"];
-export type Review = Schemas["Review"];
-export type Recap = Schemas["Recap"];
-export type Pick = Schemas["Pick"];
-export type Listed = Schemas["Listed"];
-export type Paper = Schemas["Paper"];
-export type PaperTopic = Schemas["PaperTopic"];
-export type Chosen = Schemas["Chosen"];
-export type Row = Schemas["Row"];
-export type Papers = Schemas["Papers"];
-export type TopicCard = Schemas["TopicCard"];
-export type TopicRef = Schemas["TopicRef"];
-export type TopicKind = Schemas["TopicKind"];
-export type Grade = Schemas["Grade"];
-export type Ack = Schemas["Ack"];
-export type ReactionValue = Schemas["ReactionValue"];
-export type ReactionReason = Schemas["ReactionReason"];
-export type LabelValue = Schemas["LabelValue"];
-export type Lookup = Schemas["Lookup"];
-export type Publication = Schemas["Publication"];
-export type DeepCard = Schemas["DeepCard"];
-export type IntegrationCard = Schemas["IntegrationCard"];
 
 export class ApiError extends Error {
   constructor(
