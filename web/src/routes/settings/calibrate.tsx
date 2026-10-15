@@ -57,7 +57,7 @@ function PastSessionRow({ s }: { s: SessionRow }) {
     <button className="sess" data-sub onClick={() => open(s.id)}>
       <span className="t">{rowDate(s.drawn_at)}</span>
       <span className="fa faint">
-        {s.answered} of {s.papers} answered · seed {s.seed}
+        {s.answered} of {s.papers} answered · {s.differ} differ · seed {s.seed}
       </span>
       <span className="fv faint">{s.answered < s.papers ? "unfinished" : ""}</span>
       <span className="fv faint">›</span>
@@ -126,9 +126,11 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(item));
   const [pick, setPick] = useState(false);
   const name = (slug: string) => tree.data?.classes.find((c) => c.slug === slug)?.name ?? slug;
-  // Each active Focus topic gets its Fit; the drawn topic at least, while the tree loads.
-  const focus = (tree.data?.topics ?? []).filter((t) => t.depth === "focus" && t.status === "active");
-  const asked = focus.length ? focus : [{ class: item.topic } as Partial<Schemas["Topic"]> & { class: string }];
+  // The drawn topic first, paused or not, then every other active Focus topic; the answer takes Focus topics only.
+  const topics = tree.data?.topics ?? [];
+  const drawn = topics.find((t) => t.class === item.topic);
+  const asked: (Partial<Schemas["Topic"]> & { class: string })[] = [drawn ?? { class: item.topic }, ...topics.filter((t) => t.class !== item.topic && t.depth === "focus" && t.status === "active")];
+  const focus = new Set(topics.filter((t) => t.depth === "focus").map((t) => t.class));
   const answered = new Set(s.items.filter((it) => it.answered_at).map((it) => it.position));
   const n = s.items.length;
   const i = s.items.findIndex((it) => it.position === item.position);
@@ -138,7 +140,8 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   /** Next records the answer when the drawn topic has its Fit, then moves on; a paper left unanswered stays grey. */
   const next = () => {
     const after = i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true });
-    if (canRecord && (changed || !item.answered_at)) answer.mutate({ position: item.position, answer: { fit: draft.fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
+    const fit = Object.fromEntries(Object.entries(draft.fit).filter(([slug]) => focus.has(slug) || slug === item.topic));
+    if (canRecord && (changed || !item.answered_at)) answer.mutate({ position: item.position, answer: { fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
     else after();
   };
   const back = () => i > 0 && go(s.items[i - 1]!.position);
@@ -260,7 +263,7 @@ function Review({ s }: { s: Session }) {
                 <span className="faint">you</span> <b>{it.fit[it.topic] ?? "–"}</b>
               </span>
               <span className="fa">
-                <span className="faint">pipeline</span> {pipelineSide(it) ?? it.why}
+                <span className="faint">pipeline</span> {it.verdict ?? pipelineSide(it) ?? it.why}
               </span>
               <span className="fv faint">{it.appraisal?.value?.replace("_", " ") ?? ""}</span>
             </PaperLink>

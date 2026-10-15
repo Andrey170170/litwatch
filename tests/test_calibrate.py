@@ -77,6 +77,7 @@ async def test_a_draw_skips_a_verdict_on_text_since_rewritten(db):
 async def test_answers_become_labels_and_appraisals(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    assert item["verdict"] == "related"  # the pipeline's side, for the review
     with pytest.raises(ValueError, match="required"):
         await calibrate.answer(db, session_id, item["position"], Answer(fit={}))
     await calibrate.answer(
@@ -201,3 +202,31 @@ async def test_an_appraisal_can_be_cleared(db):
     assert await calibrate.matters_no_topic(db) == []
     rows = await (await db.execute("SELECT count(*) AS n FROM appraisals")).fetchone()
     assert rows["n"] == 2  # matters once, then cleared
+
+
+async def test_the_sessions_list_counts_answers_on_the_other_side_from_the_draw(db):
+    """The past-session rows say how many answers differ from the pipeline's side."""
+    import httpx
+
+    from litwatch.api import create_app
+    from litwatch.config import Config
+
+    session_id = await calibrate.draw(db, seed=3, size=4)
+    above = [i for i in await items(db, session_id) if i["why"] == "above"]
+    below = [i for i in await items(db, session_id) if i["why"] == "below"]
+    await calibrate.answer(
+        db, session_id, above[0]["position"], Answer(fit={FAITH.slug: LabelValue.NONE})
+    )
+    await calibrate.answer(
+        db, session_id, above[1]["position"], Answer(fit={FAITH.slug: LabelValue.CENTRAL})
+    )
+    await calibrate.answer(
+        db, session_id, below[0]["position"], Answer(fit={FAITH.slug: LabelValue.RELATED})
+    )
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    transport = httpx.ASGITransport(app=create_app(dsn, "t", Config()))
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://t", headers={"authorization": "Bearer t"}
+    ) as c:
+        (row,) = (await c.get("/api/settings/calibrate")).json()
+    assert (row["papers"], row["answered"], row["differ"]) == (4, 3, 2)

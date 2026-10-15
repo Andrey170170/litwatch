@@ -64,7 +64,7 @@ function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Pro
     onError: (e) => toast(said(e), "error"),
   });
   const busy = usePaperBusy(paperId);
-  return { isPending: busy, mutate: (v: V, options?: { onSuccess?: () => void }) => m.mutate({ id: paperId, v }, options) };
+  return { isPending: busy, mutate: (v: V, options?: { onSuccess?: (r: R) => void }) => m.mutate({ id: paperId, v }, options) };
 }
 
 const acked = (qc: QueryClient, id: string, ack: Ack) => {

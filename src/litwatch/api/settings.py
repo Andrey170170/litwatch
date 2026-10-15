@@ -197,7 +197,7 @@ async def misses(request: Request, c: Conn) -> list[Miss]:
     tree = await taxonomy_store.load(c)
     at = _thresholds(request, tree)
     found = []
-    for r in await quality.misses(c):
+    for r in await quality.misses(c, tree):
         opinions = r["opinions"] or {}
         sources = set(r["sources"])
         classified = r["classified"]
@@ -405,7 +405,12 @@ async def sessions(c: Conn) -> list[dict[str, Any]]:
     return await (
         await c.execute(
             "SELECT s.id, s.seed, s.drawn_at, count(i.*) AS papers, "
-            "count(i.answered_at) AS answered FROM calibration_sessions s "
+            "count(i.answered_at) AS answered, "
+            # An answer on the other side from the draw: a wanted paper graded below, or one
+            # graded relevant or above the owner put at adjacent or none.
+            "count(*) FILTER (WHERE (i.why = 'above' AND i.answer IN ('adjacent', 'none')) "
+            "OR (i.why = 'below' AND i.answer IN ('central', 'related'))) AS differ "
+            "FROM calibration_sessions s "
             "LEFT JOIN calibration_items i ON i.session_id = s.id "
             "GROUP BY s.id ORDER BY s.id DESC LIMIT 20"
         )

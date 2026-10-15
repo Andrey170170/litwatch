@@ -18,10 +18,11 @@ function status(c: Card): string {
   return `Up to date${c.skipped ? ` · ${c.skipped} skipped` : ""}`;
 }
 
-function IntegrationCard({ c, done, settle }: { c: Card; done: string | undefined; settle: (what: string) => void }) {
+function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Set<number>; onSkip: (eventId: number) => void }) {
   const retry = useRetryIntegration();
   const skip = useSkipEvent();
-  // The failing event, until it was skipped on this visit.
+  // The failing event, unless it was skipped on this visit; a later failure shows as itself.
+  const done = c.failing && skipped.has(c.failing.event_id);
   const f = c.enabled && !done ? c.failing : null;
   return (
     <div className={`icard${f ? " fail" : ""}${c.enabled ? "" : " off"}`}>
@@ -30,7 +31,7 @@ function IntegrationCard({ c, done, settle }: { c: Card; done: string | undefine
         <span className="faint">{c.enabled ? "on" : "off"}</span>
       </div>
       {c.description && <div className="nb">{c.description}</div>}
-      <div className="ist">{done ?? status(c)}</div>
+      <div className="ist">{done ? "Event skipped · up to date" : status(c)}</div>
       {f && (
         <div className="ierr mono">
           {f.type}
@@ -52,7 +53,7 @@ function IntegrationCard({ c, done, settle }: { c: Card; done: string | undefine
               <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate(c.name)}>
                 Retry now
               </button>
-              <button className="btn" disabled={skip.isPending} onClick={() => skip.mutate({ name: c.name, eventId: f.event_id }, { onSuccess: () => settle("Event skipped · up to date") })}>
+              <button className="btn" disabled={skip.isPending} onClick={() => skip.mutate({ name: c.name, eventId: f.event_id }, { onSuccess: () => onSkip(f.event_id) })}>
                 Skip this event
               </button>
             </>
@@ -68,13 +69,14 @@ function IntegrationCard({ c, done, settle }: { c: Card; done: string | undefine
 
 export function IntegrationsPage() {
   const cards = useQuery(integrationsQuery);
-  const [settled, setSettled] = useState<Record<string, string>>({});
+  // The events skipped on this visit: each card keeps its result in place until the page is left.
+  const [skipped, setSkipped] = useState<Set<number>>(new Set());
   return (
     <>
       <PageHead title="Integrations" sub="Each reacts to the pipeline's events on its own schedule. Which are loaded is set in litwatch.toml." />
       <Load q={cards} />
       {cards.data?.map((c) => (
-        <IntegrationCard key={c.name} c={c} done={settled[c.name]} settle={(what) => setSettled((x) => ({ ...x, [c.name]: what }))} />
+        <IntegrationCard key={c.name} c={c} skipped={skipped} onSkip={(id) => setSkipped((x) => new Set(x).add(id))} />
       ))}
       {cards.data && !cards.data.length && <div className="empty">No integration is configured.</div>}
       {cards.data && cards.data.length > 0 && (
@@ -88,7 +90,7 @@ export function IntegrationsPage() {
               <span>Skipped</span>
             </div>
             {cards.data.map((c) => {
-              const failed = c.failing && !settled[c.name] ? 1 : 0;
+              const failed = c.failing && !skipped.has(c.failing.event_id) ? 1 : 0;
               return (
               <div className="mr" key={c.name}>
                 <span className="mono">{c.name}</span>

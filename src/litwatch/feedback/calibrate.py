@@ -227,7 +227,8 @@ async def answer(
 
 
 async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, Any] | None:
-    """A session's papers in order, each with what the owner has said."""
+    """A session's papers in order, each with the pipeline's Fit on the drawn topic (the verdict
+    the draw read, else the current one) and what the owner has said."""
     found = await (
         await conn.execute("SELECT * FROM calibration_sessions WHERE id = %s", (session_id,))
     ).fetchone()
@@ -238,6 +239,10 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
         """
         SELECT i.position, i.paper_id, i.topic, i.why, i.answered_at, p.title, p.abstract,
                p.authors, p.published,
+               coalesce((SELECT v.fit FROM verdicts v WHERE v.id = i.verdict_id),
+                        (SELECT v.fit FROM verdicts v WHERE v.paper_id = i.paper_id
+                         AND v.topic = i.topic ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1))
+                   AS verdict,
                (SELECT coalesce(jsonb_object_agg(l.topic, l.value), '{}') FROM labels l
                 WHERE l.paper_id = i.paper_id AND NOT l.provisional) AS fit,
                (SELECT row_to_json(a) FROM (SELECT value, note FROM appraisals

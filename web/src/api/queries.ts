@@ -105,8 +105,9 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
 
 // -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
 
-/** Fresh each visit: a page that waits on the owner must not show what was settled elsewhere as still open. */
-const settingsOptions = { staleTime: 0, refetchOnWindowFocus: false } as const;
+/** Fresh each visit, and still for the visit: a page that waits on the owner must not show what was settled
+ * elsewhere as still open, and nothing moves under the reader while it is open. */
+const settingsOptions = { staleTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
 export const qualityQuery = queryOptions({
   queryKey: ["settings", "quality"],

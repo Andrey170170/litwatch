@@ -68,11 +68,18 @@ describe("Settings", () => {
     const titles = screen.getAllByRole("link", { name: /paper$/ }).map((l) => l.textContent);
     expect(titles).toEqual(["A split paper", "A stuck paper"]);
     expect(screen.getByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("1");
   });
 
   it("saves a topic only once something changed, then offers the re-run in place of Save", async () => {
     viewport(true);
-    const calls = scriptFetch({ ...common, "GET /api/settings/topics/mi/keywords": { circuit: 4 }, "PUT /api/settings/topics/mi": () => ({ ...topic, interests: "Sparse circuits" }) });
+    const after = { ...topic, interests: "Sparse circuits" };
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/taxonomy": () => (calls.some((c) => c.method === "PUT") ? { ...tree, topics: [after] } : tree),
+      "GET /api/settings/topics/mi/keywords": { circuit: 4 },
+      "PUT /api/settings/topics/mi": after,
+    });
     renderApp("/settings/topics/mi");
     const save = await screen.findByRole("button", { name: "Save" });
     expect(save).toBeDisabled();
@@ -82,11 +89,14 @@ describe("Settings", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({ class: "mi", interests: "Sparse circuits", keywords: ["circuit"] }));
     expect(await screen.findByText("Saved as version 2. It applies to papers classified or graded from now on.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    // The taxonomy's refetch after the save does not reopen the form.
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/settings/taxonomy").length).toBeGreaterThan(1));
+    expect(screen.getByText("Saved as version 2. It applies to papers classified or graded from now on.")).toBeInTheDocument();
   });
 
   it("records a Calibrate answer on Next, then shows the next paper", async () => {
     viewport(true);
-    const items = [1, 2].map((position) => ({ position, paper_id: `2610.0000${position}`, topic: "mi", why: "above", answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }));
+    const items = [1, 2].map((position) => ({ position, paper_id: `2610.0000${position}`, topic: "mi", why: "above", verdict: "related", answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }));
     const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items }, "PUT /api/settings/calibrate/1/items/1": { recorded: true } });
     const { router } = renderApp("/settings/calibrate/1");
     expect(await screen.findByText("Drawn 1")).toBeInTheDocument();

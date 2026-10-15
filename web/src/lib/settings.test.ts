@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { differs, level, savedLine, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
+import { differs, level, savedLine, settle, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
 
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [] };
 const stuck = { paper_id: "1", revision: 1, title: "t", failed_runs: 3, last_error: null, failed_at: "2026-10-15" };
 const split = { paper_id: "1", topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
 
 describe("waiting", () => {
+  const q = { night: { ...night, splits: [split, { ...split, paper_id: "2", label: { value: "central" } }], ungraded: [stuck], analysis_failed: [stuck] } } as Quality;
   it("counts unlabelled splits and the stuck steps, not labelled ones", () => {
-    const q = { night: { ...night, splits: [split, { ...split, paper_id: "2", label: { value: "central" } }], ungraded: [stuck], analysis_failed: [stuck] } } as Quality;
     expect(waiting(q)).toBe(3);
+  });
+  it("drops what this visit settled, which keeps its place", () => {
+    const after = settle(settle(q, "splits", "1", "a", "related"), "analysis_failed", "1", null, "Tried again");
+    expect(waiting(after)).toBe(1);
+    expect(after.night.splits.map((s) => s.settled)).toEqual(["related", undefined]);
+    expect(after.night.analysis_failed[0]!.settled).toBe("Tried again");
+    expect(after.night.ungraded[0]!.settled).toBeUndefined();
   });
 });
 
@@ -37,8 +44,11 @@ describe("took", () => {
 });
 
 describe("differs", () => {
-  const item = (why: SessionItem["why"], fit?: SessionItem["fit"][string]): SessionItem => ({ position: 1, paper_id: "1", topic: "a", why, answered_at: null, title: "", abstract: "", authors: [], published: null, fit: fit ? { a: fit } : {}, appraisal: null });
-  it("is the owner on the other side from the draw", () => {
+  const item = (why: SessionItem["why"], fit?: SessionItem["fit"][string], verdict: SessionItem["verdict"] = null): SessionItem => ({ position: 1, paper_id: "1", topic: "a", why, verdict, answered_at: null, title: "", abstract: "", authors: [], published: null, fit: fit ? { a: fit } : {}, appraisal: null });
+  it("is the owner on the other side from the pipeline's Fit, or from the draw while the verdict is gone", () => {
+    expect(differs(item("above", "adjacent", "related"))).toBe(true);
+    expect(differs(item("above", "central", "related"))).toBe(false);
+    expect(differs(item("split", "none", "central"))).toBe(true);
     expect(differs(item("above", "adjacent"))).toBe(true);
     expect(differs(item("above", "related"))).toBe(false);
     expect(differs(item("below", "central"))).toBe(true);

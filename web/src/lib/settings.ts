@@ -58,10 +58,12 @@ export type Split = {
   recorded_at: string;
   title: string;
   label: { value: LabelValue } | null;
+  /** What settled it on this visit (client-side; DESIGN.md: a settled item keeps its result in place). */
+  settled?: string;
 };
 
 /** A paper stuck after three failed runs of a step (`store.failures.stuck`). */
-export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null };
+export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; settled?: string };
 
 export type Spend = { provider: string; spent: number; projected: number; budget: number | null; over: boolean };
 
@@ -100,13 +102,15 @@ export type Run = {
   updated: number;
 };
 
-export type SessionRow = { id: number; seed: number; drawn_at: string; papers: number; answered: number };
+export type SessionRow = { id: number; seed: number; drawn_at: string; papers: number; answered: number; differ: number };
 
 export type SessionItem = {
   position: number;
   paper_id: string;
   topic: string;
   why: "above" | "below" | "split" | "miss" | "reaction";
+  /** The pipeline's Fit on the drawn topic; null while it has no verdict. */
+  verdict: Fit | null;
   answered_at: string | null;
   title: string;
   abstract: string;
@@ -120,10 +124,23 @@ export type Session = { id: number; seed: number; drawn_at: string; items: Sessi
 
 // -- rules ---------------------------------------------------------------------------------------------------------
 
-/** How many things wait on the owner: splits and escalations still unlabelled, and the three stuck steps. */
+export type Waiting = "splits" | "awaiting_classification" | "analysis_failed" | "ungraded";
+
+/** How many things wait on the owner: splits and escalations still unlabelled, and the three stuck steps, less
+ * what this visit settled. */
 export function waiting(q: Quality): number {
   const n = q.night;
-  return n.splits.filter((s) => !s.label).length + n.awaiting_classification.length + n.analysis_failed.length + n.ungraded.length;
+  const open = (xs: { settled?: string }[]) => xs.filter((x) => !x.settled).length;
+  return open(n.splits.filter((s) => !s.label)) + open(n.awaiting_classification) + open(n.analysis_failed) + open(n.ungraded);
+}
+
+/** The quality page with one item marked settled, in place: the page and the sidebar read the same copy. */
+export function settle(q: Quality, list: Waiting, paperId: string, topic: string | null | undefined, what: string): Quality {
+  const mark = <T extends { paper_id: string; topic?: string | null }>(xs: T[]): T[] => xs.map((x) => (x.paper_id === paperId && (topic == null || x.topic === topic) ? { ...x, settled: what } : x));
+  const night = { ...q.night };
+  if (list === "splits") night.splits = mark(night.splits);
+  else night[list] = mark(night[list]);
+  return { ...q, night };
 }
 
 export type Level = "ok" | "warn" | "bad";
@@ -164,10 +181,12 @@ export function pipelineSide(item: SessionItem): "relevant or above" | "below" |
   return item.why === "above" ? "relevant or above" : item.why === "below" ? "below" : null;
 }
 
-/** Whether the owner's Fit on the drawn topic sits on the other side from the pipeline's draw. */
+/** Whether the owner's Fit on the drawn topic sits on the other side from the pipeline's: its verdict, or the
+ * draw's side while the verdict is gone. */
 export function differs(item: SessionItem): boolean {
   const fit = item.fit[item.topic];
   if (!fit || fit === "unsure") return false;
+  if (item.verdict) return admits(fit) !== admits(item.verdict);
   const side = pipelineSide(item);
   return side === "relevant or above" ? !admits(fit) : side === "below" ? admits(fit) : false;
 }

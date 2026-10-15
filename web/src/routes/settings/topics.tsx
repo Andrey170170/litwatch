@@ -139,16 +139,17 @@ export function TopicEditorPage() {
   if (!tree.data) return <Load q={tree} />;
   const cls = tree.data.classes.find((c) => c.slug === slug);
   if (!cls) return <p className="empty">There is no such class.</p>;
-  // Keyed by what was loaded: the form opens on the topic as it is, and on a fresh copy after a save.
   const current = tree.data.topics?.find((t) => t.class === slug) ?? null;
-  return <TopicEditor key={JSON.stringify(current)} tree={tree.data} cls={cls} current={current} />;
+  return <TopicEditor key={slug} tree={tree.data} cls={cls} current={current} />;
 }
 
 function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: Topic | null }) {
   const stats = useQuery(taxonomyStatsQuery);
   const save = useSaveTopic();
   const navigate = useNavigate();
-  const base = asForm(current ?? fresh(cls));
+  // The form against what was loaded, or what was last saved here; the taxonomy's refetch after a save does
+  // not reopen it.
+  const [base, setBase] = useState(() => asForm(current ?? fresh(cls)));
   const [form, setForm] = useState(base);
   const [saved, setSaved] = useState<{ before: Topic | null } | null>(null);
   // The keyword being typed, or null while the "+ keyword" button shows.
@@ -166,7 +167,15 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
   };
   const onSave = () => {
     const body: Topic = { ...form, rubric: form.depth === "focus" ? form.rubric || null : null, interests: form.interests || null };
-    save.mutate({ slug: cls.slug, topic: body }, { onSuccess: () => setSaved({ before: current }) });
+    save.mutate(
+      { slug: cls.slug, topic: body },
+      {
+        onSuccess: () => {
+          setSaved({ before: current });
+          setBase(form);
+        },
+      },
+    );
   };
   return (
     <div className="setpg">

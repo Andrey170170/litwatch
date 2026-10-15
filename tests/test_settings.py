@@ -203,6 +203,14 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     assert t["classified"] and t["probability"] == 0.3 and t["threshold"] == 0.5
     assert (t["classifier"], t["uncertain"], t["keyword"]) == (False, True, False)
     assert (t["graded"], t["judge"], t["check"]) == (True, "related", "adjacent")
+    # A miss on the parent: the classifier's membership in the Focus class stands in it too.
+    from litwatch.feedback import misses as misses_store
+
+    await misses_store.report(conn, P.id, "interpretability")
+    await _classify(conn, P, {FAITH.slug: 0.9, "interpretability": 0.1}, FAITH.slug)
+    found = (await client.get("/api/settings/misses")).json()
+    (parent,) = [x for x in found if x["topic"] == "interpretability"]
+    assert parent["trace"]["classifier"] is True and parent["trace"]["probability"] == 0.1
 
     # Reactions over 30 days per topic and reason, for Overview.
     await word.react(

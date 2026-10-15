@@ -107,31 +107,37 @@ async def reactions_by_topic(conn: psycopg.AsyncConnection, days: int = 30) -> l
     )
 
 
-async def misses(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
+async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[dict[str, Any]]:
     """Reported misses, newest first, each with what the stages concluded for the owner's topic
     on the paper's current text (feedback.md, misses): whether it has been classified and the
     classifier's probability for the topic's class, which of the classifier, the uncertain band
-    and the keyword check made it a member, and the graders' opinions from the current verdict.
+    and the keyword check made it a member (a classifier membership anywhere under the class
+    counts, as it stands in the class), and the graders' opinions from the current verdict.
     Null where a stage has not run on this text."""
+    # Each followed topic's class with every class under it, as (topic, class) pairs.
+    pairs = [(t.slug, c) for t in (tree.topics if tree else []) for c in tree.subtree(t.slug)]
     return await _all(
         conn,
         """
+        WITH under AS (SELECT * FROM unnest(%s::text[], %s::text[]) AS under (topic, class))
         SELECT m.id, m.paper_id, m.topic, m.reported_at, p.title,
                EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = m.paper_id
                        AND c.paper_revision = p.revision) AS classified,
                (SELECT (c.response->'probabilities'->>m.topic)::float FROM classifications c
                 WHERE c.paper_id = m.paper_id AND c.paper_revision = p.revision
                 ORDER BY c.id DESC LIMIT 1) AS probability,
-               (SELECT coalesce(array_agg(x.source), '{}') FROM memberships x
-                WHERE x.paper_id = m.paper_id AND x.class = m.topic AND x.member
-                  AND x.paper_revision = p.revision
-                  AND x.source IN ('classifier', 'uncertain', 'keyword')) AS sources,
+               (SELECT coalesce(array_agg(DISTINCT x.source), '{}') FROM memberships x
+                WHERE x.paper_id = m.paper_id AND x.member AND x.paper_revision = p.revision
+                  AND x.source IN ('classifier', 'uncertain', 'keyword')
+                  AND (x.class = m.topic OR x.class IN
+                       (SELECT class FROM under WHERE under.topic = m.topic))) AS sources,
                (SELECT v.opinions FROM verdicts v WHERE v.paper_id = m.paper_id
                 AND v.topic = m.topic AND v.paper_revision = p.revision
                 ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) AS opinions
         FROM misses m JOIN papers p ON p.id = m.paper_id
         ORDER BY m.reported_at DESC, m.id DESC
         """,
+        ([t for t, _ in pairs], [c for _, c in pairs]),
     )
 
 
