@@ -6,6 +6,9 @@ from typing import Any
 
 import psycopg
 
+from litwatch.core.evaluation import recall
+from litwatch.store import evaluation
+
 
 async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> list[dict]:
     return await (await conn.execute(query, params)).fetchall()
@@ -64,3 +67,20 @@ async def runs(conn: psycopg.AsyncConnection, limit: int = 30) -> list[dict[str,
         "updated FROM runs ORDER BY id DESC LIMIT %s",
         (limit,),
     )
+
+
+async def replay_recall(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
+    """Recall per Focus topic from the latest replay (feedback.md, evaluation): the four numbers
+    for each cohort and topic with their n, never pooled, and the run they come from; None
+    before any replay. A replay still running, or cut short, counts what has concluded."""
+    eval_run_id = await evaluation.latest(conn, "replay")
+    if eval_run_id is None:
+        return None
+    run = await evaluation.get(conn, eval_run_id)
+    return {
+        "eval_run": eval_run_id,
+        "started_at": run["started_at"],
+        "finished_at": run["finished_at"],
+        "cost": float(run["cost"]) if run["cost"] is not None else None,
+        "recall": recall(await evaluation.outcomes(conn, eval_run_id)),
+    }
