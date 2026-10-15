@@ -69,7 +69,7 @@ class Models(_Section):
     )
     # A decision model asked whether an Area verdict's Fit holds.
     area_check: RoleConfig = RoleConfig(
-        provider="openrouter", model="openai/gpt-6-luna-decisions", decisions=True
+        provider="openrouter", model="typesafe/jev-1.13", decisions=True
     )
     field_grade: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5")
     writer: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")

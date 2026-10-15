@@ -130,7 +130,7 @@ model = "meta/muse-spark-1.3-contributor"
 
 [models.area_check]
 provider = "openrouter"
-model = "openai/gpt-6-luna-decisions"
+model = "typesafe/jev-1.13"
 decisions = true
 
 [models.field_grade]
