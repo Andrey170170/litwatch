@@ -14,8 +14,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from litwatch import fulltext
+from litwatch.api import digests, reading, settings
 from litwatch.api import integrations as integrations_api
-from litwatch.api import reading, settings
 from litwatch.api.deps import authorised
 from litwatch.config import Config
 from litwatch.core import (
@@ -100,6 +100,7 @@ def create_app(
     app.state.fulltext_wake = asyncio.Event()  # set to have the full-text worker look now
     protected = [Depends(authorised)]
     app.include_router(reading.router, dependencies=protected)
+    app.include_router(digests.router, dependencies=protected)
     app.include_router(settings.router, dependencies=protected)
     app.include_router(integrations_api.router, dependencies=protected)
     app.include_router(reading.session)

@@ -28,7 +28,10 @@ numbers per cohort and Focus topic over labels frozen with the run, resumable, a
 Quality; the first run in `evals/2026-10-15-replay.md`); N3's text reads (the archive's LaTeX text with its arXiv
 version, urgent requests, a disposable archive for verification) and its full-text queue (Briefs with the
 overstatement line, the Gist and Weight from the full text, the lease, revisions, Quality and the status line,
-`litwatch fulltext`). Next: N2c's two-week run, and the grade table and rarity offsets tuned on the labels; N3's
+`litwatch fulltext`); N4's digests (due found from the database, daily and weekly digests per depth with their Gists
+and picks, quiet days, records with the live set-aside mark, the bounded wait in the nightly run, failed digests on
+Quality and the status line, the Day, Week, History and digest API with the topics' digest strips, `litwatch digests
+write` for a window and `litwatch eval digests` for the voice check). Next: N2c's two-week run, and the grade table and rarity offsets tuned on the labels; N3's
 Briefs harness and Deep card passes.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the

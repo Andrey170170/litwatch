@@ -4,9 +4,9 @@ import type { Schemas } from "@/api/client";
 export type RunStatus = Schemas["RunStatus"];
 export type StatusLine = { text: string; tone: "ok" | "running" | "failed" | "over"; page: "overview" | "needs" | "runs"; title: string };
 
-/** Papers and text passes waiting on the owner after a failure: counted on the status line. */
+/** Papers, text passes and digests waiting on the owner after a failure: counted on the status line. */
 export function problems(s: RunStatus): number {
-  return s.awaiting_classification + s.analysis_failed + s.ungraded + s.fulltext_failed;
+  return s.awaiting_classification + s.analysis_failed + s.ungraded + s.fulltext_failed + s.digests_failed;
 }
 
 /** Failed outranks running, running outranks over budget; nothing before the first run. */

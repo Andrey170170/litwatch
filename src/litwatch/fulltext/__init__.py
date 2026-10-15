@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -220,6 +221,11 @@ def _outcome(a: Attempt) -> str:
     return "briefs_written" if a.output is not None else "fulltext_failed"
 
 
+def worked(counts: Counter[str]) -> int:
+    """How many passes `work`'s tries spent on: written or failed, not those awaiting text."""
+    return counts["briefs_written"] + counts["fulltext_failed"]
+
+
 async def work(
     conn: psycopg.AsyncConnection,
     config: Config,
@@ -228,13 +234,17 @@ async def work(
     run: ModelRun | None = None,
     gateway: GatewayFactory = default_gateway,
     limit: int | None = None,
+    deadline: float | None = None,
 ) -> Counter[str]:
     """Try every pass that is due once, up to `limit`, `BATCH` at a time: read its text, and
-    write from it. The calls go on `run`, or on a run of kind `fulltext` opened only when some
-    text arrived. Returns how the tries ended."""
+    write from it. No batch starts after `deadline` (`time.monotonic()`); those left are the
+    worker's. The calls go on `run`, or on a run of kind `fulltext` opened only when some text
+    arrived. Returns how the tries ended."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
-    while limit is None or len(tried) < limit:
+    while (limit is None or len(tried) < limit) and (
+        deadline is None or time.monotonic() < deadline
+    ):
         size = BATCH if limit is None else min(BATCH, limit - len(tried))
         claimed = [c for c in await store_.claim(conn, LEASE, size, tried) if c.id not in tried]
         if not claimed:
@@ -286,8 +296,7 @@ async def work_waiting(
     total: Counter[str] = Counter()
     deadline = asyncio.get_running_loop().time() + wait
     while True:
-        worked = total["briefs_written"] + total["fulltext_failed"]
-        allowance = None if limit is None else limit - worked
+        allowance = None if limit is None else limit - worked(total)
         if allowance is not None and allowance <= 0:
             return total
         done = await work(conn, config, archive, gateway=gateway, limit=allowance)

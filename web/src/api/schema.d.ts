@@ -264,6 +264,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/digests/days/{day}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Day
+         * @description A day's daily digests, every topic's at Gist level, and where ‹ › step.
+         */
+        get: operations["day_api_digests_days__day__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/digests/weeks/{day}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Week
+         * @description The weekly digests of the week holding `day`, and where ‹ › step.
+         */
+        get: operations["week_api_digests_weeks__day__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/digests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * History
+         * @description History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily
+         *     Marks and whether arXiv listed papers on it, and the weeks those days fall in with their
+         *     weekly Marks.
+         */
+        get: operations["history_api_digests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/digests/{digest_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Digest
+         * @description A digest in full: its text and its papers by role, each as it was shown.
+         */
+        get: operations["digest_api_digests__digest_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/digests/{digest_id}/write": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Again
+         * @description Write a failed digest again now, over the papers due for it now, as a run of its own.
+         *     It may fail again. 409 when it is not failed (written meanwhile), its topic is paused, or
+         *     another job holds the run lock.
+         */
+        post: operations["write_again_api_digests__digest_id__write_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/taxonomy": {
         parameters: {
             query?: never;
@@ -948,6 +1052,29 @@ export interface components {
             recorded_at?: string | null;
         };
         /**
+         * Day
+         * @description A day's daily digests in the fixed topic order. `released` is false on a day arXiv listed
+         *     nothing; `previous` and `next` are the nearest days with digests; on a Monday, `weekly` is
+         *     the Monday of the week whose weekly digests came out that day.
+         */
+        Day: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Released */
+            released: boolean;
+            /** Digests */
+            digests: components["schemas"]["DigestCard"][];
+            /** Previous */
+            previous?: string | null;
+            /** Next */
+            next?: string | null;
+            /** Weekly */
+            weekly?: string | null;
+        };
+        /**
          * DeepCard
          * @description A deep card: the reading card the deep service wrote, as it wrote it.
          */
@@ -967,6 +1094,158 @@ export interface components {
          * @enum {string}
          */
         Depth: "focus" | "area" | "field";
+        /**
+         * Digest
+         * @description A digest in full: its text and every paper by role; why it failed, when it did.
+         */
+        Digest: {
+            /** Id */
+            id: number;
+            topic: components["schemas"]["Badge"];
+            period: components["schemas"]["DigestPeriod"];
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            state: components["schemas"]["DigestState"];
+            counts: components["schemas"]["DigestCounts"];
+            best_rarity?: components["schemas"]["Rarity"] | null;
+            /** Gist */
+            gist?: string | null;
+            /** Text */
+            text?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Written At
+             * Format: date-time
+             */
+            written_at: string;
+            /** Papers */
+            papers: components["schemas"]["DigestPaper"][];
+        };
+        /**
+         * DigestCard
+         * @description A digest at Gist level (a Day or a Week): its Gist and up to three of its papers (its
+         *     picks, else its central papers); `more` are the rest.
+         */
+        DigestCard: {
+            /** Id */
+            id: number;
+            topic: components["schemas"]["Badge"];
+            period: components["schemas"]["DigestPeriod"];
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            state: components["schemas"]["DigestState"];
+            counts: components["schemas"]["DigestCounts"];
+            best_rarity?: components["schemas"]["Rarity"] | null;
+            /** Gist */
+            gist?: string | null;
+            /** Papers */
+            papers: components["schemas"]["DigestPaper"][];
+            /** More */
+            more: number;
+        };
+        /**
+         * DigestCounts
+         * @description What a digest's Mark counts: the papers it covered, its picks, and of them those central,
+         *     related, and graded must read.
+         */
+        DigestCounts: {
+            /**
+             * Papers
+             * @default 0
+             */
+            papers: number;
+            /**
+             * Picks
+             * @default 0
+             */
+            picks: number;
+            /**
+             * Central
+             * @default 0
+             */
+            central: number;
+            /**
+             * Related
+             * @default 0
+             */
+            related: number;
+            /**
+             * Must Read
+             * @default 0
+             */
+            must_read: number;
+        };
+        /**
+         * DigestMark
+         * @description A digest at Mark level (History): its topic, how many papers, its best rarity.
+         */
+        DigestMark: {
+            /** Id */
+            id: number;
+            topic: components["schemas"]["Badge"];
+            period: components["schemas"]["DigestPeriod"];
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            state: components["schemas"]["DigestState"];
+            counts: components["schemas"]["DigestCounts"];
+            best_rarity?: components["schemas"]["Rarity"] | null;
+        };
+        /**
+         * DigestPaper
+         * @description A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set
+         *     it below relevant where it was graded.
+         */
+        DigestPaper: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Announced */
+            announced?: string | null;
+            role: components["schemas"]["DigestRole"];
+            /** Why */
+            why?: string | null;
+            /** Revision */
+            revision: number;
+            /** Gist */
+            gist?: string | null;
+            fit?: components["schemas"]["Fit"] | null;
+            grade?: components["schemas"]["Grade"] | null;
+            rarity: components["schemas"]["Rarity"];
+            /**
+             * Set Aside
+             * @default false
+             */
+            set_aside: boolean;
+        };
+        /**
+         * DigestPeriod
+         * @enum {string}
+         */
+        DigestPeriod: "day" | "week";
+        /**
+         * DigestRole
+         * @description How a digest shows one of its papers.
+         * @enum {string}
+         */
+        DigestRole: "pick" | "listed" | "mentioned";
+        /**
+         * DigestState
+         * @description A digest is published once written, or once it says "Nothing new"; a failed one is
+         *     written again by the next run, over the papers due then.
+         * @enum {string}
+         */
+        DigestState: "written" | "nothing_new" | "failed";
         /** DrawIn */
         DrawIn: {
             /** Seed */
@@ -1119,6 +1398,31 @@ export interface components {
          */
         Hand: "save" | "unsave";
         /**
+         * History
+         * @description Days from `until` back to `since`, newest first, and the weeks they touch; `start` is the
+         *     day of the oldest digest, where History stops.
+         */
+        History: {
+            /** Days */
+            days: components["schemas"]["HistoryDay"][];
+            /** Weeks */
+            weeks: components["schemas"]["HistoryWeek"][];
+            /** Start */
+            start?: string | null;
+        };
+        /** HistoryDay */
+        HistoryDay: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Released */
+            released: boolean;
+            /** Marks */
+            marks: components["schemas"]["DigestMark"][];
+        };
+        /**
          * HistoryItem
          * @description Something said about the paper, oldest first: every verdict (`value` its Fit), the
          *     owner's label (its value) and thumb (its value and reason) as they stand, misses, and each
@@ -1153,6 +1457,16 @@ export interface components {
             split?: boolean | null;
             /** Escalated */
             escalated?: boolean | null;
+        };
+        /** HistoryWeek */
+        HistoryWeek: {
+            /**
+             * Monday
+             * Format: date
+             */
+            monday: string;
+            /** Marks */
+            marks: components["schemas"]["DigestMark"][];
         };
         /**
          * IntegrationCard
@@ -1668,6 +1982,11 @@ export interface components {
              * @default 0
              */
             fulltext_failed: number;
+            /**
+             * Digests Failed
+             * @default 0
+             */
+            digests_failed: number;
             /** Over Budget */
             over_budget?: string[];
         };
@@ -1722,6 +2041,22 @@ export interface components {
          * @enum {string}
          */
         Status: "draft" | "active" | "paused";
+        /**
+         * StripDigest
+         * @description One square of a topic's digest strip: a digest, coloured by its best rarity (none for
+         *     nothing new), red when it failed.
+         */
+        StripDigest: {
+            /** Id */
+            id: number;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            state: components["schemas"]["DigestState"];
+            best_rarity?: components["schemas"]["Rarity"] | null;
+        };
         /**
          * Taxonomy
          * @description The tree, parents before children and siblings in the owner's order, and the followed
@@ -1817,6 +2152,8 @@ export interface components {
             status: components["schemas"]["Status"];
             /** Subject */
             subject: string;
+            /** Strip */
+            strip?: components["schemas"]["StripDigest"][];
             /** Papers */
             papers: number;
             /** Saved */
@@ -1844,6 +2181,8 @@ export interface components {
             status: components["schemas"]["Status"];
             /** Subject */
             subject: string;
+            /** Strip */
+            strip?: components["schemas"]["StripDigest"][];
         };
         /**
          * TopicPage
@@ -1911,6 +2250,23 @@ export interface components {
             version: number;
             /** Date */
             date?: string | null;
+        };
+        /**
+         * Week
+         * @description A week's weekly digests in the fixed topic order, keyed by its Monday.
+         */
+        Week: {
+            /**
+             * Monday
+             * Format: date
+             */
+            monday: string;
+            /** Digests */
+            digests: components["schemas"]["DigestCard"][];
+            /** Previous */
+            previous?: string | null;
+            /** Next */
+            next?: string | null;
         };
         /**
          * Weight
@@ -2511,6 +2867,183 @@ export interface operations {
                 content?: never;
             };
             /** @description Not a Focus topic */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    day_api_digests_days__day__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                day: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Day"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    week_api_digests_weeks__day__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                day: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Week"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    history_api_digests_get: {
+        parameters: {
+            query: {
+                since: string;
+                until: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["History"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    digest_api_digests__digest_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                digest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Digest"];
+                };
+            };
+            /** @description No such digest, or its topic is no longer shown */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_again_api_digests__digest_id__write_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                digest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Digest"];
+                };
+            };
+            /** @description No such digest, or its topic is no longer shown */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The digest is not failed, its topic is not active, or a job runs */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -134,9 +134,9 @@ async def _one(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> d
 
 async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     """The latest nightly run: running, failed (or stuck past `STALE_AFTER`), or done; done
-    with papers awaiting classification, or with analysis, a grading or a full-text pass
-    stopped, needs the owner's attention. `papers` are those the run classified; while it runs,
-    `waiting` are those still to classify."""
+    with papers awaiting classification, with analysis, a grading or a full-text pass stopped,
+    or with a digest that failed, needs the owner's attention. `papers` are those the run
+    classified; while it runs, `waiting` are those still to classify."""
     run = await _one(conn, "SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
     if run is None:
         return {"state": "none"}
@@ -145,6 +145,9 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     analysis = await failures.count_stuck(conn, "analysis", FAILED_RUNS)
     ungraded = await failures.count_stuck(conn, "grading", FAILED_RUNS)
     texts = await fulltext.count_stuck(conn, FAILED_RUNS)
+    from litwatch.store import digests  # it reads this module's SCOPE
+
+    failed_digests = await digests.count_failed(conn)
     papers = await _one(
         conn,
         # The owner's classifications by hand (model `owner`) during the run are not its work.
@@ -161,6 +164,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         "analysis_failed": analysis,
         "ungraded": ungraded,
         "fulltext_failed": texts,
+        "digests_failed": failed_digests,
     }
     if run["finished_at"] is None and now - run["started_at"] < STALE_AFTER:
         waiting = await _one(
@@ -178,7 +182,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         return result | {"state": "running", "waiting": waiting["n"]}
     if run["error"] or run["finished_at"] is None:
         return result | {"state": "failed", "error": run["error"]}
-    attention = awaiting or analysis or ungraded or texts
+    attention = awaiting or analysis or ungraded or texts or failed_digests
     return result | {"state": "attention" if attention else "quiet"}
 
 

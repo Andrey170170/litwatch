@@ -29,6 +29,8 @@ PUBLICATION_FOUND = "publication.found"
 CARD_REQUESTED = "card.requested"
 # A deep card was stored for a paper (emitted by the `deep` integration).
 CARD_READY = "card.ready"
+# A digest was published, written or "Nothing new": its id, topic, period and day.
+DIGEST_WRITTEN = "digest.written"
 
 
 async def emit(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -23,6 +23,10 @@ from litwatch.core import (
     Status,
     Weight,
 )
+from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
+
+# The most days one History request covers.
+HISTORY_SPAN = timedelta(days=92)
 
 # -- the status line -------------------------------------------------------------------------------
 
@@ -43,6 +47,7 @@ class RunStatus(BaseModel):
     ungraded: int = 0  # gradings that failed three runs in a row, stopped
     # full-text passes that failed three runs in a row, or await their text over a week
     fulltext_failed: int = 0
+    digests_failed: int = 0  # digests whose writer call failed, written again by the next run
     over_budget: list[str] = Field(default_factory=list)  # providers projected over budget
 
 
@@ -192,9 +197,21 @@ class Papers(BaseModel):
     left_out: list[str] = Field(default_factory=list)
 
 
+class StripDigest(BaseModel):
+    """One square of a topic's digest strip: a digest, coloured by its best rarity (none for
+    nothing new), red when it failed."""
+
+    id: int
+    day: date  # a weekly digest's Monday
+    state: DigestState
+    best_rarity: Rarity | None = None
+
+
 class TopicHead(Badge):
     status: Status
     subject: str
+    # The topic's latest digests, oldest first: daily for Focus and Area, weekly for Field.
+    strip: list[StripDigest] = Field(default_factory=list)
 
 
 class TopicCard(TopicHead):
@@ -504,6 +521,121 @@ class PublicationIn(BaseModel):
 
 class SessionIn(BaseModel):
     token: str
+
+
+# -- digests --------------------------------------------------------------------------------------
+
+
+class DigestCounts(BaseModel):
+    """What a digest's Mark counts: the papers it covered, its picks, and of them those central,
+    related, and graded must read."""
+
+    papers: int = 0
+    picks: int = 0
+    central: int = 0
+    related: int = 0
+    must_read: int = 0
+
+
+class DigestMark(BaseModel):
+    """A digest at Mark level (History): its topic, how many papers, its best rarity."""
+
+    id: int
+    topic: Badge
+    period: DigestPeriod
+    day: date  # a weekly digest's Monday
+    state: DigestState
+    counts: DigestCounts
+    best_rarity: Rarity | None = None
+
+
+class DigestPaper(BaseModel):
+    """A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set
+    it below relevant where it was graded."""
+
+    id: str
+    title: str
+    announced: date | None = None
+    role: DigestRole
+    why: str | None = None  # a pick's reason
+    revision: int
+    gist: str | None = None
+    fit: Fit | None = None
+    grade: Grade | None = None
+    rarity: Rarity
+    set_aside: bool = False
+
+
+class DigestCard(DigestMark):
+    """A digest at Gist level (a Day or a Week): its Gist and up to three of its papers (its
+    picks, else its central papers); `more` are the rest."""
+
+    gist: str | None = None
+    papers: list[DigestPaper]
+    more: int
+
+
+class Digest(DigestMark):
+    """A digest in full: its text and every paper by role; why it failed, when it did."""
+
+    gist: str | None = None
+    text: str | None = None
+    error: str | None = None
+    written_at: datetime
+    papers: list[DigestPaper]
+
+
+class Day(BaseModel):
+    """A day's daily digests in the fixed topic order. `released` is false on a day arXiv listed
+    nothing; `previous` and `next` are the nearest days with digests; on a Monday, `weekly` is
+    the Monday of the week whose weekly digests came out that day."""
+
+    day: date
+    released: bool
+    digests: list[DigestCard]
+    previous: date | None = None
+    next: date | None = None
+    weekly: date | None = None
+
+
+class Week(BaseModel):
+    """A week's weekly digests in the fixed topic order, keyed by its Monday."""
+
+    monday: date
+    digests: list[DigestCard]
+    previous: date | None = None
+    next: date | None = None
+
+
+class HistoryDay(BaseModel):
+    day: date
+    released: bool
+    marks: list[DigestMark]
+
+
+class HistoryWeek(BaseModel):
+    monday: date
+    marks: list[DigestMark]
+
+
+class History(BaseModel):
+    """Days from `until` back to `since`, newest first, and the weeks they touch; `start` is the
+    day of the oldest digest, where History stops."""
+
+    days: list[HistoryDay]
+    weeks: list[HistoryWeek]
+    start: date | None = None
+
+
+class HistoryIn(BaseModel):
+    since: date
+    until: date
+
+    @model_validator(mode="after")
+    def _span(self) -> HistoryIn:
+        if not timedelta(0) <= self.until - self.since <= HISTORY_SPAN:
+            raise ValueError(f"since must be before until, at most {HISTORY_SPAN.days} days")
+        return self
 
 
 # -- integrations ----------------------------------------------------------------------------------

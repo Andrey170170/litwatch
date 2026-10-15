@@ -37,16 +37,20 @@ eval_app = typer.Typer(no_args_is_help=True, help="Dry runs measured against the
 library_app = typer.Typer(no_args_is_help=True, help="Effective grades, rarity and the library.")
 taxonomy_app = typer.Typer(no_args_is_help=True, help="The class tree and its topics, as YAML.")
 intake_app = typer.Typer(help="Take papers in: from arXiv, or a window from the archive.")
+digests_app = typer.Typer(no_args_is_help=True, help="Daily and weekly digests.")
 app.add_typer(db_app, name="db")
 app.add_typer(eval_app, name="eval")
 app.add_typer(library_app, name="library")
 app.add_typer(taxonomy_app, name="taxonomy")
 app.add_typer(intake_app, name="intake")
+app.add_typer(digests_app, name="digests")
 console = Console()
 
 ConfigPath = Annotated[
     Path | None, typer.Option("--config", help="litwatch.toml; default $LITWATCH_CONFIG or ./")
 ]
+Since = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The first day.")]
+Until = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The last day.")]
 
 
 def _config(path: Path | None) -> configuration.Config:
@@ -152,6 +156,23 @@ def nightly(
     """The nightly run as the scheduler runs it: intake, classification, analysis, grading."""
     cfg = _config(config)
     run_id = _run(lambda conn: nightly_job.run(conn, cfg, fetch=fetch, days=days, limit=limit))
+    run = _run(lambda conn: runs.get(conn, run_id))
+    console.print(f"run {run_id}: cost ${run['cost']}")
+    console.print_json(data=run["counts"])
+
+
+# -- digests --------------------------------------------------------------------------------------
+
+
+@digests_app.command("write")
+def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None:
+    """Write the digests of every day from --since to --until, and the weekly digests of the
+    weeks inside it, as the nightly run would have on those days, over the papers due now
+    (the restart, a missed night). Published digests stay as they are."""
+    from litwatch.jobs import digests as digests_job  # noqa: PLC0415
+
+    cfg = _config(config)
+    run_id = _run(lambda conn: digests_job.window(conn, cfg, since.date(), until.date()))
     run = _run(lambda conn: runs.get(conn, run_id))
     console.print(f"run {run_id}: cost ${run['cost']}")
     console.print_json(data=run["counts"])
@@ -390,6 +411,39 @@ def eval_report(
     text = _run(work)
     if text is None:
         raise SystemExit("no such replay")
+    print(text, end="")
+    if out is not None:
+        out.write_text(text)
+
+
+@eval_app.command("digests")
+def eval_digests(
+    since: Since,
+    until: Until,
+    out: Annotated[Path | None, typer.Option(help="Also write the report here.")] = None,
+) -> None:
+    """The written digests from --since to --until checked against the voice rules and the
+    picks each depth allows, and the Focus papers still due: no calls."""
+    from litwatch.core import FAILED_RUNS, Depth  # noqa: PLC0415
+    from litwatch.core.digests import DigestPeriod  # noqa: PLC0415
+    from litwatch.quality import digests as harness  # noqa: PLC0415
+    from litwatch.store import digests as digests_store  # noqa: PLC0415
+
+    first, last = since.date(), until.date()
+
+    async def work(conn: psycopg.AsyncConnection) -> str:
+        tree = await taxonomy_store.load(conn)
+        topics = tree.shown() if tree else []
+        due = {
+            t.slug: len(await digests_store.due(conn, tree, t, DigestPeriod.DAY, last, FAILED_RUNS))
+            for t in topics
+            if t.depth == Depth.FOCUS
+        }
+        written = await digests_store.written(conn, first, last)
+        depths = {t.slug: t.depth.value for t in topics}
+        return harness.report(first, last, written, depths, due)
+
+    text = _run(work)
     print(text, end="")
     if out is not None:
         out.write_text(text)

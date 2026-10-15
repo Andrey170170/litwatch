@@ -101,7 +101,7 @@ class Integration(Protocol):
 
 ## Events
 
-Every event below carries the paper's id in `paper_id`.
+Every event below but `digest.written` carries the paper's id in `paper_id`.
 
 | Type | When | Payload |
 | --- | --- | --- |
@@ -117,6 +117,7 @@ Every event below carries the paper's id in `paper_id`.
 | `publication.found` | A published record was stored for the paper, by lookup or by the owner | `dblp_key`, `venue`, `year`, `doi`, `by_owner`: bool |
 | `card.requested` | The owner asked for a deep card (`POST /api/papers/<id>/card`), whatever the grade | none |
 | `card.ready` | The `deep` integration stored a card | `model` |
+| `digest.written` | A digest was published: written, or saying "Nothing new" (a failed one is not; it is published when written again). `paper_id` is null | `digest`: its id, for `GET /api/digests/<id>`; `topic`; `period`: `day` or `week`; `day`: the day, or the week's Monday; `state`: `written` or `nothing_new` |
 
 `grade.changed` is the one to watch for grades; `verdict.recorded` is the pipeline's internal
 record and can disagree with what the owner sees. The **effective Fit** is the owner's word

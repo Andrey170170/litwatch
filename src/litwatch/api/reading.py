@@ -32,12 +32,14 @@ from litwatch.core import (
     page_standing,
 )
 from litwatch.core.classification import Membership, Source, standing
+from litwatch.core.digests import DAILY, DigestPeriod
 from litwatch.core.rules import FAILED_RUNS, REACTION_WORDS
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
 from litwatch.jobs import publications as lookups
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
+from litwatch.store import digests as digests_store
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import reading
@@ -529,10 +531,25 @@ async def lookup(body: s.LookupIn, c: Conn) -> s.Lookup:
 # -- topics ----------------------------------------------------------------------------------------
 
 
-def _head(tree: Taxonomy, topic: Topic) -> dict[str, Any]:
+# A digest strip's length: the daily digests of a Focus or Area topic, the weekly of a Field's.
+STRIP = {DigestPeriod.DAY: 15, DigestPeriod.WEEK: 8}
+
+
+async def _strips(c: psycopg.AsyncConnection, topics: list[Topic]) -> dict[str, list[Any]]:
+    """Each topic's digest strip, oldest first."""
+    found: dict[str, list[Any]] = {t.slug: [] for t in topics}
+    for period, limit in STRIP.items():
+        slugs = [t.slug for t in topics if (t.depth in DAILY) == (period == DigestPeriod.DAY)]
+        for r in await digests_store.strips(c, slugs, period, limit):
+            found[r["topic"]].append(s.StripDigest(**r))
+    return found
+
+
+def _head(tree: Taxonomy, topic: Topic, strip: list[Any]) -> dict[str, Any]:
     return _looks(tree)[topic.slug].model_dump() | {
         "status": topic.status,
         "subject": topic.subject,
+        "strip": strip,
     }
 
 
@@ -542,12 +559,13 @@ async def topics(c: Conn) -> list[s.TopicGroup]:
     tree = await taxonomy_store.load(c)
     cards = await reading.topic_cards(c, tree) if tree else {}
     shown = tree.shown() if tree else []
+    strips = await _strips(c, shown)
     return [
         s.TopicGroup(
             depth=depth,
             topics=[
                 s.TopicCard(
-                    **_head(tree, t),
+                    **_head(tree, t, strips[t.slug]),
                     papers=cards[t.slug]["papers"],
                     saved=cards[t.slug]["saved"],
                     counts=s.RarityCounts(**cards[t.slug]["rarities"]),
@@ -571,7 +589,7 @@ async def topic(slug: str, c: Conn, params: Annotated[s.TopicPapersIn, Query()])
     )
     looks = _looks(tree)
     return s.TopicPage(
-        topic=s.TopicHead(**_head(tree, found)),
+        topic=s.TopicHead(**_head(tree, found, (await _strips(c, [found]))[found.slug])),
         rows=[_row(tree, looks, r, s.TopicRow) for r in listed.rows],
         total=listed.total,
         counts=s.RarityCounts(**listed.rarities),

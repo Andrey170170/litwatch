@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import psycopg
@@ -11,6 +12,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch import events
 from litwatch.core import Paper, rewritten
+from litwatch.core.digests import announced
 
 # What `row_to_paper` reads; the stored body of every match would be megabytes nobody looks at.
 COLUMNS = """
@@ -68,7 +70,11 @@ def _iso(value: datetime | None) -> str | None:
 
 
 async def upsert(
-    conn: psycopg.AsyncConnection, papers: list[Paper], *, source: str = "arxiv"
+    conn: psycopg.AsyncConnection,
+    papers: list[Paper],
+    *,
+    source: str = "arxiv",
+    listed: Mapping[str, date] | None = None,
 ) -> Upserted:
     """Insert new papers and refresh metadata on replacements, emitting `paper.added` and
     `paper.revised` with the `source` in their payload.
@@ -78,6 +84,10 @@ async def upsert(
     but never replace canonical metadata. The archive's metadata is canonical (it came from
     OAI) and, like OAI's, dated by day, but it replaces stored metadata only when it is known
     to be newer: a higher version, or the same version on a later day.
+
+    A paper's listing day (`announced`) comes from its first version's submission time
+    (`core.digests.announced`) in canonical metadata; until that arrives, from `listed`, the
+    day a feed announced it as new (Atom carries no submission time).
     """
     result = Upserted()
     async with conn.transaction():
@@ -97,11 +107,15 @@ async def upsert(
                     INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
                                         published, updated, url, metadata_source,
                                         version, version_history,
-                                        doi, journal_ref, license)
+                                        doi, journal_ref, license, announced)
                     VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
                             %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
-                            %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s)
+                            %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s,
+                            %(announced)s)
                     ON CONFLICT (id) DO UPDATE SET
+                        -- Canonical metadata (Atom never updates) dates the first listing;
+                        -- a feed's date stands only until it does.
+                        announced = coalesce(EXCLUDED.announced, papers.announced),
                         -- The owner's correction stands while arXiv sends the text it fixed.
                         title = CASE WHEN {_KEPT}
                                      THEN papers.title ELSE EXCLUDED.title END,
@@ -149,6 +163,7 @@ async def upsert(
                         **p.model_dump(),
                         "authors": Jsonb(p.authors),
                         "version_history": Jsonb(p.version_history),
+                        "announced": announced(p) or (listed or {}).get(p.id),
                         "source": source,
                         "by_day": source in _BY_DAY,
                     },

@@ -43,8 +43,15 @@ label takes it out of the subtree). Eligible means:
 A **daily digest** covers the topic's due papers at the time it is written. Normally those are the day's papers; a
 paper that became eligible late (its grading failed on Friday and succeeded on Monday, its re-check finished after the
 wait) is in the next daily digest, shown with its announcement date. A **weekly digest** covers the papers that became
-due for the topic during its week; for a Field topic, which has no daily digest, writing the weekly is what clears
-them. The owner's word never makes a paper due: the owner already knows it.
+due for the topic during its week, and any paper a published daily digest covered that no weekly digest has yet (a
+daily digest written again after its week's weekly, the days before a recovery window's first Monday), so none is
+left out of every weekly; for a Field topic, which has no daily digest, writing the weekly is what clears
+them. The owner's word never makes a paper due: the owner already knows it. A paper announced more than three weeks
+before a digest's day is never due for it: late papers arrive within days, and one the collection gains much later (a
+re-run after a topic edit, a reported miss, an old paper read on demand) was never news. A paper's day is the arXiv
+listing that first showed it, from its first version's submission time (before 14:00 US Eastern on a weekday, the
+next weekday's listing). arXiv's holidays are not known: the papers a holiday delays keep the holiday's date and
+are in the next day's digests.
 
 ## Quiet days
 
@@ -84,7 +91,7 @@ configured timezone.
 
 A digest is **published** when it is written or says "Nothing new". A published digest is final: a re-run of the
 same day does not rewrite it, and papers that become due afterwards go into the next one. Each of its papers is frozen
-as it was shown: paper revision, Gist, effective Fit, grade, rarity, and its role (pick, listed or mentioned). The one
+as it was shown: paper revision, title, Gist, effective Fit, grade, rarity, and its role (pick, listed or mentioned). The one
 live element is the set-aside mark: when the owner later sets a paper below relevant, it stays in the digest, shown
 struck through. A paper is announced as new in a topic's daily digests once (first v1, decisions 15 and 19).
 

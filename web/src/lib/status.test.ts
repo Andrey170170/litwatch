@@ -8,6 +8,7 @@ const base: RunStatus = {
   analysis_failed: 0,
   ungraded: 0,
   fulltext_failed: 0,
+  digests_failed: 0,
 };
 
 describe("statusLine", () => {
@@ -21,6 +22,7 @@ describe("statusLine", () => {
     const s = statusLine({ ...base, state: "running", waiting: 30, analysis_failed: 2, ungraded: 1, over_budget: ["gist"] });
     expect(s).toMatchObject({ text: "3 failed", tone: "failed", page: "needs" });
     expect(statusLine({ ...base, fulltext_failed: 1 })).toMatchObject({ text: "1 failed", page: "needs" });
+    expect(statusLine({ ...base, digests_failed: 1 })).toMatchObject({ text: "1 failed", page: "needs" });
   });
   it("shows progress while running", () => {
     expect(statusLine({ ...base, state: "running", papers: 47, waiting: 165 })).toMatchObject({ text: "47/212", tone: "running" });
