@@ -175,10 +175,15 @@ def test_rarity_on_a_topic_page():
 @pytest.mark.parametrize(
     ("levels", "weight", "expected"),
     [
-        # Field topics are lowered by one; Focus and Area are not.
-        ([("agents", Depth.FIELD, Rarity.EPIC)], Weight.INCREMENTAL, (Rarity.RARE, "agents")),
+        # Field topics are lowered by two; Focus and Area are not.
+        ([("agents", Depth.FIELD, Rarity.EPIC)], Weight.INCREMENTAL, (Rarity.UNCOMMON, "agents")),
         (
             [("agents", Depth.FIELD, Rarity.EPIC), ("interp", Depth.AREA, Rarity.RARE)],
+            Weight.INCREMENTAL,
+            (Rarity.RARE, "interp"),  # a Field must read gives way to an Area relevant
+        ),
+        (
+            [("agents", Depth.FIELD, Rarity.LEGENDARY), ("interp", Depth.AREA, Rarity.RARE)],
             Weight.INCREMENTAL,
             (Rarity.RARE, "agents"),  # a tie goes to the first in the owner's order
         ),

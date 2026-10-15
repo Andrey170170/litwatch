@@ -240,11 +240,11 @@ async def test_a_row_carries_its_open_state(client, conn, shelves):
 
 async def test_badges_put_the_topic_giving_the_highest_level_first(client, conn):
     await classify(conn, P, FAITH.slug, AGENTS.slug)
-    await grade(conn, P, "adjacent")  # Focus adjacent: uncommon
-    await grade(conn, P, "central", AGENTS)  # Field must read: epic, lowered to rare
+    await grade(conn, P, "none")  # Focus none: common
+    await grade(conn, P, "central", AGENTS)  # Field must read: epic, lowered to uncommon
     (row,) = (await client.get("/api/papers", params={"q": "hidden"})).json()["rows"]
     assert [b["slug"] for b in row["badges"]] == [AGENTS.slug, FAITH.slug, INTERP.slug]
-    assert row["rarity"] == "rare"
+    assert row["rarity"] == "uncommon"
 
 
 async def test_badges_and_rail_cover_every_followed_topic_whose_page_holds_the_paper(client, conn):
