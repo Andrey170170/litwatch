@@ -65,6 +65,21 @@ export type Split = {
 /** A paper stuck after three failed runs of a step (`store.failures.stuck`). */
 export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; settled?: string };
 
+/** A full-text pass waiting on the owner (`store.fulltext.stuck`): failed three runs, or awaiting its text over
+ * a week. */
+export type TextPassStuck = {
+  id: number;
+  paper_id: string;
+  revision: number;
+  title: string;
+  kind: "brief" | "weight";
+  state: "failed" | "awaiting_text";
+  failed_runs: number;
+  last_error: string | null;
+  queued_at: string;
+  settled?: string;
+};
+
 export type Spend = { provider: string; spent: number; projected: number; budget: number | null; over: boolean };
 
 export type Recall = {
@@ -80,7 +95,7 @@ export type Recall = {
 };
 
 export type Quality = {
-  night: { run: number | null; error: string | null; splits: Split[]; awaiting_classification: Stuck[]; analysis_failed: Stuck[]; ungraded: Stuck[] };
+  night: { run: number | null; error: string | null; splits: Split[]; awaiting_classification: Stuck[]; analysis_failed: Stuck[]; ungraded: Stuck[]; fulltext: TextPassStuck[] };
   cost: Spend[];
   recall: { eval_run: number; started_at: string; finished_at: string | null; cost: number; recall: Recall[] } | null;
   calibration: { topic: string; precision: number | null; precision_n: number; dropped: number | null; dropped_n: number }[];
@@ -111,6 +126,8 @@ export type SessionItem = {
   why: "above" | "below" | "split" | "miss" | "reaction";
   /** The pipeline's Fit on the drawn topic; null while it has no verdict. */
   verdict: Fit | null;
+  /** The Fit the owner answered on the drawn topic; null until answered. `fit` holds the current labels. */
+  answer: LabelValue | null;
   answered_at: string | null;
   title: string;
   abstract: string;
@@ -124,21 +141,26 @@ export type Session = { id: number; seed: number; drawn_at: string; items: Sessi
 
 // -- rules ---------------------------------------------------------------------------------------------------------
 
-export type Waiting = "splits" | "awaiting_classification" | "analysis_failed" | "ungraded";
+export type Waiting = "splits" | "awaiting_classification" | "analysis_failed" | "ungraded" | "fulltext";
 
-/** How many things wait on the owner: splits and escalations still unlabelled, and the three stuck steps, less
- * what this visit settled. */
+/** How many things wait on the owner: splits and escalations still unlabelled, the three stuck steps and the
+ * full-text passes, less what this visit settled. */
 export function waiting(q: Quality): number {
   const n = q.night;
   const open = (xs: { settled?: string }[]) => xs.filter((x) => !x.settled).length;
-  return open(n.splits.filter((s) => !s.label)) + open(n.awaiting_classification) + open(n.analysis_failed) + open(n.ungraded);
+  return open(n.splits.filter((s) => !s.label)) + open(n.awaiting_classification) + open(n.analysis_failed) + open(n.ungraded) + open(n.fulltext);
 }
 
+/** Which item settled: its paper, and its topic or pass where a paper can have several. */
+export type Settled = { paper_id: string; topic?: string | null; id?: number };
+
 /** The quality page with one item marked settled, in place: the page and the sidebar read the same copy. */
-export function settle(q: Quality, list: Waiting, paperId: string, topic: string | null | undefined, what: string): Quality {
-  const mark = <T extends { paper_id: string; topic?: string | null }>(xs: T[]): T[] => xs.map((x) => (x.paper_id === paperId && (topic == null || x.topic === topic) ? { ...x, settled: what } : x));
+export function settle(q: Quality, list: Waiting, item: Settled, what: string): Quality {
+  const same = (x: Settled) => x.paper_id === item.paper_id && (item.topic == null || x.topic === item.topic) && (item.id == null || x.id === item.id);
+  const mark = <T extends Settled>(xs: T[]): T[] => xs.map((x) => (same(x) ? { ...x, settled: what } : x));
   const night = { ...q.night };
   if (list === "splits") night.splits = mark(night.splits);
+  else if (list === "fulltext") night.fulltext = mark(night.fulltext);
   else night[list] = mark(night[list]);
   return { ...q, night };
 }
@@ -181,12 +203,12 @@ export function pipelineSide(item: SessionItem): "relevant or above" | "below" |
   return item.why === "above" ? "relevant or above" : item.why === "below" ? "below" : null;
 }
 
-/** Whether the owner's Fit on the drawn topic sits on the other side from the pipeline's: its verdict, or the
- * draw's side while the verdict is gone. */
+/** Whether the owner's answer differs from the pipeline's: another Fit than its verdict's, or, while the verdict
+ * is gone, the other side from the draw's (the API's `DIFFERS`, which the sessions list counts). */
 export function differs(item: SessionItem): boolean {
-  const fit = item.fit[item.topic];
+  const fit = item.answer;
   if (!fit || fit === "unsure") return false;
-  if (item.verdict) return admits(fit) !== admits(item.verdict);
+  if (item.verdict) return fit !== item.verdict;
   const side = pipelineSide(item);
   return side === "relevant or above" ? !admits(fit) : side === "below" ? admits(fit) : false;
 }
@@ -194,7 +216,7 @@ export function differs(item: SessionItem): boolean {
 /** The first line of the re-run offer after a save (DESIGN.md, "The re-run offer"). */
 export function savedLine(before: Schemas["Topic"] | null, after: Schemas["Topic"], version: number): string {
   if (!before) return "Followed. Its papers show ungraded until a run grades them.";
-  if (before.depth !== after.depth) return "Saved. Topic pages and rarity follow the new depth now; its papers are graded again on the next run.";
+  if (before.depth !== after.depth) return "Saved. Topic pages and rarity follow the new depth now; the Fits already given stand until a re-run is asked for.";
   const read = (t: Schemas["Topic"]) => JSON.stringify([t.subject, t.rubric ?? "", t.interests ?? "", t.keywords ?? []]);
   if (read(before) !== read(after)) return `Saved as version ${version}. It applies to papers classified or graded from now on.`;
   return "Saved.";

@@ -226,9 +226,39 @@ async def answer(
         )
 
 
+# The pipeline's Fit on a session item's drawn topic: the verdict the draw read, else the current.
+_VERDICT = """coalesce((SELECT v.fit FROM verdicts v WHERE v.id = i.verdict_id),
+                 (SELECT v.fit FROM verdicts v WHERE v.paper_id = i.paper_id
+                  AND v.topic = i.topic ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1))"""
+
+# Whether the owner's answer differs from the pipeline's Fit: another Fit than its verdict's,
+# or, while the verdict is gone, the other side from the draw's. Unsure never differs.
+DIFFERS = f"""i.answer IS NOT NULL AND i.answer <> 'unsure' AND CASE
+    WHEN ({_VERDICT}) IS NOT NULL THEN i.answer <> ({_VERDICT})
+    WHEN i.why = 'above' THEN i.answer IN ('adjacent', 'none')
+    WHEN i.why = 'below' THEN i.answer IN ('central', 'related')
+    ELSE false END"""
+
+
+async def sessions(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict[str, Any]]:
+    """The newest sessions: how many papers each drew, how many are answered, and how many
+    answers differ from the pipeline's Fit (`DIFFERS`)."""
+    return await _all(
+        conn,
+        f"""
+        SELECT s.id, s.seed, s.drawn_at, count(i.*) AS papers, count(i.answered_at) AS answered,
+               count(*) FILTER (WHERE {DIFFERS}) AS differ
+        FROM calibration_sessions s LEFT JOIN calibration_items i ON i.session_id = s.id
+        GROUP BY s.id ORDER BY s.id DESC LIMIT %s
+        """,
+        (limit,),
+    )
+
+
 async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, Any] | None:
     """A session's papers in order, each with the pipeline's Fit on the drawn topic (the verdict
-    the draw read, else the current one) and what the owner has said."""
+    the draw read, else the current one), the answer recorded for it (`answer`, null until
+    given) and what the owner has said since (`fit`, every current label; `appraisal`)."""
     found = await (
         await conn.execute("SELECT * FROM calibration_sessions WHERE id = %s", (session_id,))
     ).fetchone()
@@ -236,14 +266,10 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
         return None
     items = await _all(
         conn,
-        """
-        SELECT i.position, i.paper_id, i.topic, i.why, i.answered_at, p.title, p.abstract,
-               p.authors, p.published,
-               coalesce((SELECT v.fit FROM verdicts v WHERE v.id = i.verdict_id),
-                        (SELECT v.fit FROM verdicts v WHERE v.paper_id = i.paper_id
-                         AND v.topic = i.topic ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1))
-                   AS verdict,
-               (SELECT coalesce(jsonb_object_agg(l.topic, l.value), '{}') FROM labels l
+        f"""
+        SELECT i.position, i.paper_id, i.topic, i.why, i.answer, i.answered_at, p.title,
+               p.abstract, p.authors, p.published, {_VERDICT} AS verdict,
+               (SELECT coalesce(jsonb_object_agg(l.topic, l.value), '{{}}') FROM labels l
                 WHERE l.paper_id = i.paper_id AND NOT l.provisional) AS fit,
                (SELECT row_to_json(a) FROM (SELECT value, note FROM appraisals
                 WHERE paper_id = i.paper_id ORDER BY at DESC, id DESC LIMIT 1) a) AS appraisal

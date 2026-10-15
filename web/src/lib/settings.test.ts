@@ -2,21 +2,24 @@ import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
 import { differs, level, savedLine, settle, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
 
-const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [] };
+const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [] };
+const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
 const stuck = { paper_id: "1", revision: 1, title: "t", failed_runs: 3, last_error: null, failed_at: "2026-10-15" };
 const split = { paper_id: "1", topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
 
 describe("waiting", () => {
-  const q = { night: { ...night, splits: [split, { ...split, paper_id: "2", label: { value: "central" } }], ungraded: [stuck], analysis_failed: [stuck] } } as Quality;
-  it("counts unlabelled splits and the stuck steps, not labelled ones", () => {
-    expect(waiting(q)).toBe(3);
+  const q = { night: { ...night, splits: [split, { ...split, paper_id: "2", label: { value: "central" } }], ungraded: [stuck], analysis_failed: [stuck], fulltext: [pass, { ...pass, id: 8, kind: "weight" }] } } as Quality;
+  it("counts unlabelled splits, the stuck steps and the full-text passes, not labelled splits", () => {
+    expect(waiting(q)).toBe(5);
   });
   it("drops what this visit settled, which keeps its place", () => {
-    const after = settle(settle(q, "splits", "1", "a", "related"), "analysis_failed", "1", null, "Tried again");
-    expect(waiting(after)).toBe(1);
+    const after = settle(settle(settle(q, "splits", { paper_id: "1", topic: "a" }, "related"), "analysis_failed", { paper_id: "1" }, "Tried again"), "fulltext", { paper_id: "3", id: 8 }, "Running");
+    expect(waiting(after)).toBe(2);
     expect(after.night.splits.map((s) => s.settled)).toEqual(["related", undefined]);
     expect(after.night.analysis_failed[0]!.settled).toBe("Tried again");
     expect(after.night.ungraded[0]!.settled).toBeUndefined();
+    // Of the paper's two passes, only the one run.
+    expect(after.night.fulltext.map((s) => s.settled)).toEqual([undefined, "Running"]);
   });
 });
 
@@ -44,10 +47,12 @@ describe("took", () => {
 });
 
 describe("differs", () => {
-  const item = (why: SessionItem["why"], fit?: SessionItem["fit"][string], verdict: SessionItem["verdict"] = null): SessionItem => ({ position: 1, paper_id: "1", topic: "a", why, verdict, answered_at: null, title: "", abstract: "", authors: [], published: null, fit: fit ? { a: fit } : {}, appraisal: null });
-  it("is the owner on the other side from the pipeline's Fit, or from the draw while the verdict is gone", () => {
+  // The recorded answer is what counts; the current label may have moved on since.
+  const item = (why: SessionItem["why"], answer: SessionItem["answer"] = null, verdict: SessionItem["verdict"] = null): SessionItem => ({ position: 1, paper_id: "1", topic: "a", why, verdict, answer, answered_at: answer ? "2026-10-15" : null, title: "", abstract: "", authors: [], published: null, fit: { a: "none" }, appraisal: null });
+  it("is another Fit than the pipeline's verdict, or the other side from the draw while the verdict is gone", () => {
     expect(differs(item("above", "adjacent", "related"))).toBe(true);
-    expect(differs(item("above", "central", "related"))).toBe(false);
+    expect(differs(item("above", "central", "related"))).toBe(true);
+    expect(differs(item("above", "related", "related"))).toBe(false);
     expect(differs(item("split", "none", "central"))).toBe(true);
     expect(differs(item("above", "adjacent"))).toBe(true);
     expect(differs(item("above", "related"))).toBe(false);
@@ -55,7 +60,7 @@ describe("differs", () => {
     expect(differs(item("below", "none"))).toBe(false);
   });
   it("never for unsure, unanswered, or a paper taken for another reason", () => {
-    expect(differs(item("above", "unsure"))).toBe(false);
+    expect(differs(item("above", "unsure", "related"))).toBe(false);
     expect(differs(item("above"))).toBe(false);
     expect(differs(item("split", "none"))).toBe(false);
   });
@@ -68,7 +73,7 @@ describe("savedLine", () => {
     expect(savedLine(t, { ...t, keywords: [] }, 3)).toMatch(/version 3/);
   });
   it("says the shape changed on a change of depth, and only Saved for the look", () => {
-    expect(savedLine(t, { ...t, depth: "area" }, 3)).toMatch(/new depth/);
+    expect(savedLine(t, { ...t, depth: "area" }, 3)).toMatch(/new depth now; the Fits already given stand/);
     expect(savedLine(t, { ...t, colour: "#fff" }, 3)).toBe("Saved.");
     expect(savedLine(null, t, 1)).toMatch(/Followed/);
   });

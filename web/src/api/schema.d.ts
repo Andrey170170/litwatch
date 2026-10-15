@@ -412,6 +412,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/taxonomy.yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Taxonomy Yaml
+         * @description The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML).
+         */
+        get: operations["taxonomy_yaml_api_settings_taxonomy_yaml_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/taxonomy/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Taxonomy Stats */
+        get: operations["taxonomy_stats_api_settings_taxonomy_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/topics/{slug}/keywords": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Keyword Matches
+         * @description How many papers of the last 90 days each of the topic's keywords matches (the editor).
+         */
+        get: operations["keyword_matches_api_settings_topics__slug__keywords_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/topics/{slug}": {
         parameters: {
             query?: never;
@@ -467,6 +524,26 @@ export interface paths {
          * @description At the top, what last night left; below, how well the Focus topics are doing.
          */
         get: operations["quality_page_api_settings_quality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/misses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Misses
+         * @description Reported misses, newest first, each with its trace.
+         */
+        get: operations["misses_api_settings_misses_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1628,6 +1705,23 @@ export interface components {
              */
             q: string;
         };
+        /** Miss */
+        Miss: {
+            /** Id */
+            id: number;
+            /** Paper Id */
+            paper_id: string;
+            /** Title */
+            title: string;
+            /** Topic */
+            topic: string;
+            /**
+             * Reported At
+             * Format: date-time
+             */
+            reported_at: string;
+            trace: components["schemas"]["MissTrace"];
+        };
         /** MissIn */
         MissIn: {
             /** Paper Id */
@@ -1640,6 +1734,33 @@ export interface components {
              * @enum {string}
              */
             fit: "central" | "related";
+        };
+        /**
+         * MissTrace
+         * @description What each stage concluded for the owner's topic when the reported paper went through the
+         *     pipeline (feedback.md, misses), on the paper's current text. `classified`: classification
+         *     has run; then `probability` is the classifier's for the topic's class against the class's
+         *     `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it.
+         *     `graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null
+         *     where only the judge was asked).
+         */
+        MissTrace: {
+            /** Classified */
+            classified: boolean;
+            /** Probability */
+            probability?: number | null;
+            /** Threshold */
+            threshold: number;
+            /** Classifier */
+            classifier?: boolean | null;
+            /** Uncertain */
+            uncertain?: boolean | null;
+            /** Keyword */
+            keyword?: boolean | null;
+            /** Graded */
+            graded: boolean;
+            judge?: components["schemas"]["Fit"] | null;
+            check?: components["schemas"]["Fit"] | null;
         };
         /** NextFire */
         NextFire: {
@@ -2176,6 +2297,26 @@ export interface components {
             parent?: string | null;
             /** Threshold */
             threshold?: number | null;
+        };
+        /**
+         * TaxonomyStats
+         * @description What the Taxonomy and Topics pages show beside the tree: papers standing in each class or
+         *     under it, the threshold each class is admitted at (its own, or the configured default for
+         *     its depth), and the current revision of each followed topic.
+         */
+        TaxonomyStats: {
+            /** Members */
+            members: {
+                [key: string]: number;
+            };
+            /** Thresholds */
+            thresholds: {
+                [key: string]: number;
+            };
+            /** Topic Revisions */
+            topic_revisions: {
+                [key: string]: number;
+            };
         };
         /**
          * TextPass
@@ -3212,6 +3353,93 @@ export interface operations {
             };
         };
     };
+    taxonomy_yaml_api_settings_taxonomy_yaml_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    taxonomy_stats_api_settings_taxonomy_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyStats"];
+                };
+            };
+        };
+    };
+    keyword_matches_api_settings_topics__slug__keywords_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description No such topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     save_topic_api_settings_topics__slug__put: {
         parameters: {
             query?: never;
@@ -3298,6 +3526,26 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    misses_api_settings_misses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Miss"][];
                 };
             };
         };

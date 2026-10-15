@@ -236,6 +236,24 @@ export function useGradeNow(paperId: string) {
   );
 }
 
+/** Run a full-text pass that waits on the owner now: failed three runs, or awaiting its text over a week. A 409
+ * means the page is behind (it ran, or the text changed): the paper is refetched. */
+export function useRunPassNow(paperId: string) {
+  const qc = useQueryClient();
+  return usePaperMutation(
+    paperId,
+    async (id, passId: number) => {
+      try {
+        return ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: passId } } }));
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["paper", id] });
+        throw e;
+      }
+    },
+    stepped("Running the pass now; its Brief shows here once written"),
+  );
+}
+
 /** BibTeX for one paper, as text; the API looks the published version up first. */
 export async function bibtexFor(id: string): Promise<string> {
   return ok(await api.POST("/api/bibtex", { body: { ids: [id] }, parseAs: "text" }));
@@ -282,13 +300,15 @@ export function useDrawSession() {
   });
 }
 
-/** One paper's answers in a session; the session is refetched so the strip and the review follow. */
+/** One paper's answers in a session; the session is refetched so the strip and the review follow, and the
+ * paper's page and the status line, which the new labels change. */
 export function useAnswer(sessionId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ position, answer }: { position: number; answer: Schemas["Answer"] }) =>
+    mutationFn: async ({ position, answer }: { position: number; paperId: string; answer: Schemas["Answer"] }) =>
       ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: sessionId, position } }, body: answer })),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId], exact: true }),
+    onSuccess: (_, { paperId }) =>
+      Promise.all([qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId], exact: true }), qc.invalidateQueries({ queryKey: ["paper", paperId] }), qc.invalidateQueries({ queryKey: ["status"] })]),
     onError: (e) => toast(said(e, "The answer did not go through"), "error"),
   });
 }

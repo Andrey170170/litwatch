@@ -22,8 +22,9 @@ const split = {
   label: null,
 };
 const stuck = { paper_id: "2610.00002", revision: 1, title: "A stuck paper", failed_runs: 3, last_error: "invalid", failed_at: "2026-10-14T03:00:00Z" };
+const pass = { id: 7, paper_id: "2610.00003", revision: 1, title: "A textless paper", kind: "brief", state: "failed", failed_runs: 3, last_error: "the LaTeX did not build", queued_at: "2026-10-08T03:00:00Z" };
 const quality = {
-  night: { run: 6, error: null, splits: [split], awaiting_classification: [], analysis_failed: [stuck], ungraded: [] },
+  night: { run: 6, error: null, splits: [split], awaiting_classification: [], analysis_failed: [stuck], ungraded: [], fulltext: [pass] },
   cost: [{ provider: "anthropic", spent: 1.5, projected: 4, budget: 20, over: false }],
   recall: null,
   calibration: [],
@@ -48,7 +49,7 @@ describe("Settings", () => {
     scriptFetch(common);
     renderApp("/settings");
     const needs = await screen.findByRole("link", { name: /Needs you/ });
-    await waitFor(() => expect(needs).toHaveTextContent("2 waiting"));
+    await waitFor(() => expect(needs).toHaveTextContent("3 waiting"));
     expect(screen.getByRole("link", { name: /Topics/ })).toHaveTextContent("1 followed");
     expect(screen.getByRole("link", { name: /Runs and cost/ })).toHaveTextContent("$1.50 of $20.00 this month");
   });
@@ -57,7 +58,7 @@ describe("Settings", () => {
     viewport(true);
     const calls = scriptFetch({ ...common, "PUT /api/labels/mi/2610.00001": { saved: false } });
     renderApp("/settings/needs");
-    expect(await screen.findByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(await screen.findByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     const item = screen.getByText("A split paper").closest(".need")!;
     expect(item).toHaveTextContent("adjacent stands");
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "related" }));
@@ -66,9 +67,24 @@ describe("Settings", () => {
     expect(item).toHaveTextContent("labelled related");
     // Still first in its group, before the stuck paper.
     const titles = screen.getAllByRole("link", { name: /paper$/ }).map((l) => l.textContent);
-    expect(titles).toEqual(["A split paper", "A stuck paper"]);
-    expect(screen.getByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("1");
+    expect(titles).toEqual(["A split paper", "A stuck paper", "A textless paper"]);
+    expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("2");
+  });
+
+  it("lists a full-text pass that failed three runs and runs it now, settling it in place", async () => {
+    viewport(true);
+    const calls = scriptFetch({ ...common, "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }) });
+    renderApp("/settings/needs");
+    expect(await screen.findByText("Full text · 1")).toBeInTheDocument();
+    const item = screen.getByRole("link", { name: "A textless paper" }).closest(".need")!;
+    expect(item).toHaveTextContent("Brief failed 3 runs: the LaTeX did not build");
+    await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Run it now" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url === "/api/settings/fulltext/7/now")).toBe(true));
+    await waitFor(() => expect(item).toHaveClass("settled"));
+    expect(item).toHaveTextContent("Running now, first in line, with three more runs.");
+    expect(within(item as HTMLElement).queryByRole("button", { name: "Run it now" })).toBeNull();
+    expect(screen.getByRole("link", { name: /Needs you/ })).toHaveTextContent("2");
   });
 
   it("saves a topic only once something changed, then offers the re-run in place of Save", async () => {
@@ -96,7 +112,7 @@ describe("Settings", () => {
 
   it("records a Calibrate answer on Next, then shows the next paper", async () => {
     viewport(true);
-    const items = [1, 2].map((position) => ({ position, paper_id: `2610.0000${position}`, topic: "mi", why: "above", verdict: "related", answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }));
+    const items = [1, 2].map((position) => ({ position, paper_id: `2610.0000${position}`, topic: "mi", why: "above", verdict: "related", answer: null, answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }));
     const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items }, "PUT /api/settings/calibrate/1/items/1": { recorded: true } });
     const { router } = renderApp("/settings/calibrate/1");
     expect(await screen.findByText("Drawn 1")).toBeInTheDocument();

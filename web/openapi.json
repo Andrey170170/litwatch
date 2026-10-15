@@ -1486,6 +1486,93 @@
         }
       }
     },
+    "/api/settings/taxonomy.yaml": {
+      "get": {
+        "summary": "Taxonomy Yaml",
+        "description": "The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML).",
+        "operationId": "taxonomy_yaml_api_settings_taxonomy_yaml_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/settings/taxonomy/stats": {
+      "get": {
+        "summary": "Taxonomy Stats",
+        "operationId": "taxonomy_stats_api_settings_taxonomy_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyStats"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics/{slug}/keywords": {
+      "get": {
+        "summary": "Keyword Matches",
+        "description": "How many papers of the last 90 days each of the topic's keywords matches (the editor).",
+        "operationId": "keyword_matches_api_settings_topics__slug__keywords_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Keyword Matches Api Settings Topics  Slug  Keywords Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such topic"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/topics/{slug}": {
       "put": {
         "summary": "Save Topic",
@@ -1584,6 +1671,29 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Quality Page Api Settings Quality Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/misses": {
+      "get": {
+        "summary": "Misses",
+        "description": "Reported misses, newest first, each with its trace.",
+        "operationId": "misses_api_settings_misses_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Miss"
+                  },
+                  "type": "array",
+                  "title": "Response Misses Api Settings Misses Get"
                 }
               }
             }
@@ -4259,6 +4369,44 @@
         ],
         "title": "LookupIn"
       },
+      "Miss": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "reported_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reported At"
+          },
+          "trace": {
+            "$ref": "#/components/schemas/MissTrace"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "paper_id",
+          "title",
+          "topic",
+          "reported_at",
+          "trace"
+        ],
+        "title": "Miss"
+      },
       "MissIn": {
         "properties": {
           "paper_id": {
@@ -4285,6 +4433,94 @@
           "topic"
         ],
         "title": "MissIn"
+      },
+      "MissTrace": {
+        "properties": {
+          "classified": {
+            "type": "boolean",
+            "title": "Classified"
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability"
+          },
+          "threshold": {
+            "type": "number",
+            "title": "Threshold"
+          },
+          "classifier": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classifier"
+          },
+          "uncertain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertain"
+          },
+          "keyword": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keyword"
+          },
+          "graded": {
+            "type": "boolean",
+            "title": "Graded"
+          },
+          "judge": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "classified",
+          "threshold",
+          "graded"
+        ],
+        "title": "MissTrace",
+        "description": "What each stage concluded for the owner's topic when the reported paper went through the\npipeline (feedback.md, misses), on the paper's current text. `classified`: classification\nhas run; then `probability` is the classifier's for the topic's class against the class's\n`threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it.\n`graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null\nwhere only the judge was asked)."
       },
       "NextFire": {
         "properties": {
@@ -5827,6 +6063,39 @@
         ],
         "title": "TaxonomyClass",
         "description": "One node of the tree. `parent` is the parent's slug, None at the top."
+      },
+      "TaxonomyStats": {
+        "properties": {
+          "members": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Members"
+          },
+          "thresholds": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Thresholds"
+          },
+          "topic_revisions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Topic Revisions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "members",
+          "thresholds",
+          "topic_revisions"
+        ],
+        "title": "TaxonomyStats",
+        "description": "What the Taxonomy and Topics pages show beside the tree: papers standing in each class or\nunder it, the threshold each class is admitted at (its own, or the configured default for\nits depth), and the current revision of each followed topic."
       },
       "TextPass": {
         "properties": {

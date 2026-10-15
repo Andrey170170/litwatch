@@ -251,7 +251,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
             <div className="oh">{savedLine(saved.before, form, version)}</div>
             <div className="nsub">Re-run it now on:</div>
             {["Labelled papers and reported misses", "The topic's existing members", "Papers matching its keywords · last 90 days", "A date range"].map((row) => (
-              <div className="orow off" key={row}>
+              <div className="ofr off" key={row}>
                 <span className="box" />
                 <span className="ol">{row}</span>
                 <span className="mono faint">–</span>

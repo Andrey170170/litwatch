@@ -94,6 +94,9 @@ async def test_answers_become_labels_and_appraisals(db):
         await db.execute("SELECT * FROM labels WHERE paper_id = %s", (item["paper_id"],))
     ).fetchone()
     assert (label["value"], label["origin"]) == ("none", "sample")
+    # The answer is recorded on the item, for the review, whatever the label says later.
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    assert item["answer"] == "none" and item["answered_at"] is not None
     # It matters but fits no Focus topic: a missing topic or a narrow rubric.
     (listed,) = await calibrate.matters_no_topic(db)
     assert (listed["paper_id"], listed["note"]) == (item["paper_id"], "about steering, not traces")
@@ -204,29 +207,28 @@ async def test_an_appraisal_can_be_cleared(db):
     assert rows["n"] == 2  # matters once, then cleared
 
 
-async def test_the_sessions_list_counts_answers_on_the_other_side_from_the_draw(db):
-    """The past-session rows say how many answers differ from the pipeline's side."""
+async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db):
+    """The past-session rows say how many answers differ from the pipeline's Fit: another Fit
+    than the verdict's, as the review marks them. Unsure never differs."""
     import httpx
 
     from litwatch.api import create_app
     from litwatch.config import Config
 
     session_id = await calibrate.draw(db, seed=3, size=4)
-    above = [i for i in await items(db, session_id) if i["why"] == "above"]
-    below = [i for i in await items(db, session_id) if i["why"] == "below"]
-    await calibrate.answer(
-        db, session_id, above[0]["position"], Answer(fit={FAITH.slug: LabelValue.NONE})
-    )
-    await calibrate.answer(
-        db, session_id, above[1]["position"], Answer(fit={FAITH.slug: LabelValue.CENTRAL})
-    )
-    await calibrate.answer(
-        db, session_id, below[0]["position"], Answer(fit={FAITH.slug: LabelValue.RELATED})
-    )
+    above = [i for i in await items(db, session_id) if i["why"] == "above"]  # verdict related
+    below = [i for i in await items(db, session_id) if i["why"] == "below"]  # verdict none
+    for item, fit in (
+        (above[0], LabelValue.NONE),  # differs
+        (above[1], LabelValue.CENTRAL),  # differs: another Fit, though on the same side
+        (below[0], LabelValue.RELATED),  # differs
+        (below[1], LabelValue.UNSURE),  # answered, never differs
+    ):
+        await calibrate.answer(db, session_id, item["position"], Answer(fit={FAITH.slug: fit}))
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     transport = httpx.ASGITransport(app=create_app(dsn, "t", Config()))
     async with httpx.AsyncClient(
         transport=transport, base_url="http://t", headers={"authorization": "Bearer t"}
     ) as c:
         (row,) = (await c.get("/api/settings/calibrate")).json()
-    assert (row["papers"], row["answered"], row["differ"]) == (4, 3, 2)
+    assert (row["papers"], row["answered"], row["differ"]) == (4, 4, 3)

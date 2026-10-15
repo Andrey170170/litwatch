@@ -402,19 +402,7 @@ async def draw(body: DrawIn, c: Conn) -> dict[str, int]:
 
 @router.get("/calibrate")
 async def sessions(c: Conn) -> list[dict[str, Any]]:
-    return await (
-        await c.execute(
-            "SELECT s.id, s.seed, s.drawn_at, count(i.*) AS papers, "
-            "count(i.answered_at) AS answered, "
-            # An answer on the other side from the draw: a wanted paper graded below, or one
-            # graded relevant or above the owner put at adjacent or none.
-            "count(*) FILTER (WHERE (i.why = 'above' AND i.answer IN ('adjacent', 'none')) "
-            "OR (i.why = 'below' AND i.answer IN ('central', 'related'))) AS differ "
-            "FROM calibration_sessions s "
-            "LEFT JOIN calibration_items i ON i.session_id = s.id "
-            "GROUP BY s.id ORDER BY s.id DESC LIMIT 20"
-        )
-    ).fetchall()
+    return await calibrate.sessions(c)
 
 
 @router.get("/calibrate/{session_id}")

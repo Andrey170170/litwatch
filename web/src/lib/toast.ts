@@ -22,6 +22,12 @@ export function toast(text: string | null | undefined, tone: Toast["tone"] = "pl
   }, ms);
 }
 
+/** Drop every toast at once; tests reset the store between cases. */
+export function clearToasts() {
+  toasts = [];
+  emit();
+}
+
 export function useToasts(): Toast[] {
   return useSyncExternalStore(
     (cb) => {

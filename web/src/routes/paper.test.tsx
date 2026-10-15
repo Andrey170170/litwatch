@@ -29,9 +29,66 @@ const paper = {
   publication_by_owner: false,
   card_requestable: true,
 };
-const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 };
+const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0 };
+const brief = { id: 1, text: "The brief, from the full text.", overstatement: "The abstract overstates: the gain holds only for 7B models.", revision: 1, arxiv_version: 1, source: "latex", written_at: "2026-10-14T03:00:00Z" };
 
 describe("a paper's page", () => {
+  it("shows the Brief in the abstract's place, its overstatement first, and the abstract only without one", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, brief } });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText("The brief, from the full text.")).toBeInTheDocument();
+    const callout = screen.getByText("The abstract overstates: the gain holds only for 7B models.");
+    expect(callout.compareDocumentPosition(screen.getByText("The brief, from the full text."))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.queryByText("We study things.")).toBeNull();
+    expect(screen.queryByText(/No Brief yet/)).toBeNull();
+    expect(screen.queryByText(/older revision/)).toBeNull();
+  });
+
+  it("says which revision an older Brief read, and why the abstract stands in without one", async () => {
+    viewport(true);
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": { ...paper, revision: 2, brief },
+      "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", text_pass: { id: 7, kind: "brief", state: "awaiting_text", queued_at: "2026-10-14T03:00:00Z" } },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText(/Written for an older revision of the text \(arXiv v1\); the current one waits for its full text/)).toBeInTheDocument();
+    renderApp("/paper/2610.00003");
+    await waitFor(() => expect(screen.getByText("The Brief waits for the paper's full text; the abstract stands in.")).toBeInTheDocument());
+    expect(screen.getByText("We study things.")).toBeInTheDocument();
+  });
+
+  it("runs a stuck full-text pass now from its note, and says so when the page is behind", async () => {
+    viewport(true);
+    const states = [
+      { kind: "fulltext_failed", revision: 1, error: "the LaTeX did not build", pass_id: 7 },
+      { kind: "awaiting_text", revision: 1, error: null, pass_id: 8 },
+    ];
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => (calls.some((c) => c.method === "POST") ? { ...paper, states: [states[1]] } : { ...paper, states }),
+      "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }),
+      "POST /api/settings/fulltext/8/now": () => json({ detail: "the pass is not waiting for the owner" }, 409),
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText(/Full text failed three runs in a row/)).toBeInTheDocument();
+    expect(screen.getByText("the LaTeX did not build")).toBeInTheDocument();
+    expect(screen.getByText(/Awaiting the full text for over a week/)).toBeInTheDocument();
+    const [failed] = screen.getAllByRole("button", { name: "Run it now" });
+    await userEvent.click(failed!);
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url === "/api/settings/fulltext/7/now")).toBe(true));
+    // The page is refetched: the pass that ran is gone from the notes, the other's note stays.
+    await waitFor(() => expect(screen.queryByText(/Full text failed three runs in a row/)).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Run it now" }));
+    expect(await screen.findByText("the pass is not waiting for the owner")).toBeInTheDocument();
+  });
+
   it("records a thumb only once a reason is picked, on the topic's row", async () => {
     viewport(true);
     const calls = scriptFetch({

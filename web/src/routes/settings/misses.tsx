@@ -12,12 +12,15 @@ type Miss = Schemas["Miss"];
 type Cell = { name: string; value: string; tone: "ok" | "bad" | "off" };
 
 /** The five cells of a trace: what each stage concluded for the topic. Cyan where the stage would have admitted
- * the paper, red where it let it go, grey while the stage has not run on this text. */
+ * the paper, red where it let it go, grey while the stage has not run on this text. The classifier's cell reads
+ * its probability against the threshold; a paper admitted through a class under the topic says so. */
 export function cells(t: Miss["trace"]): Cell[] {
   const pending: Cell["tone"] = "off";
   const p = t.probability;
+  const read = p == null ? "no answer" : `${p.toFixed(2)} ${p >= t.threshold ? "over" : "under"} ${t.threshold.toFixed(2)}`;
+  const under = t.classifier && (p == null || p < t.threshold) ? " · in a class under it" : "";
   return [
-    { name: "Classifier", value: !t.classified ? "pending" : p == null ? "no answer" : `${p.toFixed(2)} ${t.classifier ? "over" : "under"} ${t.threshold.toFixed(2)}`, tone: !t.classified ? pending : t.classifier ? "ok" : "bad" },
+    { name: "Classifier", value: !t.classified ? "pending" : read + under, tone: !t.classified ? pending : t.classifier ? "ok" : "bad" },
     { name: "Uncertain band", value: !t.classified ? "pending" : t.uncertain ? "member" : t.classifier ? "–" : "under", tone: !t.classified ? pending : t.uncertain ? "ok" : t.classifier ? "off" : "bad" },
     { name: "Keywords", value: !t.classified ? "pending" : t.keyword ? "match" : "no match", tone: !t.classified ? pending : t.keyword ? "ok" : "bad" },
     { name: "Judge", value: !t.graded ? "pending" : (t.judge ?? "–"), tone: !t.graded ? pending : admits(t.judge) ? "ok" : "bad" },

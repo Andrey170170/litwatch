@@ -5,10 +5,11 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis } from "@/api/mutations";
+import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow } from "@/api/mutations";
 import { qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
-import { type LabelValue, type Quality, settle, type Split, type Stuck, type Waiting, waiting } from "@/lib/settings";
+import { rowDate } from "@/lib/format";
+import { type LabelValue, type Quality, settle, type Settled, type Split, type Stuck, type TextPassStuck, type Waiting, waiting } from "@/lib/settings";
 import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 type Settle = (what: string) => void;
@@ -20,6 +21,7 @@ const KIND = {
   awaiting: { name: "Awaiting classification", line: "Classification failed three runs; the paper is in no class.", step: "Classification" },
   ungraded: { name: "Ungraded", line: "Grading failed three runs; the paper shows ungraded on its topic.", step: "Grading" },
   analysis: { name: "Analysis", line: "Analysis failed three runs; the paper has no Gist or Weight and shows its title alone.", step: "Analysis" },
+  fulltext: { name: "Full text", line: "A full-text pass failed three runs, or has waited for its text over a week; the abstract stands in for the Brief." },
 } as const;
 
 function Group<T>({ kind, items, children }: { kind: keyof typeof KIND; items: T[]; children: (item: T) => React.ReactNode }) {
@@ -144,19 +146,45 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
   );
 }
 
+/** Grade it now counts as the first of three more runs: a run that fails again settles the item too, since the
+ * nightly runs take it from here and it no longer waits on the owner. */
 function Ungraded({ s, badge, settle }: { s: Stuck; badge: React.ReactNode; settle: Settle }) {
   const grade = useGradeNow(s.paper_id);
-  // A run that fails again leaves the item open, with the error and the button.
-  const [error, setError] = useState<string | null>(null);
   return (
     <Stuck s={s} kind="ungraded" badge={badge}>
-      {error && <div className="nres badt">Grading failed again: {error}</div>}
       <div className="nact">
-        <button className="btn" disabled={grade.isPending} onClick={() => grade.mutate({ topic: s.topic!, revision: s.revision }, { onSuccess: (r) => (r.graded ? settle(`Graded again: ${r.fit}. The result shows on its topic.`) : setError(r.error ?? "no verdict")) })}>
+        <button className="btn" disabled={grade.isPending} onClick={() => grade.mutate({ topic: s.topic!, revision: s.revision }, { onSuccess: (r) => settle(r.graded ? `Graded again: ${r.fit}. The result shows on its topic.` : `Grading failed again: ${r.error ?? "no verdict"}. The nightly runs try twice more.`) })}>
           {grade.isPending ? "Grading…" : "Grade it now"}
         </button>
       </div>
     </Stuck>
+  );
+}
+
+/** A full-text pass that failed three runs or waits for its text over a week; Run it now puts it first in line. */
+function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
+  const run = useRunPassNow(s.paper_id);
+  const what = s.kind === "brief" ? "Brief" : "Weight re-check";
+  return (
+    <div className={`need fail${s.settled ? " settled" : ""}`}>
+      <div className="nh">
+        <PaperLink id={s.paper_id} className="nt">
+          {s.title}
+        </PaperLink>
+      </div>
+      <div className="nb">
+        {s.state === "failed" ? `${what} failed ${s.failed_runs} runs${s.last_error ? `: ${s.last_error}` : "."}` : `${what} has waited for the paper's text since ${rowDate(s.queued_at)}; the archive has not delivered it.`}
+      </div>
+      {s.settled ? (
+        <div className="nres">{s.settled}</div>
+      ) : (
+        <div className="nact">
+          <button className="btn" disabled={run.isPending} onClick={() => run.mutate(s.id, { onSuccess: () => settle(s.state === "failed" ? "Running now, first in line, with three more runs." : "Asked for the text again, at urgent priority; the pass runs once it arrives.") })}>
+            {run.isPending ? "Starting…" : "Run it now"}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -180,7 +208,7 @@ export function NeedsPage() {
   const q = quality.data;
   const badge = (slug: string | null | undefined) => (slug && cards[slug] ? <Badge topic={cards[slug]} /> : null);
   // Marks the item settled in the cached page: it stays where it is, and the counts follow.
-  const settler = (list: Waiting, s: { paper_id: string; topic?: string | null }) => (what: string) => qc.setQueryData(qualityQuery.queryKey, (old: Quality | undefined) => old && settle(old, list, s.paper_id, list === "awaiting_classification" || list === "analysis_failed" ? null : s.topic, what));
+  const settler = (list: Waiting, s: Settled) => (what: string) => qc.setQueryData(qualityQuery.queryKey, (old: Quality | undefined) => old && settle(old, list, s, what));
   const open = q ? waiting(q) : 0;
   // A split labelled before this visit no longer waits; one labelled on it stays, settled.
   const splits = q?.night.splits.filter((s) => s.split && (!s.label || s.settled)) ?? [];
@@ -194,19 +222,22 @@ export function NeedsPage() {
         <>
           {(["split", "escalated"] as const).map((kind) => (
             <Group key={kind} kind={kind} items={kind === "split" ? splits : escalations}>
-              {(s) => <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} settle={settler("splits", s)} />}
+              {(s) => <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} settle={settler("splits", { paper_id: s.paper_id, topic: s.topic })} />}
             </Group>
           ))}
           <Group kind="awaiting" items={q.night.awaiting_classification}>
-            {(s) => <Awaiting key={s.paper_id} s={s} settle={settler("awaiting_classification", s)} />}
+            {(s) => <Awaiting key={s.paper_id} s={s} settle={settler("awaiting_classification", { paper_id: s.paper_id })} />}
           </Group>
           <Group kind="ungraded" items={q.night.ungraded}>
-            {(s) => <Ungraded key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} settle={settler("ungraded", s)} />}
+            {(s) => <Ungraded key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} settle={settler("ungraded", { paper_id: s.paper_id, topic: s.topic })} />}
           </Group>
           <Group kind="analysis" items={q.night.analysis_failed}>
-            {(s) => <Analysis key={s.paper_id} s={s} settle={settler("analysis_failed", s)} />}
+            {(s) => <Analysis key={s.paper_id} s={s} settle={settler("analysis_failed", { paper_id: s.paper_id })} />}
           </Group>
-          <Later>Full text and digests join this page when their passes land (N3 stage 2, N4).</Later>
+          <Group kind="fulltext" items={q.night.fulltext}>
+            {(s) => <TextPass key={s.id} s={s} settle={settler("fulltext", { paper_id: s.paper_id, id: s.id })} />}
+          </Group>
+          <Later>Digests that could not be written join this page with N4.</Later>
         </>
       )}
     </>

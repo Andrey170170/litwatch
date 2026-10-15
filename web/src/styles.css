@@ -372,6 +372,8 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
 .prose.gist { font-size: 16px; line-height: 1.5; color: var(--fg); }
 .overst { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--sig); background: color-mix(in srgb, var(--sig) 10%, transparent); font-size: 13.5px; font-weight: 600; }
 .why0 { font-size: 12px; color: var(--fg3); margin-bottom: 6px; }
+/* a Brief that found the abstract overstating says so first (DESIGN.md, "The ladder") */
+.overst { border-left: 3px solid var(--sig); background: color-mix(in srgb, var(--sig) 8%, transparent); padding: 7px 11px; margin: 0 0 10px; font-size: 13.5px; }
 .oldrev { display: inline-block; font-size: 12px; color: var(--fg3); margin-bottom: 6px; padding: 4px 8px; border: 1px dashed var(--line); }
 /* the Deep card */
 .claim { font-size: 15.5px; line-height: 1.45; font-weight: 600; margin: 0 0 12px; padding-left: 10px; border-left: 3px solid var(--acc); }
@@ -662,10 +664,10 @@ input.kw { width: 240px; }
 .offer { border: 1px solid var(--acc); background: var(--surface); padding: 12px 14px; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); animation: lw-fade 0.2s ease-out; }
 .offer .oh { font-weight: 600; font-size: 13.5px; }
 .offer .nsub { margin: 2px 0 8px; }
-.orow { display: grid; grid-template-columns: 18px minmax(0, 1fr) 64px; gap: 10px; align-items: center; padding: 6px 2px; border-top: 1px solid var(--line2); font-size: 13px; }
-.orow.off { color: var(--fg3); }
-.orow .box { width: 16px; height: 16px; border: 1px solid var(--fg3); }
-.orow .mono { text-align: right; font-size: 12px; }
+.ofr { display: grid; grid-template-columns: 18px minmax(0, 1fr) 64px; gap: 10px; align-items: center; padding: 6px 2px; border-top: 1px solid var(--line2); font-size: 13px; }
+.ofr.off { color: var(--fg3); }
+.ofr .box { width: 16px; height: 16px; border: 1px solid var(--fg3); }
+.ofr .mono { text-align: right; font-size: 12px; }
 /* the taxonomy tree */
 .crow { display: flex; align-items: center; gap: 8px; padding: 2px 12px 2px 2px; border-top: 1px solid var(--line2); font-size: 13px; }
 .crow:first-child { border-top: 0; }

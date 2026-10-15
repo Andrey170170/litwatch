@@ -112,8 +112,9 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
     on the paper's current text (feedback.md, misses): whether it has been classified and the
     classifier's probability for the topic's class, which of the classifier, the uncertain band
     and the keyword check made it a member (a classifier membership anywhere under the class
-    counts, as it stands in the class), and the graders' opinions from the current verdict.
-    Null where a stage has not run on this text."""
+    counts, as it stands in the class; the band and the keyword check admit a paper to one
+    Focus class only), and the graders' opinions from the current verdict. Null where a stage
+    has not run on this text."""
     # Each followed topic's class with every class under it, as (topic, class) pairs.
     pairs = [(t.slug, c) for t in (tree.topics if tree else []) for c in tree.subtree(t.slug)]
     return await _all(
@@ -129,8 +130,8 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
                (SELECT coalesce(array_agg(DISTINCT x.source), '{}') FROM memberships x
                 WHERE x.paper_id = m.paper_id AND x.member AND x.paper_revision = p.revision
                   AND x.source IN ('classifier', 'uncertain', 'keyword')
-                  AND (x.class = m.topic OR x.class IN
-                       (SELECT class FROM under WHERE under.topic = m.topic))) AS sources,
+                  AND (x.class = m.topic OR (x.source = 'classifier' AND x.class IN
+                       (SELECT class FROM under WHERE under.topic = m.topic)))) AS sources,
                (SELECT v.opinions FROM verdicts v WHERE v.paper_id = m.paper_id
                 AND v.topic = m.topic AND v.paper_revision = p.revision
                 ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) AS opinions

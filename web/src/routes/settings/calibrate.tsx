@@ -69,8 +69,11 @@ function PastSessionRow({ s }: { s: SessionRow }) {
 
 type Draft = { fit: Record<string, LabelValue>; value: Value | null; note: string };
 
+/** The paper's recorded answer on the drawn topic, the current labels on the others, and its appraisal. */
 function draftOf(item: SessionItem): Draft {
-  return { fit: { ...item.fit }, value: item.appraisal?.value ?? null, note: item.appraisal?.note ?? "" };
+  const fit = { ...item.fit };
+  if (item.answer) fit[item.topic] = item.answer;
+  return { fit, value: item.appraisal?.value ?? null, note: item.appraisal?.note ?? "" };
 }
 
 /** The paper, blind: title, authors, id, date, Gist, abstract and classes; no grade, rarity or topic marks. */
@@ -141,7 +144,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   const next = () => {
     const after = i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true });
     const fit = Object.fromEntries(Object.entries(draft.fit).filter(([slug]) => focus.has(slug) || slug === item.topic));
-    if (canRecord && (changed || !item.answered_at)) answer.mutate({ position: item.position, answer: { fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
+    if (canRecord && (changed || !item.answered_at)) answer.mutate({ position: item.position, paperId: item.paper_id, answer: { fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
     else after();
   };
   const back = () => i > 0 && go(s.items[i - 1]!.position);
@@ -242,7 +245,7 @@ function Review({ s }: { s: Session }) {
   const off = s.items.filter(differs);
   return (
     <div className="setpg">
-      <PageHead title={`Calibrate · ${rowDate(s.drawn_at)}`} deeper sub={`${s.items.length - unanswered.length} of ${s.items.length} answered · seed ${s.seed}. The pipeline's side shows here: ${off.length} ${off.length === 1 ? "answer differs" : "answers differ"} from it; they count against precision on Overview.`}>
+      <PageHead title={`Calibrate · ${rowDate(s.drawn_at)}`} deeper sub={`${s.items.length - unanswered.length} of ${s.items.length} answered · seed ${s.seed}. The pipeline's Fit shows here: ${off.length} ${off.length === 1 ? "answer differs" : "answers differ"} from it; an answer on its other side counts against precision on Overview.`}>
         {unanswered.length > 0 && (
           <button className="btn pri" onClick={() => open(s.id, { at: unanswered[0]!.position })}>
             Continue · {unanswered.length} left
@@ -260,7 +263,7 @@ function Review({ s }: { s: Session }) {
               <span className="t">{it.title}</span>
               {t ? <Badge topic={t} size="sm" /> : <span />}
               <span className="fa">
-                <span className="faint">you</span> <b>{it.fit[it.topic] ?? "–"}</b>
+                <span className="faint">you</span> <b>{it.answer ?? "–"}</b>
               </span>
               <span className="fa">
                 <span className="faint">pipeline</span> {it.verdict ?? pipelineSide(it) ?? it.why}

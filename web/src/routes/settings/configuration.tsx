@@ -10,9 +10,11 @@ export function ConfigurationPage() {
   const config = useQuery(configQuery);
   const models = (config.data?.models ?? {}) as Record<string, Role>;
   const roles = Object.entries(models).filter(([, r]) => r && typeof r === "object" && "model" in r);
-  const labs = (role: string) => models[role]?.provider ?? "";
-  const judge = labs("judge");
-  const check = labs("check");
+  // The lab that trained a role's model, as the backend reads it: Anthropic's own, else the model's prefix on
+  // OpenRouter ("openai/gpt-6.1-sol" is OpenAI's).
+  const lab = (role: string) => (models[role]?.provider === "anthropic" ? "anthropic" : (models[role]?.model ?? "").split("/")[0] ?? "");
+  const judge = lab("judge");
+  const check = lab("check");
   return (
     <>
       <PageHead title="Configuration" sub="litwatch.toml as loaded; read-only here, the file is the source of truth. Secrets are masked." />

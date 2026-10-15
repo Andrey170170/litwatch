@@ -211,6 +211,11 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     found = (await client.get("/api/settings/misses")).json()
     (parent,) = [x for x in found if x["topic"] == "interpretability"]
     assert parent["trace"]["classifier"] is True and parent["trace"]["probability"] == 0.1
+    # The band admits a paper to one Focus class for grading, not to the classes above it.
+    await misses_store.report(conn, Q.id, "interpretability")
+    found = (await client.get("/api/settings/misses")).json()
+    (band,) = [x for x in found if x["topic"] == "interpretability" and x["paper_id"] == Q.id]
+    assert (band["trace"]["classifier"], band["trace"]["uncertain"]) == (False, False)
 
     # Reactions over 30 days per topic and reason, for Overview.
     await word.react(

@@ -1,4 +1,4 @@
-/** The ladder (DESIGN.md, "The ladder"): Gist, Abstract standing in for the Brief, the Deep card, the paper. */
+/** The ladder (DESIGN.md, "The ladder"): Gist, the Brief or the abstract standing in for it, the Deep card, the paper. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fullDate } from "@/lib/format";
 import { useDesktop } from "@/hooks/useDesktop";
@@ -103,6 +103,34 @@ export function ThePaper({ paper }: { paper: Paper }) {
 
 type Props = { paper: Paper; asked: boolean; deepRead: ReactNode; onGistAway: (away: boolean) => void };
 
+/** The quiet line over the abstract when it stands in for the Brief: where the Brief is, or why there is none. */
+export function whyAbstract(paper: Paper): string {
+  switch (paper.text_pass?.state) {
+    case "awaiting_text":
+      return "The Brief waits for the paper's full text; the abstract stands in.";
+    case "ready":
+    case "running":
+      return "The Brief is being written from the full text; the abstract stands in.";
+    case "failed":
+      return "The full-text pass failed; it is tried again on the next run. The abstract stands in.";
+    default:
+      return "No Brief yet: Briefs are written for Focus papers at central or related and for Area must reads, so the abstract stands in.";
+  }
+}
+
+/** The Brief: the overstatement first where the full text does not support the abstract, and which revision of the
+ * text it read when the paper has moved on since. */
+function Brief({ paper, brief }: { paper: Paper; brief: NonNullable<Paper["brief"]> }) {
+  const older = brief.revision < paper.revision;
+  return (
+    <Rung name="Brief" extra={<span className="faint normal-case tracking-normal">{brief.source === "latex" ? "from the LaTeX" : "from the PDF"}</span>}>
+      {brief.overstatement && <div className="overst">{brief.overstatement}</div>}
+      {older && <div className="why0">Written for an older revision of the text{brief.arxiv_version ? ` (arXiv v${brief.arxiv_version})` : ""}; the current one waits for its full text.</div>}
+      <p className="prose">{brief.text}</p>
+    </Rung>
+  );
+}
+
 export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
   const desktop = useDesktop();
   const gistRef = useRef<HTMLDivElement>(null);
@@ -118,15 +146,19 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
     <div className="ladder">
       {paper.gist && !analysisFailed && (
         <div ref={gistRef}>
-          <Rung name="Gist">
+          <Rung name="Gist" extra={paper.gist.source === "full_text" ? <span className="faint normal-case tracking-normal">from the full text</span> : undefined}>
             <p className="prose gist">{paper.gist.text}</p>
           </Rung>
         </div>
       )}
-      <Rung name="Abstract">
-        {paper.in_collection && !analysisFailed && <div className="why0">No Brief yet: Briefs are written for Focus papers at central or related and for Area must reads, so the abstract stands in.</div>}
-        <p className="prose">{paper.abstract}</p>
-      </Rung>
+      {paper.brief && !analysisFailed ? (
+        <Brief paper={paper} brief={paper.brief} />
+      ) : (
+        <Rung name="Abstract">
+          {paper.in_collection && !analysisFailed && <div className="why0">{whyAbstract(paper)}</div>}
+          <p className="prose">{paper.abstract}</p>
+        </Rung>
+      )}
       {(paper.in_collection || paper.card || asked) && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
       {desktop && <ThePaper paper={paper} />}
     </div>

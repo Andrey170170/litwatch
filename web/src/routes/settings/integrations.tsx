@@ -18,11 +18,14 @@ function status(c: Card): string {
   return `Up to date${c.skipped ? ` · ${c.skipped} skipped` : ""}`;
 }
 
-function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Set<number>; onSkip: (eventId: number) => void }) {
+/** Whether the card's failing event was skipped on this visit: the card keeps saying so after the refetch
+ * clears it, until another event fails. */
+const skippedOn = (c: Card, skipped: Map<string, number>) => skipped.has(c.name) && (!c.failing || c.failing.event_id === skipped.get(c.name));
+
+function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Map<string, number>; onSkip: (eventId: number) => void }) {
   const retry = useRetryIntegration();
   const skip = useSkipEvent();
-  // The failing event, unless it was skipped on this visit; a later failure shows as itself.
-  const done = c.failing && skipped.has(c.failing.event_id);
+  const done = skippedOn(c, skipped);
   const f = c.enabled && !done ? c.failing : null;
   return (
     <div className={`icard${f ? " fail" : ""}${c.enabled ? "" : " off"}`}>
@@ -69,14 +72,14 @@ function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Set<number>
 
 export function IntegrationsPage() {
   const cards = useQuery(integrationsQuery);
-  // The events skipped on this visit: each card keeps its result in place until the page is left.
-  const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  // The event skipped on this visit per integration: each card keeps its result in place until the page is left.
+  const [skipped, setSkipped] = useState<Map<string, number>>(new Map());
   return (
     <>
       <PageHead title="Integrations" sub="Each reacts to the pipeline's events on its own schedule. Which are loaded is set in litwatch.toml." />
       <Load q={cards} />
       {cards.data?.map((c) => (
-        <IntegrationCard key={c.name} c={c} skipped={skipped} onSkip={(id) => setSkipped((x) => new Set(x).add(id))} />
+        <IntegrationCard key={c.name} c={c} skipped={skipped} onSkip={(id) => setSkipped((x) => new Map(x).set(c.name, id))} />
       ))}
       {cards.data && !cards.data.length && <div className="empty">No integration is configured.</div>}
       {cards.data && cards.data.length > 0 && (
@@ -90,7 +93,7 @@ export function IntegrationsPage() {
               <span>Skipped</span>
             </div>
             {cards.data.map((c) => {
-              const failed = c.failing && !skipped.has(c.failing.event_id) ? 1 : 0;
+              const failed = c.failing && !skippedOn(c, skipped) ? 1 : 0;
               return (
               <div className="mr" key={c.name}>
                 <span className="mono">{c.name}</span>
