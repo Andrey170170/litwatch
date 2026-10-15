@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import importlib
 import json
 import random
 from contextlib import aclosing
@@ -138,9 +139,24 @@ def fingerprint(config: Config, tree: Taxonomy) -> str:
         ],
         "validation": VALIDATION_VERSION,
         "requests": asked,
+        "code": _code(),
     }
     text = json.dumps(material, sort_keys=True, default=str)
     return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+# The code a replay's conclusions come from: routing, keywords, Fit aggregation and the four
+# numbers. Its source is in the fingerprint, so a run never resumes across a change to it; the
+# journal still returns identical calls free, so starting afresh costs little.
+_CODE = ("classification", "grading", "core.classification", "core.grading", "core.evaluation")
+
+
+def _code() -> str:
+    digest = hashlib.sha256()
+    for name in _CODE:
+        digest.update(Path(importlib.import_module(f"litwatch.{name}").__file__).read_bytes())
+    digest.update(Path(__file__).read_bytes())
+    return digest.hexdigest()[:12]
 
 
 @dataclass
@@ -237,11 +253,13 @@ async def resume(conn: psycopg.AsyncConnection, config: Config, eval_run_id: int
 
 
 async def estimate(conn: psycopg.AsyncConnection, config: Config, r: Replay) -> dict[str, float]:
-    """What what is left would cost, by step: the latest calls of each role's model in the
-    journal, or `FALLBACK_COST` where it has none. Reused replies would cost less."""
+    """What what is left would cost, by step: the latest calls of each role under its current
+    configuration (provider, model, effort) in the journal, or `FALLBACK_COST` where it has
+    none. Reused replies would cost less."""
     per_call = {}
     for role in ROLES:
-        mean = await calls.mean_cost(conn, role, config.models.role(role).model)
+        served = config.models.role(role)
+        mean = await calls.mean_cost(conn, role, served.provider, served.model, served.effort)
         per_call[role] = FALLBACK_COST[role] if mean is None else mean
     return {
         "classification": len(r.to_classify) * per_call[classification.ROLE],

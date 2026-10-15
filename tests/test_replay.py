@@ -275,6 +275,13 @@ async def test_a_prompt_change_refuses_a_resume(conn, models, monkeypatch):
         await replay.resume(conn, CONFIG, r.eval_run_id)
 
 
+async def test_a_code_change_refuses_a_resume(conn, models, monkeypatch):
+    r = await start(conn, models)
+    monkeypatch.setattr(replay, "_code", lambda: "another")
+    with pytest.raises(ValueError, match="another configuration"):
+        await replay.resume(conn, CONFIG, r.eval_run_id)
+
+
 async def test_a_paper_whose_text_changed_is_classified_and_graded_again_on_resume(conn, models):
     # Classified on its first text, its grading failed; then its abstract was rewritten.
     models.decisions[A.title] = decision("cot-faithfulness")
@@ -308,6 +315,10 @@ async def test_the_estimate_goes_by_the_journal_and_counts_what_is_left(conn, mo
     await start(conn, models)
     again = await replay.estimate(conn, CONFIG, r)  # every scripted call cost $0.001
     assert again == pytest.approx({"classification": 3 * 0.001, "grading": 3 * 0.002})
+    # Calls under another effort cost differently: the judge at high has none to go by yet.
+    judge = CONFIG.models.judge.model_copy(update={"effort": "high"})
+    harder = CONFIG.model_copy(update={"models": CONFIG.models.model_copy(update={"judge": judge})})
+    assert (await replay.estimate(conn, harder, r))["grading"] == pytest.approx(3 * (0.003 + 0.001))
 
 
 async def test_quality_shows_recall_from_the_latest_replay_and_the_report_names_the_losses(
