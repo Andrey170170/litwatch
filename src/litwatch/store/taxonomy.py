@@ -30,8 +30,11 @@ class Saved:
     retired_classes: list[str] = field(default_factory=list)
     revised_topics: list[str] = field(default_factory=list)  # new, or a new revision
     unfollowed_topics: list[str] = field(default_factory=list)
-    # Followed, unfollowed, or with a new depth or revision: what their papers' grades rest on.
+    # Followed, unfollowed, into or out of draft, or with a new depth or revision: what their
+    # papers' grades and rarity rest on. A draft topic is not followed; a paused one still is.
     changed_topics: list[str] = field(default_factory=list)
+    # The owner's order of the topics kept changed: a tie between topics now breaks otherwise.
+    reordered: bool = False
 
 
 async def lock(conn: psycopg.AsyncConnection) -> None:
@@ -134,9 +137,11 @@ async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
     async with conn.transaction():
         await lock(conn)
         before = {
-            r["class"]: (r["depth"], r["revision"])
+            r["class"]: (r["depth"], r["status"] == "draft", r["revision"])
             for r in await (
-                await conn.execute("SELECT class, depth, revision FROM topics")
+                await conn.execute(
+                    "SELECT class, depth, status, revision FROM topics ORDER BY position, class"
+                )
             ).fetchall()
         }
 
@@ -171,10 +176,10 @@ async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
                 saved.revised_classes.append(c.slug)
 
         latest = await _latest(conn, "topic_versions")
-        after: dict[str, tuple[str, int]] = {}
+        after: dict[str, tuple[str, bool, int]] = {}
         for position, t in enumerate(tree.topics, 1):
             revision, new = _revision(latest, t.slug, t.version)
-            after[t.slug] = (t.depth.value, revision)
+            after[t.slug] = (t.depth.value, t.status == Status.DRAFT, revision)
             await conn.execute(
                 """
                 INSERT INTO topics (class, depth, subject, rubric, interests, keywords, monogram,
@@ -224,6 +229,7 @@ async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
         saved.changed_topics = sorted(
             s for s in set(before) | set(after) if before.get(s) != after.get(s)
         )
+        saved.reordered = [s for s in before if s in after] != [s for s in after if s in before]
     return saved
 
 

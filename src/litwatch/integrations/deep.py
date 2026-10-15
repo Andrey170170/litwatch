@@ -304,7 +304,7 @@ class Deep:
         self, conn: psycopg.AsyncConnection, paper_id: str, requested: bool
     ) -> list[tuple[str, Topic]]:
         """The topics the card is for, each with its class's name."""
-        grades = await word_store.effective_for(conn, paper_id)
+        grades = await word_store.focus_grades(conn, paper_id)
         tree = await taxonomy_store.load(conn)
         focus = [
             (tree.get(t.slug).name, t)

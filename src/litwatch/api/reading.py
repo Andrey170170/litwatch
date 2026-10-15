@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, set_token_cookie, token_ok
+from litwatch.api.deps import Conn, budget_lines, set_token_cookie, token_ok
 from litwatch.core import (
     Depth,
     Hand,
@@ -50,8 +50,10 @@ async def _topic(c: psycopg.AsyncConnection, slug: str) -> tuple[str, Topic] | N
 
 
 @router.get("/status")
-async def status(c: Conn) -> s.Status:
-    return s.Status(**await reading.status(c))
+async def status(request: Request, c: Conn) -> s.Status:
+    spend = await budget_lines(c, _config(request).budget)
+    over = [line.provider for line in spend if line.over]
+    return s.Status(**await reading.status(c), over_budget=over)
 
 
 # -- papers ----------------------------------------------------------------------------------------
@@ -106,7 +108,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         raise HTTPException(status_code=404, detail="no such paper")
     topics = [
         s.PaperTopic(
-            **{k: t[k] for k in ("slug", "name", "depth", "colour", "grade", "missed")},
+            **{k: t[k] for k in ("slug", "name", "depth", "colour", "fit", "grade", "missed")},
             label=s.LabelState(**t["label"]) if t["label"] else None,
             reaction=(t["reaction"] or {}).get("value"),
             reaction_reason=(t["reaction"] or {}).get("reason"),
@@ -294,9 +296,9 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
     _, settled = await word.react(c, reaction)
     focus = known is not None and known[1].depth == Depth.FOCUS
     if focus and body.reason == ReactionReason.UNRELATED:
-        said = f"Marked not relevant for {known[0]}"
+        said = f"Marked not on {known[0]}"
     elif focus and body.reason == ReactionReason.GREAT_FIND:
-        said = f"Marked relevant for {known[0]}"
+        said = f"Marked a great find for {known[0]}"
     else:
         said = f"Remembered for {known[0]}" if known else "Remembered"
     return _ack(said, settled)
@@ -327,13 +329,7 @@ async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn) -> s.Ack:
     await _known(c, paper_id)
     _, settled = await word.label(
         c,
-        Label(
-            paper_id=paper_id,
-            topic=topic,
-            value=body.value,
-            grade=body.grade if body.value == "relevant" else None,
-            origin=LabelOrigin.READER,
-        ),
+        Label(paper_id=paper_id, topic=topic, value=body.value, origin=LabelOrigin.READER),
     )
     return _ack(f"Noted for {known[0]}", settled)
 
@@ -350,7 +346,7 @@ async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
     if known is None or known[1].depth != Depth.FOCUS:
         raise HTTPException(status_code=404, detail="not a Focus topic")
     await _known(c, body.paper_id)
-    _, settled, new = await misses.report(c, body.paper_id, body.topic)
+    _, settled, new = await misses.report(c, body.paper_id, body.topic, body.fit)
     if not new:
         return _ack(f"Already reported as missed for {known[0]}", settled)
     return _ack(f"Reported as missed for {known[0]}", settled)

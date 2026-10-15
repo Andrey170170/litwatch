@@ -116,7 +116,15 @@ abstract, the topic's subject and, for a Focus topic, its rubric. How it is chec
 A verdict needs every grader it calls to answer validly (a Fit from the four, a reason; for `area_check`, a yes or no
 with its probability). If one fails, comes back truncated or invalid, or refuses, no verdict is made:
 the grading stays pending, is retried next run, and after three failed runs is listed on Quality as ungraded with a
-button to grade it now (carried from the first v1).
+button to grade it now (carried from the first v1). As in classification and analysis, only an unusable answer (truncated, invalid,
+refused) counts toward the three; a grader that did not answer (a timeout, a provider down) is retried without
+counting. Grading it now runs at once, as a run of its own, and counts as the first of three more runs; until its result is
+recorded the grading stays pending, so a request cut short leaves it to the next run.
+
+Grading runs nightly after analysis, once per paper revision: the first pass on a revision grades every active topic
+its memberships lead to (a paused topic grades nothing new; a paper whose analysis failed is graded all the same, its
+Weight treated as solid). After that pass only failed gradings and reported misses are graded; a topic the paper
+leads to later, by a followed topic or a moved class, waits for a re-run (section 10).
 
 ### Fit and Weight
 

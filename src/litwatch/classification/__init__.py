@@ -25,6 +25,7 @@ from litwatch.core.classification import (
     standing,
 )
 from litwatch.core.taxonomy import Taxonomy
+from litwatch.feedback import word
 from litwatch.llm import CallError, Gateway, Usage
 from litwatch.llm.decisions import Decision
 from litwatch.llm.types import Choice, DecisionRequest, Predicate, Question
@@ -157,9 +158,11 @@ async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
     nothing to record: the paper's text changed meanwhile, or it was dismissed.
 
     The classifier's memberships replace the paper's earlier ones; the owner's class labels
-    stay and outrank them (`core.classification.standing`).
+    stay and outrank them (`core.classification.standing`). The paper is settled: classified,
+    it is in the collection and has a rarity, from its Weight alone until it is graded.
     """
     async with conn.transaction():
+        await word.lock(conn, c.paper.id)  # before any write, as every write that settles
         if not await papers_store.still_current(conn, c.paper):
             return False
         if c.error is not None or c.classified is None or c.model is None:
@@ -171,6 +174,7 @@ async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
         await store.replace(conn, c.paper, c.memberships, c.versions)
         await failures.succeeded(conn, c.paper.id, "classification")
         await _announce(conn, c.paper, primary, by_owner=False)
+        await word.settle(conn, c.paper.id)
     return True
 
 
@@ -184,7 +188,7 @@ async def by_hand(
     """The owner classifies a paper: its classes, each an owner membership, and its primary
     class (the first named, unless given). The keyword check runs as usual. Raises ValueError
     for a class not in the tree. Returns False when the paper's text changed meanwhile, or it
-    was dismissed."""
+    was dismissed. The caller settles the paper once its transaction ends (`word.settle`)."""
     if not classes:
         raise ValueError("name at least one class")
     if unknown := sorted(set(classes) - {c.slug for c in tree.classes}):

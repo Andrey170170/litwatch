@@ -1182,6 +1182,71 @@
         }
       }
     },
+    "/api/settings/grading/{topic}/{paper_id}/now": {
+      "post": {
+        "summary": "Grade Now",
+        "description": "A grading failed three runs in a row on this text: grade it now, as a run of its own.\nIt counts as the first of three more runs. Until it is recorded the grading stays a pending\nfailure, so a request cut short leaves it to the next nightly run; 409 when the paper's text\nchanged or it was dismissed while it was graded.",
+        "operationId": "grade_now_api_settings_grading__topic___paper_id__now_post",
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Topic"
+            }
+          },
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Awaiting"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GradedOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/calibrate": {
       "get": {
         "summary": "Sessions",
@@ -1721,7 +1786,7 @@
         "properties": {
           "fit": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/Fit"
+              "$ref": "#/components/schemas/LabelValue"
             },
             "type": "object",
             "title": "Fit"
@@ -1759,7 +1824,7 @@
           "fit"
         ],
         "title": "Answer",
-        "description": "One paper's answers. Fit for the topic it was drawn or taken for is required."
+        "description": "One paper's answers. Fit for the topic it was drawn or taken for is required: central,\nrelated, adjacent, none or unsure."
       },
       "Awaiting": {
         "properties": {
@@ -1917,38 +1982,34 @@
             "type": "string",
             "title": "Topic"
           },
-          "grade": {
-            "$ref": "#/components/schemas/Grade"
+          "fit": {
+            "$ref": "#/components/schemas/Fit"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
           },
           "split": {
             "type": "boolean",
             "title": "Split",
             "default": false
           },
-          "judge": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Opinion"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "check": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Opinion"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "migrated": {
+          "escalated": {
             "type": "boolean",
-            "title": "Migrated",
+            "title": "Escalated",
             "default": false
+          },
+          "opinions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Opinion"
+            },
+            "type": "object",
+            "title": "Opinions"
+          },
+          "paper_revision": {
+            "type": "integer",
+            "title": "Paper Revision",
+            "default": 1
           },
           "recorded_at": {
             "anyOf": [
@@ -1966,10 +2027,11 @@
         "type": "object",
         "required": [
           "topic",
-          "grade"
+          "fit",
+          "reason"
         ],
         "title": "Chosen",
-        "description": "One Focus topic's current verdict on the paper."
+        "description": "One followed topic's current verdict on the paper: the Fit that stands, each grader's\nanswer by role, and the paper revision it was made from."
       },
       "CitedIn": {
         "properties": {
@@ -2269,26 +2331,15 @@
         "description": "The event an integration is stuck on; its later events wait behind it."
       },
       "Fit": {
-        "properties": {
-          "value": {
-            "$ref": "#/components/schemas/LabelValue"
-          },
-          "grade": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Grade"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "value"
+        "type": "string",
+        "enum": [
+          "central",
+          "related",
+          "adjacent",
+          "none"
         ],
-        "title": "Fit"
+        "title": "Fit",
+        "description": "How close a paper is to one topic, most inclusive first."
       },
       "Grade": {
         "type": "string",
@@ -2299,7 +2350,42 @@
           "none"
         ],
         "title": "Grade",
-        "description": "A Focus topic's judgement of a paper, most inclusive first."
+        "description": "A paper's standing on one topic, from its Fit there and its Weight, most inclusive first."
+      },
+      "GradedOut": {
+        "properties": {
+          "graded": {
+            "type": "boolean",
+            "title": "Graded"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "graded"
+        ],
+        "title": "GradedOut",
+        "description": "What grading now found: the Fit that stands, or why there is no verdict."
       },
       "HTTPValidationError": {
         "properties": {
@@ -2342,10 +2428,10 @@
             "format": "date-time",
             "title": "At"
           },
-          "grade": {
+          "fit": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Grade"
+                "$ref": "#/components/schemas/Fit"
               },
               {
                 "type": "null"
@@ -2453,16 +2539,6 @@
         "properties": {
           "value": {
             "$ref": "#/components/schemas/LabelValue"
-          },
-          "grade": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Grade"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "type": "object",
@@ -2475,16 +2551,6 @@
         "properties": {
           "value": {
             "$ref": "#/components/schemas/LabelValue"
-          },
-          "grade": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Grade"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "origin": {
             "type": "string",
@@ -2506,12 +2572,14 @@
       "LabelValue": {
         "type": "string",
         "enum": [
-          "relevant",
+          "central",
+          "related",
           "adjacent",
-          "not_relevant",
+          "none",
           "unsure"
         ],
-        "title": "LabelValue"
+        "title": "LabelValue",
+        "description": "A label's answer: a Fit (`core.grading.Fit`), or unsure."
       },
       "Lookup": {
         "properties": {
@@ -2553,6 +2621,15 @@
           "topic": {
             "type": "string",
             "title": "Topic"
+          },
+          "fit": {
+            "type": "string",
+            "enum": [
+              "central",
+              "related"
+            ],
+            "title": "Fit",
+            "default": "central"
           }
         },
         "type": "object",
@@ -2588,14 +2665,21 @@
       },
       "Opinion": {
         "properties": {
-          "grade": {
-            "$ref": "#/components/schemas/Grade"
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reason": {
-            "type": "string",
-            "title": "Reason"
-          },
-          "model": {
             "anyOf": [
               {
                 "type": "string"
@@ -2604,15 +2688,37 @@
                 "type": "null"
               }
             ],
-            "title": "Model"
+            "title": "Reason"
+          },
+          "holds": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holds"
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability"
           }
         },
         "type": "object",
         "required": [
-          "grade",
-          "reason"
+          "model"
         ],
-        "title": "Opinion"
+        "title": "Opinion",
+        "description": "One grader's answer: a Fit with one sentence why, or, from `area_check`, whether the\njudge's Fit holds and the probability that it does."
       },
       "Order": {
         "properties": {
@@ -2868,6 +2974,16 @@
             ],
             "title": "Colour"
           },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "grade": {
             "anyOf": [
               {
@@ -2921,7 +3037,7 @@
           "depth"
         ],
         "title": "PaperTopic",
-        "description": "The paper as one topic sees it."
+        "description": "The paper as one topic sees it: its effective Fit and grade there."
       },
       "Papers": {
         "properties": {
@@ -3690,6 +3806,18 @@
             "type": "integer",
             "title": "Analysis Failed",
             "default": 0
+          },
+          "ungraded": {
+            "type": "integer",
+            "title": "Ungraded",
+            "default": 0
+          },
+          "over_budget": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Over Budget"
           }
         },
         "type": "object",

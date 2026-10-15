@@ -34,7 +34,7 @@ from litwatch.store import taxonomy as taxonomy_store
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="litwatch")
 db_app = typer.Typer(no_args_is_help=True, help="Database migrations.")
 eval_app = typer.Typer(no_args_is_help=True, help="Dry runs measured against the owner's labels.")
-library_app = typer.Typer(no_args_is_help=True, help="Effective grades and the library.")
+library_app = typer.Typer(no_args_is_help=True, help="Effective grades, rarity and the library.")
 taxonomy_app = typer.Typer(no_args_is_help=True, help="The class tree and its topics, as YAML.")
 intake_app = typer.Typer(help="Take papers in: from arXiv, or a window from the archive.")
 app.add_typer(db_app, name="db")
@@ -143,7 +143,7 @@ def nightly(
     ] = None,
     config: ConfigPath = None,
 ) -> None:
-    """The nightly run as the scheduler runs it: intake, classification and analysis."""
+    """The nightly run as the scheduler runs it: intake, classification, analysis, grading."""
     cfg = configuration.load(config)
     run_id = _run(lambda conn: nightly_job.run(conn, cfg, fetch=fetch, days=days, limit=limit))
     run = _run(lambda conn: runs.get(conn, run_id))
@@ -280,8 +280,8 @@ def eval_classify_report(
 
 @library_app.command("sync")
 def library_sync() -> None:
-    """Settle every paper with a verdict or the owner's word: effective grades, the library,
-    and their events. For a database written around the settle."""
+    """Settle every paper with a verdict, a Weight or the owner's word: effective grades,
+    rarity, the library, and their events. For a database written around the settle."""
     console.print_json(data=_run(word.sync))
 
 
@@ -353,7 +353,7 @@ def openapi(out: Annotated[Path, typer.Argument(help="Where to write the schema.
 
 @app.command()
 def ping(
-    role: Annotated[str, typer.Argument(help="classify, analyse, judge, check or writer")],
+    role: Annotated[str, typer.Argument(help=", ".join(configuration.ROLES))],
     config: ConfigPath = None,
 ) -> None:
     """Send one small request through a role, to check its key, model and price."""

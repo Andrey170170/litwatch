@@ -5,18 +5,19 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
-from litwatch import classification
-from litwatch.api.deps import Conn
-from litwatch.core import FAILED_RUNS, Paper, Taxonomy, Topic
+from litwatch import classification, grading
+from litwatch.api.deps import Conn, budget_lines
+from litwatch.core import FAILED_RUNS, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
+from litwatch.jobs.context import model_run
 from litwatch.store import failures, quality
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -65,7 +66,7 @@ async def order(body: Order, c: Conn) -> None:
     """The owner's order, which topic lists and cards follow. The list must name every topic
     once."""
     try:
-        await taxonomy_store.set_order(c, body.slugs)
+        await word.reorder(c, body.slugs)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -74,7 +75,7 @@ async def order(body: Order, c: Conn) -> None:
 
 
 @router.get("/quality")
-async def quality_page(c: Conn) -> dict[str, Any]:
+async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
     """At the top, what last night left; below, how well the Focus topics are doing."""
     night = await quality.last_night(c)
     since = night["started_at"] if night else date.today() - timedelta(days=1)
@@ -87,7 +88,12 @@ async def quality_page(c: Conn) -> dict[str, Any]:
             "awaiting_classification": await failures.stuck(c, "classification", FAILED_RUNS),
             # Analysis failed three runs in a row; it is not tried again until the owner says.
             "analysis_failed": await failures.stuck(c, "analysis", FAILED_RUNS),
+            # A grading failed three runs in a row: ungraded there until the owner grades it.
+            "ungraded": await failures.stuck(c, "grading", FAILED_RUNS),
         },
+        "cost": [
+            line.model_dump() for line in await budget_lines(c, request.app.state.config.budget)
+        ],
         "calibration": await calibrate.precision(c),
         "matters_no_topic": await calibrate.matters_no_topic(c),
         "collected": await quality.collected_reactions(c),
@@ -113,7 +119,7 @@ WAITING = {
 
 @asynccontextmanager
 async def _awaiting(
-    c: Any, paper_id: str, revision: int, step: failures.Step = "classification"
+    c: Any, paper_id: str, revision: int, step: failures.Step = "classification", topic: str = ""
 ) -> AsyncIterator[Paper]:
     """The paper, locked to the end of the action's transaction, if `step` still waits for the
     owner on it at `revision`; 409 if its text changed or it no longer waits (a nightly
@@ -125,7 +131,7 @@ async def _awaiting(
             raise HTTPException(status_code=404, detail="no such paper")
         if paper.revision != revision:
             raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
-        if not await failures.waiting(c, paper, step, FAILED_RUNS):
+        if not await failures.waiting(c, paper, step, FAILED_RUNS, topic):
             raise HTTPException(status_code=409, detail=f"{step} is not waiting for the owner")
         yield paper
 
@@ -145,10 +151,11 @@ class ClassesIn(Awaiting):
 @router.put("/classification/{paper_id:path}", responses=WAITING)
 async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
     """The owner names the paper's classes, which go on as usual with source `owner`."""
-    # The taxonomy is read in the action's transaction, so its shared lock holds the tree still
-    # until the classification is recorded; and before the paper's lock, since locks are
-    # taken taxonomy first (`feedback.word.lock`).
+    # One transaction, with the settle lock taken first as by every write that settles: its
+    # shared taxonomy lock holds the tree still until the classification is recorded, and the
+    # paper is classified and settled together.
     async with c.transaction():
+        await word.lock(c, paper_id)
         tree = await taxonomy_store.load(c)
         if tree is None:
             raise HTTPException(status_code=409, detail="no taxonomy")
@@ -157,6 +164,7 @@ async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str,
                 await classification.by_hand(c, paper, tree, body.classes, body.primary)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+        await word.settle(c, paper_id)  # classified: in the collection, with a rarity
     return {
         "classes": list(dict.fromkeys(body.classes)),
         "primary": body.primary or body.classes[0],
@@ -176,8 +184,11 @@ async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
     abstract = (body.abstract or "").strip() or None
     if not (title or abstract):
         raise HTTPException(status_code=422, detail="give a title or an abstract")
-    async with _awaiting(c, paper_id, body.revision):
-        await papers_store.correct(c, paper_id, title, abstract)
+    async with c.transaction():  # the new text and the grades without its old Weight, together
+        await word.lock(c, paper_id)
+        async with _awaiting(c, paper_id, body.revision):
+            await papers_store.correct(c, paper_id, title, abstract)
+        await word.settle(c, paper_id)
 
 
 @router.post("/analysis/{paper_id:path}/retry", status_code=204, responses=WAITING)
@@ -185,6 +196,46 @@ async def retry_analysis(paper_id: str, body: Awaiting, c: Conn) -> None:
     """Analysis failed three runs in a row on this text: give it three more, from the next run."""
     async with _awaiting(c, paper_id, body.revision, "analysis"):
         await failures.succeeded(c, paper_id, "analysis")  # forgets the count
+
+
+class GradedOut(BaseModel):
+    """What grading now found: the Fit that stands, or why there is no verdict."""
+
+    graded: bool
+    fit: Fit | None = None
+    error: str | None = None
+
+
+@router.post("/grading/{topic}/{paper_id:path}/now", responses=WAITING)
+async def grade_now(
+    topic: str, paper_id: str, body: Awaiting, request: Request, c: Conn
+) -> GradedOut:
+    """A grading failed three runs in a row on this text: grade it now, as a run of its own.
+    It counts as the first of three more runs. Until it is recorded the grading stays a pending
+    failure, so a request cut short leaves it to the next nightly run; 409 when the paper's text
+    changed or it was dismissed while it was graded."""
+    tree = await taxonomy_store.load(c)
+    followed = tree.topic(topic) if tree else None
+    if tree is None or followed is None:
+        raise HTTPException(status_code=404, detail="no such topic")
+    if followed.status != Status.ACTIVE:
+        raise HTTPException(status_code=409, detail=f"{topic} is {followed.status}: not graded")
+    async with _awaiting(c, paper_id, body.revision, "grading", topic) as paper:
+        await failures.reset(c, paper_id, "grading", topic)
+    config = request.app.state.config
+    due = [grading.Due(paper, followed, tree.get(topic).name)]
+    recorded = False
+    async with (
+        model_run(c, config, "grading", gateway=request.app.state.gateway) as run,
+        aclosing(grading.grade(due, run.gateway, config.grading)) as found,
+    ):
+        async for g in found:
+            if recorded := await grading.record(c, g):
+                run.add("graded" if g.verdict is not None else "grading_failed")
+    if not recorded:
+        raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
+    v = g.verdict
+    return GradedOut(graded=v is not None, fit=v.fit if v else None, error=g.error)
 
 
 # -- calibrate -------------------------------------------------------------------------------------

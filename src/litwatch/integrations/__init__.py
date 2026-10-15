@@ -113,5 +113,5 @@ async def must_read_and_saved(conn: psycopg.AsyncConnection, paper_id: str) -> b
     trusting what the event said: the owner's word or a later verdict may have moved the
     paper since, and the owner may have unsaved it."""
     row = await word_store.library_row(conn, paper_id)
-    grades = await word_store.effective_for(conn, paper_id)
+    grades = await word_store.focus_grades(conn, paper_id)
     return bool(row and row["saved"]) and Grade.MUST_READ in grades.values()

@@ -1,7 +1,8 @@
-"""Looking a paper up by its arXiv link, and reporting it as a miss for a Focus topic.
+"""Looking a paper up by its arXiv link, and reporting it as a miss for a topic.
 
-Filing a miss is the owner's word (a label of relevant, origin `miss`), so it saves the paper
-like any label.
+Filing a miss is the owner's word (a label of central or related, origin `miss`), a membership
+of the topic's class (source `miss`, so grading for the topic runs whatever classification
+says), and the owner's newest Save (feedback.md, misses).
 """
 
 from __future__ import annotations
@@ -10,11 +11,15 @@ import asyncio
 
 import psycopg
 
-from litwatch.core import Label, LabelOrigin, LabelValue, Paper
+from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Paper
+from litwatch.core.classification import Source
 from litwatch.feedback import word
 from litwatch.feedback.word import Settled
 from litwatch.intake.search import fetch_by_ids, id_from_url
+from litwatch.store import classifications as classifications_store
 from litwatch.store import papers as papers_store
+from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store import word as word_store
 
 
 class NotFoundError(LookupError):
@@ -38,13 +43,17 @@ async def lookup(conn: psycopg.AsyncConnection, text: str) -> tuple[Paper, bool]
 
 
 async def report(
-    conn: psycopg.AsyncConnection, paper_id: str, topic: str
+    conn: psycopg.AsyncConnection, paper_id: str, topic: str, fit: Fit = Fit.CENTRAL
 ) -> tuple[int, Settled, bool]:
-    """File the miss and give the owner's word on it. Returns the miss id, what settled and
-    whether it is new. Reporting again keeps the miss: the owner's word is given again only
-    where none stands (it was taken back), and never over a label the owner gave since."""
+    """File the miss and give the owner's word on it: `fit` (central or related) for the topic,
+    a membership of the topic's class with source `miss`, and the owner's newest Save. Returns
+    the miss id, what settled and whether it is new. Reporting again keeps the miss and saves
+    again: the owner's word is given again only where none stands (it was taken back), and
+    never over a label the owner gave since. Raises ValueError for a Fit below related."""
+    if fit not in (Fit.CENTRAL, Fit.RELATED):
+        raise ValueError("a miss is central or related")
     word_on_it = Label(
-        paper_id=paper_id, topic=topic, value=LabelValue.RELEVANT, origin=LabelOrigin.MISS
+        paper_id=paper_id, topic=topic, value=LabelValue(fit.value), origin=LabelOrigin.MISS
     )
     async with conn.transaction():
         # The paper's lock first, so looking for a standing label and giving the word again
@@ -57,6 +66,14 @@ async def report(
                 (paper_id, topic),
             )
         ).fetchone()
+        await word_store.set_hand(conn, paper_id, Hand.SAVE)
+        tree = await taxonomy_store.load(conn)
+        paper = await papers_store.get(conn, paper_id)
+        if tree is not None and paper is not None and topic in {c.slug for c in tree.classes}:
+            version = tree.get(topic).version
+            await classifications_store.put_owner(
+                conn, paper, topic, True, version, source=Source.MISS
+            )
         if row is None:
             existing = await (
                 await conn.execute(

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from litwatch import events
 from litwatch.core import Analysis, Contribution, Facets, Paper, TaxonomyClass, Weight
 from litwatch.core.analysis import WEIGHT_DEFINITIONS
+from litwatch.feedback import word
 from litwatch.llm import CallError, Gateway, Request, Usage
 from litwatch.store import analyses as store
 from litwatch.store import failures
@@ -142,9 +143,11 @@ async def analyse(
 
 async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
     """Store one paper's analysis, its Weight and its Gist from the abstract, with
-    `gist.written`; or record its failure. Returns False when there was nothing to record: the
-    paper's text changed meanwhile, or it was dismissed."""
+    `gist.written`, and settle the paper (its grades and rarity follow the Weight); or record
+    its failure. Returns False when there was nothing to record: the paper's text changed
+    meanwhile, or it was dismissed."""
     async with conn.transaction():
+        await word.lock(conn, a.paper.id)  # before any write, as every write that settles
         if not await papers_store.still_current(conn, a.paper):
             return False
         if a.analysis is None or a.model is None:
@@ -161,4 +164,5 @@ async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
             source="abstract",
             gist_id=gist,
         )
+        await word.settle(conn, a.paper.id)
     return True

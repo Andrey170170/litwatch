@@ -31,32 +31,35 @@ async def _one(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> d
 
 async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     """The latest nightly run: running, failed (or stuck past `STALE_AFTER`), or done; done
-    with papers awaiting classification or with analysis stopped needs the owner's attention."""
+    with papers awaiting classification, or with analysis or a grading stopped, needs the
+    owner's attention."""
     run = await _one(conn, "SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
     if run is None:
         return {"state": "none"}
     now = (await _one(conn, "SELECT now() AS now"))["now"]
     awaiting = await failures.count_stuck(conn, "classification", FAILED_RUNS)
     analysis = await failures.count_stuck(conn, "analysis", FAILED_RUNS)
+    ungraded = await failures.count_stuck(conn, "grading", FAILED_RUNS)
     result: dict[str, Any] = {
         "run_id": run["id"],
         "started_at": run["started_at"],
         "finished_at": run["finished_at"],
         "awaiting_classification": awaiting,
         "analysis_failed": analysis,
+        "ungraded": ungraded,
     }
     if run["finished_at"] is None and now - run["started_at"] < STALE_AFTER:
         return result | {"state": "running"}
     if run["error"] or run["finished_at"] is None:
         return result | {"state": "failed", "error": run["error"]}
-    return result | {"state": "attention" if awaiting or analysis else "quiet"}
+    return result | {"state": "attention" if awaiting or analysis or ungraded else "quiet"}
 
 
 # -- a paper ---------------------------------------------------------------------------------------
 
 
 async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
-    """Everything the paper page shows, each Focus topic's current verdict included."""
+    """Everything the paper page shows, each followed topic's current verdict included."""
     found = await _one(
         conn,
         f"SELECT p.id, p.title, p.abstract, {AUTHORS}, "
@@ -71,14 +74,14 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     topics = await _all(
         conn,
         """
-        SELECT t.class AS slug, c.name, t.depth, t.colour, t.position, g.grade,
-               (SELECT row_to_json(l) FROM (SELECT value, grade, origin, provisional
+        SELECT t.class AS slug, c.name, t.depth, t.colour, t.position, g.fit, g.grade,
+               (SELECT row_to_json(l) FROM (SELECT value, origin, provisional
                 FROM labels WHERE paper_id = %(p)s AND topic = t.class) l) AS label,
                (SELECT row_to_json(r) FROM (SELECT value, reason FROM reactions
                 WHERE paper_id = %(p)s AND topic = t.class) r) AS reaction,
                EXISTS (SELECT 1 FROM misses ms WHERE ms.paper_id = %(p)s AND ms.topic = t.class)
                    AND EXISTS (SELECT 1 FROM labels lb WHERE lb.paper_id = %(p)s
-                               AND lb.topic = t.class AND lb.value = 'relevant')
+                               AND lb.topic = t.class AND lb.value IN ('central', 'related'))
                    -- and the owner's current word still says so (a newer thumb can withdraw it)
                    AND coalesce(g.grade IN ('must_read', 'relevant'), false) AS missed
         FROM topics t JOIN classes c ON c.slug = t.class
@@ -96,16 +99,15 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     verdicts = await _all(
         conn,
         # current verdicts of followed topics only; an unfollowed topic's stay in the history
-        "SELECT DISTINCT ON (topic) topic, grade, split, judge, check_opinion AS check, "
-        "migrated, recorded_at FROM verdicts v JOIN topics t ON t.class = v.topic "
-        "WHERE paper_id = %s "
-        "ORDER BY topic, paper_revision DESC, topic_revision DESC, recorded_at DESC, id DESC",
+        "SELECT DISTINCT ON (topic) topic, fit, reason, split, escalated, opinions, "
+        "paper_revision, recorded_at FROM verdicts v JOIN topics t ON t.class = v.topic "
+        "WHERE paper_id = %s ORDER BY topic, paper_revision DESC, recorded_at DESC, id DESC",
         (paper_id,),
     )
     history = await _all(
         conn,
         """
-        SELECT 'graded' AS what, topic, recorded_at AS at, grade
+        SELECT 'graded' AS what, topic, recorded_at AS at, fit
         FROM verdicts WHERE paper_id = %(p)s
         UNION ALL
         SELECT 'missed', topic, reported_at, NULL FROM misses WHERE paper_id = %(p)s
@@ -173,7 +175,8 @@ async def papers(
     else:
         scope, scope_params = sql.SQL(""), []
         grade = sql.SQL(
-            "(SELECT g.grade FROM effective_grades g WHERE g.paper_id = p.id "
+            "(SELECT g.grade FROM effective_grades g JOIN topics t ON t.class = g.topic "
+            "AND t.depth = 'focus' WHERE g.paper_id = p.id "
             f"ORDER BY array_position({GRADE_ORDER}, g.grade) LIMIT 1)"
         )
     order = SORTS.get(sort or ("published" if q else "added"), SORTS["added"])

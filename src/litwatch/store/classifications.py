@@ -96,10 +96,17 @@ async def replace(
 
 
 async def put_owner(
-    conn: psycopg.AsyncConnection, paper: Paper, slug: str, member: bool, class_version: str
+    conn: psycopg.AsyncConnection,
+    paper: Paper,
+    slug: str,
+    member: bool,
+    class_version: str,
+    *,
+    source: Source = Source.OWNER,
 ) -> None:
-    """The owner's class label: in the class or out of it, whatever the other sources say."""
-    m = Membership(slug=slug, source=Source.OWNER, member=member)
+    """The owner's class label: in the class or out of it, whatever the other sources say; or,
+    with source `miss`, the class of a topic the owner reported the paper missed for."""
+    m = Membership(slug=slug, source=source, member=member)
     await _put(conn, paper, m, class_version)
 
 

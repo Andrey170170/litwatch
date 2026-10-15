@@ -49,9 +49,17 @@ evaluation calls the same functions and writes only to evaluation tables.
   one from the full-text pass queued last for the current revision, the same pass as the current Brief and Gist, else
   from the abstract.
 - `verdicts` (paper, topic, topic version, paper revision, fit, reason, opinions per grader, split, escalated, at),
-  one row per grading as before; the grade is derived, not stored here.
-- `effective_grades` (paper, topic, fit, grade) and `rarities` (paper, mixed-list level, best topic): kept current so
-  every surface reads one answer and lists sort by it.
+  one row per grading as before; the topic version is the topic's version hash, and opinions are keyed by role
+  (`judge`, `check`, `area_check` with its probability, `field_grade`). The grade is derived, not stored here.
+- `effective_grades` (paper, topic, fit, grade, rarity on the topic's page), a row for every followed topic with a
+  verdict or the owner's word, and `rarities` (paper, mixed-list level, best topic, null when no topic graded the
+  paper and its Weight's floor alone sets the level): kept current so every surface reads one answer and lists sort
+  by it.
+- `step_failures` (paper, step classification | analysis | grading, topic for a grading, paper revision, failed
+  runs, last error): a step's failed runs on the paper's current text; three unusable answers in a row leave it for
+  the owner (pipeline.md, section 9).
+- `grading_passes` (paper, paper revision, at): the revision's first grading pass is done; after it only failed
+  gradings and reported misses are graded (pipeline.md, section 4).
 - `gists` (paper, paper revision, arXiv version or unknown, pass, text, source abstract | full_text, model, at): the
   current Gist is the one from the full-text pass queued last for the current revision, else from the abstract. `analyses.gist` is the abstract one.
 - `briefs` (paper, paper revision, arXiv version or unknown, pass, text, overstatement line, text source latex | pdf,
@@ -74,7 +82,7 @@ digests (a listed paper the owner later set below relevant). `regression` and th
 evaluation history.
 
 **Kept as they are:** `papers`, `intake_checkpoints`, `intake_snapshots`, `runs`, `inference_calls`, `labels` (plus
-class labels), `reactions` (reason values changed), `appraisals`, `calibration_sessions`,
+class labels; the value is a Fit or unsure, and the grade column is gone: the grade follows from the Fit), `reactions` (reason values changed), `appraisals`, `calibration_sessions`,
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
 `zotero_items`, `webdav_files`, `deep_cards`, `deep_attempts` (plus the job's usage: tokens, turns, list cost), `deep_waiting`, `eval_runs`, `eval_results` (columns
@@ -122,7 +130,8 @@ model = "meta/muse-spark-1.3-contributor"
 
 [models.area_check]
 provider = "openrouter"
-model = "openai/gpt-6-luna-decisions"
+model = "typesafe/jev-1.13"
+decisions = true
 
 [models.field_grade]
 provider = "anthropic"

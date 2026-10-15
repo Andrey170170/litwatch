@@ -10,9 +10,11 @@ from pydantic import BaseModel, Field, model_validator
 from litwatch.core import (
     Depth,
     Event,
+    Fit,
     Grade,
     Hand,
     LabelValue,
+    Opinion,
     Publication,
     ReactionReason,
     ReactionValue,
@@ -30,6 +32,8 @@ class Status(BaseModel):
     error: str | None = None
     awaiting_classification: int = 0  # papers whose classification failed three runs in a row
     analysis_failed: int = 0  # papers whose analysis failed three runs in a row, stopped
+    ungraded: int = 0  # gradings that failed three runs in a row, stopped
+    over_budget: list[str] = Field(default_factory=list)  # providers projected over budget
 
 
 class TopicRef(BaseModel):
@@ -39,34 +43,30 @@ class TopicRef(BaseModel):
     colour: str | None = None
 
 
-class Opinion(BaseModel):
-    grade: Grade
-    reason: str
-    model: str | None = None
-
-
 class Chosen(BaseModel):
-    """One Focus topic's current verdict on the paper."""
+    """One followed topic's current verdict on the paper: the Fit that stands, each grader's
+    answer by role, and the paper revision it was made from."""
 
     topic: str
-    grade: Grade
+    fit: Fit
+    reason: str
     split: bool = False
-    judge: Opinion | None = None
-    check: Opinion | None = None
-    migrated: bool = False
+    escalated: bool = False
+    opinions: dict[str, Opinion] = Field(default_factory=dict)
+    paper_revision: int = 1
     recorded_at: datetime | None = None
 
 
 class LabelState(BaseModel):
     value: LabelValue
-    grade: Grade | None = None
     origin: str
     provisional: bool = False
 
 
 class PaperTopic(TopicRef):
-    """The paper as one topic sees it."""
+    """The paper as one topic sees it: its effective Fit and grade there."""
 
+    fit: Fit | None = None
     grade: Grade | None = None
     label: LabelState | None = None
     reaction: ReactionValue | None = None
@@ -78,7 +78,7 @@ class HistoryItem(BaseModel):
     what: Literal["graded", "missed"]
     topic: str
     at: datetime
-    grade: Grade | None = None
+    fit: Fit | None = None  # the verdict's, for `graded`
 
 
 class DeepCard(BaseModel):
@@ -164,7 +164,6 @@ class ReactionIn(BaseModel):
 
 class LabelIn(BaseModel):
     value: LabelValue
-    grade: Grade | None = None
 
 
 class SaveIn(BaseModel):
@@ -191,6 +190,7 @@ class Lookup(BaseModel):
 class MissIn(BaseModel):
     paper_id: str
     topic: str
+    fit: Literal[Fit.CENTRAL, Fit.RELATED] = Fit.CENTRAL  # the owner's word, asked at once
 
 
 class CitedIn(BaseModel):
