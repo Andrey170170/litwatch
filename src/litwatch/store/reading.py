@@ -146,8 +146,9 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     ungraded = await failures.count_stuck(conn, "grading", FAILED_RUNS)
     papers = await _one(
         conn,
+        # The owner's classifications by hand (model `owner`) during the run are not its work.
         "SELECT count(*) AS n FROM classifications WHERE classified_at >= %(from)s "
-        "AND (%(to)s::timestamptz IS NULL OR classified_at <= %(to)s)",
+        "AND (%(to)s::timestamptz IS NULL OR classified_at <= %(to)s) AND model <> 'owner'",
         {"from": run["started_at"], "to": run["finished_at"]},
     )
     result: dict[str, Any] = {

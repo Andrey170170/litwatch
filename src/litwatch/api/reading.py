@@ -454,7 +454,10 @@ async def _bibtex(
 
 
 async def _matching(c: psycopg.AsyncConnection, query: s.PaperQuery) -> list[str]:
-    """Every collection paper a Papers filter matches, in its order."""
+    """Every collection paper a Papers filter matches, in its order; none when it asks for
+    the papers outside the collection."""
+    if query.source == "outside":
+        return []
     tree = await taxonomy_store.load(c)
     _topics_known(tree, query.topic)
     listed = await reading.papers(c, tree, _query(query), limit=None)
@@ -476,7 +479,7 @@ async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
         await lookups.for_copy(c, request.app.state.publications, body.ids[0])
     ids = list(body.ids)
     source = body.filter.source if body.filter else None
-    if body.filter is not None and source != "outside":
+    if body.filter is not None:
         ids += [i for i in await _matching(c, body.filter) if i not in ids]
     outside = [
         Cited(id=h.id, title=h.title, authors=list(h.authors), year=h.year)

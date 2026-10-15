@@ -506,6 +506,13 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
     await classify(conn, P, FAITH.slug)
     running = (await client.get("/api/status")).json()
     assert (running["state"], running["papers"], running["waiting"]) == ("running", 1, 1)
+    # The owner classifying by hand meanwhile is not the run's work.
+    await conn.execute(
+        "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
+        "primary_class, model) SELECT paper_id, paper_revision, taxonomy_revision, "
+        "primary_class, 'owner' FROM classifications"
+    )
+    assert (await client.get("/api/status")).json()["papers"] == 1
     await conn.execute("UPDATE runs SET finished_at = now()")
     done = (await client.get("/api/status")).json()
     assert (done["state"], done["papers"], done["waiting"]) == ("quiet", 1, None)
@@ -676,3 +683,5 @@ async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client
     assert "eprint = {2610.00001}" in text and "eprint = {2610.99902}" not in text
     text = (await client.get("/api/bibtex", params={"q": "sparse"})).text
     assert "eprint = {2610.00002}" in text and "2610.00001" not in text
+    outside = {"q": "hidden computation", "source": "outside"}
+    assert "@" not in (await client.get("/api/bibtex", params=outside)).text
