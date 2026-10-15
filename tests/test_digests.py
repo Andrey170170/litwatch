@@ -450,6 +450,8 @@ def test_the_voice_check_names_each_rule_broken_and_spares_titles():
     assert voice_problems("It is a must read.") == ["names a grade"]
     text = "Attention Is All You Need set the architecture the papers build on."
     assert voice_problems(text, ["Attention Is All You Need"]) == []
+    shortened = "Passing the Test You Trained On finds rankings transfer poorly."
+    assert voice_problems(shortened, ["Passing the Test You Trained On: Detector Rankings"]) == []
 
 
 # -- the Digest tab --------------------------------------------------------------------------------
