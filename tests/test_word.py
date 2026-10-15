@@ -204,7 +204,7 @@ async def test_a_new_order_of_the_topics_breaks_a_tie_for_the_best_topic(db):
 
 async def test_wrong_topic_takes_the_paper_out_and_clearing_the_thumb_brings_it_back(db):
     await graded(db, "central")
-    _, settled = await word.react(db, thumb("unrelated"))
+    _, settled = await word.react(db, thumb("wrong_topic"))
     assert settled.grades == {FAITH.slug: (Grade.MUST_READ, Grade.NONE)}
     assert (settled.was_saved, settled.saved) == (True, False)
     settled = await word.unreact(db, P.id, FAITH.slug)
@@ -221,10 +221,14 @@ async def test_a_great_find_lifts_an_adjacent_verdict_to_related(db):
 async def test_reactions_that_carry_no_word_change_nothing(db):
     await graded(db, "related")
     await graded(db, "related", topic=INTERP.slug)
-    for reaction in (thumb("not_for_me"), thumb("unrelated", topic=INTERP.slug), thumb(None)):
+    for reaction in (
+        thumb("not_interesting"),
+        thumb("wrong_topic", topic=INTERP.slug),
+        thumb(None),
+    ):
         _, settled = await word.react(db, reaction)
         assert settled.grades == {} and settled.saved is True
-    _, settled = await word.react(db, thumb("unrelated", topic=None))
+    _, settled = await word.react(db, thumb("wrong_topic", topic=None))
     assert settled.grades == {}
 
 
@@ -243,7 +247,7 @@ async def test_the_owners_related_never_falls_below_relevant(db):
 
 async def test_a_label_after_a_thumb_decides_and_keeps_its_origin(db):
     await graded(db, "related")
-    await word.react(db, thumb("unrelated"))
+    await word.react(db, thumb("wrong_topic"))
     first, settled = await word.label(db, said("central", origin=LabelOrigin.SAMPLE))
     assert settled.grades == {FAITH.slug: (Grade.NONE, Grade.MUST_READ)} and settled.saved
     changed, _ = await word.label(db, first.model_copy(update={"origin": LabelOrigin.READER}))
@@ -280,12 +284,12 @@ async def test_sync_settles_what_was_written_around_it(db):
 
 async def test_the_later_word_wins_inside_one_transaction(db):
     async with db.transaction():
-        await word.react(db, thumb("unrelated"))
+        await word.react(db, thumb("wrong_topic"))
         _, settled = await word.label(db, said("central"))
     assert settled.saved is True
     async with db.transaction():
         await word.label(db, said("central"))
-        _, settled = await word.react(db, thumb("unrelated"))
+        _, settled = await word.react(db, thumb("wrong_topic"))
     assert settled.saved is False
 
 

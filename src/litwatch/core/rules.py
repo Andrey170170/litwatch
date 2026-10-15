@@ -22,7 +22,7 @@ REWRITE_SIMILARITY = 0.8  # texts less similar than this were rewritten, not tou
 # section 9): classification then waits for the owner, analysis is listed on Quality.
 FAILED_RUNS = 3
 # The two reasons that make a reaction the owner's word on a Focus topic.
-REACTION_WORDS = (ReactionReason.UNRELATED, ReactionReason.GREAT_FIND)
+REACTION_WORDS = (ReactionReason.WRONG_TOPIC, ReactionReason.GREAT_FIND)
 
 
 _NOW = datetime.max.replace(tzinfo=UTC)
@@ -43,7 +43,7 @@ def owners_word(
     labelled = Fit(label.value) if label else None
     if reaction is None:
         return labelled
-    if reaction.reason == ReactionReason.UNRELATED:
+    if reaction.reason == ReactionReason.WRONG_TOPIC:
         heard = Fit.NONE
     else:
         heard = verdict if verdict in (Fit.CENTRAL, Fit.RELATED) else Fit.RELATED

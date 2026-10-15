@@ -122,10 +122,10 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
                 )
 
         # Rarity, for a paper in the collection: the followed topics' page levels in the owner's
-        # order, lowered by depth, never below the Weight's floor.
+        # order, lowered by depth, never below the Weight's floor. The Weight is kept beside it.
         if await word_store.in_collection(conn, paper_id):
             levels = [(s, t.depth, after[s].rarity) for s, t in topics.items() if s in after]
-            rarity = mixed_rarity(levels, weight)
+            rarity = (*mixed_rarity(levels, weight), weight)
             if rarity != await word_store.rarity_of(conn, paper_id):
                 await word_store.set_rarity(conn, paper_id, *rarity)
 
