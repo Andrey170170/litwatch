@@ -1,6 +1,6 @@
-"""The nightly run: intake, classification, analysis and grading, under the run lock and with a
-run record. Each recorded Weight and verdict settles its paper (effective grades, rarity, the
-library) as it is recorded."""
+"""The nightly run: intake, classification, analysis, grading and the full-text queue, under the
+run lock and with a run record. Each recorded Weight and verdict settles its paper (effective
+grades, rarity, the library, its full-text pass) as it is recorded."""
 
 from __future__ import annotations
 
@@ -10,14 +10,16 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from litwatch import analysis, classification, grading, intake
+from litwatch import analysis, classification, fulltext, grading, intake
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
+from litwatch.core.fulltext import RECONCILE_LOOKBACK
 from litwatch.feedback import word
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
 from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
@@ -71,6 +73,31 @@ async def grade(
     await verdicts_store.passed(conn, passes)  # only once every grading is recorded
 
 
+async def text_passes(
+    conn: psycopg.AsyncConnection, config: Config, run: ModelRun, limit: int | None = None
+) -> None:
+    """Reconcile the full-text queue with the database: settle every candidate paper
+    (`store.fulltext.candidates`: those with a pass open, those the rule may give one, those
+    read for an older version or revision), so a trigger missed costs at most a night
+    (pipeline.md, sections 6 and 8); all of them, as `limit` caps what is spent. Then make
+    the failed passes ready again, those with fewer than `FAILED_RUNS` failed runs; and try
+    every pass that is due once, up to `limit`: the passes
+    this run queued have their text asked for now, and the service's worker runs each once its
+    text is there."""
+    reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK)
+    await word.settle_all(conn, reconciled)
+    run.add("fulltext_reconciled", len(reconciled))
+    run.add("fulltext_retried", await fulltext_store.retry_failed(conn, FAILED_RUNS))
+    archive = fulltext.archive_for(config)
+    if archive is None:
+        log.warning("no archive configured: full-text passes wait")
+        return
+    try:
+        await fulltext.work(conn, config, archive, run=run, limit=limit)
+    finally:
+        await archive.aclose()
+
+
 async def run(
     conn: psycopg.AsyncConnection,
     config: Config,
@@ -83,7 +110,9 @@ async def run(
     """One run under the run lock. Returns the run id.
 
     An incomplete harvest does not stop the rest: what arrived is classified, analysed and
-    graded, and the gap stays open for the next run. `limit` caps the papers each step takes.
+    graded, and the gap stays open for the next run. `limit` caps the papers each step that
+    spends takes, and the full-text passes tried; the full-text reconcile spends nothing and
+    takes all.
     """
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
@@ -106,4 +135,5 @@ async def run(
         await classify(conn, config, run, limit)
         await analyse(conn, run, limit)
         await grade(conn, config, run, limit)
+        await text_passes(conn, config, run, limit)
         return run.run_id

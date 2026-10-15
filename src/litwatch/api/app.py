@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from litwatch import fulltext
 from litwatch.api import integrations as integrations_api
 from litwatch.api import reading, settings
 from litwatch.api.deps import authorised
@@ -31,9 +32,25 @@ WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Start the scheduler with the service when the configuration enables it, and the
-    integrations' dispatcher when any is loaded."""
+    """Start the scheduler with the service when the configuration enables it, with the
+    full-text worker when an archive is configured too (it calls models and has the archive
+    fetch, so, like the schedule, it waits for cutover), and the integrations' dispatcher
+    when any is loaded."""
     tasks = []
+    enabled = app.state.config.schedule.enabled
+    archive = fulltext.archive_for(app.state.config) if enabled else None
+    if archive is not None:
+        tasks.append(
+            asyncio.create_task(
+                fulltext.run_forever(
+                    app.state.dsn,
+                    app.state.config,
+                    archive,
+                    app.state.gateway,
+                    app.state.fulltext_wake,
+                )
+            )
+        )
     if app.state.config.schedule.enabled:
         tasks.append(
             asyncio.create_task(
@@ -55,6 +72,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         app.state.search_pool.shutdown(wait=False, cancel_futures=True)
+        if archive is not None:
+            await archive.aclose()
 
 
 def create_app(
@@ -78,6 +97,7 @@ def create_app(
     app.state.search_timeout = SEARCH_TIMEOUT_SECONDS
     app.state.search_pool = integrations_api.search_pool()
     app.state.search_stats = {}
+    app.state.fulltext_wake = asyncio.Event()  # set to have the full-text worker look now
     protected = [Depends(authorised)]
     app.include_router(reading.router, dependencies=protected)
     app.include_router(settings.router, dependencies=protected)

@@ -148,10 +148,13 @@ async def test_a_revision_moves_only_when_its_hash_changes(conn):
     again = await taxonomy_store.save(conn, TREE)
     assert again == taxonomy_store.Saved()
 
-    # Badge, status and order are not part of a topic's version.
+    # Badge, status and order are not part of a topic's version; a new status settles the
+    # topic's papers (a paused topic queues no full-text pass).
     restyled = FAITH.model_copy(update={"colour": "#000000", "status": Status.PAUSED})
     tree = TREE.following(restyled).model_copy(update={"topics": [INTERP, restyled, AGENTS]})
-    assert await taxonomy_store.save(conn, tree) == taxonomy_store.Saved(reordered=True)
+    assert await taxonomy_store.save(conn, tree) == taxonomy_store.Saved(
+        reordered=True, changed_topics=[FAITH.slug]
+    )
     assert [t.slug for t in await taxonomy_store.topics(conn)] == [
         INTERP.slug,
         FAITH.slug,

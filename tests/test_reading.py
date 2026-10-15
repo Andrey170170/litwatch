@@ -334,7 +334,7 @@ async def test_a_paper_page_has_its_header_rail_classes_states_and_history(clien
     assert (page["rarity"], page["in_collection"], page["revision"]) == ("legendary", True, 1)
     assert [b["slug"] for b in page["badges"]] == [FAITH.slug, INTERP.slug, AGENTS.slug]
     assert page["weight"] == {"weight": "landmark", "reason": "Sound work.", "source": "abstract"}
-    assert page["gist"] == {"text": "Probes find hidden steps."}
+    assert page["gist"] == {"text": "Probes find hidden steps.", "source": "abstract"}
     assert [v["version"] for v in page["versions"]] == [1, 2] and page["version"] == 2
     assert page["source_url"] == f"https://arxiv.org/e-print/{P.id}"
 
@@ -504,6 +504,7 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
         "awaiting_classification": 0,
         "analysis_failed": 0,
         "ungraded": 0,
+        "fulltext_failed": 0,
         "over_budget": [],
     }
     await conn.execute(

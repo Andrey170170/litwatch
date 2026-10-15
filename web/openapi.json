@@ -1600,6 +1600,45 @@
         }
       }
     },
+    "/api/settings/fulltext/{pass_id}/now": {
+      "post": {
+        "summary": "Run Pass Now",
+        "description": "A full-text pass failed three runs in a row, or awaits its text over a week: run it now.\nIt is first in line for the full-text worker, with three more runs; its text is asked for\nagain at urgent priority. 409 when it no longer waits for the owner (it ran, the paper's\ntext changed, it was dropped).",
+        "operationId": "run_pass_now_api_settings_fulltext__pass_id__now_post",
+        "parameters": [
+          {
+            "name": "pass_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Pass Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such full-text pass"
+          },
+          "409": {
+            "description": "The pass no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/calibrate": {
       "get": {
         "summary": "Sessions",
@@ -2262,6 +2301,67 @@
         "type": "object",
         "title": "BibtexIn"
       },
+      "Brief": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "overstatement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overstatement"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "arxiv_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Version"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "latex",
+              "pdf"
+            ],
+            "title": "Source"
+          },
+          "written_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Written At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "revision",
+          "source",
+          "written_at"
+        ],
+        "title": "Brief",
+        "description": "The paper's Brief: its current revision's, or the newest from an older revision\n(`revision` says which) until the current one is written. `overstatement`, when the full\ntext does not support the abstract, opens it."
+      },
       "CardRequested": {
         "properties": {
           "event_id": {
@@ -2777,6 +2877,15 @@
           "text": {
             "type": "string",
             "title": "Text"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "abstract",
+              "full_text"
+            ],
+            "title": "Source",
+            "default": "abstract"
           }
         },
         "type": "object",
@@ -3276,7 +3385,9 @@
               "analysis_stopped",
               "split",
               "escalated",
-              "ungraded"
+              "ungraded",
+              "fulltext_failed",
+              "awaiting_text"
             ],
             "title": "Kind"
           },
@@ -3305,6 +3416,17 @@
               }
             ],
             "title": "Error"
+          },
+          "pass_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Id"
           }
         },
         "type": "object",
@@ -3313,7 +3435,7 @@
           "revision"
         ],
         "title": "OpenState",
-        "description": "What waits on the owner for this paper, as Needs you lists it, with the paper revision\nthe action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the\ntext), `analysis_stopped` (try again), and a topic's `split`, `escalated` (label it) or\n`ungraded` (grade it now)."
+        "description": "What waits on the owner for this paper, as Needs you lists it, with the paper revision\nthe action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the\ntext), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or\n`ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed` or\n`awaiting_text` over a week (run it now)."
       },
       "Opinion": {
         "properties": {
@@ -3553,6 +3675,26 @@
               }
             ]
           },
+          "brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Brief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text_pass": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextPass"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "weight": {
             "anyOf": [
               {
@@ -3673,7 +3815,7 @@
           "topics"
         ],
         "title": "Paper",
-        "description": "A paper's page: its header, its ladder (Gist, abstract, deep card, the paper) and the\nrail, its open states and its history. Outside the collection (never classified) it has no\nrarity."
+        "description": "A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)\nand the rail, its open states and its history. Outside the collection (never classified)\nit has no rarity."
       },
       "PaperClass": {
         "properties": {
@@ -4490,6 +4632,11 @@
             "title": "Ungraded",
             "default": 0
           },
+          "fulltext_failed": {
+            "type": "integer",
+            "title": "Fulltext Failed",
+            "default": 0
+          },
           "over_budget": {
             "items": {
               "type": "string"
@@ -4696,6 +4843,47 @@
         ],
         "title": "TaxonomyClass",
         "description": "One node of the tree. `parent` is the parent's slug, None at the top."
+      },
+      "TextPass": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "brief",
+              "weight"
+            ],
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting_text",
+              "ready",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "queued_at"
+        ],
+        "title": "TextPass",
+        "description": "The full-text pass queued last for the paper's current text: a Brief (Focus) or a Weight\nre-check with a Brief (Area pick candidate), and where it is. A paper without one shows its\nabstract in the Brief's place."
       },
       "Topic": {
         "properties": {

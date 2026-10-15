@@ -169,10 +169,11 @@ class FakeArxiv:
 
 
 class FakeArchive:
-    """arxiv-archive's API: catalog records, jobs, PDFs, LaTeX text, search, and window listings
-    over `listing` (items as `/v1/papers` gives them), a page of `limit` at a time with the next
-    index as the cursor. Jobs end in `status`, or in `statuses[kind]` for that kind; `texts` holds
-    each paper's LaTeX text as `(version, text)`, served for that version or none asked."""
+    """arxiv-archive's API: catalog records, jobs (and their retries, in `retried`), PDFs, LaTeX
+    text, search, and window listings over `listing` (items as `/v1/papers` gives them), a page
+    of `limit` at a time with the next index as the cursor. Jobs end in `status`, or in
+    `statuses[kind]` for that kind; `texts` holds each paper's LaTeX text as `(version, text)`,
+    served for that version or none asked."""
 
     def __init__(self, status: str = "complete", records: dict[str, int] | None = None) -> None:
         self.status = status
@@ -183,6 +184,7 @@ class FakeArchive:
             for pid, v in (records or {}).items()
         }
         self.jobs: list[dict[str, Any]] = []
+        self.retried: list[int] = []
         self.search_items: list[dict[str, Any]] = []
         self.searches: list[dict[str, str]] = []
         self.listing: list[dict[str, Any]] = []
@@ -208,6 +210,11 @@ class FakeArchive:
             job = {"id": len(self.jobs) + 1, "status": status, **body}
             self.jobs.append(job)
             return httpx.Response(202, json=job)
+        if path.startswith("/v1/jobs/") and path.endswith("/retry"):
+            job_id = int(path.split("/")[3])
+            self.retried.append(job_id)
+            self.statuses[self.jobs[job_id - 1]["kind"]] = "pending"  # until a test says
+            return httpx.Response(200, json={"id": job_id, "status": "pending"})
         if path.startswith("/v1/jobs/"):
             return httpx.Response(200, json={"id": 1, "status": self.status})
         if path.endswith("/text"):

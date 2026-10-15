@@ -13,7 +13,7 @@ from litwatch.archive.client import (
     listed,
     metadata,
 )
-from litwatch.archive.text import TextUnavailable, pdf_to_markdown, read_text
+from litwatch.archive.text import TextUnavailable, pdf_to_markdown, read_text, retry_downloads
 
 __all__ = [
     "BACKGROUND",
@@ -28,4 +28,5 @@ __all__ = [
     "metadata",
     "pdf_to_markdown",
     "read_text",
+    "retry_downloads",
 ]

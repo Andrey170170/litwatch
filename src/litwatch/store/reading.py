@@ -19,8 +19,8 @@ import psycopg
 
 from litwatch.core import FAILED_RUNS, Depth, Rarity, Taxonomy, Weight
 from litwatch.core.grading import NO_WEIGHT, WEIGHT_FLOORS
-from litwatch.store import failures
-from litwatch.store.analyses import CURRENT_GIST
+from litwatch.store import failures, fulltext
+from litwatch.store.analyses import CURRENT_FIRST, CURRENT_GIST, CURRENT_GIST_SOURCE
 
 STALE_AFTER = timedelta(hours=36)
 # A stored JSON null in `authors` reads as no authors.
@@ -134,9 +134,9 @@ async def _one(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> d
 
 async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     """The latest nightly run: running, failed (or stuck past `STALE_AFTER`), or done; done
-    with papers awaiting classification, or with analysis or a grading stopped, needs the
-    owner's attention. `papers` are those the run classified; while it runs, `waiting` are
-    those still to classify."""
+    with papers awaiting classification, or with analysis, a grading or a full-text pass
+    stopped, needs the owner's attention. `papers` are those the run classified; while it runs,
+    `waiting` are those still to classify."""
     run = await _one(conn, "SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
     if run is None:
         return {"state": "none"}
@@ -144,6 +144,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     awaiting = await failures.count_stuck(conn, "classification", FAILED_RUNS)
     analysis = await failures.count_stuck(conn, "analysis", FAILED_RUNS)
     ungraded = await failures.count_stuck(conn, "grading", FAILED_RUNS)
+    texts = await fulltext.count_stuck(conn, FAILED_RUNS)
     papers = await _one(
         conn,
         # The owner's classifications by hand (model `owner`) during the run are not its work.
@@ -159,6 +160,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         "awaiting_classification": awaiting,
         "analysis_failed": analysis,
         "ungraded": ungraded,
+        "fulltext_failed": texts,
     }
     if run["finished_at"] is None and now - run["started_at"] < STALE_AFTER:
         waiting = await _one(
@@ -176,7 +178,8 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         return result | {"state": "running", "waiting": waiting["n"]}
     if run["error"] or run["finished_at"] is None:
         return result | {"state": "failed", "error": run["error"]}
-    return result | {"state": "attention" if awaiting or analysis or ungraded else "quiet"}
+    attention = awaiting or analysis or ungraded or texts
+    return result | {"state": "attention" if attention else "quiet"}
 
 
 # -- lists -----------------------------------------------------------------------------------------
@@ -400,7 +403,7 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
     (`grades`, `members`: what its badges come from), whether it is saved, and its open state
     on an `in_view` topic or its own: `word` (a split or escalated verdict the owner has not
     labelled), else `failure` (a step stopped after `FAILED_RUNS` failed runs: classification,
-    analysis, or a grading)."""
+    analysis, a grading or a full-text pass; or a full-text pass awaiting text over a week)."""
     if not ids:
         return []
     found = await _all(
@@ -430,6 +433,7 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
                         AND f.paper_revision = p.revision AND f.failed_runs >= %(runs)s
                         AND (f.step <> 'grading' OR f.topic = ANY(%(in_view)s))
                         AND {ACTIVE})
+                      OR {fulltext.STUCK_EXISTS}
                     THEN 'failure' END AS state
         FROM papers p
         LEFT JOIN rarities r ON r.paper_id = p.id
@@ -440,7 +444,7 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
         ) a ON true
         WHERE p.id = ANY(%(ids)s)
         """,
-        {"ids": ids, "in_view": in_view, "runs": FAILED_RUNS},
+        {"ids": ids, "in_view": in_view} | fulltext.stuck_params(FAILED_RUNS),
     )
     by_id = {r["id"]: r for r in found}
     return [by_id[i] for i in ids]
@@ -497,14 +501,15 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     """What a paper's page is built from, for every topic, followed or not: the paper with its
     library state, rarity, current Weight, Gist and facets; its effective grades, current
     verdicts, labels, reactions and misses; its newest classification and its memberships; the
-    steps failing on its current text; and its history."""
+    steps failing on its current text; its Brief, its current full-text pass and those waiting on
+    the owner; and its history."""
     found = await _one(
         conn,
         f"""
         SELECT p.id, p.title, p.abstract, {AUTHORS} AS authors, p.published, p.updated,
                p.version, p.revision, p.version_history,
                coalesce(l.saved, false) AS saved, l.hand, r.level AS rarity,
-               {CURRENT_GIST} AS gist,
+               {CURRENT_GIST} AS gist, {CURRENT_GIST_SOURCE} AS gist_source,
                EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = p.id) AS in_collection,
                w.weight, w.reason AS weight_reason, w.source AS weight_source,
                a.contribution, a.releases_code, a.releases_weights
@@ -512,8 +517,8 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         LEFT JOIN library l ON l.paper_id = p.id
         LEFT JOIN rarities r ON r.paper_id = p.id
         LEFT JOIN LATERAL (
-            SELECT weight, reason, source FROM weights WHERE paper_id = p.id
-            AND paper_revision = p.revision ORDER BY id DESC LIMIT 1
+            SELECT weight, reason, source FROM weights x WHERE paper_id = p.id
+            AND paper_revision = p.revision {CURRENT_FIRST.format(x="x")} LIMIT 1
         ) w ON true
         LEFT JOIN LATERAL (
             SELECT contribution, releases_code, releases_weights FROM analyses
@@ -564,6 +569,14 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     }
     for key, query in queries.items():
         found[key] = await _all(conn, query, p)
+    found["brief"] = await fulltext.brief_for(conn, paper_id)
+    found["text_pass"] = await fulltext.text_pass_for(conn, paper_id)
+    found["stuck_passes"] = await _all(
+        conn,
+        "SELECT f.id, f.state, f.last_error FROM fulltext_passes f "
+        f"JOIN papers p ON p.id = f.paper_id WHERE f.paper_id = %(p)s AND {fulltext.STUCK}",
+        p | fulltext.stuck_params(FAILED_RUNS),
+    )
     found["classification"] = await _one(
         conn,
         "SELECT c.primary_class, k.name AS primary_name, c.model, c.classified_at, "

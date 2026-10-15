@@ -16,6 +16,8 @@ PAPER_REVISED = "paper.revised"
 PAPER_CLASSIFIED = "paper.classified"
 # A Gist was written for the paper: from the abstract by analysis, from the full text later.
 GIST_WRITTEN = "gist.written"
+# A Brief was written for the paper from its full text, for the revision in the payload.
+BRIEF_WRITTEN = "brief.written"
 VERDICT_RECORDED = "verdict.recorded"
 # A paper's effective grade for a Focus topic changed, by a verdict or the owner's word.
 GRADE_CHANGED = "grade.changed"

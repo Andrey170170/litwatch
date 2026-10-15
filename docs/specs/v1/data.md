@@ -66,8 +66,9 @@ evaluation calls the same functions and writes only to evaluation tables.
   text hash, model, at): the current Brief is the one from the pass queued last for the current revision, the same pass
   as the current Gist.
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
-  done | failed, priority, queued at, text arrived at, arXiv version read, text hash, lease until, failed runs, last
-  error).
+  done | failed, priority, queued at, tried at, text arrived at, arXiv version read, text source latex | pdf, text
+  hash, paper's update read for, lease until, failed runs, retry text, last error): one Brief or Weight re-check open per paper revision; a worker takes
+  the least recently tried first. `weights` and `gists` name the pass a full-text row came from.
 - `due` is reshaped: (topic, paper, due since, daily digest, weekly digest), the durable record of what a digest still
   has to cover ([digests.md](digests.md)).
 - `digests` (topic, period day | week, day, state pending | written | nothing_new | failed, gist, text, counts, best

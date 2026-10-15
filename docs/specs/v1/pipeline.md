@@ -205,8 +205,13 @@ A **full-text pass** reads the paper's text, not its abstract. Three kinds:
 | Deep card | Focus papers at an effective grade of must read; Area picks; any paper on request | asks the `deep` integration for a card (see [integrations.md](integrations.md)) |
 
 A pass is queued when its paper qualifies, judged on the effective Fit and grade, so the owner's word can queue one
-too (a label or miss that makes a Focus paper central gets it a Brief). It is **awaiting text** until the archive has the paper's text, then runs at
-once, not at the next night. Text comes from the archive: the LaTeX source's text first, the PDF's text when the paper
+too (a label or miss that makes a Focus paper central gets it a Brief). Only active topics queue one; a pass not yet started is dropped
+when its paper no longer qualifies (the owner's word, a paused or unfollowed topic). The database decides, not the events that
+queue: the worker settles a pass's paper before it spends anything on it, so a pass no longer wanted is dropped
+unread, and the nightly run settles every paper with a pass open or that may qualify for one, so a missed trigger
+costs at most a night. It is **awaiting text** until the archive has the paper's text, then runs at
+once, not at the next night: the service's full-text worker, which runs with the schedule, looks at the queue every
+half minute (`litwatch fulltext` works it by hand). Text comes from the archive: the LaTeX source's text first, the PDF's text when the paper
 has no source (see [archive.md](archive.md)). For a pass queued by the nightly run, litwatch asks the archive to fetch
 the source at **urgent** priority, so the papers that matter arrive within minutes rather than behind a night's
 background downloads.
@@ -226,13 +231,15 @@ one from the full-text pass queued last for the current revision, else the one f
 library follow. A digest already written does not change (it is a record, [digests.md](digests.md)).
 
 **What a pass read.** A pass is queued for one paper revision and records what it read: the arXiv version of the
-text, its source (LaTeX or PDF) and a hash of it. When the archive cannot say which arXiv version its text is, the
-version is recorded as unknown. A pass that finishes after its paper got a new revision stores its result labelled
+text, its source (LaTeX or PDF), a hash of it and the paper's arXiv update it was read for. When the archive cannot
+say which arXiv version its text is, the version is recorded as unknown. When intake knows a paper was updated but not
+to which version, that newer update queues its passes again once, as a new version does (section 8). A pass that finishes after its paper got a new revision stores its result labelled
 with the old revision (section 8), does not replace the current Weight, and a pass for the new revision is queued. A
 running pass holds a lease (default 30 minutes); when the lease runs out, because the worker died, the pass goes back
 to ready.
 
-A pass that fails, including a model response that is truncated or invalid, is retried on the next run; after three
+A pass that fails, including a model response that is truncated or invalid, is retried on the next run (a download
+the archive gave up on is asked for again with it); after three
 failed runs it is listed on Quality with the error and a button to run it now. A pass awaiting text for more than
 seven days is listed there too. Both count as terminal for the digest wait ([digests.md](digests.md), timing).
 

@@ -12,6 +12,7 @@ from litwatch.archive.client import (
     URGENT,
     ArchiveClient,
     ArchiveError,
+    ArchiveUnavailable,
     ArchiveVersionUnknown,
     PaperText,
 )
@@ -48,6 +49,38 @@ def _usable(text: PaperText | None) -> PaperText | None:
 
 def _why(job: dict) -> str:
     return str(job.get("error") or job.get("status"))[:200]
+
+
+async def _retried(archive: ArchiveClient, job: dict) -> bool:
+    """Ask the archive to try a failed job again; False when it is not failed (unavailable
+    means arXiv has no such file) or another retry came first."""
+    if job.get("status") != "failed":
+        return False
+    try:
+        await archive.retry(job["id"])
+    except ArchiveUnavailable:
+        raise
+    except ArchiveError:
+        return False
+    return True
+
+
+async def retry_downloads(archive: ArchiveClient, paper: Paper, priority: int = URGENT) -> int:
+    """Ask the archive to try again the downloads of the paper's text that it gave up on after
+    failing: its source, and its PDF when `read_text` would fall back to it (the source not to
+    be had, or without LaTeX text). Returns how many."""
+    try:
+        paper = await archive.resolve(paper)
+    except ArchiveVersionUnknown:
+        return 0  # read from the historical LaTeX alone: nothing to download
+    assert paper.version is not None
+    jobs = [source := await archive.request(paper, "source", priority)]
+    if source.get("status") in DONE or (
+        source.get("status") == "complete"
+        and not _usable(await archive.latex(paper.id, paper.version))
+    ):
+        jobs.append(await archive.request(paper, "pdf", priority))
+    return sum([await _retried(archive, job) for job in jobs])
 
 
 async def read_text(

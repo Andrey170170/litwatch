@@ -19,6 +19,7 @@ from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
 from litwatch.store import failures, quality
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 
@@ -90,6 +91,8 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
             "analysis_failed": await failures.stuck(c, "analysis", FAILED_RUNS),
             # A grading failed three runs in a row: ungraded there until the owner grades it.
             "ungraded": await failures.stuck(c, "grading", FAILED_RUNS),
+            # A full-text pass failed three runs in a row, or awaits its text over a week.
+            "fulltext": await fulltext_store.stuck(c, FAILED_RUNS),
         },
         "cost": [
             line.model_dump() for line in await budget_lines(c, request.app.state.config.budget)
@@ -237,6 +240,29 @@ async def grade_now(
         raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
     v = g.verdict
     return GradedOut(graded=v is not None, fit=v.fit if v else None, error=g.error)
+
+
+# What `run_pass_now` answers besides success, for the API schema.
+PASS_WAITING = {
+    404: {"description": "No such full-text pass"},
+    409: {"description": "The pass no longer waits for the owner"},
+}
+
+
+@router.post("/fulltext/{pass_id}/now", status_code=204, responses=PASS_WAITING)
+async def run_pass_now(pass_id: int, request: Request, c: Conn) -> None:
+    """A full-text pass failed three runs in a row, or awaits its text over a week: run it now.
+    It is first in line for the full-text worker, with three more runs; its text is asked for
+    again at urgent priority. 409 when it no longer waits for the owner (it ran, the paper's
+    text changed, it was dropped)."""
+    async with c.transaction():
+        paper_id = await fulltext_store.paper_of(c, pass_id)
+        if paper_id is None:
+            raise HTTPException(status_code=404, detail="no such full-text pass")
+        await word.lock(c, paper_id)  # as every write to a paper's passes
+        if not await fulltext_store.run_now(c, pass_id, FAILED_RUNS):
+            raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
+    request.app.state.fulltext_wake.set()
 
 
 # -- calibrate -------------------------------------------------------------------------------------

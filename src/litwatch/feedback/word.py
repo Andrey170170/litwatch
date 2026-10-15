@@ -1,15 +1,17 @@
 """The owner's word and what follows from it.
 
 Every change that can move a paper (a verdict, a Weight, a label, a thumb, the Save toggle, an
-edit of the followed topics) ends in `settle`, which recomputes the paper's effective Fit and
-grade per followed topic, its rarity and whether it is in the library, stores them, and emits
-`grade.changed`, `paper.saved` and `paper.unsaved` in the same transaction.
+edit of the followed topics, a new arXiv version) ends in `settle`, which recomputes the paper's
+effective Fit and grade per followed topic, its rarity and whether it is in the library, stores
+them, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the same transaction. It
+also queues the paper's full-text pass when it qualifies for one, so the owner's word can queue
+one too, and drops one not started that it no longer qualifies for.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import psycopg
 
@@ -17,6 +19,7 @@ from litwatch import events
 from litwatch.core import (
     Depth,
     Effective,
+    Fit,
     Grade,
     Hand,
     Label,
@@ -28,9 +31,19 @@ from litwatch.core import (
     in_library,
     mixed_rarity,
     owners_word,
+    page_standing,
+)
+from litwatch.core.fulltext import (
+    TEXT_PRIORITY,
+    PassState,
+    to_drop,
+    to_queue,
+    to_relabel,
+    wanted,
 )
 from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
@@ -69,9 +82,12 @@ def _value(e: Effective | None) -> dict[str, str | None]:
     return {"grade": e.grade.value if e else None, "fit": e.fit.value if e else None}
 
 
-async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
+async def settle(
+    conn: psycopg.AsyncConnection, paper_id: str, *, claimed: int | None = None
+) -> Settled:
     """Recompute and store the paper's effective Fits and grades, its rarity and its library
-    state, with their events.
+    state, with their events, and its text pass. `claimed` is a pass the caller holds and has
+    not worked yet: it is judged as one not started, so it may be dropped or relabelled.
 
     Settles of one paper are serialized and read only after the lock is held, so the last to
     run sees every committed change and leaves the stored state right.
@@ -139,7 +155,57 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
             await events.emit(
                 conn, events.PAPER_SAVED if result.saved else events.PAPER_UNSAVED, paper_id
             )
+        await _text_pass(conn, paper_id, topics, after, claimed)
     return result
+
+
+async def _text_pass(
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    topics: dict,
+    after: dict[str, Effective],
+    claimed: int | None,
+) -> None:
+    """Queue the paper's Brief or Weight re-check when it qualifies on its effective Fits and
+    grades in active topics, an Area's including its descendants' (pipeline.md, sections 4
+    and 6), or again for a newer arXiv version
+    (section 8); relabel one not started that it now wants for another reason, and drop one it
+    no longer qualifies for."""
+    found = await fulltext_store.facts(conn, paper_id)
+    if found is None or found.dismissed:
+        return
+    last, ours = found.last, found.last is not None and found.last.id == claimed
+    if ours and last.state == PassState.RUNNING:
+        last = replace(last, state=PassState.READY)
+    await fulltext_store.drop_stale(conn, paper_id, found.revision, claimed)
+    active = [t for t in topics.values() if t.status == Status.ACTIVE]
+    tree = await taxonomy_store.load(conn)
+
+    def must_read_in(area: str) -> bool:
+        # An Area's pick candidates include its subtree's papers (section 4): its own grade,
+        # else the highest among its followed descendants'.
+        below = [(t.slug, after[t.slug]) for t in tree.under(area) if t.slug in after]
+        standing = page_standing(after.get(area), [b for b in below if b[0] != area], None)
+        return standing.grade == Grade.MUST_READ
+
+    want = wanted(
+        focus=any(
+            t.depth == Depth.FOCUS
+            and t.slug in after
+            and after[t.slug].fit in (Fit.CENTRAL, Fit.RELATED)
+            for t in active
+        ),
+        area=tree is not None
+        and any(t.depth == Depth.AREA and must_read_in(t.slug) for t in active),
+        has_text_result=found.has_text_result,
+    )
+    if to_drop(want, last):
+        await fulltext_store.drop(conn, last.id, claimed=ours)
+    elif want is not None and to_relabel(want, last):
+        await fulltext_store.relabel(conn, last.id, *want, claimed=ours)
+    elif want is not None and to_queue(want, last, found.version):
+        kind, reason = want
+        await fulltext_store.queue(conn, paper_id, found.revision, kind, reason, TEXT_PRIORITY)
 
 
 async def label(conn: psycopg.AsyncConnection, given: Label) -> tuple[Label, Settled]:
@@ -181,11 +247,16 @@ async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Se
 
 async def save_taxonomy(conn: psycopg.AsyncConnection, tree: Taxonomy) -> taxonomy_store.Saved:
     """Save the taxonomy and, in the same transaction, settle the papers of every topic it
-    changed: a topic no longer followed takes its grades with it, a new depth moves its
-    papers' rarity, and one no longer at Focus its papers' place in the library."""
+    changed, or under a topic or class it changed: a topic no longer followed takes its grades
+    with it, a new depth moves its papers' rarity, one no longer at Focus its papers' place in
+    the library, and an Area's standing follows the topics under it."""
     async with conn.transaction():
         saved = await taxonomy_store.save(conn, tree)
-        for slug in saved.changed_topics:
+        # And those of the topics under each, and under a class revised (moved, say): an Area's
+        # standing comes from the topics under it too.
+        roots = [*saved.changed_topics, *saved.revised_classes]
+        below = {t.slug for slug in roots for t in tree.under(slug)}
+        for slug in sorted(set(saved.changed_topics) | below):
             await settle_topic(conn, slug)
         if saved.reordered:
             await settle_ties(conn)
@@ -211,8 +282,9 @@ async def settle_ties(conn: psycopg.AsyncConnection) -> int:
 
 
 async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
-    """Settle each paper, as after storing rewritten text: its Weight went with the old text,
-    so its grades fall back to solid until the new text is analysed."""
+    """Settle each paper, as after storing revised papers: a rewrite's Weight went with the old
+    text, so its grades fall back to solid until the new text is analysed, and a new arXiv
+    version queues the passes that read the text again."""
     for paper_id in paper_ids:
         await settle(conn, paper_id)
 
