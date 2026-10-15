@@ -144,19 +144,19 @@ def test_the_owners_word_is_a_fit_from_the_newest_label_or_reaction():
     assert owners_word(None, great, Fit.CENTRAL, focus=True) == Fit.CENTRAL
     assert owners_word(None, great, Fit.ADJACENT, focus=True) == Fit.RELATED
     assert owners_word(None, great, None, focus=True) == Fit.RELATED
-    assert owners_word(label("related"), thumb("unrelated", at=later), None, focus=True) == (
+    assert owners_word(label("related"), thumb("wrong_topic", at=later), None, focus=True) == (
         Fit.NONE
     )
-    assert owners_word(label("central", at=later), thumb("unrelated"), None, focus=True) == (
+    assert owners_word(label("central", at=later), thumb("wrong_topic"), None, focus=True) == (
         Fit.CENTRAL
     )
     # A bulk-accepted label loses to any thumb that speaks; unsure is no word.
     old = label("central", at=later, provisional=True)
-    assert owners_word(old, thumb("unrelated"), None, focus=True) == Fit.NONE
+    assert owners_word(old, thumb("wrong_topic"), None, focus=True) == Fit.NONE
     assert owners_word(label("unsure"), None, Fit.CENTRAL, focus=True) is None
     # Reasons that carry no word, and any reaction outside a Focus topic, are only collected.
-    assert owners_word(None, thumb("not_for_me"), None, focus=True) is None
-    assert owners_word(None, thumb("unrelated"), Fit.CENTRAL, focus=False) is None
+    assert owners_word(None, thumb("not_interesting"), None, focus=True) is None
+    assert owners_word(None, thumb("wrong_topic"), Fit.CENTRAL, focus=False) is None
     assert owners_word(label("adjacent"), None, None, focus=False) == Fit.ADJACENT
 
 

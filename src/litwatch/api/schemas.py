@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -10,18 +10,24 @@ from pydantic import BaseModel, Field, model_validator
 from litwatch.core import (
     Depth,
     Event,
+    Facets,
     Fit,
     Grade,
     Hand,
     LabelValue,
     Opinion,
     Publication,
+    Rarity,
     ReactionReason,
     ReactionValue,
+    Status,
+    Weight,
 )
 
+# -- the status line -------------------------------------------------------------------------------
 
-class Status(BaseModel):
+
+class RunStatus(BaseModel):
     """The latest nightly run: none yet, running, failed, or finished without an error, with
     papers waiting for the owner (`attention`) or not (`quiet`)."""
 
@@ -30,24 +36,213 @@ class Status(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: str | None = None
+    papers: int = 0  # classified by the run (so far, while it runs)
+    waiting: int | None = None  # still to classify, while it runs
     awaiting_classification: int = 0  # papers whose classification failed three runs in a row
     analysis_failed: int = 0  # papers whose analysis failed three runs in a row, stopped
     ungraded: int = 0  # gradings that failed three runs in a row, stopped
     over_budget: list[str] = Field(default_factory=list)  # providers projected over budget
 
 
-class TopicRef(BaseModel):
+# -- topics and rows -------------------------------------------------------------------------------
+
+
+class Badge(BaseModel):
+    """A followed topic as a badge shows it: its class's slug and name, its depth (the badge's
+    shape), monogram and colour."""
+
     slug: str
-    name: str  # its class's
+    name: str
     depth: Depth
-    colour: str | None = None
+    monogram: str
+    colour: str
 
 
-class Chosen(BaseModel):
-    """One followed topic's current verdict on the paper: the Fit that stands, each grader's
-    answer by role, and the paper revision it was made from."""
+class GradedBadge(Badge):
+    """A badge on a paper, one per followed topic whose page holds it: the grade and rarity
+    that page shows (`core.page_standing`); grade null where neither the topic nor a followed
+    descendant graded it, the rarity then its Weight's floor."""
 
-    topic: str
+    grade: Grade | None
+    rarity: Rarity
+
+
+class PaperRef(BaseModel):
+    id: str
+    title: str
+
+
+# A row's open state: `word` asks for the owner's word (an unlabelled split or escalation),
+# `failure` reports a step stopped after three failed runs; `word` when both.
+type RowState = Literal["word", "failure"]
+
+
+class Row(BaseModel):
+    """One paper in a list. `rarity` is the list's: the mixed list's on Papers, the topic page's
+    on a topic. No Gist, Weight or facets until analysis succeeds; no rarity until classified."""
+
+    id: str
+    title: str
+    authors: list[str]
+    published: datetime | None = None
+    gist: str | None = None  # the current one
+    weight: Weight | None = None  # the current one
+    facets: Facets | None = None
+    rarity: Rarity | None = None
+    badges: list[GradedBadge] = Field(default_factory=list)  # the highest level's topic first
+    saved: bool = False
+    state: RowState | None = None
+
+
+class TopicRow(Row):
+    """A paper on a topic's page: the topic's own grade, else the highest of the followed topics
+    under it (`via`), else none (ungraded there, coloured by its Weight)."""
+
+    grade: Grade | None = None
+    via: str | None = None
+
+
+class OutsideRow(BaseModel):
+    """A paper a search provider found that the collection lacks."""
+
+    id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    published: datetime | None = None
+    source: str  # the provider
+    score: float | None = None  # the provider's, for its "best match" order
+
+
+class RarityCounts(BaseModel):
+    """Papers per rarity level; `unrated` have none yet (not classified)."""
+
+    legendary: int = 0
+    epic: int = 0
+    rare: int = 0
+    uncommon: int = 0
+    common: int = 0
+    unrated: int = 0
+
+
+class GradeCounts(BaseModel):
+    """Papers per grade on a topic's page; `ungraded` have none there."""
+
+    must_read: int = 0
+    relevant: int = 0
+    adjacent: int = 0
+    none: int = 0
+    ungraded: int = 0
+
+
+type Sort = Literal["rarest", "newest", "added", "title", "best"]
+type GradeLevel = Literal["must_read", "relevant", "adjacent", "none", "ungraded"]
+
+
+class ListQuery(BaseModel):
+    """A list's filters, as query parameters. Rarity and grade are the levels: several may be
+    given, and the counts in the answer leave them out. A grade on Papers is a badge's; on a
+    topic page the page's own. `rarest` sorts by rarity, then newest first; `best` by search
+    rank while `q` is given, else as `rarest`."""
+
+    q: str | None = None
+    rarity: list[Rarity] = Field(default_factory=list)
+    grade: list[GradeLevel] = Field(default_factory=list)
+    saved: bool | None = None
+    code: bool | None = None  # the abstract announces released code
+    weight: list[Weight] = Field(default_factory=list)
+    since: date | None = None  # published on or after (UTC)
+    until: date | None = None  # published on or before (UTC)
+    sort: Sort = "rarest"
+
+
+class PaperQuery(ListQuery):
+    """Papers' filters: also the pages of one or more topics (each with its subtree), or of
+    every topic at a depth, and one band of a search."""
+
+    topic: list[str] = Field(default_factory=list)
+    depth: Depth | None = None
+    source: Literal["collection", "outside"] | None = None
+
+
+class Paged(BaseModel):
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
+
+class PapersIn(PaperQuery, Paged):
+    pass
+
+
+class TopicPapersIn(ListQuery, Paged):
+    pass
+
+
+class Papers(BaseModel):
+    """A page of Papers, the whole filter's total, and the papers per rarity under every filter
+    but the levels. A search also brings what search providers found that the collection lacks,
+    as a band of its own on the first page; a provider that failed or was too slow is named in
+    `left_out`."""
+
+    rows: list[Row]
+    total: int
+    counts: RarityCounts
+    outside: list[OutsideRow] = Field(default_factory=list)
+    left_out: list[str] = Field(default_factory=list)
+
+
+class TopicHead(Badge):
+    status: Status
+    subject: str
+
+
+class TopicCard(TopicHead):
+    """A topic on the Topics tab: its page's papers, how many are saved, how many at each of
+    the page's rarity levels, and its newest must read."""
+
+    papers: int
+    saved: int
+    counts: RarityCounts
+    newest_must_read: PaperRef | None = None
+
+
+class TopicGroup(BaseModel):
+    depth: Depth
+    topics: list[TopicCard]  # in the owner's order
+
+
+class TopicPage(BaseModel):
+    """A page of a topic's papers, its total, and the papers per rarity and per grade under
+    every filter but the levels."""
+
+    topic: TopicHead
+    rows: list[TopicRow]
+    total: int
+    counts: RarityCounts
+    grades: GradeCounts
+
+
+# -- a paper ---------------------------------------------------------------------------------------
+
+
+class Version(BaseModel):
+    version: int
+    date: datetime | None = None
+
+
+class Gist(BaseModel):
+    text: str
+
+
+class WeightState(BaseModel):
+    weight: Weight
+    reason: str
+    source: Literal["abstract", "full_text"]
+
+
+class CurrentVerdict(BaseModel):
+    """A topic's current verdict: the Fit that stands, each grader's answer by role, and the
+    paper revision it was made from."""
+
     fit: Fit
     reason: str
     split: bool = False
@@ -63,22 +258,93 @@ class LabelState(BaseModel):
     provisional: bool = False
 
 
-class PaperTopic(TopicRef):
-    """The paper as one topic sees it: its effective Fit and grade there."""
+class ReactionState(BaseModel):
+    value: ReactionValue
+    reason: ReactionReason | None = None
 
-    fit: Fit | None = None
+
+# A topic's open state on a paper: an unlabelled split or escalation asks for the owner's word;
+# `ungraded` is a grading stopped after three failed runs (Grade it now); `grading_again` a
+# grading that failed and is tried again.
+type TopicState = Literal["split", "escalated", "ungraded", "grading_again"]
+
+
+class PaperTopic(BaseModel):
+    """A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its
+    own effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),
+    its current verdict, the owner's word that stands (from the label, a thumb or a miss), the
+    label and thumb themselves, and its open state."""
+
+    topic: Badge
+    fit: Fit | None = None  # the effective one, on this topic itself
     grade: Grade | None = None
+    rarity: Rarity | None = None
+    via: str | None = None
+    verdict: CurrentVerdict | None = None
+    word: Fit | None = None
     label: LabelState | None = None
-    reaction: ReactionValue | None = None
-    reaction_reason: ReactionReason | None = None
-    missed: bool = False  # reported as missed for this Focus topic, and that word stands
+    reaction: ReactionState | None = None
+    missed: bool = False  # reported as missed for this topic
+    state: TopicState | None = None
+
+
+class OpenState(BaseModel):
+    """What waits on the owner for this paper, as Needs you lists it, with the paper revision
+    the action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the
+    text), `analysis_stopped` (try again), and a topic's `split`, `escalated` (label it) or
+    `ungraded` (grade it now)."""
+
+    kind: Literal["awaiting_classification", "analysis_stopped", "split", "escalated", "ungraded"]
+    revision: int
+    topic: str | None = None
+    error: str | None = None
+
+
+class ClassSource(BaseModel):
+    source: Literal["classifier", "uncertain", "keyword", "owner", "miss"]
+    member: bool = True  # false only for the owner's label taking the paper out
+    probability: float | None = None
+
+
+class PaperClass(BaseModel):
+    """A class the paper has a membership of, by source. `member`: one stands that puts the
+    paper in the class (the uncertain band and the keyword check are for grading only). `path`
+    is its classes' names from the top down to it."""
+
+    slug: str
+    name: str
+    path: list[str]
+    member: bool
+    sources: list[ClassSource]
+
+
+class Classification(BaseModel):
+    """The newest classification and the current memberships, classes of the current tree only
+    (a retired class leads nowhere)."""
+
+    primary: str
+    primary_name: str
+    model: str
+    at: datetime
+    paper_revision: int
+    classes: list[PaperClass]
 
 
 class HistoryItem(BaseModel):
-    what: Literal["graded", "missed"]
-    topic: str
+    """Something said about the paper, oldest first: every verdict (`value` its Fit), the
+    owner's label (its value) and thumb (its value and reason) as they stand, misses, and each
+    classification (`topic` is its primary class). `followed`: the topic is followed now."""
+
+    what: Literal["graded", "labelled", "reacted", "missed", "classified"]
     at: datetime
-    fit: Fit | None = None  # the verdict's, for `graded`
+    topic: str | None = None
+    name: str | None = None  # the topic's or class's
+    followed: bool = False
+    value: str | None = None
+    reason: ReactionReason | None = None
+    revision: int | None = None
+    split: bool | None = None
+    escalated: bool | None = None
 
 
 class DeepCard(BaseModel):
@@ -90,74 +356,46 @@ class DeepCard(BaseModel):
 
 
 class Paper(BaseModel):
+    """A paper's page: its header, its ladder (Gist, abstract, deep card, the paper) and the
+    rail, its open states and its history. Outside the collection (never classified) it has no
+    rarity."""
+
     id: str
     title: str
-    abstract: str
     authors: list[str]
-    categories: list[str]
+    abstract: str
     published: datetime | None = None
     updated: datetime | None = None
-    added: datetime
-    version: int | None = None
-    revision: int = 1
-    doi: str | None = None
-    journal_ref: str | None = None
+    version: int | None = None  # the arXiv version stored, when known
+    versions: list[Version] = Field(default_factory=list)  # arXiv versions seen
+    revision: int = 1  # the paper's own: raised by each rewrite of title or abstract
     arxiv_url: str
     pdf_url: str
+    source_url: str  # the LaTeX source
+    in_collection: bool
+    rarity: Rarity | None = None
+    badges: list[GradedBadge] = Field(default_factory=list)
+    gist: Gist | None = None
+    weight: WeightState | None = None
+    facets: Facets | None = None
     saved: bool = False
-    hand: Hand | None = None
-    topics: list[PaperTopic]
-    reaction: ReactionValue | None = None  # for no topic (a plain search result)
-    reaction_reason: ReactionReason | None = None
-    history: list[HistoryItem]
-    versions: list[dict[str, Any]] = Field(default_factory=list)  # arXiv versions seen
-    chosen: list[Chosen]
+    hand: Hand | None = None  # the owner's newest use of the Save toggle
+    topics: list[PaperTopic]  # the rail, in the fixed topic order
+    reaction: ReactionState | None = None  # for no topic (a plain search result)
+    classification: Classification | None = None
+    states: list[OpenState] = Field(default_factory=list)
+    history: list[HistoryItem] = Field(default_factory=list)
     publication: Publication | None = None  # the published version, when one is known
     publication_by_owner: bool = False  # the owner chose it (or chose "none")
     card: DeepCard | None = None  # shown whenever one is stored, integration or not
     card_requestable: bool = False  # an integration that answers card requests is loaded
 
 
-class Row(BaseModel):
-    """One paper in a table."""
-
-    id: str
-    title: str
-    authors: list[str]
-    published: datetime | None = None
-    added: datetime | None = None
-    grade: Grade | None = None
-    saved: bool = False
-    also_in: list[str] = Field(default_factory=list)  # other topics it is relevant to
-    source: str = "collection"  # or the search provider that found it outside the collection
-    score: float | None = None  # the provider's, for its "best match" order
-
-
-class Papers(BaseModel):
-    """A page of the table. A search also brings the papers search providers found that the
-    collection lacks, as a second band under the first; a provider that failed or was too
-    slow is named in `left_out`."""
-
-    rows: list[Row]
-    total: int
-    outside: list[Row] = Field(default_factory=list)
-    left_out: list[str] = Field(default_factory=list)
-
-
-class TopicCard(TopicRef):
-    status: str
-    position: int | None = None
-    subject: str
-    papers: int  # at relevant or above
-    saved: int
-    opened_at: datetime | None = None
-
-
 # -- what the owner says ---------------------------------------------------------------------------
 
 
 class ReactionIn(BaseModel):
-    topic: str | None = None
+    topic: str | None = None  # the topic of the surface it was given on; none in a plain search
     value: ReactionValue
     reason: ReactionReason | None = None
 
@@ -171,9 +409,11 @@ class SaveIn(BaseModel):
 
 
 class Ack(BaseModel):
-    """What happened, in the words the reader sees."""
+    """What an action changed. The page shows the result where it was taken; `message` is set
+    only for what it cannot show (DESIGN.md, acknowledgement): a thumb that gives or takes back
+    the owner's word on a Focus topic, and a reported miss."""
 
-    message: str
+    message: str | None = None
     saved: bool
     grades: dict[str, Grade | None] = Field(default_factory=dict)  # topics whose grade moved
 
@@ -202,20 +442,9 @@ class CitedIn(BaseModel):
     year: int | None = None
 
 
-class BibtexFilter(BaseModel):
-    """A papers-table filter, as `GET /api/papers` takes it."""
-
-    q: str | None = None
-    topic: str | None = None
-    adjacent: bool = False
-    saved: bool | None = None
-    year: int | None = None
-    source: Literal["collection", "outside"] | None = None  # one band only, as the table
-
-
 class BibtexIn(BaseModel):
     ids: list[str] = Field(default_factory=list)  # papers in the collection
-    filter: BibtexFilter | None = None  # every collection paper a table filter matches, too
+    filter: PaperQuery | None = None  # every collection paper a Papers filter matches, too
     cited: list[CitedIn] = Field(default_factory=list)  # provider hits the collection lacks
 
 

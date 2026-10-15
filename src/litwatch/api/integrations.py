@@ -194,7 +194,7 @@ async def _ask(
 
 async def search_outside(
     request: Request, c: Any, query: str, filters: SearchFilters, sort: str | None
-) -> tuple[list[s.Row], list[str]]:
+) -> tuple[list[s.OutsideRow], list[str]]:
     """Ask every search provider at once, each with a short timeout. Returns the hits the
     collection lacks, merged by arXiv id (the first provider to name a paper keeps it), and
     the names of the providers left out because they failed or were too slow.
@@ -231,7 +231,7 @@ async def search_outside(
     for row in await held.fetchall():
         hits.pop(row["id"])
     rows = [
-        s.Row(
+        s.OutsideRow(
             id=hit.id,
             title=hit.title,
             authors=hit.authors,

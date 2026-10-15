@@ -104,6 +104,13 @@ WEIGHT_FLOORS: dict[Weight, Rarity] = {
 }
 
 
+def badge_order(levels: Iterable[tuple[str, Depth, Rarity]]) -> list[str]:
+    """The badges a paper shows in a mixed list (section 5), from each followed topic's page level
+    in the fixed topic order: the topic giving the highest level first, ties in that order."""
+    ranked = sorted(levels, key=lambda x: -x[2].lowered(DEPTH_OFFSETS[x[1]]).level)
+    return [slug for slug, _, _ in ranked]
+
+
 def topic_rarity(g: Grade, weight: Weight | None) -> Rarity:
     """The level on one topic's page, from its grade alone (and landmark for legendary)."""
     if g == Grade.MUST_READ and weight == Weight.LANDMARK:
@@ -148,6 +155,29 @@ def effective(word: Fit | None, verdict: Fit | None, weight: Weight | None) -> E
     if word in (Fit.CENTRAL, Fit.RELATED) and not g.at_least(OWNER_FLOOR):
         g = OWNER_FLOOR
     return Effective(fit=fit, grade=g, rarity=topic_rarity(g, weight))
+
+
+class PageStanding(BaseModel):
+    """A paper as one topic's page shows it (pipeline.md, section 4, what a parent topic shows):
+    the topic's own grade, else the highest among its followed descendants' (`via` names that
+    descendant), else ungraded, coloured by its Weight's floor (section 5)."""
+
+    grade: Grade | None
+    rarity: Rarity
+    via: str | None = None
+
+
+def page_standing(
+    own: Effective | None, below: Iterable[tuple[str, Effective]], weight: Weight | None
+) -> PageStanding:
+    """`below` are the followed descendants' effective grades in the fixed topic order; the first
+    of the highest wins a tie. `store.reading` applies the same rule in SQL to whole lists."""
+    if own is not None:
+        return PageStanding(grade=own.grade, rarity=own.rarity)
+    best = max(below, key=lambda b: b[1].rarity.level, default=None)
+    if best is not None:
+        return PageStanding(grade=best[1].grade, rarity=best[1].rarity, via=best[0])
+    return PageStanding(grade=None, rarity=WEIGHT_FLOORS[weight or NO_WEIGHT])
 
 
 # -- what grading records -------------------------------------------------------------------------

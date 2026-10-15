@@ -3,6 +3,8 @@ abstract (data.md: `analyses`, `weights`, `gists`)."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import psycopg
 
 from litwatch.core import Analysis, Paper, TaxonomyClass, Weight
@@ -82,11 +84,24 @@ async def current_weight(conn: psycopg.AsyncConnection, paper_id: str) -> Weight
     """The paper's current Weight: the newest for its current revision, or None until the
     current text is analysed (pipeline.md, section 4: it is then treated as solid). The
     full-text queue (N3) refines this to the pass queued last for the current revision."""
-    row = await (
+    row = await weight_of(conn, paper_id)
+    return Weight(row["weight"]) if row else None
+
+
+async def weight_of(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+    """The current Weight's row, `current_weight`'s, with its reason and source."""
+    return await (
         await conn.execute(
-            "SELECT w.weight FROM weights w JOIN papers p ON p.id = w.paper_id "
+            "SELECT w.weight, w.reason, w.source FROM weights w JOIN papers p ON p.id = w.paper_id "
             "AND p.revision = w.paper_revision WHERE w.paper_id = %s ORDER BY w.id DESC LIMIT 1",
             (paper_id,),
         )
     ).fetchone()
-    return Weight(row["weight"]) if row else None
+
+
+# The current Gist of paper `p` (an alias in the query using it), as a scalar subquery: the newest
+# for its current revision. The full-text queue (N3) refines it as it does `current_weight`.
+CURRENT_GIST = (
+    "(SELECT g.text FROM gists g WHERE g.paper_id = p.id AND g.paper_revision = p.revision "
+    "ORDER BY g.id DESC LIMIT 1)"
+)

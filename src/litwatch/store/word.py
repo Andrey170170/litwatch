@@ -9,7 +9,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from litwatch.core import Effective, Grade, Hand, Rarity, Reaction
+from litwatch.core import Effective, Grade, Hand, Rarity, Reaction, Weight
 from litwatch.core.grading import DEPTH_OFFSETS
 
 # -- reactions -------------------------------------------------------------------------------------
@@ -103,13 +103,16 @@ async def set_effective(
 
 async def rarity_of(
     conn: psycopg.AsyncConnection, paper_id: str
-) -> tuple[Rarity, str | None] | None:
+) -> tuple[Rarity, str | None, Weight | None] | None:
+    """The stored level, best topic and the Weight the level was set with."""
     row = await (
         await conn.execute(
-            "SELECT level, best_topic FROM rarities WHERE paper_id = %s", (paper_id,)
+            "SELECT level, best_topic, weight FROM rarities WHERE paper_id = %s", (paper_id,)
         )
     ).fetchone()
-    return (Rarity(row["level"]), row["best_topic"]) if row else None
+    if row is None:
+        return None
+    return Rarity(row["level"]), row["best_topic"], Weight(row["weight"]) if row["weight"] else None
 
 
 async def tied(conn: psycopg.AsyncConnection) -> list[str]:
@@ -148,15 +151,20 @@ async def in_collection(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
 
 
 async def set_rarity(
-    conn: psycopg.AsyncConnection, paper_id: str, level: Rarity, best_topic: str | None
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    level: Rarity,
+    best_topic: str | None,
+    weight: Weight | None,
 ) -> None:
     await conn.execute(
         """
-        INSERT INTO rarities (paper_id, level, best_topic) VALUES (%s, %s, %s)
+        INSERT INTO rarities (paper_id, level, best_topic, weight) VALUES (%s, %s, %s, %s)
         ON CONFLICT (paper_id) DO UPDATE SET
-            level = EXCLUDED.level, best_topic = EXCLUDED.best_topic, updated_at = now()
+            level = EXCLUDED.level, best_topic = EXCLUDED.best_topic, weight = EXCLUDED.weight,
+            updated_at = now()
         """,
-        (paper_id, level.value, best_topic),
+        (paper_id, level.value, best_topic, weight.value if weight else None),
     )
 
 

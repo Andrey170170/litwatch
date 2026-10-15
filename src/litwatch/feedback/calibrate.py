@@ -134,7 +134,7 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
         UNION ALL
         SELECT r.paper_id, r.topic, 'reaction', NULL FROM reactions r
         JOIN topics t ON t.class = r.topic AND t.depth = 'focus'
-        WHERE r.reason IN ('unrelated', 'great_find')
+        WHERE r.reason IN ('wrong_topic', 'great_find')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = r.paper_id
                           AND l.topic = r.topic AND NOT l.provisional)
         """,

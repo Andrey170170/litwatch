@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -148,11 +148,10 @@ class Archive:
 
     def search(self, query: str, filters: SearchFilters) -> list[SearchHit]:
         params: dict[str, Any] = {"q": query, "limit": min(filters.limit, 50)}
-        if filters.year:
-            params |= {
-                "date_from": date(filters.year, 1, 1).isoformat(),
-                "date_to": date(filters.year, 12, 31).isoformat(),
-            }
+        if filters.since:
+            params["date_from"] = filters.since.isoformat()
+        if filters.until:
+            params["date_to"] = filters.until.isoformat()
         try:
             response = self.search_http.get(
                 f"{self.archive.base_url}/v1/search", params=params, headers=self.archive._headers

@@ -62,7 +62,7 @@ async def test_everything_but_the_health_check_needs_the_token(client):
 
 async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn):
     await papers_store.upsert(conn, [paper("cs/9901001")])
-    url = f"/api/word/{FAITH.slug}/cs/9901001"
+    url = f"/api/labels/{FAITH.slug}/cs/9901001"
     assert (await client.put(url, json={"value": "related"}, headers=AUTH)).status_code == 200
     assert [label.paper_id for label in await feedback_store.labels(conn)] == ["cs/9901001"]
     assert (await client.delete(url, headers=AUTH)).status_code == 200

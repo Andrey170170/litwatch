@@ -50,6 +50,7 @@ class Shelf:
     def __init__(self, name, hits=(), delay=0.0, error=None):
         self.name, self.hits, self.delay, self.error = name, list(hits), delay, error
         self.threads: list[str] = []
+        self.asked: list = []  # the filters of each search
 
     def wants(self, event):
         return False
@@ -59,6 +60,7 @@ class Shelf:
 
     def search(self, query, filters):
         self.threads.append(threading.current_thread().name)
+        self.asked.append(filters)
         time.sleep(self.delay)
         if self.error:
             raise self.error
@@ -189,8 +191,15 @@ async def test_search_adds_what_providers_find_outside_the_collection(conn, make
     assert "no answer within" in cards["slow"]["search"]["last_error"]
     assert "index is rebuilding" in cards["broken"]["search"]["last_error"]
 
-    # Topic and saved are the collection's: no outside band with them; `source` picks a band.
-    for params in ({"topic": "cot-faithfulness"}, {"saved": "true"}, {"source": "collection"}):
+    # The window goes to the providers as it is.
+    window = {"q": "hidden", "since": "2025-03-01", "until": "2026-02-28"}
+    await client.get("/api/papers", params=window)
+    asked = archive.asked[-1]
+    assert (str(asked.since), str(asked.until)) == ("2025-03-01", "2026-02-28")
+    # Topic, saved and code are the collection's: no outside band with them, even code=false;
+    # `source` picks a band.
+    collection = ({"topic": "cot-faithfulness"}, {"saved": "true"}, {"code": "false"})
+    for params in (*collection, {"source": "collection"}):
         got = (await client.get("/api/papers", params={"q": "hidden", **params})).json()
         assert got["outside"] == [] and got["left_out"] == []
     only = (await client.get("/api/papers", params={"q": "hidden", "source": "outside"})).json()

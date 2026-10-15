@@ -21,7 +21,10 @@ plan; the web app a placeholder until N7); N2a's taxonomy in the database, the c
 `classes` and `topics`, imported and exported as YAML (`litwatch taxonomy import`, `export`); N2a's intake from the
 archive; N2a's classification and analysis as nightly steps (records, events, awaiting classification with the owner's
 three actions); N2b's grading (Fit per depth, the grade table, effective Fit and grade, rarity, the library rule and
-budgets; the nightly run is intake, classification, analysis and grading). Next: N2b's reading API.
+budgets; the nightly run is intake, classification, analysis and grading); N2b's reading API (Papers rarest first with
+its filters, search and counts per rarity; the topics by depth and a topic's page under the parent rule; a paper's page
+with its rail, open states and history; reaction reasons as feedback.md names them). Next: N2c's replay and the
+two-week run.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).

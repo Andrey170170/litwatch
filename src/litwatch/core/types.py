@@ -120,17 +120,22 @@ class ReactionValue(StrEnum):
 
 
 class ReactionReason(StrEnum):
+    """What a thumb says went wrong or right, each pointing at the stage that would have made the
+    mistake (feedback.md, reactions)."""
+
     # with a thumb down
-    NOT_FOR_ME = "not_for_me"
-    UNRELATED = "unrelated"  # wrong topic: on a Focus topic, the owner's word Fit none
-    ALREADY_KNEW = "already_knew"
-    OVERRATED = "overrated"
+    WRONG_TOPIC = "wrong_topic"  # classification: on a Focus topic, the owner's word Fit none
+    OVERRATED = "overrated"  # grading or Weight
+    NOT_INTERESTING = "not_interesting"  # correct, but not for the owner
+    ALREADY_KNEW = "already_knew"  # never counted as a correction
     # with a thumb up
+    UNDERRATED = "underrated"  # grading or Weight
     GREAT_FIND = "great_find"  # on a Focus topic, the owner's word central or related
 
     @property
     def goes_with(self) -> ReactionValue:
-        return ReactionValue.UP if self == ReactionReason.GREAT_FIND else ReactionValue.DOWN
+        up = (ReactionReason.UNDERRATED, ReactionReason.GREAT_FIND)
+        return ReactionValue.UP if self in up else ReactionValue.DOWN
 
 
 class Reaction(BaseModel):

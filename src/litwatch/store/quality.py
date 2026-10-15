@@ -50,7 +50,7 @@ async def collected_reactions(conn: psycopg.AsyncConnection, limit: int = 200) -
         FROM reactions r JOIN papers p ON p.id = r.paper_id
         LEFT JOIN topics t ON t.class = r.topic
         WHERE t.depth IS DISTINCT FROM 'focus'
-           OR r.reason IS NULL OR r.reason NOT IN ('unrelated', 'great_find')
+           OR r.reason IS NULL OR r.reason NOT IN ('wrong_topic', 'great_find')
         ORDER BY r.reacted_at DESC LIMIT %s
         """,
         (limit,),
