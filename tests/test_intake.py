@@ -191,10 +191,14 @@ async def test_revision_keeps_the_first_posting_and_is_rewritten_only_when_the_t
     # A refresh that changes neither the version nor the text is not a revision.
     await papers.upsert(conn, [rewrite.model_copy(update={"doi": "10.1/x"})], source="oai")
     assert await events(conn) == [
-        ("paper.added", paper.id, {"version": 1}),
-        ("paper.revised", paper.id, {"version": 2, "previous_version": 1, "rewritten": False}),
-        ("paper.revised", paper.id, {"version": 3, "previous_version": 2, "rewritten": True}),
+        ("paper.added", paper.id, {"version": 1, "source": "oai"}),
+        ("paper.revised", paper.id, {**revision(2, 1), "rewritten": False}),
+        ("paper.revised", paper.id, {**revision(3, 2), "rewritten": True}),
     ]
+
+
+def revision(version, previous, source="oai"):
+    return {"version": version, "previous_version": previous, "source": source}
 
 
 async def test_canonical_text_replacing_a_feed_abstract_counts_as_rewritten(conn, monkeypatch):

@@ -53,6 +53,12 @@ def fingerprint(table: str) -> str:
     return f"md5(regexp_replace({table}.title || ' ' || {table}.abstract, '\\s+', ' ', 'g'))"
 
 
+# The source of papers intake read from the archive (`intake.archive`), beside "oai" and "atom".
+ARCHIVE = "archive"
+# Sources that give dates as days: a same-day `updated` keeps the stored time, an earlier day
+# is stale metadata and changes nothing.
+_BY_DAY = ("oai", ARCHIVE)
+
 # The owner's correction stands: arXiv sent the very text it fixed.
 _KEPT = f"papers.corrected_from = {fingerprint('EXCLUDED')}"
 
@@ -65,11 +71,12 @@ async def upsert(
     conn: psycopg.AsyncConnection, papers: list[Paper], *, source: str = "arxiv"
 ) -> Upserted:
     """Insert new papers and refresh metadata on replacements, emitting `paper.added` and
-    `paper.revised`.
+    `paper.revised` with the `source` in their payload.
 
     A revision counts as rewritten only when its title or abstract changed beyond a touch-up
     (`core.rewritten`); only then is the paper triaged again. Atom metadata can insert a paper
-    but never replace canonical metadata.
+    but never replace canonical metadata. The archive's metadata is canonical (it came from
+    OAI) and, like OAI's, dated by day.
     """
     result = Upserted()
     async with conn.transaction():
@@ -107,7 +114,7 @@ async def upsert(
                         primary_category = coalesce(EXCLUDED.primary_category,
                                                     papers.primary_category),
                         published = least(papers.published, EXCLUDED.published),
-                        updated = CASE WHEN %(source)s = 'oai'
+                        updated = CASE WHEN %(by_day)s
                                        AND papers.updated::date = EXCLUDED.updated::date
                                        THEN papers.updated ELSE EXCLUDED.updated END,
                         url = EXCLUDED.url, metadata_source = EXCLUDED.metadata_source,
@@ -128,7 +135,7 @@ async def upsert(
                     WHERE %(source)s <> 'atom'
                       AND (papers.version IS NULL OR EXCLUDED.version IS NULL
                            OR EXCLUDED.version >= papers.version)
-                      AND (%(source)s <> 'oai' OR papers.updated IS NULL
+                      AND (NOT %(by_day)s OR papers.updated IS NULL
                            OR EXCLUDED.updated::date >= papers.updated::date)
                     RETURNING (xmax = 0) AS inserted, version, title, abstract
                     """,
@@ -137,6 +144,7 @@ async def upsert(
                         "authors": Jsonb(p.authors),
                         "version_history": Jsonb(p.version_history),
                         "source": source,
+                        "by_day": source in _BY_DAY,
                     },
                 )
                 row = await cur.fetchone()
@@ -144,7 +152,9 @@ async def upsert(
                     continue
                 if row["inserted"]:
                     result.inserted += 1
-                    await events.emit(conn, events.PAPER_ADDED, p.id, version=row["version"])
+                    await events.emit(
+                        conn, events.PAPER_ADDED, p.id, version=row["version"], source=source
+                    )
                     continue
                 result.updated += 1
                 old = before[p.id]
@@ -167,6 +177,7 @@ async def upsert(
                         version=row["version"],
                         previous_version=old["version"],
                         rewritten=changed,
+                        source=source,
                     )
     return result
 

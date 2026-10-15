@@ -16,13 +16,13 @@ import httpx
 from bs4 import BeautifulSoup, NavigableString, Tag
 from markdownify import MarkdownConverter
 
-from litwatch.core import Paper
-from litwatch.integrations.archive import (
+from litwatch.archive import (
     ArchiveClient,
     ArchiveError,
     ArchiveUnavailable,
     ArchiveVersionUnknown,
 )
+from litwatch.core import Paper
 
 log = logging.getLogger(__name__)
 

@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from litwatch import events, integrations
+from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import (
     Grade,
@@ -28,7 +29,7 @@ from litwatch.core import (
 from litwatch.events import dispatch
 from litwatch.feedback import word
 from litwatch.integrations import IntegrationError, papertext
-from litwatch.integrations.archive import Archive, ArchiveClient
+from litwatch.integrations.archive import Archive
 from litwatch.integrations.deep import MAX_SUBMISSIONS, Deep, DeepClient
 from litwatch.integrations.papertext import BodyFetcher, html_to_markdown
 from litwatch.integrations.webhook import Webhook

@@ -5,11 +5,12 @@ On `paper.added` and `paper.revised` it publishes the paper's metadata and asks 
 and source at background priority; the archive owns acquisition and deduplicates by paper,
 version and kind, so asking twice is harmless. An artifact needs an explicit arXiv version:
 when neither the paper nor the archive's catalog knows one, only the metadata is published.
-Registration is independent of relevance: every paper intake stores is registered.
+Registration is independent of relevance: every paper intake stores is registered, except
+what intake read from the archive itself (the event's `source` is "archive"): it is there.
 
 It is also a `SearchProvider`: litwatch's search box asks it beside the collection, which
 adds the papers litwatch never ingested. Other integrations (webdav, deep) read PDFs through
-`ArchiveClient` when this one is configured, with arXiv as the fallback.
+the client (`litwatch.archive`) when this one is configured, with arXiv as the fallback.
 
 Options: `url` (or $LITWATCH_ARCHIVE_URL), the bearer token in $LITWATCH_ARCHIVE_TOKEN,
 `wait_seconds` (60: how long a reader waits for a PDF the archive is still fetching),
@@ -21,19 +22,18 @@ litwatch that registers the same papers).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from datetime import UTC, date, datetime
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 import psycopg
 
 from litwatch import events
+from litwatch.archive import ArchiveClient, ArchiveUnavailable, ArchiveVersionUnknown
 from litwatch.config import Config
-from litwatch.core import SEARCH_TIMEOUT_SECONDS, Event, Paper, SearchFilters, SearchHit
+from litwatch.core import SEARCH_TIMEOUT_SECONDS, Event, SearchFilters, SearchHit
 from litwatch.integrations import (
     IntegrationError,
     enabled_using,
@@ -45,176 +45,7 @@ from litwatch.store import papers as papers_store
 
 log = logging.getLogger(__name__)
 
-MAX_PDF_BYTES = 128 * 1024 * 1024
 ARTIFACTS = ("pdf", "source")
-BACKGROUND = 100  # the archive's priority for papers nobody is waiting on; 0 is urgent
-
-
-class ArchiveError(RuntimeError):
-    """An archive request was rejected or returned an invalid response."""
-
-
-class ArchiveUnavailable(ArchiveError):  # noqa: N818 - public outage signal
-    """The service cannot be reached; callers may fall back to paced direct access."""
-
-
-class ArchiveVersionUnknown(ArchiveError):  # noqa: N818 - public resolution signal
-    """No explicit revision can safely be associated with this metadata."""
-
-
-def _same_timestamp(left: str | None, right: str | None) -> bool:
-    if not left or not right:
-        return False
-    try:
-        return datetime.fromisoformat(left.replace("Z", "+00:00")) == datetime.fromisoformat(
-            right.replace("Z", "+00:00")
-        )
-    except ValueError:
-        return left == right
-
-
-def metadata(paper: Paper) -> dict[str, Any]:
-    """The paper as the archive's catalog takes it; litwatch's own revision count stays home."""
-    return paper.model_dump(mode="json", exclude_none=True, exclude={"revision"})
-
-
-class ArchiveClient:
-    """The archive's authenticated API: catalog records, acquisition jobs, bounded reads.
-    Never puts response bodies, headers or credentials into an error."""
-
-    def __init__(
-        self,
-        base_url: str,
-        token: str,
-        http: httpx.AsyncClient | None = None,
-        *,
-        wait_seconds: float = 60.0,
-    ) -> None:
-        self.base_url = base_url.rstrip("/")
-        self._headers = {"Authorization": f"Bearer {token}"}
-        self.http = http or httpx.AsyncClient(timeout=30.0, follow_redirects=False)
-        self.wait_seconds = max(0.0, wait_seconds)
-
-    async def aclose(self) -> None:
-        await self.http.aclose()
-
-    @staticmethod
-    def _path(paper_id: str) -> str:
-        return "/v1/papers/" + quote(paper_id, safe="")
-
-    @staticmethod
-    def _check(response: httpx.Response) -> None:
-        if response.status_code >= 500 or response.status_code in (401, 403, 429):
-            raise ArchiveUnavailable(f"archive HTTP {response.status_code}")
-        if not response.is_success:
-            raise ArchiveError(f"archive HTTP {response.status_code}")
-
-    async def _json(
-        self, method: str, path: str, *, missing: bool = False, **kwargs: Any
-    ) -> dict | None:
-        try:
-            response = await self.http.request(
-                method, self.base_url + path, headers=self._headers, **kwargs
-            )
-        except httpx.HTTPError as exc:
-            raise ArchiveUnavailable("archive transport unavailable") from exc
-        if missing and response.status_code == 404:
-            return None
-        self._check(response)
-        try:
-            result = response.json()
-        except ValueError as exc:
-            raise ArchiveError("invalid archive JSON") from exc
-        if not isinstance(result, dict):
-            raise ArchiveError("invalid archive object")
-        return result
-
-    async def record(self, paper_id: str) -> dict | None:
-        return await self._json("GET", self._path(paper_id), missing=True)
-
-    async def upsert_paper(self, paper: Paper) -> dict:
-        result = await self._json(
-            "PUT",
-            self._path(paper.id),
-            json={"metadata": metadata(paper), "latest_version": paper.version},
-        )
-        assert result is not None
-        return result
-
-    async def resolve(self, paper: Paper) -> Paper:
-        """Reuse the catalog's revision only when it describes the same upstream update."""
-        if paper.version is not None:
-            return paper
-        found = await self.record(paper.id)
-        if (
-            found
-            and found.get("latest_version")
-            and _same_timestamp(paper.updated, found.get("metadata", {}).get("updated"))
-        ):
-            return paper.model_copy(update={"version": found["latest_version"]})
-        raise ArchiveVersionUnknown(f"{paper.id}: explicit revision unavailable")
-
-    async def request(self, paper: Paper, kind: str = "pdf", priority: int = BACKGROUND) -> dict:
-        """Ask for an artifact of an explicit revision; asking again promotes the same job."""
-        assert paper.version is not None
-        result = await self._json(
-            "POST",
-            "/v1/jobs",
-            json={
-                "paper_id": paper.id,
-                "version": paper.version,
-                "kind": kind,
-                "priority": priority,
-                "provenance": {"client": "litwatch"},
-            },
-        )
-        assert result is not None
-        return result
-
-    async def job(self, job_id: int | str) -> dict:
-        result = await self._json("GET", f"/v1/jobs/{int(job_id)}")
-        assert result is not None
-        return result
-
-    async def available_pdf(self, paper_id: str, version: int) -> bytes | None:
-        """Read an explicit revision, bounding the transfer."""
-        try:
-            async with self.http.stream(
-                "GET",
-                self.base_url + self._path(paper_id) + "/pdf",
-                headers=self._headers,
-                params={"version": version},
-            ) as response:
-                if response.status_code == 404:
-                    return None
-                self._check(response)
-                result = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if len(result) + len(chunk) > MAX_PDF_BYTES:
-                        raise ArchiveError("archive PDF exceeds the read limit")
-                    result.extend(chunk)
-        except httpx.HTTPError as exc:
-            raise ArchiveUnavailable("archive PDF transport unavailable") from exc
-        if not result.startswith(b"%PDF-"):
-            raise ArchiveError("archive returned an invalid PDF")
-        return bytes(result)
-
-    async def pdf(self, paper: Paper) -> bytes | None:
-        """The PDF, asked for urgently and waited on for at most `wait_seconds`. None when the
-        archive could not get it in time; a pending job is never duplicated by a caller."""
-        paper = await self.resolve(paper)
-        job = await self.request(paper, priority=0)
-        deadline = asyncio.get_running_loop().time() + self.wait_seconds
-        while True:
-            if job.get("status") == "complete":
-                return await self.available_pdf(paper.id, paper.version)
-            if job.get("status") in ("failed", "unavailable"):
-                return None
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                return None
-            await asyncio.sleep(min(2.0, remaining))
-            job = await self.job(job["id"])
 
 
 def client(options: dict[str, Any]) -> ArchiveClient:
@@ -230,6 +61,12 @@ def reader(config: Config) -> ArchiveClient | None:
     """A client for reading PDFs when an archive integration is configured and enabled."""
     section = enabled_using(config, "archive")
     return client(section) if section else None
+
+
+def source(config: Config) -> ArchiveClient:
+    """A client for reading papers from the archive: the enabled archive section's, else one
+    from $LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN alone."""
+    return client(enabled_using(config, "archive") or {})
 
 
 def _authors(value: Any) -> list[str]:
@@ -286,7 +123,11 @@ class Archive:
         self.register = register
 
     def wants(self, event: Event) -> bool:
-        return self.register and event.type in (events.PAPER_ADDED, events.PAPER_REVISED)
+        return (
+            self.register
+            and event.type in (events.PAPER_ADDED, events.PAPER_REVISED)
+            and event.payload.get("source") != papers_store.ARCHIVE
+        )
 
     async def aclose(self) -> None:
         await self.archive.aclose()

@@ -105,8 +105,8 @@ Every event below carries the paper's id in `paper_id`.
 
 | Type | When | Payload |
 | --- | --- | --- |
-| `paper.added` | Intake stored a paper new to the collection | `version`: arXiv version or null |
-| `paper.revised` | A stored paper got a new arXiv version, or its title or abstract was rewritten (by arXiv, or corrected by the owner) | `version`, `previous_version`, `rewritten`: bool; an owner's correction has `rewritten: true, corrected: true` and no versions |
+| `paper.added` | Intake stored a paper new to the collection | `version`: arXiv version or null; `source`: where intake read it (`oai`, `atom`, `archive`) |
+| `paper.revised` | A stored paper got a new arXiv version, or its title or abstract was rewritten (by arXiv, or corrected by the owner) | `version`, `previous_version`, `rewritten`: bool, `source`; an owner's correction has `rewritten: true, corrected: true` and no versions or source |
 | `verdict.recorded` | Grading recorded a verdict for a Watch topic | `topic`, `grade`, `split`: bool, `verdict_id` |
 | `grade.changed` | A paper's effective grade for a Watch topic changed, by a verdict or the owner's word | `topic`, `before`, `after`: `must_read`, `relevant`, `adjacent`, `none` or null |
 | `paper.saved` | The paper entered the library | none |
@@ -209,7 +209,7 @@ The built-in `archive` integration is a search provider.
 | --- | --- | --- |
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `take.written`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it |
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
-| `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source); answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers |
+| `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source), unless intake read it from the archive; answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers |
 | `deep` | `grade.changed` to `must_read`, `paper.saved`, `card.requested` | Asks the deep service for a reading card; emits `card.ready` |
 | `webhook` | any, by pattern | POSTs the event as JSON to a URL |
 
