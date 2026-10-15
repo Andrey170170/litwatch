@@ -60,6 +60,10 @@ async def test_a_run_refuses_to_resume_answers_to_another_request(tmp_path):
     gateway = Gateway(Models(classify=role), {})
     with pytest.raises(ValueError, match="another request"):
         await classify.run(gateway, TREE, [], out)
+    # The keyword check is part of the request: new patterns are another request.
+    patterns = TREE.model_copy(deep=True)
+    patterns.topics[0].keywords = [*patterns.topics[0].keywords, "new pattern"]
+    assert classify.fingerprint(gateway, patterns) != classify.fingerprint(gateway, TREE)
 
 
 def test_a_resumed_run_reads_its_archived_answers_and_the_new_ones(tmp_path):

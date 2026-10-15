@@ -33,15 +33,20 @@ def test_the_request_asks_every_class_and_offers_the_primary_class_by_name():
 
 
 def test_the_primary_class_and_every_class_at_its_threshold_are_direct_memberships():
-    found = direct(TREE, answer("circuits", steering=0.5, robotics=0.49))
-    assert found == {"circuits", "steering"}
-    assert with_ancestors(TREE, found) == {"circuits", "steering", "interpretability"}
+    # A Focus topic's class at 0.5, any other at 0.8.
+    found = direct(TREE, answer("robotics", circuits=0.5, steering=0.79, deception=0.8))
+    assert found == {"robotics", "circuits", "deception"}
+    assert with_ancestors(TREE, {"circuits"}) == {"circuits", "interpretability"}
+    # A class's own threshold wins.
+    tree = TREE.model_copy(deep=True)
+    tree.get("steering").threshold = 0.6
+    assert "steering" in direct(tree, answer("robotics", steering=0.6))
 
 
 def test_the_band_brings_a_focus_class_in_from_its_subtree_and_nothing_else():
-    assert band(TREE, answer("robotics", circuits=0.3)) == {"circuits"}
+    assert band(TREE, answer("robotics", circuits=0.1)) == {"circuits"}
     # Below the floor, at the threshold (already a member) and outside a Focus subtree: no.
-    assert band(TREE, answer("robotics", circuits=0.1, steering=0.3)) == set()
+    assert band(TREE, answer("robotics", circuits=0.09, steering=0.3)) == set()
     assert band(TREE, answer("robotics", circuits=0.5)) == set()
 
 

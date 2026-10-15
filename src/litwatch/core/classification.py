@@ -8,14 +8,26 @@ grading only: the uncertain band and the keyword check.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from enum import StrEnum
 
 from pydantic import BaseModel
 
 from litwatch.core.taxonomy import Depth, Taxonomy
 
-DEFAULT_THRESHOLD = 0.5
-BAND_FLOOR = 0.2
+
+@dataclass(frozen=True)
+class Thresholds:
+    """Where membership is drawn, for classes without a threshold of their own: `focus` at or
+    under a Focus topic, `default` elsewhere; the uncertain band from `floor` up to the class's
+    threshold. The defaults were chosen in N1 (evals/2026-10-14-classifiers.md)."""
+
+    default: float = 0.8
+    focus: float = 0.5
+    floor: float = 0.1
+
+
+CHOSEN = Thresholds()
 
 
 class Source(StrEnum):
@@ -33,15 +45,23 @@ class Classified(BaseModel):
     primary: str
 
 
-def threshold(tree: Taxonomy, slug: str, default: float = DEFAULT_THRESHOLD) -> float:
-    return tree.get(slug).threshold or default
+def _focus(tree: Taxonomy) -> list[str]:
+    return [t.class_ for t in tree.topics if t.depth == Depth.FOCUS]
 
 
-def direct(tree: Taxonomy, c: Classified, default: float = DEFAULT_THRESHOLD) -> set[str]:
-    """The classes the classifier makes the paper a direct member of."""
-    return {c.primary} | {
-        slug for slug, p in c.probabilities.items() if p >= threshold(tree, slug, default)
+def thresholds(tree: Taxonomy, t: Thresholds = CHOSEN) -> dict[str, float]:
+    """Each class's threshold: its own, else the Focus or the default one."""
+    focus = set(_focus(tree))
+    return {
+        c.slug: c.threshold or (t.focus if focus & {c.slug, *tree.ancestors(c.slug)} else t.default)
+        for c in tree.classes
     }
+
+
+def direct(tree: Taxonomy, c: Classified, t: Thresholds = CHOSEN) -> set[str]:
+    """The classes the classifier makes the paper a direct member of."""
+    at = thresholds(tree, t)
+    return {c.primary} | {slug for slug, p in c.probabilities.items() if p >= at[slug]}
 
 
 def with_ancestors(tree: Taxonomy, slugs: set[str]) -> set[str]:
@@ -49,24 +69,15 @@ def with_ancestors(tree: Taxonomy, slugs: set[str]) -> set[str]:
     return slugs | {a for s in slugs for a in tree.ancestors(s)}
 
 
-def _focus(tree: Taxonomy) -> list[str]:
-    return [t.class_ for t in tree.topics if t.depth == Depth.FOCUS]
-
-
-def band(
-    tree: Taxonomy,
-    c: Classified,
-    default: float = DEFAULT_THRESHOLD,
-    floor: float = BAND_FLOOR,
-) -> set[str]:
+def band(tree: Taxonomy, c: Classified, t: Thresholds = CHOSEN) -> set[str]:
     """Focus topics' classes the paper joins by the uncertain band: some class at or under one
     has a probability in [floor, threshold)."""
+    at = thresholds(tree, t)
     return {
         f
         for f in _focus(tree)
-        if any(floor <= c.probabilities.get(s, 0.0) < threshold(tree, s, default)
-               for s in tree.subtree(f))
-    }  # fmt: skip
+        if any(t.floor <= c.probabilities.get(s, 0.0) < at[s] for s in tree.subtree(f))
+    }
 
 
 def keyword(tree: Taxonomy, title: str, abstract: str) -> dict[str, str]:

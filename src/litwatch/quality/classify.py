@@ -25,8 +25,8 @@ from pydantic import BaseModel
 from litwatch import classification
 from litwatch.core import Paper
 from litwatch.core.classification import (
-    DEFAULT_THRESHOLD,
     Classified,
+    Thresholds,
     band,
     direct,
     grading_topics,
@@ -124,9 +124,10 @@ def results(path: Path) -> dict[str, Result]:
 
 
 def fingerprint(gateway: Gateway, tree: Taxonomy) -> str:
-    """The role's configuration and the questions, hashed."""
+    """The role's configuration, the questions and the Focus keyword patterns, hashed."""
     role = gateway.models.role(classification.ROLE).model_dump_json()
-    asked = repr(classification.questions(tree))
+    patterns = {t.class_: t.keywords for t in tree.topics if t.depth == Depth.FOCUS}
+    asked = repr((classification.questions(tree), patterns))
     return hashlib.sha256(f"{role}\n{asked}".encode()).hexdigest()[:12]
 
 
@@ -187,31 +188,31 @@ async def run(
 # -- scoring ---------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Setting:
-    """Where membership is drawn: the default threshold and the uncertain band's floor."""
-
-    threshold: float = DEFAULT_THRESHOLD
-    floor: float = 0.2
+# The report's baseline: every class at 0.5, the band from 0.2, as pipeline.md had it.
+AT_DEFAULT = Thresholds(default=0.5, focus=0.5, floor=0.2)
 
 
-AT_DEFAULT = Setting()
+def everywhere(threshold: float, floor: float) -> Thresholds:
+    """One threshold for every class."""
+    return Thresholds(default=threshold, focus=threshold, floor=floor)
 
 
-def members(tree: Taxonomy, r: Result, s: Setting = AT_DEFAULT) -> set[str]:
+def members(tree: Taxonomy, r: Result, s: Thresholds = AT_DEFAULT) -> set[str]:
     """Classes the classifier puts the paper in, inherited ones included; none if it failed."""
     if r.error:
         return set()
-    return with_ancestors(tree, direct(tree, r.classified, s.threshold))
+    return with_ancestors(tree, direct(tree, r.classified, s))
 
 
-def focus_routes(tree: Taxonomy, r: Result, cls: str, s: Setting = AT_DEFAULT) -> tuple[bool, ...]:
+def focus_routes(
+    tree: Taxonomy, r: Result, cls: str, s: Thresholds = AT_DEFAULT
+) -> tuple[bool, ...]:
     """Whether the paper reaches a Focus class: by the classifier, with the band, with the
     band and the keyword check. A failed paper reaches a class by keyword alone."""
     if r.error:
         return False, False, cls in r.keywords
     by_class = cls in members(tree, r, s)
-    by_band = by_class or cls in band(tree, r.classified, s.threshold, s.floor)
+    by_band = by_class or cls in band(tree, r.classified, s)
     return by_class, by_band, by_band or cls in r.keywords
 
 
@@ -249,25 +250,14 @@ def _top(tree: Taxonomy, slug: str) -> str:
     return [slug, *tree.ancestors(slug)][-1]
 
 
-def focus_kept(tree: Taxonomy, threshold: float) -> Taxonomy:
-    """The tree with every class at or under a Focus topic at `threshold`, so a higher default
-    applies only outside them."""
-    split = tree.model_copy(deep=True)
-    focus = {s for t in tree.topics if t.depth == Depth.FOCUS for s in tree.subtree(t.class_)}
-    for c in split.classes:
-        if c.slug in focus:
-            c.threshold = threshold
-    return split
-
-
-def graded(tree: Taxonomy, r: Result, s: Setting = AT_DEFAULT) -> set[str]:
+def graded(tree: Taxonomy, r: Result, s: Thresholds = AT_DEFAULT) -> set[str]:
     """The topics that would grade the paper: from its direct memberships, the band and the
     keyword check (each a direct membership of a Focus topic's class)."""
     if r.error:
         joined = set(r.keywords)
     else:
         c = r.classified
-        joined = direct(tree, c, s.threshold) | band(tree, c, s.threshold, s.floor)
+        joined = direct(tree, c, s) | band(tree, c, s)
         joined |= set(r.keywords)
     return grading_topics(tree, joined)
 
@@ -278,6 +268,7 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
     with no answer at all (no text in the database) are left out."""
     names = list(runs)
     focus = [t.class_ for t in tree.topics if t.depth == Depth.FOCUS]
+    at_default = {n: {p: members(tree, r) for p, r in runs[n].items()} for n in names}
     lines: list[str] = ["## Runs", ""]
 
     def mean(values: Iterable[float], fmt: str) -> str:
@@ -331,7 +322,7 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
     provisional = [(c, p) for c, ps in labels.focus.get("provisional", {}).items() for p in ps]
     heads = [h for n in names for h in (f"{n} volume", f"{n} provisional recall")]
 
-    def volume_and_recall(n: str, s: Setting, routes: range) -> list[str]:
+    def volume_and_recall(n: str, s: Thresholds, routes: range) -> list[str]:
         drawn = [
             [any(focus_routes(tree, runs[n][p], c, s)[i] for c in focus) for i in routes]
             for p in labels.draw
@@ -352,7 +343,7 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
         "",
     ]
     rows = [
-        [t, *(v for n in names for v in volume_and_recall(n, Setting(t, min(0.2, t)), range(3)))]
+        [t, *(v for n in names for v in volume_and_recall(n, everywhere(t, min(0.2, t)), range(3)))]
         for t in SWEEP
     ]
     lines += _table(["Threshold", *heads], rows)
@@ -364,7 +355,7 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
         "",
     ]
     rows = [
-        [f, *(v for n in names for v in volume_and_recall(n, Setting(0.5, f), range(2, 3)))]
+        [f, *(v for n in names for v in volume_and_recall(n, everywhere(0.5, f), range(2, 3)))]
         for f in FLOORS
     ]
     lines += _table(["Floor", *heads], rows)
@@ -388,7 +379,9 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
     per_paper = ["direct memberships per paper", ""]
     for n in names:
         answered = [runs[n][p] for p in labels.draw if p in runs[n] and not runs[n][p].error]
-        per_paper.append(mean((len(direct(tree, r.classified)) for r in answered), ".1f"))
+        per_paper.append(
+            mean((len(direct(tree, r.classified, AT_DEFAULT)) for r in answered), ".1f")
+        )
     lines += _table(["Topic", "Depth", *names], [*rows, per_paper])
 
     lines += ["", "## A higher threshold outside the Focus subtrees", ""]
@@ -401,26 +394,28 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
         "",
     ]
     rows = []
+    upper = [c.slug for c in tree.classes if tree.level(c.slug) <= 2]
     for t in OUTSIDE_FOCUS:
-        split, s = focus_kept(tree, 0.5), Setting(t, 0.1)
+        s = Thresholds(default=t, focus=0.5, floor=0.1)
         row: list[object] = [t]
         for n in names:
             judged = [
-                (c.slug in members(split, runs[n][p], s), c.slug in mem)
+                (c in got, c in mem)
                 for p, (mem, unsettled) in labels.memberships.items()
                 if p in runs[n]
-                for c in split.classes
-                if split.level(c.slug) <= 2 and c.slug not in unsettled
+                for got in [members(tree, runs[n][p], s)]
+                for c in upper
+                if c not in unsettled
             ]
             reached = sum(
-                focus_routes(split, runs[n][p], c, s)[2] for c, p in provisional if p in runs[n]
+                focus_routes(tree, runs[n][p], c, s)[2] for c, p in provisional if p in runs[n]
             )
-            drawn = [graded(split, runs[n][p], s) for p in labels.draw if p in runs[n]]
+            drawn = [graded(tree, runs[n][p], s) for p in labels.draw if p in runs[n]]
 
             on_provisional = sum(p in runs[n] for _, p in provisional)
             row.append(
                 f"{_pr(judged)}; {reached}/{on_provisional}; "
-                f"{' / '.join(_gradings(split, drawn, d) for d in Depth)}"
+                f"{' / '.join(_gradings(tree, drawn, d) for d in Depth)}"
             )
         rows.append(row)
     lines += _table(["Others at", *names], rows)
@@ -452,7 +447,7 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
         row = [c.name, len(held)]
         for n in names:
             judged = [
-                (c.slug in members(tree, runs[n][p]), c.slug in mem)
+                (c.slug in at_default[n][p], c.slug in mem)
                 for p, (mem, unsettled) in labels.memberships.items()
                 if p in runs[n] and c.slug not in unsettled
             ]
@@ -474,7 +469,7 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
         row = [cls, len(held)]
         for n in names:
             judged = [
-                (cls in members(tree, runs[n][p]), t[cls] in ("1", "2"))
+                (cls in at_default[n][p], t[cls] in ("1", "2"))
                 for p, t in labels.draw.items()
                 if p in runs[n] and t[cls] in ("1", "2", "4")
             ]
