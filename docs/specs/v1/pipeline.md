@@ -167,8 +167,9 @@ The grade for a topic is derived from Fit there and the paper's Weight:
 | adjacent | adjacent | adjacent | adjacent |
 | none | none | none | none |
 
-This table is a starting point, tuned in N2 against the owner's labels. A paper whose analysis has not produced a
-Weight yet is treated as solid. A Focus topic's digest lists papers by Fit, not grade (see [digests.md](digests.md)).
+This table was checked in N2c against the two-week run and 0.14's tiers and kept for now: the labels available did
+not establish a cell change ([evals/2026-10-15-tuning.md](../../../evals/2026-10-15-tuning.md)). A paper whose
+analysis has not produced a Weight yet is treated as solid. A Focus topic's digest lists papers by Fit, not grade (see [digests.md](digests.md)).
 
 **Effective Fit and effective grade.** The owner's word is always a Fit (see [feedback.md](feedback.md)). The
 **effective Fit** is the owner's word where there is one, otherwise the verdict's. The **effective grade** is the
@@ -287,18 +288,26 @@ Published digests are records and are never re-projected.
 ## 11. Volumes and cost
 
 From the side-by-side database (2026-09-29 to 2026-10-12): 700–1,550 papers on a weekday, about 2,500 on the first day
-after a weekend, none announced on Saturday and Sunday. Estimates per weekday at about 1,000 papers, to be measured in
-N1 and N2:
+after a weekend, none announced on Saturday and Sunday. Those are nightly intake records, 31 % of them a version after
+the first, in a fortnight that began in the busiest week of the first v1's data. Measured in N2c on the papers first
+submitted 2026-10-01 to 10-14 (6,305, read from the archive): 425–595 on a submission weekday (424 on the partial last
+day), 975 and 1,156 on a Monday with Saturday and Sunday folded in
+([evals/2026-10-15-tuning.md](../../../evals/2026-10-15-tuning.md)). Estimates per weekday at about 1,000 papers, with
+what N2c measured per 1,000 papers:
 
-| Step | Calls | Estimate |
-| --- | --- | --- |
-| Classification | 1 decision request per paper (~400 input tokens, ~50 questions) | about $0.05 a day on Luna Decisions |
-| Analysis | 1 small-LLM call per paper | $0.50–1 a day |
-| Grading, Focus | 20–40 members a night, two labs | cents, as in the first v1 |
-| Grading, Area | 30–60 members a day, `judge` plus a decision check | a few dollars a day on Anthropic credit |
-| Grading, Field | a few hundred members a day, one cheap model | under $1 a day |
-| Full-text passes | a handful of Briefs and re-checks a day | cents to a dollar |
-| Deep cards | Focus must reads, Area picks, requests: a few a week | the `deep` service's own subscription |
-| Digests | one call per digest written | as the first v1's reviews |
+| Step | Calls | Estimate | Measured (N2c) |
+| --- | --- | --- | --- |
+| Classification | 1 decision request per paper (~400 input tokens, ~50 questions) | about $0.05 a day on Luna Decisions | $0.26 on Jev |
+| Analysis | 1 small-LLM call per paper | $0.50–1 a day | $0.40 |
+| Grading, Focus | 20–40 members a night, two labs | cents, as in the first v1 | $1.00 for 145 gradings, 132 of them from the uncertain band and the keyword check |
+| Grading, Area | 30–60 members a day, `judge` plus a decision check | a few dollars a day on Anthropic credit | $0.87 for 179 gradings, 2 of them escalated to `check` |
+| Grading, Field | a few hundred members a day, one cheap model | under $1 a day | $0.16 for 811 gradings |
+| Full-text passes | a handful of Briefs and re-checks a day | cents to a dollar | not run; the grades queue about 62 papers (56 Area re-checks), about $9 at N3's $0.15 a pass |
+| Deep cards | Focus must reads, Area picks, requests: a few a week | the `deep` service's own subscription | not run; Focus must reads alone are about 4 |
+| Digests | one call per digest written | as the first v1's reviews | not run |
+
+Classification, analysis and grading came to $2.68 per 1,000 papers, two thirds of it the `judge` on Opus 5.5. The
+run processed the fortnight at once; its costs split by submission day, weekends folded into Monday, give $1.04–1.70
+for a night Tuesday to Friday and $2.45–3.29 for a Monday.
 
 The restart (milestone N6) runs this over the two most recent weeks of papers, read from the archive.
