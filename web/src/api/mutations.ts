@@ -22,14 +22,16 @@ function patchSaved(qc: QueryClient, paperId: string, saved: boolean) {
     );
 }
 
-/** After a write on a paper: refetch its page, patch its star in lists, leave the rest to the next visit. */
-export function settled(qc: QueryClient, paperId: string, ack?: Ack) {
+/** After a write on a paper: refetch its page, patch its star in lists, leave the rest to the next visit. The
+ * write counts as pending until the page is refetched, so the controls show the new state before they re-enable. */
+export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
-  void qc.invalidateQueries({ queryKey: ["paper", paperId] });
   void qc.invalidateQueries({ queryKey: ["papers"], refetchType: "none" });
   void qc.invalidateQueries({ queryKey: ["topic"], refetchType: "none" });
   void qc.invalidateQueries({ queryKey: ["topics"], refetchType: "none" });
   void qc.invalidateQueries({ queryKey: ["status"] });
+  await qc.invalidateQueries({ queryKey: ["paper", paperId] });
+  if (qc.getQueryState(["paper", paperId])?.status === "error") toast("Recorded, but the page could not be refreshed", "error");
 }
 
 export function said(e: unknown, fallback = "That did not go through"): string {
@@ -53,7 +55,7 @@ function usePaperBusy(paperId: string): boolean {
  * write's variables: the hook's options follow the latest render, so a page that moves to another paper before
  * the write runs or returns would otherwise write to, or settle, the wrong one.
  */
-function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Promise<R>, done: (qc: QueryClient, id: string, r: R) => void) {
+function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Promise<R>, done: (qc: QueryClient, id: string, r: R) => void | Promise<void>) {
   const qc = useQueryClient();
   const m = useMutation({
     mutationKey: PAPER_WRITE,
@@ -67,7 +69,7 @@ function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Pro
 
 const acked = (qc: QueryClient, id: string, ack: Ack) => {
   toast(ack.message);
-  settled(qc, id, ack);
+  return settled(qc, id, ack);
 };
 
 export function useSave(paperId: string) {
@@ -126,9 +128,10 @@ export function useProcess() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => ok(await api.POST("/api/lookup", { body: { q: id } })),
-    onSuccess: (r) => {
+    onSuccess: (r, id) => {
       toast(r.fetched ? "Fetched into the collection; it is processed on the next run" : "Already in the collection");
       void qc.invalidateQueries({ queryKey: ["papers"], refetchType: "none" });
+      return qc.invalidateQueries({ queryKey: ["paper", id] });
     },
     onError: (e) => toast(said(e, "Could not fetch it"), "error"),
   });
@@ -169,7 +172,7 @@ export function usePublication(paperId: string) {
       ),
     (qc, id, record) => {
       toast(record ? `Published version set: ${[record.venue, record.year].filter(Boolean).join(" ") || "a record"}` : "Noted: no published version");
-      void qc.invalidateQueries({ queryKey: ["paper", id] });
+      return settled(qc, id);
     },
   );
 }
@@ -178,7 +181,7 @@ export function usePublication(paperId: string) {
 
 const stepped = (done: string) => (qc: QueryClient, id: string) => {
   toast(done);
-  settled(qc, id);
+  return settled(qc, id);
 };
 
 export function useDismiss(paperId: string) {
@@ -229,7 +232,7 @@ export function useGradeNow(paperId: string) {
       ),
     (qc, id, r) => {
       toast(r.graded ? `Graded: ${r.fit}` : `Grading failed again: ${r.error ?? "no verdict"}`, r.graded ? "plain" : "error");
-      settled(qc, id);
+      return settled(qc, id);
     },
   );
 }

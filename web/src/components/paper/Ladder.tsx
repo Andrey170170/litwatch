@@ -127,7 +127,7 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
         {paper.in_collection && !analysisFailed && <div className="why0">No Brief yet: Briefs are written for Focus papers at central or related and for Area must reads, so the abstract stands in.</div>}
         <p className="prose">{paper.abstract}</p>
       </Rung>
-      {paper.in_collection && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
+      {(paper.in_collection || paper.card || asked) && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
       {desktop && <ThePaper paper={paper} />}
     </div>
   );

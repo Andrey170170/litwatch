@@ -50,6 +50,7 @@ function linkProps(row: Row, topic: string | undefined, list: RowProps["list"]) 
     to: "/paper/$" as const,
     params: { _splat: row.id },
     search: topic ? { topic } : {},
+    state: { list: list.key },
     onClick: () => openedFrom(list.key, list.ids, list.total),
   };
 }

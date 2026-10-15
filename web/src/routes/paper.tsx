@@ -73,6 +73,7 @@ export function PaperPage() {
 
 function PaperView({ id, under }: { id: string; under: string | undefined }) {
   const desktop = useDesktop();
+  const process = useProcess();
   // While a card is asked for, the page polls until an integration has written it (the API has no queued state).
   const asked = useCardAsked(id);
   const { data: paper, error, isPending } = useQuery({ ...paperQuery(id), refetchInterval: asked ? 15_000 : false });
@@ -88,13 +89,23 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   };
   if (isPending) return <div className="loadmore">Loading…</div>;
   // A failed poll while a card is awaited keeps the page: only a paper that never loaded shows the error.
-  if (!paper)
+  // An archive paper litwatch has not fetched has no page yet (that is N5's); Process brings it in.
+  if (!paper) {
+    const unheld = error instanceof ApiError && error.status === 404;
     return (
       <>
         <Back />
-        <div className="empty">{error instanceof ApiError && error.status === 404 ? `${id} is not in the collection.` : "Could not load the paper."}</div>
+        <div className="empty">{unheld ? `${id} is not in the collection.` : "Could not load the paper."}</div>
+        {unheld && (
+          <div className="agrid" style={{ maxWidth: 320 }}>
+            <button className="pri" onClick={() => process.mutate(id)} disabled={process.isPending}>
+              Process
+            </button>
+          </div>
+        )}
       </>
     );
+  }
   const deepRead = paper.card_requestable && !asked ? <DeepReadInline paper={paper} /> : null;
   return (
     <div className="pg">

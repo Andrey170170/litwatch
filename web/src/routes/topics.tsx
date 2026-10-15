@@ -49,7 +49,7 @@ function Card({ t }: { t: Schemas["TopicCard"] }) {
 }
 
 export function TopicsPage() {
-  const { data, isPending } = useQuery(topicsQuery);
+  const { data, isError, refetch } = useQuery(topicsQuery);
   const desktop = useDesktop();
   return (
     <>
@@ -69,7 +69,15 @@ export function TopicsPage() {
           </section>
         ) : null,
       )}
-      {!isPending && !data?.some((g) => g.topics.length) && <div className="empty">No topics are followed yet.</div>}
+      {isError && (
+        <div className="loadmore">
+          Could not load the topics ·{" "}
+          <button className="inl" onClick={() => void refetch()}>
+            Try again
+          </button>
+        </div>
+      )}
+      {data && !data.some((g) => g.topics.length) && <div className="empty">No topics are followed yet.</div>}
     </>
   );
 }

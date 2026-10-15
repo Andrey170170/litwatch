@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
-import { renderApp, scriptFetch, viewport } from "@/test/harness";
+import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const badge = { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" };
 const paper = {
@@ -130,5 +130,55 @@ describe("a paper's page", () => {
     });
     renderApp("/paper/9999.99999");
     expect(await screen.findByText("9999.99999 is not in the collection.")).toBeInTheDocument();
+  });
+
+  it("fetches a paper it does not hold from its own page, then shows it", async () => {
+    viewport(true);
+    let held = true;
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": () => (held ? json({ detail: "no such paper" }, 404) : { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, topics: [], badges: [], rarity: null, gist: null }),
+      "POST /api/lookup": () => {
+        held = false;
+        return { fetched: true };
+      },
+    });
+    renderApp("/paper/2409.01234");
+    await screen.findByText("2409.01234 is not in the collection.");
+    await userEvent.click(screen.getByRole("button", { name: "Process" }));
+    expect(await screen.findByRole("heading", { name: "Fetched one" })).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ q: "2409.01234" });
+  });
+
+  it("lights the phone's thumbs for the topic the paper was opened under, the one its sheet opens on", async () => {
+    viewport(false);
+    const other = { slug: "al", name: "Alignment", depth: "focus", monogram: "AL", colour: "#ff3b4e" };
+    const two = {
+      ...paper,
+      topics: [
+        { ...paper.topics[0], reaction: null },
+        { topic: other, fit: "related", grade: "relevant", rarity: "rare", verdict: null, missed: false, reaction: { value: "down", reason: "overrated" } },
+      ],
+    };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": two });
+    renderApp("/paper/2610.00002?topic=mi");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByRole("button", { name: "Thumbs down" })).toHaveClass("dim");
+    await userEvent.click(screen.getByRole("button", { name: "Thumbs down" }));
+    const sheet = screen.getByRole("dialog", { name: "Thumbs down" });
+    expect(within(sheet).getByRole("button", { name: /Mech interp/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("gives focus back to the control that opened a sheet", async () => {
+    viewport(false);
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    const more = screen.getByRole("button", { name: "More" });
+    await userEvent.click(more);
+    await userEvent.click(within(screen.getByRole("dialog", { name: "The paper" })).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(more);
   });
 });

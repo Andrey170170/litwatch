@@ -61,13 +61,14 @@ export function linkCells(paper: Paper, keys: ("arxiv" | "pdf" | "latex" | "code
   return keys.map((k) => cells[k] && <Fragment key={k}>{cells[k]}</Fragment>);
 }
 
-/** Report as a miss: the Focus topic, and whether it is central or related, asked at once (feedback.md). */
+/** Report as a miss: the Focus topic (the API takes no other), and whether it is central or related, asked at once
+ * (feedback.md). */
 export function MissPicker({ paper, onDone }: { paper: Paper; onDone: () => void }) {
   const { data } = useQuery(topicsQuery);
   const miss = useMiss(paper.id);
   const [topic, setTopic] = useState<string | null>(null);
-  const topics = data?.flatMap((g) => g.topics) ?? [];
-  if (!topics.length) return <div className="why">No topic is followed.</div>;
+  const topics = data?.find((g) => g.depth === "focus")?.topics ?? [];
+  if (!topics.length) return <div className="why">No Focus topic is followed.</div>;
   return (
     <div className="why" role="group" aria-label="Report as a miss">
       {!topic

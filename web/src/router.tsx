@@ -8,6 +8,13 @@ import { SettingsPage } from "@/routes/settings";
 import { TopicPage } from "@/routes/topic";
 import { TopicsPage } from "@/routes/topics";
 
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    /** The key of the list a paper was opened from (listContext.ts). */
+    list?: string;
+  }
+}
+
 /** A path no route owns stays inside the shell, so the sidebar is the way out. */
 function NotFound() {
   return <p className="empty">There is no such page.</p>;

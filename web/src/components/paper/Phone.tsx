@@ -3,6 +3,7 @@
  * reaction sheet with a topic choice first, and the paper sheet with a label per topic, the links and the facts.
  */
 import { useState } from "react";
+import { useLocation } from "@tanstack/react-router";
 import { useDeepRead, useProcess, useSave } from "@/api/mutations";
 import { Badge } from "@/components/Badge";
 import { Sheet } from "@/components/Sheet";
@@ -14,9 +15,13 @@ import { DeepReadCell, linkCells, MissPicker, type Paper } from "./Actions";
 import { Classes, Published } from "./Ladder";
 import { FitControl, Reasons, whoseFit, type PaperTopic } from "./TopicRow";
 
+/** The topic row a reaction sheet opens on: the one the paper was opened under, else its only one; none when it
+ * must ask. */
+const sheetTopic = (paper: Paper, under: string | undefined) => paper.topics.find((t) => t.topic.slug === under) ?? (paper.topics.length === 1 ? paper.topics[0] : undefined);
+
 function ReactSheet({ paper, value, under, onClose }: { paper: Paper; value: ReactionValue; under: string | undefined; onClose: () => void }) {
   const topics = paper.topics;
-  const [topic, setTopic] = useState<string | null>(topics.find((t) => t.topic.slug === under)?.topic.slug ?? (topics.length === 1 ? topics[0]!.topic.slug : null));
+  const [topic, setTopic] = useState<string | null>(sheetTopic(paper, under)?.topic.slug ?? null);
   const current = topic ? paper.topics.find((t) => t.topic.slug === topic)?.reaction : paper.reaction;
   return (
     <Sheet open onClose={onClose} label={value === "up" ? "Thumbs up" : "Thumbs down"}>
@@ -126,8 +131,11 @@ export function PhoneBar({ paper, under, asked, sheet, setSheet }: { paper: Pape
   const save = useSave(paper.id);
   const process = useProcess();
   const deep = useDeepRead(paper.id);
-  const place = placeOf(paper.id);
-  const lit = (v: ReactionValue) => paper.topics.some((t) => t.reaction?.value === v) || paper.reaction?.value === v;
+  const listKey = useLocation({ select: (l) => l.state.list });
+  const place = placeOf(paper.id, listKey);
+  // The thumbs light for the topic the sheet opens on (sheetTopic): any topic's when the sheet would ask which.
+  const on = sheetTopic(paper, under);
+  const lit = (v: ReactionValue) => (on ? on.reaction?.value === v : paper.topics.length ? paper.topics.some((t) => t.reaction?.value === v) : paper.reaction?.value === v);
   return (
     <Fill name="foot">
       <div className="pfoot pgf">
