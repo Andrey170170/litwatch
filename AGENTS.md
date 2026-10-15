@@ -33,7 +33,8 @@ CI (`.github/workflows/ci.yaml`) runs all of these; run the ones your change tou
 
 - `uv run ruff check src tests`, `uv run ruff format --check src tests`
 - `uv run pytest --strict-markers`. Tests that need PostgreSQL create and drop their own schema in
-  `TEST_DATABASE_URL`, which must be a disposable database, and skip without it.
+  `TEST_DATABASE_URL`, which must be a disposable database, and skip without it. Run one suite at a time per database
+  cluster: the outbox reads the cluster-wide snapshot, so another run's open transactions hide fresh events.
 - In `deep/`: `npm run typecheck`, `npm test`. In `web/`: `pnpm typecheck`, `pnpm test`. In `archive/`:
   `.venv/bin/python -m unittest discover -s tests` (setup in its README).
 
