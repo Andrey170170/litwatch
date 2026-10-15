@@ -3,6 +3,8 @@ the owner's actions on a paper classification keeps failing on. Models are scrip
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
@@ -210,14 +212,24 @@ async def test_analysis_records_gist_weight_and_facets_with_its_event(conn, mode
     assert len(await rows(conn, "SELECT 1 FROM analyses")) == 2  # done once per revision
 
 
-async def test_failed_analysis_is_retried_every_run_and_listed_after_three(conn, models):
+async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_again(conn, models):
     models.analyses[A.title] = ANALYSIS | {"gist": "Too short."}  # not a Gist: invalid
     for _ in range(FAILED_RUNS):
         assert (await night(conn, models))["analysis_failed"] == 1
     (listed,) = await failures.stuck(conn, "analysis", FAILED_RUNS)
     assert listed["paper_id"] == A.id and listed["title"] == A.title
     del models.analyses[A.title]
-    assert (await night(conn, models))["analysed"] == 1  # still tried, and now it worked
+    models.asked.clear()
+    await night(conn, models)
+    assert ("analyse", A.title) not in models.asked  # left for the owner, at no cost
+    async with api(conn) as client:
+        status = (await client.get("/api/status")).json()
+        assert status["state"] == "attention" and status["analysis_failed"] == 1
+        url = "/api/settings/analysis/{}/retry"
+        assert (await client.post(url.format(A.id), json={"revision": 2})).status_code == 409
+        assert (await client.post(url.format(B.id), json=AT_1)).status_code == 409  # analysed
+        assert (await client.post(url.format(A.id), json=AT_1)).status_code == 204
+    assert (await night(conn, models))["analysed"] == 1
     assert await failures.stuck(conn, "analysis", FAILED_RUNS) == []
 
 
@@ -301,9 +313,14 @@ async def client(conn, models):
     models.decisions[A.title] = {"broken": True}  # never valid
     for _ in range(FAILED_RUNS):
         await night(conn, models)
+    async with api(conn) as c:
+        yield c
+
+
+@asynccontextmanager
+async def api(conn) -> AsyncIterator[httpx.AsyncClient]:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, CONFIG)
-    transport = httpx.ASGITransport(app=app)
+    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN, CONFIG))
     headers = {"authorization": f"Bearer {TOKEN}"}
     async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
         yield c

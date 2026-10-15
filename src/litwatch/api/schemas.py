@@ -29,6 +29,7 @@ class Status(BaseModel):
     finished_at: datetime | None = None
     error: str | None = None
     awaiting_classification: int = 0  # papers whose classification failed three runs in a row
+    analysis_failed: int = 0  # papers whose analysis failed three runs in a row, stopped
 
 
 class TopicRef(BaseModel):

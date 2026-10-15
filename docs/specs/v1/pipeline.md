@@ -253,8 +253,8 @@ Classification is the gate for everything after it, so a paper whose classificat
 first v1's awaiting-triage: **dismiss** (litwatch drops it from processing; it stays searchable in the archive),
 **classify by hand** (the owner names its classes; it goes on as usual with source `owner`), **fix the text** (the
 owner corrects title or abstract; this counts as a rewrite and classification runs again). A paper whose analysis
-fails is retried and, after three runs, listed on Quality; it has no Gist or Weight until then and shows its title
-alone.
+fails three runs in a row is counted on the status line, listed on Quality and no longer tried, so it costs nothing until the owner acts: **try
+again** gives it three more runs. It has no Gist or Weight until then and shows its title alone.
 
 ## 10. Edits to the taxonomy and to topics
 

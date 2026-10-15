@@ -42,8 +42,9 @@ async def classify(
 
 async def analyse(conn: psycopg.AsyncConnection, run: ModelRun, limit: int | None = None) -> None:
     """Analyse every paper whose current text is classified and not analysed, up to `limit`.
-    A failure is tried again on every run."""
-    papers = await analyses_store.due(conn, limit)
+    A paper whose answers were unusable `FAILED_RUNS` runs in a row is left for the owner, who
+    can have it tried again."""
+    papers = await analyses_store.due(conn, FAILED_RUNS, limit)
     async with aclosing(analysis.analyse(papers, run.gateway)) as found:
         async for a in found:
             if await analysis.record(conn, a):
