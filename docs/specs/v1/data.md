@@ -67,7 +67,7 @@ evaluation calls the same functions and writes only to evaluation tables.
   as the current Gist.
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
   done | failed, priority, queued at, tried at, text arrived at, arXiv version read, text source latex | pdf, text
-  hash, lease until, failed runs, retry text, last error): one Brief or Weight re-check open per paper revision; a worker takes
+  hash, paper's update read for, lease until, failed runs, retry text, last error): one Brief or Weight re-check open per paper revision; a worker takes
   the least recently tried first. `weights` and `gists` name the pass a full-text row came from.
 - `due` is reshaped: (topic, paper, due since, daily digest, weekly digest), the durable record of what a digest still
   has to cover ([digests.md](digests.md)).

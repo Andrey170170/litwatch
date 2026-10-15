@@ -21,6 +21,10 @@ from litwatch.core.fulltext import (
 from litwatch.store.papers import COLUMNS, row_to_paper
 from litwatch.store.taxonomy import lock_shared, row_to_class
 
+# Whether text pass `f` read paper `p`'s text for its latest arXiv update, or none is known: what
+# keeps a done pass current while the paper's version is unknown.
+COVERS_UPDATE = "coalesce(f.paper_updated >= p.updated, p.updated IS NULL)"
+
 
 @dataclass(frozen=True)
 class Facts:
@@ -36,14 +40,15 @@ class Facts:
 async def facts(conn: psycopg.AsyncConnection, paper_id: str) -> Facts | None:
     row = await (
         await conn.execute(
-            """
+            f"""
             SELECT p.revision, p.version, p.dismissed_at IS NOT NULL AS dismissed,
                    f.id, f.kind, f.reason, f.state, f.arxiv_version,
+                   NOT {COVERS_UPDATE} AS newer_update,
                    EXISTS (SELECT 1 FROM fulltext_passes d WHERE d.paper_id = p.id
                            AND d.kind <> 'deep' AND d.state = 'done') AS has_text_result
             FROM papers p
             LEFT JOIN LATERAL (
-                SELECT id, kind, reason, state, arxiv_version FROM fulltext_passes
+                SELECT id, kind, reason, state, arxiv_version, paper_updated FROM fulltext_passes
                 WHERE paper_id = p.id AND paper_revision = p.revision AND kind <> 'deep'
                 ORDER BY id DESC LIMIT 1
             ) f ON true
@@ -61,6 +66,7 @@ async def facts(conn: psycopg.AsyncConnection, paper_id: str) -> Facts | None:
             row["reason"],
             PassState(row["state"]),
             row["arxiv_version"],
+            row["state"] == PassState.DONE and row["newer_update"],
         )
         if row["id"]
         else None
@@ -333,31 +339,33 @@ async def add(
         """
         UPDATE fulltext_passes SET state = 'done', lease_until = NULL, last_error = NULL,
             finished_at = now(), text_arrived_at = coalesce(text_arrived_at, now()),
-            arxiv_version = %(version)s, text_source = %(source)s, text_hash = %(hash)s
+            arxiv_version = %(version)s, text_source = %(source)s, text_hash = %(hash)s,
+            paper_updated = %(updated)s::timestamptz
         WHERE id = %(id)s
         """,
-        {"id": c.id, **_read(text)},
+        {"id": c.id, "updated": c.paper.updated, **_read(text)},
     )
     return Written(brief_row["id"], gist_row["id"])
 
 
 async def outdated(conn: psycopg.AsyncConnection) -> list[str]:
     """The papers, not dismissed, given a Brief or full-text Weight, or with a text pass for an
-    older revision, whose current revision has no text pass open or done on its arXiv version: a
-    new version or revision came after what was read or queued (`to_queue`'s rule, found from
-    the database)."""
+    older revision, whose current revision has no text pass open or done on its arXiv version
+    (on its latest update, when the version is unknown): a new version or revision came after
+    what was read or queued (`to_queue`'s rule, found from the database)."""
     rows = await (await conn.execute(f"{OUTDATED} ORDER BY p.id")).fetchall()
     return [r["id"] for r in rows]
 
 
-OUTDATED = """
+OUTDATED = f"""
     SELECT DISTINCT p.id FROM fulltext_passes d JOIN papers p ON p.id = d.paper_id
     WHERE d.kind <> 'deep' AND (d.state = 'done' OR d.paper_revision < p.revision)
       AND p.dismissed_at IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM fulltext_passes f
           WHERE f.paper_id = p.id AND f.paper_revision = p.revision AND f.kind <> 'deep'
-            AND (f.state <> 'done' OR p.version IS NULL OR f.arxiv_version >= p.version))
+            AND (f.state <> 'done' OR f.arxiv_version >= p.version
+                 OR (p.version IS NULL AND {COVERS_UPDATE})))
 """
 
 

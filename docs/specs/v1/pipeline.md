@@ -231,8 +231,9 @@ one from the full-text pass queued last for the current revision, else the one f
 library follow. A digest already written does not change (it is a record, [digests.md](digests.md)).
 
 **What a pass read.** A pass is queued for one paper revision and records what it read: the arXiv version of the
-text, its source (LaTeX or PDF) and a hash of it. When the archive cannot say which arXiv version its text is, the
-version is recorded as unknown. A pass that finishes after its paper got a new revision stores its result labelled
+text, its source (LaTeX or PDF), a hash of it and the paper's arXiv update it was read for. When the archive cannot
+say which arXiv version its text is, the version is recorded as unknown. When intake knows a paper was updated but not
+to which version, that newer update queues its passes again once, as a new version does (section 8). A pass that finishes after its paper got a new revision stores its result labelled
 with the old revision (section 8), does not replace the current Weight, and a pass for the new revision is queued. A
 running pass holds a lease (default 30 minutes); when the lease runs out, because the worker died, the pass goes back
 to ready.

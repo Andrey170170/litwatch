@@ -23,6 +23,7 @@ CREATE TABLE fulltext_passes (
     arxiv_version    integer,
     text_source      text CHECK (text_source IN ('latex', 'pdf')),
     text_hash        text,
+    paper_updated    timestamptz,  -- the paper's arXiv update when the text was read for it
     lease_until      timestamptz,
     failed_runs      integer NOT NULL DEFAULT 0,
     retry_text       boolean NOT NULL DEFAULT false,

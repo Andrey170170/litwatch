@@ -184,6 +184,9 @@ def test_the_pass_a_paper_wants_and_when_it_is_queued_again():
     assert to_queue(want, None, 2)
     assert not to_queue(want, done, 2)
     assert to_queue(want, done, 3)  # a new arXiv version
+    assert not to_queue(want, done, None)  # no version known, and no update since
+    newer = TextPass(1, PassKind.BRIEF, "focus", PassState.DONE, 2, newer_update=True)
+    assert to_queue(want, newer, None)  # an update of unknown version since
     assert not to_queue(want, TextPass(1, PassKind.BRIEF, "focus", PassState.FAILED, None), 3)
     area = TextPass(1, PassKind.WEIGHT, "area", PassState.AWAITING_TEXT, None)
     assert to_relabel(want, area)
@@ -617,6 +620,23 @@ async def test_a_new_arxiv_version_is_read_again_by_the_next_nightly_run(db, mon
         2,
     )
     assert await fulltext_store.outdated(db) == []
+
+
+async def test_a_new_update_of_unknown_version_is_read_again_once(db):
+    await graded(db, "central")
+    await work(db, ready(FakeArchive()), Writer())
+    # Its raw history missing, intake knows an update came but not its version.
+    later = P.model_copy(update={"version": None, "updated": "2026-10-20T00:00:00+00:00"})
+    assert (await papers_store.upsert(db, [later])).rewritten == []
+    assert await fulltext_store.outdated(db) == [P.id]
+    await word.settle_all(db, await fulltext_store.outdated(db))
+    assert [r["state"] for r in await passes(db)] == ["done", "awaiting_text"]
+    fake = FakeArchive()
+    fake.texts[P.id] = (None, BODY)  # the archive cannot say either: its historical LaTeX
+    assert await work(db, fake, Writer()) == {"briefs_written": 1}
+    assert await fulltext_store.outdated(db) == []  # once, not again
+    await word.settle(db, P.id)
+    assert len(await passes(db)) == 2
 
 
 async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revision(db):

@@ -45,6 +45,8 @@ class TextPass:
     reason: str
     state: PassState
     arxiv_version: int | None  # of the text it read; None until read, or when unknown
+    # Done, and the paper's arXiv record was updated after the update it read the text for.
+    newer_update: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,14 +75,17 @@ def wanted(focus: bool, area: bool, has_text_result: bool) -> tuple[PassKind, st
 
 def to_queue(want: tuple[PassKind, str] | None, last: TextPass | None, version: int | None) -> bool:
     """Whether to queue the wanted pass: none was queued for this revision yet, or the last one
-    is done and read an older arXiv version than the paper now has. One still to run reads the
-    paper's version when it does."""
+    is done and read an older arXiv version than the paper now has, or, the paper's version
+    unknown (its history missing), was read before the paper's latest update. One still to
+    run reads the paper's version when it does."""
     if want is None:
         return False
     if last is None:
         return True
-    if last.state != PassState.DONE or version is None:
+    if last.state != PassState.DONE:
         return False
+    if version is None:
+        return last.newer_update
     return last.arxiv_version is None or last.arxiv_version < version
 
 
