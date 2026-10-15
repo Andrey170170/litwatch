@@ -75,9 +75,13 @@ async def grade(
 async def text_passes(
     conn: psycopg.AsyncConnection, config: Config, run: ModelRun, limit: int | None = None
 ) -> None:
-    """Make the failed full-text passes ready again, those with fewer than `FAILED_RUNS` failed
-    runs, and try every pass that is due once, up to `limit`: the passes this run queued have
-    their text asked for now, and the service's worker runs each once its text is there."""
+    """Settle the papers whose text was read from an older version or revision, which queues
+    their passes again (pipeline.md, section 8); make the failed passes ready again, those with
+    fewer than `FAILED_RUNS` failed runs; and try every pass that is due once, up to `limit`: the
+    passes this run queued have their text asked for now, and the service's worker runs each
+    once its text is there. Found in the database, not handed on by intake, so a run cut short
+    leaves them to the next."""
+    await word.settle_all(conn, await fulltext_store.outdated(conn))
     run.add("fulltext_retried", await fulltext_store.retry_failed(conn, FAILED_RUNS))
     archive = fulltext.archive_for(config)
     if archive is None:
@@ -112,7 +116,7 @@ async def run(
     ):
         if fetch:
             result = await intake.collect(conn, config.intake.categories, since, run.run_id)
-            await word.settle_all(conn, result.revised)  # what was read of the old text is stale
+            await word.settle_all(conn, result.rewritten)  # the old text's Weight went with it
             await runs.update(
                 conn,
                 run.run_id,

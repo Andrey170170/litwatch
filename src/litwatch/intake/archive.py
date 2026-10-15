@@ -51,7 +51,6 @@ async def collect(
         result.inserted += stored.inserted
         result.updated += stored.updated
         result.rewritten += stored.rewritten
-        result.revised += stored.revised
         seen.update(p.id for p in usable)
     result.fetched = len(seen)
     if result.details["skipped"]:

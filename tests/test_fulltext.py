@@ -391,23 +391,31 @@ async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db):
 # -- revisions -------------------------------------------------------------------------------------
 
 
-async def test_a_new_arxiv_version_queues_the_pass_again(db):
+async def test_a_new_arxiv_version_is_read_again_by_the_next_nightly_run(db, monkeypatch):
+    await analysed(db, "solid")  # nothing left for the night's other steps
     await graded(db, "central")
     await work(db, ready(FakeArchive()), Writer())
-    revised = await papers_store.upsert(db, [P.model_copy(update={"version": 2})])
-    assert (revised.revised, revised.rewritten) == ([P.id], [])
-    await word.settle_all(db, revised.revised)
+    # Stored by an intake that settles nothing after it: found from the database.
+    assert (await papers_store.upsert(db, [P.model_copy(update={"version": 2})])).rewritten == []
+    assert await fulltext_store.outdated(db) == [P.id]
+    fake = ready(FakeArchive(), version=2)
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: archive(fake))
+    await nightly.run(db, CONFIG, fetch=False, gateway=Writer().gateway)
     old, new = await passes(db)
-    assert (old["state"], new["state"], new["paper_revision"]) == ("done", "awaiting_text", 1)
-    await work(db, ready(FakeArchive(), version=2), Writer())
-    assert (await passes(db))[1]["arxiv_version"] == 2
+    assert (old["arxiv_version"], new["state"], new["paper_revision"], new["arxiv_version"]) == (
+        1,
+        "done",
+        1,
+        2,
+    )
+    assert await fulltext_store.outdated(db) == []
 
 
 async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revision(db):
     await graded(db, "central")
     (claimed,) = await fulltext_store.claim(db, LEASE)
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
-    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).revised)
+    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).rewritten)
     # The running pass is kept; the old verdict still stands, so revision 2 has one queued.
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [
         (1, "running"),
@@ -433,7 +441,7 @@ async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revisi
 async def test_a_pass_not_started_before_a_rewrite_is_dropped(db):
     await graded(db, "central")
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
-    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).revised)
+    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).rewritten)
     # The pass for revision 1 is gone; the old verdict still stands, so revision 2 has one.
     (row,) = await passes(db)
     assert row["paper_revision"] == 2

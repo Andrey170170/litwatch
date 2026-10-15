@@ -27,8 +27,6 @@ class IntakeResult:
     updated: int = 0
     # Stored papers whose title or abstract a revision rewrote.
     rewritten: list[str] = field(default_factory=list)
-    # Stored papers rewritten or given a new arXiv version.
-    revised: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -148,7 +146,6 @@ async def collect(
             result.inserted += stored.inserted
             result.updated += stored.updated
             result.rewritten += stored.rewritten
-            result.revised += stored.revised
             seen_oai.update(p.id for p in papers)
             seen.update(p.id for p in papers)
             info.update(
