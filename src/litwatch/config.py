@@ -57,7 +57,9 @@ class RoleConfig(_Section):
 
 class Models(_Section):
     # Chosen in N1 (evals/2026-10-14-classifiers.md).
-    classify: RoleConfig = RoleConfig(provider="openrouter", model="typesafe/jev-1.13", decisions=True)
+    classify: RoleConfig = RoleConfig(
+        provider="openrouter", model="typesafe/jev-1.13", decisions=True
+    )
     triage: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
     judge: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
     check: RoleConfig = RoleConfig(
