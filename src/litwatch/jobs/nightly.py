@@ -13,6 +13,7 @@ import psycopg
 from litwatch import analysis, classification, fulltext, grading, intake
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
+from litwatch.core.fulltext import RECONCILE_LOOKBACK
 from litwatch.feedback import word
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
@@ -75,13 +76,16 @@ async def grade(
 async def text_passes(
     conn: psycopg.AsyncConnection, config: Config, run: ModelRun, limit: int | None = None
 ) -> None:
-    """Settle the papers whose text was read, or its pass queued, for an older version or
-    revision, which queues their passes again (pipeline.md, section 8); make the failed passes
-    ready again, those with fewer than `FAILED_RUNS` failed runs; and try every pass that is due
-    once, up to `limit`: the passes this run queued have their text asked for now, and the
-    service's worker runs each once its text is there. Found in the database, not handed on by
-    intake, so a run cut short leaves them to the next."""
-    await word.settle_all(conn, await fulltext_store.outdated(conn))
+    """Reconcile the full-text queue with the database: settle every candidate paper
+    (`store.fulltext.candidates`: those with a pass open, those the rule may give one, those
+    read for an older version or revision), so a trigger missed costs at most a night
+    (pipeline.md, sections 6 and 8). Then make the failed passes ready again, those with fewer than
+    `FAILED_RUNS` failed runs; and try every pass that is due once, up to `limit`: the passes
+    this run queued have their text asked for now, and the service's worker runs each once its
+    text is there."""
+    reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK, limit)
+    await word.settle_all(conn, reconciled)
+    run.add("fulltext_reconciled", len(reconciled))
     run.add("fulltext_retried", await fulltext_store.retry_failed(conn, FAILED_RUNS))
     archive = fulltext.archive_for(config)
     if archive is None:

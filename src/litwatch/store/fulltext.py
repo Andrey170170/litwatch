@@ -86,19 +86,26 @@ async def queue(
     return row["id"]
 
 
-async def relabel(conn: psycopg.AsyncConnection, pass_id: int, kind: PassKind, reason: str) -> None:
-    """Say why a pass that has not started runs now."""
+def _unstarted(claimed: bool) -> list[str]:
+    # A pass the caller has claimed but not yet worked counts as not started.
+    return [s.value for s in UNSTARTED] + ([PassState.RUNNING.value] if claimed else [])
+
+
+async def relabel(
+    conn: psycopg.AsyncConnection, pass_id: int, kind: PassKind, reason: str, *, claimed=False
+) -> None:
+    """Say why a pass that has not started (or that the caller `claimed`) runs now."""
     await conn.execute(
         "UPDATE fulltext_passes SET kind = %s, reason = %s WHERE id = %s AND state = ANY(%s)",
-        (kind.value, reason, pass_id, [s.value for s in UNSTARTED]),
+        (kind.value, reason, pass_id, _unstarted(claimed)),
     )
 
 
-async def drop(conn: psycopg.AsyncConnection, pass_id: int) -> None:
-    """Remove a pass that has not started; it wrote nothing."""
+async def drop(conn: psycopg.AsyncConnection, pass_id: int, *, claimed: bool = False) -> None:
+    """Remove a pass that has not started (or that the caller `claimed`); it wrote nothing."""
     await conn.execute(
         "DELETE FROM fulltext_passes WHERE id = %s AND state = ANY(%s)",
-        (pass_id, [s.value for s in UNSTARTED]),
+        (pass_id, _unstarted(claimed)),
     )
 
 
@@ -121,6 +128,7 @@ class Claimed:
 
     id: int
     kind: PassKind
+    reason: str
     revision: int  # the revision the pass was queued for
     paper: Paper
     area: TaxonomyClass | None
@@ -153,9 +161,10 @@ async def claim(
                 UPDATE fulltext_passes f SET state = 'running', tried_at = now(),
                                              lease_until = now() + %s
                 FROM taken WHERE f.id = taken.id
-                RETURNING f.id, f.kind, f.paper_revision, f.lease_until, f.paper_id, f.retry_text
+                RETURNING f.id, f.kind, f.reason, f.paper_revision, f.lease_until, f.paper_id,
+                          f.retry_text
             )
-            SELECT {COLUMNS}, x.id AS pass_id, x.kind, x.paper_revision AS pass_revision,
+            SELECT {COLUMNS}, x.id AS pass_id, x.kind, x.reason, x.paper_revision AS pass_revision,
                    x.lease_until, x.retry_text, k.slug, k.name, k.description, k.parent, k.threshold
             FROM claimed x JOIN papers p ON p.id = x.paper_id
             LEFT JOIN LATERAL (SELECT primary_class FROM classifications
@@ -171,6 +180,7 @@ async def claim(
         Claimed(
             id=r["pass_id"],
             kind=PassKind(r["kind"]),
+            reason=r["reason"],
             revision=r["pass_revision"],
             paper=row_to_paper(r),
             area=row_to_class(r) if r["slug"] else None,
@@ -192,6 +202,23 @@ async def held(conn: psycopg.AsyncConnection, c: Claimed) -> bool:
         )
     ).fetchone()
     return row is not None
+
+
+async def label_of(conn: psycopg.AsyncConnection, pass_id: int) -> tuple[PassKind, str] | None:
+    """The pass's kind and reason, or None when it is gone (dropped)."""
+    row = await (
+        await conn.execute("SELECT kind, reason FROM fulltext_passes WHERE id = %s", (pass_id,))
+    ).fetchone()
+    return (PassKind(row["kind"]), row["reason"]) if row else None
+
+
+async def release(conn: psycopg.AsyncConnection, c: Claimed) -> None:
+    """Give a claimed pass back unworked: it awaits its next claim, behind those not tried."""
+    await conn.execute(
+        "UPDATE fulltext_passes SET state = 'awaiting_text', lease_until = NULL "
+        "WHERE id = %s AND state = 'running' AND lease_until = %s",
+        (c.id, c.lease_until),
+    )
 
 
 async def retry_asked(conn: psycopg.AsyncConnection, c: Claimed) -> None:
@@ -315,18 +342,69 @@ async def outdated(conn: psycopg.AsyncConnection) -> list[str]:
     older revision, whose current revision has no text pass open or done on its arXiv version: a
     new version or revision came after what was read or queued (`to_queue`'s rule, found from
     the database)."""
+    rows = await (await conn.execute(f"{OUTDATED} ORDER BY p.id")).fetchall()
+    return [r["id"] for r in rows]
+
+
+OUTDATED = """
+    SELECT DISTINCT p.id FROM fulltext_passes d JOIN papers p ON p.id = d.paper_id
+    WHERE d.kind <> 'deep' AND (d.state = 'done' OR d.paper_revision < p.revision)
+      AND p.dismissed_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM fulltext_passes f
+          WHERE f.paper_id = p.id AND f.paper_revision = p.revision AND f.kind <> 'deep'
+            AND (f.state <> 'done' OR p.version IS NULL OR f.arxiv_version >= p.version))
+"""
+
+
+async def candidates(
+    conn: psycopg.AsyncConnection, lookback: timedelta, limit: int | None = None
+) -> list[str]:
+    """The papers, not dismissed, whose text pass the nightly run settles from the database
+    whatever triggered or missed it (pipeline.md, section 6), up to `limit`: every paper with a
+    pass open; every one without a pass for its current revision that the rule may give one
+    (an active Focus topic's central or related, an active Area's must read, its own or a
+    followed descendant's; or such a verdict or label from the last `lookback`, whose settle
+    may have been missed); and the `outdated` ones. Bounded by the queue and what qualifies but
+    has no pass, not by the library."""
     rows = await (
         await conn.execute(
-            """
-            SELECT DISTINCT p.id FROM fulltext_passes d JOIN papers p ON p.id = d.paper_id
-            WHERE d.kind <> 'deep' AND (d.state = 'done' OR d.paper_revision < p.revision)
-              AND p.dismissed_at IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM fulltext_passes f
-                  WHERE f.paper_id = p.id AND f.paper_revision = p.revision AND f.kind <> 'deep'
-                    AND (f.state <> 'done' OR p.version IS NULL OR f.arxiv_version >= p.version))
-            ORDER BY p.id
-            """
+            f"""
+            WITH RECURSIVE area_scope AS (
+                SELECT class FROM topics WHERE depth = 'area' AND status = 'active'
+                UNION
+                SELECT c.slug FROM classes c JOIN area_scope a ON c.parent = a.class
+                WHERE c.retired_at IS NULL
+            ), focus AS (
+                SELECT class FROM topics WHERE depth = 'focus' AND status = 'active'
+            ), area AS (
+                SELECT t.class FROM topics t JOIN area_scope a ON a.class = t.class
+                WHERE t.status <> 'draft'
+            ), qualifying AS (
+                SELECT paper_id FROM effective_grades
+                WHERE (topic IN (SELECT class FROM focus) AND fit IN ('central', 'related'))
+                   OR (topic IN (SELECT class FROM area) AND grade = 'must_read')
+                UNION
+                SELECT paper_id FROM verdicts
+                WHERE recorded_at >= now() - %(lookback)s AND fit IN ('central', 'related')
+                  AND (topic IN (SELECT class FROM focus) OR topic IN (SELECT class FROM area))
+                UNION
+                SELECT paper_id FROM labels
+                WHERE labelled_at >= now() - %(lookback)s AND value IN ('central', 'related')
+                  AND (topic IN (SELECT class FROM focus) OR topic IN (SELECT class FROM area))
+            )
+            SELECT p.id FROM papers p
+            WHERE p.dismissed_at IS NULL AND (
+                EXISTS (SELECT 1 FROM fulltext_passes f WHERE f.paper_id = p.id
+                        AND f.kind <> 'deep' AND f.state <> 'done')
+                OR (p.id IN (SELECT paper_id FROM qualifying)
+                    AND NOT EXISTS (SELECT 1 FROM fulltext_passes f WHERE f.paper_id = p.id
+                                    AND f.paper_revision = p.revision AND f.kind <> 'deep'))
+                OR p.id IN ({OUTDATED})
+            )
+            ORDER BY p.id LIMIT %(limit)s
+            """,
+            {"lookback": lookback, "limit": limit},
         )
     ).fetchall()
     return [r["id"] for r in rows]

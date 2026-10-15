@@ -31,6 +31,9 @@ LEASE = timedelta(minutes=30)
 TEXT_PRIORITY = 0
 # A pass awaiting text this long is listed for the owner.
 AWAITING_TOO_LONG = timedelta(days=7)
+# The nightly reconcile also looks at verdicts and labels this recent, whose settle may have
+# been missed: more than a night, so a missed trigger costs at most one.
+RECONCILE_LOOKBACK = timedelta(days=2)
 
 
 @dataclass(frozen=True)

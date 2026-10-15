@@ -5,7 +5,9 @@ awaiting text and is tried again on the worker's next tick, so it runs once the 
 With the text, the `brief` role writes the Brief, a Gist and the Weight from the full text, which
 `record` stores and settles. Both kinds of pass make that one call.
 
-A pass is held by a lease while it runs; one whose lease ran out (its worker died) is tried
+Before anything is spent on a claimed pass, its paper is settled (`_still_wanted`), so a pass
+the database no longer wants is dropped unread, whatever trigger missed it. A pass is held by
+a lease while it runs; one whose lease ran out (its worker died) is tried
 again. A failed pass is tried again on the next nightly run (`retry_failed`), and the archive
 is asked to try again what it gave up on; after `FAILED_RUNS` failed runs, or a week awaiting
 text, it waits for the owner on Quality."""
@@ -189,6 +191,25 @@ async def _add(conn: psycopg.AsyncConnection, c: Claimed, a: Attempt, read: Text
         )
 
 
+async def _still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
+    """Settle the paper of a claimed pass before anything is spent on it, under its lock, as
+    `word.settle` judges the database now, whatever trigger was missed: None when the pass
+    still runs as claimed; else why not. One no longer wanted is dropped; one wanted for
+    another reason is relabelled and given back, to run on its next claim."""
+    async with conn.transaction():
+        await word.lock(conn, c.paper.id)
+        if not await store_.held(conn, c):
+            return "lost"
+        await word.settle(conn, c.paper.id, claimed=c.id)
+        label = await store_.label_of(conn, c.id)
+        if label is None:
+            return "fulltext_dropped"
+        if label != (c.kind, c.reason):
+            await store_.release(conn, c)
+            return "fulltext_relabelled"
+    return None
+
+
 def _outcome(a: Attempt) -> str:
     if a.waiting:
         return "awaiting_text"
@@ -215,7 +236,15 @@ async def work(
         if not claimed:
             break
         tried.update(c.id for c in claimed)
-        attempts = await asyncio.gather(*(_read(archive, c) for c in claimed))
+        wanted = []
+        for c in claimed:
+            if (why := await _still_wanted(conn, c)) is None:
+                wanted.append(c)
+            elif why != "lost":
+                counts[why] += 1
+                if run:
+                    run.add(why)
+        attempts = await asyncio.gather(*(_read(archive, c) for c in wanted))
         for a in attempts:
             if a.text is None and await record(conn, a):
                 counts[_outcome(a)] += 1

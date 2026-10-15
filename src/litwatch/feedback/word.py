@@ -11,7 +11,7 @@ one too, and drops one not started that it no longer qualifies for.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import psycopg
 
@@ -33,7 +33,14 @@ from litwatch.core import (
     owners_word,
     page_standing,
 )
-from litwatch.core.fulltext import TEXT_PRIORITY, to_drop, to_queue, to_relabel, wanted
+from litwatch.core.fulltext import (
+    TEXT_PRIORITY,
+    PassState,
+    to_drop,
+    to_queue,
+    to_relabel,
+    wanted,
+)
 from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
@@ -75,9 +82,12 @@ def _value(e: Effective | None) -> dict[str, str | None]:
     return {"grade": e.grade.value if e else None, "fit": e.fit.value if e else None}
 
 
-async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
+async def settle(
+    conn: psycopg.AsyncConnection, paper_id: str, *, claimed: int | None = None
+) -> Settled:
     """Recompute and store the paper's effective Fits and grades, its rarity and its library
-    state, with their events.
+    state, with their events, and its text pass. `claimed` is a pass the caller holds and has
+    not worked yet: it is judged as one not started, so it may be dropped or relabelled.
 
     Settles of one paper are serialized and read only after the lock is held, so the last to
     run sees every committed change and leaves the stored state right.
@@ -145,12 +155,16 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
             await events.emit(
                 conn, events.PAPER_SAVED if result.saved else events.PAPER_UNSAVED, paper_id
             )
-        await _text_pass(conn, paper_id, topics, after)
+        await _text_pass(conn, paper_id, topics, after, claimed)
     return result
 
 
 async def _text_pass(
-    conn: psycopg.AsyncConnection, paper_id: str, topics: dict, after: dict[str, Effective]
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    topics: dict,
+    after: dict[str, Effective],
+    claimed: int | None,
 ) -> None:
     """Queue the paper's Brief or Weight re-check when it qualifies on its effective Fits and
     grades in active topics, an Area's including its descendants' (pipeline.md, sections 4
@@ -160,6 +174,9 @@ async def _text_pass(
     found = await fulltext_store.facts(conn, paper_id)
     if found is None or found.dismissed:
         return
+    last, ours = found.last, found.last is not None and found.last.id == claimed
+    if ours and last.state == PassState.RUNNING:
+        last = replace(last, state=PassState.READY)
     await fulltext_store.drop_stale(conn, paper_id, found.revision)
     active = [t for t in topics.values() if t.status == Status.ACTIVE]
     tree = await taxonomy_store.load(conn)
@@ -182,11 +199,11 @@ async def _text_pass(
         and any(t.depth == Depth.AREA and must_read_in(t.slug) for t in active),
         has_text_result=found.has_text_result,
     )
-    if to_drop(want, found.last):
-        await fulltext_store.drop(conn, found.last.id)
-    elif want is not None and to_relabel(want, found.last):
-        await fulltext_store.relabel(conn, found.last.id, *want)
-    elif want is not None and to_queue(want, found.last, found.version):
+    if to_drop(want, last):
+        await fulltext_store.drop(conn, last.id, claimed=ours)
+    elif want is not None and to_relabel(want, last):
+        await fulltext_store.relabel(conn, last.id, *want, claimed=ours)
+    elif want is not None and to_queue(want, last, found.version):
         kind, reason = want
         await fulltext_store.queue(conn, paper_id, found.revision, kind, reason, TEXT_PRIORITY)
 

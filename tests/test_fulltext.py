@@ -431,6 +431,45 @@ async def test_the_nightly_run_retries_failed_passes_and_works_the_queue(db, mon
     assert (await passes(db))[0]["state"] == "done"
 
 
+# -- the backstop: the database, not the triggers, decides -----------------------------------------
+
+
+async def test_a_pass_its_paper_stopped_qualifying_for_is_dropped_at_claim_with_no_call(db):
+    await graded(db, "central")
+    await db.execute("UPDATE verdicts SET fit = 'none'")  # by a route that settles nothing
+    fake, writer = ready(FakeArchive()), Writer()
+    assert await work(db, fake, writer) == {"fulltext_dropped": 1}
+    assert (writer.asked, fake.jobs, await passes(db)) == ([], [], [])
+
+
+async def test_a_pass_wanted_for_another_reason_at_claim_runs_on_its_next_claim(db):
+    await analysed(db, "solid")
+    await graded(db, "central")
+    await graded(db, "central", INTERP.slug)  # must read in the Area too
+    await db.execute("UPDATE verdicts SET fit = 'adjacent' WHERE topic = %s", (FAITH.slug,))
+    fake, writer = ready(FakeArchive()), Writer()
+    assert await work(db, fake, writer) == {"fulltext_relabelled": 1}  # nothing spent
+    assert (writer.asked, fake.jobs) == ([], [])
+    (row,) = await passes(db)
+    assert (row["kind"], row["reason"], row["state"]) == ("weight", "area", "awaiting_text")
+    assert await work(db, fake, writer) == {"briefs_written": 1}
+
+
+async def test_a_paper_that_came_to_qualify_by_no_trigger_gets_its_pass_on_the_nightly_run(
+    db, monkeypatch
+):
+    await analysed(db, "solid")  # nothing left for the night's other steps
+    found = Verdict(
+        paper_id=P.id, topic=FAITH.slug, topic_version="v", fit=Fit.CENTRAL, reason="r", opinions={}
+    )
+    await verdicts.add(db, found)  # and no settle
+    assert await passes(db) == []
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: None)  # queued, not worked
+    await nightly.run(db, CONFIG, fetch=False, gateway=Writer().gateway)
+    (row,) = await passes(db)
+    assert (row["kind"], row["reason"], row["state"]) == ("brief", "focus", "awaiting_text")
+
+
 # -- the lease and the limit -----------------------------------------------------------------------
 
 
@@ -450,7 +489,16 @@ async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db):
     await graded(db, "central")
     other = paper("2610.00002", version=1)
     await papers_store.upsert(db, [other])
-    await fulltext_store.queue(db, other.id, 1, PassKind.BRIEF, "focus", 0)
+    found = Verdict(
+        paper_id=other.id,
+        topic=FAITH.slug,
+        topic_version="v",
+        fit=Fit.CENTRAL,
+        reason="r",
+        opinions={},
+    )
+    await verdicts.add(db, found)
+    await word.settle(db, other.id)
     fake = FakeArchive(status="pending")
     assert await work(db, fake, Writer(), limit=1) == {"awaiting_text": 1}
     assert await work(db, fake, Writer(), limit=1) == {"awaiting_text": 1}
