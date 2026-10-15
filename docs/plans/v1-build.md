@@ -152,6 +152,22 @@ Runs and cost with Jobs and the Deep card estimate, Integrations, Configuration)
 digest slide-over. W4: phone gestures (edge swipe back, stepping, sheet drag), the PWA and share target, and the stack
 smoke test's page list. A web PR starts on a surface only once its endpoints are merged.
 
+### Deferred to later PRs
+
+- **N5:** after Process fetches a paper outside the collection, `/api/lookup` stores only its metadata and
+  `in_collection` stays false until it is classified, so the paper page offers Process again and a second tap only
+  says "Already in the collection" (#56, Codex). N5's page for papers outside the collection shows the fetched state,
+  read from the API.
+- **N6 (the owner, 2026-10-15):** the Area must-read volume (a median of 20 a night for Alignment and safety, 12 for
+  Interpretability) and the full-text cost it brings (about $9 per 1,000 papers) are accepted for the restart.
+  Reassess them after one to two weeks of running, together with the cost, and tune then. The Focus related ×
+  incremental cell stays: two papers are not enough to move it. The Field offset is 2 (`evals/2026-10-15-tuning.md`).
+- **API gaps W1 found**, each for the core PR that owns it: a Brief on Paper (N3); a Deep card's queued state and
+  "Write again", which POST answers 409 (N3's Deep cards); digests for the topic strips and the sidebar's counts (N4,
+  W3); a page for an archive paper not yet fetched and the archive's size for the search box (N5); the "Among the
+  collection" rows; rung ✓/✗ ratings; code and weights URLs on the facets; listing unclassified papers; splits and
+  escalations on the status line; which source set the owner's word.
+
 ## Decisions
 
 **D1 · The first v1's deployment is taken down now, and nothing is carried from it or from 0.14.** Its containers are

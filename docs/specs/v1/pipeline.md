@@ -183,7 +183,7 @@ Rarity is what a paper's colour shows. Five levels, low to high: common, uncommo
 epic, must read with Weight landmark → legendary.
 
 **In a mixed list** (Digest, Papers, search): the highest of the paper's levels, where each followed topic's level is
-its topic-page level lowered by the topic's depth (Focus 0, Area 0, Field 1), and a paper's Weight alone gives a
+its topic-page level lowered by the topic's depth (Focus 0, Area 0, Field 2), and a paper's Weight alone gives a
 floor (landmark → rare, solid → uncommon, incremental → common), which is all an ungraded paper has. A paper outside
 the collection has no rarity and shows none.
 
