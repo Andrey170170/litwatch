@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import gzip
 import hashlib
 import random
 import statistics
@@ -38,6 +39,7 @@ from litwatch.llm.gateway import CallError, Gateway
 SEED = 20261014
 DRAW = 300
 SWEEP = (0.3, 0.4, 0.5, 0.6, 0.7)
+OUTSIDE_FOCUS = (0.5, 0.6, 0.7, 0.8, 0.9)
 FLOORS = (0.1, 0.2, 0.3)
 
 
@@ -113,9 +115,14 @@ class Result(BaseModel):
 
 
 def results(path: Path) -> dict[str, Result]:
-    if not path.exists():
+    """A run's answers; a finished run is kept gzipped (`<candidate>.jsonl.gz`) and read so."""
+    packed = path.with_name(path.name + ".gz")
+    if packed.exists() and not path.exists():
+        lines = gzip.decompress(packed.read_bytes()).decode().splitlines()
+    elif path.exists():
+        lines = path.read_text().splitlines()
+    else:
         return {}
-    lines = path.read_text().splitlines()
     return {r.paper_id: r for r in (Result.model_validate_json(x) for x in lines if x)}
 
 
@@ -235,8 +242,25 @@ def _table(head: list[str], rows: Iterable[Iterable[object]]) -> list[str]:
     return out + ["| " + " | ".join(str(c) for c in row) + " |" for row in rows]
 
 
+def _gradings(tree: Taxonomy, drawn: list[set[str]], depth: Depth) -> str:
+    """Gradings per 100 papers for the topics of one depth."""
+    slugs = {t.class_ for t in tree.topics if t.depth == depth}
+    return f"{100 * sum(len(g & slugs) for g in drawn) / len(drawn):.0f}" if drawn else "–"
+
+
 def _top(tree: Taxonomy, slug: str) -> str:
     return [slug, *tree.ancestors(slug)][-1]
+
+
+def focus_kept(tree: Taxonomy, threshold: float) -> Taxonomy:
+    """The tree with every class at or under a Focus topic at `threshold`, so a higher default
+    applies only outside them."""
+    split = tree.model_copy(deep=True)
+    focus = {s for t in tree.topics if t.depth == Depth.FOCUS for s in tree.subtree(t.class_)}
+    for c in split.classes:
+        if c.slug in focus:
+            c.threshold = threshold
+    return split
 
 
 def graded(tree: Taxonomy, r: Result, s: Setting = AT_DEFAULT) -> set[str]:
@@ -369,6 +393,40 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
         answered = [runs[n][p] for p in labels.draw if p in runs[n] and not runs[n][p].error]
         per_paper.append(mean((len(direct(tree, r.classified)) for r in answered), ".1f"))
     lines += _table(["Topic", "Depth", *names], [*rows, per_paper])
+
+    lines += ["", "## A higher threshold outside the Focus subtrees", ""]
+    lines += [
+        "Classes at or under a Focus topic keep 0.5; every other class takes the threshold in "
+        "the row; the band's floor is 0.1. Precision / recall on the silver memberships "
+        "(levels 1–2, pooled over classes); provisional recall with band and keywords; and "
+        "gradings per 100 drawn papers for the Focus, Area and Field topics (a paper graded for "
+        "two topics of a depth counts twice).",
+        "",
+    ]
+    rows = []
+    for t in OUTSIDE_FOCUS:
+        split, s = focus_kept(tree, 0.5), Setting(t, 0.1)
+        row: list[object] = [t]
+        for n in names:
+            judged = [
+                (c.slug in members(split, runs[n][p], s), c.slug in mem)
+                for p, (mem, unsettled) in labels.memberships.items()
+                if p in runs[n]
+                for c in split.classes
+                if split.level(c.slug) <= 2 and c.slug not in unsettled
+            ]
+            reached = sum(
+                focus_routes(split, runs[n][p], c, s)[2] for c, p in provisional if p in runs[n]
+            )
+            drawn = [graded(split, runs[n][p], s) for p in labels.draw if p in runs[n]]
+
+            on_provisional = sum(p in runs[n] for _, p in provisional)
+            row.append(
+                f"{_pr(judged)}; {reached}/{on_provisional}; "
+                f"{' / '.join(_gradings(split, drawn, d) for d in Depth)}"
+            )
+        rows.append(row)
+    lines += _table(["Others at", *names], rows)
 
     lines += ["", "## Primary class", "", "Exact class / same top-level class.", ""]
     rows = []
