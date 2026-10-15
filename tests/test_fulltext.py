@@ -228,12 +228,29 @@ async def test_the_owners_word_queues_a_pass_and_takes_back_one_not_started(db):
 
 
 async def test_a_paused_topic_queues_nothing_and_drops_its_pass(db):
-    await graded(db, "central")
+    await graded(db, "related")  # relevant: the Area above would not pick it
     assert len(await passes(db)) == 1
     tree = await taxonomy_store.load(db)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
     await word.save_taxonomy(db, tree.following(faith.model_copy(update={"status": Status.PAUSED})))
     assert await passes(db) == []
+
+
+async def test_an_area_counts_a_must_read_its_descendant_graded(db):
+    async def status(slug: str, value: Status) -> None:
+        tree = await taxonomy_store.load(db)
+        topic = next(t for t in tree.topics if t.slug == slug)
+        await word.save_taxonomy(db, tree.following(topic.model_copy(update={"status": value})))
+
+    await analysed(db, "solid")
+    await graded(db, "central")  # must read in the Focus topic, ungraded by the Area itself
+    await status(FAITH.slug, Status.PAUSED)
+    # Still the Area's pick candidate through its followed descendant (pipeline.md, section 4).
+    assert [(r["kind"], r["reason"]) for r in await passes(db)] == [("weight", "area")]
+    await status(INTERP.slug, Status.PAUSED)
+    assert await passes(db) == []
+    await status(INTERP.slug, Status.ACTIVE)  # the Area's own papers include its subtree's
+    assert [(r["kind"], r["reason"]) for r in await passes(db)] == [("weight", "area")]
 
 
 @pytest.mark.parametrize(
@@ -242,7 +259,7 @@ async def test_a_paused_topic_queues_nothing_and_drops_its_pass(db):
     ids=["still-fetching", "failed"],
 )
 async def test_a_pass_running_when_its_topic_is_paused_is_dropped_once_it_stops(db, attempt):
-    await graded(db, "central")
+    await graded(db, "related")
     (claimed,) = await fulltext_store.claim(db, LEASE)
     tree = await taxonomy_store.load(db)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)

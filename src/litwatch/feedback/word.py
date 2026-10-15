@@ -31,6 +31,7 @@ from litwatch.core import (
     in_library,
     mixed_rarity,
     owners_word,
+    page_standing,
 )
 from litwatch.core.fulltext import TEXT_PRIORITY, to_drop, to_queue, to_relabel, wanted
 from litwatch.store import analyses as analyses_store
@@ -152,19 +153,33 @@ async def _text_pass(
     conn: psycopg.AsyncConnection, paper_id: str, topics: dict, after: dict[str, Effective]
 ) -> None:
     """Queue the paper's Brief or Weight re-check when it qualifies on its effective Fits and
-    grades in active topics (pipeline.md, section 6), or again for a newer arXiv version
+    grades in active topics, an Area's including its descendants' (pipeline.md, sections 4
+    and 6), or again for a newer arXiv version
     (section 8); relabel one not started that it now wants for another reason, and drop one it
     no longer qualifies for."""
     found = await fulltext_store.facts(conn, paper_id)
     if found is None or found.dismissed:
         return
     await fulltext_store.drop_stale(conn, paper_id, found.revision)
-    active = [(topics[s], e) for s, e in after.items() if topics[s].status == Status.ACTIVE]
+    active = [t for t in topics.values() if t.status == Status.ACTIVE]
+    tree = await taxonomy_store.load(conn)
+
+    def must_read_in(area: str) -> bool:
+        # An Area's pick candidates include its subtree's papers (section 4): its own grade,
+        # else the highest among its followed descendants'.
+        below = [(t.slug, after[t.slug]) for t in tree.under(area) if t.slug in after]
+        standing = page_standing(after.get(area), [b for b in below if b[0] != area], None)
+        return standing.grade == Grade.MUST_READ
+
     want = wanted(
         focus=any(
-            t.depth == Depth.FOCUS and e.fit in (Fit.CENTRAL, Fit.RELATED) for t, e in active
+            t.depth == Depth.FOCUS
+            and t.slug in after
+            and after[t.slug].fit in (Fit.CENTRAL, Fit.RELATED)
+            for t in active
         ),
-        area=any(t.depth == Depth.AREA and e.grade == Grade.MUST_READ for t, e in active),
+        area=tree is not None
+        and any(t.depth == Depth.AREA and must_read_in(t.slug) for t in active),
         has_text_result=found.has_text_result,
     )
     if to_drop(want, found.last):
@@ -219,7 +234,9 @@ async def save_taxonomy(conn: psycopg.AsyncConnection, tree: Taxonomy) -> taxono
     papers' rarity, and one no longer at Focus its papers' place in the library."""
     async with conn.transaction():
         saved = await taxonomy_store.save(conn, tree)
-        for slug in saved.changed_topics:
+        # And those of the topics under each: an Area's standing comes from them too.
+        below = {t.slug for slug in saved.changed_topics for t in tree.under(slug)}
+        for slug in sorted(set(saved.changed_topics) | below):
             await settle_topic(conn, slug)
         if saved.reordered:
             await settle_ties(conn)
