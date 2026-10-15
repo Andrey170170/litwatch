@@ -35,63 +35,75 @@ export function said(e: unknown, fallback = "That did not go through"): string {
   return e instanceof ApiError && e.message ? e.message : e instanceof Error && e.message ? e.message : fallback;
 }
 
-function useAck(paperId: string) {
+/**
+ * A write on one paper. The paper's id is taken when `mutate` is called, as one of the write's variables: the
+ * hook's options follow the latest render, so a page that moves to another paper before the write runs or
+ * returns would otherwise write to, or settle, the wrong one.
+ */
+function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Promise<R>, done: (qc: QueryClient, id: string, r: R) => void) {
   const qc = useQueryClient();
-  return {
-    onSuccess: (ack: Ack) => {
-      toast(ack.message);
-      settled(qc, paperId, ack);
-    },
-    onError: (e: unknown) => toast(said(e), "error"),
-  };
+  const m = useMutation({
+    mutationFn: ({ id, v }: { id: string; v: V }) => call(id, v),
+    onSuccess: (r, { id }) => done(qc, id, r),
+    onError: (e) => toast(said(e), "error"),
+  });
+  return { isPending: m.isPending, mutate: (v: V, options?: { onSuccess?: () => void }) => m.mutate({ id: paperId, v }, options) };
 }
 
+const acked = (qc: QueryClient, id: string, ack: Ack) => {
+  toast(ack.message);
+  settled(qc, id, ack);
+};
+
 export function useSave(paperId: string) {
-  return useMutation({
-    mutationFn: async (saved: boolean) =>
-      ok(await api.PUT("/api/library/{paper_id}", { params: { path: { paper_id: paperId } }, body: { saved } })),
-    ...useAck(paperId),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, saved: boolean) => ok(await api.PUT("/api/library/{paper_id}", { params: { path: { paper_id: id } }, body: { saved } })),
+    acked,
+  );
 }
 
 export function useReact(paperId: string) {
-  return useMutation({
-    mutationFn: async (v: { topic: string | null; value: Schemas["ReactionValue"]; reason: Schemas["ReactionReason"] }) =>
-      ok(await api.PUT("/api/reactions/{paper_id}", { params: { path: { paper_id: paperId } }, body: v })),
-    ...useAck(paperId),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, v: { topic: string | null; value: Schemas["ReactionValue"]; reason: Schemas["ReactionReason"] }) =>
+      ok(await api.PUT("/api/reactions/{paper_id}", { params: { path: { paper_id: id } }, body: v })),
+    acked,
+  );
 }
 
 export function useUnreact(paperId: string) {
-  return useMutation({
-    mutationFn: async (topic: string | null) =>
-      ok(await api.DELETE("/api/reactions/{paper_id}", { params: { path: { paper_id: paperId }, query: { topic: topic ?? undefined } } })),
-    ...useAck(paperId),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, topic: string | null) =>
+      ok(await api.DELETE("/api/reactions/{paper_id}", { params: { path: { paper_id: id }, query: { topic: topic ?? undefined } } })),
+    acked,
+  );
 }
 
 export function useLabel(paperId: string) {
-  return useMutation({
-    mutationFn: async (v: { topic: string; value: Schemas["LabelValue"] }) =>
-      ok(await api.PUT("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: paperId } }, body: { value: v.value } })),
-    ...useAck(paperId),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, v: { topic: string; value: Schemas["LabelValue"] }) =>
+      ok(await api.PUT("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } }, body: { value: v.value } })),
+    acked,
+  );
 }
 
 export function useUnlabel(paperId: string) {
-  return useMutation({
-    mutationFn: async (topic: string) =>
-      ok(await api.DELETE("/api/labels/{topic}/{paper_id}", { params: { path: { topic, paper_id: paperId } } })),
-    ...useAck(paperId),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, topic: string) => ok(await api.DELETE("/api/labels/{topic}/{paper_id}", { params: { path: { topic, paper_id: id } } })),
+    acked,
+  );
 }
 
 export function useMiss(paperId: string) {
-  return useMutation({
-    mutationFn: async (v: { topic: string; fit: "central" | "related" }) =>
-      ok(await api.POST("/api/misses", { body: { paper_id: paperId, ...v } })),
-    ...useAck(paperId),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, v: { topic: string; fit: "central" | "related" }) => ok(await api.POST("/api/misses", { body: { paper_id: id, ...v } })),
+    acked,
+  );
 }
 
 /** Process: fetch a paper the collection lacks, by arXiv id. */
@@ -110,96 +122,97 @@ export function useProcess() {
 /** Deep read: ask for a card; the page shows it once an integration has written it. */
 export function useDeepRead(paperId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => ok(await api.POST("/api/papers/{paper_id}/card", { params: { path: { paper_id: paperId } } })),
-    onSuccess: () => toast("Deep card requested"),
-    onError: (e) => {
-      if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["paper", paperId] });
-      toast(said(e), "error");
+  return usePaperMutation(
+    paperId,
+    async (id, _: undefined) => {
+      try {
+        return ok(await api.POST("/api/papers/{paper_id}/card", { params: { path: { paper_id: id } } }));
+      } catch (e) {
+        // a 409 means the page is behind (a card exists, or none can be asked): refetch the paper asked for
+        if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["paper", id] });
+        throw e;
+      }
     },
-  });
+    () => toast("Deep card requested"),
+  );
 }
 
 /** The owner names the published version by DOI, or that there is none. */
 export function usePublication(paperId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (v: { doi?: string; none?: boolean }) =>
+  return usePaperMutation(
+    paperId,
+    async (id, v: { doi?: string; none?: boolean }) =>
       ok(
         await api.PUT("/api/papers/{paper_id}/publication", {
-          params: { path: { paper_id: paperId } },
+          params: { path: { paper_id: id } },
           body: { doi: v.doi ?? null, none: v.none ?? false, dblp_key: null },
         }),
       ),
-    onSuccess: (record) => {
+    (qc, id, record) => {
       toast(record ? `Published version set: ${[record.venue, record.year].filter(Boolean).join(" ") || "a record"}` : "Noted: no published version");
-      void qc.invalidateQueries({ queryKey: ["paper", paperId] });
+      void qc.invalidateQueries({ queryKey: ["paper", id] });
     },
-    onError: (e) => toast(said(e), "error"),
-  });
+  );
 }
 
 // The open states' actions (pipeline.md, section 9), each named by the paper revision the page showed.
 
-function useSettle(paperId: string, done: string) {
-  const qc = useQueryClient();
-  return {
-    onSuccess: () => {
-      toast(done);
-      settled(qc, paperId);
-    },
-    onError: (e: unknown) => toast(said(e), "error"),
-  };
-}
+const stepped = (done: string) => (qc: QueryClient, id: string) => {
+  toast(done);
+  settled(qc, id);
+};
 
 export function useDismiss(paperId: string) {
-  return useMutation({
-    mutationFn: async (revision: number) =>
-      ok(await api.POST("/api/settings/classification/{paper_id}/dismiss", { params: { path: { paper_id: paperId } }, body: { revision } })),
-    ...useSettle(paperId, "Dismissed; it stays searchable in the archive"),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, revision: number) =>
+      ok(await api.POST("/api/settings/classification/{paper_id}/dismiss", { params: { path: { paper_id: id } }, body: { revision } })),
+    stepped("Dismissed; it stays searchable in the archive"),
+  );
 }
 
 export function useClassifyByHand(paperId: string) {
-  return useMutation({
-    mutationFn: async (v: { revision: number; classes: string[]; primary?: string }) =>
-      ok(await api.PUT("/api/settings/classification/{paper_id}", { params: { path: { paper_id: paperId } }, body: v })),
-    ...useSettle(paperId, "Classified; it goes on as usual"),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, v: { revision: number; classes: string[]; primary?: string }) =>
+      ok(await api.PUT("/api/settings/classification/{paper_id}", { params: { path: { paper_id: id } }, body: v })),
+    stepped("Classified; it goes on as usual"),
+  );
 }
 
 export function useFixText(paperId: string) {
-  return useMutation({
-    mutationFn: async (v: { revision: number; title?: string; abstract?: string }) =>
-      ok(await api.POST("/api/settings/classification/{paper_id}/correction", { params: { path: { paper_id: paperId } }, body: v })),
-    ...useSettle(paperId, "Text fixed; the next run classifies it again"),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, v: { revision: number; title?: string; abstract?: string }) =>
+      ok(await api.POST("/api/settings/classification/{paper_id}/correction", { params: { path: { paper_id: id } }, body: v })),
+    stepped("Text fixed; the next run classifies it again"),
+  );
 }
 
 export function useRetryAnalysis(paperId: string) {
-  return useMutation({
-    mutationFn: async (revision: number) =>
-      ok(await api.POST("/api/settings/analysis/{paper_id}/retry", { params: { path: { paper_id: paperId } }, body: { revision } })),
-    ...useSettle(paperId, "Analysis gets three more runs, from the next one"),
-  });
+  return usePaperMutation(
+    paperId,
+    async (id, revision: number) =>
+      ok(await api.POST("/api/settings/analysis/{paper_id}/retry", { params: { path: { paper_id: id } }, body: { revision } })),
+    stepped("Analysis gets three more runs, from the next one"),
+  );
 }
 
 export function useGradeNow(paperId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (v: { topic: string; revision: number }) =>
+  return usePaperMutation(
+    paperId,
+    async (id, v: { topic: string; revision: number }) =>
       ok(
         await api.POST("/api/settings/grading/{topic}/{paper_id}/now", {
-          params: { path: { topic: v.topic, paper_id: paperId } },
+          params: { path: { topic: v.topic, paper_id: id } },
           body: { revision: v.revision },
         }),
       ),
-    onSuccess: (r) => {
+    (qc, id, r) => {
       toast(r.graded ? `Graded: ${r.fit}` : `Grading failed again: ${r.error ?? "no verdict"}`, r.graded ? "plain" : "error");
-      settled(qc, paperId);
+      settled(qc, id);
     },
-    onError: (e) => toast(said(e), "error"),
-  });
+  );
 }
 
 /** BibTeX for one paper, as text; the API looks the published version up first. */

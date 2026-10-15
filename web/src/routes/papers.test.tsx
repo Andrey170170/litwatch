@@ -71,6 +71,28 @@ describe("Papers", () => {
     expect(screen.queryByRole("region", { name: "Epic and legendary" })).toBeNull();
   });
 
+  it("says when a shelf could not load and tries again on request", async () => {
+    viewport(true);
+    let failRare = true;
+    const calls = scriptFetch({
+      "GET /api/status": { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
+      "GET /api/topics": [],
+      "GET /api/papers": ({ url }) => {
+        const rarity = new URL(url, "http://x").searchParams.get("rarity") ?? "";
+        if (rarity === "rare" && failRare) return json({ detail: "the database went away" }, 500);
+        if (rarity === "rare") return { rows: [row("2610.00003", "Rare one", "rare")], total: 1, counts };
+        return { rows: [], total: rarity.includes("epic") ? 0 : 4, counts };
+      },
+    });
+    renderApp("/papers");
+    const rare = await screen.findByRole("region", { name: "Rare" });
+    expect(await within(rare).findByText(/Could not load/)).toBeInTheDocument();
+    failRare = false;
+    await userEvent.click(within(rare).getByRole("button", { name: "Try again" }));
+    expect(await within(rare).findByText("Rare one")).toBeInTheDocument();
+    expect(calls.filter((c) => c.url.includes("rarity=rare")).length).toBe(2);
+  });
+
   it("keeps an opened shelf open on the way back, without refetching the list", async () => {
     viewport(true);
     const calls = scriptFetch({

@@ -37,20 +37,28 @@ function ShelfView<P extends Page, K extends QueryKey>({ shelf, query, topic, li
   };
   const q = useInfiniteQuery(query(shelf, open ? 50 : 1));
   const total = q.data?.pages[0]?.total;
-  if (total === 0 || (total === undefined && !q.isPending)) return null;
+  if (total === 0 || (total === undefined && !q.isPending && !q.isError)) return null;
   const rows = open ? (q.data?.pages.flatMap((p) => p.rows) ?? []) : [];
   const style = { "--rc": rc(shelf.colour) } as React.CSSProperties;
-  const list = { key: shelfKey, ids: rows.map((r) => r.id) };
+  const list = { key: shelfKey, ids: rows.map((r) => r.id), total: total ?? rows.length };
   const Head = shelf.open ? "div" : "button";
   return (
     <section aria-label={shelf.name}>
-      <Head className={`shh${open ? "" : " fold"}`} style={style} onClick={shelf.open ? undefined : toggle}>
+      <Head className={`shh${open ? "" : " fold"}`} style={style} onClick={shelf.open ? undefined : toggle} aria-expanded={shelf.open ? undefined : open}>
         <span className="sq" />
         {shelf.name}
         <span className="k">{total ?? ""}</span>
         {!shelf.open && <span className="tg">{open ? "fold" : "show"}</span>}
       </Head>
-      {open && (
+      {q.isError && (
+        <div className="loadmore">
+          Could not load ·{" "}
+          <button className="inl" onClick={() => void q.refetch()}>
+            Try again
+          </button>
+        </div>
+      )}
+      {open && !q.isError && (
         <div className={shelf.form === "table" ? "tbl" : "blist"}>
           {rows.map((r) =>
             shelf.form === "reading" ? (

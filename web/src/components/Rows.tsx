@@ -19,7 +19,7 @@ export function Star({ id, saved, className = "sv" }: { id: string; saved: boole
     save.mutate(!saved);
   };
   return (
-    <button className={`${className}${saved ? " on" : ""} hit`} onClick={onClick} title={saved ? "Saved · unsave" : "Save"} aria-pressed={saved} aria-label={saved ? "Unsave" : "Save"}>
+    <button className={`${className}${saved ? " on" : ""} hit`} onClick={onClick} disabled={save.isPending} title={saved ? "Saved · unsave" : "Save"} aria-pressed={saved} aria-label={saved ? "Unsave" : "Save"}>
       {saved ? "★" : "☆"}
     </button>
   );
@@ -42,7 +42,7 @@ type RowProps = {
   /** The topic the list belongs to, carried to the paper's page; none on a mixed list, which shows badges. */
   topic?: string;
   /** The list this row is in, in order, so the paper's page knows its place. */
-  list: { key: string; ids: string[] };
+  list: { key: string; ids: string[]; total: number };
 };
 
 function linkProps(row: Row, topic: string | undefined, list: RowProps["list"]) {
@@ -50,7 +50,7 @@ function linkProps(row: Row, topic: string | undefined, list: RowProps["list"]) 
     to: "/paper/$" as const,
     params: { _splat: row.id },
     search: topic ? { topic } : {},
-    onClick: () => openedFrom(list.key, list.ids),
+    onClick: () => openedFrom(list.key, list.ids, list.total),
   };
 }
 

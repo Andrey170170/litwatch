@@ -66,19 +66,19 @@ export function MissPicker({ paper, onDone }: { paper: Paper; onDone: () => void
   const { data } = useQuery(topicsQuery);
   const miss = useMiss(paper.id);
   const [topic, setTopic] = useState<string | null>(null);
-  const focus = data?.find((g) => g.depth === "focus")?.topics ?? [];
-  if (!focus.length) return <div className="why">No Focus topic is followed.</div>;
+  const topics = data?.flatMap((g) => g.topics) ?? [];
+  if (!topics.length) return <div className="why">No topic is followed.</div>;
   return (
     <div className="why" role="group" aria-label="Report as a miss">
       {!topic
-        ? focus.map((t) => (
+        ? topics.map((t) => (
             <button key={t.slug} onClick={() => setTopic(t.slug)}>
               <Badge topic={t} size="sm" /> {t.name}
             </button>
           ))
         : (["central", "related"] as const).map((fit) => (
             <button key={fit} onClick={() => miss.mutate({ topic, fit }, { onSuccess: onDone })} disabled={miss.isPending}>
-              {fit} on {focus.find((t) => t.slug === topic)?.name}
+              {fit} on {topics.find((t) => t.slug === topic)?.name}
             </button>
           ))}
       <button className="clr" onClick={onDone}>

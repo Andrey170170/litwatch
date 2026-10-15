@@ -3,7 +3,7 @@
  * reaction sheet with a topic choice first, and the paper sheet with a label per topic, the links and the facts.
  */
 import { useState } from "react";
-import { useProcess, useSave } from "@/api/mutations";
+import { useDeepRead, useProcess, useSave } from "@/api/mutations";
 import { Badge } from "@/components/Badge";
 import { Sheet } from "@/components/Sheet";
 import { Fill } from "@/components/slots";
@@ -125,6 +125,7 @@ export function PaperSheet({ paper, asked, onAsked, onClose }: { paper: Paper; a
 export function PhoneBar({ paper, under, asked, onAsked, sheet, setSheet }: { paper: Paper; under: string | undefined; asked: boolean; onAsked: () => void; sheet: "more" | "up" | "down" | null; setSheet: (s: "more" | "up" | "down" | null) => void }) {
   const save = useSave(paper.id);
   const process = useProcess();
+  const deep = useDeepRead(paper.id);
   const place = placeOf(paper.id);
   const lit = (v: ReactionValue) => paper.topics.some((t) => t.reaction?.value === v) || paper.reaction?.value === v;
   return (
@@ -132,7 +133,7 @@ export function PhoneBar({ paper, under, asked, onAsked, sheet, setSheet }: { pa
       <div className="pfoot pgf">
         {paper.in_collection ? (
           <>
-            <button className={paper.saved ? "on" : ""} onClick={() => save.mutate(!paper.saved)} aria-pressed={paper.saved}>
+            <button className={paper.saved ? "on" : ""} onClick={() => save.mutate(!paper.saved)} disabled={save.isPending} aria-pressed={paper.saved}>
               {paper.saved ? "★" : "☆"} <small>{paper.saved ? "Saved" : "Save"}</small>
             </button>
             <button className={lit("up") ? "on" : "dim"} onClick={() => setSheet("up")} aria-label="Thumbs up">
@@ -148,6 +149,11 @@ export function PhoneBar({ paper, under, asked, onAsked, sheet, setSheet }: { pa
             <button className="on" onClick={() => process.mutate(paper.id)} disabled={process.isPending}>
               <small>Process</small>
             </button>
+            {paper.card_requestable && !paper.card && (
+              <button onClick={() => deep.mutate(undefined, { onSuccess: onAsked })} disabled={deep.isPending || asked}>
+                <small>{asked ? "Queued" : "Deep read"}</small>
+              </button>
+            )}
             <span className="lbl" />
           </>
         )}

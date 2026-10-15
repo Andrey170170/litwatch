@@ -1,6 +1,6 @@
 /** Papers: the whole collection as shelves by mixed rarity, with search over the collection and the archive. */
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useProcess } from "@/api/mutations";
 import { outsideQuery, papersQuery, topicsQuery } from "@/api/queries";
 import { ListControls } from "@/components/ListControls";
@@ -26,14 +26,14 @@ function Outside({ q, search }: { q: string; search: ListSearch }) {
       {data && !hits.length && <div className="empty">No archive hits for “{q}”.</div>}
       {hits.map((h) => (
         <div key={h.id} className="orow">
-          <span className="ti">
+          <Link to="/paper/$" params={{ _splat: h.id }} className="ti">
             {h.title}
             <br />
             <span className="au">
               {(h.authors ?? []).slice(0, 2).join(", ")}
               {(h.authors?.length ?? 0) > 2 ? ` +${h.authors!.length - 2}` : ""} · {rowDate(h.published)} · <span className="mono">{h.id}</span>
             </span>
-          </span>
+          </Link>
           <button
             className="btn"
             disabled={process.isPending}
@@ -53,7 +53,9 @@ export function PapersPage() {
   const desktop = useDesktop();
   const { data: groups } = useQuery(topicsQuery);
   const shelves = shelvesFor(PAPER_SHELVES, search.rarity ?? []);
-  const filtered = Boolean(search.q || search.rarity?.length || search.saved || search.code || search.topic?.length);
+  // narrowed by a facet the archive cannot answer; then the outside band stays out (DESIGN.md, "Outside the collection")
+  const narrowed = Boolean(search.rarity?.length || search.saved || search.code || search.topic?.length);
+  const filtered = Boolean(search.q) || narrowed;
   const first = useInfiniteQuery(papersQuery(search, shelves[0]!, 50));
   const page0 = first.data?.pages[0];
   const query = (shelf: Shelf, limit: number) => papersQuery(search, shelf, limit);
@@ -72,7 +74,7 @@ export function PapersPage() {
         empty={page0 && visibleCount(page0.counts, search) === 0 ? <div className="empty">{filtered ? "Nothing matches." : "Nothing in the collection yet."}</div> : null}
       />
       {page0 && page0.counts.unrated > 0 && !search.rarity?.length && <div className="loadmore">{page0.counts.unrated} not yet classified</div>}
-      {search.q && <Outside q={search.q} search={search} />}
+      {search.q && !narrowed && <Outside q={search.q} search={search} />}
     </>
   );
 }

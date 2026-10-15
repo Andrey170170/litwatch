@@ -62,10 +62,12 @@ html[data-theme="light"] { color-scheme: light; --gk: 0.75; }
   --color-sig: var(--sig);
   --color-cy: var(--cy);
   --color-warn: var(--warn);
-  --font-ui: var(--font-ui);
-  --font-name: var(--font-name);
-  --font-mono: var(--font-mono);
   --breakpoint-desk: 56rem;
+}
+
+/* the phone: every control is at least 40px tall (DESIGN.md, "Every control has a hit area of at least 40 px") */
+@media (max-width: 55.99rem) {
+  :is(button.shh, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input) { min-height: 40px; }
 }
 
 /* the glow's two values are registered so a hover can ease them instead of jumping */
