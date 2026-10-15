@@ -54,19 +54,24 @@ async def taxonomy_yaml(c: Conn) -> str:
 
 class TaxonomyStats(BaseModel):
     """What the Taxonomy and Topics pages show beside the tree: papers standing in each class or
-    under it, and the current revision of each class and followed topic."""
+    under it, the threshold each class is admitted at (its own, or the configured default for
+    its depth), and the current revision of each class and followed topic."""
 
     members: dict[str, int]
+    thresholds: dict[str, float]
     class_revisions: dict[str, int]
     topic_revisions: dict[str, int]
 
 
 @router.get("/taxonomy/stats")
-async def taxonomy_stats(c: Conn) -> TaxonomyStats:
+async def taxonomy_stats(request: Request, c: Conn) -> TaxonomyStats:
     tree = await taxonomy_store.load(c)
     members = await quality.class_members(c, tree) if tree else {}
+    at = thresholds(tree, request.app.state.config.classification.thresholds) if tree else {}
     classes, topics = await quality.revisions(c)
-    return TaxonomyStats(members=members, class_revisions=classes, topic_revisions=topics)
+    return TaxonomyStats(
+        members=members, thresholds=at, class_revisions=classes, topic_revisions=topics
+    )
 
 
 @router.get("/topics/{slug}/keywords", responses={404: {"description": "No such topic"}})
