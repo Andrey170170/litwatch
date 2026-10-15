@@ -349,7 +349,8 @@ def report(
     cost = f"${float(run['cost']):.2f}" if run["cost"] is not None else "unknown"
     models = ", ".join(
         f"{role} {m['provider']}:{m['model']}" + (f"@{m['effort']}" if m.get("effort") else "")
-        for role, m in run["models"].items()
+        for role in ROLES
+        if (m := run["models"].get(role))
     )
     finished = run["finished_at"].isoformat(timespec="minutes") if run["finished_at"] else "no"
     lines = [
@@ -358,8 +359,8 @@ def report(
         f"- Started {run['started_at'].isoformat(timespec='minutes')}, finished: {finished}; "
         f"cost {cost}.",
         f"- Roles: {models}.",
-        f"- Taxonomy revision {params.get('taxonomy')}; Focus topics: "
-        + ", ".join(f"{s} ({v})" for s, v in run["topics"].items())
+        f"- Taxonomy revision {str(params.get('taxonomy'))[:12]}; Focus topics and versions: "
+        + ", ".join(f"{s} {v[:12]}" for s, v in run["topics"].items())
         + ".",
         f"- Thresholds: {params.get('thresholds')}.",
     ]
