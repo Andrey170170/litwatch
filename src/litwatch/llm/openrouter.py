@@ -164,8 +164,9 @@ def reply_of(completion: Any, role: RoleConfig) -> Reply:
         raise ProviderError("the completion has no choices", transient=True)
     choice = choices[0]
     text = choice.message.content or ""
-    if getattr(choice.message, "refusal", None):
-        return Reply(text, Stop.REFUSED, usage, refusal="unspecified")
+    if said := getattr(choice.message, "refusal", None):
+        said = "\n\n".join(filter(None, (text, said)))
+        return Reply(text, Stop.REFUSED, usage, refusal="unspecified", raw=said)
     finish = getattr(choice, "finish_reason", None)
     if finish == "content_filter":
         return Reply(text, Stop.REFUSED, usage, refusal="content_filter")

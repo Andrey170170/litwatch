@@ -287,6 +287,13 @@ async def test_in_debug_mode_a_failed_reply_is_kept_with_what_the_validator_said
     assert (await calls(conn))[-1]["reply"] == cut
 
 
+async def test_in_debug_mode_an_openrouter_refusal_keeps_what_the_model_said(conn, journal):
+    refused = SdkClient(openrouter_completion("", refusal="I cannot help with that"))
+    with pytest.raises(CallError, match="refused: unspecified"):
+        await gateway(MODELS, openrouter=refused, journal=journal, debug=True).ask("check", REQUEST)
+    assert (await calls(conn))[-1]["reply"] == "I cannot help with that"
+
+
 async def test_out_of_debug_mode_a_failed_reply_is_not_kept(conn, journal):
     with pytest.raises(CallError):
         await gateway(MODELS, SdkClient(anthropic_message(INVALID)), journal=journal).ask(
