@@ -84,7 +84,7 @@ evaluation calls the same functions and writes only to evaluation tables.
 digests (a listed paper the owner later set below relevant). `regression` and the M2 labelling tables stay as
 evaluation history.
 
-**Kept as they are:** `papers`, `intake_checkpoints`, `intake_snapshots`, `runs`, `inference_calls`, `labels` (plus
+**Kept as they are:** `papers`, `intake_checkpoints`, `intake_snapshots`, `runs`, `inference_calls` (plus the reply of a failed call, kept in debug mode), `labels` (plus
 class labels; the value is a Fit or unsure, and the grade column is gone: the grade follows from the Fit), `reactions` (reason values changed: wrong_topic, overrated, not_interesting, already_knew, underrated, great_find), `appraisals`, `calibration_sessions`,
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
@@ -117,6 +117,8 @@ The first v1 had no reactions, misses or take ratings to map.
 `litwatch.toml` stays the source of truth and read-only in the web app (first v1, decision 11). Changed sections:
 
 ```toml
+debug = false              # true, or LITWATCH_DEBUG=1: keep failed calls' replies (models.md)
+
 [models.classify]          # decision model, chosen in N1
 provider = "openrouter"
 model = "typesafe/jev-1.13"

@@ -55,9 +55,10 @@ class CallJournal:
             "UPDATE inference_calls SET output = %s WHERE id = %s", (Jsonb(output), call_id)
         )
 
-    async def reject(self, call_id: int, error: str) -> None:
+    async def reject(self, call_id: int, error: str, reply: str | None = None) -> None:
         await self.conn.execute(
-            "UPDATE inference_calls SET error = %s WHERE id = %s", (error, call_id)
+            "UPDATE inference_calls SET error = %s, reply = %s WHERE id = %s",
+            (error, reply, call_id),
         )
 
     async def total(self) -> float:

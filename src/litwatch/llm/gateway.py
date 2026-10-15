@@ -71,7 +71,7 @@ class Journal(Protocol):
     async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int: ...
     async def record(self, call_id: int, usage: Usage) -> None: ...
     async def accept(self, call_id: int, output: dict[str, Any]) -> None: ...
-    async def reject(self, call_id: int, error: str) -> None: ...
+    async def reject(self, call_id: int, error: str, reply: str | None = None) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -92,7 +92,8 @@ class DecisionProvider(Provider, Protocol):
 
 class Gateway:
     """`ask(role, request)` and `decide(role, request)` are the whole interface the pipeline
-    uses."""
+    uses. In `debug` mode a reply that could not be used is journalled with the call, and an
+    invalid one's error carries what the validator said."""
 
     def __init__(
         self,
@@ -101,9 +102,10 @@ class Gateway:
         journal: Journal | None = None,
         *,
         retry_delays: tuple[float, ...] = RETRY_DELAYS,
+        debug: bool = False,
     ) -> None:
         self.models, self.providers, self.journal = models, providers, journal
-        self.retry_delays = retry_delays
+        self.retry_delays, self.debug = retry_delays, debug
 
     def _provider(self, role: RoleConfig) -> Provider:
         if role.provider not in self.providers:
@@ -181,7 +183,7 @@ class Gateway:
         """A validated answer, reusing an identical earlier call. Raises `CallError`.
 
         The reply is recorded before it is validated, so a rejected one still has its charge;
-        only validated outputs are reusable.
+        only validated outputs are reusable. The reply's text is kept only in debug mode.
         """
         role = self.models.role(role_name)
         key = self.request_key(role, request)
@@ -198,6 +200,7 @@ class Gateway:
             )
             return Answer(request.output.model_validate(hit["output"]), usage, role.label)
         call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None
+        reply = None
         try:
             reply = await self.complete(role_name, request, send)
             reply.usage.source_call_id = call_id
@@ -214,22 +217,27 @@ class Gateway:
             except json.JSONDecodeError as exc:
                 raise CallError("invalid", "not JSON", reply.usage) from exc
             except ValidationError as exc:
-                # Where it failed, not what was said: the reply itself is not kept.
-                where = sorted({".".join(map(str, e["loc"])) or "reply" for e in exc.errors()})
-                detail = f"{exc.error_count()} validation errors: {', '.join(where)}"
+                # Where it failed; in debug mode what the validator said there too.
+                errors = [(".".join(map(str, e["loc"])) or "reply", e["msg"]) for e in exc.errors()]
+                if self.debug:
+                    said = "; ".join(f"{where}: {msg}" for where, msg in errors)
+                else:
+                    said = ", ".join(sorted({where for where, _ in errors}))
+                detail = f"{exc.error_count()} validation errors: {said}"
                 raise CallError("invalid", detail, reply.usage) from exc
         except CallError as exc:
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.
             if journal:
-                await journal.reject(call_id, str(exc))
+                kept = _without_nul(reply.raw or reply.text) if self.debug and reply else None
+                await journal.reject(call_id, str(exc), kept)
             raise
         if journal:
             await journal.accept(call_id, value.model_dump(mode="json"))
         return Answer(value, reply.usage, role.label)
 
 
-def build(models: Models, journal: Journal | None = None) -> Gateway:
+def build(models: Models, journal: Journal | None = None, *, debug: bool = False) -> Gateway:
     """A gateway over the providers that have credentials in the environment."""
     from litwatch.llm.anthropic import AnthropicProvider  # noqa: PLC0415
     from litwatch.llm.openrouter import OpenRouterProvider  # noqa: PLC0415
@@ -239,4 +247,4 @@ def build(models: Models, journal: Journal | None = None) -> Gateway:
         providers["anthropic"] = AnthropicProvider(key)
     if key := secret("OPENROUTER_API_KEY"):
         providers["openrouter"] = OpenRouterProvider(key)
-    return Gateway(models, providers, journal)
+    return Gateway(models, providers, journal, debug=debug)

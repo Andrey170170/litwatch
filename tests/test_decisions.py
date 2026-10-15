@@ -116,6 +116,16 @@ async def test_a_decision_is_journalled_and_reused(conn, journal):  # noqa: F811
     assert len(await calls(conn)) == 1
 
 
+async def test_in_debug_mode_a_decisions_reply_is_kept_as_the_endpoint_sent_it(conn, journal):  # noqa: F811
+    sent = decisions_reply(["not", "an", "object"])
+    gw = gateway(JEV, SdkClient(sent), journal)
+    gw.debug = True
+    with pytest.raises(CallError, match="invalid"):
+        await gw.decide("classify", REQUEST)
+    (row,) = await calls(conn)
+    assert json.loads(row["reply"]) == sent
+
+
 def test_only_openrouter_serves_a_decisions_endpoint():
     with pytest.raises(ValueError, match="only OpenRouter"):
         RoleConfig(provider="anthropic", model="claude-haiku-5-5", decisions=True)

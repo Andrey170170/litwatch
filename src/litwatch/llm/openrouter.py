@@ -102,6 +102,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 def decision_reply(raw: Any, request: DecisionRequest, role: RoleConfig) -> Reply:
     """The answers as the JSON a chat model gives for the same request. An answer that is
     missing or of the wrong type is left out, so the gateway rejects the reply as invalid."""
+    sent = json.dumps(raw, default=str)
     raw = raw if isinstance(raw, dict) else {}
     answers = _mapping(raw.get("answers"))
     out: dict[str, Any] = {}
@@ -126,7 +127,7 @@ def decision_reply(raw: Any, request: DecisionRequest, role: RoleConfig) -> Repl
         generation_id=raw.get("id"),
         provider=raw.get("provider"),
     )
-    return Reply(json.dumps(out), Stop.COMPLETE, usage)
+    return Reply(json.dumps(out), Stop.COMPLETE, usage, raw=sent)
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -163,8 +164,9 @@ def reply_of(completion: Any, role: RoleConfig) -> Reply:
         raise ProviderError("the completion has no choices", transient=True)
     choice = choices[0]
     text = choice.message.content or ""
-    if getattr(choice.message, "refusal", None):
-        return Reply(text, Stop.REFUSED, usage, refusal="unspecified")
+    if said := getattr(choice.message, "refusal", None):
+        said = "\n\n".join(filter(None, (text, said)))
+        return Reply(text, Stop.REFUSED, usage, refusal="unspecified", raw=said)
     finish = getattr(choice, "finish_reason", None)
     if finish == "content_filter":
         return Reply(text, Stop.REFUSED, usage, refusal="content_filter")
