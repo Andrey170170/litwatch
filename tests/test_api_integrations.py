@@ -22,10 +22,13 @@ from tests.conftest import TREE, deliver, paper, settled, start
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
 P = paper("2610.00001", title="Hidden traces", abstract="Hidden computation in CoT.")
+# What a stored card says it was written from.
+LABEL = {"revision": 1, "version": 1, "source": "latex"}
 
 
 class Carder:
-    """Answers card requests, and fails on the events it is told to."""
+    """Handles card requests as events, says it makes cards (as integrations did before the
+    Deep worker), and fails on the events it is told to."""
 
     name = "carder"
     description = "Makes cards on request."
@@ -113,7 +116,7 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
     assert list(cards) == ["carder", "shelf", "old"]
     stuck = cards["carder"]
     assert stuck["enabled"] and stuck["description"] == "Makes cards on request."
-    assert stuck["lag"] == 2 and stuck["answers_card_requests"]
+    assert stuck["lag"] == 2 and not stuck["answers_card_requests"]
     assert stuck["failing"]["event_id"] == first
     assert stuck["failing"]["type"] == "card.requested" and stuck["failing"]["failures"] == 1
     assert "the card service is down" in stuck["failing"]["error"]
@@ -154,17 +157,16 @@ async def test_a_card_request_needs_an_integration_that_answers_it(conn, make):
     paper_page = (await bare.get(f"/api/papers/{P.id}")).json()
     assert paper_page["card"] is None and paper_page["card_requestable"] is False
 
-    client = await make([Carder()])
-    assert (await client.post("/api/papers/2610.99999/card")).status_code == 404
-    assert (await client.get(f"/api/papers/{P.id}")).json()["card_requestable"] is True
-    asked = await client.post(f"/api/papers/{P.id}/card")
-    assert asked.status_code == 202
-    event = await outbox.event(conn, asked.json()["event_id"])
-    assert (event.type, event.paper_id) == (events.CARD_REQUESTED, P.id)
+    # Nor does an integration that only says it makes cards: the Deep worker takes the built-in
+    # `deep` integration alone (test_deep.py follows a request through it).
+    marked = await make([Carder()])
+    assert (await marked.post(f"/api/papers/{P.id}/card")).status_code == 409
+    assert (await marked.get(f"/api/papers/{P.id}")).json()["card_requestable"] is False
 
-    # A stored card shows, integration or not, and is not asked for again.
-    await state.put_card(conn, P.id, {"key_claim": "K."}, "deep-model", {}, [])
-    assert (await client.post(f"/api/papers/{P.id}/card")).status_code == 409
+    # A stored card shows, integration or not.
+    await state.put_card(
+        conn, P.id, {"key_claim": "K."}, "deep-model", {}, [], **LABEL, pass_id=None
+    )
     shown = (await bare.get(f"/api/papers/{P.id}")).json()
     assert shown["card"]["card"] == {"key_claim": "K."} and shown["card"]["model"] == "deep-model"
     assert shown["card_requestable"] is False

@@ -18,7 +18,7 @@ from rich.console import Console
 from litwatch import config as configuration
 from litwatch import seeds, store
 from litwatch.archive import ArchiveError
-from litwatch.core import Taxonomy
+from litwatch.core import Paper, Taxonomy
 from litwatch.feedback import word
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
@@ -449,6 +449,82 @@ def eval_digests(
         out.write_text(text)
 
 
+@eval_app.command("briefs")
+def eval_briefs(
+    preferences: Annotated[Path, typer.Option(help="The preference set's Briefs.")] = Path(
+        "evals/preferences/briefs.yaml"
+    ),
+    out: Annotated[Path, typer.Option(help="The run's answers, one JSON line a paper.")] = Path(
+        "evals/runs/briefs/brief.jsonl"
+    ),
+    config: Annotated[Path | None, typer.Option(help="Default: ./litwatch.toml.")] = None,
+    wait_minutes: Annotated[float, typer.Option(help="How long to wait for a text.")] = 20,
+    concurrency: int = 4,
+) -> None:
+    """Write the Brief of each paper of the preference set with the configured `brief` role,
+    reading its text from the archive as a full-text pass does. A dry run: it reads the papers
+    from the configured database and writes only to `out`; a run resumes where it stopped."""
+    from litwatch.fulltext import archive_for  # noqa: PLC0415
+    from litwatch.llm.gateway import build  # noqa: PLC0415
+    from litwatch.quality import briefs  # noqa: PLC0415
+
+    cfg = _config(config)
+    archive = archive_for(cfg)
+    if archive is None:
+        raise SystemExit("no archive: configure one, or set $LITWATCH_ARCHIVE_URL")
+    entries = briefs.load(preferences)
+    found = _run(lambda conn: papers_store.get_many(conn, [e.id for e in entries]), migrate=False)
+    by_id = {p.id: p for p in found}
+    if missing := [e.id for e in entries if e.id not in by_id]:
+        console.print(f"[yellow]not in the database, left out: {', '.join(missing)}[/yellow]")
+
+    def progress(r: briefs.Result) -> None:
+        console.print(f"{r.paper_id}: {r.error or 'answered'} ${r.cost or 0:.2f}")
+
+    async def main() -> list[briefs.Result]:
+        try:
+            return await briefs.run(
+                build(cfg.models), seeds.taxonomy(),
+                [(by_id[e.id], e) for e in entries if e.id in by_id], archive, out,
+                concurrency=concurrency, wait_seconds=wait_minutes * 60, progress=progress,
+            )  # fmt: skip
+        finally:
+            await archive.aclose()
+
+    new = asyncio.run(main())
+    cost = sum(r.cost or 0 for r in new)
+    console.print(f"{sum(r.output is not None for r in new)} of {len(new)} answered, ${cost:.2f}")
+
+
+@eval_app.command("briefs-report")
+def eval_briefs_report(
+    title: Annotated[str, typer.Option(help="The report's heading.")] = "Briefs",
+    preferences: Annotated[Path, typer.Option(help="The preference set's Briefs.")] = Path(
+        "evals/preferences/briefs.yaml"
+    ),
+    run: Annotated[Path, typer.Option(help="The run's answers.")] = Path(
+        "evals/runs/briefs/brief.jsonl"
+    ),
+) -> None:
+    """The papers' abstracts beside their overstatement lines, Briefs and Gists, with the rule
+    checks and the owner's judgments, as markdown: no calls."""
+    from litwatch.quality import briefs  # noqa: PLC0415
+    from litwatch.store import analyses as analyses_store  # noqa: PLC0415
+
+    entries = briefs.load(preferences)
+    ids = [e.id for e in entries]
+
+    async def work(conn: psycopg.AsyncConnection) -> tuple[list[Paper], dict[str, str]]:
+        return await papers_store.get_many(conn, ids), await analyses_store.abstract_gists(
+            conn, ids
+        )
+
+    found, gists = _run(work, migrate=False)
+    papers = {p.id: p for p in found}
+    found = briefs.results(run)
+    print(briefs.report(title, entries, papers, found, gists, briefs.spent(run)), end="")
+
+
 # -- library ---------------------------------------------------------------------------------------
 
 
@@ -533,25 +609,60 @@ def fulltext_queue(
     wait: Annotated[
         int, typer.Option(help="Keep trying, for at most this many seconds, while some await text.")
     ] = 0,
+    deep: Annotated[
+        bool, typer.Option(help="Work the Deep card passes instead, with the deep integration.")
+    ] = False,
     config: ConfigPath = None,
 ) -> None:
-    """Work the full-text queue as the service's worker does: try every pass that is due once,
+    """Work the full-text queue as the service's workers do: try every pass that is due once,
     and with --wait again every half minute while some still await their text from the archive
-    ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration)."""
+    ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration). Text passes
+    by default; Deep card passes with --deep, one at a time, each a paid job on the deep service."""
     from litwatch import fulltext  # noqa: PLC0415
+    from litwatch.fulltext import deep as deep_passes  # noqa: PLC0415
+    from litwatch.integrations import deep as deep_integration  # noqa: PLC0415
+    from litwatch.integrations import enabled_using  # noqa: PLC0415
 
     cfg = _config(config)
     archive = fulltext.archive_for(cfg)
     if archive is None:
         raise SystemExit("no archive configured")
+    maker = None
+    if deep:
+        options = enabled_using(cfg, "deep")
+        if options is None:
+            raise SystemExit("no deep integration configured")
+        options = {k: v for k, v in options.items() if k not in ("use", "enabled")}
+        maker = deep_integration.load("deep", options, cfg)
+
+    async def work_deep(conn: psycopg.AsyncConnection) -> Counter[str]:
+        total: Counter[str] = Counter()
+        deadline = asyncio.get_running_loop().time() + wait
+        while True:
+            worked = total["cards_written"] + total["card_failed"]
+            if limit is not None and worked >= limit:
+                return total
+            done = await deep_passes.work(
+                conn, archive, maker, limit=None if limit is None else limit - worked
+            )
+            console.print(dict(done))
+            total.update(done)
+            left = deadline - asyncio.get_running_loop().time()
+            if not done["awaiting_text"] or left <= 0:
+                return total
+            await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
 
     async def work(conn: psycopg.AsyncConnection) -> Counter[str]:
         try:
+            if maker is not None:
+                return await work_deep(conn)
             return await fulltext.work_waiting(
                 conn, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
             )
         finally:
             await archive.aclose()
+            if maker is not None:
+                await maker.aclose()
 
     console.print_json(data=dict(_run(work)))
 

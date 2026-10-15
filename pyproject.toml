@@ -24,8 +24,6 @@ dependencies = [
     "rich>=13.0",
     "uvicorn>=0.30",
     "croniter>=6.2.4",
-    "beautifulsoup4>=4.15.0",
-    "markdownify>=1.2.3",
     "lxml>=6.1.3",
 ]
 

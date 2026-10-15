@@ -164,6 +164,11 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   says "Already in the collection" (#56, Codex). N5's page for papers outside the collection shows the fetched state,
   read from the API. Also N5: DESIGN.md's "Use the PDF", for a paper whose LaTeX reads badly, has no endpoint yet
   (#59); it belongs with the archive's text assembly and its PDF fallback, and the paper page takes it once merged.
+  Also N5: the stack smoke test shows a Deep card with live "Among the collection" rows, the deep service reaching
+  litwatch with `LITWATCH_URL` and `LITWATCH_TOKEN`; #61 wrote a real card only without them.
+- **N4b, after N3's Deep cards (#61):** Deep passes for Area picks. N3 queues them for saved Focus must reads and the
+  owner's requests; N4 merged (#60) before them. A pick's pass checks at claim that its digest is published
+  (integrations.md).
 - **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
   paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
   the restart's digests.
@@ -179,6 +184,12 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   W3); a page for an archive paper not yet fetched and the archive's size for the search box (N5); the "Among the
   collection" rows; rung ✓/✗ ratings; code and weights URLs on the facets; listing unclassified papers; splits and
   escalations on the status line; which source set the owner's word.
+- **W2 or W3, the Deep card's web parts** (from N3's Deep cards): "Asked for" and the pulsing status line from
+  `card_pass`; Write again on a paper that has a card (`card_requestable` is now true there; the phone layout and
+  Actions still hide it); the "Among the collection" rows from `card.among` (rarity, relation, note, each linking to
+  its paper) and links on prior work's arXiv ids; the card's label (revision, arXiv version, source, written); the
+  `card_failed` open state; Quality's `deep` usage (attempts, list cost shown as "at least", unknown);
+  `CardRequested.pass_id` in place of `event_id`.
 
 ## Decisions
 

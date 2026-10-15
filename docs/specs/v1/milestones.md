@@ -31,8 +31,9 @@ overstatement line, the Gist and Weight from the full text, the lease, revisions
 `litwatch fulltext`); N4's digests (due found from the database, daily and weekly digests per depth with their Gists
 and picks, quiet days, records with the live set-aside mark, the bounded wait in the nightly run, failed digests on
 Quality and the status line, the Day, Week, History and digest API with the topics' digest strips, `litwatch digests
-write` for a window and `litwatch eval digests` for the voice check). Next: N2c's two-week run, and the grade table and rarity offsets tuned on the labels; N3's
-Briefs harness and Deep card passes.
+write` for a window and `litwatch eval digests` for the voice check); N3's Deep card passes (each attempt's usage or that it is unknown, the lease, cards labelled
+with the text they read, Write again, the "among the collection" section in `deep/`) and its Briefs harness
+(`litwatch eval briefs`, the ten papers in `evals/2026-10-15-briefs.md`). Next: the owner's read of N3's ten Briefs; N5, the archive in the stack.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).

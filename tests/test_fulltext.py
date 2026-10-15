@@ -141,8 +141,12 @@ async def analysed(conn, weight: str, paper_id: str = P.id) -> None:
 
 
 async def passes(conn) -> list[dict]:
+    """P's text passes; its Deep card passes are tests/test_deep.py's."""
     return await (
-        await conn.execute("SELECT * FROM fulltext_passes WHERE paper_id = %s ORDER BY id", (P.id,))
+        await conn.execute(
+            "SELECT * FROM fulltext_passes WHERE paper_id = %s AND kind <> 'deep' ORDER BY id",
+            (P.id,),
+        )
     ).fetchall()
 
 
@@ -361,7 +365,9 @@ async def test_a_pass_tried_again_has_the_archive_try_again_what_it_gave_up_on(d
     assert fake.retried == []  # a first try takes the archive's word
     await fulltext_store.retry_failed(db, FAILED_RUNS)
     await fulltext_store.claim(db, LEASE)  # taken by a worker that died before reading
-    await db.execute("UPDATE fulltext_passes SET lease_until = now() - interval '1 second'")
+    await db.execute(
+        "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' WHERE kind <> 'deep'"
+    )
     assert await work(db, fake, Writer()) == {"awaiting_text": 1}
     assert fake.retried == [3, 4]  # the source and the PDF it falls back on, asked for again
     fake.statuses.clear()  # and failed again
@@ -417,7 +423,9 @@ async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_n
 async def test_a_pass_awaiting_text_over_a_week_waits_for_the_owner(db):
     await graded(db, "central")
     assert await fulltext_store.count_stuck(db, FAILED_RUNS) == 0
-    await db.execute("UPDATE fulltext_passes SET queued_at = now() - interval '8 days'")
+    await db.execute(
+        "UPDATE fulltext_passes SET queued_at = now() - interval '8 days' WHERE kind <> 'deep'"
+    )
     (listed,) = await fulltext_store.stuck(db, FAILED_RUNS)
     assert listed["state"] == "awaiting_text"
     assert await fulltext_store.count_stuck(db, FAILED_RUNS) == 1
@@ -426,7 +434,9 @@ async def test_a_pass_awaiting_text_over_a_week_waits_for_the_owner(db):
 async def test_the_nightly_run_retries_failed_passes_and_works_the_queue(db, monkeypatch):
     await analysed(db, "solid")  # nothing left for the night's other steps
     await graded(db, "central")
-    await db.execute("UPDATE fulltext_passes SET state = 'failed', failed_runs = 1")
+    await db.execute(
+        "UPDATE fulltext_passes SET state = 'failed', failed_runs = 1 WHERE kind <> 'deep'"
+    )
     fake = ready(FakeArchive())
     monkeypatch.setattr(fulltext, "archive_for", lambda config: archive(fake))
     run_id = await nightly.run(db, CONFIG, fetch=False, gateway=Writer().gateway)
@@ -438,7 +448,9 @@ async def test_the_nightly_run_retries_failed_passes_and_works_the_queue(db, mon
 
 async def test_failed_passes_are_retried_only_after_a_taxonomy_save_in_flight(db):
     await graded(db, "central")
-    await db.execute("UPDATE fulltext_passes SET state = 'failed', failed_runs = 1")
+    await db.execute(
+        "UPDATE fulltext_passes SET state = 'failed', failed_runs = 1 WHERE kind <> 'deep'"
+    )
     async with await store.connect(db.test_dsn, db.test_schema) as other:
         async with other.transaction():
             await taxonomy_store.lock(other)  # as a save that drops passes holds it
@@ -536,7 +548,7 @@ async def test_a_paper_that_came_to_qualify_by_no_trigger_gets_its_pass_on_the_n
 async def test_the_nightly_reconcile_is_not_cut_short_by_the_limit(db, monkeypatch):
     await analysed(db, "solid")
     await graded(db, "central")
-    stuck = "UPDATE fulltext_passes SET state = 'failed', failed_runs = %s"
+    stuck = "UPDATE fulltext_passes SET state = 'failed', failed_runs = %s WHERE kind <> 'deep'"
     await db.execute(stuck, (FAILED_RUNS,))
     other = paper("2610.00002", version=1)  # after P, which waits for the owner
     await papers_store.upsert(db, [other])
@@ -559,7 +571,9 @@ async def test_the_nightly_reconcile_is_not_cut_short_by_the_limit(db, monkeypat
     monkeypatch.setattr(fulltext, "archive_for", lambda config: None)
     await nightly.run(db, CONFIG, fetch=False, limit=1, gateway=Writer().gateway)
     (row,) = await (
-        await db.execute("SELECT * FROM fulltext_passes WHERE paper_id = %s", (other.id,))
+        await db.execute(
+            "SELECT * FROM fulltext_passes WHERE paper_id = %s AND kind <> 'deep'", (other.id,)
+        )
     ).fetchall()
     assert (row["kind"], row["state"]) == ("brief", "awaiting_text")
 
@@ -571,7 +585,9 @@ async def test_a_lease_holds_a_pass_until_it_runs_out(db):
     await graded(db, "central")
     (held,) = await fulltext_store.claim(db, LEASE)
     assert await fulltext_store.claim(db, LEASE) == []  # held
-    await db.execute("UPDATE fulltext_passes SET lease_until = now() - interval '1 second'")
+    await db.execute(
+        "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' WHERE kind <> 'deep'"
+    )
     (again,) = await fulltext_store.claim(db, LEASE)  # its worker died: tried again
     assert again.id == held.id
     # The first worker, back late, records nothing over the second's.

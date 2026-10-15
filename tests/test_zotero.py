@@ -26,6 +26,8 @@ P = paper(
     abstract="Hidden computation in CoT.",
     published="2026-10-01T12:00:00+00:00",
 )
+# What a stored card says it was written from.
+LABEL = {"revision": 1, "version": 1, "source": "latex", "pass_id": None}
 CARD = {
     "summary": "First paragraph.\n\nSecond paragraph.",
     "key_claim": "Probes predict unfaithful reasoning.",
@@ -172,7 +174,7 @@ async def test_grades_published_versions_and_cards_reach_the_notes(world):
     (note,) = fake.notes(key)
     assert "NeurIPS 2026" in note and "doi:10.1/x" in note
 
-    await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, [])
+    await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, [], **LABEL)
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
     await run(conn, z)
     notes = fake.notes(key)
@@ -187,7 +189,7 @@ async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(worl
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
     await start(conn, z)
     await grade(conn, "must_read")
-    await state.put_card(conn, P.id, CARD, "deep-model", {}, [])
+    await state.put_card(conn, P.id, CARD, "deep-model", {}, [], **LABEL)
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
     await run(conn, z)
     (item,) = fake.tops()

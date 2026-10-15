@@ -253,7 +253,11 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         ]
         + [
             s.OpenState(
-                kind="fulltext_failed" if f["state"] == "failed" else "awaiting_text",
+                kind="awaiting_text"
+                if f["state"] != "failed"
+                else "card_failed"
+                if f["kind"] == "deep"
+                else "fulltext_failed",
                 revision=found["revision"],
                 error=f["last_error"],
                 pass_id=f["id"],
@@ -262,7 +266,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         ]
     )
     published = await publications_store.get(c, paper_id)
-    card, card_requestable = await integrations_api.card(request, c, paper_id)
+    card, card_pass, card_requestable = await integrations_api.card(request, c, paper_id)
     unattached = next((r for r in found["reactions"] if r["topic"] is None), None)
     return s.Paper(
         **{
@@ -300,6 +304,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         publication=published["record"] if published else None,
         publication_by_owner=bool(published and published["by_owner"]),
         card=card,
+        card_pass=card_pass,
         card_requestable=card_requestable,
     )
 

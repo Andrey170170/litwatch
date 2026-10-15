@@ -22,6 +22,7 @@ from litwatch.core import (
     SEARCH_TIMEOUT_SECONDS,
 )
 from litwatch.events import Integration, dispatch
+from litwatch.fulltext import deep as deep_passes
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.publications import Dblp, PublicationSource
@@ -34,8 +35,8 @@ WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start the scheduler with the service when the configuration enables it, with the
     full-text worker when an archive is configured too (it calls models and has the archive
-    fetch, so, like the schedule, it waits for cutover), and the integrations' dispatcher
-    when any is loaded."""
+    fetch, so, like the schedule, it waits for cutover) and the Deep card worker when a card
+    provider is loaded as well, and the integrations' dispatcher when any is loaded."""
     tasks = []
     enabled = app.state.config.schedule.enabled
     archive = fulltext.archive_for(app.state.config) if enabled else None
@@ -51,6 +52,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 )
             )
         )
+        if maker := integrations_api.card_maker(app.state.integrations):
+            tasks.append(
+                asyncio.create_task(
+                    deep_passes.run_forever(app.state.dsn, archive, maker, app.state.deep_wake)
+                )
+            )
     if app.state.config.schedule.enabled:
         tasks.append(
             asyncio.create_task(
@@ -98,6 +105,7 @@ def create_app(
     app.state.search_pool = integrations_api.search_pool()
     app.state.search_stats = {}
     app.state.fulltext_wake = asyncio.Event()  # set to have the full-text worker look now
+    app.state.deep_wake = asyncio.Event()  # and the Deep card worker
     protected = [Depends(authorised)]
     app.include_router(reading.router, dependencies=protected)
     app.include_router(digests.router, dependencies=protected)

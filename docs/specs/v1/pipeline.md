@@ -202,7 +202,7 @@ A **full-text pass** reads the paper's text, not its abstract. Three kinds:
 | --- | --- | --- |
 | Brief | Focus papers at effective Fit central or related | writes the Brief and the Gist; also re-checks Weight |
 | Weight re-check | Area papers whose grade from the abstract is must read (the pick candidates) | judges Weight again from the full text, and writes a Brief and the Gist |
-| Deep card | Focus papers at an effective grade of must read; Area picks; any paper on request | asks the `deep` integration for a card (see [integrations.md](integrations.md)) |
+| Deep card | Focus papers at an effective grade of must read, not unsaved, without a card; Area picks; any paper on request | asks the `deep` integration for a card (see [integrations.md](integrations.md)) |
 
 A pass is queued when its paper qualifies, judged on the effective Fit and grade, so the owner's word can queue one
 too (a label or miss that makes a Focus paper central gets it a Brief). Only active topics queue one; a pass not yet started is dropped
@@ -237,6 +237,16 @@ to which version, that newer update queues its passes again once, as a new versi
 with the old revision (section 8), does not replace the current Weight, and a pass for the new revision is queued. A
 running pass holds a lease (default 30 minutes); when the lease runs out, because the worker died, the pass goes back
 to ready.
+
+**A Deep pass** is one per paper, open until done, and not tied to a revision: it records the revision and text it
+read when it submits, and its card is labelled with them (section 8). The owner's request takes over an automatic pass
+or queues one, goes first, and is never dropped by a settle; an automatic pass not started is dropped as any pass is.
+A card takes most of an hour, so Deep passes have their own worker, one at a time, and their lease outlasts the
+longest a job is followed (the job's timeout and a margin). Each submission is an attempt, recorded before it is sent
+and given its job once accepted: a pass whose worker died while its job ran is followed by its next claim, not
+submitted again, whatever the paper wants by then. The attempt records the job's usage when it ends, with a card or
+failed, or that it is unknown (the job was lost before it reported). At most `max_per_day` automatic submissions are
+made in any 24 hours; the owner's requests do not count.
 
 A pass that fails, including a model response that is truncated or invalid, is retried on the next run (a download
 the archive gave up on is asked for again with it); after three

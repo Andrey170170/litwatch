@@ -7,7 +7,7 @@ import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent
 import type { Models, ThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { PROVIDER, requireSubscription } from "./auth.ts";
-import { buildHosts, type HostConfig } from "./hosts.ts";
+import { buildHosts, type HostConfig, type StoreHit } from "./hosts.ts";
 import { systemPrompt, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
 import { Repl, type HostFn } from "./repl.ts";
 import { validate, type Result } from "./schema.ts";
@@ -102,8 +102,16 @@ export async function processPaper(
   const hosts: Record<string, HostFn> = Object.fromEntries(
     Object.entries(buildHosts(hostCfg)).map(([name, fn]) => [name, traced(name, fn)]),
   );
+  // The collection's papers the agent was shown: among_collection may name only these.
+  const collection = new Set<string>();
+  const search = hosts["store.search"]!;
+  hosts["store.search"] = async (args) => {
+    const hits = (await search(args)) as StoreHit[];
+    for (const h of hits) if (h.in_collection) collection.add(h.id);
+    return hits;
+  };
   hosts.submit = async ([result]) => {
-    const v = validate(result, spec.extensions);
+    const v = validate(result, spec.extensions, { collection, self: paper.id });
     if (v.ok) {
       submitted = v.value;
       record({ t: now(), type: "submit", ok: true });

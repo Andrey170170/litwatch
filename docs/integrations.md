@@ -64,12 +64,15 @@ class Integration(Protocol):
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.
-  - `makes_cards = True`: it answers `card.requested` by storing a deep card. Only then does the
-    paper page offer to request one. Wanting the event is not enough (a webhook may pass it on).
   - `async def idle(self, conn)`: awaited when the integration has no event to be handed, at
     most about once a minute, under the same lock as `handle`, for work no event brings
-    (`deep` retries papers still waiting for their text there). A failure is logged and changes
+    (retrying a delivery that waits on something outside litwatch). A failure is logged and changes
     nothing else; keep it short and bounded, since events wait while it runs.
+
+Deep cards come from the built-in `deep` integration only: the owner's request (`POST
+/api/papers/<id>/card`) queues a Deep pass, which the service's Deep worker submits to it, and
+only with it loaded does the paper page offer the request. Another integration may react to
+`card.requested` (a webhook passes it on) but makes no card.
 
 `Event` is `litwatch.core.Event`:
 
@@ -115,8 +118,8 @@ Every event below but `digest.written` carries the paper's id in `paper_id`.
 | `paper.saved` | The paper entered the library | none |
 | `paper.unsaved` | The paper left the library (its last reason went, or the owner unsaved it) | none |
 | `publication.found` | A published record was stored for the paper, by lookup or by the owner | `dblp_key`, `venue`, `year`, `doi`, `by_owner`: bool |
-| `card.requested` | The owner asked for a deep card (`POST /api/papers/<id>/card`), whatever the grade | none |
-| `card.ready` | The `deep` integration stored a card | `model` |
+| `card.requested` | The owner asked for a deep card (`POST /api/papers/<id>/card`), whatever the grade, a card already made included; the Deep pass is queued | `pass_id` |
+| `card.ready` | The `deep` integration stored a card | `model`, `pass_id` |
 | `digest.written` | A digest was published: written, or saying "Nothing new" (a failed one is not; it is published when written again). `paper_id` is null | `digest`: its id, for `GET /api/digests/<id>`; `topic`; `period`: `day` or `week`; `day`: the day, or the week's Monday; `state`: `written` or `nothing_new` |
 
 `grade.changed` is the one to watch for grades; `verdict.recorded` is the pipeline's internal
@@ -135,14 +138,13 @@ Through the repositories in `litwatch.store`. Each function takes the connection
 | Call | Returns |
 | --- | --- |
 | `store.papers.get(conn, paper_id)` | `core.Paper` (title, abstract, authors, categories, published, url, version, doi, ...) or None |
-| `store.papers.body(conn, paper_id)` | `(text, "html" or "pdf")` when the full text was fetched for the paper's current revision, else None |
 | `store.word.effective_for(conn, paper_id)` | `{topic slug: core.Effective}` for every followed topic that has one, Focus, Area or Field: its effective `fit`, `grade` and `rarity` on the topic's page |
 | `store.word.focus_grades(conn, paper_id)` | `{topic slug: core.Grade}`, the effective grades on the Focus topics only: what the library reads |
 | `store.word.library_row(conn, paper_id)` | a dict with `saved` (bool) and `hand` (`save`, `unsave` or None), or None |
 | `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug` (its class's), `name`, `depth` (`focus`, `area`, `field`) and `grade` |
 | `store.publications.found(conn, [paper_id])` | `{paper_id: core.Publication}` for those with a published record |
 | `store.taxonomy.topics(conn, core.Status.ACTIVE)` | the active `core.Topic`s, in the owner's order; `store.taxonomy.load(conn)` gives the whole `core.Taxonomy`, class names included |
-| `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `written_at`, `error`) or None |
+| `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `stats`, `error`, `written_at`, and what it was written from: `revision`, `arxiv_version`, `source`) or None |
 
 ## Configuration and loading
 
@@ -216,7 +218,7 @@ The built-in `archive` integration is a search provider.
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it |
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source), unless intake read it from the archive; answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers |
-| `deep` | `grade.changed` to `must_read`, `paper.saved`, `card.requested` | Asks the deep service for a reading card; emits `card.ready` |
+| `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) | Asks the deep service for a reading card and records each attempt's usage; emits `card.ready`. Loads only with an archive to read papers from |
 | `webhook` | any, by pattern | POSTs the event as JSON to a URL |
 
 Each module's docstring lists its options and environment variables.
