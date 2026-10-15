@@ -56,10 +56,8 @@ class RoleConfig(_Section):
 
 
 class Models(_Section):
-    # Provisional until N1's comparison settles it (evals/, docs/specs/v1/models.md).
-    classify: RoleConfig = RoleConfig(
-        provider="openrouter", model="openai/gpt-6-luna-decisions", decisions=True
-    )
+    # Chosen in N1 (evals/2026-10-14-classifiers.md).
+    classify: RoleConfig = RoleConfig(provider="openrouter", model="typesafe/jev-1.13", decisions=True)
     triage: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
     judge: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
     check: RoleConfig = RoleConfig(

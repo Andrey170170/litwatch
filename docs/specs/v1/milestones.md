@@ -14,6 +14,10 @@ and a stated check. Each milestone is one or more PRs into `v1`, shipped as
 the build plan, [`docs/plans/v1-build.md`](../../plans/v1-build.md) (approved 2026-10-14): the archive's code moves
 in first (decision 49), and the web app (N7) is built from N2 onward, beside the core.
 
+Built for the redesign: the archive's code in `archive/` (#41); N0, the seed tree with its topics and the evaluation
+labels (#42); N1, the decision request and the classifier comparison, with Jev chosen (#43,
+`evals/2026-10-14-classifiers.md`). Next: N2a.
+
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).
 

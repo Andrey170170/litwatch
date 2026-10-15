@@ -6,7 +6,7 @@ Pipeline code names roles, never models; moving a role between providers or labs
 
 | Role | Kind | Used for | Proposed default |
 | --- | --- | --- | --- |
-| `classify` | decision | classification ([pipeline.md](pipeline.md), section 2) | chosen in N1: Luna Decisions, Jev or Haiku 5.5 |
+| `classify` | decision | classification ([pipeline.md](pipeline.md), section 2) | Jev (`typesafe/jev-1.13`, Decisions endpoint), chosen in N1 |
 | `analyse` | chat | Gist, Weight from the abstract, facets | Haiku 5.5 |
 | `judge` | chat | Fit for Focus and Area topics | Opus 5.5 |
 | `check` | chat | second-lab Fit for Focus topics and escalated Area disagreements | Muse Spark 1.3 (contributor) |

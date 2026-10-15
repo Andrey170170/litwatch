@@ -29,14 +29,16 @@ stored plus papers the owner added (a miss, a paper processed on demand from the
 
 ## 2. Classification
 
-One call per paper to the `classify` role, a decision model (the default is chosen in milestone N1 from Luna
-Decisions, Jev and Haiku 5.5). The request carries the paper's title and abstract and the taxonomy:
+One call per paper to the `classify` role, a decision model: Jev, chosen in milestone N1 over Luna Decisions and
+Haiku 5.5 (`evals/2026-10-14-classifiers.md`). The request carries the paper's title and abstract and the taxonomy:
 
 - one yes/no question per class, "does this paper belong to <class name>: <description>", answered with a
   probability;
 - one choice question for the primary class among all classes.
 
-A paper is a **direct member** of a class when its probability is at or above the class's threshold (default 0.5),
+A paper is a **direct member** of a class when its probability is at or above the class's threshold: its own if set,
+otherwise 0.5 for a class at or under a Focus topic and 0.8 for every other class (`[classification]` in configuration;
+set in N1, where 0.8 kept recall at 0.96 and raised precision from 0.43 to 0.72 on the silver memberships),
 and of its primary class, which is the choice answer, whatever that class's own yes/no probability (the choice is the
 stronger statement). It is an **inherited member** of every ancestor of a class it is a direct member of. Only direct
 memberships are stored; inherited ones follow from the tree. A paper can be a direct member of a class and of its
@@ -57,7 +59,7 @@ holds to that.
 **Recall insurance for Focus topics.** Two more ways into a Focus topic's class, both stored as the source of the
 membership:
 
-- **uncertain band**: a probability in [0.2, threshold) for a class at or under a Focus topic makes the paper a
+- **uncertain band**: a probability in [0.1, threshold) for a class at or under a Focus topic makes the paper a
   member for grading only; it is graded, and only grading can show it;
 - **keyword check**: the Focus topic's keyword patterns are matched against title and abstract with no model
   involved; a match makes the paper a member for grading only.

@@ -56,6 +56,8 @@ Total spend: about $3.40 for the three runs and $0.20 for trials.
 
 ## Recommendation
 
+The owner chose it on 2026-10-14.
+
 **Jev, with classes at or under a Focus topic at 0.5, every other class at 0.8, and the uncertain band from 0.1.**
 It is the only candidate that keeps every CoT positive, the cheapest and the fastest; at 0.8 outside the Focus
 subtrees it sends about 11 Focus, 19 Area and 72 Field gradings per 100 papers. At 650 papers a night that is
