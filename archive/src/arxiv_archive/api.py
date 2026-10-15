@@ -16,9 +16,11 @@ import socket
 import stat
 import tempfile
 import threading
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from .catalog import validate_id
 from .store import Store
 
 JSON_LIMIT = 1024 * 1024
@@ -199,6 +201,60 @@ class PaperHandler(BaseHTTPRequestHandler):
         finally:
             self.server.search_slots.release()
 
+    def papers_response(self, query: dict):
+        """GET /v1/papers: the papers arXiv received as new in a date window, read from the
+        catalog itself (not the search index, which is rebuilt apart and can lag).
+
+        `since`, `until` (YYYY-MM-DD, required, inclusive) bound the first version's
+        submission date: the date arXiv stamps v1 with, which litwatch's arXiv intake stores
+        as `published`. A window of submission dates is what "the papers of these weeks"
+        means: a revision does not bring an old paper back, and a paper keeps its date when
+        its metadata is edited, unlike an OAI datestamp. A paper is announced a day or so
+        after it is submitted, so the newest days of a window still fill as arXiv announces.
+        `categories` (comma-separated) keeps papers listed in any of them, cross-lists
+        included; omitted, every category. `limit` (1-1000, default 500) caps a page;
+        `cursor` is the previous page's `next`, opaque. The answer is {items, next}: each item
+        a `search.listing_item`, `next` null once the window is exhausted. A page may be short
+        or empty before the end, so continue until `next` is null.
+        """
+        allowed = {'since', 'until', 'categories', 'cursor', 'limit'}
+        if set(query) - allowed or any(len(v) != 1 for v in query.values()):
+            raise APIError(400, 'Invalid listing parameters')
+        params = {key: values[0] for key, values in query.items()}
+        window = []
+        for name in ('since', 'until'):
+            try:
+                value = params.get(name, '')
+                if date.fromisoformat(value).isoformat() != value:
+                    raise ValueError
+            except ValueError:
+                raise APIError(400, f'{name} must be a date (YYYY-MM-DD)') from None
+            window.append(value)
+        if window[0] > window[1]:
+            raise APIError(400, 'since must not follow until')
+        categories = {c for c in params.get('categories', '').split(',') if c}
+        if any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9.-]{0,39}', c) for c in categories):
+            raise APIError(400, 'Invalid arXiv category')
+        limit = params.get('limit', '500')
+        if not re.fullmatch(r'[0-9]{1,4}', limit) or not 1 <= int(limit) <= 1000:
+            raise APIError(400, 'limit must be 1-1000')
+        after = None
+        if 'cursor' in params:
+            published, _, paper_id = params['cursor'].partition(':')
+            try:
+                date.fromisoformat(published)
+                validate_id(paper_id)
+            except ValueError:
+                raise APIError(400, 'Invalid cursor') from None
+            after = (published, paper_id)
+        catalog = self.server.store.catalog
+        if not catalog.dates_indexed():
+            raise APIError(503, 'Paper dates are not indexed yet; run paper-archive index-dates')
+        result = catalog.list_papers(*window, categories, after, int(limit))
+        if result['next']:
+            result['next'] = ':'.join(result['next'])
+        return self.json_response(200, result)
+
     def file_response(self, paper_id: str, kind: str, version: int | None,
                       source_path: str | None = None):
         store = self.server.store
@@ -259,6 +315,8 @@ class PaperHandler(BaseHTTPRequestHandler):
             raise APIError(400, 'Request URL is too long')
         if route in ('/v1/search', '/v1/search/status') and method == 'GET':
             return self.search_response(query, status=route.endswith('/status'))
+        if route == '/v1/papers' and method == 'GET':
+            return self.papers_response(query)
         if route == '/v1/bibtex' and method == 'GET':
             from .citations import bibtex
             values = query.get('ids', [])

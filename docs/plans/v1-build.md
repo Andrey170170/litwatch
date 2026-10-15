@@ -113,7 +113,11 @@ library rule, budgets; the old Watch grading removed. The reading API for papers
 
 **N2c · Replay and the two-week run.** `eval replay` and `eval report` with the four recall numbers per cohort; the
 sandbox's two weeks run through the pipeline (the estimate shown and approved first); the grade table and rarity
-offsets tuned on the labels; measured cost per weekday written beside the estimates in pipeline.md.
+offsets tuned on the labels; measured cost per weekday written beside the estimates in pipeline.md. Before the run,
+the live archive runs this repository's `archive/` and has run `paper-archive index-dates` once, so `GET /v1/papers`
+fills the sandbox (owner, 2026-10-14): its catalog is backed up first, the change only adds the `paper_dates` table,
+and 0.14 and v1 registering the same papers stays one record and one download per version, as the archive keys
+papers, jobs and files.
 
 **N3 · The full-text queue.** The archive client's urgent requests and text reads, and whatever the archive needs for
 them (the arXiv version of the text it serves); Briefs with the overstatement line and the Gist from the full text

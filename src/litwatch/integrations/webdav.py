@@ -30,6 +30,12 @@ import httpx
 import psycopg
 
 from litwatch import events
+from litwatch.archive import (
+    ArchiveClient,
+    ArchiveError,
+    ArchiveUnavailable,
+    ArchiveVersionUnknown,
+)
 from litwatch.config import Config
 from litwatch.core import Event, Paper
 from litwatch.integrations import (
@@ -40,13 +46,7 @@ from litwatch.integrations import (
     required_secret,
 )
 from litwatch.integrations import zotero as zotero_mod
-from litwatch.integrations.archive import (
-    ArchiveClient,
-    ArchiveError,
-    ArchiveUnavailable,
-    ArchiveVersionUnknown,
-    reader,
-)
+from litwatch.integrations.archive import reader
 from litwatch.integrations.zotero import (
     PDF_TAG,
     AlreadyWrittenError,

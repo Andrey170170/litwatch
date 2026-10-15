@@ -27,6 +27,7 @@ def parser() -> argparse.ArgumentParser:
                                 help="rewrite sources stored before filtering as text-only (destructive)")
     strip.add_argument("--dry-run", action="store_true", help="report savings without writing")
     strip.add_argument("--limit", type=positive_int, help="process at most this many packages")
+    commands.add_parser("index-dates", help="date every paper so papers can be listed by window (idempotent)")
     imp = commands.add_parser("import-history")
     imp.add_argument("--ledger", type=Path)
     serve = commands.add_parser("serve")
@@ -85,6 +86,9 @@ def run(argv=None) -> int:
                 result = store.catalog.import_history(
                     args.archive, args.ledger or args.work / "state/progress.sqlite",
                     progress=lambda checkpoint: print(json.dumps(checkpoint), flush=True))
+        elif args.command == "index-dates":
+            result = store.catalog.index_dates(
+                progress=lambda done: print(json.dumps(done), flush=True))
         elif args.command == "get":
             print(store.get(args.paper_id, kind=args.kind, version=args.version))
             return 0

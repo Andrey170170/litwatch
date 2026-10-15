@@ -27,6 +27,7 @@ no file the defaults apply. `litwatch ping judge` sends one small request throug
 ```sh
 litwatch nightly                     # intake, triage with the keyword audit, grading
 litwatch intake --days 1             # intake alone
+litwatch intake archive --days 14    # a window's papers read from the archive instead of arXiv
 litwatch mark-triaged                # count stored papers as triaged, so runs start from new ones
 litwatch topics list | import | export
 litwatch eval seed | replay | sample-rejects | report    # dry runs against your labels
