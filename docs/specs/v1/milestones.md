@@ -43,9 +43,10 @@ labels; measured cost per weekday written next to the estimates in [pipeline.md]
 
 **N3 · The full-text queue.** Urgent archive requests, text reading (LaTeX first), Briefs with the overstatement line
 and the Gist from the full text, Weight re-checks, Deep card requests through the queue, the "among the collection" section and linked prior work in
-`deep`, and its usage recorded per card. *Check:* on a test night, every Focus paper at central or related has a Brief and every Area must-read
+`deep`, and its usage recorded per attempt. *Check:* on a test night, every Focus paper at central or related has a Brief and every Area must-read
 candidate a re-checked Weight within the digest wait, or its pass is on Quality as failed or awaiting text and the
-digest used the abstract; on ten hand-read papers, the overstatement line appears where
+digest used the abstract; every paper with a Brief shows the Gist written with it, and every finished Deep
+attempt, carded or failed, has its usage; on ten hand-read papers, the overstatement line appears where
 the owner agrees the abstract overstates and nowhere else.
 
 **N4 · Digests.** Daily and weekly digests per depth, their Gists, picks, quiet days, records, the bounded wait, the
