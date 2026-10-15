@@ -3,7 +3,7 @@
  * ones folded to a count until opened; each loads more as it scrolls (DESIGN.md, "Topics").
  */
 import { useInfiniteQuery, type InfiniteData, type QueryKey, type UseInfiniteQueryOptions } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { rc, type Shelf } from "@/lib/rarity";
 import { setShelfOpen, shelfOpen } from "@/lib/remember";
 import { ReadingRow, TableRow, type Row } from "./Rows";
@@ -30,10 +30,13 @@ function Sentinel({ onSeen }: { onSeen: () => void }) {
 
 function ShelfView<P extends Page, K extends QueryKey>({ shelf, query, topic, listKey }: { shelf: Shelf; query: ShelfQuery<P, K>; topic?: string; listKey: string }) {
   const shelfKey = `${listKey}:${shelf.key}`;
-  const [open, setOpen] = useState(() => shelf.open || shelfOpen(shelfKey));
+  // Read from the session's memory each render, so a changed filter (a new listKey) shows that list's own state
+  // without remounting the shelf, which would drop the rows kept on screen while the new ones load.
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const open = shelf.open || shelfOpen(shelfKey);
   const toggle = () => {
     setShelfOpen(shelfKey, !open);
-    setOpen(!open);
+    rerender();
   };
   const q = useInfiniteQuery(query(shelf, open ? 50 : 1));
   const total = q.data?.pages[0]?.total;
@@ -81,7 +84,7 @@ export function Shelves<P extends Page, K extends QueryKey>({ shelves, query, to
   return (
     <>
       {shelves.map((s) => (
-        <ShelfView key={`${listKey}:${s.key}`} shelf={s} query={query} topic={topic} listKey={listKey} />
+        <ShelfView key={s.key} shelf={s} query={query} topic={topic} listKey={listKey} />
       ))}
       {empty}
     </>

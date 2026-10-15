@@ -72,6 +72,31 @@ describe("Papers", () => {
     expect(screen.queryByRole("region", { name: "Epic and legendary" })).toBeNull();
   });
 
+  it("keeps the rows on screen while a changed filter's rows load", async () => {
+    viewport(true);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    scriptFetch({
+      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
+      "GET /api/topics": [],
+      "GET /api/papers": async ({ url }) => {
+        const q = new URL(url, "http://x").searchParams;
+        if (!(q.get("rarity") ?? "").includes("epic")) return { rows: [], total: 0, counts };
+        if (!q.get("code")) return { rows: [row("2610.00002", "Epic one", "epic")], total: 1, counts };
+        await held;
+        return { rows: [row("2610.00005", "Epic with code", "epic")], total: 1, counts };
+      },
+    });
+    const { router } = renderApp("/papers");
+    const top = await screen.findByRole("region", { name: "Epic and legendary" });
+    expect(await within(top).findByText("Epic one")).toBeInTheDocument();
+    await router.navigate({ to: "/papers", search: { code: true } });
+    await waitFor(() => expect(router.state.location.searchStr).toBe("?code=1"));
+    expect(screen.getByText("Epic one")).toBeInTheDocument();
+    release();
+    expect(await screen.findByText("Epic with code")).toBeInTheDocument();
+  });
+
   it("says when a shelf could not load and tries again on request", async () => {
     viewport(true);
     let failRare = true;
