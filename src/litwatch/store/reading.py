@@ -48,7 +48,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
 
 
 async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
-    """Everything the paper page shows, each Watch topic's current verdict included."""
+    """Everything the paper page shows, each Focus topic's current verdict included."""
     found = await _one(
         conn,
         f"SELECT p.id, p.title, p.abstract, {AUTHORS}, "
@@ -63,20 +63,20 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     topics = await _all(
         conn,
         """
-        SELECT t.slug, t.name, t.kind, t.colour, t.position, g.grade,
+        SELECT t.class AS slug, c.name, t.depth, t.colour, t.position, g.grade,
                (SELECT row_to_json(l) FROM (SELECT value, grade, origin, provisional
-                FROM labels WHERE paper_id = %(p)s AND topic = t.slug) l) AS label,
+                FROM labels WHERE paper_id = %(p)s AND topic = t.class) l) AS label,
                (SELECT row_to_json(r) FROM (SELECT value, reason FROM reactions
-                WHERE paper_id = %(p)s AND topic = t.slug) r) AS reaction,
-               EXISTS (SELECT 1 FROM misses ms WHERE ms.paper_id = %(p)s AND ms.topic = t.slug)
+                WHERE paper_id = %(p)s AND topic = t.class) r) AS reaction,
+               EXISTS (SELECT 1 FROM misses ms WHERE ms.paper_id = %(p)s AND ms.topic = t.class)
                    AND EXISTS (SELECT 1 FROM labels lb WHERE lb.paper_id = %(p)s
-                               AND lb.topic = t.slug AND lb.value = 'relevant')
+                               AND lb.topic = t.class AND lb.value = 'relevant')
                    -- and the owner's current word still says so (a newer thumb can withdraw it)
                    AND coalesce(g.grade IN ('must_read', 'relevant'), false) AS missed
-        FROM topics t
-        LEFT JOIN effective_grades g ON g.paper_id = %(p)s AND g.topic = t.slug
+        FROM topics t JOIN classes c ON c.slug = t.class
+        LEFT JOIN effective_grades g ON g.paper_id = %(p)s AND g.topic = t.class
         WHERE t.status <> 'draft'
-        ORDER BY array_position(ARRAY['watch', 'radar', 'pulse'], t.kind), t.position
+        ORDER BY t.position
         """,
         {"p": paper_id},
     )
@@ -137,7 +137,7 @@ async def papers(
 
     With a topic the table is that topic's papers at relevant or above (adjacent too when
     asked) with that topic's grade; otherwise the whole collection, each row with its best
-    Watch grade. `also_in` names the other topics the paper is relevant to. A search sorts by
+    Focus grade. `also_in` names the other topics the paper is relevant to. A search sorts by
     published date.
     """
     where, params = [sql.SQL("true")], []
@@ -173,8 +173,9 @@ async def papers(
                p.fetched_at AS added,
                {grade} AS grade,
                coalesce(l.saved, false) AS saved,
-               (SELECT coalesce(array_agg(t2.name ORDER BY t2.position), '{{}}')
-                FROM effective_grades g2 JOIN topics t2 ON t2.slug = g2.topic
+               (SELECT coalesce(array_agg(c2.name ORDER BY t2.position), '{{}}')
+                FROM effective_grades g2 JOIN topics t2 ON t2.class = g2.topic
+                JOIN classes c2 ON c2.slug = t2.class
                 WHERE g2.paper_id = p.id AND g2.grade IN ('must_read', 'relevant')
                   AND g2.topic IS DISTINCT FROM %s::text) AS also_in,
                count(*) OVER () AS total
@@ -221,15 +222,17 @@ async def topic_cards(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
     return await _all(
         conn,
         """
-        SELECT t.slug, t.name, t.kind, t.status, t.colour, t.position, t.subject, v.opened_at,
-               (SELECT count(*) FROM effective_grades g WHERE g.topic = t.slug
+        SELECT t.class AS slug, c.name, t.depth, t.status, t.colour, t.position, t.subject,
+               v.opened_at,
+               (SELECT count(*) FROM effective_grades g WHERE g.topic = t.class
                 AND g.grade IN ('must_read', 'relevant')) AS papers,
                (SELECT count(*) FROM effective_grades g JOIN library l
                 ON l.paper_id = g.paper_id AND l.saved
-                WHERE g.topic = t.slug AND g.grade IN ('must_read', 'relevant')) AS saved
-        FROM topics t LEFT JOIN topic_visits v ON v.topic = t.slug
+                WHERE g.topic = t.class AND g.grade IN ('must_read', 'relevant')) AS saved
+        FROM topics t JOIN classes c ON c.slug = t.class
+        LEFT JOIN topic_visits v ON v.topic = t.class
         WHERE t.status <> 'draft'
-        ORDER BY array_position(ARRAY['watch', 'radar', 'pulse'], t.kind), t.position
+        ORDER BY t.position
         """,
     )
 

@@ -16,8 +16,8 @@ from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
-from tests.conftest import TOPICS, deliver, paper, settled, start
+from litwatch.store import taxonomy as taxonomy_store
+from tests.conftest import TREE, deliver, paper, settled, start
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -77,8 +77,7 @@ def hit(pid: str, day: int, score: float | None = None) -> SearchHit:
 
 @pytest.fixture
 async def make(conn):
-    for topic in TOPICS:
-        await topics_store.save(conn, topic)
+    await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [P])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     clients = []

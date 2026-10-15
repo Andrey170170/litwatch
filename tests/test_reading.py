@@ -11,9 +11,9 @@ from litwatch.config import Config
 from litwatch.core import Grade, Opinion, Verdict
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import AGENTS, FAITH, TOPICS, paper
+from tests.conftest import AGENTS, FAITH, TREE, paper
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -23,8 +23,7 @@ Q = paper("2610.00002", title="A near neighbour", abstract="Sparse features.")
 
 @pytest.fixture
 async def client(conn):
-    for topic in TOPICS:
-        await topics_store.save(conn, topic)
+    await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [P, Q])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, Config())
@@ -63,12 +62,12 @@ async def test_acknowledgements_say_what_happened(client, conn):
         json={"topic": FAITH.slug, "value": "down", "reason": "not_for_me"},
     )
     assert said.json() == {
-        "message": "Remembered for CoT faithfulness",
+        "message": "Remembered for Chain-of-thought faithfulness",
         "saved": True,
         "grades": {},
     }
     said = await client.put(f"/api/reactions/{P.id}", json={"topic": AGENTS.slug, "value": "up"})
-    assert said.json()["message"] == "Remembered for Agents"
+    assert said.json()["message"] == "Remembered for Agents and tool use"
     wrong = await client.put(f"/api/reactions/{P.id}", json={"value": "up", "reason": "overrated"})
     assert wrong.status_code == 422
     assert (await client.put(f"/api/library/{P.id}", json={"saved": False})).json()["message"] == (
@@ -111,7 +110,7 @@ async def test_the_papers_table_filters_by_topic_and_searches(client, conn):
 async def test_a_reported_miss_is_the_owners_word(client, conn):
     ack = await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     assert ack.json()["message"] == (
-        "Reported as missed for CoT faithfulness; it joins the library"
+        "Reported as missed for Chain-of-thought faithfulness; it joins the library"
     )
     (miss,) = await (await conn.execute("SELECT * FROM misses")).fetchall()
     assert (miss["paper_id"], miss["topic"]) == (Q.id, FAITH.slug)
@@ -154,7 +153,7 @@ async def test_reporting_a_miss_again_keeps_a_later_correction(client, conn):
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     await client.put(f"/api/word/{FAITH.slug}/{Q.id}", json={"value": "not_relevant"})
     again = await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
-    assert again.json()["message"] == "Already reported as missed for CoT faithfulness"
+    assert again.json()["message"] == "Already reported as missed for Chain-of-thought faithfulness"
     (label,) = await (await conn.execute("SELECT value FROM labels")).fetchall()
     assert label["value"] == "not_relevant"
     assert len(await (await conn.execute("SELECT id FROM misses")).fetchall()) == 1
@@ -197,7 +196,7 @@ async def test_the_paper_page_lists_versions_seen(client, conn):
 async def test_also_in_leaves_out_the_topic_whose_table_it_is(client, conn):
     await grade(conn, P, "relevant")
     (row,) = (await client.get("/api/papers", params={"q": "hidden computation"})).json()["rows"]
-    assert (row["grade"], row["also_in"]) == ("relevant", ["CoT faithfulness"])
+    assert (row["grade"], row["also_in"]) == ("relevant", ["Chain-of-thought faithfulness"])
     (row,) = (await client.get("/api/papers", params={"topic": FAITH.slug})).json()["rows"]
     assert row["also_in"] == []
 

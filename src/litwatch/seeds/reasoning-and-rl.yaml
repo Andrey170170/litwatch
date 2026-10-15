@@ -1,8 +1,0 @@
-name: Reasoning and RL post-training
-slug: reasoning-and-rl
-kind: pulse
-subject: >-
-  Training and using language models to reason: reinforcement learning from verifiable rewards and
-  reward models, GRPO-style post-training, reasoning models and their thinking budgets, test-time
-  scaling and search, self-verification and reflection, distillation of reasoning, and analyses of
-  what such training changes. Prompting tricks evaluated on one benchmark are not part of the field.

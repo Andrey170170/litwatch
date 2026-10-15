@@ -36,8 +36,8 @@ from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
-from tests.conftest import FAITH, TOPICS, deliver, paper, settled, start
+from litwatch.store import taxonomy as taxonomy_store
+from tests.conftest import FAITH, TREE, deliver, paper, settled, start
 from tests.fakes_http import FakeArchive, FakeArxiv, FakeDeep, mock
 
 MIGRATIONS = resources.files("litwatch.store").joinpath("migrations")
@@ -54,8 +54,7 @@ HTML = (
 
 @pytest.fixture
 async def world(conn):
-    for topic in TOPICS:
-        await topics_store.save(conn, topic)
+    await taxonomy_store.save(conn, TREE)
     return conn
 
 
@@ -267,7 +266,7 @@ async def test_a_must_read_library_paper_gets_a_card_and_card_ready(world, deep)
 
     (sent,) = fake.requests
     assert sent["extensions"] == ["faithfulness"]
-    assert [s["name"] for s in sent["selections"]] == [FAITH.name]
+    assert [s["name"] for s in sent["selections"]] == ["Chain-of-thought faithfulness"]
     assert sent["paper"]["body_source"] == "html" and "Paragraph 79" in sent["paper"]["body"]
     stored = await state.card(conn, P.id)
     assert stored["card"] == CARD and stored["model"] == "deep-model"
@@ -300,11 +299,11 @@ async def test_an_overruled_must_read_requests_no_card_but_the_owner_can_ask(wor
     await deliver(conn, d)
     assert fake.requests == []
 
-    # Asked by hand, whatever the grade: every active Watch topic is the card's context.
+    # Asked by hand, whatever the grade: every active Focus topic is the card's context.
     await events.emit(conn, events.CARD_REQUESTED, P.id)
     await deliver(conn, d)
     (sent,) = fake.requests
-    assert [s["name"] for s in sent["selections"]] == [FAITH.name]
+    assert [s["name"] for s in sent["selections"]] == ["Chain-of-thought faithfulness"]
     assert (await state.card(conn, P.id))["card"] == CARD
 
 

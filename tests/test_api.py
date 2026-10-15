@@ -7,8 +7,8 @@ from litwatch.api import app as app_module
 from litwatch.api import create_app
 from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
-from tests.conftest import FAITH, TOPICS, paper
+from litwatch.store import taxonomy as taxonomy_store
+from tests.conftest import FAITH, TREE, paper
 
 TOKEN = "s3cret"
 
@@ -18,8 +18,7 @@ READ_TOKEN = "r3ad"
 
 @pytest.fixture
 async def client(conn):
-    for topic in TOPICS:
-        await topics_store.save(conn, topic)
+    await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
     # The app opens its own connections; point them at the test schema.
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"

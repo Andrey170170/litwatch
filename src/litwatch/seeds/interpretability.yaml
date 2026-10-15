@@ -1,7 +1,0 @@
-name: Interpretability
-slug: interpretability
-kind: radar
-subject: >-
-  Understanding the internal mechanisms, representations, or circuits of neural language models: probes,
-  sparse autoencoders, attention and attribution analysis, activation patching and ablation, steering
-  vectors, logit lens, feature and circuit discovery, and the methods and evaluations for these tools.

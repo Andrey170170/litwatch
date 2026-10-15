@@ -2,7 +2,7 @@
 file sync reads, attached to the paper's Zotero item.
 
 It hears `grade.changed` to `must_read` and `paper.saved`, and acts only when the paper is,
-at that moment, `must_read` for some Watch topic and in the library: an overruled or
+at that moment, `must_read` for some Focus topic and in the library: an overruled or
 superseded `must_read`, or an unsaved paper, fetches nothing, and saving it again does what
 was skipped. The item is the `zotero` integration's, so this one needs it loaded; until the
 item exists the event is retried. The PDF comes from the archive when that integration is

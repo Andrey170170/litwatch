@@ -8,17 +8,17 @@ import pytest
 from litwatch import config
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import (
+    Depth,
     Grade,
     Label,
     LabelOrigin,
     LabelValue,
     Status,
-    TopicKind,
     Verdict,
     current_verdict,
     effective_grade,
 )
-from tests.conftest import FAITH
+from tests.conftest import FAITH, TREE
 
 T0 = datetime(2026, 10, 1, tzinfo=UTC)
 
@@ -72,13 +72,31 @@ def test_the_owners_label_outranks_the_verdict():
     assert effective_grade(None, None) is None
 
 
-def test_a_topic_version_follows_what_a_model_sees_and_nothing_else():
-    renamed = FAITH.model_copy(update={"name": "Renamed", "status": Status.PAUSED, "revision": 7})
-    assert renamed.version == FAITH.version
+def test_a_topic_version_follows_what_a_grader_reads_and_nothing_else():
+    badge = {"monogram": "XX", "colour": "#000000", "status": Status.PAUSED}
+    assert FAITH.model_copy(update=badge).version == FAITH.version
     reordered = FAITH.model_copy(update={"keywords": list(reversed(FAITH.keywords))})
     assert reordered.version == FAITH.version
-    assert FAITH.model_copy(update={"rubric": "Another rubric."}).version != FAITH.version
-    assert FAITH.model_copy(update={"kind": TopicKind.RADAR}).version != FAITH.version
+    for change in (
+        {"rubric": "Another rubric."},
+        {"depth": Depth.AREA},
+        {"subject": "Another subject entirely."},
+        {"interests": "Something."},
+        {"keywords": ["faithful"]},
+    ):
+        assert FAITH.model_copy(update=change).version != FAITH.version
+
+
+def test_a_class_version_follows_name_description_parent_and_threshold():
+    c = TREE.get(FAITH.slug)
+    assert c.model_copy(update={"slug": "renamed-slug"}).version == c.version
+    for change in (
+        {"name": "Another name"},
+        {"description": "Another description."},
+        {"parent": None},
+        {"threshold": 0.7},
+    ):
+        assert c.model_copy(update=change).version != c.version
 
 
 def test_judge_and_check_must_come_from_different_labs():

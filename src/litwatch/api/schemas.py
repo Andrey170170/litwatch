@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from litwatch.core import (
+    Depth,
     Event,
     Grade,
     Hand,
@@ -15,7 +16,6 @@ from litwatch.core import (
     Publication,
     ReactionReason,
     ReactionValue,
-    TopicKind,
 )
 
 
@@ -31,8 +31,8 @@ class Status(BaseModel):
 
 class TopicRef(BaseModel):
     slug: str
-    name: str
-    kind: TopicKind
+    name: str  # its class's
+    depth: Depth
     colour: str | None = None
 
 
@@ -43,7 +43,7 @@ class Opinion(BaseModel):
 
 
 class Chosen(BaseModel):
-    """One Watch topic's current verdict on the paper."""
+    """One Focus topic's current verdict on the paper."""
 
     topic: str
     grade: Grade
@@ -68,7 +68,7 @@ class PaperTopic(TopicRef):
     label: LabelState | None = None
     reaction: ReactionValue | None = None
     reaction_reason: ReactionReason | None = None
-    missed: bool = False  # reported as missed for this Watch topic, and that word stands
+    missed: bool = False  # reported as missed for this Focus topic, and that word stands
 
 
 class HistoryItem(BaseModel):

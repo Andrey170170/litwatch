@@ -1,8 +1,0 @@
-name: Agents and tool use
-slug: agents
-kind: pulse
-subject: >-
-  Language models acting over multiple steps: agent architectures and frameworks, tool and function
-  calling, computer and browser use, coding agents, multi-agent systems, planning and memory for agents,
-  agent benchmarks and evaluations, and training methods specific to agents. Papers that use an off-the-shelf
-  agent only as a baseline for a different topic are not part of the field.

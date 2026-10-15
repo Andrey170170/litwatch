@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from datetime import datetime
 from enum import StrEnum
@@ -52,22 +50,16 @@ def keyword_patterns(value: Any) -> list[str]:
     return items
 
 
-class TopicKind(StrEnum):
-    """The service a topic gets. Only Watch topics are graded per paper."""
-
-    WATCH = "watch"
-    RADAR = "radar"
-    PULSE = "pulse"
-
-
 class Status(StrEnum):
+    """Whether a topic is in use."""
+
     DRAFT = "draft"  # stored, not used by any run
     ACTIVE = "active"
     PAUSED = "paused"  # history kept, no new judgements
 
 
 class Grade(StrEnum):
-    """A Watch topic's judgement of a paper, most inclusive first."""
+    """A Focus topic's judgement of a paper, most inclusive first."""
 
     MUST_READ = "must_read"
     RELEVANT = "relevant"
@@ -83,56 +75,8 @@ class Grade(StrEnum):
         return self.rank <= other.rank
 
 
-class Topic(BaseModel):
-    """Something the owner follows. `revision` is set by the store when the topic is saved."""
-
-    slug: str = Field(pattern=SLUG_RE.pattern)
-    name: str = Field(min_length=2, max_length=80)
-    kind: TopicKind
-    subject: str = Field(min_length=20)
-    rubric: str | None = None  # Watch: what makes a paper `must_read`
-    interests: str | None = None  # Radar: what the owner cares about within the field
-    keywords: list[str] = Field(default_factory=list)  # Watch: regexes on title and abstract
-    status: Status = Status.ACTIVE
-    revision: int | None = None
-    # The owner's order and the topic's colour; the store assigns both when a topic is new.
-    position: int | None = None
-    colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
-
-    @field_validator("rubric", "interests", mode="before")
-    @classmethod
-    def _blank_is_none(cls, value: Any) -> Any:
-        return value.strip() if isinstance(value, str) and value.strip() else None
-
-    @field_validator("subject", mode="before")
-    @classmethod
-    def _strip(cls, value: Any) -> Any:
-        return value.strip() if isinstance(value, str) else value
-
-    @field_validator("keywords", mode="before")
-    @classmethod
-    def _keywords(cls, value: Any) -> list[str]:
-        return keyword_patterns(value)
-
-    @property
-    def version(self) -> str:
-        """SHA-256 of what a model sees of the topic. Name, status and revision do not count.
-
-        It says whether two versions differ, not which is newer; `revision` orders them.
-        """
-        content = {
-            "kind": self.kind.value,
-            "subject": self.subject,
-            "rubric": self.rubric,
-            "interests": self.interests,
-            "keywords": sorted(self.keywords),
-        }
-        canonical = json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode()).hexdigest()
-
-
 class Opinion(BaseModel):
-    """One model's grade of one paper for one Watch topic."""
+    """One model's grade of one paper for one Focus topic."""
 
     grade: Grade
     reason: str
@@ -187,7 +131,7 @@ class LabelOrigin(StrEnum):
 
 
 class Label(BaseModel):
-    """The owner's word on one paper for one Watch topic. It outranks any verdict."""
+    """The owner's word on one paper for one Focus topic. It outranks any verdict."""
 
     paper_id: str
     topic: str
@@ -201,7 +145,7 @@ class Label(BaseModel):
 
 
 class Word(BaseModel):
-    """The owner's word on a paper for a Watch topic, from a label or a reaction."""
+    """The owner's word on a paper for a Focus topic, from a label or a reaction."""
 
     value: LabelValue
     grade: Grade | None = None
@@ -215,11 +159,11 @@ class ReactionValue(StrEnum):
 class ReactionReason(StrEnum):
     # with a thumb down
     NOT_FOR_ME = "not_for_me"
-    UNRELATED = "unrelated"  # unrelated to the topic: on a Watch topic, the word not relevant
+    UNRELATED = "unrelated"  # unrelated to the topic: on a Focus topic, the word not relevant
     ALREADY_KNEW = "already_knew"
     OVERRATED = "overrated"
     # with a thumb up
-    GREAT_FIND = "great_find"  # on a Watch topic, the word relevant
+    GREAT_FIND = "great_find"  # on a Focus topic, the word relevant
 
     @property
     def goes_with(self) -> ReactionValue:

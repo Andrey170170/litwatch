@@ -12,6 +12,7 @@ from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, set_token_cookie, token_ok
 from litwatch.core import (
+    Depth,
     Hand,
     Label,
     LabelOrigin,
@@ -19,7 +20,7 @@ from litwatch.core import (
     Reaction,
     ReactionReason,
     SearchFilters,
-    TopicKind,
+    Topic,
 )
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
@@ -29,7 +30,7 @@ from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import reading
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 
 router = APIRouter(prefix="/api")
 
@@ -38,8 +39,11 @@ def _config(request: Request) -> Any:
     return request.app.state.config
 
 
-async def _topics(c: psycopg.AsyncConnection) -> dict[str, Any]:
-    return {t.slug: t for t in await topics_store.all(c, None)}
+async def _topic(c: psycopg.AsyncConnection, slug: str) -> tuple[str, Topic] | None:
+    """The followed topic on class `slug`, with its class's name."""
+    tree = await taxonomy_store.load(c)
+    topic = tree.topic(slug) if tree else None
+    return (tree.get(slug).name, topic) if topic else None
 
 
 # -- the status line -------------------------------------------------------------------------------
@@ -102,7 +106,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         raise HTTPException(status_code=404, detail="no such paper")
     topics = [
         s.PaperTopic(
-            **{k: t[k] for k in ("slug", "name", "kind", "colour", "grade", "missed")},
+            **{k: t[k] for k in ("slug", "name", "depth", "colour", "grade", "missed")},
             label=s.LabelState(**t["label"]) if t["label"] else None,
             reaction=(t["reaction"] or {}).get("value"),
             reaction_reason=(t["reaction"] or {}).get("reason"),
@@ -278,9 +282,8 @@ async def _known(c: psycopg.AsyncConnection, paper_id: str) -> None:
 @router.put("/reactions/{paper_id:path}")
 async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
     await _known(c, paper_id)
-    topics = await _topics(c)
-    topic = topics.get(body.topic) if body.topic else None
-    if body.topic and topic is None:
+    known = await _topic(c, body.topic) if body.topic else None
+    if body.topic and known is None:
         raise HTTPException(status_code=404, detail="no such topic")
     try:
         reaction = Reaction(
@@ -289,13 +292,13 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     _, settled = await word.react(c, reaction)
-    watch = topic is not None and topic.kind == TopicKind.WATCH
-    if watch and body.reason == ReactionReason.UNRELATED:
-        said = f"Marked not relevant for {topic.name}"
-    elif watch and body.reason == ReactionReason.GREAT_FIND:
-        said = f"Marked relevant for {topic.name}"
+    focus = known is not None and known[1].depth == Depth.FOCUS
+    if focus and body.reason == ReactionReason.UNRELATED:
+        said = f"Marked not relevant for {known[0]}"
+    elif focus and body.reason == ReactionReason.GREAT_FIND:
+        said = f"Marked relevant for {known[0]}"
     else:
-        said = f"Remembered for {topic.name}" if topic else "Remembered"
+        said = f"Remembered for {known[0]}" if known else "Remembered"
     return _ack(said, settled)
 
 
@@ -318,9 +321,9 @@ async def save(paper_id: str, body: s.SaveIn, c: Conn) -> s.Ack:
 @router.put("/word/{topic}/{paper_id:path}")
 async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn) -> s.Ack:
     """The label row on a paper page: the owner's own word, origin `reader`."""
-    known = (await _topics(c)).get(topic)
-    if known is None or known.kind != TopicKind.WATCH:
-        raise HTTPException(status_code=404, detail="not a Watch topic")
+    known = await _topic(c, topic)
+    if known is None or known[1].depth != Depth.FOCUS:
+        raise HTTPException(status_code=404, detail="not a Focus topic")
     await _known(c, paper_id)
     _, settled = await word.label(
         c,
@@ -332,7 +335,7 @@ async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn) -> s.Ack:
             origin=LabelOrigin.READER,
         ),
     )
-    return _ack(f"Noted for {known.name}", settled)
+    return _ack(f"Noted for {known[0]}", settled)
 
 
 @router.delete("/word/{topic}/{paper_id:path}")
@@ -342,15 +345,15 @@ async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
 
 @router.post("/misses")
 async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
-    """File a miss for a Watch topic."""
-    known = (await _topics(c)).get(body.topic)
-    if known is None or known.kind != TopicKind.WATCH:
-        raise HTTPException(status_code=404, detail="not a Watch topic")
+    """File a miss for a Focus topic."""
+    known = await _topic(c, body.topic)
+    if known is None or known[1].depth != Depth.FOCUS:
+        raise HTTPException(status_code=404, detail="not a Focus topic")
     await _known(c, body.paper_id)
     _, settled, new = await misses.report(c, body.paper_id, body.topic)
     if not new:
-        return _ack(f"Already reported as missed for {known.name}", settled)
-    return _ack(f"Reported as missed for {known.name}", settled)
+        return _ack(f"Already reported as missed for {known[0]}", settled)
+    return _ack(f"Reported as missed for {known[0]}", settled)
 
 
 # -- the session -----------------------------------------------------------------------------------

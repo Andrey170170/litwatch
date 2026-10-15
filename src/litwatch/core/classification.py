@@ -46,7 +46,7 @@ class Classified(BaseModel):
 
 
 def _focus(tree: Taxonomy) -> list[str]:
-    return [t.class_ for t in tree.topics if t.depth == Depth.FOCUS]
+    return [t.slug for t in tree.topics if t.depth == Depth.FOCUS]
 
 
 def thresholds(tree: Taxonomy, t: Thresholds = CHOSEN) -> dict[str, float]:
@@ -89,14 +89,14 @@ def keyword(tree: Taxonomy, title: str, abstract: str) -> dict[str, str]:
         if t.depth == Depth.FOCUS:
             hit = next((k for k in t.keywords if re.search(k, text, re.IGNORECASE)), None)
             if hit:
-                found[t.class_] = hit
+                found[t.slug] = hit
     return found
 
 
 def grading_topics(tree: Taxonomy, direct_members: set[str]) -> set[str]:
     """The topics that grade a paper: for each direct membership, the nearest followed class at
     or above it (pipeline.md, section 4). Inherited memberships add none."""
-    followed = {t.class_ for t in tree.topics}
+    followed = {t.slug for t in tree.topics}
     found = set()
     for slug in direct_members:
         nearest = next((s for s in [slug, *tree.ancestors(slug)] if s in followed), None)
