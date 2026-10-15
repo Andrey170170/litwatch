@@ -123,8 +123,8 @@ html[data-theme="light"] a.inl, html[data-theme="light"] button.inl { color: var
   font: 700 10.5px var(--font-name); letter-spacing: 0.02em; color: #fff; background: var(--tc);
   clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%);
 }
-.badge.area { background: color-mix(in srgb, var(--tc) 18%, transparent); color: var(--tc); }
-.badge.field { background: transparent; color: var(--tc); box-shadow: inset 0 0 0 1.5px var(--tc); }
+.badge[data-depth="area"] { background: color-mix(in srgb, var(--tc) 18%, transparent); color: var(--tc); }
+.badge[data-depth="field"] { background: transparent; color: var(--tc); box-shadow: inset 0 0 0 1.5px var(--tc); }
 .badge.lg { width: 28px; height: 28px; font-size: 12.5px; }
 .badge.sm { width: 16px; height: 16px; font-size: 8px; }
 .bs { display: inline-flex; gap: 3px; }
@@ -255,7 +255,7 @@ html[data-theme="light"] .sheet .done { color: var(--fg); border-color: var(--fg
 .qbox input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--fg); font-size: 13.5px; }
 .qbox:focus-within { border-color: var(--acc); }
 .qbox.big { max-width: none; height: 40px; }
-.qbox.short { max-width: 280px; flex: 0 1 280px; }
+.qbox.short { min-width: 180px; max-width: 220px; flex: 0 1 220px; }
 .fchip { padding: 5px 11px; border: 1px solid var(--line); font: 700 12px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg2); white-space: nowrap; }
 .fchip:hover { color: var(--fg); }
 .fchip.on { color: var(--acc); border-color: var(--acc); }
@@ -274,7 +274,7 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
 .cnt { font: 12px var(--font-mono); color: var(--fg3); white-space: nowrap; }
 /* the rarity bar: five segments sized by count, each a filter */
 .rbar { display: flex; gap: 3px; }
-.rbar.inl { flex: 1; min-width: 260px; }
+.rbar.inl { flex: 1; min-width: 200px; }
 .rseg { display: flex; flex-direction: column; justify-content: center; min-width: 0; padding: 4px 7px; background: color-mix(in srgb, var(--rc) 18%, transparent); box-shadow: inset 0 3px 0 var(--rc); overflow: hidden; text-align: left; }
 .rseg b { font: 600 13px var(--font-mono); color: var(--rc); }
 .rseg span { font-size: 10.5px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -317,12 +317,12 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
 .orow .au { font-size: 12px; color: var(--fg3); }
 /* the Topics tab */
 .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; margin-bottom: 18px; }
-.tcard { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface); border: 1px solid var(--line2); text-align: left; }
+.tcard { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface); border: 1px solid var(--line2); text-align: left; cursor: pointer; }
 .tcard:hover { border-color: var(--acc); }
 .tcard:active { background: var(--hover); }
 .tcard .hd { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .tcard .hd > div { min-width: 0; }
-.tcard .n { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.tcard .n { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
 .tcard .s { font-size: 12px; color: var(--fg3); }
 .rthin { display: flex; gap: 2px; height: 6px; }
 .rthin span { background: var(--rc); }

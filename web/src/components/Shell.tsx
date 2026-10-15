@@ -42,10 +42,12 @@ function useCame(): Came {
 
 function Following({ onPick }: { onPick?: () => void }) {
   const { data } = useQuery(topicsQuery);
+  const topics = data?.flatMap((g) => g.topics) ?? [];
+  if (!topics.length) return null;
   return (
     <>
       <div className="sec">Following</div>
-      {data?.flatMap((g) => g.topics).map((t) => (
+      {topics.map((t) => (
         <Link key={t.slug} to="/topics/$slug" params={{ slug: t.slug }} className="it" activeProps={{ className: "it on" }} onClick={onPick}>
           <Badge topic={t} />
           <span className="nm">{t.name}</span>

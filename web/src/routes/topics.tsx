@@ -1,6 +1,6 @@
 /** The Topics tab: cards grouped Focus, Area, Field in the fixed order (DESIGN.md, "Topics"). */
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { Schemas } from "@/api/client";
 import { topicsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
@@ -8,26 +8,28 @@ import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { DEPTH_NAME, RARITIES, RARITY_NAME, rc } from "@/lib/rarity";
 
-/** The topic's papers by rarity as a thin bar, the five levels as segments sized by count. */
+/** The topic's papers by rarity as a thin bar, the five levels as segments sized by count; one grey line when
+ * it has none. */
 function Thin({ counts }: { counts: Schemas["RarityCounts"] }) {
+  const any = RARITIES.some((r) => counts[r] > 0);
   return (
     <div className="rthin" aria-hidden>
-      {RARITIES.map((r) => (
-        <span key={r} style={{ "--rc": rc(r), flex: Math.max(counts[r], 0.6) } as React.CSSProperties} title={`${RARITY_NAME[r]}: ${counts[r]}`} />
-      ))}
+      {any ? RARITIES.map((r) => <span key={r} style={{ "--rc": rc(r), flex: Math.max(counts[r], 0.6) } as React.CSSProperties} title={`${RARITY_NAME[r]}: ${counts[r]}`} />) : <span style={{ "--rc": "var(--line)", flex: 1 } as React.CSSProperties} />}
     </div>
   );
 }
 
+/** The whole card opens the topic; the newest must read, a link of its own, opens that paper. */
 function Card({ t }: { t: Schemas["TopicCard"] }) {
+  const navigate = useNavigate();
   return (
-    <Link to="/topics/$slug" params={{ slug: t.slug }} className="tcard">
+    <div className="tcard" onClick={() => void navigate({ to: "/topics/$slug", params: { slug: t.slug } })}>
       <div className="hd">
         <Badge topic={t} size="lg" />
         <div>
-          <div className="n" title={t.name}>
+          <Link to="/topics/$slug" params={{ slug: t.slug }} className="n" title={t.name} onClick={(e) => e.stopPropagation()}>
             {t.name}
-          </div>
+          </Link>
           <div className="s">
             {t.papers} papers · {t.saved} saved
           </div>
@@ -42,7 +44,7 @@ function Card({ t }: { t: Schemas["TopicCard"] }) {
           </Link>
         </div>
       )}
-    </Link>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 /** The quick actions (DESIGN.md, "The rail"): the action grid, Deep read, the miss report and the DOI form. */
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { bibtexFor, copyText, useDeepRead, useMiss, usePublication, useSave } from "@/api/mutations";
 import { topicsQuery } from "@/api/queries";
@@ -57,7 +57,7 @@ export function linkCells(paper: Paper, keys: ("arxiv" | "pdf" | "latex" | "code
     bib: <button onClick={() => void copyBibtex(paper.id)}>BibTeX ⧉</button>,
     id: <button onClick={() => void copyId(paper.id)}>arXiv id ⧉</button>,
   };
-  return keys.map((k) => cells[k] && <span key={k} className="contents">{cells[k]}</span>);
+  return keys.map((k) => cells[k] && <Fragment key={k}>{cells[k]}</Fragment>);
 }
 
 /** Report as a miss: the Focus topic, and whether it is central or related, asked at once (feedback.md). */

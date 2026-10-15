@@ -1,7 +1,7 @@
 /** A paper's page (DESIGN.md, "Paper"): the header, its open states, the ladder, and the rail or the phone's bars. */
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/api/client";
 import { useDeepRead, useProcess } from "@/api/mutations";
 import { paperQuery } from "@/api/queries";
@@ -71,7 +71,6 @@ export function PaperPage() {
   const [gistAway, setGistAway] = useState(false);
   const [asked, setAsked] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
-  const railRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setAsked(false);
     setSheet(null);
@@ -99,7 +98,7 @@ export function PaperPage() {
       <Back />
       <Header paper={paper} />
       <Notes paper={paper} onLabel={onLabel} />
-      <div className="pgcols" ref={railRef}>
+      <div className="pgcols">
         <Ladder paper={paper} asked={asked} deepRead={deepRead} onGistAway={onGistAway} />
         {desktop && <Rail paper={paper} gistAway={gistAway} asked={asked} onAsked={() => setAsked(true)} />}
       </div>
@@ -108,6 +107,7 @@ export function PaperPage() {
   );
 }
 
+/** "Deep read" inline in the Deep card rung's line, while the paper has no card. */
 function DeepReadInline({ paper, onAsked }: { paper: Paper; onAsked: () => void }) {
   const deep = useDeepRead(paper.id);
   return (

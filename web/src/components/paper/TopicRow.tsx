@@ -106,7 +106,7 @@ export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t:
   };
   return (
     <>
-      <div className={`tprow${asks ? " ask" : ""}`} style={{ "--rc": colour } as React.CSSProperties}>
+      <div className={`tprow${asks ? " ask" : ""}`} data-topic={t.topic.slug} style={{ "--rc": colour } as React.CSSProperties}>
         <Badge topic={t.topic} />
         <span className="nm">{t.topic.name}</span>
         <span className={`gr${failed ? " fail" : ""}`}>{failed || t.state === "grading_again" ? "ungraded" : gradeLine(t.grade, weight)}</span>

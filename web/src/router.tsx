@@ -8,7 +8,12 @@ import { SettingsPage } from "@/routes/settings";
 import { TopicPage } from "@/routes/topic";
 import { TopicsPage } from "@/routes/topics";
 
-const rootRoute = createRootRoute({ component: Shell });
+/** A path no route owns stays inside the shell, so the sidebar is the way out. */
+function NotFound() {
+  return <p className="empty">There is no such page.</p>;
+}
+
+const rootRoute = createRootRoute({ component: Shell, notFoundComponent: NotFound });
 
 export const digestRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: DigestPage });
 export const topicsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/topics", component: TopicsPage });

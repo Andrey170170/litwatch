@@ -53,6 +53,7 @@ export function PapersPage() {
   const desktop = useDesktop();
   const { data: groups } = useQuery(topicsQuery);
   const shelves = shelvesFor(PAPER_SHELVES, search.rarity ?? []);
+  const filtered = Boolean(search.q || search.rarity?.length || search.saved || search.code || search.topic?.length);
   const first = useInfiniteQuery(papersQuery(search, shelves[0]!, 50));
   const page0 = first.data?.pages[0];
   const query = (shelf: Shelf, limit: number) => papersQuery(search, shelf, limit);
@@ -68,7 +69,7 @@ export function PapersPage() {
         shelves={shelves}
         query={query}
         listKey={`papers:${JSON.stringify(search)}`}
-        empty={page0 && sumVisible(page0.counts, search) === 0 ? <div className="empty">Nothing matches.</div> : null}
+        empty={page0 && sumVisible(page0.counts, search) === 0 ? <div className="empty">{filtered ? "Nothing matches." : "Nothing in the collection yet."}</div> : null}
       />
       {page0 && page0.counts.unrated > 0 && !search.rarity?.length && <div className="loadmore">{page0.counts.unrated} not yet classified</div>}
       {search.q && <Outside q={search.q} search={search} />}

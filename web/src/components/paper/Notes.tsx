@@ -68,13 +68,14 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
     case "split":
     case "escalated": {
       const said = topic?.verdict ? Object.entries(topic.verdict.opinions ?? {}).filter(([, o]) => o.fit).map(([role, o]) => `${role} ${o.fit}`) : [];
+      const opinions = said.join(", ").replace(/^\w/, (c) => c.toUpperCase());
       return (
         <div className="note">
           <div>
             <b>
               {state.kind === "split" ? "Split" : "Escalated"} on {name}.
             </b>{" "}
-            {said.join(", ")}; {topic?.fit} stands until it is labelled.
+            {opinions}; {topic?.fit} stands until it is labelled.
           </div>
           <div className="acts">
             <button className="btn" onClick={() => onLabel(state.topic!)}>
