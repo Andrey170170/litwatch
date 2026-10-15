@@ -81,10 +81,16 @@ describe("Settings", () => {
   it("keeps the visit's rows on the way back from a paper, and starts afresh on a link", async () => {
     viewport(true);
     const paper = { id: "2610.00002", title: "A stuck paper", authors: ["A"], abstract: "A.", published: "2026-10-13", version: 1, revision: 1, arxiv_url: "", pdf_url: "", source_url: "", in_collection: true, saved: false, topics: [], states: [], publication_by_owner: false, card_requestable: false };
-    // The second read of /quality finds the failure gone and the split too.
+    // The second read of /quality finds the failure gone and the split too, and lands only when told to.
     let reads = 0;
+    let land!: () => void;
     const later = { ...quality, night: { ...quality.night, splits: [], analysis_failed: [] } };
-    const calls = scriptFetch({ ...common, "GET /api/settings/quality": () => (++reads > 1 ? later : quality), "GET /api/papers/2610.00002": paper, "POST /api/settings/analysis/2610.00002/retry": { saved: false } });
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/quality": () => (++reads > 1 ? new Promise<typeof later>((r) => (land = () => r(later))) : quality),
+      "GET /api/papers/2610.00002": paper,
+      "POST /api/settings/analysis/2610.00002/retry": { saved: false },
+    });
     const { router } = renderApp("/settings/needs");
     const item = (await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")!;
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Try again" }));
@@ -103,7 +109,14 @@ describe("Settings", () => {
     expect(within(needs).getByText("2")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("link", { name: /Taxonomy/ }));
     await waitFor(() => expect(fetched()).toBe(2));
-    await waitFor(() => expect(within(needs).getByText("1")).toBeInTheDocument());
+    // Back before the read lands: the page waits for it rather than showing the old rows and swapping them.
+    router.history.back();
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
+    land();
+    expect(await screen.findByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
+    expect(within(needs).getByText("1")).toBeInTheDocument();
   });
 
   it("settles an item whose action answers 409 with the reason, in place", async () => {

@@ -212,7 +212,10 @@ export function NeedsPage() {
   const quality = useQuery(qualityQuery);
   const qc = useQueryClient();
   const cards = useTopicCards();
-  const q = quality.data;
+  // A fresh visit's refresh still in flight (the read invalidated, `freshVisit`) holds the rows back: the page shows
+  // the fresh ones from its first paint, never the old ones moving as they land.
+  const refreshing = quality.isFetching && quality.isStale;
+  const q = refreshing ? undefined : quality.data;
   const badge = (slug: string | null | undefined) => (slug && cards[slug] ? <Badge topic={cards[slug]} /> : null);
   // Marks the item settled in the cached page: it stays where it is, and the counts follow.
   const settler = (list: Waiting, s: Settled) => (what: string | undefined) => qc.setQueryData(qualityQuery.queryKey, (old: Quality | undefined) => old && settle(old, list, s, what));
@@ -223,7 +226,7 @@ export function NeedsPage() {
   return (
     <>
       <PageHead title="Needs you" sub={q ? line(q) : undefined} />
-      <Load q={quality} />
+      <Load q={{ ...quality, isPending: quality.isPending || refreshing }} />
       {q && (
         <>
           {(["split", "escalated"] as const).map((kind) => (
