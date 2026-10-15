@@ -95,6 +95,28 @@ class LatexTextTests(unittest.TestCase):
         self.assertLess(text.index("Appendix only."), text.index("Paper body."))
         self.assertIn("\\bibliography{refs}", text)  # the paper has no .bbl of its own
 
+    def test_a_bbl_is_read_once_and_only_by_its_own_document(self):
+        text = self.text(
+            [
+                (
+                    "paper.tex",
+                    b"\\documentclass{article}\\begin{document}Paper body.\\bibliography{refs}"
+                    b"\\end{document}\n",
+                ),
+                (
+                    "appendix.tex",
+                    b"\\documentclass{article}\\begin{document}Appendix body.\\input{paper.bbl}"
+                    b"\\end{document}\n",
+                ),
+                (
+                    "paper.bbl",
+                    b"\\begin{thebibliography}{1}\\bibitem{x} Paper reference.\\end{thebibliography}\n",
+                ),
+            ]
+        )
+        self.assertEqual(text.count("Paper reference."), 1)
+        self.assertGreater(text.index("Paper reference."), text.index("Paper body."))
+
     def test_a_document_whose_class_is_in_its_preamble_ties_with_one_that_has_its_own(self):
         text = self.text(
             [

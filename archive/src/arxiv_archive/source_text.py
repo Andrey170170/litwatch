@@ -315,8 +315,12 @@ def latex_text(package: Path, limit: int) -> str:
     used = set(mains)
 
     def document(main: str) -> str:
+        own = str(PurePosixPath(main).with_suffix('.bbl'))
+
         def resolve(name: str, here: str) -> str | None:
-            return next((p for p in _candidates(name, main, here) if p in files and p not in used), None)
+            # A .bbl is only ever its own document's bibliography, and is read once.
+            return next((p for p in _candidates(name, main, here) if p in files and p not in used
+                         and (not p.lower().endswith('.bbl') or p == own)), None)
 
         def expand(body: str, here: str, depth: int) -> str:
             def inline(match: re.Match) -> str:
@@ -328,8 +332,9 @@ def latex_text(package: Path, limit: int) -> str:
             return INPUT.sub(inline, body)
 
         text = expand(files[main], main, 0)
-        bbl = files.get(str(PurePosixPath(main).with_suffix('.bbl')))
+        bbl = files.get(own) if own not in used else None
         if bbl is not None:
+            used.add(own)
             if BIBLIOGRAPHY.search(text):
                 text = BIBLIOGRAPHY.sub(lambda _: bbl, text, count=1)
                 text = BIBLIOGRAPHY.sub('', text)

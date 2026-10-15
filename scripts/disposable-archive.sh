@@ -38,7 +38,7 @@ start() {
     nohup "$bin/paper-archive-worker" "${args[@]}" > "$dir/worker.log" 2>&1 &
     echo $! > "$dir/worker.pid"
     for _ in $(seq 50); do
-        if curl -sf -H "Authorization: Bearer $(cat "$dir/token")" \
+        if curl -sf --max-time 2 -H "Authorization: Bearer $(cat "$dir/token")" \
             "http://127.0.0.1:$port/v1/status" > /dev/null; then
             # Ready only with both processes up: a worker that exited fetches nothing.
             ours "$(cat "$dir/worker.pid")" "$dir" || failed "$dir" "the worker exited"
