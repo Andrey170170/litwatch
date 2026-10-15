@@ -13,7 +13,7 @@ export interface PaperInput {
   body_source?: string | null;
 }
 
-/** A selection the paper was screened into: why the lab watches this topic and what it wants noticed. */
+/** A topic the card is for: why the lab follows it and what it must read. */
 export interface SelectionContext {
   name: string;
   subject: string;
@@ -28,10 +28,10 @@ export function systemPrompt(
   extensions: string[],
   context: SelectionContext[],
 ): string {
-  return `You are the deep processor of litwatch, a literature watch run by an NLP research lab. The lab keeps \
-selections: topics it follows, each with a rubric for what counts as tier 1, the papers its members must read. \
-Screening placed this paper in tier 1 of the selections listed below. Your job is the lab's reading card for it: \
-the result described by the schema below, delivered through submit().
+  return `You are the deep processor of litwatch, a literature watch run by an NLP research lab. The lab follows \
+topics, each with a subject and a rubric for what it must read. litwatch graded this paper must read in the topics \
+listed below, or a lab member asked for its card. Your job is the lab's reading card for it: the result described \
+by the schema below, delivered through submit().
 
 ${renderSelections(context)}
 
@@ -40,13 +40,16 @@ and functions carry over between cells, top-level await works, an exception is j
 outside the session exists: no filesystem, no shell, no imports. The paper is already loaded.
 
 Session API:
-- paper: the full paper as a markdown string; meta: {id, title, authors, published, url}
+- paper: the full paper as a string, its LaTeX source (inputs inlined, the bibliography in place) or the \
+text of its PDF as markdown (the first message says which); meta: {id, title, authors, published, url}
 - sections(): headings with character offsets; section(title): the text of one section (substring match)
 - find(pattern, context = 200, limit = 20): matches of a string or RegExp with surrounding text and section
-- refs(): the bibliography as an array of strings; entries usually carry arXiv ids
-- await store.search(query, limit = 10): full-text search over the papers this lab's watch holds, then \
-papers it never ingested (in_collection false); returns id, title, authors, published, tier (1 must read to \
-4 not relevant, null if never graded), and reason (the watch's own note on the paper, if any)
+- refs(): the bibliography as an array of strings, often with arXiv ids; empty when it is in another form, \
+so read it with find() or section()
+- await store.search(query, limit = 10): search over the papers litwatch holds, the lab's collection \
+(in_collection true), then papers it never took in (in_collection false); returns id, title, authors, \
+published, tier (its highest grade in the lab's topics: 1 must read, 2 relevant, 3 adjacent, 4 not about it; \
+null if none graded it), and reason (litwatch's Gist of the paper, if it wrote one)
 - await s2.lookup(idOrQuery): Semantic Scholar. An arXiv id, DOI, or S2 id returns the paper with its \
 references; any other text searches by title and returns candidates. Unauthenticated access is \
 rate-limited, so a lookup can fail; the paper's own bibliography is the primary source for prior work
@@ -63,14 +66,16 @@ Result schema (JSON Schema):
 ${schemaJson(extensions)}
 
 Standards: every statement about the paper comes from its text. Prior work and code availability are \
-checked, not assumed: an unreachable or empty repository is not available. Write for lab members who \
+checked, not assumed: an unreachable or empty repository is not available. among_collection names only \
+papers a store.search in this session returned with in_collection true, and a relation only where both \
+papers' texts or Gists bear it out. Write for lab members who \
 have not read the paper: specific methods, numbers, and model names; no hype; no markdown in strings. \
 Budget: ${maxCells} cells. The run ends on a successful submit.`;
 }
 
 function renderSelections(context: SelectionContext[]): string {
-  if (context.length === 0) return "Selections: none recorded for this job.";
-  const lines = ["Selections this paper is in:"];
+  if (context.length === 0) return "Topics: none recorded for this job.";
+  const lines = ["Topics this card is for:"];
   for (const s of context) {
     lines.push(`- ${s.name}: ${s.subject}`);
     if (s.rubric) lines.push(`  Rubric: ${s.rubric}`);

@@ -69,6 +69,45 @@ test("paper helpers see the injected markdown", async () => {
   }
 });
 
+const LATEX = String.raw`\begin{abstract}
+We read hidden steps.
+\end{abstract}
+\section{Introduction}\label{sec:intro}
+Intro with a needle.
+% \section{Old draft}
+\section{Method \& \texttt{probes}}
+\subsection*{Setup}
+We probe things.
+\section{Results}
+Numbers.
+\begin{thebibliography}{9}
+\bibitem[Turpin et al.(2023)]{turpin} M.~Turpin.
+\newblock Language models don't always say what they think.
+\newblock arXiv:2305.04388.
+\bibitem{lanham} T.~Lanham. Measuring faithfulness.
+\end{thebibliography}
+\appendix
+\section{Extra}
+More.
+`;
+
+test("paper helpers read LaTeX source: sections, nesting, comments and the bibliography", async () => {
+  const r = await Repl.create({ paper: LATEX, __meta: JSON.stringify({ id: "2601.00001" }) }, {}, {});
+  try {
+    const titles = "Abstract|Introduction|Method & probes|Setup|Results|References|Extra";
+    assert.equal((await r.run("sections().map(s => s.title).join('|')")).output, titles);
+    assert.match((await r.run("section('method')")).output, /We probe things/, "a section holds its subsections");
+    assert.doesNotMatch((await r.run("section('method')")).output, /Numbers/);
+    assert.equal((await r.run("find('needle')[0].section")).output, "Introduction");
+    assert.doesNotMatch((await r.run("section('references')")).output, /More\./);
+    const refs = JSON.parse((await r.run("JSON.stringify(refs())")).output);
+    assert.equal(refs.length, 2);
+    assert.match(refs[0], /^M.~Turpin. Language models don't always say what they think. arXiv:2305.04388.$/);
+  } finally {
+    r.dispose();
+  }
+});
+
 test("a runaway cell kills the session and later cells report it", async () => {
   const r = await repl({}, { cellTimeoutMs: 200 });
   const out = await r.run("while (true) {}");

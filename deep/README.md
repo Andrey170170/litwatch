@@ -4,6 +4,10 @@ The deep-card service: an agent with one JavaScript REPL tool reads a paper and 
 reading card. litwatch's `deep` integration submits papers to it (`POST /process`) and polls
 for the result.
 
+The card places the paper among litwatch's collection (`among_collection`): papers it agrees with,
+contradicts, extends or supersedes. `submit` takes only ids a `store.search` in the same session
+returned from the collection. `paper` is the archive's LaTeX source, or the PDF's text as markdown.
+
 ```sh
 npm ci
 npm test && npm run typecheck
