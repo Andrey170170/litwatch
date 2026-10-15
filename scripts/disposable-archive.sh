@@ -12,6 +12,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")/.." && pwd)
+MARK=.litwatch-disposable-archive  # what `start` leaves in its directory, and `stop` asks for
 bin="$here/archive/.venv/bin"
 
 start() {
@@ -25,9 +26,12 @@ start() {
     dir=$(mktemp -d /tmp/litwatch-archive.XXXXXX)
     # Its own arXiv pacing state: the instance's is shared by its processes, and not ours to write.
     mkdir -p "$dir/work/pacing" "$dir/archive"
+    touch "$dir/$MARK"
     (umask 077 && python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$dir/token")
     local args=(--work "$dir/work" --archive "$dir/archive" --no-mount-guard)
-    "$bin/paper-archive" "${args[@]}" index-dates > /dev/null  # an empty catalog lists at once
+    # An empty catalog lists at once.
+    "$bin/paper-archive" "${args[@]}" index-dates > "$dir/serve.log" 2>&1 \
+        || failed "$dir" "the archive's catalog did not start"
     nohup "$bin/paper-archive" "${args[@]}" serve --host 127.0.0.1 --port "$port" \
         --token-file "$dir/token" > "$dir/serve.log" 2>&1 &
     echo $! > "$dir/serve.pid"
@@ -37,12 +41,7 @@ start() {
         if curl -sf -H "Authorization: Bearer $(cat "$dir/token")" \
             "http://127.0.0.1:$port/v1/status" > /dev/null; then
             # Ready only with both processes up: a worker that exited fetches nothing.
-            if ! ours "$(cat "$dir/worker.pid")" "$dir"; then
-                echo "the worker exited:" >&2
-                tail -20 "$dir/worker.log" >&2
-                stop "$dir"
-                exit 1
-            fi
+            ours "$(cat "$dir/worker.pid")" "$dir" || failed "$dir" "the worker exited"
             echo "export LITWATCH_ARCHIVE_URL=http://127.0.0.1:$port"
             echo "export LITWATCH_ARCHIVE_TOKEN=$(cat "$dir/token")"
             echo "# stop: scripts/disposable-archive.sh stop $dir"
@@ -50,16 +49,26 @@ start() {
         fi
         sleep 0.2
     done
-    echo "the archive did not answer; logs in $dir" >&2
-    stop "$dir"
+    failed "$dir" "the archive did not answer"
+}
+
+# Startup failed: show both logs, then stop the archive (which removes them) and fail.
+failed() {
+    echo "$2" >&2
+    for log in "$1"/serve.log "$1"/worker.log; do
+        [[ -f "$log" ]] || continue
+        echo "== ${log##*/}" >&2
+        tail -20 "$log" >&2
+    done
+    stop "$1"
     exit 1
 }
 
 stop() {
     local dir=$1
-    # Exactly a directory `start` made (mktemp's six characters), so `rm -rf` reaches nothing else.
-    [[ "$dir" =~ ^/tmp/litwatch-archive\.[A-Za-z0-9]{6}$ && -d "$dir" && ! -L "$dir" ]] \
-        || { echo "not a disposable archive: $dir" >&2; exit 1; }
+    # Only a directory `start` made (its name and its mark), so `rm -rf` reaches nothing else.
+    [[ "$dir" =~ ^/tmp/litwatch-archive\.[A-Za-z0-9]{6}$ && -d "$dir" && ! -L "$dir" \
+        && -f "$dir/$MARK" ]] || { echo "not a disposable archive: $dir" >&2; exit 1; }
     local alive=0
     for file in "$dir"/serve.pid "$dir"/worker.pid; do
         [[ -f "$file" ]] || continue
