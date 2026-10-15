@@ -533,25 +533,60 @@ def fulltext_queue(
     wait: Annotated[
         int, typer.Option(help="Keep trying, for at most this many seconds, while some await text.")
     ] = 0,
+    deep: Annotated[
+        bool, typer.Option(help="Work the Deep card passes instead, with the deep integration.")
+    ] = False,
     config: ConfigPath = None,
 ) -> None:
-    """Work the full-text queue as the service's worker does: try every pass that is due once,
+    """Work the full-text queue as the service's workers do: try every pass that is due once,
     and with --wait again every half minute while some still await their text from the archive
-    ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration)."""
+    ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration). Text passes
+    by default; Deep card passes with --deep, one at a time, each a paid job on the deep service."""
     from litwatch import fulltext  # noqa: PLC0415
+    from litwatch.fulltext import deep as deep_passes  # noqa: PLC0415
+    from litwatch.integrations import deep as deep_integration  # noqa: PLC0415
+    from litwatch.integrations import enabled_using  # noqa: PLC0415
 
     cfg = _config(config)
     archive = fulltext.archive_for(cfg)
     if archive is None:
         raise SystemExit("no archive configured")
+    maker = None
+    if deep:
+        options = enabled_using(cfg, "deep")
+        if options is None:
+            raise SystemExit("no deep integration configured")
+        options = {k: v for k, v in options.items() if k not in ("use", "enabled")}
+        maker = deep_integration.load("deep", options, cfg)
+
+    async def work_deep(conn: psycopg.AsyncConnection) -> Counter[str]:
+        total: Counter[str] = Counter()
+        deadline = asyncio.get_running_loop().time() + wait
+        while True:
+            worked = total["cards_written"] + total["card_failed"]
+            if limit is not None and worked >= limit:
+                return total
+            done = await deep_passes.work(
+                conn, archive, maker, limit=None if limit is None else limit - worked
+            )
+            console.print(dict(done))
+            total.update(done)
+            left = deadline - asyncio.get_running_loop().time()
+            if not done["awaiting_text"] or left <= 0:
+                return total
+            await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
 
     async def work(conn: psycopg.AsyncConnection) -> Counter[str]:
         try:
+            if maker is not None:
+                return await work_deep(conn)
             return await fulltext.work_waiting(
                 conn, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
             )
         finally:
             await archive.aclose()
+            if maker is not None:
+                await maker.aclose()
 
     console.print_json(data=dict(_run(work)))
 

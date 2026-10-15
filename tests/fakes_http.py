@@ -239,9 +239,11 @@ class FakeArchive:
 
 
 class FakeDeep:
-    """The deep service's job protocol: a job that needs two polls to finish. It can fail the
-    next polls (`fail_polls`), keep a job running (`hold`), or accept a submission and then
-    lose the answer (`lose_answers`), as a dropped connection would."""
+    """The deep service's job protocol: a job that needs two polls to finish, ending as
+    `outcome` (its result, stats and model, or its error). It can fail the next polls
+    (`fail_polls`), keep a job running (`hold`), forget its jobs (`vanish`, as a restart does),
+    or accept a submission and then lose the answer (`lose_answers`), as a dropped connection
+    would."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         self.outcome = outcome
@@ -249,6 +251,7 @@ class FakeDeep:
         self.requests: list[dict[str, Any]] = []
         self.fail_polls = 0
         self.hold = False
+        self.vanish = False
         self.lose_answers = 0
 
     def handle(self, req: httpx.Request) -> httpx.Response:
@@ -259,12 +262,13 @@ class FakeDeep:
                 self.lose_answers -= 1
                 raise httpx.ReadTimeout("the answer never came", request=req)
             return httpx.Response(202, json={"id": "job-1", "status": "queued"})
-        if req.url.path == "/jobs/job-1":
+        if req.url.path == "/jobs/job-1" and not self.vanish:
             if self.fail_polls:
                 self.fail_polls -= 1
                 return httpx.Response(503)
             self.polls += 1
             if self.polls < 2 or self.hold:
                 return httpx.Response(200, json={"status": "running", "stats": {"cells": 3}})
-            return httpx.Response(200, json={"status": "done", **self.outcome})
+            status = "error" if self.outcome.get("error") else "done"
+            return httpx.Response(200, json={"status": status, **self.outcome})
         return httpx.Response(404)

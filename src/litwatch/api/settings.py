@@ -6,7 +6,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -15,12 +15,14 @@ from pydantic import BaseModel, ValidationError
 from litwatch import classification, grading
 from litwatch.api.deps import Conn, budget_lines
 from litwatch.core import FAILED_RUNS, Fit, Paper, Status, Taxonomy, Topic
+from litwatch.core.budget import month_start
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
 from litwatch.store import digests as digests_store
 from litwatch.store import failures, quality
 from litwatch.store import fulltext as fulltext_store
+from litwatch.store import integrations as integrations_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 
@@ -100,6 +102,9 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
         "cost": [
             line.model_dump() for line in await budget_lines(c, request.app.state.config.budget)
         ],
+        # Deep cards' month to date at list prices, observed and not budgeted: a lower bound
+        # while any attempt's usage is unknown.
+        "deep": await integrations_store.usage_since(c, month_start(datetime.now(UTC))),
         "recall": await quality.replay_recall(c),
         "calibration": await calibrate.precision(c),
         "matters_no_topic": await calibrate.matters_no_topic(c),
@@ -254,10 +259,10 @@ PASS_WAITING = {
 
 @router.post("/fulltext/{pass_id}/now", status_code=204, responses=PASS_WAITING)
 async def run_pass_now(pass_id: int, request: Request, c: Conn) -> None:
-    """A full-text pass failed three runs in a row, or awaits its text over a week: run it now.
-    It is first in line for the full-text worker, with three more runs; its text is asked for
-    again at urgent priority. 409 when it no longer waits for the owner (it ran, the paper's
-    text changed, it was dropped)."""
+    """A full-text pass (a Deep card's included) failed three runs in a row, or awaits its text
+    over a week: run it now. It is first in line for its worker, with three more runs; its text
+    is asked for again at urgent priority. 409 when it no longer waits for the owner (it ran,
+    the paper's text changed, it was dropped)."""
     async with c.transaction():
         paper_id = await fulltext_store.paper_of(c, pass_id)
         if paper_id is None:
@@ -266,6 +271,7 @@ async def run_pass_now(pass_id: int, request: Request, c: Conn) -> None:
         if not await fulltext_store.run_now(c, pass_id, FAILED_RUNS):
             raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
     request.app.state.fulltext_wake.set()
+    request.app.state.deep_wake.set()
 
 
 # -- calibrate -------------------------------------------------------------------------------------

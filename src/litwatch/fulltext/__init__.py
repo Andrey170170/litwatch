@@ -5,7 +5,7 @@ awaiting text and is tried again on the worker's next tick, so it runs once the 
 With the text, the `brief` role writes the Brief, a Gist and the Weight from the full text, which
 `record` stores and settles. Both kinds of pass make that one call.
 
-Before anything is spent on a claimed pass, its paper is settled (`_still_wanted`), so a pass
+Before anything is spent on a claimed pass, its paper is settled (`still_wanted`), so a pass
 the database no longer wants is dropped unread, whatever trigger missed it. A pass is held by
 a lease while it runs; one whose lease ran out (its worker died) is tried
 again. A failed pass is tried again on the next nightly run (`retry_failed`), and the archive
@@ -35,7 +35,7 @@ from litwatch.archive import (
     retry_downloads,
 )
 from litwatch.config import Config
-from litwatch.core.fulltext import LEASE, TextRead
+from litwatch.core.fulltext import LEASE, PassKind, TextRead
 from litwatch.feedback import word
 from litwatch.fulltext import brief
 from litwatch.integrations import IntegrationError
@@ -77,7 +77,8 @@ def archive_for(config: Config) -> ArchiveClient | None:
         return None
 
 
-async def _read(archive: ArchiveClient, c: Claimed) -> Attempt:
+async def read(archive: ArchiveClient, c: Claimed) -> Attempt:
+    """Read the claimed pass's text from the archive at urgent priority."""
     a = Attempt(c)
     try:
         if c.retry_text:  # tried again: what the archive gave up on is tried again too
@@ -192,7 +193,7 @@ async def _add(conn: psycopg.AsyncConnection, c: Claimed, a: Attempt, read: Text
         )
 
 
-async def _still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
+async def still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
     """Settle the paper of a claimed pass before anything is spent on it, under its lock, as
     `word.settle` judges the database now, whatever trigger was missed: None when the pass
     still runs as claimed; else why not. One no longer wanted is dropped; one wanted for
@@ -209,7 +210,8 @@ async def _still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None
         label = await store_.label_of(conn, c.id)
         if label is None:
             return "fulltext_dropped"
-        if label != (c.kind, c.reason):
+        # A Deep pass the owner asked for meanwhile runs all the same, now as their request.
+        if label != (c.kind, c.reason) and c.kind != PassKind.DEEP:
             await store_.release(conn, c)
             return "fulltext_relabelled"
     return None
@@ -252,13 +254,13 @@ async def work(
         tried.update(c.id for c in claimed)
         wanted = []
         for c in claimed:
-            if (why := await _still_wanted(conn, c)) is None:
+            if (why := await still_wanted(conn, c)) is None:
                 wanted.append(c)
             elif why != "lost":
                 counts[why] += 1
                 if run:
                     run.add(why)
-        attempts = await asyncio.gather(*(_read(archive, c) for c in wanted))
+        attempts = await asyncio.gather(*(read(archive, c) for c in wanted))
         for a in attempts:
             if a.text is None and await record(conn, a):
                 counts[_outcome(a)] += 1

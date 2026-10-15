@@ -1,5 +1,6 @@
 """What the API knows of integrations: their status under Settings, the owner's retry and
-skip, card requests, and the search providers asked beside litwatch's own search.
+skip, Deep cards and their requests, and the search providers asked beside litwatch's own
+search.
 
 The API never imports `integrations`. The service's start-up wiring hands `create_app` the
 loaded integrations, which it sees only through the contracts in `events` and `core`.
@@ -18,6 +19,8 @@ from litwatch import events
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn
 from litwatch.core import SearchFilters, SearchHit, SearchProvider
+from litwatch.fulltext import deep as deep_passes
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
@@ -37,10 +40,14 @@ def providers(request: Request) -> list[SearchProvider]:
     return [i for i in loaded(request) if isinstance(i, SearchProvider)]
 
 
-def answers_card_requests(integrations: list[events.Integration]) -> bool:
-    """Whether a loaded integration makes deep cards (says `makes_cards = True`). Wanting
+def card_maker(integrations: list[events.Integration]) -> Any:
+    """The loaded integration that makes Deep cards (says `makes_cards = True`), if any. Wanting
     `card.requested` is not enough: a webhook may pass it on without any card coming back."""
-    return any(getattr(i, "makes_cards", False) for i in integrations)
+    return next((i for i in integrations if getattr(i, "makes_cards", False)), None)
+
+
+def answers_card_requests(integrations: list[events.Integration]) -> bool:
+    return card_maker(integrations) is not None
 
 
 # -- Settings → Integrations -----------------------------------------------------------------------
@@ -149,29 +156,66 @@ async def changes(
 # -- deep cards ------------------------------------------------------------------------------------
 
 
-@router.post("/papers/{paper_id:path}/card", status_code=202)
+# What `request_card` answers besides success, for the API schema.
+CARD_REFUSED = {
+    404: {"description": "No such paper"},
+    409: {"description": "No card provider is configured, or the paper is dismissed"},
+}
+
+
+@router.post("/papers/{paper_id:path}/card", status_code=202, responses=CARD_REFUSED)
 async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardRequested:
-    """Ask for a deep card on this paper, whatever its grade. Honoured by whichever loaded
-    integration answers `card.requested`; the card shows on the paper once it is stored."""
+    """Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
+    when it has one: the request goes through the full-text queue, first in line, and the card
+    shows on the paper once it is written. Asking again while one is queued or being written
+    changes nothing."""
     if await papers_store.get(c, paper_id) is None:
         raise HTTPException(status_code=404, detail="no such paper")
     if not answers_card_requests(loaded(request)):
-        raise HTTPException(status_code=409, detail="no integration answers card requests")
+        raise HTTPException(status_code=409, detail="no card provider is configured")
+    pass_id = await deep_passes.request(c, paper_id)
+    if pass_id is None:
+        raise HTTPException(status_code=409, detail="the paper is dismissed")
+    request.app.state.deep_wake.set()
+    return s.CardRequested(pass_id=pass_id)
+
+
+async def card(
+    request: Request, c: Any, paper_id: str
+) -> tuple[s.DeepCard | None, s.CardPass | None, bool]:
+    """The paper page's Deep card rung: the stored card, shown whatever is loaded; with a card
+    provider loaded, its open pass and whether "Deep read" (or "Write again") applies."""
     stored = await integrations_store.card(c, paper_id)
+    found = None
     if stored and stored["card"]:
-        raise HTTPException(status_code=409, detail="this paper already has a card")
-    return s.CardRequested(event_id=await events.emit(c, events.CARD_REQUESTED, paper_id))
+        among = [
+            a
+            for a in stored["card"].get("among_collection") or []
+            if a.get("arxiv_id") and a.get("relation") in s.RELATIONS
+        ]
+        marks = await papers_store.marks(c, [a["arxiv_id"] for a in among])
+        found = s.DeepCard(
+            **{k: stored[k] for k in ("card", "model", "written_at", "revision", "arxiv_version")},
+            source=stored["source"],
+            among=[_among(a, marks.get(a["arxiv_id"])) for a in among],
+        )
+    if not answers_card_requests(loaded(request)):
+        return found, None, False
+    open_pass = await fulltext_store.open_deep(c, paper_id)
+    return found, s.CardPass(**open_pass) if open_pass else None, open_pass is None
 
 
-async def card(request: Request, c: Any, paper_id: str) -> tuple[s.DeepCard | None, bool]:
-    """The stored card for the paper page, and whether the request button applies."""
-    stored = await integrations_store.card(c, paper_id)
-    found = (
-        s.DeepCard(card=stored["card"], model=stored["model"], written_at=stored["written_at"])
-        if stored and stored["card"]
-        else None
+def _among(entry: dict[str, Any], mark: dict[str, Any] | None) -> s.AmongRow:
+    """One row of a card's "among the collection" section, with the paper as the collection
+    has it now (its title and rarity), or as the card named it."""
+    return s.AmongRow(
+        id=entry["arxiv_id"],
+        title=mark["title"] if mark else entry.get("title") or entry["arxiv_id"],
+        relation=entry["relation"],
+        note=entry.get("note"),
+        rarity=mark["rarity"] if mark else None,
+        in_collection=bool(mark and mark["in_collection"]),
     )
-    return found, found is None and answers_card_requests(loaded(request))
 
 
 # -- search providers ------------------------------------------------------------------------------

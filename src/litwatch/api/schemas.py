@@ -337,8 +337,8 @@ class OpenState(BaseModel):
     """What waits on the owner for this paper, as Needs you lists it, with the paper revision
     the action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the
     text), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or
-    `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed` or
-    `awaiting_text` over a week (run it now)."""
+    `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep card's
+    `card_failed`, or either `awaiting_text` over a week (run it now)."""
 
     kind: Literal[
         "awaiting_classification",
@@ -347,6 +347,7 @@ class OpenState(BaseModel):
         "escalated",
         "ungraded",
         "fulltext_failed",
+        "card_failed",
         "awaiting_text",
     ]
     revision: int
@@ -402,12 +403,46 @@ class HistoryItem(BaseModel):
     escalated: bool | None = None
 
 
+RELATIONS = ("agrees", "contradicts", "extends", "supersedes")
+
+
+class AmongRow(BaseModel):
+    """A paper a Deep card places this one among: one of the collection's, by its arXiv id, with
+    how the two relate and its rarity now (null outside the collection)."""
+
+    id: str
+    title: str
+    relation: Literal["agrees", "contradicts", "extends", "supersedes"]
+    note: str | None = None
+    rarity: Rarity | None = None
+    in_collection: bool = False
+
+
 class DeepCard(BaseModel):
-    """A deep card: the reading card the deep service wrote, as it wrote it."""
+    """A Deep card: the reading card the deep service wrote, as it wrote it, and what it was
+    written from (the paper revision and arXiv version, null where unknown, and the text's
+    source). `among` is its "among the collection" section as rows."""
 
     card: dict[str, Any]
     model: str | None = None
     written_at: datetime | None = None
+    revision: int | None = None
+    arxiv_version: int | None = None
+    source: Literal["latex", "pdf"] | None = None
+    among: list[AmongRow] = Field(default_factory=list)
+
+
+class CardPass(BaseModel):
+    """The paper's Deep card in the full-text queue: the owner's request or automatic (a Focus
+    must read), and where it is (awaiting the paper's text, ready, being written, or failed this
+    run and to be tried again; `failed_runs` says how often)."""
+
+    id: int
+    reason: Literal["request", "focus"]
+    state: Literal["awaiting_text", "ready", "running", "failed"]
+    queued_at: datetime
+    failed_runs: int = 0
+    error: str | None = None
 
 
 class Paper(BaseModel):
@@ -445,7 +480,10 @@ class Paper(BaseModel):
     publication: Publication | None = None  # the published version, when one is known
     publication_by_owner: bool = False  # the owner chose it (or chose "none")
     card: DeepCard | None = None  # shown whenever one is stored, integration or not
-    card_requestable: bool = False  # an integration that answers card requests is loaded
+    card_pass: CardPass | None = None  # queued or being written, while a card provider is loaded
+    # A card provider is loaded and no card is queued or being written: "Deep read", or "Write
+    # again" under a card.
+    card_requestable: bool = False
 
 
 # -- what the owner says ---------------------------------------------------------------------------
@@ -677,7 +715,7 @@ class IntegrationCard(BaseModel):
 
 
 class CardRequested(BaseModel):
-    event_id: int
+    pass_id: int  # the Deep pass that writes the card
 
 
 class Changes(BaseModel):

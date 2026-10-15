@@ -1,5 +1,6 @@
 """The full-text queue's rules (docs/specs/v1/pipeline.md, sections 6 and 8): which text pass a
-paper's current revision wants, and when one is queued again or no longer wanted."""
+paper's current revision wants, and when one is queued again or no longer wanted; and the same
+for a paper's Deep card pass."""
 
 from __future__ import annotations
 
@@ -29,6 +30,13 @@ LEASE = timedelta(minutes=30)
 # Text passes go first in the queue (lower is sooner); the archive is asked for their text at
 # its urgent priority whatever this is.
 TEXT_PRIORITY = 0
+# Deep passes are worked by their own worker, one at a time: the owner's requests first.
+REQUEST_PRIORITY = 0
+AUTOMATIC_PRIORITY = 1
+# Why a Deep pass runs: the owner asked (never dropped by a settle), or a Focus topic grades the
+# paper must read. N4 adds Area picks.
+REQUESTED = "request"
+FOCUS = "focus"
 # A pass awaiting text this long is listed for the owner.
 AWAITING_TOO_LONG = timedelta(days=7)
 # The nightly reconcile also looks at verdicts and labels this recent, whose settle may have
@@ -106,3 +114,34 @@ def to_drop(want: tuple[PassKind, str] | None, last: TextPass | None) -> bool:
     is read or listed for the owner for a paper that no longer qualifies (a topic paused, the
     owner's word)."""
     return want is None and last is not None and last.state in UNSTARTED
+
+
+@dataclass(frozen=True)
+class DeepPass:
+    """The paper's open Deep pass: one not done."""
+
+    id: int
+    reason: str
+    state: PassState
+
+
+def deep_wanted(focus_must_read: bool, saved: bool, has_card: bool) -> str | None:
+    """Why the paper wants an automatic Deep card, or None: an active Focus topic grades it must
+    read, it is not unsaved, and it has no card yet. A card is remade only on request
+    (section 8), and an Unsave cancels automatic cards not started (integrations.md)."""
+    return FOCUS if focus_must_read and saved and not has_card else None
+
+
+def deep_to_queue(want: str | None, open_pass: DeepPass | None) -> bool:
+    return want is not None and open_pass is None
+
+
+def deep_to_drop(want: str | None, open_pass: DeepPass | None) -> bool:
+    """Whether an automatic Deep pass not started is no longer wanted. The owner's request is
+    never dropped this way."""
+    return (
+        want is None
+        and open_pass is not None
+        and open_pass.reason != REQUESTED
+        and open_pass.state in UNSTARTED
+    )

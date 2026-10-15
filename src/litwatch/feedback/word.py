@@ -4,8 +4,9 @@ Every change that can move a paper (a verdict, a Weight, a label, a thumb, the S
 edit of the followed topics, a new arXiv version) ends in `settle`, which recomputes the paper's
 effective Fit and grade per followed topic, its rarity and whether it is in the library, stores
 them, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the same transaction. It
-also queues the paper's full-text pass when it qualifies for one, so the owner's word can queue
-one too, and drops one not started that it no longer qualifies for.
+also queues the paper's full-text passes when it qualifies for them (its Brief or Weight
+re-check, its Deep card), so the owner's word can queue one too, and drops one not started that
+it no longer qualifies for.
 """
 
 from __future__ import annotations
@@ -36,6 +37,9 @@ from litwatch.core import (
 from litwatch.core.fulltext import (
     TEXT_PRIORITY,
     PassState,
+    deep_to_drop,
+    deep_to_queue,
+    deep_wanted,
     to_drop,
     to_queue,
     to_relabel,
@@ -156,6 +160,7 @@ async def settle(
                 conn, events.PAPER_SAVED if result.saved else events.PAPER_UNSAVED, paper_id
             )
         await _text_pass(conn, paper_id, topics, after, claimed)
+        await _deep_pass(conn, paper_id, topics, after, result.saved, claimed)
     return result
 
 
@@ -206,6 +211,37 @@ async def _text_pass(
     elif want is not None and to_queue(want, last, found.version):
         kind, reason = want
         await fulltext_store.queue(conn, paper_id, found.revision, kind, reason, TEXT_PRIORITY)
+
+
+async def _deep_pass(
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    topics: dict,
+    after: dict[str, Effective],
+    saved: bool,
+    claimed: int | None,
+) -> None:
+    """Queue the paper's automatic Deep card when an active Focus topic grades it must read, it
+    is saved and it has no card; drop an automatic one not started that it no longer wants (an
+    Unsave, a paused topic). The owner's request is left alone."""
+    found = await fulltext_store.deep_facts(conn, paper_id)
+    if found is None or found.dismissed:
+        return
+    open_pass = found.open_pass
+    if open_pass is not None and open_pass.id == claimed and open_pass.state == PassState.RUNNING:
+        open_pass = replace(open_pass, state=PassState.READY)
+    focus_must_read = any(
+        t.depth == Depth.FOCUS
+        and t.status == Status.ACTIVE
+        and t.slug in after
+        and after[t.slug].grade == Grade.MUST_READ
+        for t in topics.values()
+    )
+    want = deep_wanted(focus_must_read, saved, found.has_card)
+    if deep_to_drop(want, open_pass):
+        await fulltext_store.drop(conn, open_pass.id, claimed=open_pass.id == claimed)
+    elif want is not None and deep_to_queue(want, open_pass):
+        await fulltext_store.queue_deep(conn, paper_id, found.revision, want)
 
 
 async def label(conn: psycopg.AsyncConnection, given: Label) -> tuple[Label, Settled]:

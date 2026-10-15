@@ -577,7 +577,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     found["text_pass"] = await fulltext.text_pass_for(conn, paper_id)
     found["stuck_passes"] = await _all(
         conn,
-        "SELECT f.id, f.state, f.last_error FROM fulltext_passes f "
+        "SELECT f.id, f.kind, f.state, f.last_error FROM fulltext_passes f "
         f"JOIN papers p ON p.id = f.paper_id WHERE f.paper_id = %(p)s AND {fulltext.STUCK}",
         p | fulltext.stuck_params(FAILED_RUNS),
     )
