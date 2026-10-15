@@ -222,7 +222,7 @@ topics:
       agents, and plan-to-output fidelity in generation models.
     rubric: |-
       - Central: a method for detecting such omission or commission, a benchmark or ground-truth construction for it, a definition of it, or a meta-evaluation of such methods, intended to transfer across tasks and models. The knowledge of what the model actually computed must come from task construction (hints, cues, or hidden directives whose use is revealed by the output), from model internals read against the trace, or from a meta-evaluation of such methods. Whether a hint, cue, or hidden directive the model demonstrably followed is disclosed in its trace is such an omission test, whatever the paper calls it.
-      - Related: interventions that only measure whether the trace matters to the answer (paraphrasing, truncation, perturbation, step importance), which are proxies for importance, not faithfulness; single-domain audits that apply a sound method to one task.
+      - Related: interventions that only measure whether the trace matters to the answer (paraphrasing, truncation, perturbation, step importance), which are proxies for importance, not faithfulness; single-domain audits that apply a sound method to one task; the faithfulness of a model's stated reasons or explanations rather than its reasoning trace.
       - Adjacent: papers on reading traces for unsafe intent or on monitorability in general, and position papers.
     keywords:
       - chain.of.thought
