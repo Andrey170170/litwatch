@@ -140,7 +140,10 @@ read for papers outside the collection; the stack smoke test.
 
 **N6 · Restart.** A fresh stack, the two most recent weeks read from the archive and run through the whole pipeline,
 unlabelled; no data carried from 0.14 or the first v1 (decision 48). Check: the run's counts and costs, every Focus
-central paper with its Brief or a stated reason, and the digests written.
+central paper with its Brief or a stated reason, and the digests written. Also time the reading API's list and topic
+queries on the restart's data with PostgreSQL's JIT on and off (`EXPLAIN (ANALYZE, BUFFERS)`, paired): at 100k
+synthetic papers JIT added 100–800 ms per topic query (#52), since it compiles anew on every execution. Turn it off
+for litwatch's connections if the full system shows the same.
 
 **W1–W4 · The web app** (Fable 5.1, worktree, PRs into `v1`). W1: the shell (sidebar, drawer, header, run status),
 the look's tokens and faces, Papers, the Topics tab and topic page, the paper page with its ladder, rail and open

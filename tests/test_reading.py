@@ -17,6 +17,7 @@ from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, verdicts
 from litwatch.store import papers as papers_store
+from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
 
@@ -230,6 +231,11 @@ async def test_a_row_carries_its_open_state(client, conn, shelves):
     assert {r["id"]: r["state"] for r in (await client.get("/api/papers")).json()["rows"]}[
         epic.id
     ] is None
+    # Dismissal ends a paper's work: asked for by id (a lookup), it has no open state.
+    await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (rare.id,))
+    tree = await taxonomy_store.load(conn)
+    (row,) = (await reading_store.papers(conn, tree, reading_store.Query(ids=[rare.id]))).rows
+    assert row["state"] is None
 
 
 async def test_badges_put_the_topic_giving_the_highest_level_first(client, conn):

@@ -460,7 +460,7 @@ async def _matching(c: psycopg.AsyncConnection, query: s.PaperQuery) -> list[str
         return []
     tree = await taxonomy_store.load(c)
     _topics_known(tree, query.topic)
-    listed = await reading.papers(c, tree, _query(query), limit=None)
+    listed = await reading.papers(c, tree, _query(query), limit=None, ids_only=True)
     return [r["id"] for r in listed.rows]
 
 

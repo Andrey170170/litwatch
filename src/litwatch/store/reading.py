@@ -308,10 +308,12 @@ async def papers(
     *,
     limit: int | None = 50,
     offset: int = 0,
+    ids_only: bool = False,
 ) -> Listed:
     """A page of the collection (Papers, search, lookups), each row at its mixed-list rarity.
     With topics or a depth, only their pages' papers. A grade filter asks for a grade (a
-    badge's) on a topic in view: those topics and the followed topics under them, or any."""
+    badge's) on a topic in view: those topics and the followed topics under them, or any.
+    `ids_only` leaves each row its id alone, for callers that need only the matches (BibTeX)."""
     shown = tree.shown() if tree else []
     where, params = _filters(query)
     in_view = [t.slug for t in shown]
@@ -351,7 +353,8 @@ async def papers(
         limit=limit,
         offset=offset,
     )
-    rows = await _rows(conn, [r["id"] for r in page], in_view)
+    ids = [r["id"] for r in page]
+    rows = [{"id": i} for i in ids] if ids_only else await _rows(conn, ids, in_view)
     return Listed(rows=rows, total=total, rarities=rarities, grades={})
 
 
@@ -411,7 +414,8 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
                 FROM effective_grades e WHERE e.paper_id = p.id) AS grades,
                ARRAY(SELECT m.class FROM memberships m WHERE m.paper_id = p.id
                      AND {SHOWN_MEMBER}) AS members,
-               CASE WHEN EXISTS (
+               CASE WHEN p.dismissed_at IS NOT NULL THEN NULL  -- dismissal ended its work
+                    WHEN EXISTS (
                         SELECT 1 FROM (
                             SELECT DISTINCT ON (v.topic) v.topic, v.split, v.escalated
                             FROM verdicts v WHERE v.paper_id = p.id AND v.topic = ANY(%(in_view)s)
