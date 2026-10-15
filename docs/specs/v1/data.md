@@ -46,8 +46,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   one row per grading as before; the grade is derived, not stored here.
 - `effective_grades` (paper, topic, fit, grade) and `rarities` (paper, mixed-list level, best topic): kept current so
   every surface reads one answer and lists sort by it.
-- `gists` (paper, paper revision, arXiv version or unknown, text, source abstract | full_text, model, at): the current
-  Gist is the one from the full text of the newest arXiv version read for the current revision, else from the abstract. `analyses.gist` is the abstract one.
+- `gists` (paper, paper revision, arXiv version or unknown, pass, text, source abstract | full_text, model, at): the
+  current Gist is the one from the full-text pass queued last for the current revision, else from the abstract. `analyses.gist` is the abstract one.
 - `briefs` (paper, paper revision, arXiv version or unknown, text, overstatement line, text source latex | pdf, text
   hash, model, at).
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |

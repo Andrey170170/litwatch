@@ -211,7 +211,7 @@ still awaiting text).
 **The Gist from the full text.** The call that writes a Brief also returns Weight and a new Gist, so the text is read
 once and the Gist cannot repeat a claim the Brief corrects. The Gist keeps the rules of section 3 and has its own
 instructions in the response schema. It replaces the Gist from the abstract as Weight does: the current Gist is the
-one from the full text of the newest arXiv version read for the current revision, else the one from analysis; a new one emits `gist.written`.
+one from the full-text pass queued last for the current revision, else the one from analysis; a new one emits `gist.written`.
 
 **Weight from the full text** replaces Weight from the abstract (source `full_text`) and the grade, rarity and
 library follow. A digest already written does not change (it is a record, [digests.md](digests.md)).
