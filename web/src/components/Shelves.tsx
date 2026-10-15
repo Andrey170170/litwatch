@@ -81,7 +81,7 @@ export function Shelves<P extends Page, K extends QueryKey>({ shelves, query, to
   return (
     <>
       {shelves.map((s) => (
-        <ShelfView key={s.key} shelf={s} query={query} topic={topic} listKey={listKey} />
+        <ShelfView key={`${listKey}:${s.key}`} shelf={s} query={query} topic={topic} listKey={listKey} />
       ))}
       {empty}
     </>

@@ -73,7 +73,7 @@ export const outsideQuery = (q: string | undefined, search: ListSearch) =>
     queryKey: ["papers", "outside", q ?? "", sortOf(search)],
     queryFn: async () => ok(await api.GET("/api/papers", { params: { query: { q, source: "outside", sort: sortOf(search), limit: 50 } } })),
     enabled: !!q,
-    staleTime: 60_000,
+    ...listOptions,
   });
 
 /** One shelf of a topic's page. */

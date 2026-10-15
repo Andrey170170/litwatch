@@ -12,7 +12,7 @@ import { PAPER_SHELVES, shelvesFor, type Shelf } from "@/lib/rarity";
 import { visibleCount, type ListSearch } from "@/lib/search";
 
 function Outside({ q, search }: { q: string; search: ListSearch }) {
-  const { data, isPending } = useQuery(outsideQuery(q, search));
+  const { data, isError, isFetching, refetch } = useQuery(outsideQuery(q, search));
   const process = useProcess();
   const navigate = useNavigate();
   const hits = data?.outside ?? [];
@@ -22,8 +22,16 @@ function Outside({ q, search }: { q: string; search: ListSearch }) {
         Outside the collection · from the archive <span className="cnt">{data ? hits.length : ""}</span>
         {data?.left_out?.length ? <span className="cnt">· {data.left_out.join(", ")} did not answer</span> : null}
       </div>
-      {isPending && <div className="loadmore">Searching…</div>}
-      {data && !hits.length && <div className="empty">No archive hits for “{q}”.</div>}
+      {isFetching && !data && <div className="loadmore">Searching…</div>}
+      {isError && !isFetching && (
+        <div className="loadmore">
+          Could not search the archive ·{" "}
+          <button className="inl" onClick={() => void refetch()}>
+            Try again
+          </button>
+        </div>
+      )}
+      {data && !hits.length && !isError && <div className="empty">No archive hits for “{q}”.</div>}
       {hits.map((h) => (
         <div key={h.id} className="orow">
           <Link to="/paper/$" params={{ _splat: h.id }} className="ti">

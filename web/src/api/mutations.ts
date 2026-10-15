@@ -3,8 +3,9 @@
  * into every list row that shows it, and lists are marked stale without refetching, so nothing reorders under
  * the reader. A toast carries only what the API says the page cannot show.
  */
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
+import { rememberCard } from "@/lib/remember";
 import { toast } from "@/lib/toast";
 
 type Ack = Schemas["Ack"];
@@ -35,19 +36,33 @@ export function said(e: unknown, fallback = "That did not go through"): string {
   return e instanceof ApiError && e.message ? e.message : e instanceof Error && e.message ? e.message : fallback;
 }
 
+const PAPER_WRITE = ["paper-write"];
+
+/** Whether a write on this paper is in flight, wherever it was started: a control that closed and reopened
+ * meanwhile still waits for it, so a Clear cannot land before a slower change and be undone by it. */
+function usePaperBusy(paperId: string): boolean {
+  const ids = useMutationState({
+    filters: { mutationKey: PAPER_WRITE, status: "pending" },
+    select: (m) => (m.state.variables as { id?: string } | undefined)?.id,
+  });
+  return ids.includes(paperId);
+}
+
 /**
- * A write on one paper. The paper's id is taken when `mutate` is called, as one of the write's variables: the
- * hook's options follow the latest render, so a page that moves to another paper before the write runs or
- * returns would otherwise write to, or settle, the wrong one.
+ * A write on one paper, one at a time per paper. The paper's id is taken when `mutate` is called, as one of the
+ * write's variables: the hook's options follow the latest render, so a page that moves to another paper before
+ * the write runs or returns would otherwise write to, or settle, the wrong one.
  */
 function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Promise<R>, done: (qc: QueryClient, id: string, r: R) => void) {
   const qc = useQueryClient();
   const m = useMutation({
+    mutationKey: PAPER_WRITE,
     mutationFn: ({ id, v }: { id: string; v: V }) => call(id, v),
     onSuccess: (r, { id }) => done(qc, id, r),
     onError: (e) => toast(said(e), "error"),
   });
-  return { isPending: m.isPending, mutate: (v: V, options?: { onSuccess?: () => void }) => m.mutate({ id: paperId, v }, options) };
+  const busy = usePaperBusy(paperId);
+  return { isPending: busy, mutate: (v: V, options?: { onSuccess?: () => void }) => m.mutate({ id: paperId, v }, options) };
 }
 
 const acked = (qc: QueryClient, id: string, ack: Ack) => {
@@ -133,7 +148,11 @@ export function useDeepRead(paperId: string) {
         throw e;
       }
     },
-    () => toast("Deep card requested"),
+    // remembered here, not by the page, which may have gone by the time the request returns
+    (_, id) => {
+      rememberCard(id);
+      toast("Deep card requested");
+    },
   );
 }
 

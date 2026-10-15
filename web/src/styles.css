@@ -67,7 +67,11 @@ html[data-theme="light"] { color-scheme: light; --gk: 0.75; }
 
 /* the phone: every control is at least 40px tall (DESIGN.md, "Every control has a hit area of at least 40 px") */
 @media (max-width: 55.99rem) {
-  :is(button.shh, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input) { min-height: 40px; }
+  :is(button.shh, .btn, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input) { min-height: 40px; }
+  .rseg { min-width: 40px; }
+  /* inline controls keep their size in the text and take a 40px hit area around it, as .hit does */
+  :is(.cp, .pghead .au .more, button.inl) { position: relative; }
+  :is(.cp, .pghead .au .more, button.inl)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
 }
 
 /* the glow's two values are registered so a hover can ease them instead of jumping */
@@ -158,10 +162,10 @@ html[data-theme="light"] a.inl, html[data-theme="light"] button.inl { color: var
 .app { display: flex; height: 100dvh; }
 .side { width: var(--side); flex: none; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 12px 8px; overflow-y: auto; }
 .wm { display: flex; align-items: center; gap: 10px; padding: 2px 8px; margin-bottom: 10px; font: 700 18px var(--font-name); letter-spacing: 0.2em; text-transform: uppercase; }
-.wm > a { color: inherit; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .wm > a { color: var(--acc); } }
-html[data-theme="dark"] .wm > a { color: var(--acc); }
-.wm > a:hover { animation: nc-glitch 0.45s steps(3) 1; }
+.wm .mark { color: inherit; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .wm .mark { color: var(--acc); } }
+html[data-theme="dark"] .wm .mark { color: var(--acc); }
+.wm .mark:hover { animation: nc-glitch 0.45s steps(3) 1; }
 @keyframes nc-glitch {
   0% { text-shadow: 2px 0 var(--sig), -2px 0 var(--cy); transform: translateX(1px); }
   35% { text-shadow: -3px 0 var(--sig), 2px 0 var(--cy); transform: translateX(-1px) skewX(-6deg); }

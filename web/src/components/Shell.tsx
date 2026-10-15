@@ -72,7 +72,9 @@ function Desktop() {
     <div className="app">
       <aside className="side">
         <div className="wm">
-          <Link to="/">litwatch</Link>
+          <Link to="/" className="mark">
+            litwatch
+          </Link>
           <RunStatus />
         </div>
         <nav className="nav">
@@ -135,7 +137,7 @@ function Phone() {
       <Slot name="foot" />
       <Sheet open={menu} onClose={() => setMenu(false)} side="left" label="Menu">
         <div className="wm">
-          <Link to="/" onClick={() => setMenu(false)}>
+          <Link to="/" className="mark" onClick={() => setMenu(false)}>
             litwatch
           </Link>
           <RunStatus />

@@ -69,7 +69,7 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
           </>
         )}
       </div>
-      {!failed && <FitControl paperId={paper.id} t={t} />}
+      <FitControl paperId={paper.id} t={t} />
     </div>
   );
 }

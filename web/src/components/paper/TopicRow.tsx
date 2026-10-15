@@ -99,6 +99,41 @@ export function verdictLine(t: PaperTopic, weight: Weight | null | undefined): R
   );
 }
 
+/** The two thumbs; the lit one shows its reason. */
+function Thumbs({ reaction, pick, setPick }: { reaction: PaperTopic["reaction"] | null | undefined; pick: ReactionValue | null; setPick: (v: ReactionValue | null) => void }) {
+  const thumb = (value: ReactionValue) => {
+    const on = reaction?.value === value;
+    return (
+      <button className={`th${on ? " on" : ""}`} onClick={() => setPick(pick === value ? null : value)} aria-label={value === "up" ? "Thumbs up" : "Thumbs down"} aria-pressed={on}>
+        {value === "up" ? "👍" : "👎"}
+        {on && reaction?.reason && <span>{reasonLabel(reaction.reason)}</span>}
+      </button>
+    );
+  };
+  return (
+    <>
+      {thumb("up")}
+      {thumb("down")}
+    </>
+  );
+}
+
+/** The rail's row for a collection paper under no followed topic: the thumbs for the paper itself (feedback.md,
+ * "Reactions": a thumb for the topic of the surface, or none). */
+export function PaperRow({ paperId, reaction }: { paperId: string; reaction: PaperTopic["reaction"] | null | undefined }) {
+  const [pick, setPick] = useState<ReactionValue | null>(null);
+  return (
+    <>
+      <div className="tprow" style={{ "--rc": "var(--fg3)" } as React.CSSProperties}>
+        <span className="nm">This paper</span>
+        <span className="vd">Under no followed topic</span>
+        <Thumbs reaction={reaction} pick={pick} setPick={setPick} />
+      </div>
+      {pick && <Reasons paperId={paperId} topic={null} value={pick} current={reaction} onDone={() => setPick(null)} />}
+    </>
+  );
+}
+
 export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t: PaperTopic; weight: Weight | null | undefined; revision: number }) {
   const [pick, setPick] = useState<ReactionValue | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
@@ -106,15 +141,6 @@ export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t:
   const asks = t.state === "split" || t.state === "escalated";
   const failed = t.state === "ungraded";
   const colour = failed || t.state === "grading_again" ? "var(--fg3)" : rc(t.rarity);
-  const thumb = (value: ReactionValue) => {
-    const on = t.reaction?.value === value;
-    return (
-      <button className={`th${on ? " on" : ""}`} onClick={() => setPick(pick === value ? null : value)} aria-label={value === "up" ? "Thumbs up" : "Thumbs down"} aria-pressed={on}>
-        {value === "up" ? "👍" : "👎"}
-        {on && t.reaction?.reason && <span>{reasonLabel(t.reaction.reason)}</span>}
-      </button>
-    );
-  };
   return (
     <>
       <div className={`tprow${asks ? " ask" : ""}`} data-topic={t.topic.slug} style={{ "--rc": colour } as React.CSSProperties}>
@@ -132,8 +158,7 @@ export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t:
             </>
           )}
         </span>
-        {thumb("up")}
-        {thumb("down")}
+        <Thumbs reaction={t.reaction} pick={pick} setPick={setPick} />
         <button className="lb" onClick={() => setLabelOpen((o) => !o)} title="Label the Fit" aria-expanded={labelOpen || asks}>
           Label
         </button>

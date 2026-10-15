@@ -15,7 +15,7 @@ import { Header } from "@/components/paper/Header";
 import { Ladder } from "@/components/paper/Ladder";
 import { Notes } from "@/components/paper/Notes";
 import { PhoneBar } from "@/components/paper/Phone";
-import { TopicRow } from "@/components/paper/TopicRow";
+import { PaperRow, TopicRow } from "@/components/paper/TopicRow";
 
 function Rail({ paper, gistAway, asked, onAsked }: { paper: Paper; gistAway: boolean; asked: boolean; onAsked: () => void }) {
   const [miss, setMiss] = useState(false);
@@ -31,11 +31,12 @@ function Rail({ paper, gistAway, asked, onAsked }: { paper: Paper; gistAway: boo
           <p>{paper.gist.text}</p>
         </div>
       )}
-      {paper.in_collection && paper.topics.length > 0 && (
+      {paper.in_collection && (
         <div className="tplist" id="rail-topics">
           {paper.topics.map((t) => (
             <TopicRow key={t.topic.slug} paperId={paper.id} t={t} weight={paper.weight?.weight} revision={paper.revision} />
           ))}
+          {!paper.topics.length && <PaperRow paperId={paper.id} reaction={paper.reaction} />}
         </div>
       )}
       {paper.in_collection ? (
