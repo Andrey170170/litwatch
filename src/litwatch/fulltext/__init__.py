@@ -201,19 +201,25 @@ async def still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
     dismissed since its claim is given back, left for the owner's word as `record` leaves it."""
     async with conn.transaction():
         await word.lock(conn, c.paper.id)
-        if not await store_.held(conn, c):
-            return "lost"
-        if await store_.dismissed(conn, c.paper.id):  # `settle` leaves its pass alone
-            await store_.release(conn, c)
-            return "fulltext_dismissed"
-        await word.settle(conn, c.paper.id, claimed=c.id)
-        label = await store_.label_of(conn, c.id)
-        if label is None:
-            return "fulltext_dropped"
-        # A Deep pass the owner asked for meanwhile runs all the same, now as their request.
-        if label != (c.kind, c.reason) and c.kind != PassKind.DEEP:
-            await store_.release(conn, c)
-            return "fulltext_relabelled"
+        return await judged(conn, c)
+
+
+async def judged(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
+    """`still_wanted`'s judgement, in a transaction that holds the paper's lock: the Deep worker
+    makes it again just before it submits, since the archive read can be long."""
+    if not await store_.held(conn, c):
+        return "lost"
+    if await store_.dismissed(conn, c.paper.id):  # `settle` leaves its pass alone
+        await store_.release(conn, c)
+        return "fulltext_dismissed"
+    await word.settle(conn, c.paper.id, claimed=c.id)
+    label = await store_.label_of(conn, c.id)
+    if label is None:
+        return "fulltext_dropped"
+    # A Deep pass the owner asked for meanwhile runs all the same, now as their request.
+    if label != (c.kind, c.reason) and c.kind != PassKind.DEEP:
+        await store_.release(conn, c)
+        return "fulltext_relabelled"
     return None
 
 

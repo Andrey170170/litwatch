@@ -29,7 +29,7 @@ from litwatch import events, store
 from litwatch.archive import ArchiveClient
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
-from litwatch.fulltext import TICK_SECONDS, read, record, still_wanted
+from litwatch.fulltext import TICK_SECONDS, judged, read, record, still_wanted
 from litwatch.integrations.deep import Deep
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
@@ -107,9 +107,13 @@ async def _work_one(
             return "awaiting_text" if a.waiting else "card_failed"
         text = TextRead(a.text.version, a.text.source, a.text.sha256)
         async with conn.transaction():
-            # Under the paper's lock: the owner's request may have taken the pass over since
-            # its claim, and then the submission and its attempt are theirs.
+            # Under the paper's lock, judged again as at its claim: the paper may have been
+            # dismissed or unsaved during the read, and nothing is spent then. The owner's
+            # request may have taken the pass over since its claim, and then the submission and
+            # its attempt are theirs.
             await word.lock(conn, c.paper.id)
+            if why := await judged(conn, c):
+                return why
             reason = await store_.submitted(conn, c, text)
             if reason is None:
                 return "lost"

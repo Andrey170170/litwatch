@@ -374,6 +374,35 @@ async def test_a_request_that_takes_over_a_claimed_pass_makes_the_attempt_the_ow
     assert [a["automatic"] for a in await attempts(db)] == [False]
 
 
+async def test_a_paper_dismissed_or_unsaved_during_the_read_is_never_submitted(db, monkeypatch):
+    reading = deep_passes.read
+    meanwhile = []
+
+    async def read_then(archive, c):
+        found = await reading(archive, c)
+        await meanwhile.pop(0)()  # while the worker reads the text
+        return found
+
+    async def dismiss():
+        await db.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (P.id,))
+
+    async def unsave():
+        await word.toggle(db, P.id, Hand.UNSAVE)
+
+    monkeypatch.setattr(deep_passes, "read", read_then)
+    await deep_passes.request(db, P.id)
+    fake = FakeDeep(DONE)
+    meanwhile.append(dismiss)
+    assert await work(db, with_text(P), make(fake)) == {"fulltext_dismissed": 1}
+
+    await db.execute("UPDATE papers SET dismissed_at = NULL")
+    await db.execute("DELETE FROM fulltext_passes")
+    await grade(db, Fit.CENTRAL)  # saved, a Focus must read: an automatic pass
+    meanwhile.append(unsave)
+    assert await work(db, with_text(P), make(fake)) == {"fulltext_dropped": 1}
+    assert (fake.requests, await attempts(db)) == ([], [])
+
+
 async def test_a_job_whose_polls_keep_failing_is_given_up_at_its_deadline(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
