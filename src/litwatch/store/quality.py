@@ -1,13 +1,17 @@
-"""The queries behind Settings: Quality's lists and the runs."""
+"""The queries behind Settings: Quality's lists, the misses and their traces, the runs, and
+the counts the Topics and Taxonomy pages show."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import psycopg
 
+from litwatch.core import Taxonomy
 from litwatch.core.evaluation import recall
 from litwatch.store import evaluation
+from litwatch.store.reading import SHOWN_MEMBER
 
 
 async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> list[dict]:
@@ -84,3 +88,98 @@ async def replay_recall(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
         "cost": float(run["cost"]) if run["cost"] is not None else None,
         "recall": recall(await evaluation.outcomes(conn, eval_run_id)),
     }
+
+
+async def reactions_by_topic(conn: psycopg.AsyncConnection, days: int = 30) -> list[dict]:
+    """Thumbs per followed topic and reason over the trailing days (feedback.md, reactions:
+    each reason points at a stage), for Overview's table. A thumb without a reason has
+    `reason` null."""
+    return await _all(
+        conn,
+        """
+        SELECT r.topic, r.reason, count(*) AS n FROM reactions r
+        JOIN topics t ON t.class = r.topic
+        WHERE r.reacted_at >= now() - make_interval(days => %s)
+        GROUP BY r.topic, r.reason ORDER BY r.topic, r.reason
+        """,
+        (days,),
+    )
+
+
+async def misses(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
+    """Reported misses, newest first, each with what the stages concluded for the owner's topic
+    on the paper's current text (feedback.md, misses): whether it has been classified and the
+    classifier's probability for the topic's class, which of the classifier, the uncertain band
+    and the keyword check made it a member, and the graders' opinions from the current verdict.
+    Null where a stage has not run on this text."""
+    return await _all(
+        conn,
+        """
+        SELECT m.id, m.paper_id, m.topic, m.reported_at, p.title,
+               EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = m.paper_id
+                       AND c.paper_revision = p.revision) AS classified,
+               (SELECT (c.response->'probabilities'->>m.topic)::float FROM classifications c
+                WHERE c.paper_id = m.paper_id AND c.paper_revision = p.revision
+                ORDER BY c.id DESC LIMIT 1) AS probability,
+               (SELECT coalesce(array_agg(x.source), '{}') FROM memberships x
+                WHERE x.paper_id = m.paper_id AND x.class = m.topic AND x.member
+                  AND x.paper_revision = p.revision
+                  AND x.source IN ('classifier', 'uncertain', 'keyword')) AS sources,
+               (SELECT v.opinions FROM verdicts v WHERE v.paper_id = m.paper_id
+                AND v.topic = m.topic AND v.paper_revision = p.revision
+                ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) AS opinions
+        FROM misses m JOIN papers p ON p.id = m.paper_id
+        ORDER BY m.reported_at DESC, m.id DESC
+        """,
+    )
+
+
+async def class_members(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str, int]:
+    """Papers standing in each class or any class under it (the memberships a page shows), by
+    class slug; a class with none is left out."""
+    pairs = [(c.slug, a) for c in tree.classes for a in [c.slug, *tree.ancestors(c.slug)]]
+    rows = await _all(
+        conn,
+        f"""
+        SELECT map.target, count(DISTINCT m.paper_id) AS n
+        FROM memberships m
+        JOIN unnest(%s::text[], %s::text[]) AS map (class, target) ON map.class = m.class
+        JOIN papers p ON p.id = m.paper_id AND p.dismissed_at IS NULL
+        WHERE {SHOWN_MEMBER}
+        GROUP BY map.target
+        """,
+        ([c for c, _ in pairs], [a for _, a in pairs]),
+    )
+    return {r["target"]: r["n"] for r in rows}
+
+
+async def revisions(conn: psycopg.AsyncConnection) -> tuple[dict[str, int], dict[str, int]]:
+    """The current revision of every class in the tree and of every followed topic."""
+    classes = await _all(conn, "SELECT slug, revision FROM classes WHERE retired_at IS NULL")
+    topics = await _all(conn, "SELECT class, revision FROM topics")
+    return {r["slug"]: r["revision"] for r in classes}, {r["class"]: r["revision"] for r in topics}
+
+
+async def keyword_matches(
+    conn: psycopg.AsyncConnection, patterns: list[str], days: int = 90
+) -> dict[str, int]:
+    """How many papers published in the trailing days each keyword pattern matches, in the
+    title or abstract, as the keyword check matches them (core.classification.keyword)."""
+    found = dict.fromkeys(patterns, 0)
+    if not patterns:
+        return found
+    compiled = [(k, re.compile(k, re.IGNORECASE)) for k in patterns]
+    # A server-side cursor streams the window; it needs a transaction to live in.
+    async with conn.transaction(), conn.cursor(name="keyword_matches") as cur:
+        cur.itersize = 1000
+        await cur.execute(
+            "SELECT title, abstract FROM papers WHERE dismissed_at IS NULL "
+            "AND published >= now() - make_interval(days => %s)",
+            (days,),
+        )
+        async for row in cur:
+            text = f"{row['title']}\n{row['abstract']}"
+            for k, rx in compiled:
+                if rx.search(text):
+                    found[k] += 1
+    return found

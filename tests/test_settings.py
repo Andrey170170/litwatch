@@ -153,3 +153,83 @@ async def test_bad_input_is_refused_not_crashed(client):
 
 async def test_settings_refuse_what_does_not_exist(client):
     assert (await client.post("/api/settings/calibrate/999/more")).status_code == 404
+
+
+async def _classify(conn, paper, probabilities, primary):
+    """Record a classification as the nightly step would, with the memberships it makes."""
+    from litwatch import classification
+    from litwatch.core.classification import Classified, memberships
+
+    found = Classified(probabilities=probabilities, primary=primary)
+    c = classification.Classification(
+        paper=paper,
+        taxonomy_revision=TREE.classes_version,
+        versions={k.slug: k.version for k in TREE.classes},
+        classified=found,
+        memberships=memberships(TREE, found, paper.title, paper.abstract),
+        response={"probabilities": probabilities},
+        model="m",
+    )
+    assert await classification.record(conn, c)
+
+
+async def test_a_miss_carries_what_each_stage_concluded(client, conn):
+    from litwatch.core import Reaction, ReactionReason, ReactionValue
+    from litwatch.feedback import misses
+
+    # Reported before any stage ran: every cell pending.
+    await misses.report(conn, Q.id, FAITH.slug)
+    (m,) = (await client.get("/api/settings/misses")).json()
+    assert (m["paper_id"], m["topic"], m["trace"]["classified"]) == (Q.id, FAITH.slug, False)
+    assert m["trace"]["classifier"] is None and m["trace"]["graded"] is False
+    # Classified under the Focus threshold, kept in by the band; graded by both labs.
+    await _classify(conn, Q, {FAITH.slug: 0.3, "other": 0.9}, "other")
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=Q.id,
+            topic=FAITH.slug,
+            topic_version="v",
+            fit=Fit.RELATED,
+            reason="r",
+            opinions={
+                "judge": Opinion(fit=Fit.RELATED, reason="y", model="a"),
+                "check": Opinion(fit=Fit.ADJACENT, reason="n", model="b"),
+            },
+        ),
+    )
+    (m,) = (await client.get("/api/settings/misses")).json()
+    t = m["trace"]
+    assert t["classified"] and t["probability"] == 0.3 and t["threshold"] == 0.5
+    assert (t["classifier"], t["uncertain"], t["keyword"]) == (False, True, False)
+    assert (t["graded"], t["judge"], t["check"]) == (True, "related", "adjacent")
+
+    # Reactions over 30 days per topic and reason, for Overview.
+    await word.react(
+        conn,
+        Reaction(
+            paper_id=Q.id,
+            topic=FAITH.slug,
+            value=ReactionValue.DOWN,
+            reason=ReactionReason.OVERRATED,
+        ),
+    )
+    page = (await client.get("/api/settings/quality")).json()
+    assert page["reactions"] == [{"topic": FAITH.slug, "reason": "overrated", "n": 1}]
+
+
+async def test_taxonomy_stats_and_export(client, conn):
+    from datetime import UTC, datetime
+
+    recent = P.model_copy(update={"published": datetime.now(UTC)})
+    await papers_store.upsert(conn, [recent])  # the keyword window is the last 90 days
+    await _classify(conn, recent, {FAITH.slug: 0.9}, FAITH.slug)
+    stats = (await client.get("/api/settings/taxonomy/stats")).json()
+    # A member of the Focus class stands in its parent too.
+    assert stats["members"] == {FAITH.slug: 1, "interpretability": 1}
+    assert stats["topic_revisions"][FAITH.slug] == 1 and stats["class_revisions"]["other"] == 1
+    kw = await client.get(f"/api/settings/topics/{FAITH.slug}/keywords")
+    assert kw.json() == {r"chain.of.thought": 1, r"\bCoT\b": 0, "faithful": 1}
+    assert (await client.get("/api/settings/topics/other/keywords")).status_code == 404
+    text = (await client.get("/api/settings/taxonomy.yaml")).text
+    assert text.startswith("classes:") and f"class: {FAITH.slug}" in text

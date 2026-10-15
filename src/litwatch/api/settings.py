@@ -1,5 +1,6 @@
 """Settings, the kitchen behind the gear: the taxonomy and its topics, Quality and the papers
-awaiting classification, Calibrate, runs, and the configuration (read-only, spec decision 11)."""
+awaiting classification, Calibrate, the misses, runs, and the configuration (read-only, spec
+decision 11)."""
 
 from __future__ import annotations
 
@@ -10,12 +11,14 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ValidationError
 
-from litwatch import classification, grading
+from litwatch import classification, grading, seeds
 from litwatch.api.deps import Conn, budget_lines
 from litwatch.core import FAILED_RUNS, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.core.budget import month_start
+from litwatch.core.classification import thresholds
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
@@ -38,6 +41,42 @@ SECRET_WORDS = ("key", "token", "password", "secret", "authorization", "credenti
 async def taxonomy(c: Conn) -> Taxonomy | None:
     """The class tree and the followed topics; null before one is imported."""
     return await taxonomy_store.load(c)
+
+
+@router.get("/taxonomy.yaml", response_class=PlainTextResponse, responses={404: {}})
+async def taxonomy_yaml(c: Conn) -> str:
+    """The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML)."""
+    tree = await taxonomy_store.load(c)
+    if tree is None:
+        raise HTTPException(status_code=404, detail="no taxonomy yet")
+    return seeds.dump_taxonomy(tree)
+
+
+class TaxonomyStats(BaseModel):
+    """What the Taxonomy and Topics pages show beside the tree: papers standing in each class or
+    under it, and the current revision of each class and followed topic."""
+
+    members: dict[str, int]
+    class_revisions: dict[str, int]
+    topic_revisions: dict[str, int]
+
+
+@router.get("/taxonomy/stats")
+async def taxonomy_stats(c: Conn) -> TaxonomyStats:
+    tree = await taxonomy_store.load(c)
+    members = await quality.class_members(c, tree) if tree else {}
+    classes, topics = await quality.revisions(c)
+    return TaxonomyStats(members=members, class_revisions=classes, topic_revisions=topics)
+
+
+@router.get("/topics/{slug}/keywords", responses={404: {"description": "No such topic"}})
+async def keyword_matches(slug: str, c: Conn) -> dict[str, int]:
+    """How many papers of the last 90 days each of the topic's keywords matches (the editor)."""
+    tree = await taxonomy_store.load(c)
+    topic = tree.topic(slug) if tree else None
+    if topic is None:
+        raise HTTPException(status_code=404, detail="no such topic")
+    return await quality.keyword_matches(c, topic.keywords)
 
 
 @router.put("/topics/{slug}")
@@ -109,7 +148,72 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
         "calibration": await calibrate.precision(c),
         "matters_no_topic": await calibrate.matters_no_topic(c),
         "collected": await quality.collected_reactions(c),
+        "reactions": await quality.reactions_by_topic(c),
     }
+
+
+# -- misses ----------------------------------------------------------------------------------------
+
+
+class MissTrace(BaseModel):
+    """What each stage concluded for the owner's topic when the reported paper went through the
+    pipeline (feedback.md, misses), on the paper's current text. `classified`: classification
+    has run; then `probability` is the classifier's for the topic's class against the class's
+    `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it.
+    `graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null
+    where only the judge was asked)."""
+
+    classified: bool
+    probability: float | None = None
+    threshold: float
+    classifier: bool | None = None
+    uncertain: bool | None = None
+    keyword: bool | None = None
+    graded: bool
+    judge: Fit | None = None
+    check: Fit | None = None
+
+
+class Miss(BaseModel):
+    id: int
+    paper_id: str
+    title: str
+    topic: str
+    reported_at: datetime
+    trace: MissTrace
+
+
+@router.get("/misses")
+async def misses(request: Request, c: Conn) -> list[Miss]:
+    """Reported misses, newest first, each with its trace."""
+    tree = await taxonomy_store.load(c)
+    at = thresholds(tree, request.app.state.config.classification.thresholds) if tree else {}
+    found = []
+    for r in await quality.misses(c):
+        opinions = r["opinions"] or {}
+        sources = set(r["sources"])
+        classified = r["classified"]
+        found.append(
+            Miss(
+                id=r["id"],
+                paper_id=r["paper_id"],
+                title=r["title"],
+                topic=r["topic"],
+                reported_at=r["reported_at"],
+                trace=MissTrace(
+                    classified=classified,
+                    probability=r["probability"],
+                    threshold=at.get(r["topic"], classification.CHOSEN.default),
+                    classifier="classifier" in sources if classified else None,
+                    uncertain="uncertain" in sources if classified else None,
+                    keyword="keyword" in sources if classified else None,
+                    graded=bool(r["opinions"]),
+                    judge=(opinions.get("judge") or {}).get("fit"),
+                    check=(opinions.get("check") or {}).get("fit"),
+                ),
+            )
+        )
+    return found
 
 
 # -- papers classification kept failing on (pipeline.md, section 9) -------------------------------
