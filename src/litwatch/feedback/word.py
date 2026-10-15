@@ -1,7 +1,7 @@
 """The owner's word and what follows from it.
 
 Every change that can move a paper (a verdict, a label, a thumb, the Save toggle) ends in
-`settle`, which recomputes the paper's effective grade per Watch topic and whether it is in
+`settle`, which recomputes the paper's effective grade per Focus topic and whether it is in
 the library, stores both, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the
 same transaction.
 """
@@ -15,19 +15,19 @@ import psycopg
 
 from litwatch import events
 from litwatch.core import (
+    Depth,
     Grade,
     Hand,
     Label,
     Reaction,
-    Topic,
-    TopicKind,
+    Taxonomy,
     current_verdict,
     effective_grade,
     in_library,
     owners_word,
 )
 from litwatch.store import feedback as feedback_store
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
 
@@ -45,8 +45,8 @@ class Settled:
     saved: bool = False
 
 
-async def _watch_topics(conn: psycopg.AsyncConnection) -> dict[str, Topic]:
-    return {t.slug: t for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
+async def _focus_topics(conn: psycopg.AsyncConnection) -> set[str]:
+    return {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
 
 
 # Advisory lock namespace for settling one paper; the second key is the paper id's hash.
@@ -57,11 +57,11 @@ async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     """Hold the paper's settle lock to the end of the transaction. Every write that ends in a
     settle takes it first, so no two transactions wait on each other's rows.
 
-    The topic rows are share-locked first, in slug order: a topic edit locks them all before
-    any paper, so locks are always taken topics first, and a settle never reads a kind that
-    an edit in flight is about to change.
+    The taxonomy lock is taken shared first: a taxonomy edit takes it exclusively before any
+    paper, so locks are always taken taxonomy first, and a settle never reads a depth that an
+    edit in flight is about to change.
     """
-    await conn.execute("SELECT slug FROM topics ORDER BY slug FOR SHARE")
+    await taxonomy_store.lock_shared(conn)
     await conn.execute("SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (SETTLE_LOCK, paper_id))
 
 
@@ -74,7 +74,7 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
 
     async with conn.transaction():
         await lock(conn, paper_id)
-        watched = await _watch_topics(conn)
+        focus = await _focus_topics(conn)
         labels = {x.topic: x for x in await feedback_store.labels_for(conn, paper_id)}
         reactions = {r.topic: r for r in await word_store.reactions_for(conn, paper_id)}
         by_topic: dict[str, list] = {}
@@ -84,13 +84,13 @@ async def settle(conn: psycopg.AsyncConnection, paper_id: str) -> Settled:
 
         result = Settled(paper_id)
         after: dict[str, Grade | None] = {}
-        # A stored grade for a topic that is no longer Watch is removed, with its event.
-        involved = (set(watched) & (set(labels) | set(reactions) | set(by_topic))) | set(before)
+        # A stored grade for a topic no longer followed at Focus is removed, with its event.
+        involved = (set(focus) & (set(labels) | set(reactions) | set(by_topic))) | set(before)
         for topic in sorted(involved):
             word = owners_word(labels.get(topic), reactions.get(topic))
             old = before.get(topic)
             verdict = current_verdict(by_topic.get(topic, []))
-            new = after[topic] = effective_grade(word, verdict) if topic in watched else None
+            new = after[topic] = effective_grade(word, verdict) if topic in focus else None
             if new != old:
                 result.grades[topic] = (old, new)
                 await word_store.set_effective(conn, paper_id, topic, new)
@@ -152,10 +152,19 @@ async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Se
         return await settle(conn, paper_id)
 
 
+async def save_taxonomy(conn: psycopg.AsyncConnection, tree: Taxonomy) -> taxonomy_store.Saved:
+    """Save the taxonomy and, in the same transaction, settle the papers of every topic it
+    changed: a topic no longer followed at Focus takes its grades with it."""
+    async with conn.transaction():
+        saved = await taxonomy_store.save(conn, tree)
+        for slug in saved.changed_topics:
+            await settle_topic(conn, slug)
+    return saved
+
+
 async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
-    """Settle every paper the topic has a grade, verdict or word for, in id order: after its
-    kind or content changed, so a topic that stopped being Watch takes its grades with it.
-    Call it in the transaction that saved the topic, after `topics.kind_for_update`."""
+    """Settle every paper the topic has a grade, verdict or word for, in id order. Call it in
+    the transaction that changed the topic, after `taxonomy.lock`."""
     rows = await (
         await conn.execute(
             "SELECT paper_id FROM effective_grades WHERE topic = %(t)s "

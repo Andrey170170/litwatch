@@ -1,4 +1,4 @@
-"""Looking a paper up by its arXiv link, and reporting it as a miss for a Watch topic.
+"""Looking a paper up by its arXiv link, and reporting it as a miss for a Focus topic.
 
 Filing a miss is the owner's word (a label of relevant, origin `miss`), so it saves the paper
 like any label.

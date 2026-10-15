@@ -31,9 +31,11 @@ evaluation calls the same functions and writes only to evaluation tables.
 
 - `classes` (id, parent, name, description, threshold, position, version) and `class_versions` (class, revision, hash,
   content, saved at): the taxonomy, edited in Settings.
-- `topics` is reshaped: (class, depth focus|area|field, subject, rubric, interests, keywords, icon, colour, position,
-  status, version). A topic points at one class; the class's description is what the classifier reads, the topic's
-  subject and rubric are what the graders read.
+- `topics` is reshaped: (class, depth focus|area|field, subject, rubric, interests, keywords, monogram, colour,
+  position, status, version). A topic points at one class; the class's description is what the classifier reads, the
+  topic's subject and rubric are what the graders read. Unfollowing a class deletes its topic row; its versions stay in
+  `topic_versions`, and following it again continues from the last one. A class taken out of the tree is retired, its
+  row kept; putting the same slug back brings it back, with its memberships.
 - `classifications` (paper, paper revision, taxonomy revision, primary class, the decision response with every class's
   probability, model, at) and `memberships` (paper, class, paper revision, class version, source classifier |
   uncertain | keyword | owner | miss, member yes | no, probability): direct memberships only, a "no" being the

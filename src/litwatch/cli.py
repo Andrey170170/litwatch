@@ -18,7 +18,7 @@ from rich.console import Console
 from litwatch import config as configuration
 from litwatch import seeds, store
 from litwatch.archive import ArchiveError
-from litwatch.core import Topic
+from litwatch.core import Taxonomy
 from litwatch.feedback import word
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
@@ -29,17 +29,15 @@ from litwatch.jobs.lock import run_lock
 from litwatch.publications import Dblp
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="litwatch")
 db_app = typer.Typer(no_args_is_help=True, help="Database migrations.")
-topics_app = typer.Typer(no_args_is_help=True, help="Topics as YAML, in and out.")
 eval_app = typer.Typer(no_args_is_help=True, help="Dry runs measured against the owner's labels.")
 library_app = typer.Typer(no_args_is_help=True, help="Effective grades and the library.")
-taxonomy_app = typer.Typer(no_args_is_help=True, help="The class tree and its followed topics.")
+taxonomy_app = typer.Typer(no_args_is_help=True, help="The class tree and its topics, as YAML.")
 intake_app = typer.Typer(help="Take papers in: from arXiv, or a window from the archive.")
 app.add_typer(db_app, name="db")
-app.add_typer(topics_app, name="topics")
 app.add_typer(eval_app, name="eval")
 app.add_typer(library_app, name="library")
 app.add_typer(taxonomy_app, name="taxonomy")
@@ -150,57 +148,49 @@ def nightly(
     console.print_json(data=run["counts"])
 
 
-# -- topics ----------------------------------------------------------------------------------------
+# -- the taxonomy ----------------------------------------------------------------------------------
 
 
-@topics_app.command("list")
-def topics_list() -> None:
-    for topic in _run(lambda conn: topics_store.all(conn, None)):
-        console.print(
-            f"{topic.kind.value:6} {topic.status.value:7} r{topic.revision}  {topic.slug}"
-            f"  ({len(topic.keywords)} keywords)"
-        )
+def _taxonomy_file(path: Path | None) -> Taxonomy:
+    try:
+        return seeds.taxonomy(path)
+    except (ValueError, OSError, yaml.YAMLError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
 
 
-async def _save_all(conn: psycopg.AsyncConnection, topics: list[Topic]) -> list[Topic]:
-    """Save the topics; one whose kind or model-visible content changed has its papers
-    settled again (a topic no longer Watch drops its grades)."""
-    saved = []
-    for topic in topics:
-        # The kind is read under the row lock the save takes, so a concurrent import cannot
-        # make this one miss the transition.
-        async with conn.transaction():
-            before = await topics_store.kind_for_update(conn, topic.slug)
-            revision = (await topics_store.get(conn, topic.slug) or topic).revision
-            saved.append(await topics_store.save(conn, topic))
-            if before is not None and (before != topic.kind or saved[-1].revision != revision):
-                await word.settle_topic(conn, topic.slug)
-    return saved
-
-
-@topics_app.command("import")
-def topics_import(
-    path: Annotated[Path | None, typer.Argument(help="A YAML file or a directory of them.")] = None,
-    starter: Annotated[bool, typer.Option(help="The topics shipped with litwatch.")] = False,
+@taxonomy_app.command("import")
+def taxonomy_import(
+    path: Annotated[Path | None, typer.Argument(help="A taxonomy YAML; default the seed.")] = None,
 ) -> None:
-    """Create or update topics. A changed topic gets a new revision and applies forward."""
-    if (path is not None) == starter:
-        raise typer.BadParameter("give a path or --starter")
+    """Make the file the taxonomy. A changed class or topic gets a new revision and applies
+    forward; a class left out is retired, a topic left out unfollowed."""
+    tree = _taxonomy_file(path)
+    saved = _run(lambda conn: word.save_taxonomy(conn, tree))
+    console.print(f"{len(tree.classes)} classes, {len(tree.topics)} topics")
+    for what, slugs in (
+        ("new revisions of classes", saved.revised_classes),
+        ("retired classes", saved.retired_classes),
+        ("new revisions of topics", saved.revised_topics),
+        ("unfollowed topics", saved.unfollowed_topics),
+    ):
+        if slugs:
+            console.print(f"{what}: {', '.join(slugs)}")
 
-    async def work(conn: psycopg.AsyncConnection) -> list[Topic]:
-        return await _save_all(conn, seeds.starter() if starter else seeds.load(path))
 
-    for topic in _run(work):
-        console.print(f"{topic.slug}: {topic.kind.value}, revision {topic.revision}")
-
-
-@topics_app.command("export")
-def topics_export(directory: Path) -> None:
-    """Write every topic to `<directory>/<slug>.yaml`."""
-    directory.mkdir(parents=True, exist_ok=True)
-    for topic in _run(lambda conn: topics_store.all(conn, None)):
-        (directory / f"{topic.slug}.yaml").write_text(seeds.dump(topic))
-        console.print(f"wrote {topic.slug}.yaml")
+@taxonomy_app.command("export")
+def taxonomy_export(
+    path: Annotated[Path | None, typer.Argument(help="Default: standard output.")] = None,
+) -> None:
+    """Write the taxonomy in the database as YAML, in the format `import` reads."""
+    tree = _run(taxonomy_store.load)
+    if tree is None:
+        raise SystemExit("no taxonomy yet: `litwatch taxonomy import` the seed first")
+    text = seeds.dump_taxonomy(tree)
+    if path is None:
+        typer.echo(text, nl=False)
+    else:
+        path.write_text(text)
 
 
 @taxonomy_app.command("check")
@@ -208,11 +198,7 @@ def taxonomy_check(
     path: Annotated[Path | None, typer.Argument(help="A taxonomy YAML; default the seed.")] = None,
 ) -> None:
     """Validate a taxonomy file and summarise it."""
-    try:
-        tree = seeds.taxonomy(path)
-    except (ValueError, OSError, yaml.YAMLError) as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+    tree = _taxonomy_file(path)
     levels = Counter(tree.level(c.slug) for c in tree.classes)
     console.print(
         f"{len(tree.classes)} classes ("
@@ -220,7 +206,7 @@ def taxonomy_check(
         + ")"
     )
     for topic in tree.topics:
-        console.print(f"{topic.depth.value:6} {topic.monogram}  {tree.get(topic.class_).name}")
+        console.print(f"{topic.depth.value:6} {topic.monogram}  {tree.get(topic.slug).name}")
 
 
 # -- evaluation ------------------------------------------------------------------------------------

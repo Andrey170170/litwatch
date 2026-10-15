@@ -126,7 +126,7 @@ def results(path: Path) -> dict[str, Result]:
 def fingerprint(gateway: Gateway, tree: Taxonomy) -> str:
     """The role's configuration, the questions and the Focus keyword patterns, hashed."""
     role = gateway.models.role(classification.ROLE).model_dump_json()
-    patterns = {t.class_: t.keywords for t in tree.topics if t.depth == Depth.FOCUS}
+    patterns = {t.slug: t.keywords for t in tree.topics if t.depth == Depth.FOCUS}
     asked = repr((classification.questions(tree), patterns))
     return hashlib.sha256(f"{role}\n{asked}".encode()).hexdigest()[:12]
 
@@ -245,7 +245,7 @@ def _table(head: list[str], rows: Iterable[Iterable[object]]) -> list[str]:
 
 def _gradings(tree: Taxonomy, drawn: list[set[str]], depth: Depth) -> str:
     """Gradings per 100 papers for the topics of one depth."""
-    slugs = {t.class_ for t in tree.topics if t.depth == depth}
+    slugs = {t.slug for t in tree.topics if t.depth == depth}
     return f"{100 * sum(len(g & slugs) for g in drawn) / len(drawn):.0f}" if drawn else "–"
 
 
@@ -270,7 +270,7 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
     paper a candidate failed on counts against it (it reaches classes by keyword alone); papers
     with no answer at all (no text in the database) are left out."""
     names = list(runs)
-    focus = [t.class_ for t in tree.topics if t.depth == Depth.FOCUS]
+    focus = [t.slug for t in tree.topics if t.depth == Depth.FOCUS]
     at_default = {n: {p: members(tree, r) for p, r in runs[n].items()} for n in names}
     lines: list[str] = ["## Runs", ""]
 
@@ -373,10 +373,10 @@ def report(tree: Taxonomy, labels: Labels, runs: dict[str, dict[str, Result]]) -
     ]
     rows = []
     for t in tree.topics:
-        row: list[object] = [t.class_, t.depth.value]
+        row: list[object] = [t.slug, t.depth.value]
         for n in names:
             drawn = [runs[n][p] for p in labels.draw if p in runs[n]]
-            hit = sum(t.class_ in graded(tree, r) for r in drawn)
+            hit = sum(t.slug in graded(tree, r) for r in drawn)
             row.append(f"{hit / len(drawn):.1%}" if drawn else "–")
         rows.append(row)
     per_paper = ["direct memberships per paper", ""]

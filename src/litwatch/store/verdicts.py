@@ -1,4 +1,4 @@
-"""Verdicts: every grading of a paper for a Watch topic, each its own row."""
+"""Verdicts: every grading of a paper for a Focus topic, each its own row."""
 
 from __future__ import annotations
 

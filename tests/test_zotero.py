@@ -16,8 +16,8 @@ from litwatch.jobs import publications as lookups
 from litwatch.store import integrations as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
-from tests.conftest import FAITH, TOPICS, deliver, paper, start
+from litwatch.store import taxonomy as taxonomy_store
+from tests.conftest import FAITH, TREE, deliver, paper, start
 from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
 
 P = paper(
@@ -49,8 +49,7 @@ CARD = {
 
 @pytest.fixture
 async def world(conn):
-    for topic in TOPICS:
-        await topics_store.save(conn, topic)
+    await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [P])
     return conn
 
@@ -106,7 +105,7 @@ async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_
     assert fake.collection_names(key) == {"Litwatch", "Tier 1"}
     assert "litwatch:watch:cot-faithfulness:must_read" in fake.tags(key)
     (note,) = fake.notes(key)
-    assert "litwatch:screen schema=2" in note and "CoT faithfulness" in note
+    assert "litwatch:screen schema=2" in note and "Chain-of-thought faithfulness" in note
 
     await say(conn, LabelValue.RELEVANT, Grade.RELEVANT)
     await run(conn, z)
@@ -163,7 +162,7 @@ async def test_grades_published_versions_and_cards_reach_the_notes(world):
     await run(conn, z)
     (item,) = fake.tops()
     key = item["key"]
-    assert "CoT faithfulness</b> · must read" in fake.notes(key)[0]
+    assert "Chain-of-thought faithfulness</b> · must read" in fake.notes(key)[0]
 
     await lookups.store_record(
         conn, P.id, Publication(venue="NeurIPS", year=2026, doi="10.1/x"), by_owner=True

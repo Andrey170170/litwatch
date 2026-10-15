@@ -1,6 +1,6 @@
 """Calibrate: the one place that asks (spec §8 M3, decision 20).
 
-A session holds about twenty papers, split evenly across the Watch topics and, within each,
+A session holds about twenty papers, split evenly across the active Focus topics and, within each,
 half drawn at random from the papers graded relevant or above in the trailing 30 days and
 half from those graded below, all without a label for that topic. On request it continues
 with papers waiting for a word: last night's splits and papers carrying a word-carrying
@@ -15,9 +15,9 @@ from typing import Any, Literal
 import psycopg
 from pydantic import BaseModel, model_validator
 
-from litwatch.core import Grade, Label, LabelOrigin, LabelValue, TopicKind
+from litwatch.core import Depth, Grade, Label, LabelOrigin, LabelValue, Status
 from litwatch.feedback import word
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 
 SESSION = 20
 DRAW_DAYS = 30
@@ -51,12 +51,13 @@ async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[
 
 async def draw(conn: psycopg.AsyncConnection, seed: int, size: int = SESSION) -> int:
     """Draw a session and return its id. The seed is recorded, so the draw can be repeated."""
-    watched = [t.slug for t in await topics_store.all(conn) if t.kind == TopicKind.WATCH]
-    per_group = max(1, size // (2 * max(1, len(watched))))
+    active = await taxonomy_store.topics(conn, Status.ACTIVE)
+    focus = [t.slug for t in active if t.depth == Depth.FOCUS]
+    per_group = max(1, size // (2 * max(1, len(focus))))
     rng = random.Random(seed)
     picked: list[tuple[str, str, str, int]] = []
     seen: set[str] = set()
-    for topic in watched:
+    for topic in focus:
         for above in (True, False):
             pool = [r for r in await _pool(conn, topic, above) if r["paper_id"] not in seen]
             for row in rng.sample(pool, min(per_group, len(pool))):
@@ -102,7 +103,7 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
             SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic, 'split' AS why,
                    v.id AS verdict_id, v.judge->>'grade' AS a, v.check_opinion->>'grade' AS b,
                    v.recorded_at
-            FROM verdicts v JOIN topics t ON t.slug = v.topic AND t.kind = 'watch'
+            FROM verdicts v JOIN topics t ON t.class = v.topic AND t.depth = 'focus'
             ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.topic_revision DESC,
                      v.recorded_at DESC, v.id DESC) s
         WHERE (a IN ('must_read', 'relevant')) <> (b IN ('must_read', 'relevant'))
@@ -114,11 +115,12 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
                           AND l.topic = s.topic AND NOT l.provisional)
         UNION ALL
         SELECT m.paper_id, m.topic, 'miss', NULL, NULL, NULL FROM misses m
+        JOIN topics t ON t.class = m.topic AND t.depth = 'focus'
         WHERE NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = m.paper_id
                           AND l.topic = m.topic AND NOT l.provisional)
         UNION ALL
         SELECT r.paper_id, r.topic, 'reaction', NULL, NULL, NULL FROM reactions r
-        JOIN topics t ON t.slug = r.topic AND t.kind = 'watch'
+        JOIN topics t ON t.class = r.topic AND t.depth = 'focus'
         WHERE r.reason IN ('unrelated', 'great_find')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = r.paper_id
                           AND l.topic = r.topic AND NOT l.provisional)
@@ -186,9 +188,9 @@ async def answer(
         raise LookupError("no such item")
     if item["topic"] not in given.fit:
         raise ValueError(f"fit for {item['topic']} is required")
-    watched = {t.slug for t in await topics_store.all(conn, None) if t.kind == TopicKind.WATCH}
-    if unknown := sorted(set(given.fit) - watched):
-        raise ValueError(f"not Watch topics: {', '.join(unknown)}")
+    focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
+    if unknown := sorted(set(given.fit) - focus):
+        raise ValueError(f"not Focus topics: {', '.join(unknown)}")
     async with conn.transaction():
         for topic, fit in given.fit.items():
             # The drawn topic's answer is the sample; any other is the owner's own choice.
@@ -251,21 +253,21 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
 
 
 async def precision(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
-    """Per Watch topic over the trailing 90 days of draws: precision at relevant (the drawn
+    """Per Focus topic over the trailing 90 days of draws: precision at relevant (the drawn
     upper group labelled relevant) and how often grading dropped a wanted paper (the lower
     group labelled relevant). Unsure and unanswered draws count nowhere."""
     rows = await _all(
         conn,
         """
-        SELECT t.slug AS topic, i.why,
+        SELECT t.class AS topic, i.why,
                count(*) FILTER (WHERE i.answer IS NOT NULL AND i.answer <> 'unsure') AS answered,
                count(*) FILTER (WHERE i.answer = 'relevant') AS relevant
         FROM topics t
-        JOIN calibration_items i ON i.topic = t.slug AND i.why IN ('above', 'below')
+        JOIN calibration_items i ON i.topic = t.class AND i.why IN ('above', 'below')
         JOIN calibration_sessions s ON s.id = i.session_id
              AND s.drawn_at >= now() - make_interval(days => %s)
-        WHERE t.kind = 'watch'
-        GROUP BY t.slug, t.position, i.why ORDER BY t.position, i.why
+        WHERE t.depth = 'focus'
+        GROUP BY t.class, t.position, i.why ORDER BY t.position, i.why
         """,
         (PRECISION_DAYS,),
     )
@@ -281,7 +283,7 @@ async def precision(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
 
 async def matters_no_topic(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
     """Papers whose newest appraisal is "matters" and that are below relevant for every
-    Watch topic, earlier words included: a missing topic or a narrow rubric."""
+    Focus topic, earlier words included: a missing topic or a narrow rubric."""
     return await _all(
         conn,
         """
@@ -290,8 +292,8 @@ async def matters_no_topic(conn: psycopg.AsyncConnection) -> list[dict[str, Any]
             ORDER BY paper_id, at DESC, id DESC) a
         JOIN papers p ON p.id = a.paper_id
         WHERE a.value = 'matters'
-          AND NOT EXISTS (SELECT 1 FROM effective_grades g JOIN topics t ON t.slug = g.topic
-                          WHERE g.paper_id = a.paper_id AND t.kind = 'watch'
+          AND NOT EXISTS (SELECT 1 FROM effective_grades g JOIN topics t ON t.class = g.topic
+                          WHERE g.paper_id = a.paper_id AND t.depth = 'focus'
                             AND g.grade IN ('must_read', 'relevant'))
         ORDER BY a.at DESC
         """,

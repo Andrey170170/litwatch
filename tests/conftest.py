@@ -7,31 +7,49 @@ from uuid import uuid4
 import pytest
 
 from litwatch import store
-from litwatch.core import Paper, Topic, TopicKind
+from litwatch.core import Depth, Paper, Taxonomy, TaxonomyClass, Topic
 from litwatch.events import dispatch
 
+# A small tree with one topic at each depth: Focus under its Area, a Field beside them.
 FAITH = Topic(
     slug="cot-faithfulness",
-    name="CoT faithfulness",
-    kind=TopicKind.WATCH,
+    depth=Depth.FOCUS,
+    monogram="CF",
+    colour="#c026d3",
     subject="Whether a reasoning trace omits or contradicts a computation the model performed.",
     rubric="A method or benchmark for detecting such mismatch, meant to transfer across tasks.",
     keywords=[r"chain.of.thought", r"\bCoT\b", "faithful"],
 )
 INTERP = Topic(
     slug="interpretability",
-    name="Interpretability",
-    kind=TopicKind.RADAR,
+    depth=Depth.AREA,
+    monogram="IN",
+    colour="#4f46e5",
     subject="Understanding the internal mechanisms and representations of neural networks.",
     interests="Methods that could verify what a reasoning trace claims.",
 )
 AGENTS = Topic(
     slug="agents",
-    name="Agents",
-    kind=TopicKind.PULSE,
+    depth=Depth.FIELD,
+    monogram="AG",
+    colour="#ca8a04",
     subject="Language models acting over multiple steps with tools and memory.",
 )
 TOPICS = [FAITH, INTERP, AGENTS]
+TREE = Taxonomy(
+    classes=[
+        TaxonomyClass(slug="interpretability", name="Interpretability", description=INTERP.subject),
+        TaxonomyClass(
+            slug="cot-faithfulness",
+            name="Chain-of-thought faithfulness",
+            description=FAITH.subject,
+            parent="interpretability",
+        ),
+        TaxonomyClass(slug="agents", name="Agents and tool use", description=AGENTS.subject),
+        TaxonomyClass(slug="other", name="Other", description="Papers that fit nothing above."),
+    ],
+    topics=TOPICS,
+)
 
 
 def paper(id: str = "2609.11934", **fields) -> Paper:

@@ -13,7 +13,7 @@ from litwatch.core import Event
 PAPER_ADDED = "paper.added"
 PAPER_REVISED = "paper.revised"
 VERDICT_RECORDED = "verdict.recorded"
-# A paper's effective grade for a Watch topic changed, by a verdict or the owner's word.
+# A paper's effective grade for a Focus topic changed, by a verdict or the owner's word.
 GRADE_CHANGED = "grade.changed"
 PAPER_SAVED = "paper.saved"
 PAPER_UNSAVED = "paper.unsaved"

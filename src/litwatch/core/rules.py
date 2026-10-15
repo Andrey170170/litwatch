@@ -35,7 +35,7 @@ def current_verdict(verdicts: Iterable[Verdict]) -> Verdict | None:
     )
 
 
-# The two reasons that make a reaction the owner's word on a Watch topic.
+# The two reasons that make a reaction the owner's word on a Focus topic.
 WORDS = {
     ReactionReason.UNRELATED: LabelValue.NOT_RELEVANT,
     ReactionReason.GREAT_FIND: LabelValue.RELEVANT,
@@ -44,7 +44,7 @@ _NOW = datetime.max.replace(tzinfo=UTC)
 
 
 def owners_word(label: Label | None, reaction: Reaction | None) -> Word | None:
-    """The owner's word on a paper for a Watch topic: the newer of the label and the reaction.
+    """The owner's word on a paper for a Focus topic: the newer of the label and the reaction.
 
     Only two reasons make a reaction a word ("unrelated" and "great find"). An unsure label is
     no word, and a provisional label, accepted in bulk, is older than either. A time not yet
@@ -84,7 +84,7 @@ def effective_grade(word: Word | Label | None, verdict: Verdict | None) -> Grade
 
 
 def in_library(hand: Hand | None, grades: Iterable[Grade | None]) -> bool:
-    """Whether a paper is saved: the owner's newest use of the toggle, else any Watch topic at
+    """Whether a paper is saved: the owner's newest use of the toggle, else any Focus topic at
     an effective grade of `relevant` or above."""
     if hand is not None:
         return hand == Hand.SAVE

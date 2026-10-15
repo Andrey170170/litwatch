@@ -13,6 +13,7 @@ from litwatch.core.search import (
     SearchHit,
     SearchProvider,
 )
+from litwatch.core.taxonomy import Depth, Taxonomy, TaxonomyClass, Topic
 from litwatch.core.types import (
     Event,
     Grade,
@@ -27,14 +28,13 @@ from litwatch.core.types import (
     ReactionReason,
     ReactionValue,
     Status,
-    Topic,
-    TopicKind,
     Verdict,
     Word,
 )
 
 __all__ = [
     "SEARCH_TIMEOUT_SECONDS",
+    "Depth",
     "Event",
     "Grade",
     "Hand",
@@ -51,8 +51,9 @@ __all__ = [
     "SearchHit",
     "SearchProvider",
     "Status",
+    "Taxonomy",
+    "TaxonomyClass",
     "Topic",
-    "TopicKind",
     "Verdict",
     "Word",
     "current_verdict",

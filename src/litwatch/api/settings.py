@@ -1,5 +1,5 @@
-"""Settings, the kitchen behind the gear: topics, Quality, Calibrate, runs, and the
-configuration (read-only, spec decision 11)."""
+"""Settings, the kitchen behind the gear: the taxonomy and its topics, Quality, Calibrate,
+runs, and the configuration (read-only, spec decision 11)."""
 
 from __future__ import annotations
 
@@ -11,42 +11,45 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
 from litwatch.api.deps import Conn
-from litwatch.core import Topic
+from litwatch.core import Taxonomy, Topic
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
 from litwatch.store import quality
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 
 router = APIRouter(prefix="/api/settings")
 
 SECRET_WORDS = ("key", "token", "password", "secret", "authorization", "credential")
 
 
-# -- topics ----------------------------------------------------------------------------------------
+# -- the taxonomy ----------------------------------------------------------------------------------
 
 
-@router.get("/topics")
-async def topics(c: Conn) -> list[Topic]:
-    return await topics_store.all(c, None)
+@router.get("/taxonomy")
+async def taxonomy(c: Conn) -> Taxonomy | None:
+    """The class tree and the followed topics; null before one is imported."""
+    return await taxonomy_store.load(c)
 
 
 @router.put("/topics/{slug}")
 async def save_topic(slug: str, body: dict[str, Any], c: Conn) -> Topic:
-    """Create or edit a topic. Edits apply forward; a change of kind or content settles the
-    topic's papers again (see feedback.word.settle_topic)."""
-    try:
-        topic = Topic.model_validate(body | {"slug": slug})
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=422, detail=exc.errors(include_url=False, include_context=False)
-        ) from exc
+    """Follow class `slug`, or edit its topic. The class takes the subject as its description.
+    Edits apply forward; a change of depth or content settles the topic's papers again (see
+    feedback.word.save_taxonomy)."""
     async with c.transaction():
-        before = await topics_store.kind_for_update(c, slug)
-        revision = (await topics_store.get(c, slug) or topic).revision
-        saved = await topics_store.save(c, topic)
-        if before is not None and (before != topic.kind or saved.revision != revision):
-            await word.settle_topic(c, slug)
-    return saved
+        await taxonomy_store.lock(c)
+        tree = await taxonomy_store.load(c)
+        if tree is None or slug not in {cls.slug for cls in tree.classes}:
+            raise HTTPException(status_code=404, detail="no such class")
+        try:
+            topic = Topic.model_validate(body | {"class": slug})
+            changed = tree.following(topic)
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=422, detail=exc.errors(include_url=False, include_context=False)
+            ) from exc
+        await word.save_taxonomy(c, changed)
+    return topic
 
 
 class Order(BaseModel):
@@ -56,15 +59,11 @@ class Order(BaseModel):
 @router.put("/topics-order", status_code=204)
 async def order(body: Order, c: Conn) -> None:
     """The owner's order, which topic lists and cards follow. The list must name every topic
-    once. Rows are locked as a topic save locks them."""
-    async with c.transaction():
-        rows = await (
-            await c.execute("SELECT slug FROM topics ORDER BY slug FOR UPDATE")
-        ).fetchall()
-        if sorted(body.slugs) != [r["slug"] for r in rows]:
-            raise HTTPException(status_code=422, detail="name every topic exactly once")
-        for position, slug in enumerate(body.slugs, 1):
-            await c.execute("UPDATE topics SET position = %s WHERE slug = %s", (position, slug))
+    once."""
+    try:
+        await taxonomy_store.set_order(c, body.slugs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # -- quality ---------------------------------------------------------------------------------------
@@ -72,7 +71,7 @@ async def order(body: Order, c: Conn) -> None:
 
 @router.get("/quality")
 async def quality_page(c: Conn) -> dict[str, Any]:
-    """At the top, what last night left; below, how well the Watch topics are doing."""
+    """At the top, what last night left; below, how well the Focus topics are doing."""
     night = await quality.last_night(c)
     since = night["started_at"] if night else date.today() - timedelta(days=1)
     return {

@@ -16,9 +16,9 @@ from litwatch.core import (
 from litwatch.feedback import calibrate, word
 from litwatch.feedback.calibrate import Answer, Fit
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import FAITH, TOPICS, paper
+from tests.conftest import FAITH, TREE, paper
 
 ABOVE = [paper(f"2610.0010{i}") for i in range(3)]
 BELOW = [paper(f"2610.0020{i}") for i in range(3)]
@@ -26,8 +26,7 @@ BELOW = [paper(f"2610.0020{i}") for i in range(3)]
 
 @pytest.fixture
 async def db(conn):
-    for topic in TOPICS:
-        await topics_store.save(conn, topic)
+    await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, ABOVE + BELOW)
     for p, g in [(p, "relevant") for p in ABOVE] + [(p, "none") for p in BELOW]:
         await verdicts.add(
@@ -77,7 +76,7 @@ async def test_answers_become_labels_and_appraisals(db):
         await db.execute("SELECT * FROM labels WHERE paper_id = %s", (item["paper_id"],))
     ).fetchone()
     assert (label["value"], label["origin"]) == ("not_relevant", "sample")
-    # It matters but fits no Watch topic: a missing topic or a narrow rubric.
+    # It matters but fits no Focus topic: a missing topic or a narrow rubric.
     (listed,) = await calibrate.matters_no_topic(db)
     assert (listed["paper_id"], listed["note"]) == (item["paper_id"], "about steering, not traces")
 
@@ -168,22 +167,25 @@ def test_relevant_takes_must_read_or_worth_reading_and_nothing_else_takes_a_grad
     assert Fit(value="relevant", grade="must_read").grade == Grade.MUST_READ
 
 
-async def test_more_takes_in_an_unmarked_miss(db):
-    missed = paper("2610.00400")
-    await papers_store.upsert(db, [missed])
+async def test_more_takes_in_an_unmarked_miss_for_a_focus_topic_only(db):
+    missed, elsewhere = paper("2610.00400"), paper("2610.00401")
+    await papers_store.upsert(db, [missed, elsewhere])
     await db.execute(
-        "INSERT INTO misses (paper_id, topic) VALUES (%s, %s)", (missed.id, FAITH.slug)
+        "INSERT INTO misses (paper_id, topic) VALUES (%s, %s), (%s, 'interpretability')",
+        (missed.id, FAITH.slug, elsewhere.id),
     )
     session_id = await calibrate.draw(db, seed=5, size=0)
     await calibrate.more(db, session_id)
-    assert (missed.id, "miss") in {(i["paper_id"], i["why"]) for i in await items(db, session_id)}
+    taken = {(i["paper_id"], i["why"]) for i in await items(db, session_id)}
+    assert (missed.id, "miss") in taken
+    assert (elsewhere.id, "miss") not in taken  # no label can be given for an Area topic
 
 
-async def test_fit_names_only_watch_topics(db):
+async def test_fit_names_only_focus_topics(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: Fit(value="not_relevant"), "interpretability": Fit(value="not_relevant")}
-    with pytest.raises(ValueError, match="not Watch topics: interpretability"):
+    with pytest.raises(ValueError, match="not Focus topics: interpretability"):
         await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
 
 

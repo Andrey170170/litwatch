@@ -233,7 +233,7 @@ export interface paths {
         put?: never;
         /**
          * Report Miss
-         * @description File a miss for a Watch topic.
+         * @description File a miss for a Focus topic.
          */
         post: operations["report_miss_api_misses_post"];
         delete?: never;
@@ -242,15 +242,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/settings/topics": {
+    "/api/settings/taxonomy": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Topics */
-        get: operations["topics_api_settings_topics_get"];
+        /**
+         * Taxonomy
+         * @description The class tree and the followed topics; null before one is imported.
+         */
+        get: operations["taxonomy_api_settings_taxonomy_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -269,8 +272,9 @@ export interface paths {
         get?: never;
         /**
          * Save Topic
-         * @description Create or edit a topic. Edits apply forward; a change of kind or content settles the
-         *     topic's papers again (see feedback.word.settle_topic).
+         * @description Follow class `slug`, or edit its topic. The class takes the subject as its description.
+         *     Edits apply forward; a change of depth or content settles the topic's papers again (see
+         *     feedback.word.save_taxonomy).
          */
         put: operations["save_topic_api_settings_topics__slug__put"];
         post?: never;
@@ -291,7 +295,7 @@ export interface paths {
         /**
          * Order
          * @description The owner's order, which topic lists and cards follow. The list must name every topic
-         *     once. Rows are locked as a topic save locks them.
+         *     once.
          */
         put: operations["order_api_settings_topics_order_put"];
         post?: never;
@@ -310,7 +314,7 @@ export interface paths {
         };
         /**
          * Quality Page
-         * @description At the top, what last night left; below, how well the Watch topics are doing.
+         * @description At the top, what last night left; below, how well the Focus topics are doing.
          */
         get: operations["quality_page_api_settings_quality_get"];
         put?: never;
@@ -655,7 +659,7 @@ export interface components {
         };
         /**
          * Chosen
-         * @description One Watch topic's current verdict on the paper.
+         * @description One Focus topic's current verdict on the paper.
          */
         Chosen: {
             /** Topic */
@@ -704,6 +708,12 @@ export interface components {
             /** Written At */
             written_at?: string | null;
         };
+        /**
+         * Depth
+         * @description How closely the owner follows a topic: the research question, the area, the wider field.
+         * @enum {string}
+         */
+        Depth: "focus" | "area" | "field";
         /** DrawIn */
         DrawIn: {
             /** Seed */
@@ -754,7 +764,7 @@ export interface components {
         };
         /**
          * Grade
-         * @description A Watch topic's judgement of a paper, most inclusive first.
+         * @description A Focus topic's judgement of a paper, most inclusive first.
          * @enum {string}
          */
         Grade: "must_read" | "relevant" | "adjacent" | "none";
@@ -962,7 +972,7 @@ export interface components {
             slug: string;
             /** Name */
             name: string;
-            kind: components["schemas"]["TopicKind"];
+            depth: components["schemas"]["Depth"];
             /** Colour */
             colour?: string | null;
             grade?: components["schemas"]["Grade"] | null;
@@ -1131,15 +1141,48 @@ export interface components {
             token: string;
         };
         /**
-         * Topic
-         * @description Something the owner follows. `revision` is set by the store when the topic is saved.
+         * Taxonomy
+         * @description The tree, parents before children and siblings in the owner's order, and the followed
+         *     topics in the owner's order. Construction fails with every problem found.
          */
-        Topic: {
+        Taxonomy: {
+            /** Classes */
+            classes: components["schemas"]["TaxonomyClass"][];
+            /** Topics */
+            topics?: components["schemas"]["Topic"][];
+        };
+        /**
+         * TaxonomyClass
+         * @description One node of the tree. `parent` is the parent's slug, None at the top.
+         */
+        TaxonomyClass: {
             /** Slug */
             slug: string;
             /** Name */
             name: string;
-            kind: components["schemas"]["TopicKind"];
+            /** Description */
+            description: string;
+            /** Parent */
+            parent?: string | null;
+            /** Threshold */
+            threshold?: number | null;
+        };
+        /**
+         * Topic
+         * @description A class the owner follows, keyed by the class's slug (`class` in YAML and JSON). The
+         *     graders read its subject (the Fit definition) and, for a Focus topic, its rubric (what each
+         *     Fit level means for it).
+         */
+        Topic: {
+            /** Class */
+            class: string;
+            depth: components["schemas"]["Depth"];
+            /** Monogram */
+            monogram: string;
+            /** Colour */
+            colour: string;
+            /** @default active */
+            status: components["schemas"]["litwatch__core__types__Status"];
             /** Subject */
             subject: string;
             /** Rubric */
@@ -1148,14 +1191,6 @@ export interface components {
             interests?: string | null;
             /** Keywords */
             keywords?: string[];
-            /** @default active */
-            status: components["schemas"]["litwatch__core__types__Status"];
-            /** Revision */
-            revision?: number | null;
-            /** Position */
-            position?: number | null;
-            /** Colour */
-            colour?: string | null;
         };
         /** TopicCard */
         TopicCard: {
@@ -1163,7 +1198,7 @@ export interface components {
             slug: string;
             /** Name */
             name: string;
-            kind: components["schemas"]["TopicKind"];
+            depth: components["schemas"]["Depth"];
             /** Colour */
             colour?: string | null;
             /** Status */
@@ -1179,12 +1214,6 @@ export interface components {
             /** Opened At */
             opened_at?: string | null;
         };
-        /**
-         * TopicKind
-         * @description The service a topic gets. Only Watch topics are graded per paper.
-         * @enum {string}
-         */
-        TopicKind: "watch" | "radar" | "pulse";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1219,6 +1248,7 @@ export interface components {
         };
         /**
          * Status
+         * @description Whether a topic is in use.
          * @enum {string}
          */
         litwatch__core__types__Status: "draft" | "active" | "paused";
@@ -1739,7 +1769,7 @@ export interface operations {
             };
         };
     };
-    topics_api_settings_topics_get: {
+    taxonomy_api_settings_taxonomy_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1754,7 +1784,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Topic"][];
+                    "application/json": components["schemas"]["Taxonomy"] | null;
                 };
             };
         };

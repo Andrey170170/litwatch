@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from litwatch.core import (
+    Depth,
     Grade,
     Hand,
     Label,
@@ -14,16 +15,15 @@ from litwatch.core import (
     Reaction,
     ReactionReason,
     ReactionValue,
-    TopicKind,
     Verdict,
     in_library,
     owners_word,
 )
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import FAITH, INTERP, TOPICS, paper
+from tests.conftest import FAITH, INTERP, TREE, paper
 
 T0 = datetime(2026, 10, 1, tzinfo=UTC)
 P = paper("2610.00001")
@@ -81,8 +81,7 @@ def test_the_newest_hand_outranks_every_other_reason_to_be_saved():
 
 @pytest.fixture
 async def db(conn):
-    for topic in TOPICS:
-        await topics_store.save(conn, topic)
+    await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [P])
     return conn
 
@@ -181,10 +180,14 @@ async def test_the_later_word_wins_inside_one_transaction(db):
     assert settled.saved is False
 
 
-async def test_a_topic_that_stops_being_watch_takes_its_grade_with_it(db):
+@pytest.mark.parametrize("unfollow", [False, True])
+async def test_a_topic_no_longer_followed_at_focus_takes_its_grade_with_it(db, unfollow):
     await grade(db, "relevant")
-    await topics_store.save(db, FAITH.model_copy(update={"kind": TopicKind.RADAR}))
-    assert await word.settle_topic(db, FAITH.slug) == 1
-    assert (await word.settle(db, P.id)).saved is False
+    area = FAITH.model_copy(update={"depth": Depth.AREA, "rubric": None})
+    tree = TREE.model_copy(update={"topics": [INTERP]}) if unfollow else TREE.following(area)
+    assert FAITH.slug in (await word.save_taxonomy(db, tree)).changed_topics
+    assert (await (await db.execute("SELECT saved FROM library")).fetchone())["saved"] is False
     rows = await (await db.execute("SELECT * FROM effective_grades")).fetchall()
     assert rows == []
+    _, after = (await outbox(db))[-2]  # the grade's event, then the unsave
+    assert after == {"topic": FAITH.slug, "before": "relevant", "after": None}

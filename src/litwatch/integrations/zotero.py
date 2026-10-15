@@ -4,9 +4,9 @@ Every event it hears for a paper converges that paper's item on what litwatch ho
 handling an event twice, or in a different order, ends in the same place:
 
 - a library paper gets a preprint item (found by arXiv id or title before one is made) in
-  the `Litwatch` collection, and in a subcollection for its best Watch grade;
-- tags `litwatch:watch:<topic>:<grade>` for each Watch topic at `relevant` or above;
-- a `litwatch:screen` note with the Watch grades and the published version, and a
+  the `Litwatch` collection, and in a subcollection for its best Focus grade;
+- tags `litwatch:watch:<topic>:<grade>` for each Focus topic at `relevant` or above;
+- a `litwatch:screen` note with the Focus grades and the published version, and a
   `litwatch:enrichment` note and tags from the deep card when one is stored;
 - a paper the owner unsaved, or that left the library, is taken out of the collections and
   tagged `litwatch:dropped`. Its item is never deleted.
@@ -272,7 +272,7 @@ class ZoteroClient:
         self, paper: Paper, key: str | None, grade: Grade | None, tags: list[str], attempt: str
     ) -> str:
         """Find or create the item, then converge its collections and managed tags. `grade`
-        is the paper's best Watch grade, which picks the subcollection. `attempt` names this
+        is the paper's best Focus grade, which picks the subcollection. `attempt` names this
         try (the event being handled), so a create sent twice makes one item."""
         cols = await self.collections()
         wanted = {cols.root} | ({cols.by_grade[grade]} if grade in cols.by_grade else set())
@@ -419,9 +419,9 @@ class Zotero:
                     await state.set_zotero_item(conn, paper_id, None)
             return
         paper = await papers_store.get(conn, paper_id)
-        watch = [t for t in seen["topics"] if t["kind"] == "watch" and _shown(t["grade"])]
-        best = min((Grade(t["grade"]) for t in watch), key=lambda g: g.rank, default=None)
-        tags = [f"{WATCH_TAG_PREFIX}{t['slug']}:{t['grade']}" for t in watch]
+        focus = [t for t in seen["topics"] if t["depth"] == "focus" and _shown(t["grade"])]
+        best = min((Grade(t["grade"]) for t in focus), key=lambda g: g.rank, default=None)
+        tags = [f"{WATCH_TAG_PREFIX}{t['slug']}:{t['grade']}" for t in focus]
         attempt = str(event.id)
         try:
             key = await self.zotero.ensure_item(paper, key, best, tags, attempt)
@@ -430,7 +430,7 @@ class Zotero:
             key = await self.zotero.ensure_item(paper, None, best, tags, attempt)
         await state.set_zotero_item(conn, paper_id, key)
         record = (await publications_store.found(conn, [paper_id])).get(paper_id)
-        note = screen_note(paper, watch, record)
+        note = screen_note(paper, focus, record)
         await self.zotero.upsert_note(key, note, NOTE_FIND, NOTE_TAG, attempt)
         card = await state.card(conn, paper_id)
         if card and card["card"]:
@@ -446,7 +446,7 @@ class Zotero:
             # In the inbox exactly while its card is ready and it is `must_read` for an inbox
             # topic: a paper that drops below that leaves the inbox again.
             inbox = bool(card and card["card"]) and any(
-                t["grade"] == Grade.MUST_READ and t["slug"] in self.inbox_topics for t in watch
+                t["grade"] == Grade.MUST_READ and t["slug"] in self.inbox_topics for t in focus
             )
             await self.zotero.set_in_collection(key, self.inbox_collection, inbox)
 
@@ -561,11 +561,11 @@ def webdav_payload(paper: Paper, pdf: bytes) -> tuple[bytes, bytes]:
 GRADE_WORDS = {"must_read": "must read", "relevant": "relevant"}
 
 
-def screen_note(paper: Paper, watch: list[dict[str, Any]], record: Publication | None) -> str:
-    """The `litwatch:screen` note: litwatch's grade per Watch topic, then the published
+def screen_note(paper: Paper, focus: list[dict[str, Any]], record: Publication | None) -> str:
+    """The `litwatch:screen` note: litwatch's grade per Focus topic, then the published
     version when one is known."""
     parts = [NOTE_MARKER, "<p><b>litwatch</b></p>"]
-    for topic in watch:
+    for topic in focus:
         parts.append(f"<p><b>{_esc(topic['name'])}</b> · {GRADE_WORDS[topic['grade']]}</p>")
     if record is not None:
         where = " ".join(str(x) for x in (record.venue or record.container, record.year) if x)

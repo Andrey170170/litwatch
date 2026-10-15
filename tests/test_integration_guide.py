@@ -14,9 +14,9 @@ from litwatch.core import Grade, Hand, Opinion, Verdict
 from litwatch.events import Integration
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import FAITH, TOPICS, deliver, paper, start
+from tests.conftest import FAITH, TREE, deliver, paper, start
 
 GUIDE = Path(__file__).parent.parent / "docs" / "integrations.md"
 P = paper("2610.00001", title="Traces that hide steps")
@@ -50,8 +50,7 @@ async def grade(conn, g: str) -> None:
 
 
 async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):
-    for topic in TOPICS:
-        await topics_store.save(conn, topic)
+    await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [P])
     config = Config(
         integrations={"phone": {"use": "my_litwatch_ntfy", "topic": "litwatch-must-read"}}

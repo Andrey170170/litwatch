@@ -1,13 +1,13 @@
 """deep: asks the `deep` service for a reading card on a paper, stores it, and emits
 `card.ready`.
 
-A card is made for a paper that is, when the event is handled, `must_read` for some Watch
+A card is made for a paper that is, when the event is handled, `must_read` for some Focus
 topic and in the library (`grade.changed` to `must_read`, `paper.saved`), and for any paper
 the owner asks about by hand (`card.requested`), whatever its grade or topic. A paper gets
 one card; a stored card is never replaced by an automatic event.
 
 litwatch owns all state; the service is a stateless job runner that does not deduplicate.
-It gets the paper's text, the Watch topics that make the paper `must_read` (all active Watch
+It gets the paper's text, the Focus topics that make the paper `must_read` (all active Focus
 topics for a request on a paper that is `must_read` nowhere) and the card extensions those
 topics ask for, and returns the validated card with a trace and token counts.
 
@@ -45,18 +45,18 @@ import psycopg
 
 from litwatch import events
 from litwatch.config import Config
-from litwatch.core import Event, Grade, Paper, TopicKind
+from litwatch.core import Depth, Event, Grade, Paper, Status, Topic
 from litwatch.integrations import IntegrationError, must_read_and_saved, required
 from litwatch.integrations.archive import reader
 from litwatch.integrations.papertext import BodyFetcher
 from litwatch.store import integrations as state
 from litwatch.store import papers as papers_store
-from litwatch.store import topics as topics_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
 log = logging.getLogger(__name__)
 
-# Card extensions per Watch topic; the names are the deep service's EXTENSIONS.
+# Card extensions per Focus topic; the names are the deep service's EXTENSIONS.
 EXTENSIONS = {"cot-faithfulness": "faithfulness", "cot-monitoring": "monitoring"}
 MAX_AUTOMATIC_ATTEMPTS = 3  # automatic submissions per paper, ever
 MAX_SUBMISSIONS = 3  # per event: a request, too, stops after this many unanswered submissions
@@ -253,9 +253,11 @@ class Deep:
         job_id = await self.client.submit(
             _paper(paper, *body),
             extensions=sorted(
-                {self.extensions[t.slug] for t in topics if t.slug in self.extensions}
+                {self.extensions[t.slug] for _, t in topics if t.slug in self.extensions}
             ),
-            selections=[{"name": t.name, "subject": t.subject, "rubric": t.rubric} for t in topics],
+            selections=[
+                {"name": name, "subject": t.subject, "rubric": t.rubric} for name, t in topics
+            ],
         )
         await state.job_started(conn, paper, job_id, event_id, automatic)
         return await self._follow(conn, paper_id, await state.card(conn, paper_id))
@@ -298,11 +300,19 @@ class Deep:
         )
         return None
 
-    async def _topics(self, conn: psycopg.AsyncConnection, paper_id: str, requested: bool) -> list:
+    async def _topics(
+        self, conn: psycopg.AsyncConnection, paper_id: str, requested: bool
+    ) -> list[tuple[str, Topic]]:
+        """The topics the card is for, each with its class's name."""
         grades = await word_store.effective_for(conn, paper_id)
-        watch = [t for t in await topics_store.all(conn) if t.kind == TopicKind.WATCH]
-        chosen = [t for t in watch if grades.get(t.slug) == Grade.MUST_READ]
-        return chosen or (watch if requested else [])
+        tree = await taxonomy_store.load(conn)
+        focus = [
+            (tree.get(t.slug).name, t)
+            for t in (tree.topics if tree else [])
+            if t.depth == Depth.FOCUS and t.status == Status.ACTIVE
+        ]
+        chosen = [(n, t) for n, t in focus if grades.get(t.slug) == Grade.MUST_READ]
+        return chosen or (focus if requested else [])
 
     async def _body(self, conn: psycopg.AsyncConnection, paper: Paper) -> tuple[str, str] | None:
         if stored := await papers_store.body(conn, paper.id):
