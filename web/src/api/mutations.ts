@@ -242,7 +242,8 @@ export function useGradeNow(paperId: string) {
 }
 
 /** Run a full-text pass that waits on the owner now: failed three runs, or awaiting its text over a week. A 409
- * means the page is behind (it ran, or the text changed): the paper is refetched. */
+ * means the page is behind (it ran, or the text changed): the paper is refetched and the cached Needs you page
+ * reconciled from it, as after a write. */
 export function useRunPassNow(paperId: string) {
   const qc = useQueryClient();
   return usePaperMutation(
@@ -251,7 +252,7 @@ export function useRunPassNow(paperId: string) {
       try {
         return ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: passId } } }));
       } catch (e) {
-        if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["paper", id] });
+        if (e instanceof ApiError && e.status === 409) await settled(qc, id);
         throw e;
       }
     },

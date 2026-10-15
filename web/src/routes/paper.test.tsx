@@ -71,11 +71,17 @@ describe("a paper's page", () => {
     const calls = scriptFetch({
       "GET /api/status": status,
       "GET /api/topics": [],
-      "GET /api/papers/2610.00002": () => (calls.some((c) => c.method === "POST") ? { ...paper, states: [states[1]] } : { ...paper, states, text_pass: { id: 7, kind: "brief", state: "failed", queued_at: "2026-10-14T03:00:00Z" } }),
+      // Each run drops its pass from the page: the first on success, the second on a 409 (the page was behind).
+      "GET /api/papers/2610.00002": () => ({ ...paper, states: states.slice(calls.filter((c) => c.method === "POST").length), text_pass: { id: 7, kind: "brief", state: "failed", queued_at: "2026-10-14T03:00:00Z" } }),
       "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }),
       "POST /api/settings/fulltext/8/now": () => json({ detail: "the pass is not waiting for the owner" }, 409),
     });
-    renderApp("/paper/2610.00002");
+    // The Needs you page the reader came from lists both passes; each is settled there as it leaves the paper.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const row = (id: number, state: string) => ({ id, paper_id: "2610.00002", revision: 1, title: "Epic one", kind: "brief", state, failed_runs: 0, last_error: null, queued_at: "2026-10-08T03:00:00Z" });
+    client.setQueryData(["settings", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
+    const settledRows = () => (client.getQueryData(["settings", "quality"]) as { night: { fulltext: { id: number; settled?: string }[] } }).night.fulltext.map((r) => r.settled);
+    renderApp("/paper/2610.00002", client);
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByText(/Full text failed three runs in a row/)).toBeInTheDocument();
     expect(screen.getByText("the LaTeX did not build")).toBeInTheDocument();
@@ -86,8 +92,11 @@ describe("a paper's page", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url === "/api/settings/fulltext/7/now")).toBe(true));
     // The page is refetched: the pass that ran is gone from the notes, the other's note stays.
     await waitFor(() => expect(screen.queryByText(/Full text failed three runs in a row/)).toBeNull());
+    expect(settledRows()).toEqual(["Settled on the paper's page.", undefined]);
     await userEvent.click(screen.getByRole("button", { name: "Run it now" }));
     expect(await screen.findByText("the pass is not waiting for the owner")).toBeInTheDocument();
+    // The 409 refetch finds the pass gone too: settled on Needs you as well, not left waiting there.
+    await waitFor(() => expect(settledRows()).toEqual(["Settled on the paper's page.", "Settled on the paper's page."]));
   });
 
   it("records a thumb only once a reason is picked, on the topic's row", async () => {
