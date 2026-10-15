@@ -30,7 +30,8 @@ async def due(
             WHERE p.dismissed_at IS NULL
               AND NOT EXISTS (SELECT 1 FROM analyses a
                               WHERE a.paper_id = p.id AND a.paper_revision = p.revision)
-            ORDER BY coalesce(f.failed_runs, 0), p.fetched_at, p.id LIMIT %s
+            ORDER BY f.paper_id IS NOT NULL, coalesce(f.failed_runs, 0), p.fetched_at, p.id
+            LIMIT %s
             """,
             (limit,),
         )

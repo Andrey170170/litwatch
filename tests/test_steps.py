@@ -253,6 +253,12 @@ async def test_a_model_that_did_not_answer_is_retried_without_counting(conn, mod
     assert await failures.stuck(conn, table, FAILED_RUNS) == []
 
 
+async def test_a_retry_that_did_not_count_still_comes_after_new_papers(conn, models):
+    # A is older than B by id; a failure that adds no failed run still sends it to the back.
+    await failures.failed(conn, A, "classification", "timeout: x", counts=False)
+    assert [p.id for p in await classifications_store.due(conn, FAILED_RUNS, limit=1)] == [B.id]
+
+
 async def test_a_failing_record_stops_every_call_before_the_run_closes(conn, models, monkeypatch):
     """B's call never returns; recording A fails. The run must not end with B still asking."""
     stalled, cancelled = asyncio.Event(), []

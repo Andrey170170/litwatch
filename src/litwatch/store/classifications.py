@@ -29,7 +29,8 @@ async def due(conn: psycopg.AsyncConnection, runs: int, limit: int | None = None
             WHERE p.dismissed_at IS NULL AND coalesce(f.failed_runs, 0) < %s
               AND NOT EXISTS (SELECT 1 FROM classifications c
                               WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
-            ORDER BY coalesce(f.failed_runs, 0), p.fetched_at, p.id LIMIT %s
+            ORDER BY f.paper_id IS NOT NULL, coalesce(f.failed_runs, 0), p.fetched_at, p.id
+            LIMIT %s
             """,
             (runs, limit),
         )
