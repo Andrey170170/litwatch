@@ -1,5 +1,6 @@
 """The classification harness reads the committed labels into cohorts and scores them apart."""
 
+import gzip
 from pathlib import Path
 
 import pytest
@@ -59,3 +60,11 @@ async def test_a_run_refuses_to_resume_answers_to_another_request(tmp_path):
     gateway = Gateway(Models(classify=role), {})
     with pytest.raises(ValueError, match="another request"):
         await classify.run(gateway, TREE, [], out)
+
+
+def test_a_resumed_run_reads_its_archived_answers_and_the_new_ones(tmp_path):
+    out = tmp_path / "jev.jsonl"
+    older, newer = classify.Result(paper_id="1"), classify.Result(paper_id="2")
+    (tmp_path / "jev.jsonl.gz").write_bytes(gzip.compress(older.model_dump_json().encode()))
+    out.write_text(newer.model_dump_json() + "\n")
+    assert set(classify.results(out)) == {"1", "2"}

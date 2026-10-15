@@ -115,14 +115,11 @@ class Result(BaseModel):
 
 
 def results(path: Path) -> dict[str, Result]:
-    """A run's answers; a finished run is kept gzipped (`<candidate>.jsonl.gz`) and read so."""
+    """A run's answers: those kept gzipped (`<candidate>.jsonl.gz`) and those appended since."""
     packed = path.with_name(path.name + ".gz")
-    if packed.exists() and not path.exists():
-        lines = gzip.decompress(packed.read_bytes()).decode().splitlines()
-    elif path.exists():
-        lines = path.read_text().splitlines()
-    else:
-        return {}
+    lines = gzip.decompress(packed.read_bytes()).decode().splitlines() if packed.exists() else []
+    if path.exists():
+        lines += path.read_text().splitlines()
     return {r.paper_id: r for r in (Result.model_validate_json(x) for x in lines if x)}
 
 
