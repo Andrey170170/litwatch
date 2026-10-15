@@ -109,14 +109,18 @@ async def drop(conn: psycopg.AsyncConnection, pass_id: int, *, claimed: bool = F
     )
 
 
-async def drop_stale(conn: psycopg.AsyncConnection, paper_id: str, revision: int) -> None:
+async def drop_stale(
+    conn: psycopg.AsyncConnection, paper_id: str, revision: int, claimed: int | None = None
+) -> None:
     """Remove the text passes for older revisions of the paper that wrote nothing and are not
-    running (not started, or their worker died): their text no longer exists. A running one
-    finishes and stores its result labelled with its revision."""
+    running (not started, `claimed` but not yet started included, or their worker died): their
+    text no longer exists. A running one finishes and stores its result labelled with its
+    revision."""
     await conn.execute(
         "DELETE FROM fulltext_passes WHERE paper_id = %s AND paper_revision < %s "
-        "AND kind <> 'deep' AND (state = ANY(%s) OR (state = 'running' AND lease_until < now()))",
-        (paper_id, revision, [s.value for s in UNSTARTED]),
+        "AND kind <> 'deep' AND (state = ANY(%s) OR id = %s "
+        "OR (state = 'running' AND lease_until < now()))",
+        (paper_id, revision, [s.value for s in UNSTARTED], claimed),
     )
 
 
@@ -370,19 +374,28 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
         await conn.execute(
             f"""
             WITH RECURSIVE area_scope AS (
-                SELECT class FROM topics WHERE depth = 'area' AND status = 'active'
+                SELECT class AS root, class FROM topics
+                WHERE depth = 'area' AND status = 'active'
                 UNION
-                SELECT c.slug FROM classes c JOIN area_scope a ON c.parent = a.class
+                SELECT a.root, c.slug FROM classes c JOIN area_scope a ON c.parent = a.class
                 WHERE c.retired_at IS NULL
             ), focus AS (
                 SELECT class FROM topics WHERE depth = 'focus' AND status = 'active'
             ), area AS (
-                SELECT t.class FROM topics t JOIN area_scope a ON a.class = t.class
+                SELECT a.root, t.class FROM topics t JOIN area_scope a ON a.class = t.class
                 WHERE t.status <> 'draft'
+            ), area_must_read AS (
+                -- An Area's own grade, else its followed descendants' highest
+                -- (core.grading.page_standing); must read has the highest rarity.
+                SELECT g.paper_id FROM effective_grades g JOIN area a ON a.class = g.topic
+                WHERE g.grade = 'must_read' AND (g.topic = a.root OR NOT EXISTS (
+                    SELECT 1 FROM effective_grades own
+                    WHERE own.paper_id = g.paper_id AND own.topic = a.root))
             ), qualifying AS (
                 SELECT paper_id FROM effective_grades
-                WHERE (topic IN (SELECT class FROM focus) AND fit IN ('central', 'related'))
-                   OR (topic IN (SELECT class FROM area) AND grade = 'must_read')
+                WHERE topic IN (SELECT class FROM focus) AND fit IN ('central', 'related')
+                UNION
+                SELECT paper_id FROM area_must_read
                 UNION
                 SELECT paper_id FROM verdicts
                 WHERE recorded_at >= now() - %(lookback)s AND fit IN ('central', 'related')

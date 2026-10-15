@@ -177,7 +177,7 @@ async def _text_pass(
     last, ours = found.last, found.last is not None and found.last.id == claimed
     if ours and last.state == PassState.RUNNING:
         last = replace(last, state=PassState.READY)
-    await fulltext_store.drop_stale(conn, paper_id, found.revision)
+    await fulltext_store.drop_stale(conn, paper_id, found.revision, claimed)
     active = [t for t in topics.values() if t.status == Status.ACTIVE]
     tree = await taxonomy_store.load(conn)
 

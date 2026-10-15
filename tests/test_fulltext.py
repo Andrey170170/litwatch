@@ -26,6 +26,7 @@ from litwatch.core import (
 )
 from litwatch.core.fulltext import (
     LEASE,
+    RECONCILE_LOOKBACK,
     PassKind,
     PassState,
     TextPass,
@@ -470,6 +471,35 @@ async def test_a_paper_dismissed_after_its_pass_is_claimed_spends_nothing(db, mo
     assert (writer.asked, fake.jobs) == ([], [])
     (row,) = await passes(db)
     assert row["state"] == "awaiting_text"  # left for the owner's word, as `record` leaves it
+
+
+async def test_a_pass_whose_paper_was_rewritten_after_its_claim_is_dropped_unread(db, monkeypatch):
+    await graded(db, "central")
+    claim = fulltext_store.claim
+    rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
+
+    async def claim_then_rewrite(conn, *args):
+        claimed = await claim(conn, *args)
+        await word.settle_all(conn, (await papers_store.upsert(conn, [rewrite])).rewritten)
+        return claimed
+
+    monkeypatch.setattr(fulltext_store, "claim", claim_then_rewrite)
+    fake, writer = ready(FakeArchive()), Writer()
+    assert await work(db, fake, writer, limit=1) == {"fulltext_dropped": 1}
+    assert (writer.asked, fake.jobs) == ([], [])
+    assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
+
+
+async def test_the_reconcile_leaves_out_a_paper_its_area_grades_below_must_read(db):
+    await analysed(db, "solid")
+    await graded(db, "central")  # must read in the Focus topic
+    await graded(db, "adjacent", INTERP.slug)  # the Area's own grade stands over it
+    tree = await taxonomy_store.load(db)
+    faith = next(t for t in tree.topics if t.slug == FAITH.slug)
+    await word.save_taxonomy(db, tree.following(faith.model_copy(update={"status": Status.PAUSED})))
+    assert await passes(db) == []
+    await db.execute("UPDATE verdicts SET recorded_at = now() - interval '3 days'")
+    assert await fulltext_store.candidates(db, RECONCILE_LOOKBACK) == []
 
 
 async def test_a_paper_that_came_to_qualify_by_no_trigger_gets_its_pass_on_the_nightly_run(
