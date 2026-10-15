@@ -64,14 +64,15 @@ class Integration(Protocol):
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.
-  - `makes_cards = True`: it makes deep cards (`deep`, the one built in): the owner's request
-    (`POST /api/papers/<id>/card`) queues a Deep pass in the full-text queue, and the service's
-    Deep worker submits it to this integration. Only then does the paper page offer to request
-    one. Wanting `card.requested` is not enough (a webhook may pass it on).
   - `async def idle(self, conn)`: awaited when the integration has no event to be handed, at
     most about once a minute, under the same lock as `handle`, for work no event brings
     (retrying a delivery that waits on something outside litwatch). A failure is logged and changes
     nothing else; keep it short and bounded, since events wait while it runs.
+
+Deep cards come from the built-in `deep` integration only: the owner's request (`POST
+/api/papers/<id>/card`) queues a Deep pass, which the service's Deep worker submits to it, and
+only with it loaded does the paper page offer the request. Another integration may react to
+`card.requested` (a webhook passes it on) but makes no card.
 
 `Event` is `litwatch.core.Event`:
 

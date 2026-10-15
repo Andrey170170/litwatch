@@ -121,7 +121,6 @@ class DeepClient:
 
 class Deep:
     name = "deep"
-    makes_cards = True  # the owner may ask for a card (`POST /api/papers/{id}/card`)
     description = (
         "Writes a Deep card for every saved Focus must read, and for any paper the owner asks "
         "about, through the full-text queue."

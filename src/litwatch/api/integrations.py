@@ -20,6 +20,7 @@ from litwatch.api import schemas as s
 from litwatch.api.deps import Conn
 from litwatch.core import SearchFilters, SearchHit, SearchProvider
 from litwatch.fulltext import deep as deep_passes
+from litwatch.integrations.deep import Deep
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import outbox
@@ -40,10 +41,11 @@ def providers(request: Request) -> list[SearchProvider]:
     return [i for i in loaded(request) if isinstance(i, SearchProvider)]
 
 
-def card_maker(integrations: list[events.Integration]) -> Any:
-    """The loaded integration that makes Deep cards (says `makes_cards = True`), if any. Wanting
-    `card.requested` is not enough: a webhook may pass it on without any card coming back."""
-    return next((i for i in integrations if getattr(i, "makes_cards", False)), None)
+def card_maker(integrations: list[events.Integration]) -> Deep | None:
+    """The loaded `Deep` integration, if any: the service's Deep worker submits Deep passes to
+    it. Wanting `card.requested` is not enough: a webhook may pass it on without any card
+    coming back."""
+    return next((i for i in integrations if isinstance(i, Deep)), None)
 
 
 def answers_card_requests(integrations: list[events.Integration]) -> bool:
