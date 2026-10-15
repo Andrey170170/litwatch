@@ -51,17 +51,25 @@ start() {
 stop() {
     local dir=$1
     [[ "$dir" == /tmp/litwatch-archive.* && -d "$dir" ]] || { echo "not a disposable archive: $dir" >&2; exit 1; }
+    local alive=0
     for file in "$dir"/serve.pid "$dir"/worker.pid; do
         [[ -f "$file" ]] || continue
         local pid
         pid=$(cat "$file")
-        # Only a process of this archive: its command line names the directory.
-        if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF "$dir"; then
-            kill "$pid"
-            for _ in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
-        fi
+        ours "$pid" "$dir" || continue
+        kill "$pid"
+        for _ in $(seq 50); do ours "$pid" "$dir" || break; sleep 0.2; done
+        # A worker blocked in a download can outlast its stop signal.
+        if ours "$pid" "$dir"; then kill -KILL "$pid"; sleep 0.5; fi
+        if ours "$pid" "$dir"; then echo "process $pid did not stop" >&2; alive=1; fi
     done
+    [[ $alive == 0 ]] || { echo "kept $dir" >&2; exit 1; }
     rm -rf "$dir"
+}
+
+# Whether `pid` is a live process of the archive in `dir`: its command line names the directory.
+ours() {
+    { tr '\0' ' ' < "/proc/$1/cmdline"; } 2>/dev/null | grep -qF "$2"
 }
 
 case "${1:-}" in
