@@ -117,9 +117,11 @@ preference set.
 
 ## Known gaps
 
-- **The quality harness and the preference set** don't exist yet. Each arrives with the milestone that introduces
-  what it measures: classification and Gists in N1–N2, Briefs in N3, digests in N4, Deep cards with the first
-  change to `deep/`.
+- **The quality harness and the preference set** are partial. Classification has its harness (`litwatch eval
+  classify`) and Briefs theirs (`litwatch eval briefs`, `eval briefs-report`, over `evals/preferences/briefs.yaml`):
+  rule checks and the owner's read so far; the judge model and the comparison with the last approved output join
+  once the preference set holds approved outputs. Digests arrive in N4. Deep cards have none yet: N3's change to
+  `deep/` did not build it, and it comes with the next.
 - **The stack smoke test** (a fresh stack on a seeded database built from real papers, headless Playwright visiting
   every page at both widths, failing on console errors, 5xx or an empty page, screenshots kept as CI artifacts)
   comes with N5, when the archive joins the stack; its page list grows with N7.

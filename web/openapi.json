@@ -1825,7 +1825,7 @@
     "/api/settings/fulltext/{pass_id}/now": {
       "post": {
         "summary": "Run Pass Now",
-        "description": "A full-text pass failed three runs in a row, or awaits its text over a week: run it now.\nIt is first in line for the full-text worker, with three more runs; its text is asked for\nagain at urgent priority. 409 when it no longer waits for the owner (it ran, the paper's\ntext changed, it was dropped).",
+        "description": "A full-text pass (a Deep card's included) failed three runs in a row, or awaits its text\nover a week: run it now. It is first in line for its worker, with three more runs; its text\nis asked for again at urgent priority. 409 when it no longer waits for the owner (it ran,\nthe paper's text changed, it was dropped).",
         "operationId": "run_pass_now_api_settings_fulltext__pass_id__now_post",
         "parameters": [
           {
@@ -2291,7 +2291,7 @@
     "/api/papers/{paper_id}/card": {
       "post": {
         "summary": "Request Card",
-        "description": "Ask for a deep card on this paper, whatever its grade. Honoured by whichever loaded\nintegration answers `card.requested`; the card shows on the paper once it is stored.",
+        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing.",
         "operationId": "request_card_api_papers__paper_id__card_post",
         "parameters": [
           {
@@ -2314,6 +2314,12 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "No card provider is configured, or the paper is dismissed"
           },
           "422": {
             "description": "Validation Error",
@@ -2401,6 +2407,62 @@
         ],
         "title": "Ack",
         "description": "What an action changed. The page shows the result where it was taken; `message` is set\nonly for what it cannot show (DESIGN.md, acknowledgement): a thumb that gives or takes back\nthe owner's word on a Focus topic, and a reported miss."
+      },
+      "AmongRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "agrees",
+              "contradicts",
+              "extends",
+              "supersedes"
+            ],
+            "title": "Relation"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "in_collection": {
+            "type": "boolean",
+            "title": "In Collection",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "relation"
+        ],
+        "title": "AmongRow",
+        "description": "A paper a Deep card places this one among: one of the collection's, by its arXiv id, with\nhow the two relate and its rarity now (null outside the collection)."
       },
       "Answer": {
         "properties": {
@@ -2584,16 +2646,72 @@
         "title": "Brief",
         "description": "The paper's Brief: its current revision's, or the newest from an older revision\n(`revision` says which) until the current one is written. `overstatement`, when the full\ntext does not support the abstract, opens it."
       },
-      "CardRequested": {
+      "CardPass": {
         "properties": {
-          "event_id": {
+          "id": {
             "type": "integer",
-            "title": "Event Id"
+            "title": "Id"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "request",
+              "focus"
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting_text",
+              "ready",
+              "running",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          },
+          "failed_runs": {
+            "type": "integer",
+            "title": "Failed Runs",
+            "default": 0
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
           }
         },
         "type": "object",
         "required": [
-          "event_id"
+          "id",
+          "reason",
+          "state",
+          "queued_at"
+        ],
+        "title": "CardPass",
+        "description": "The paper's Deep card in the full-text queue: the owner's request or automatic (a Focus\nmust read), and where it is (awaiting the paper's text, ready, being written, or failed this\nrun and to be tried again; `failed_runs` says how often)."
+      },
+      "CardRequested": {
+        "properties": {
+          "pass_id": {
+            "type": "integer",
+            "title": "Pass Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pass_id"
         ],
         "title": "CardRequested"
       },
@@ -2960,6 +3078,50 @@
               }
             ],
             "title": "Written At"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "arxiv_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Version"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "latex",
+                  "pdf"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "among": {
+            "items": {
+              "$ref": "#/components/schemas/AmongRow"
+            },
+            "type": "array",
+            "title": "Among"
           }
         },
         "type": "object",
@@ -2967,7 +3129,7 @@
           "card"
         ],
         "title": "DeepCard",
-        "description": "A deep card: the reading card the deep service wrote, as it wrote it."
+        "description": "A Deep card: the reading card the deep service wrote, as it wrote it, and what it was\nwritten from (the paper revision and arXiv version, null where unknown, and the text's\nsource). `among` is its \"among the collection\" section as rows."
       },
       "Depth": {
         "type": "string",
@@ -4119,6 +4281,7 @@
               "escalated",
               "ungraded",
               "fulltext_failed",
+              "card_failed",
               "awaiting_text"
             ],
             "title": "Kind"
@@ -4167,7 +4330,7 @@
           "revision"
         ],
         "title": "OpenState",
-        "description": "What waits on the owner for this paper, as Needs you lists it, with the paper revision\nthe action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the\ntext), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or\n`ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed` or\n`awaiting_text` over a week (run it now)."
+        "description": "What waits on the owner for this paper, as Needs you lists it, with the paper revision\nthe action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the\ntext), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or\n`ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep card's\n`card_failed`, or either `awaiting_text` over a week (run it now)."
       },
       "Opinion": {
         "properties": {
@@ -4522,6 +4685,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/DeepCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card_pass": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardPass"
               },
               {
                 "type": "null"

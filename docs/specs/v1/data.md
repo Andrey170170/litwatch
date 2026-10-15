@@ -67,8 +67,9 @@ evaluation calls the same functions and writes only to evaluation tables.
   as the current Gist.
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
   done | failed, priority, queued at, tried at, text arrived at, arXiv version read, text source latex | pdf, text
-  hash, paper's update read for, lease until, failed runs, retry text, last error): one Brief or Weight re-check open per paper revision; a worker takes
-  the least recently tried first. `weights` and `gists` name the pass a full-text row came from.
+  hash, paper's update read for, lease until, failed runs, retry text, last error): one Brief or Weight re-check open per paper revision, and one
+  Deep pass open per paper (reason request | focus; its revision is the one it read); a worker takes the least recently
+  tried first. `weights` and `gists` name the pass a full-text row came from.
 - What a digest still has to cover is not stored: a paper is due for a topic while it is eligible there, was announced
   within three weeks of the digest's day, and is in no published digest of the topic that clears it (a daily one for
   Focus and Area, a weekly one for Field), found from the database when a digest is written
@@ -84,7 +85,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   evaluation).
 
 **Removed:** `triage`, `candidates`, `takes`, `take_ratings`, `issues`, `issue_entries`, `reviews`,
-`review_picks`, `set_asides` (a digest reads the set-aside mark live from the effective grade); the first v1's
+`review_picks`, `set_asides` (a digest reads the set-aside mark live from the effective grade), `deep_waiting` (a Deep pass
+awaits its text); the first v1's
 `memberships` (paper in a field) is replaced by the new one. `regression` and the M2 labelling tables stay as
 evaluation history.
 
@@ -92,7 +94,9 @@ evaluation history.
 class labels; the value is a Fit or unsure, and the grade column is gone: the grade follows from the Fit), `reactions` (reason values changed: wrong_topic, overrated, not_interesting, already_knew, underrated, great_find), `appraisals`, `calibration_sessions`,
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
-`zotero_items`, `webdav_files`, `deep_cards`, `deep_attempts` (plus the job's usage: tokens, turns, list cost), `deep_waiting`, `eval_runs` (plus every run record a
+`zotero_items`, `webdav_files`, `deep_cards` (plus what it was written from: paper revision, arXiv version, text
+source, pass; the job columns are gone), `deep_attempts` (plus pass, job, ended at, error, and the job's usage: tokens,
+turns, list cost, null when unknown), `eval_runs` (plus every run record a
 resumed replay ran under, whose costs are its cost), `eval_results` (columns for classification instead of triage:
 whether the classifier alone and the uncertain band made the paper a member, the highest probability in the topic's
 subtree, and the graded Fit; the keyword hit, both opinions, split and the two errors as before), `eval_samples`,

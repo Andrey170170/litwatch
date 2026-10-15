@@ -566,10 +566,10 @@ export interface paths {
         put?: never;
         /**
          * Run Pass Now
-         * @description A full-text pass failed three runs in a row, or awaits its text over a week: run it now.
-         *     It is first in line for the full-text worker, with three more runs; its text is asked for
-         *     again at urgent priority. 409 when it no longer waits for the owner (it ran, the paper's
-         *     text changed, it was dropped).
+         * @description A full-text pass (a Deep card's included) failed three runs in a row, or awaits its text
+         *     over a week: run it now. It is first in line for its worker, with three more runs; its text
+         *     is asked for again at urgent priority. 409 when it no longer waits for the owner (it ran,
+         *     the paper's text changed, it was dropped).
          */
         post: operations["run_pass_now_api_settings_fulltext__pass_id__now_post"];
         delete?: never;
@@ -804,8 +804,10 @@ export interface paths {
         put?: never;
         /**
          * Request Card
-         * @description Ask for a deep card on this paper, whatever its grade. Honoured by whichever loaded
-         *     integration answers `card.requested`; the card shows on the paper once it is stored.
+         * @description Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
+         *     when it has one: the request goes through the full-text queue, first in line, and the card
+         *     shows on the paper once it is written. Asking again while one is queued or being written
+         *     changes nothing.
          */
         post: operations["request_card_api_papers__paper_id__card_post"];
         delete?: never;
@@ -853,6 +855,30 @@ export interface components {
             grades?: {
                 [key: string]: components["schemas"]["Grade"] | null;
             };
+        };
+        /**
+         * AmongRow
+         * @description A paper a Deep card places this one among: one of the collection's, by its arXiv id, with
+         *     how the two relate and its rarity now (null outside the collection).
+         */
+        AmongRow: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "agrees" | "contradicts" | "extends" | "supersedes";
+            /** Note */
+            note?: string | null;
+            rarity?: components["schemas"]["Rarity"] | null;
+            /**
+             * In Collection
+             * @default false
+             */
+            in_collection: boolean;
         };
         /**
          * Answer
@@ -930,10 +956,42 @@ export interface components {
              */
             written_at: string;
         };
+        /**
+         * CardPass
+         * @description The paper's Deep card in the full-text queue: the owner's request or automatic (a Focus
+         *     must read), and where it is (awaiting the paper's text, ready, being written, or failed this
+         *     run and to be tried again; `failed_runs` says how often).
+         */
+        CardPass: {
+            /** Id */
+            id: number;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "request" | "focus";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "awaiting_text" | "ready" | "running" | "failed";
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
+            /**
+             * Failed Runs
+             * @default 0
+             */
+            failed_runs: number;
+            /** Error */
+            error?: string | null;
+        };
         /** CardRequested */
         CardRequested: {
-            /** Event Id */
-            event_id: number;
+            /** Pass Id */
+            pass_id: number;
         };
         /**
          * Changes
@@ -1076,7 +1134,9 @@ export interface components {
         };
         /**
          * DeepCard
-         * @description A deep card: the reading card the deep service wrote, as it wrote it.
+         * @description A Deep card: the reading card the deep service wrote, as it wrote it, and what it was
+         *     written from (the paper revision and arXiv version, null where unknown, and the text's
+         *     source). `among` is its "among the collection" section as rows.
          */
         DeepCard: {
             /** Card */
@@ -1087,6 +1147,14 @@ export interface components {
             model?: string | null;
             /** Written At */
             written_at?: string | null;
+            /** Revision */
+            revision?: number | null;
+            /** Arxiv Version */
+            arxiv_version?: number | null;
+            /** Source */
+            source?: ("latex" | "pdf") | null;
+            /** Among */
+            among?: components["schemas"]["AmongRow"][];
         };
         /**
          * Depth
@@ -1566,15 +1634,15 @@ export interface components {
          * @description What waits on the owner for this paper, as Needs you lists it, with the paper revision
          *     the action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the
          *     text), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or
-         *     `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed` or
-         *     `awaiting_text` over a week (run it now).
+         *     `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep card's
+         *     `card_failed`, or either `awaiting_text` over a week (run it now).
          */
         OpenState: {
             /**
              * Kind
              * @enum {string}
              */
-            kind: "awaiting_classification" | "analysis_stopped" | "split" | "escalated" | "ungraded" | "fulltext_failed" | "awaiting_text";
+            kind: "awaiting_classification" | "analysis_stopped" | "split" | "escalated" | "ungraded" | "fulltext_failed" | "card_failed" | "awaiting_text";
             /** Revision */
             revision: number;
             /** Topic */
@@ -1688,6 +1756,7 @@ export interface components {
              */
             publication_by_owner: boolean;
             card?: components["schemas"]["DeepCard"] | null;
+            card_pass?: components["schemas"]["CardPass"] | null;
             /**
              * Card Requestable
              * @default false
@@ -3810,6 +3879,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CardRequested"];
                 };
+            };
+            /** @description No such paper */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No card provider is configured, or the paper is dismissed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

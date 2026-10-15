@@ -131,7 +131,9 @@ cost) recorded with its attempt, the lease, revisions; the "among the collection
 verification. The harness gains Briefs.
 
 **N4 · Digests.** Due, daily and weekly digests per depth with their Gists and picks, quiet days, records and set
-asides, the bounded wait, failed digests; the day, week, history and digest API; reviews and issues removed. Owner
+asides, the bounded wait, failed digests; the day, week, history and digest API; reviews and issues removed. Deep
+passes for Area picks (N3 queues them for saved Focus must reads and the owner's requests; a pick's pass checks at
+claim that its digest is published, integrations.md). Owner
 check: the restart weeks' digests read against 0.14's Notion.
 
 **N5 · The archive in the stack.** The compose file runs the archive; the storage policy; the relevance fixes (exact
