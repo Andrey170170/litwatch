@@ -23,7 +23,9 @@ class AtomBatch:
     raw: bytes
     generated_at: datetime
     announcements: dict[str, str]
-    listed: dict[str, date] = field(default_factory=dict)  # each paper's announcement date
+    # The listing date of each paper the feed announces as new; a cross-listing's first listing
+    # is not known.
+    listed: dict[str, date] = field(default_factory=dict)
 
 
 def _text(element: ET.Element, name: str) -> str:
@@ -111,7 +113,7 @@ def parse_feed(raw: bytes) -> AtomBatch:
         raw=raw,
         generated_at=generated_at,
         announcements=announcements,
-        listed=dates,
+        listed={i: d for i, d in dates.items() if announcements[i] == "new"},
     )
 
 

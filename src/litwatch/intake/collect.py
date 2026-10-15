@@ -165,7 +165,8 @@ async def collect(
                 for p in batch.papers:
                     if batch.announcements[p.id] in ("new", "cross"):
                         fallback[p.id] = p
-                        listed[p.id] = batch.listed[p.id]
+                        if p.id in batch.listed:
+                            listed[p.id] = batch.listed[p.id]
             if not info["complete"]:
                 info["source"] = (
                     "atom"

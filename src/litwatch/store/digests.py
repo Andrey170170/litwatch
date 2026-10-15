@@ -95,15 +95,25 @@ def _word(paper: str, topic: str) -> str:
                  AND r.reason IN ({words})))"""
 
 
-# A member of the topic's subtree by classification, not by the owner's word (a class label, a
-# reported miss), and not taken out of that class by a class label.
-_MEMBER = """EXISTS (
-    SELECT 1 FROM memberships m
-    WHERE m.paper_id = p.id AND m.class = ANY(%(map_classes)s) AND m.member
-      AND m.source = 'classifier'
-      AND NOT EXISTS (SELECT 1 FROM memberships o
-                      WHERE o.paper_id = m.paper_id AND o.class = m.class AND o.source = 'owner'
-                        AND NOT o.member))"""
+# A member of the topic's subtree by the pipeline, not by the owner's word (a class label, a
+# reported miss): by classification, not taken out of that class by a class label; or graded
+# central or related on a followed topic in the subtree, which a paper the keyword check or the
+# uncertain band sent there is.
+_MEMBER = """(
+    EXISTS (SELECT 1 FROM memberships m
+            WHERE m.paper_id = p.id AND m.class = ANY(%(map_classes)s) AND m.member
+              AND m.source = 'classifier'
+              AND NOT EXISTS (SELECT 1 FROM memberships o
+                              WHERE o.paper_id = m.paper_id AND o.class = m.class
+                                AND o.source = 'owner' AND NOT o.member))
+    OR EXISTS (SELECT 1 FROM unnest(%(under)s::text[]) u (topic)
+               CROSS JOIN LATERAL (
+                   SELECT v.fit FROM verdicts v WHERE v.paper_id = p.id AND v.topic = u.topic
+                   ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC LIMIT 1) v
+               WHERE v.fit IN ('central', 'related')
+                 AND NOT EXISTS (SELECT 1 FROM memberships o
+                                 WHERE o.paper_id = p.id AND o.class = u.topic
+                                   AND o.source = 'owner' AND NOT o.member)))"""
 
 
 def _focus(which: str) -> str:

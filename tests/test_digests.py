@@ -310,6 +310,20 @@ async def test_the_owners_word_neither_makes_an_area_paper_due_nor_keeps_one(db)
     assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(R.id, "listed")])
 
 
+async def test_a_paper_the_keyword_check_sent_to_a_focus_topic_is_in_its_areas_daily(db):
+    """No member of the Area's class by classification, it reached the Focus topic by the
+    keyword check; graded related there, it is the Area's too, and graded adjacent, it is not."""
+    for p, fit in ((P, "related"), (Q, "adjacent")):
+        await classify(db, p, keyword=(FAITH.slug,))
+        await analyse(db, p)
+        await grade(db, p, fit)
+    await verdicts.passed(db, [(P.id, 1), (Q.id, 1)])
+    await listed(db, TUE, P, Q)
+    await day(db, Writer(), TUE)
+    state, found = await shown(db, INTERP.slug, "day", TUE)
+    assert state == "written" and [i for i, _ in found] == [P.id]
+
+
 async def test_a_focus_paper_without_its_brief_is_written_from_its_abstract(db):
     w = Writer()
     late = paper("2610.00021", title="No Brief yet", abstract="Probes read the hidden steps.")
@@ -331,6 +345,27 @@ async def test_a_feed_without_submission_times_dates_a_paper_by_its_listing(db):
         await db.execute("SELECT announced FROM papers WHERE id = '2609.11999'")
     ).fetchone()
     assert row["announced"] == date(2026, 9, 14)
+
+
+async def test_a_cross_listing_is_not_dated_by_its_feed_and_canonical_metadata_corrects(db):
+    """A cross-listing's first listing is not the feed's day, so Atom leaves it undated; a new
+    paper's feed date stands until canonical metadata dates its first version."""
+    from litwatch.intake.atom import parse_feed  # noqa: PLC0415
+    from tests.test_intake_atom import entry, feed  # noqa: PLC0415
+
+    batch = parse_feed(feed(entry("2609.11999v1") + entry("2401.00001v3", "cross")))
+    await papers_store.upsert(db, batch.papers, source="atom", listed=batch.listed)
+    oai = paper("2609.11999", title="A paper", published="2026-09-10")
+    await papers_store.upsert(db, [oai])
+    rows = await (
+        await db.execute(
+            "SELECT id, announced FROM papers WHERE id IN ('2609.11999', '2401.00001')"
+        )
+    ).fetchall()
+    assert {r["id"]: r["announced"] for r in rows} == {
+        "2609.11999": date(2026, 9, 11),
+        "2401.00001": None,
+    }
 
 
 async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):

@@ -85,9 +85,9 @@ async def upsert(
     OAI) and, like OAI's, dated by day, but it replaces stored metadata only when it is known
     to be newer: a higher version, or the same version on a later day.
 
-    A paper's listing day (`announced`) is set once: from its first version's submission time
-    (`core.digests.announced`), else from `listed`, the day a feed listed it (Atom carries no
-    submission time).
+    A paper's listing day (`announced`) comes from its first version's submission time
+    (`core.digests.announced`) in canonical metadata; until that arrives, from `listed`, the
+    day a feed announced it as new (Atom carries no submission time).
     """
     result = Upserted()
     async with conn.transaction():
@@ -113,7 +113,9 @@ async def upsert(
                             %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s,
                             %(announced)s)
                     ON CONFLICT (id) DO UPDATE SET
-                        announced = coalesce(papers.announced, EXCLUDED.announced),
+                        -- Canonical metadata (Atom never updates) dates the first listing;
+                        -- a feed's date stands only until it does.
+                        announced = coalesce(EXCLUDED.announced, papers.announced),
                         -- The owner's correction stands while arXiv sends the text it fixed.
                         title = CASE WHEN {_KEPT}
                                      THEN papers.title ELSE EXCLUDED.title END,
