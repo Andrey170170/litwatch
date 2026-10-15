@@ -10,7 +10,7 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Analysis, Facets, Fit, Opinion, Verdict, Weight
+from litwatch.core import Analysis, Facets, Fit, Opinion, Status, Verdict, Weight
 from litwatch.core.classification import Membership, Source
 from litwatch.feedback import word
 from litwatch.store import analyses as analyses_store
@@ -236,7 +236,7 @@ async def test_badges_put_the_topic_giving_the_highest_level_first(client, conn)
 
 
 async def test_topics_are_grouped_by_depth_in_the_owners_order(client, conn, shelves):
-    await taxonomy_store.set_order(conn, [AGENTS.slug, INTERP.slug, FAITH.slug])
+    await word.reorder(conn, [AGENTS.slug, INTERP.slug, FAITH.slug])
     groups = (await client.get("/api/topics")).json()
     assert [(g["depth"], [t["slug"] for t in g["topics"]]) for g in groups] == [
         ("focus", [FAITH.slug]),
@@ -350,6 +350,15 @@ async def test_a_paper_page_names_its_own_open_states(client, conn):
     assert [s["kind"] for s in page["states"]] == ["analysis_stopped"]
     assert (page["gist"], page["weight"], page["rarity"]) == (None, None, "uncommon")
     assert page["topics"][0]["grade"] is None and page["topics"][0]["rarity"] == "uncommon"
+    # A grading stopped on a paused topic waits on nothing: it grades nothing new.
+    await stop(conn, P, "grading", FAITH.slug)
+    assert "ungraded" in [
+        s["kind"] for s in (await client.get(f"/api/papers/{P.id}")).json()["states"]
+    ]
+    paused = FAITH.model_copy(update={"status": Status.PAUSED})
+    await word.save_taxonomy(conn, TREE.following(paused))
+    page = (await client.get(f"/api/papers/{P.id}")).json()
+    assert [s["kind"] for s in page["states"]] == ["analysis_stopped"]
 
 
 # -- the owner's word ------------------------------------------------------------------------------
