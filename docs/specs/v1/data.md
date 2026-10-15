@@ -75,6 +75,9 @@ evaluation calls the same functions and writes only to evaluation tables.
   | mentioned, order, why, and frozen at writing: paper revision, gist, fit, grade, rarity).
 - `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`; a Gist rating
   names the `gists` row it rated.
+- `eval_labels` (evaluation run, paper, topic, cohort, positive): the labels a replay is measured against, frozen when
+  it starts, so its numbers read the same however the label files or the misses change ([feedback.md](feedback.md),
+  evaluation).
 
 **Removed:** `triage`, `candidates`, `takes`, `take_ratings`, `issues`, `issue_entries`, `reviews`,
 `review_picks`; the first v1's `memberships` (paper in a field) is replaced by the new one. `set_asides` is kept for
@@ -85,8 +88,11 @@ evaluation history.
 class labels; the value is a Fit or unsure, and the grade column is gone: the grade follows from the Fit), `reactions` (reason values changed: wrong_topic, overrated, not_interesting, already_knew, underrated, great_find), `appraisals`, `calibration_sessions`,
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
-`zotero_items`, `webdav_files`, `deep_cards`, `deep_attempts` (plus the job's usage: tokens, turns, list cost), `deep_waiting`, `eval_runs`, `eval_results` (columns
-for classification instead of triage), `eval_samples`, `schema_migrations`.
+`zotero_items`, `webdav_files`, `deep_cards`, `deep_attempts` (plus the job's usage: tokens, turns, list cost), `deep_waiting`, `eval_runs` (plus every run record a
+resumed replay ran under, whose costs are its cost), `eval_results` (columns for classification instead of triage:
+whether the classifier alone and the uncertain band made the paper a member, the highest probability in the topic's
+subtree, and the graded Fit; the keyword hit, both opinions, split and the two errors as before), `eval_samples`,
+`schema_migrations`.
 
 The restart ([milestones.md](milestones.md), N6) starts from an empty database (decision 48): the migrations run on
 a fresh schema, and the two most recent weeks are read from the archive. Nothing is carried from 0.14 or the first

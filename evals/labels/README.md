@@ -16,6 +16,11 @@ is not stored: an evaluation reads titles and abstracts when it runs. Topic and 
 | `disputed.csv` | 35 | silver | the papers they did not, with whether the owner was asked and the memberships both labellers still agree on |
 | `adjudicated.csv` | 20 | adjudicated | the owner's primary class for the papers asked, and which labeller it matched |
 
+`litwatch eval replay` reads `fit.csv` and `regression.csv` as four cohorts, each with its own positives:
+`owner` and `provisional` (positive: central or related; an unsure Fit is left out), `legacy` and `silver` (positive:
+tier 1 or 2); the misses reported in the database are a fifth, `miss`, every one positive. The replay freezes the
+labels it ran on in `eval_labels`, so its report reads the same after these files change.
+
 ## Where they came from
 
 Exported on 2026-10-14, before the first v1's deployment stopped, from its database and from the development

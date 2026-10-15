@@ -32,6 +32,9 @@ litwatch nightly --no-fetch --limit 20   # classify, analyse and grade a few sto
 litwatch intake --days 1             # intake alone
 litwatch intake archive --days 14    # a window's papers read from the archive instead of arXiv
 litwatch eval classify jev | classify-report jev    # the classifier comparison (candidates in evals/configs/classify.toml)
+litwatch eval replay                 # labelled and missed papers through classification and grading; shows the cost, asks
+litwatch eval replay --resume 7      # go on with replay 7 where it stopped or failed
+litwatch eval report [7] --out evals/….md   # a replay's four recall numbers per cohort and Focus topic, no calls
 litwatch serve                       # the API and web app; needs LITWATCH_API_TOKEN
 litwatch taxonomy check [PATH]       # validate a taxonomy file (default: the seed)
 litwatch taxonomy import | export    # the taxonomy in the database, as YAML in and out
@@ -42,7 +45,11 @@ litwatch publications                # look up published versions
 `LITWATCH_READ_TOKEN`, when set, is a second token that may only search and read papers
 (`GET /api/papers` and `/api/papers/{id}`); the deep service uses it.
 
-Evaluation runs never write to verdicts or the outbox. Results are in `evals/`.
+Evaluation runs never write to verdicts or the outbox. Results are in `evals/`. A replay reads its
+papers from the database (labelled papers it lacks are left out and counted) and writes only
+`eval_runs`, `eval_labels` and `eval_results`, plus the run record and call journal that carry its
+cost; `--cohort` limits it to cohorts, and `--negatives COHORT=N` samples a cohort's negatives with
+a fixed seed (positives are always all replayed, since every recall number is over them).
 
 ## Tests
 
