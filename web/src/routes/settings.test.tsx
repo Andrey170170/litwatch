@@ -87,7 +87,7 @@ describe("Settings", () => {
     expect(screen.getByText("4 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
-  it("keeps the visit's rows on the way back, refetching a fresh visit behind them, and never refetches the sidebar on the way", async () => {
+  it("keeps the visit's rows on the way back, refetches a fresh visit behind them, and never refetches the sidebar on the way", async () => {
     viewport(true);
     const renders: Record<string, number> = {};
     (globalThis as { __renders?: Record<string, number> }).__renders = renders;
@@ -117,27 +117,32 @@ describe("Settings", () => {
     // The write refreshes the summary: the count changes in place, the node the same.
     await waitFor(() => expect(count).toHaveTextContent("3"));
     expect(fetched("/api/summary")).toBe(2);
-    // To the paper and back: the settled row is still there, settled, with no fetch in between.
+    // To a sibling page and back: the settled row is still there, settled, with no fetch of this page's read.
+    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
+    router.history.back();
+    expect((await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")).toHaveClass("settled");
+    expect(fetched("/api/settings/quality")).toBe(1);
+    // By a link: a fresh visit refetches behind the cached rows, which show at once; "Updating…", never "Loading…".
+    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
+    await userEvent.click(needs);
+    const again = (await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")!;
+    expect(again).toHaveClass("settled");
+    expect(screen.queryByText("Loading…")).toBeNull();
+    await screen.findByText("Updating…");
+    expect(fetched("/api/settings/quality")).toBe(2);
+    // To the paper and back before the read lands: still the cached rows, still updating; then they update in place.
     await userEvent.click(screen.getByRole("link", { name: "A stuck paper" }));
     await screen.findByRole("heading", { name: "A stuck paper" });
     router.history.back();
     expect((await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")).toHaveClass("settled");
-    expect(fetched("/api/settings/quality")).toBe(1);
-    // A link to a sibling page marks the page's read stale, nothing more: no page reads it, the sidebar is its own.
-    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
-    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
-    expect(fetched("/api/settings/quality")).toBe(1);
-    // Back: the cached rows show at once, the fresh read behind them; no "Loading…", a quiet "Updating…" instead.
-    router.history.back();
-    const back = (await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")!;
-    expect(back).toHaveClass("settled");
     expect(screen.queryByText("Loading…")).toBeNull();
-    await screen.findByText("Updating…");
-    expect(fetched("/api/settings/quality")).toBe(2);
     land();
     await waitFor(() => expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull());
     expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     expect(screen.queryByText("Updating…")).toBeNull();
+    expect(fetched("/api/settings/quality")).toBe(2);
     // Through all of it the sidebar read the summary once more, after the write, and did not render again.
     expect(fetched("/api/summary")).toBe(2);
     expect(within(needs).getByText("3")).toBe(count);
@@ -159,19 +164,23 @@ describe("Settings", () => {
     expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
-  it("settles a digest that failed again with the new error, and one written meanwhile with the 409's reason", async () => {
+  it("keeps a digest that failed again, or that the API would not write now, on the page with the reason", async () => {
     viewport(true);
     const failed = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "week", day: "2026-10-05", state: "failed", counts: {}, error: "the writer timed out again", written_at: "2026-10-15T10:00:00Z", papers: [] };
     const twice = { ...quality, night: { ...quality.night, digests: [{ ...digest, period: "week", day: "2026-10-05" }, { ...digest, id: 4 }] } };
-    scriptFetch({ ...common, "GET /api/settings/quality": twice, "POST /api/digests/3/write": failed, "POST /api/digests/4/write": () => json({ detail: "the digest is not one to write again" }, 409) });
+    scriptFetch({ ...common, "GET /api/settings/quality": twice, "POST /api/digests/3/write": failed, "POST /api/digests/4/write": () => json({ detail: "another litwatch job is already running" }, 409) });
     renderApp("/settings/needs");
     const weekly = (await screen.findByText("Weekly digest · the week of 5 Oct")).closest(".need")!;
     await userEvent.click(within(weekly as HTMLElement).getByRole("button", { name: "Write it again" }));
     await waitFor(() => expect(weekly).toHaveTextContent("Failed again: the writer timed out again. The next run writes it again."));
+    expect(weekly).not.toHaveClass("settled");
+    expect(within(weekly as HTMLElement).getByRole("button", { name: "Write it again" })).toBeEnabled();
     const daily = screen.getByText("Daily digest · 8 Oct").closest(".need")!;
     await userEvent.click(within(daily as HTMLElement).getByRole("button", { name: "Write it again" }));
-    await waitFor(() => expect(daily).toHaveTextContent("No longer waits on the owner: the digest is not one to write again."));
-    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    await waitFor(() => expect(daily).toHaveTextContent("Not written now: another litwatch job is already running."));
+    expect(within(daily as HTMLElement).getByRole("button", { name: "Write it again" })).toBeEnabled();
+    // Both still wait, as the server still counts them.
+    expect(screen.getByText("5 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
   it("settles an item whose action answers 409 with the reason, in place", async () => {

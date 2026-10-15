@@ -51,9 +51,9 @@ function Reactions({ q, name }: { q: Quality; name: (slug: string) => React.Reac
 }
 
 export function OverviewPage() {
-  const quality = useQuery(qualityQuery);
-  const runs = useQuery(runsQuery);
-  const sessions = useQuery(sessionsQuery);
+  const quality = useQuery(qualityQuery("overview"));
+  const runs = useQuery(runsQuery("overview"));
+  const sessions = useQuery(sessionsQuery("overview"));
   const desktop = useDesktop();
   const q = quality.data;
   const night = runs.data?.find((r) => r.kind === "nightly") ?? runs.data?.[0];

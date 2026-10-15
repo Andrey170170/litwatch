@@ -31,13 +31,17 @@ function SpendRow({ s }: { s: Spend }) {
 function failed(r: Run): string {
   if (r.error) return r.error;
   const c = r.counts ?? {};
-  const parts = [c.grading_failed ? `${c.grading_failed} grading` : "", c.analysis_failed ? `${c.analysis_failed} analysis` : ""].filter(Boolean);
+  const parts = [
+    c.classification_failed ? `${c.classification_failed} classification` : "",
+    c.analysis_failed ? `${c.analysis_failed} analysis` : "",
+    c.grading_failed ? `${c.grading_failed} grading` : "",
+  ].filter(Boolean);
   return parts.length ? `${parts.join(", ")} failed` : "";
 }
 
 export function RunsPage() {
-  const quality = useQuery(qualityQuery);
-  const runs = useQuery(runsQuery);
+  const quality = useQuery(qualityQuery("runs"));
+  const runs = useQuery(runsQuery("runs"));
   const schedule = useQuery(scheduleQuery);
   const desktop = useDesktop();
   const cost = quality.data?.cost ?? [];

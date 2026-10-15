@@ -40,7 +40,7 @@ export function foldedAtFirst(tree: Tree): Set<string> {
 
 export function TaxonomyPage() {
   const tree = useQuery(taxonomyQuery);
-  const stats = useQuery(taxonomyStatsQuery);
+  const stats = useQuery(taxonomyStatsQuery("taxonomy"));
   const [folded, setFolded] = useState<Set<string> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const t = tree.data;

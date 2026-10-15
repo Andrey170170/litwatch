@@ -115,7 +115,7 @@ export type Run = {
   finished_at: string | null;
   cost: number | string;
   error: string | null;
-  counts: { classified?: number; analysed?: number; graded?: number; grading_failed?: number; analysis_failed?: number; calls?: Record<string, { cost: number; calls: number }> } | null;
+  counts: { classified?: number; classification_failed?: number; analysed?: number; analysis_failed?: number; graded?: number; grading_failed?: number; calls?: Record<string, { cost: number; calls: number }> } | null;
   fetched: number;
   inserted: number;
   updated: number;

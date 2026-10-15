@@ -13,6 +13,8 @@ export const summaryQuery = queryOptions({
   queryFn: async () => ok(await api.GET("/api/summary")),
   staleTime: 30_000,
   refetchInterval: 60_000,
+  // A sidebar mounting (the reading one for the Settings one, the phone's drawer) is navigation, not a reason.
+  refetchOnMount: false,
   // Only the data: a refetch that changes nothing re-renders nothing (structural sharing).
   notifyOnChangeProps: ["data"],
 });
@@ -63,9 +65,11 @@ const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowF
  * refetches them in the background when shown, its cached rows on screen meanwhile. Only the page gone to: the one
  * left keeps its reads for the way back. The shell's summary is never touched here. */
 export function freshVisit(qc: QueryClient, pathname: string) {
+  // A Settings page's reads are keyed by the page (below), so the page gone to is all that is marked.
   const path = pathname.replace(/\/$/, "") || "/";
   const topic = /^\/topics\/([^/]+)$/.exec(path);
-  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : path.startsWith("/settings") ? ["settings"] : null;
+  const page = /^\/settings\/([^/]+)/.exec(path);
+  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : page?.[1] ? ["settings", page[1]] : null;
   if (key) void qc.invalidateQueries({ queryKey: key, refetchType: "none" });
 }
 
@@ -113,70 +117,78 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
 
 // -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
 
+// A Settings page's reads live under its own key, `["settings", page, ...]`, so a fresh visit to one page
+// (`freshVisit`) refetches that page's reads only: a page left keeps its rows for the way back, whatever its siblings
+// read meanwhile. Two pages reading one endpoint each keep their own copy.
+
 /** Refetched in the background on each visit by a link (`freshVisit`), and still for the visit: nothing moves under
  * the reader while a page is open or on the way back to it. What a write settles is patched into the cached page
  * (`settle`, `settleFromPaper`). */
 const settingsOptions = { staleTime: Infinity, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
-export const qualityQuery = queryOptions({
-  queryKey: ["settings", "quality"],
-  queryFn: async () => ok(await api.GET("/api/settings/quality")) as unknown as Quality,
-  ...settingsOptions,
-});
+export const qualityQuery = (page: "needs" | "overview" | "runs") =>
+  queryOptions({
+    queryKey: ["settings", page, "quality"],
+    queryFn: async () => ok(await api.GET("/api/settings/quality")) as unknown as Quality,
+    ...settingsOptions,
+  });
 
 export const missesQuery = queryOptions({
-  queryKey: ["settings", "misses"],
+  queryKey: ["settings", "misses", "list"],
   queryFn: async () => ok(await api.GET("/api/settings/misses")),
   ...settingsOptions,
 });
 
-export const sessionsQuery = queryOptions({
-  queryKey: ["settings", "calibrate"],
-  queryFn: async () => ok(await api.GET("/api/settings/calibrate")) as unknown as SessionRow[],
-  ...settingsOptions,
-});
+export const sessionsQuery = (page: "calibrate" | "overview") =>
+  queryOptions({
+    queryKey: ["settings", page, "sessions"],
+    queryFn: async () => ok(await api.GET("/api/settings/calibrate")) as unknown as SessionRow[],
+    ...settingsOptions,
+  });
 
 export const sessionQuery = (id: number) =>
   queryOptions({
-    queryKey: ["settings", "calibrate", id],
+    queryKey: ["settings", "calibrate", "session", id],
     queryFn: async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session,
     ...settingsOptions,
   });
 
-export const runsQuery = queryOptions({
-  queryKey: ["settings", "runs"],
-  queryFn: async () => ok(await api.GET("/api/settings/runs")) as unknown as Run[],
-  ...settingsOptions,
-});
+export const runsQuery = (page: "overview" | "runs") =>
+  queryOptions({
+    queryKey: ["settings", page, "runs"],
+    queryFn: async () => ok(await api.GET("/api/settings/runs")) as unknown as Run[],
+    ...settingsOptions,
+  });
 
 export const scheduleQuery = queryOptions({
-  queryKey: ["settings", "schedule"],
+  queryKey: ["settings", "runs", "schedule"],
   queryFn: async () => ok(await api.GET("/api/settings/schedule")),
   staleTime: 5 * 60_000,
 });
 
 export const configQuery = queryOptions({
-  queryKey: ["settings", "config"],
+  queryKey: ["settings", "configuration", "config"],
   queryFn: async () => ok(await api.GET("/api/settings/config")) as Record<string, unknown>,
   staleTime: 5 * 60_000,
 });
 
 export const integrationsQuery = queryOptions({
-  queryKey: ["settings", "integrations"],
+  queryKey: ["settings", "integrations", "cards"],
   queryFn: async () => ok(await api.GET("/api/settings/integrations")),
   ...settingsOptions,
 });
 
-export const taxonomyStatsQuery = queryOptions({
-  queryKey: ["settings", "taxonomy-stats"],
-  queryFn: async () => ok(await api.GET("/api/settings/taxonomy/stats")),
-  ...settingsOptions,
-});
+export const taxonomyStatsQuery = (page: "topics" | "taxonomy") =>
+  queryOptions({
+    queryKey: ["settings", page, "stats"],
+    queryFn: async () => ok(await api.GET("/api/settings/taxonomy/stats")),
+    ...settingsOptions,
+  });
 
 /** How many papers of the last 90 days each of a topic's keywords matches, for the editor. */
 export const keywordsQuery = (slug: string, enabled = true) =>
   queryOptions({
-    queryKey: ["settings", "keywords", slug],
+    queryKey: ["settings", "topics", "keywords", slug],
     queryFn: async () => ok(await api.GET("/api/settings/topics/{slug}/keywords", { params: { path: { slug } } })),
     staleTime: 5 * 60_000,
     enabled,

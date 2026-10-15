@@ -29,7 +29,7 @@ function useOpenSession() {
 }
 
 export function CalibratePage() {
-  const sessions = useQuery(sessionsQuery);
+  const sessions = useQuery(sessionsQuery("calibrate"));
   const draw = useDrawSession();
   const open = useOpenSession();
   return (

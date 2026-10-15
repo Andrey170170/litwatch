@@ -79,8 +79,8 @@ describe("a paper's page", () => {
     // The Needs you page the reader came from lists both passes; each is settled there as it leaves the paper.
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const row = (id: number, state: string) => ({ id, paper_id: "2610.00002", revision: 1, title: "Epic one", kind: "brief", state, failed_runs: 0, last_error: null, queued_at: "2026-10-08T03:00:00Z" });
-    client.setQueryData(["settings", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")], digests: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
-    const settledRows = () => (client.getQueryData(["settings", "quality"]) as { night: { fulltext: { id: number; settled?: string }[] } }).night.fulltext.map((r) => r.settled);
+    client.setQueryData(["settings", "needs", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")], digests: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
+    const settledRows = () => (client.getQueryData(["settings", "needs", "quality"]) as { night: { fulltext: { id: number; settled?: string }[] } }).night.fulltext.map((r) => r.settled);
     renderApp("/paper/2610.00002", client);
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByText(/Full text failed three runs in a row/)).toBeInTheDocument();

@@ -5,7 +5,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Schemas } from "@/api/client";
 import { useReorderTopics, useSaveTopic } from "@/api/mutations";
 import { keywordsQuery, taxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
@@ -94,7 +94,7 @@ function DepthList({ depth, topics, tree, revisions, onOrder }: { depth: Depth; 
 
 export function TopicsPage() {
   const tree = useQuery(taxonomyQuery);
-  const stats = useQuery(taxonomyStatsQuery);
+  const stats = useQuery(taxonomyStatsQuery("topics"));
   const reorder = useReorderTopics();
   const t = tree.data;
   const topics = t?.topics ?? [];
@@ -144,7 +144,7 @@ export function TopicEditorPage() {
 }
 
 function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: Topic | null }) {
-  const stats = useQuery(taxonomyStatsQuery);
+  const stats = useQuery(taxonomyStatsQuery("topics"));
   const save = useSaveTopic();
   const navigate = useNavigate();
   // The form against what was loaded, or what was last saved here; the taxonomy's refetch after a save does
@@ -158,6 +158,16 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
   const matches = useQuery(keywordsQuery(cls.slug, !!current));
   const path = classPath(tree, cls.slug);
   const dirty = JSON.stringify(form) !== JSON.stringify(base);
+  // The taxonomy refreshed behind a pristine form (edited elsewhere meanwhile): the form follows it, so a save sends
+  // the current fields, not the ones loaded before. An edited form keeps its edits.
+  const loaded = JSON.stringify(asForm(current ?? fresh(cls)));
+  useEffect(() => {
+    if (!dirty && !saved && loaded !== JSON.stringify(base)) {
+      const next = JSON.parse(loaded) as Topic;
+      setBase(next);
+      setForm(next);
+    }
+  }, [loaded, dirty, saved, base]);
   const version = stats.data?.topic_revisions[cls.slug] ?? 1;
   // An edit after a save brings Save back in the offer's place.
   const set = (patch: Partial<Topic>) => {

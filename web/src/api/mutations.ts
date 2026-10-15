@@ -33,10 +33,11 @@ function patchSaved(qc: QueryClient, paperId: string, saved: boolean) {
 export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
   refreshSummary(qc);
-  await qc.invalidateQueries({ queryKey: ["paper", paperId] });
+  // The paper refetched whether or not its page is open: the reconciliation below must read fresh states.
+  await qc.invalidateQueries({ queryKey: ["paper", paperId], refetchType: "all" });
   if (qc.getQueryState(["paper", paperId])?.status === "error") toast("Recorded, but the page could not be refreshed", "error");
   const paper = qc.getQueryData<Schemas["Paper"]>(["paper", paperId]);
-  if (paper) qc.setQueryData<Quality>(qualityQuery.queryKey, (old) => old && settleFromPaper(old, paper));
+  if (paper) qc.setQueryData<Quality>(qualityQuery("needs").queryKey, (old) => old && settleFromPaper(old, paper));
 }
 
 export function said(e: unknown, fallback = "That did not go through"): string {
@@ -298,8 +299,9 @@ export function useSaveTopic() {
         qc.invalidateQueries({ queryKey: ["taxonomy"] }),
         qc.invalidateQueries({ queryKey: ["topics"] }),
         qc.invalidateQueries({ queryKey: ["summary"] }),
-        qc.invalidateQueries({ queryKey: ["settings", "taxonomy-stats"] }),
-        qc.invalidateQueries({ queryKey: ["settings", "keywords", slug] }),
+        qc.invalidateQueries({ queryKey: ["settings", "topics", "stats"] }),
+        qc.invalidateQueries({ queryKey: ["settings", "taxonomy", "stats"] }),
+        qc.invalidateQueries({ queryKey: ["settings", "topics", "keywords", slug] }),
       ]),
     onError: (e) => toast(said(e, "Could not save it"), "error"),
   });
@@ -319,7 +321,10 @@ export function useDrawSession() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => ok(await api.POST("/api/settings/calibrate", { body: {} })),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "calibrate"] }),
+    onSuccess: () => {
+      refreshSummary(qc);
+      return qc.invalidateQueries({ queryKey: ["settings", "calibrate"] });
+    },
     onError: (e) => toast(said(e, "Could not draw a session"), "error"),
   });
 }
@@ -332,7 +337,7 @@ export function useAnswer(sessionId: number) {
   return useMutation({
     mutationFn: async ({ position, answer }: { position: number; paperId: string; answer: Schemas["Answer"] }) =>
       ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: sessionId, position } }, body: answer })),
-    onSuccess: (_, { paperId }) => Promise.all([qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId], exact: true }), settled(qc, paperId)]),
+    onSuccess: (_, { paperId }) => Promise.all([qc.invalidateQueries({ queryKey: ["settings", "calibrate", "session", sessionId], exact: true }), settled(qc, paperId)]),
     onError: (e) => toast(said(e, "The answer did not go through"), "error"),
   });
 }
@@ -344,7 +349,7 @@ export function useMore(sessionId: number) {
     mutationFn: async () => ok(await api.POST("/api/settings/calibrate/{session_id}/more", { params: { path: { session_id: sessionId } } })),
     onSuccess: (r) => {
       toast(r.added ? `${plural(r.added, "more paper")} added` : "Nothing is waiting for a word");
-      return qc.invalidateQueries({ queryKey: ["settings", "calibrate", sessionId] });
+      return qc.invalidateQueries({ queryKey: ["settings", "calibrate", "session", sessionId] });
     },
     onError: (e) => toast(said(e), "error"),
   });
@@ -368,7 +373,10 @@ export function useSkipEvent() {
   return useMutation({
     mutationFn: async ({ name, eventId }: { name: string; eventId: number }) =>
       ok(await api.POST("/api/settings/integrations/{name}/skip", { params: { path: { name }, query: { event_id: eventId } } })),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "integrations"] }),
+    onSuccess: () => {
+      refreshSummary(qc);
+      return qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+    },
     onError: (e) => {
       toast(said(e), "error");
       if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["settings", "integrations"] });

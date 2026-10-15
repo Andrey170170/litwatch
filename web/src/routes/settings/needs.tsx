@@ -196,11 +196,14 @@ function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
   );
 }
 
-/** A failed digest: which one and why; Write it again runs the writer now, and a run that fails again settles the
- * item too, since the nightly runs write it again from here. */
+/** A failed digest: which one and why; Write it again runs the writer now. A digest still failed after it (the
+ * writer failed again, or the API refused: a job holds the run lock, or it is no longer one to write again) stays
+ * on the page with the reason, still to be written, as the server still counts it. */
 function FailedDigest({ d, badge, settle }: { d: FailedDigestRow; badge: React.ReactNode; settle: Settle }) {
   const write = useWriteAgain();
+  const [note, setNote] = useState<string | null>(null);
   const when = d.period === "day" ? `Daily digest · ${rowDate(d.day)}` : `Weekly digest · the week of ${rowDate(d.day)}`;
+  const onDone = (r: { state: string; error?: string | null }) => (r.state === "failed" ? setNote(`Failed again: ${r.error ?? "no text"}. The next run writes it again.`) : settle("Written again; it shows in the Digest."));
   return (
     <div className={`need fail${d.settled ? " settled" : ""}`}>
       <div className="nh">
@@ -208,11 +211,12 @@ function FailedDigest({ d, badge, settle }: { d: FailedDigestRow; badge: React.R
         <span className="nt">{when}</span>
       </div>
       <div className="nb">{d.error ? `Could not be written: ${d.error}` : "Could not be written."}</div>
+      {note && <div className="nb">{note}</div>}
       {d.settled ? (
         <div className="nres">{d.settled}</div>
       ) : (
         <div className="nact">
-          <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id, { onSuccess: (r) => settle(r.state === "failed" ? `Failed again: ${r.error ?? "no text"}. The next run writes it again.` : "Written again; it shows in the Digest."), onError: gone(settle) })}>
+          <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id, { onSuccess: onDone, onError: (e) => setNote(`Not written now: ${said(e)}.`) })}>
             {write.isPending ? "Writing…" : "Write it again"}
           </button>
         </div>
@@ -235,13 +239,13 @@ function Analysis({ s, settle }: { s: Stuck; settle: Settle }) {
 }
 
 export function NeedsPage() {
-  const quality = useQuery(qualityQuery);
+  const quality = useQuery(qualityQuery("needs"));
   const qc = useQueryClient();
   const cards = useTopicCards();
   const q = quality.data;
   const badge = (slug: string | null | undefined) => (slug && cards[slug] ? <Badge topic={cards[slug]} /> : null);
   // Marks the item settled in the cached page: it stays where it is, and the counts follow.
-  const settler = (list: Waiting, s: Settled) => (what: string | undefined) => qc.setQueryData(qualityQuery.queryKey, (old: Quality | undefined) => old && settle(old, list, s, what));
+  const settler = (list: Waiting, s: Settled) => (what: string | undefined) => qc.setQueryData(qualityQuery("needs").queryKey, (old: Quality | undefined) => old && settle(old, list, s, what));
   const open = q ? waiting(q) : 0;
   // A split labelled before this visit no longer waits; one labelled on it stays, settled.
   const { splits, escalations } = openSplits(q?.night.splits ?? []);
