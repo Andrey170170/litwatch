@@ -23,7 +23,7 @@ the results through its own web app. It is single-user and self-hosted. Branch `
 - `store` is the only package with SQL; its functions take a connection and return `core` types. Schema changes are
   migrations in `store/migrations/`.
 - Pipeline code names an `llm` role, never a model; models are configuration (`litwatch.toml`).
-- Evaluation runs are dry runs: they write to the evaluation tables only, never to candidates, verdicts or the outbox.
+- Evaluation runs are dry runs: they write to the evaluation tables only, never to verdicts or the outbox.
 - A pipeline step writes its event to the outbox in the same transaction as its data. Integrations react to events
   and are off unless configured.
 
