@@ -46,7 +46,7 @@ and the Gist from the full text, Weight re-checks, Deep card requests through th
 `deep`, and its usage recorded per attempt. *Check:* on a test night, every Focus paper at central or related has a Brief and every Area must-read
 candidate a re-checked Weight within the digest wait, or its pass is on Quality as failed or awaiting text and the
 digest used the abstract; every paper with a Brief shows the Gist written with it, and every finished Deep
-attempt, carded or failed, has its usage; on ten hand-read papers, the overstatement line appears where
+attempt, carded or failed, has its usage or says it is unknown (a job lost before it reported); on ten hand-read papers, the overstatement line appears where
 the owner agrees the abstract overstates and nowhere else, and no Gist repeats a claim its Brief corrects.
 
 **N4 · Digests.** Daily and weekly digests per depth, their Gists, picks, quiet days, records, the bounded wait, the

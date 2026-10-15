@@ -48,8 +48,9 @@ evaluation calls the same functions and writes only to evaluation tables.
   every surface reads one answer and lists sort by it.
 - `gists` (paper, paper revision, arXiv version or unknown, pass, text, source abstract | full_text, model, at): the
   current Gist is the one from the full-text pass queued last for the current revision, else from the abstract. `analyses.gist` is the abstract one.
-- `briefs` (paper, paper revision, arXiv version or unknown, text, overstatement line, text source latex | pdf, text
-  hash, model, at).
+- `briefs` (paper, paper revision, arXiv version or unknown, pass, text, overstatement line, text source latex | pdf,
+  text hash, model, at): the current Brief is the one from the pass queued last for the current revision, the same pass
+  as the current Gist.
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
   done | failed, priority, queued at, text arrived at, arXiv version read, text hash, lease until, failed runs, last
   error).
