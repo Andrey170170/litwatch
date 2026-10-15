@@ -3,6 +3,8 @@ full-text rows of `weights` and `gists`)."""
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -206,6 +208,25 @@ class Claimed:
     area: TaxonomyClass | None
     lease_until: datetime
     retry_text: bool = False  # the archive is to retry the downloads it gave up on
+
+
+# Held by the worker that works the Deep passes, so the service's and a terminal's never run
+# side by side: cards are made, and the daily cap counted, one at a time.
+DEEP_WORKER_LOCK = 7213915
+
+
+@asynccontextmanager
+async def deep_worker(conn: psycopg.AsyncConnection) -> AsyncIterator[bool]:
+    """Hold the Deep worker's lock for the block if no other worker holds it; yields whether
+    it is held."""
+    row = await (
+        await conn.execute("SELECT pg_try_advisory_lock(%s) AS locked", (DEEP_WORKER_LOCK,))
+    ).fetchone()
+    try:
+        yield row["locked"]
+    finally:
+        if row["locked"]:
+            await conn.execute("SELECT pg_advisory_unlock(%s)", (DEEP_WORKER_LOCK,))
 
 
 # Whether Deep pass `f` has an attempt open: its job was submitted, or may have been.

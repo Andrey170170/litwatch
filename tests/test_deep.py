@@ -321,6 +321,30 @@ async def test_a_request_that_takes_over_a_claimed_pass_makes_the_attempt_the_ow
     assert [a["automatic"] for a in await attempts(db)] == [False]
 
 
+async def test_a_job_whose_polls_keep_failing_is_given_up_at_its_deadline(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.fail_polls = 1
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"card_following": 1}
+    await db.execute("UPDATE deep_attempts SET at = now() - interval '2 hours'")
+    fake.fail_polls = 100  # the service is gone for good
+    assert await work(db, with_text(P), d) == {"card_failed": 1}
+    ((usage, error),) = [(a["usage"], a["error"]) for a in await attempts(db)]
+    assert usage is None and "gave up" in error
+
+
+async def test_one_worker_at_a_time_works_the_deep_passes(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    other = await store.connect(db.test_dsn, db.test_schema)
+    async with other, fulltext_store.deep_worker(other) as mine:
+        assert mine
+        assert await work(db, with_text(P), make(fake)) == {}
+    assert fake.requests == [] and [r["state"] for r in await deep_rows(db)] == ["awaiting_text"]
+    assert await work(db, with_text(P), make(fake)) == {"cards_written": 1}
+
+
 async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db):
     await grade(db, Fit.CENTRAL)
     # Unsaved by a write that missed its settle: the claim settles it first.

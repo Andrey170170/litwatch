@@ -77,6 +77,14 @@ def results(path: Path) -> dict[str, Result]:
     return {r.paper_id: r for r in found}
 
 
+def spent(path: Path) -> float:
+    """What every call of the run cost, failed ones and those answered again included."""
+    if not path.exists():
+        return 0.0
+    lines = (line for line in path.read_text().splitlines() if line)
+    return sum(Result.model_validate_json(line).cost or 0 for line in lines)
+
+
 def fingerprint(gateway: Gateway) -> str:
     """The role's configuration and its instructions, hashed."""
     role = gateway.models.role(brief.ROLE).model_dump_json()
@@ -195,12 +203,12 @@ def report(
     papers: dict[str, Paper],
     found: dict[str, Result],
     abstract_gists: dict[str, str],
+    cost: float,
 ) -> str:
-    """The report, as markdown, from the run alone: no calls."""
+    """The report, as markdown, from the run alone: no calls. `cost` is what the run spent."""
     answered = [found[e.id] for e in entries if e.id in found and found[e.id].output]
     lines = [f"# {title}", ""]
     models = sorted({r.model for r in answered if r.model})
-    cost = sum(r.cost or 0 for r in answered)
     lines += [
         f"{len(answered)} of {len(entries)} papers answered by {', '.join(models) or 'no model'}, "
         f"${cost:.2f} in all. Each paper's text was read from the archive as a full-text pass "

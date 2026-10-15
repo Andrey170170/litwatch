@@ -56,8 +56,18 @@ async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
 async def work(
     conn: psycopg.AsyncConnection, archive: ArchiveClient, deep: Deep, *, limit: int | None = None
 ) -> Counter[str]:
-    """Work the Deep passes that are due, one at a time, up to `limit` claimed. Returns how the
-    tries ended."""
+    """Work the Deep passes that are due, one at a time, up to `limit` claimed, unless another
+    worker is working them. Returns how the tries ended."""
+    async with store_.deep_worker(conn) as mine:
+        if not mine:
+            log.info("another worker is working the Deep passes")
+            return Counter()
+        return await _work(conn, archive, deep, limit)
+
+
+async def _work(
+    conn: psycopg.AsyncConnection, archive: ArchiveClient, deep: Deep, limit: int | None
+) -> Counter[str]:
     counts: Counter[str] = Counter()
     tried: set[int] = set()
     while limit is None or len(tried) < limit:

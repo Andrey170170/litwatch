@@ -521,7 +521,8 @@ def eval_briefs_report(
 
     found, gists = _run(work, migrate=False)
     papers = {p.id: p for p in found}
-    print(briefs.report(title, entries, papers, briefs.results(run), gists), end="")
+    found = briefs.results(run)
+    print(briefs.report(title, entries, papers, found, gists, briefs.spent(run)), end="")
 
 
 # -- library ---------------------------------------------------------------------------------------

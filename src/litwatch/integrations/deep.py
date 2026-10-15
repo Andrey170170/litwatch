@@ -77,15 +77,21 @@ class DeepClient:
 
     async def follow(self, job_id: str, since: datetime, label: str = "") -> Outcome:
         """Poll a job until it ends, or until `timeout_seconds` after `since` (when it was
-        submitted). A failed poll raises, and the job can be followed again later."""
+        submitted). A failed poll raises, and the job can be followed again later, until then."""
         deadline = since + timedelta(seconds=self.timeout_seconds)
+        gave_up = Outcome(None, [], None, "", "litwatch gave up waiting for the deep job")
         seen = ""
         while True:
             await asyncio.sleep(self.poll_seconds)
-            resp = await self.http.get(f"{self.base_url}/jobs/{job_id}")
-            if resp.status_code == 404:
-                return Outcome(None, [], None, "", "deep job vanished (service restarted?)")
-            resp.raise_for_status()
+            try:
+                resp = await self.http.get(f"{self.base_url}/jobs/{job_id}")
+                if resp.status_code == 404:
+                    return Outcome(None, [], None, "", "deep job vanished (service restarted?)")
+                resp.raise_for_status()
+            except httpx.HTTPError:
+                if datetime.now(UTC) > deadline:
+                    return gave_up  # what it spent was never reported
+                raise
             job = resp.json()
             stats = job.get("stats") or {}
             mark = f"{job['status']} {job.get('last_event', '')} cells={stats.get('cells', 0)}"
@@ -110,8 +116,7 @@ class DeepClient:
                     job.get("error"),
                 )
             if datetime.now(UTC) > deadline:
-                # The job may go on spending; what it spent was never reported.
-                return Outcome(None, [], None, "", "litwatch gave up waiting for the deep job")
+                return gave_up  # the job may go on spending; what it spent was never reported
 
 
 class Deep:

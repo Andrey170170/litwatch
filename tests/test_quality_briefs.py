@@ -67,6 +67,13 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     assert [r.paper_id for r in second] == [Q.id] and second[0].version is None
     assert set(briefs.results(out)) == {P.id, Q.id}
 
+    # A billed failure answered again later counts in what the run spent, not in its answers.
+    billed = briefs.Result(paper_id=P.id, error="invalid", cost=0.2, request=first[0].request)
+    with out.open("a") as f:
+        f.write(billed.model_dump_json() + "\n" + first[0].model_dump_json() + "\n")
+    assert briefs.spent(out) == pytest.approx(0.202 + first[0].cost)
+    assert briefs.results(out)[P.id].output is not None
+
     other = Gateway(Models(brief=ROLE.model_copy(update={"model": "another"})), {})
     with pytest.raises(ValueError, match="another request"):
         await briefs.run(other, seeds.taxonomy(), pairs, archive, out)
@@ -85,7 +92,9 @@ def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():
             ),
         ),
     }  # fmt: skip
-    text = briefs.report("Briefs", entries(), {P.id: P, Q.id: Q}, found, {P.id: "An old Gist."})
+    text = briefs.report(
+        "Briefs", entries(), {P.id: P, Q.id: Q}, found, {P.id: "An old Gist."}, 0.6
+    )
     assert (
         f"| {P.id} | yes | not read yet | 108 | 19 | Brief of 108 words (asked 120–200) |" in text
     )
@@ -94,4 +103,4 @@ def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():
     )
     assert "**Gist from the abstract.** An old Gist." in text
     assert "**Overstatement.** The abstract overstates: the probes" in text
-    assert "$0.40 in all" in text
+    assert "$0.60 in all" in text
