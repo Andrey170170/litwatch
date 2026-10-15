@@ -1359,6 +1359,11 @@ export interface components {
              * @default 0
              */
             awaiting_classification: number;
+            /**
+             * Analysis Failed
+             * @default 0
+             */
+            analysis_failed: number;
         };
         /**
          * Status
@@ -2015,6 +2020,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description No such paper */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The paper's text changed, or it no longer waits for the owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2052,6 +2071,20 @@ export interface operations {
                     };
                 };
             };
+            /** @description No such paper */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The paper's text changed, or it no longer waits for the owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2085,6 +2118,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description No such paper */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The paper's text changed, or it no longer waits for the owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2113,6 +2160,20 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such paper */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The paper's text changed, or it no longer waits for the owner */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

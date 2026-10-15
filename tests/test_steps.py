@@ -223,6 +223,8 @@ async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_a
     await night(conn, models)
     assert ("analyse", A.title) not in models.asked  # left for the owner, at no cost
     async with api(conn) as client:
+        status = (await client.get("/api/status")).json()
+        assert status["state"] == "attention" and status["analysis_failed"] == 1
         url = "/api/settings/analysis/{}/retry"
         assert (await client.post(url.format(A.id), json={"revision": 2})).status_code == 409
         assert (await client.post(url.format(B.id), json=AT_1)).status_code == 409  # analysed

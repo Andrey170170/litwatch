@@ -1007,6 +1007,12 @@
           "204": {
             "description": "Successful Response"
           },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1059,6 +1065,12 @@
               }
             }
           },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1102,6 +1114,12 @@
           "204": {
             "description": "Successful Response"
           },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1144,6 +1162,12 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
           },
           "422": {
             "description": "Validation Error",
@@ -3660,6 +3684,11 @@
           "awaiting_classification": {
             "type": "integer",
             "title": "Awaiting Classification",
+            "default": 0
+          },
+          "analysis_failed": {
+            "type": "integer",
+            "title": "Analysis Failed",
             "default": 0
           }
         },

@@ -104,6 +104,13 @@ class Awaiting(BaseModel):
     revision: int
 
 
+# What `_awaiting` answers besides success, for the API schema.
+WAITING = {
+    404: {"description": "No such paper"},
+    409: {"description": "The paper's text changed, or it no longer waits for the owner"},
+}
+
+
 @asynccontextmanager
 async def _awaiting(
     c: Any, paper_id: str, revision: int, step: failures.Step = "classification"
@@ -123,7 +130,7 @@ async def _awaiting(
         yield paper
 
 
-@router.post("/classification/{paper_id:path}/dismiss", status_code=204)
+@router.post("/classification/{paper_id:path}/dismiss", status_code=204, responses=WAITING)
 async def dismiss(paper_id: str, body: Awaiting, c: Conn) -> None:
     """Litwatch drops the paper from processing; it stays searchable in the archive."""
     async with _awaiting(c, paper_id, body.revision):
@@ -135,7 +142,7 @@ class ClassesIn(Awaiting):
     primary: str | None = None
 
 
-@router.put("/classification/{paper_id:path}")
+@router.put("/classification/{paper_id:path}", responses=WAITING)
 async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
     """The owner names the paper's classes, which go on as usual with source `owner`."""
     # The taxonomy is read in the action's transaction, so its shared lock holds the tree still
@@ -161,7 +168,7 @@ class CorrectionIn(Awaiting):
     abstract: str | None = None
 
 
-@router.post("/classification/{paper_id:path}/correction", status_code=204)
+@router.post("/classification/{paper_id:path}/correction", status_code=204, responses=WAITING)
 async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
     """Fix the text classification choked on. It counts as a rewrite: the next run classifies
     the corrected paper."""
@@ -173,7 +180,7 @@ async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
         await papers_store.correct(c, paper_id, title, abstract)
 
 
-@router.post("/analysis/{paper_id:path}/retry", status_code=204)
+@router.post("/analysis/{paper_id:path}/retry", status_code=204, responses=WAITING)
 async def retry_analysis(paper_id: str, body: Awaiting, c: Conn) -> None:
     """Analysis failed three runs in a row on this text: give it three more, from the next run."""
     async with _awaiting(c, paper_id, body.revision, "analysis"):
