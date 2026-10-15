@@ -30,6 +30,7 @@ from litwatch.jobs.lock import run_lock
 from litwatch.publications import Dblp
 from litwatch.store import digest as digest_store
 from litwatch.store import legacy as legacy_store
+from litwatch.store import papers as papers_store
 from litwatch.store import runs
 from litwatch.store import topics as topics_store
 from litwatch.store import triage as triage_store
@@ -319,6 +320,66 @@ def eval_sample_rejects(
 def eval_report(eval_run_id: int) -> None:
     """The metrics of an evaluation run, against the labels as they are now."""
     console.print_json(data=_run(lambda conn: feedback.metrics(conn, eval_run_id)))
+
+
+@eval_app.command("classify")
+def eval_classify(
+    candidate: Annotated[list[str], typer.Argument(help="Candidates named in --candidates.")],
+    candidates: Annotated[
+        Path, typer.Option(help="TOML: one table per candidate, each a role.")
+    ] = Path("evals/configs/classify.toml"),
+    labels: Annotated[Path, typer.Option(help="The evaluation labels.")] = Path("evals/labels"),
+    out: Annotated[Path, typer.Option(help="One <candidate>.jsonl per candidate.")] = Path(
+        "evals/runs/classify"
+    ),
+    limit: Annotated[int | None, typer.Option(help="Only the first N papers.")] = None,
+    concurrency: int = 8,
+) -> None:
+    """Sort the evaluation papers with each candidate as the `classify` role. A dry run: it reads
+    titles and abstracts from the configured database and writes only to `out`; a run resumes
+    where it stopped."""
+    import tomllib  # noqa: PLC0415
+
+    from litwatch.config import Models, RoleConfig  # noqa: PLC0415
+    from litwatch.llm.gateway import build  # noqa: PLC0415
+    from litwatch.quality import classify  # noqa: PLC0415
+
+    roles = tomllib.loads(candidates.read_text())
+    tree, evaluation = seeds.taxonomy(), classify.load(labels)
+    ids = evaluation.papers[:limit]
+    found = _run(lambda conn: papers_store.get_many(conn, ids), migrate=False)
+    if missing := len(ids) - len(found):
+        console.print(f"[yellow]{missing} papers are not in the database and are left out[/yellow]")
+    for name in candidate:
+        gateway = build(Models(classify=RoleConfig.model_validate(roles[name])))
+
+        def progress(r: classify.Result, name: str = name, done: list[int] = [0]) -> None:  # noqa: B006
+            done[0] += 1
+            if r.error or done[0] % 100 == 0:
+                console.print(f"{name}: {done[0]} {r.paper_id} {r.error or ''}")
+
+        new = asyncio.run(
+            classify.run(
+                gateway, tree, found, out / f"{name}.jsonl",
+                concurrency=concurrency, progress=progress,
+            )
+        )  # fmt: skip
+        cost = sum(r.cost or 0 for r in new)
+        failed = sum(r.error is not None for r in new)
+        console.print(f"{name}: {len(new)} sorted, {failed} failed, ${cost:.2f}")
+
+
+@eval_app.command("classify-report")
+def eval_classify_report(
+    candidate: Annotated[list[str], typer.Argument(help="Candidates whose runs to compare.")],
+    labels: Annotated[Path, typer.Option(help="The evaluation labels.")] = Path("evals/labels"),
+    runs: Annotated[Path, typer.Option(help="Where the runs are.")] = Path("evals/runs/classify"),
+) -> None:
+    """The comparison's tables, as markdown, from the runs alone: no calls."""
+    from litwatch.quality import classify  # noqa: PLC0415
+
+    results = {n: classify.results(runs / f"{n}.jsonl") for n in candidate}
+    print(classify.report(seeds.taxonomy(), classify.load(labels), results), end="")
 
 
 @eval_app.command("writers")

@@ -31,6 +31,35 @@ class Request:
         }
 
 
+@dataclass(frozen=True)
+class Predicate:
+    """A yes/no question, answered with the probability of yes."""
+
+    name: str
+    instructions: str
+
+
+@dataclass(frozen=True)
+class Choice:
+    """One option among several, answered with the option and its probability."""
+
+    name: str
+    instructions: str
+    options: tuple[tuple[str, str], ...]  # label, what it means
+
+
+type Question = Predicate | Choice
+
+
+@dataclass(frozen=True)
+class DecisionRequest:
+    """Content and typed questions about it, for a decision model (models.md). The gateway asks
+    it of a Decisions endpoint or, for a chat model, as a chat with a strict schema."""
+
+    content: str
+    questions: tuple[Question, ...]
+
+
 class Stop(StrEnum):
     COMPLETE = "complete"
     TRUNCATED = "truncated"

@@ -1,0 +1,16 @@
+# The classifiers N1 compares, each as the `classify` role (litwatch eval classify).
+
+[luna-decisions]
+provider = "openrouter"
+model = "openai/gpt-6-luna-decisions"
+decisions = true
+
+[jev]
+provider = "openrouter"
+model = "typesafe/jev-1.13"
+decisions = true
+
+[haiku]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+effort = "medium"

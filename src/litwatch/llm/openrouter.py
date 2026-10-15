@@ -9,6 +9,7 @@ no reasoning tokens, which is why the lists exist.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import openai
@@ -16,9 +17,19 @@ from openai import AsyncOpenAI
 from openai.lib._pydantic import to_strict_json_schema
 
 from litwatch.config import RoleConfig
-from litwatch.llm.types import ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm.types import (
+    Choice,
+    DecisionRequest,
+    Predicate,
+    ProviderError,
+    Reply,
+    Request,
+    Stop,
+    Usage,
+)
 
 BASE_URL = "https://openrouter.ai/api/v1"
+DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 
 # Chosen from the 0.x inference journal and a provider trial; see evals/2026-10-01-providers.md.
 DEFAULT_ROUTING: dict[str, tuple[str, ...]] = {
@@ -59,6 +70,55 @@ def chat_request(role: RoleConfig, request: Request, routing: tuple[str, ...]) -
     if limit := request.max_output_tokens or role.max_output_tokens:
         out["max_completion_tokens"] = limit
     return out
+
+
+def decisions_request(
+    role: RoleConfig, request: DecisionRequest, routing: tuple[str, ...]
+) -> dict[str, Any]:
+    """The Decisions endpoint's call: `noul` for a yes/no question, `choice` for a choice."""
+    questions: dict[str, Any] = {}
+    for q in request.questions:
+        match q:
+            case Predicate():
+                questions[q.name] = {"type": "noul", "instructions": q.instructions}
+            case Choice():
+                questions[q.name] = {
+                    "type": "choice",
+                    "instructions": q.instructions,
+                    "criteria": dict(q.options),
+                }
+    body: dict[str, Any] = {"model": role.model, "state": request.content, "questions": questions}
+    if routing:
+        body["provider"] = {"order": list(routing), "only": list(routing)}
+    return body
+
+
+def decision_reply(raw: dict[str, Any], request: DecisionRequest, role: RoleConfig) -> Reply:
+    """The answers as the JSON a chat model gives for the same request. An answer that is
+    missing or of the wrong type is left out, so the gateway rejects the reply as invalid."""
+    answers = raw.get("answers") or {}
+    out: dict[str, Any] = {}
+    for q in request.questions:
+        a = answers.get(q.name)
+        if not isinstance(a, dict):
+            continue
+        if isinstance(q, Predicate) and a.get("type") == "noul":
+            out[q.name] = a.get("noul")
+        elif isinstance(q, Choice) and a.get("type") == "choice":
+            option = a.get("choice")
+            probability = (a.get("probabilities") or {}).get(option, a.get("confidence"))
+            out[q.name] = {"option": option, "probability": probability}
+    values = raw.get("usage") or {}
+    usage = Usage(
+        model=role.model,
+        via="openrouter",
+        prompt_tokens=values.get("input_tokens") or 0,
+        completion_tokens=values.get("output_tokens") or 0,
+        cost=values.get("cost"),
+        generation_id=raw.get("id"),
+        provider=raw.get("provider"),
+    )
+    return Reply(json.dumps(out), Stop.COMPLETE, usage)
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -115,8 +175,18 @@ class OpenRouterProvider:
 
     async def complete(self, role: RoleConfig, request: Request) -> Reply:
         body = chat_request(role, request, self.routing(role))
+        completion = await self._call(self.client.chat.completions.create(**body))
+        return reply_of(completion, role)
+
+    async def decide(self, role: RoleConfig, request: DecisionRequest) -> Reply:
+        body = decisions_request(role, request, self.routing(role))
+        raw = await self._call(self.client.post(DECISIONS_URL, body=body, cast_to=object))
+        return decision_reply(raw, request, role)
+
+    async def _call(self, pending: Any) -> Any:
+        """The SDK's failures as provider errors."""
         try:
-            completion = await self.client.chat.completions.create(**body)
+            return await pending
         except openai.APITimeoutError as exc:
             raise ProviderError(type(exc).__name__, timeout=True) from exc
         # OpenRouter answers 404 when a model's only provider has no endpoint up, which the
@@ -130,4 +200,3 @@ class OpenRouterProvider:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except openai.APIError as exc:
             raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
-        return reply_of(completion, role)

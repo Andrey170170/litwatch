@@ -26,10 +26,13 @@ effort, applies retries and the timeout, journals the call with its cost, and re
 Providers: `anthropic` (prompt caching, cost from a price table) and `openrouter`.
 
 New: a second request shape for decision models. `Gateway.decide(role, decision_request, *, paper_id)` sends content
-plus a list of questions, each a predicate (yes/no), a choice among given options, or a score, and returns per question
-the answer, its probability or distribution, and the provider's confidence. Implementations: OpenRouter's Decisions
-endpoint (Luna Decisions, Jev) and, for a chat model under comparison, a chat call with a strict schema that asks for a
-probability per answer. Journalled and priced like chat calls (Luna Decisions bills input tokens only).
+plus a list of questions, each a predicate (yes/no) or a choice among given options, and returns per predicate the
+probability of yes and per choice the option and its probability. A score question is added when a role needs one.
+A role with `decisions = true` is served by OpenRouter's Decisions endpoint (Luna Decisions, Jev; `noul` and `choice`
+questions); any other model is asked the same questions as a chat with a strict schema, one property per question. The
+endpoint's reply is translated into that schema, so both are validated alike (every question answered, every
+probability in [0, 1], every choice one of its options) and journalled, priced and reused like chat calls (Luna
+Decisions and Jev bill input tokens only).
 
 ## Lab diversity
 
