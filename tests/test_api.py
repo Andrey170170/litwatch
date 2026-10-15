@@ -1,10 +1,10 @@
-"""The labelling API: the token, the queues, and what a label given there records."""
+"""The API's gate (the token and the read token) and its serving of the built web app."""
 
 import httpx
 import pytest
 
+from litwatch.api import app as app_module
 from litwatch.api import create_app
-from litwatch.core import Label, LabelOrigin, LabelValue
 from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
@@ -38,7 +38,7 @@ async def test_the_read_token_only_searches_and_reads_papers(client):
     assert (await client.get("/api/papers/2609.1", headers=READ)).json()["id"] == "2609.1"
     for method, path in [
         ("GET", "/api/status"),
-        ("GET", "/api/labelling"),
+        ("GET", "/api/topics"),
         ("GET", "/api/settings/config"),
         ("PUT", "/api/library/2609.1"),
         ("POST", "/api/papers/2609.1/card"),
@@ -54,74 +54,50 @@ async def test_the_read_token_only_searches_and_reads_papers(client):
 
 async def test_everything_but_the_health_check_needs_the_token(client):
     assert (await client.get("/healthz")).status_code == 200
-    assert (await client.get("/api/labelling")).status_code == 401
+    assert (await client.get("/api/status")).status_code == 401
     assert (
-        await client.get("/api/labelling", headers={"authorization": "Bearer no"})
+        await client.get("/api/status", headers={"authorization": "Bearer no"})
     ).status_code == 401
-    # Opening the page once with the token sets a cookie that then serves as the token.
-    page = await client.get("/label", params={"token": TOKEN})
-    assert "litwatch_token" in page.headers["set-cookie"]
-    # It sends the browser on to the bare address, so the token does not stay in the URL.
-    assert (page.status_code, page.headers["location"]) == (303, "/label")
-    assert (await client.get("/api/labelling")).json()["topics"] == [
-        {"slug": FAITH.slug, "name": FAITH.name}
-    ]
-    assert "set-cookie" not in (await client.get("/label", params={"token": "wrong"})).headers
-
-
-async def test_a_label_records_how_its_paper_was_chosen_and_can_be_taken_back(client, conn):
-    await feedback_store.add_provisional(
-        conn,
-        Label(
-            paper_id="2609.1",
-            topic=FAITH.slug,
-            value=LabelValue.RELEVANT,
-            origin=LabelOrigin.LEGACY_POSITIVE,
-            note="0.14 tier 2",
-        ),
-    )
-    sets = {s["key"]: s for s in (await client.get("/api/labelling", headers=AUTH)).json()["sets"]}
-    assert (sets["positives"]["total"], sets["positives"]["done"]) == (1, 0)
-    (item,) = (await client.get("/api/labelling/positives", headers=AUTH)).json()
-    assert item["labels"][FAITH.slug]["provisional"] is True
-
-    url = f"/api/labels/{FAITH.slug}/2609.1"
-    body = {"value": "not_relevant", "queue": "positives"}
-    assert (await client.put(url, json=body, headers=AUTH)).json()["provisional"] is False
-    (label,) = await feedback_store.labels(conn)
-    assert (label.value, label.origin) == (LabelValue.NOT_RELEVANT, LabelOrigin.LEGACY_POSITIVE)
-
-    other = {"value": "unsure", "queue": "rejects"}
-    await client.put(f"/api/labels/{FAITH.slug}/2609.2", json=other, headers=AUTH)
-    assert (await feedback_store.labels(conn))[1].origin == LabelOrigin.REJECT_SAMPLE
-    (unsure,) = (await client.get("/api/labelling/unsure", headers=AUTH)).json()
-    assert unsure["id"] == "2609.2"
-    assert (
-        await client.delete(f"/api/labels/{FAITH.slug}/2609.2", headers=AUTH)
-    ).status_code == 204
-    assert len(await feedback_store.labels(conn)) == 1
-
-    assert (
-        await client.put("/api/labels/interpretability/2609.1", json=body, headers=AUTH)
-    ).status_code == 404
-    assert (
-        await client.put(f"/api/labels/{FAITH.slug}/nope", json=body, headers=AUTH)
-    ).status_code == 404
-    assert (await client.get("/api/labelling/other", headers=AUTH)).status_code == 404
+    assert (await client.get("/api/status", headers=AUTH)).status_code == 200
 
 
 async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn):
     await papers_store.upsert(conn, [paper("cs/9901001")])
-    url = f"/api/labels/{FAITH.slug}/cs/9901001"
+    url = f"/api/word/{FAITH.slug}/cs/9901001"
     assert (await client.put(url, json={"value": "relevant"}, headers=AUTH)).status_code == 200
     assert [label.paper_id for label in await feedback_store.labels(conn)] == ["cs/9901001"]
-    assert (await client.delete(url, headers=AUTH)).status_code == 204
+    assert (await client.delete(url, headers=AUTH)).status_code == 200
     assert await feedback_store.labels(conn) == []
 
 
 async def test_a_good_bearer_header_works_beside_a_stale_cookie(client):
     client.cookies.set("litwatch_token", "old")
-    assert (await client.get("/api/labelling", headers=AUTH)).status_code == 200
+    assert (await client.get("/api/status", headers=AUTH)).status_code == 200
     # The scheme is checked, not skipped over.
     wrong_scheme = {"authorization": f"Basic  {TOKEN}"}
-    assert (await client.get("/api/labelling", headers=wrong_scheme)).status_code == 401
+    assert (await client.get("/api/status", headers=wrong_scheme)).status_code == 401
+
+
+def _web(app) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_the_built_web_app_is_served_with_its_index_for_client_routes(tmp_path, monkeypatch):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<p>shell</p>")
+    (tmp_path / "assets" / "app.js").write_text("console.log(1)")
+    (tmp_path / "manifest.webmanifest").write_text("{}")
+    monkeypatch.setattr(app_module, "WEB", tmp_path)
+    async with _web(create_app("postgresql://unused", TOKEN)) as web:
+        assert (await web.get("/")).text == "<p>shell</p>"
+        assert (await web.get("/papers?lookup=2609.1")).text == "<p>shell</p>"
+        assert (await web.get("/assets/app.js")).text == "console.log(1)"
+        assert (await web.get("/manifest.webmanifest")).text == "{}"
+        # An unknown API path is not the app's: it stays a 404.
+        assert (await web.get("/api/nothing-here", headers=AUTH)).status_code == 404
+
+
+async def test_an_unbuilt_web_app_says_how_to_build_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "WEB", tmp_path)
+    async with _web(create_app("postgresql://unused", TOKEN)) as web:
+        assert "pnpm build" in (await web.get("/")).text

@@ -19,7 +19,6 @@ from litwatch.store import papers as papers_store
 from litwatch.store import topics as topics_store
 from tests.conftest import FAITH, TOPICS, deliver, paper, start
 from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
-from tests.test_reading import night
 
 P = paper(
     "2610.00001",
@@ -158,7 +157,7 @@ async def test_an_item_0x_made_is_taken_over_not_made_again(world):
     assert fake.collection_names("OLDITEM1") == {"MINE", "Litwatch", "Tier 1"}
 
 
-async def test_takes_published_versions_and_cards_reach_the_notes(world):
+async def test_grades_published_versions_and_cards_reach_the_notes(world):
     conn, fake = world, FakeZotero()
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
     await start(conn, z)
@@ -166,15 +165,14 @@ async def test_takes_published_versions_and_cards_reach_the_notes(world):
     await run(conn, z)
     (item,) = fake.tops()
     key = item["key"]
-    assert "A take." not in fake.notes(key)[0]
+    assert "CoT faithfulness</b> · must read" in fake.notes(key)[0]
 
-    await night(conn)  # writes the take: take.written
     await lookups.store_record(
         conn, P.id, Publication(venue="NeurIPS", year=2026, doi="10.1/x"), by_owner=True
     )
     await run(conn, z)
     (note,) = fake.notes(key)
-    assert "A take." in note and "NeurIPS 2026" in note and "doi:10.1/x" in note
+    assert "NeurIPS 2026" in note and "doi:10.1/x" in note
 
     await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, [])
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")

@@ -48,10 +48,10 @@ async def test_an_integration_enabled_for_the_first_time_starts_at_the_end(conn)
 
 
 async def test_events_arrive_in_order_and_the_cursor_moves_past_unwanted_ones(conn):
-    rec = Recorder(types={events.PAPER_SAVED, events.TAKE_WRITTEN})
+    rec = Recorder(types={events.PAPER_SAVED, events.GRADE_CHANGED})
     await start(conn, rec)
     ids = await emit(
-        conn, events.PAPER_SAVED, events.PAPER_ADDED, events.TAKE_WRITTEN, events.PAPER_ADDED
+        conn, events.PAPER_SAVED, events.PAPER_ADDED, events.GRADE_CHANGED, events.PAPER_ADDED
     )
     assert await deliver(conn, rec, NOW) == 4
     assert rec.seen == [ids[0], ids[2]]

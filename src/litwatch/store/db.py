@@ -19,7 +19,7 @@ _NAME = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 
 
 class LegacyDatabaseError(RuntimeError):
-    """The database belongs to litwatch 0.x and has not been adopted."""
+    """The database belongs to litwatch 0.x, which v1 never uses (decision 48)."""
 
 
 async def connect(dsn: str, schema: str | None = None) -> psycopg.AsyncConnection[dict[str, Any]]:
@@ -59,15 +59,15 @@ def _migrations() -> list[tuple[int, str, str]]:
 async def migrate(conn: psycopg.AsyncConnection) -> list[str]:
     """Apply every migration not yet applied, in order. Returns the names applied.
 
-    A 0.x database is refused until `adopt_0x` has run on it, so pointing v1 at the wrong
-    database by accident changes nothing.
+    A 0.x database is refused, so pointing v1 at the wrong database by accident changes
+    nothing.
     """
     await conn.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK,))
     try:
         if not await _exists(conn, "schema_migrations"):
             if await _exists(conn, "selections"):
                 raise LegacyDatabaseError(
-                    "this is a litwatch 0.x database; run `litwatch db adopt` on a copy of it"
+                    "this is a litwatch 0.x database; v1 starts from an empty one"
                 )
             await conn.execute(
                 "CREATE TABLE schema_migrations (version integer PRIMARY KEY, "
@@ -90,27 +90,3 @@ async def migrate(conn: psycopg.AsyncConnection) -> list[str]:
         return applied
     finally:
         await conn.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK,))
-
-
-async def adopt_0x(conn: psycopg.AsyncConnection) -> list[str]:
-    """Turn a copy of a 0.x database into a v1 one, keeping its papers, runs and journal.
-
-    The 0.x `verdicts` and `selections` tables are renamed with a `legacy_` prefix; their
-    content is what the topic import and the regression set read. Then migrations apply.
-    """
-    if await _exists(conn, "schema_migrations"):
-        raise RuntimeError("this database already has v1 migrations")
-    if not await _exists(conn, "selections"):
-        raise RuntimeError("no 0.x tables here; a fresh database needs only `migrate`")
-    async with conn.transaction():
-        await conn.execute(
-            """
-            ALTER TABLE verdicts RENAME TO legacy_verdicts;
-            ALTER INDEX verdicts_pkey RENAME TO legacy_verdicts_pkey;
-            ALTER INDEX verdicts_selection_tier_idx RENAME TO legacy_verdicts_selection_tier_idx;
-            ALTER TABLE selections RENAME TO legacy_selections;
-            CREATE TABLE schema_migrations (version integer PRIMARY KEY, name text NOT NULL,
-                                            applied_at timestamptz NOT NULL DEFAULT now());
-            """
-        )
-    return await migrate(conn)

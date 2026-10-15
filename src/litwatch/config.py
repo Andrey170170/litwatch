@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import os
 import tomllib
-from datetime import date, datetime, time, timedelta, tzinfo
+from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-ROLES = ("classify", "triage", "judge", "check", "review", "writer")
+ROLES = ("classify", "judge", "check", "writer")
 
 
 class _Section(BaseModel):
@@ -60,12 +60,10 @@ class Models(_Section):
     classify: RoleConfig = RoleConfig(
         provider="openrouter", model="typesafe/jev-1.13", decisions=True
     )
-    triage: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
     judge: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
     check: RoleConfig = RoleConfig(
         provider="openrouter", model="meta/muse-spark-1.3-contributor", effort="high"
     )
-    review: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
     writer: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 
     @model_validator(mode="after")
@@ -86,22 +84,6 @@ class Intake(_Section):
     categories: tuple[str, ...] = ("cs.CL", "cs.AI", "cs.LG")
     # Nightly runs look back a few days so announcement lag and outages overlap.
     window_days: int = Field(default=3, gt=0)
-
-
-class Limits(_Section):
-    """Work in flight at once, per step."""
-
-    triage: int = Field(default=16, gt=0)  # calls
-    # Candidates graded at once. Each asks the judge and the check together, which are
-    # different labs, so this is also the most calls any one lab sees at a time.
-    grading: int = Field(default=6, gt=0)
-    # A candidate that failed grading this many runs is shown to the owner ungraded.
-    grading_attempts: int = Field(default=3, gt=0)
-    # A paper whose triage failed this many runs is not retried: it waits for the owner.
-    triage_stuck_after: int = Field(default=3, gt=0)
-    writing: int = Field(default=4, gt=0)  # takes written at once
-    # A pair the writer failed on this many runs enters its issue without a take.
-    take_attempts: int = Field(default=3, gt=0)
 
 
 def system_zone() -> tzinfo:
@@ -129,13 +111,12 @@ class Schedule(_Section):
     # Off until cutover: jobs run by hand before then (spec decision 22).
     enabled: bool = False
     nightly: str = "0 6 * * *"
-    weekly: str = "0 7 * * 1"
     # Publication lookup for library papers: new saves, and monthly re-checks (spec section 3).
     publications: str = "30 9 * * *"
-    # Decides which calendar date an issue belongs to. None is the server's own zone.
+    # The zone the cron times are read in. None is the server's own zone.
     timezone: str | None = None
 
-    @field_validator("nightly", "weekly", "publications")
+    @field_validator("nightly", "publications")
     @classmethod
     def _cron(cls, value: str) -> str:
         # Checked at load, so one bad expression stops the start rather than one job.
@@ -158,23 +139,10 @@ class Schedule(_Section):
     def zone(self) -> tzinfo:
         return ZoneInfo(self.timezone) if self.timezone else system_zone()
 
-    def today(self) -> date:
-        return datetime.now(self.zone).date()
-
-    def window(self, start: date, days: int = 1) -> tuple[datetime, datetime]:
-        """From midnight of `start` to midnight `days` later, in the configured zone."""
-        begin = datetime.combine(start, time.min, self.zone)
-        return begin, begin + timedelta(days=days)
-
-    def week_of(self, day: date) -> date:
-        """The Monday of the week the day falls in."""
-        return day - timedelta(days=day.weekday())
-
 
 class Config(_Section):
     intake: Intake = Intake()
     models: Models = Models()
-    limits: Limits = Limits()
     schedule: Schedule = Schedule()
     integrations: dict[str, dict] = Field(default_factory=dict)
 

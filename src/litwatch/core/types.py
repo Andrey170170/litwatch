@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
@@ -29,7 +29,7 @@ class Paper(BaseModel):
     # Only explicit upstream version identifiers; absent does not mean v1.
     version: int | None = Field(default=None, ge=1)
     # Counts rewrites of the title or abstract, set by the store. Unlike `version` it is
-    # always known, so it is what says which text a candidate or verdict was about.
+    # always known, so it is what says which text a verdict was about.
     revision: int = Field(default=1, ge=1)
     version_history: list[dict] = Field(default_factory=list)
     doi: str | None = None
@@ -53,7 +53,7 @@ def keyword_patterns(value: Any) -> list[str]:
 
 
 class TopicKind(StrEnum):
-    """The service a topic gets: graded per paper, reviewed weekly, or summarised weekly."""
+    """The service a topic gets. Only Watch topics are graded per paper."""
 
     WATCH = "watch"
     RADAR = "radar"
@@ -64,14 +64,6 @@ class Status(StrEnum):
     DRAFT = "draft"  # stored, not used by any run
     ACTIVE = "active"
     PAUSED = "paused"  # history kept, no new judgements
-
-
-class Cadence(StrEnum):
-    """How often a Radar or Pulse topic is reviewed. Weekly always; daily adds a review after
-    each nightly run, for a Radar field followed closely."""
-
-    WEEKLY = "weekly"
-    DAILY = "daily"
 
 
 class Grade(StrEnum):
@@ -100,28 +92,12 @@ class Topic(BaseModel):
     subject: str = Field(min_length=20)
     rubric: str | None = None  # Watch: what makes a paper `must_read`
     interests: str | None = None  # Radar: what the owner cares about within the field
-    keywords: list[str] = Field(default_factory=list)  # Watch: regexes for the keyword audit
+    keywords: list[str] = Field(default_factory=list)  # Watch: regexes on title and abstract
     status: Status = Status.ACTIVE
     revision: int | None = None
     # The owner's order and the topic's colour; the store assigns both when a topic is new.
     position: int | None = None
     colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
-    cadence: Cadence = Cadence.WEEKLY  # Radar may be daily too; Watch and Pulse are weekly
-
-    @model_validator(mode="after")
-    def _daily_is_radar(self) -> Topic:
-        if self.cadence == Cadence.DAILY and self.kind != TopicKind.RADAR:
-            raise ValueError("only a Radar topic can be reviewed daily")
-        return self
-
-    @field_validator("slug")
-    @classmethod
-    def _usable_as_a_field(cls, value: str) -> str:
-        # The slug names a field of the triage reply, and pydantic keeps some names for itself
-        # (`model-dump`, `copy`). Such a topic would stop triage for every paper.
-        if hasattr(BaseModel, value.replace("-", "_")):
-            raise ValueError(f"{value!r} is a reserved name; choose another slug")
-        return value
 
     @field_validator("rubric", "interests", mode="before")
     @classmethod
@@ -137,11 +113,6 @@ class Topic(BaseModel):
     @classmethod
     def _keywords(cls, value: Any) -> list[str]:
         return keyword_patterns(value)
-
-    @property
-    def field(self) -> str:
-        """The slug as a structured-output field name."""
-        return self.slug.replace("-", "_")
 
     @property
     def version(self) -> str:
@@ -189,37 +160,6 @@ class Verdict(BaseModel):
     check: Opinion | None = None
     migrated: bool = False  # carried over from a 0.x tier, with a single opinion
     recorded_at: datetime | None = None
-
-
-class Membership(BaseModel):
-    """Triage placed the paper in a Radar or Pulse topic's field."""
-
-    paper_id: str
-    topic: str
-    topic_revision: int
-    paper_version: int | None = None
-
-
-class CandidateState(StrEnum):
-    PENDING = "pending"
-    GRADED = "graded"
-
-
-class Candidate(BaseModel):
-    """A paper that triage or the keyword audit put forward for a Watch topic."""
-
-    paper_id: str
-    topic: str
-    topic_revision: int
-    paper_version: int | None = None
-    paper_revision: int = 1
-    by_triage: bool = False
-    by_keyword: bool = False
-    by_owner: bool = False  # triaged by hand, after triage kept failing on the paper
-    reason: str | None = None
-    state: CandidateState = CandidateState.PENDING
-    failed_runs: int = 0
-    last_error: str | None = None
 
 
 class LabelValue(StrEnum):
@@ -309,29 +249,6 @@ class Hand(StrEnum):
 
     SAVE = "save"
     UNSAVE = "unsave"
-
-
-class TakeSource(StrEnum):
-    """What the writer had besides the abstract and the topic."""
-
-    VERDICT = "verdict"  # both graders' opinions
-    EVALUATION = "evaluation"  # a reported miss's trace
-    MIGRATED = "migrated"  # the single opinion carried over from 0.14
-    OWNER = "owner"  # nothing: the owner's word alone made the paper relevant
-
-
-class Take(BaseModel):
-    """Litwatch's own words on a paper for a Watch topic, bound to what it was written from."""
-
-    id: int | None = None
-    paper_id: str
-    topic: str
-    paper_revision: int
-    topic_revision: int
-    grade: Grade  # must_read or relevant: decides the length
-    source: TakeSource
-    text: str
-    written_at: datetime | None = None
 
 
 class Event(BaseModel):

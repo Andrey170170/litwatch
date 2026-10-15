@@ -1,4 +1,4 @@
-"""The pure rules: reconciliation, which verdict counts, and what the owner's label does."""
+"""The pure rules: which verdict counts, and what the owner's label does."""
 
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, urlsplit
@@ -12,22 +12,15 @@ from litwatch.core import (
     Label,
     LabelOrigin,
     LabelValue,
-    Opinion,
     Status,
     TopicKind,
     Verdict,
     current_verdict,
     effective_grade,
-    keyword_match,
-    reconcile,
 )
-from tests.conftest import FAITH, paper
+from tests.conftest import FAITH
 
 T0 = datetime(2026, 10, 1, tzinfo=UTC)
-
-
-def opinion(grade: str) -> Opinion:
-    return Opinion(grade=Grade(grade), reason="r")
 
 
 def verdict(grade: str, *, revision=1, text=1, version=1, at=T0, id=1) -> Verdict:
@@ -51,12 +44,6 @@ def label(value: str, grade: str | None = None) -> Label:
         grade=Grade(grade) if grade else None,
         origin=LabelOrigin.READER,
     )
-
-
-def test_disagreement_takes_the_more_inclusive_grade_and_marks_the_verdict_split():
-    assert reconcile(opinion("relevant"), opinion("relevant")) == (Grade.RELEVANT, False)
-    assert reconcile(opinion("none"), opinion("must_read")) == (Grade.MUST_READ, True)
-    assert reconcile(opinion("relevant"), opinion("adjacent")) == (Grade.RELEVANT, True)
 
 
 def test_the_current_verdict_is_chosen_by_text_first_and_time_second():
@@ -94,11 +81,6 @@ def test_a_topic_version_follows_what_a_model_sees_and_nothing_else():
     assert FAITH.model_copy(update={"kind": TopicKind.RADAR}).version != FAITH.version
 
 
-def test_keyword_audit_matches_title_or_abstract_case_insensitively():
-    assert keyword_match(FAITH, paper(title="Is chain-of-thought FAITHFUL?")) == r"chain.of.thought"
-    assert keyword_match(FAITH, paper(abstract="We study Scot and cots.")) is None
-
-
 def test_judge_and_check_must_come_from_different_labs():
     opus = RoleConfig(provider="anthropic", model="claude-opus-5-5")
     # The lab is who trained the model: one OpenRouter key can serve two labs.
@@ -124,9 +106,3 @@ def test_a_database_password_with_url_characters_is_quoted(monkeypatch):
     url = urlsplit(config.database_url())
     assert (url.hostname, url.port, url.path) == ("db", 5432, "/litwatch")
     assert unquote(url.password) == odd
-
-
-@pytest.mark.parametrize("slug", ["model-dump", "copy", "model-fields"])
-def test_a_slug_that_pydantic_reserves_as_a_field_name_is_refused(slug):
-    with pytest.raises(ValueError, match="reserved"):
-        type(FAITH).model_validate(FAITH.model_dump() | {"slug": slug})

@@ -1,6 +1,6 @@
-"""The in-process scheduler: the nightly and weekly runs and the publication lookup at their
-cron times, in the configured timezone. Off unless `[schedule] enabled = true`; nothing runs
-on a schedule before cutover (spec decision 22).
+"""The in-process scheduler: the nightly run and the publication lookup at their cron times,
+in the configured timezone. Off unless `[schedule] enabled = true`; nothing runs on a
+schedule before cutover (spec decision 22).
 
 It keeps no state of its own. A job is due when its cron expression fired after the job's
 latest run on record, so a restart neither repeats a run nor forgets one. A fire missed by
@@ -14,17 +14,16 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 from croniter import croniter
 
 from litwatch import store
-from litwatch.config import Config, Schedule
-from litwatch.core import Cadence, Status, Topic, TopicKind
-from litwatch.jobs import nightly, publications, reviews
-from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
-from litwatch.jobs.lock import BusyError, run_lock
+from litwatch.config import Config
+from litwatch.jobs import nightly, publications
+from litwatch.jobs.context import GatewayFactory, default_gateway
+from litwatch.jobs.lock import BusyError
 from litwatch.publications import Dblp, PublicationSource
 
 log = logging.getLogger(__name__)
@@ -58,30 +57,6 @@ def next_fire(cron: str, now: datetime) -> datetime:
     return croniter(cron, after).get_next(datetime)
 
 
-def will_retry(
-    schedule: Schedule,
-    period: str,
-    day: date,
-    now: datetime | None = None,
-    topic: Topic | None = None,
-) -> bool:
-    """Whether the next scheduled run tries a failed review of this day or week again. The
-    nightly run at date `r` reviews `r` and retries the days from `r - RETRY`; the weekly run
-    at `r` reviews the last full week and retries the one before. The next run may be later
-    today. Only active topics are reviewed, and only a daily Radar topic day by day."""
-    if topic is not None and (
-        topic.status != Status.ACTIVE
-        or (period == "day" and (topic.kind != TopicKind.RADAR or topic.cadence != Cadence.DAILY))
-    ):
-        return False
-    now = now or datetime.now(schedule.zone)
-    if period == "day":
-        run = next_fire(schedule.nightly, now).date()
-        return run - reviews.RETRY <= day <= run
-    target = schedule.week_of(next_fire(schedule.weekly, now).date()) - timedelta(days=7)
-    return target - timedelta(days=7) <= day <= target
-
-
 def is_due(cron: str, now: datetime, last_run: datetime | None) -> bool:
     fired = last_fire(cron, now).astimezone(UTC)
     if now.astimezone(UTC) - fired > CATCH_UP:
@@ -97,17 +72,12 @@ def jobs(
     async def run_nightly(conn: psycopg.AsyncConnection) -> object:
         return await nightly.run(conn, config, gateway=gateway)
 
-    async def run_weekly(conn: psycopg.AsyncConnection) -> object:
-        async with run_lock(conn), model_run(conn, config, "weekly", gateway=gateway) as run:
-            return await reviews.weekly(conn, config, run)
-
     async def run_publications(conn: psycopg.AsyncConnection) -> object:
         # No model calls and no run lock: it only reads DBLP and writes publications.
         return await publications.run(conn, source or Dblp())
 
     return [
         Job("nightly", config.schedule.nightly, run_nightly),
-        Job("weekly", config.schedule.weekly, run_weekly),
         Job("publications", config.schedule.publications, run_publications),
     ]
 

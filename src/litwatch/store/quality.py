@@ -1,14 +1,10 @@
-"""The queries behind Settings: Quality's lists, the correction rate, runs, and estimates."""
+"""The queries behind Settings: Quality's lists and the runs."""
 
 from __future__ import annotations
 
-import re
-from collections.abc import AsyncIterator
 from typing import Any
 
 import psycopg
-
-from litwatch.core import Candidate
 
 
 async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> list[dict]:
@@ -43,71 +39,6 @@ async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[s
     )
 
 
-async def ungraded(conn: psycopg.AsyncConnection, attempts: int) -> list[dict[str, Any]]:
-    """Candidates grading gave up on, newest topic revision only."""
-    return await _all(
-        conn,
-        """
-        SELECT c.paper_id, c.topic, c.failed_runs, c.last_error, c.updated_at, p.title
-        FROM candidates c JOIN papers p ON p.id = c.paper_id
-        WHERE c.state = 'pending' AND c.failed_runs >= %s AND p.dismissed_at IS NULL
-          AND NOT EXISTS (SELECT 1 FROM candidates n WHERE n.paper_id = c.paper_id
-                          AND n.topic = c.topic AND n.topic_revision > c.topic_revision)
-        ORDER BY c.updated_at DESC
-        """,
-        (attempts,),
-    )
-
-
-async def failed_reviews(conn: psycopg.AsyncConnection, since: Any) -> list[dict[str, Any]]:
-    """Reviews and recaps that failed and have not been written since, for a day or week in
-    the seven days before `since`: the same window the status line counts (reading.status).
-    The next run tries them again."""
-    return await _all(
-        conn,
-        """
-        SELECT r.topic, t.name AS topic_name, r.kind, r.period, r.day, r.error
-        FROM reviews r JOIN topics t ON t.slug = r.topic
-        WHERE r.state = 'failed'
-          AND r.day >= %s::date - CASE r.period WHEN 'week' THEN 13 ELSE 7 END
-        ORDER BY r.day DESC, t.position
-        """,
-        (since,),
-    )
-
-
-async def awaiting_triage(conn: psycopg.AsyncConnection, attempts: int) -> list[dict[str, Any]]:
-    return await _all(
-        conn,
-        "SELECT t.paper_id, t.failed_runs, t.last_error, p.title FROM triage t "
-        "JOIN papers p ON p.id = t.paper_id AND p.dismissed_at IS NULL "
-        "WHERE t.state = 'failed' AND t.failed_runs >= %s "
-        "ORDER BY t.failed_runs DESC, t.paper_id",
-        (attempts,),
-    )
-
-
-async def correction_rate(conn: psycopg.AsyncConnection, days: int = 30) -> list[dict[str, Any]]:
-    """Per Watch topic over the trailing days: papers shown in issues, and how many of them
-    carry a thumb down meaning the paper should not have been there (not "already knew it")."""
-    return await _all(
-        conn,
-        """
-        SELECT t.slug AS topic, count(DISTINCT e.paper_id) AS shown,
-               count(DISTINCT e.paper_id) FILTER (WHERE r.reason IN
-                   ('not_for_me', 'unrelated', 'overrated')) AS corrected
-        FROM topics t
-        JOIN issue_entries e ON e.topic = t.slug
-        JOIN issues i ON i.id = e.issue_id AND i.day >= current_date - %s
-        LEFT JOIN reactions r ON r.paper_id = e.paper_id AND r.topic = t.slug
-                             AND r.value = 'down'
-        WHERE t.kind = 'watch'
-        GROUP BY t.slug, t.position ORDER BY t.position
-        """,
-        (days,),
-    )
-
-
 async def collected_reactions(conn: psycopg.AsyncConnection, limit: int = 200) -> list[dict]:
     """Reactions that move nothing by themselves (decision 17), for the owner or an agent."""
     return await _all(
@@ -131,99 +62,3 @@ async def runs(conn: psycopg.AsyncConnection, limit: int = 30) -> list[dict[str,
         "updated FROM runs ORDER BY id DESC LIMIT %s",
         (limit,),
     )
-
-
-async def cost_per_call(conn: psycopg.AsyncConnection, days: int = 30) -> dict[str, float]:
-    """The average charged cost of one call per role over the trailing days."""
-    rows = await _all(
-        conn,
-        """
-        SELECT operation AS role, avg((usage->>'cost')::numeric) AS cost
-        FROM inference_calls
-        WHERE started_at >= now() - make_interval(days => %s)
-          AND usage->>'cost' IS NOT NULL AND NOT coalesce((usage->>'reused')::bool, false)
-        GROUP BY operation
-        """,
-        (days,),
-    )
-    return {r["role"]: float(r["cost"]) for r in rows}
-
-
-async def _texts(conn: psycopg.AsyncConnection) -> AsyncIterator[tuple[str, str]]:
-    """Every stored paper's id and title with abstract, streamed."""
-    async with conn.cursor(name="keyword_scan") as cur:
-        # A paper the owner dismissed is never triaged or graded again (decision 24).
-        await cur.execute(
-            "SELECT id, title, abstract FROM papers WHERE dismissed_at IS NULL ORDER BY id"
-        )
-        async for row in cur:
-            yield row["id"], f"{row['title']}\n{row['abstract']}"
-
-
-async def keyword_counts(conn: psycopg.AsyncConnection, patterns: list[str]) -> dict[str, int]:
-    """How many stored papers each keyword pattern matches in title or abstract, with the
-    keyword audit's own matching (Python, case-insensitive)."""
-    compiled = {p: re.compile(p, re.IGNORECASE) for p in patterns}
-    counts = dict.fromkeys(patterns, 0)
-    async with conn.transaction():  # a named cursor lives in a transaction
-        async for _, text in _texts(conn):
-            for pattern, regex in compiled.items():
-                counts[pattern] += bool(regex.search(text))
-    return counts
-
-
-async def keyword_papers(conn: psycopg.AsyncConnection, patterns: list[str]) -> list[str]:
-    """Stored papers any of the patterns matches, as the keyword audit would."""
-    compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
-    found = []
-    if compiled:
-        async with conn.transaction():
-            async for paper_id, text in _texts(conn):
-                if any(r.search(text) for r in compiled):
-                    found.append(paper_id)
-    return found
-
-
-async def papers_between(conn: psycopg.AsyncConnection, since: Any, until: Any) -> list[str]:
-    rows = await _all(
-        conn,
-        "SELECT id FROM papers WHERE published >= %s AND published < %s "
-        "AND dismissed_at IS NULL ORDER BY id",
-        (since, until),
-    )
-    return [r["id"] for r in rows]
-
-
-async def newest_candidates(conn: psycopg.AsyncConnection, topic: str) -> list[Candidate]:
-    """Each paper's newest candidate row for the topic: the revision it was put forward under."""
-    rows = await _all(
-        conn,
-        "SELECT DISTINCT ON (paper_id) * FROM candidates WHERE topic = %s "
-        "AND paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) "
-        "ORDER BY paper_id, topic_revision DESC",
-        (topic,),
-    )
-    return [Candidate(**{k: r[k] for k in Candidate.model_fields}) for r in rows]
-
-
-async def candidate_papers(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
-    rows = await _all(
-        conn,
-        "SELECT DISTINCT paper_id FROM candidates WHERE topic = %s "
-        "AND paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) ORDER BY 1",
-        (topic,),
-    )
-    return [r["paper_id"] for r in rows]
-
-
-async def evidence_papers(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
-    """The topic's labelled papers (unsure aside) and reported misses."""
-    rows = await _all(
-        conn,
-        "SELECT paper_id FROM (SELECT paper_id FROM labels WHERE topic = %(t)s "
-        "AND value <> 'unsure' UNION SELECT paper_id FROM misses WHERE topic = %(t)s) e "
-        "WHERE paper_id NOT IN (SELECT id FROM papers WHERE dismissed_at IS NOT NULL) "
-        "ORDER BY 1",
-        {"t": topic},
-    )
-    return [r["paper_id"] for r in rows]

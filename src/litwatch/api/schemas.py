@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -20,52 +20,13 @@ from litwatch.core import (
 
 
 class Status(BaseModel):
-    """The printer's line under the masthead."""
+    """The latest nightly run: none yet, running, failed, or finished without an error."""
 
-    state: Literal["none", "running", "failed", "attention", "quiet"]
+    state: Literal["none", "running", "failed", "quiet"]
     run_id: int | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    read: int = 0
     error: str | None = None
-    showing: date | None = None  # the issue the Digest falls back to after a failed run
-    splits: int = 0
-    ungraded: int = 0
-    awaiting_triage: int = 0
-    reviews_failed: int = 0
-
-
-class IssueSummary(BaseModel):
-    id: int
-    kind: Literal["daily", "weekly"]
-    day: date
-    lede: str | None = None
-
-
-class Digest(BaseModel):
-    """The feed: daily issues newest first, and the week's weekly issue pinned above them."""
-
-    weekly: IssueSummary | None = None
-    issues: list[IssueSummary]
-    status: Status
-
-
-class Entry(BaseModel):
-    """One paper in an issue, for one Watch topic."""
-
-    paper_id: str
-    topic: str
-    lead: bool  # must read: the longer take and the larger title
-    take: str | None = None
-    title: str
-    authors: list[str]
-    published: datetime | None = None
-    revised: bool = False
-    set_aside: bool = False  # the owner has since put it below relevant: struck through
-    also_in: list[str] = Field(default_factory=list)
-    saved: bool = False
-    reaction: ReactionValue | None = None
-    reaction_reason: ReactionReason | None = None
 
 
 class TopicRef(BaseModel):
@@ -75,65 +36,6 @@ class TopicRef(BaseModel):
     colour: str | None = None
 
 
-class Pick(BaseModel):
-    """A paper a review picked, with its sentence on why."""
-
-    paper_id: str
-    title: str
-    authors: list[str] = Field(default_factory=list)
-    published: datetime | None = None
-    why: str
-    saved: bool = False
-    reaction: ReactionValue | None = None  # the owner's thumb, for the review's topic
-    reaction_reason: ReactionReason | None = None
-
-
-class Review(BaseModel):
-    """A Radar or Pulse topic's review of a day or a week. A failed one says so in one line;
-    a quiet one had no papers to read."""
-
-    period: Literal["day", "week"]
-    day: date
-    state: Literal["written", "failed", "quiet"]
-    text: str | None = None
-    picks: list[Pick] = Field(default_factory=list)
-    members: int = 0
-    will_retry: bool = False  # failed, and the next scheduled run tries it again
-
-
-class Listed(BaseModel):
-    """A paper named in a recap, with the owner's thumb on it for the recap's topic."""
-
-    paper_id: str
-    title: str
-    reaction: ReactionValue | None = None
-    reaction_reason: ReactionReason | None = None
-
-
-class Recap(BaseModel):
-    """A Watch topic's week: prose over its entries, then the entries as one-liners, what
-    the owner set aside and the misses reported."""
-
-    state: Literal["written", "failed", "quiet"]
-    text: str | None = None
-    papers: list[Listed] = Field(default_factory=list)
-    set_aside: list[Listed] = Field(default_factory=list)
-    misses: list[Listed] = Field(default_factory=list)
-    will_retry: bool = False  # failed, and the next scheduled run tries it again
-
-
-class Section(BaseModel):
-    topic: TopicRef
-    entries: list[Entry]
-    near: int = 0  # adjacent arrivals, for the fold line
-    review: Review | None = None  # a Radar or Pulse topic's section
-    recap: Recap | None = None  # a Watch topic's section in a weekly issue
-
-
-class Issue(IssueSummary):
-    sections: list[Section]
-
-
 class Opinion(BaseModel):
     grade: Grade
     reason: str
@@ -141,7 +43,7 @@ class Opinion(BaseModel):
 
 
 class Chosen(BaseModel):
-    """The folded "how this was chosen" for one Watch topic."""
+    """One Watch topic's current verdict on the paper."""
 
     topic: str
     grade: Grade
@@ -163,18 +65,14 @@ class PaperTopic(TopicRef):
     """The paper as one topic sees it."""
 
     grade: Grade | None = None
-    take: str | None = None
     label: LabelState | None = None
     reaction: ReactionValue | None = None
     reaction_reason: ReactionReason | None = None
-    member: bool = False  # in a Radar or Pulse field
-    by_owner: bool = False  # the owner put it in the field themselves
     missed: bool = False  # reported as missed for this Watch topic, and that word stands
-    grading: bool = False
 
 
 class HistoryItem(BaseModel):
-    what: Literal["candidate", "graded", "missed"]
+    what: Literal["graded", "missed"]
     topic: str
     at: datetime
     grade: Grade | None = None
@@ -210,7 +108,6 @@ class Paper(BaseModel):
     reaction_reason: ReactionReason | None = None
     history: list[HistoryItem]
     versions: list[dict[str, Any]] = Field(default_factory=list)  # arXiv versions seen
-    triage: dict[str, Any] | None = None  # topic slug -> what triage said
     chosen: list[Chosen]
     publication: Publication | None = None  # the published version, when one is known
     publication_by_owner: bool = False  # the owner chose it (or chose "none")
@@ -227,14 +124,9 @@ class Row(BaseModel):
     published: datetime | None = None
     added: datetime | None = None
     grade: Grade | None = None
-    grading: bool = False
-    take: str | None = None
-    take_topic: str | None = None  # whose take it is
     saved: bool = False
     also_in: list[str] = Field(default_factory=list)  # other topics it is relevant to
     source: str = "collection"  # or the search provider that found it outside the collection
-    by_owner: bool = False  # on a field topic's page: the owner put it in the field
-    picked: bool = False  # on a field topic's page: one of its reviews picked it
     score: float | None = None  # the provider's, for its "best match" order
 
 
@@ -251,14 +143,10 @@ class Papers(BaseModel):
 
 class TopicCard(TopicRef):
     status: str
-    cadence: Literal["weekly", "daily"] = "weekly"
-    last_review: date | None = None
     position: int | None = None
     subject: str
-    papers: int
+    papers: int  # at relevant or above
     saved: int
-    new: int
-    new_saved: int
     opened_at: datetime | None = None
 
 
