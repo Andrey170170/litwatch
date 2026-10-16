@@ -44,11 +44,15 @@ def settle(page, ms: int = 700) -> None:
 
 
 def unfold(page) -> None:
-    """Open a list's folded shelves: a fresh stack's papers are common, in the shelf folded by
-    default."""
-    for head in page.locator("main button.shh.fold").all():
-        head.click()
-    page.wait_for_load_state("networkidle")
+    """Open a list's folded shelves that hold papers: a fresh stack's papers are common, in the
+    shelf folded by default. A head shows its count once its shelf has loaded; an empty one is
+    still loading, and a head whose shelf proves empty goes."""
+    page.locator("main .shh .k:not(:empty)").first.wait_for()
+    folded = page.locator("main button.shh.fold:has(.k:not(:empty))")
+    while folded.count():
+        folded.first.click()
+        page.wait_for_load_state("networkidle")
+    page.locator(PAPER_LINK).first.wait_for()
 
 
 def gestures(base: str, token: str, out: Path) -> list[str]:
@@ -109,7 +113,8 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
                 settle(page)
                 check("edge-swipe-goes-back", page.url.endswith(first), page.url)
         else:
-            lines.append("SKIP paper-steps-next, edge-swipe-goes-back: fewer than two papers")
+            # the stack seeds its papers: fewer than two listed is the list's failure, not a skip
+            lines.append(f"FAIL paper-steps-next, edge-swipe-goes-back: {len(hrefs)} papers listed")
 
         # a Calibrate session's cards
         sessions = context.request.get(f"{base}/api/settings/calibrate")
@@ -146,7 +151,7 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
             else:
                 lines.append("SKIP vertical-scrolls: the paper's page does not overflow")
         else:
-            lines.append("SKIP vertical-scrolls: no paper listed")
+            lines.append("FAIL vertical-scrolls: no paper listed")
 
         browser.close()
     return lines

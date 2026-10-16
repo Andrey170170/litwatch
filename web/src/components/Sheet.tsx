@@ -91,7 +91,8 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
       // page's: the body scrolls
       const claim = (t: TouchEvent) => {
         const touch = t.touches[0];
-        if (!touch || axis === "x") return;
+        // a second finger is a pinch: the browser's
+        if (!touch || t.touches.length > 1 || axis === "x") return;
         const tx = touch.clientX - e.clientX;
         const ty = touch.clientY - e.clientY;
         if (axis === "y" || (ty > 0 && ty >= Math.abs(tx))) t.preventDefault();

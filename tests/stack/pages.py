@@ -196,6 +196,8 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
                 elif main.locator(".outh", has_text="did not answer").count():
                     # An archive search's heading names the providers that did not answer.
                     seen.append("failed read: the archive did not answer")
+                elif main.locator(".loadmore", has_text="Could not search").count():
+                    seen.append("failed read: the page says it could not search the archive")
                 for line in MISSING:
                     if line in text and (name not in MAY_MISS or line == NOT_A_PAGE):
                         seen.append(f"the page says {line!r}")
