@@ -40,7 +40,7 @@ async def main(papers_yaml: Path, out: Path) -> None:
                     del left[pid]
                     continue
                 if text is not None:
-                    (out / f"{pid}.{text.source}.txt").write_text(text.body)
+                    (out / f"{pid}.{text.source}.txt").write_text(text.body, encoding="utf-8")
                     print(f"{pid}: {text.source} v{text.version} {len(text.body)} chars")
                     del left[pid]
             if left:

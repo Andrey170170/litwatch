@@ -50,12 +50,13 @@ def summary(opus: dict[str, dict]) -> str:
         same_w = sum(c for (a, b), c in weights.items() if a == b)
         same_l = sum(c for (a, b), c in lines.items() if a == b)
         cost = sum(r.get("cost") or 0 for r in run.values())
+        at_least = "≥ " if any(r.get("cost") is None for r in run.values()) else ""  # unknowns
         tokens_in = statistics.median(r["input_tokens"] for r in answered) if answered else 0
         tokens_out = statistics.median(r["output_tokens"] for r in answered) if answered else 0
         rows.append(
             f"| {name} | {len(answered)} of {len(run)} | {len(refused)} | "
             f"{same_w} of {n} | {same_l} of {n} | {tokens_in:,.0f} | {tokens_out:,.0f} | "
-            f"${cost / max(len(run), 1):.3f} | ${cost:.2f} |"
+            f"{at_least}${cost / max(len(run), 1):.3f} | {at_least}${cost:.2f} |"
         )
     return "\n".join(rows)
 

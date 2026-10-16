@@ -5,7 +5,8 @@ only, nothing written to verdicts). 40 of N6's papers ([papers.yaml](2026-10-16-
 [select.sql](2026-10-16-sonnet-briefs/select.sql)): the three passes Opus 5.5 refused in N6 (one Brief, two in
 grading), 12 Focus Briefs and 25 Area Weight re-checks, each in the area its pass judged Weight in. The reference is
 Opus 5.5's answer from N6 ([opus.jsonl](2026-10-16-sonnet-briefs/opus.jsonl)); agreement with Opus is agreement,
-not correctness. **$10.17 in all**, by the runs' own journals: Sonnet $9.64, the fallback candidates $0.53.
+not correctness. **$10.17 in all**, by the runs' own journals: Sonnet $9.64, the fallback candidates $0.53 (at least: Argon's call
+with no answer has no known charge).
 
 Each run is `litwatch eval briefs --preferences <set> --out <run>.jsonl --config <run>.toml --text <variant>` with
 the configurations in [2026-10-16-sonnet-briefs/](2026-10-16-sonnet-briefs/); the tables are
@@ -19,7 +20,7 @@ cut); `no-appendix` cuts the appendix too.
 | Sonnet, high | 40 of 40 | 0 | 33 of 37 | 31 of 37 | 37,894 | 1,625 | $0.094 | $3.77 |
 | Sonnet, medium | 40 of 40 | 0 | 32 of 37 | 23 of 37 | 37,894 | 704 | $0.085 | $3.40 |
 | Sonnet, high, appendix cut | 40 of 40 | 0 | 32 of 37 | 29 of 37 | 22,021 | 1,501 | $0.062 | $2.47 |
-| Gemini 4 Argon (the 3 refusals) | 2 of 3 | 0 | – | – | 33,619 | 5,857 | $0.084 | $0.25 |
+| Gemini 4 Argon (the 3 refusals) | 2 of 3 | 0 | – | – | 33,619 | 5,857 | ≥ $0.084 | ≥ $0.25 |
 | GPT-6.1 Sol (the 3 refusals) | 3 of 3 | 0 | – | – | 23,996 | 1,894 | $0.094 | $0.28 |
 
 Agreement is over the 37 papers Opus answered.
