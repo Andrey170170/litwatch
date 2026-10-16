@@ -333,15 +333,34 @@ def test_debug_mode_is_off_unless_the_file_or_the_environment_turns_it_on(tmp_pa
     assert not default_gateway(config.Config(), None).debug
 
 
-def test_the_commands_see_a_debug_switch_kept_in_dotenv(tmp_path, monkeypatch):
-    from litwatch.cli import _config  # noqa: PLC0415
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["nightly"],
+        ["intake"],  # a group's own command
+        ["digests", "write", "--since", "2026-10-01", "--until", "2026-10-02"],
+    ],
+)
+def test_the_commands_see_a_debug_switch_kept_in_dotenv(tmp_path, monkeypatch, args):
+    from typer.testing import CliRunner  # noqa: PLC0415
+
+    from litwatch import cli  # noqa: PLC0415
 
     monkeypatch.setenv("LITWATCH_DEBUG", "")  # recorded, so the undo removes what .env sets
     monkeypatch.delenv("LITWATCH_DEBUG")
     monkeypatch.delenv("LITWATCH_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("LITWATCH_DEBUG=1\n")
-    assert _config(None).debug
+    seen, real = [], cli.configuration.load
+
+    def load(path):  # the command's configuration as read, then no further: no database
+        seen.append(real(path).debug)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli.configuration, "load", load)
+    result = CliRunner().invoke(cli.app, args)
+    assert result.exit_code == 0, result.output
+    assert seen == [True]
 
 
 def test_the_sdk_clients_leave_retrying_to_the_gateway():
