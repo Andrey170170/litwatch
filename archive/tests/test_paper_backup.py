@@ -99,7 +99,8 @@ class BackupTests(unittest.TestCase):
                 report = BACKUP.export(work, repo, destination)
                 live.execute("INSERT INTO candidates VALUES ('2609.54321')")
                 live.commit()
-                saved = destination / 'campaigns/recovery'
+                exported = destination / 'current'
+                saved = exported / 'campaigns/recovery'
                 with closing(sqlite3.connect(saved / 'manifest.sqlite')) as restored:
                     self.assertEqual(restored.execute('SELECT id FROM candidates').fetchall(),
                                      [('2609.12345',)])
@@ -108,15 +109,15 @@ class BackupTests(unittest.TestCase):
                              {'manifest.sqlite', 'selection.jsonl', 'receipt.json', 'summary.json', 'endpoint-retries-123.json'})
             self.assertEqual((saved / 'receipt.json').read_bytes(),
                              (campaign / 'receipt.json').read_bytes())
-            self.assertEqual(json.loads((destination / 'export.json').read_text()), report)
+            self.assertEqual(json.loads((exported / 'export.json').read_text()), report)
             self.assertIn('campaigns/recovery/manifest.sqlite', report['campaigns']['recovery']['files'])
             self.assertIn('work directory campaigns/', report['restore'])
-            self.assertTrue((destination / 'catalog.sqlite').is_file())
-            self.assertTrue((destination / 'progress.sqlite').is_file())
-            self.assertTrue((destination / 'manifests/frozen.json').is_file())
+            self.assertTrue((exported / 'catalog.sqlite').is_file())
+            self.assertTrue((exported / 'progress.sqlite').is_file())
+            self.assertTrue((exported / 'manifests/frozen.json').is_file())
             self.assertFalse([p for p in root.rglob('.arxiv-export-*')], 'staging left behind')
-            with closing(sqlite3.connect(destination / 'catalog.sqlite')) as exported:
-                self.assertEqual(exported.execute('PRAGMA journal_mode').fetchone()[0], 'delete')
+            with closing(sqlite3.connect(exported / 'catalog.sqlite')) as database:
+                self.assertEqual(database.execute('PRAGMA journal_mode').fetchone()[0], 'delete')
 
     def test_export_clears_stale_staging_and_wal_side_files(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -136,6 +137,50 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in destination.glob('.arxiv-export-*')), [])
             self.assertFalse((destination / 'catalog.sqlite-wal').exists())
             self.assertFalse((destination / 'catalog.sqlite-shm').exists())
+
+    def test_a_failed_export_leaves_the_previous_one_whole_and_current(self):
+        # archive.md, Deferred to N5: refreshing the export entry by entry left new databases
+        # beside old directories when it failed part-way.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, repo, destination = root / 'work', root / 'repo', root / 'backup'
+            (work / 'catalog').mkdir(parents=True)
+            (work / 'state').mkdir()
+            (repo / 'manifests').mkdir(parents=True)
+            (repo / 'manifests/frozen.json').write_text('{"first": true}')
+            for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
+                with closing(sqlite3.connect(work / name)) as database:
+                    database.execute('CREATE TABLE records (id INTEGER)')
+            # An export in the layout before `current`: replaced once a new one is current.
+            destination.mkdir()
+            (destination / 'catalog.sqlite').write_bytes(b'old layout')
+            (destination / 'campaigns').mkdir()
+            first = BACKUP.export(work, repo, destination)
+            self.assertEqual(sorted(p.name for p in destination.iterdir() if p.name.startswith('export-')),
+                             [(destination / 'current').resolve().name])
+            self.assertEqual({p.name for p in destination.iterdir()} - {'current', '.export.lock'},
+                             {(destination / 'current').resolve().name})
+            with closing(sqlite3.connect(work / 'catalog/catalog.sqlite')) as database:
+                database.execute('INSERT INTO records VALUES (1)')
+                database.commit()
+            (repo / 'manifests/frozen.json').write_text('{"first": false}')
+            for failing in ('copytree', 'replace'):
+                with self.subTest(failing=failing):
+                    target = BACKUP.shutil if failing == 'copytree' else BACKUP.os
+                    with mock.patch.object(target, failing, side_effect=OSError('disk gone')):
+                        with self.assertRaises(OSError):
+                            BACKUP.export(work, repo, destination)
+                    current = destination / 'current'
+                    self.assertEqual(json.loads((current / 'export.json').read_text()), first)
+                    self.assertEqual((current / 'manifests/frozen.json').read_text(), '{"first": true}')
+                    with closing(sqlite3.connect(current / 'catalog.sqlite')) as database:
+                        self.assertEqual(database.execute('SELECT count(*) FROM records').fetchone()[0], 0)
+            second = BACKUP.export(work, repo, destination)
+            current = destination / 'current'
+            self.assertEqual(json.loads((current / 'export.json').read_text()), second)
+            self.assertEqual((current / 'manifests/frozen.json').read_text(), '{"first": false}')
+            self.assertEqual({p.name for p in destination.iterdir()},
+                             {'current', '.export.lock', current.resolve().name})
 
     def test_campaign_discovery_rejects_symlink_escape(self):
         with tempfile.TemporaryDirectory() as directory:
