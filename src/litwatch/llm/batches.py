@@ -29,6 +29,7 @@ QUIET_SECONDS = 10.0  # a batch goes out once no call has joined it for this lon
 MAX_REQUESTS = 10_000  # or once it holds this many (Anthropic allows 100,000)
 MAX_BYTES = 200_000_000  # or this much (Anthropic allows 256 MB)
 POLL_SECONDS = 60.0
+OPERATION_SECONDS = 600.0  # a submission, status, cancel or results read, as a whole
 DRAIN = timedelta(minutes=30)  # how long cancelled batches are waited for after the deadline
 
 
@@ -43,7 +44,7 @@ class BatchProvider(Protocol):
 
 
 class BatchJournal(Protocol):
-    async def batched(self, call_ids: list[int], batch_id: str) -> None: ...
+    async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None: ...
     async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None: ...
 
 
@@ -87,11 +88,12 @@ class Batcher:
         max_requests: int = MAX_REQUESTS,
         max_bytes: int = MAX_BYTES,
         drain: timedelta = DRAIN,
+        operation: float = OPERATION_SECONDS,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.provider, self.journal, self.deadline = provider, journal, deadline
         self.quiet, self.poll, self.drain, self.now = quiet, poll, drain, now
-        self.max_requests, self.max_bytes = max_requests, max_bytes
+        self.max_requests, self.max_bytes, self.operation = max_requests, max_bytes, operation
         self._held: list[_Held] = []
         self._futures: dict[str, asyncio.Future[Reply | None]] = {}  # held or sent, by key
         self._open: dict[str, _Open] = {}
@@ -213,7 +215,9 @@ class Batcher:
                 self._resolve(h.key, None)
             return
         try:
-            batch_id = await self.provider.submit([(h.key, h.role, h.request) for h in held])
+            batch_id = await self._bounded(
+                self.provider.submit([(h.key, h.role, h.request) for h in held])
+            )
         except Exception:
             log.exception(
                 "a batch of %d calls could not be sent; they go as normal calls", len(held)
@@ -224,7 +228,7 @@ class Batcher:
         log.info("batch %s sent with %d calls", batch_id, len(held))
         if self.journal:
             ids = [h.call_id for h in held if h.call_id is not None]
-            await self.journal.batched(ids, batch_id)
+            await self.journal.batched(ids, batch_id, held[0].role.provider)
         self._open[batch_id] = _Open(
             {h.key: self._futures[h.key] for h in held},
             {h.key: h.call_id for h in held if h.call_id is not None},
@@ -240,28 +244,31 @@ class Batcher:
     async def _poll(self) -> None:
         while self._open:
             now = self.now()
-            for batch_id, batch in list(self._open.items()):
+            looked = list(self._open.items())
+            for batch_id, batch in looked:
                 await self._check(batch_id, batch, now)
-            if self._open and self.now() >= self.deadline + self.drain:  # each looked at first
-                log.warning("%d batches still open after the deadline's drain", len(self._open))
-                for batch_id in list(self._open):
-                    batch = self._open.pop(batch_id)
+            if self.now() >= self.deadline + self.drain:  # each given up looked at first
+                left = [(i, b) for i, b in looked if i in self._open]
+                if left:
+                    log.warning("%d batches still open after the deadline's drain", len(left))
+                for batch_id, batch in left:
+                    del self._open[batch_id]
                     self._give_up(batch)
                     for key in batch.waiting:
                         self._resolve(key, None)
-                return
+                continue  # batches attached meanwhile, if any, are looked at now
             if self._open:
                 await asyncio.sleep(self.poll)
 
     async def _check(self, batch_id: str, batch: _Open, now: datetime) -> None:
         try:
-            if await self.provider.status(batch_id) != "ended":
+            if await self._bounded(self.provider.status(batch_id)) != "ended":
                 if now >= self.deadline and not batch.cancelled:
-                    await self.provider.cancel(batch_id)
+                    await self._bounded(self.provider.cancel(batch_id))
                     batch.cancelled = True
                     log.info("batch %s cancelled at the deadline", batch_id)
                 return
-            replies = await self.provider.results(batch_id)
+            replies = await self._bounded(self.provider.results(batch_id))
         except Exception:
             log.exception("batch %s could not be read; trying again", batch_id)
             return
@@ -272,6 +279,10 @@ class Batcher:
         del self._open[batch_id]
         for key in batch.waiting:  # None too for a request the results did not name
             self._resolve(key, replies.get(key))
+
+    async def _bounded[T](self, operation: Coroutine[None, None, T]) -> T:
+        """A provider operation, failing (as the provider's own errors do) past `operation`."""
+        return await asyncio.wait_for(operation, self.operation)
 
     def _give_up(self, batch: _Open) -> None:
         """Its waiting calls go as normal calls while it may still answer them."""

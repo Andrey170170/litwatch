@@ -224,7 +224,7 @@ async def test_a_journal_that_fails_fails_the_calls_waiting_on_their_batch(conn,
     journal = CallJournal(conn, await runs.start(conn, "nightly"))
     gw, _, _, _ = batching(journal)
 
-    async def down(call_ids, batch_id):
+    async def down(call_ids, batch_id, provider):
         raise OSError("the database went away")
 
     monkeypatch.setattr(journal, "batched", down)
@@ -435,7 +435,7 @@ async def test_a_run_past_the_drain_reads_a_dead_runs_ended_batch_before_giving_
     dead = await runs.start(conn, "nightly")
     gw, anthropic, _, clock = batching(CallJournal(conn, dead))
     await asyncio.gather(*(gw.ask("brief", ask(n)) for n in range(2)))
-    await conn.execute("UPDATE inference_calls SET output = NULL, usage = '{}'")  # died unread
+    await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")  # unread
     await gw.close()
 
     clock.now = DEADLINE + DRAIN + timedelta(hours=1)
@@ -447,6 +447,64 @@ async def test_a_run_past_the_drain_reads_a_dead_runs_ended_batch_before_giving_
     assert [c["cost"] for c in await calls(conn)] == [0.0005, 0.0005]
     assert (await gw.ask("brief", ask(0))).usage.service_tier == "batch"
     assert anthropic.calls == []  # nothing paid twice
+    await gw.close()
+
+
+async def dead_batches(conn, n: int) -> tuple[BatchingProvider, Clock]:
+    """A dead run's `n` batches of one call each, ended, their answers never read."""
+    gw, anthropic, _, clock = batching(CallJournal(conn, await runs.start(conn, "nightly")))
+    for i in range(n):
+        await gw.ask("brief", ask(i))
+    await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")
+    await gw.close()
+    return anthropic, clock
+
+
+async def test_batches_attached_while_another_is_read_are_read_before_any_is_given_up(
+    conn, monkeypatch
+):
+    anthropic, clock = await dead_batches(conn, 2)
+    status = anthropic.status
+
+    async def slow(batch_id):  # the second call attaches while the first batch is read
+        await asyncio.sleep(0.05)
+        return await status(batch_id)
+
+    monkeypatch.setattr(anthropic, "status", slow)
+    gw, _, _, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")), provider=anthropic)
+    gw.batch_until(clock.now, drain=timedelta(0))  # as the service's worker attaches
+    answers = await asyncio.gather(gw.ask("brief", ask(0)), gw.ask("brief", ask(1)))
+    assert {a.usage.service_tier for a in answers} == {"batch"} and anthropic.calls == []
+    await gw.close()
+
+
+async def test_a_provider_operation_that_hangs_gives_way_to_normal_calls(monkeypatch):
+    gw, anthropic, _, clock = batching(hold=True)
+    gw.batchers["anthropic"].operation = 0.05
+    asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await until(lambda: anthropic.batches)
+
+    async def hangs(batch_id):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(anthropic, "status", hangs)
+    clock.now = DEADLINE + DRAIN
+    await asyncio.wait_for(asked, 2)
+    assert len(anthropic.calls) == 1
+    await gw.close()
+
+
+async def test_a_dead_runs_batch_is_recovered_by_its_provider_whatever_roles_use_now(conn):
+    anthropic, clock = await dead_batches(conn, 1)
+    moved = Models(brief=OTHER)  # brief moved to OpenRouter since the run died
+    providers = {"anthropic": anthropic, "openrouter": ScriptedProvider("openrouter", respond)}
+    journal = CallJournal(conn, await runs.start(conn, "nightly"))
+    options = FAST | {"now": clock}
+    gw = Gateway(moved, providers, journal, retry_delays=(0.0,), batch_options=options)
+    gw.batch_until(DEADLINE)
+    await gw.recover()
+    await gw.settle()
+    assert [c["cost"] for c in await calls(conn)] == [0.0005]
     await gw.close()
 
 

@@ -47,10 +47,12 @@ class CallJournal:
         ).fetchone()
         return row["id"]
 
-    async def batched(self, call_ids: list[int], batch_id: str) -> None:
-        """The calls went out in the provider's batch `batch_id`."""
+    async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None:
+        """The calls went out in `provider`'s batch `batch_id`."""
         await self.conn.execute(
-            "UPDATE inference_calls SET batch_id = %s WHERE id = ANY(%s)", (batch_id, call_ids)
+            "UPDATE inference_calls SET batch_id = %s, "
+            "usage = usage || jsonb_build_object('via', %s::text) WHERE id = ANY(%s)",
+            (batch_id, provider, call_ids),
         )
 
     async def in_batch(self, key: str) -> dict[str, Any] | None:
@@ -67,12 +69,12 @@ class CallJournal:
         ).fetchone()
 
     async def open_batches(self) -> list[dict[str, Any]]:
-        """The batches with calls not yet answered or charged, with a role that asked in each:
+        """The batches with calls not yet answered or charged, with the provider each went to:
         a dead run's, or one given up on after a deadline, whose charges are read when they
         end."""
         return await (
             await self.conn.execute(
-                "SELECT batch_id, min(operation) AS role FROM inference_calls "
+                "SELECT batch_id, min(usage->>'via') AS provider FROM inference_calls "
                 "WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
                 "AND usage->>'cost' IS NULL AND started_at > now() - %s "
                 "GROUP BY batch_id ORDER BY batch_id",
