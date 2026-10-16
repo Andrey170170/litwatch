@@ -173,9 +173,12 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
   const matches = useQuery(keywordsQuery(cls.slug, !!current));
   const path = classPath(tree, cls.slug);
   const dirty = JSON.stringify(form) !== JSON.stringify(base);
-  // What the API would refuse (a subject under 20 characters, no monogram) is not offered to save; a class not
-  // followed yet can be followed with its generated defaults once they pass.
-  const valid = form.subject.trim().length >= 20 && form.monogram.trim().length > 0;
+  // What the API would refuse (a subject under 20 characters, no monogram, a Focus topic without a rubric) is not
+  // offered to save; a class not followed yet can be followed with its generated defaults once they pass.
+  const valid =
+    form.subject.trim().length >= 20 &&
+    form.monogram.trim().length > 0 &&
+    (form.depth !== "focus" || (form.rubric ?? "").trim().length > 0);
   const savable = valid && (dirty || !current);
   // The taxonomy refreshed behind a pristine form (edited elsewhere meanwhile): the form follows it, so a save sends
   // the current fields, not the ones loaded before. An edited form keeps its edits.
@@ -230,7 +233,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
           <textarea className="tin" rows={3} value={form.subject} onChange={(e) => set({ subject: e.target.value })} aria-label="Subject" />
         </Field>
         {form.depth === "focus" && (
-          <Field label="Rubric" hint="central, related, adjacent: what each means here">
+          <Field label="Rubric" hint="central, related, adjacent: what each means here; a Focus topic needs one">
             <textarea className="tin" rows={4} value={form.rubric ?? ""} onChange={(e) => set({ rubric: e.target.value })} aria-label="Rubric" />
           </Field>
         )}
@@ -309,7 +312,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
           </div>
         ) : (
           <div className="nact">
-            <button className="btn pri" disabled={!savable || save.isPending} title={savable ? undefined : !valid ? "The subject needs at least 20 characters, and the badge a monogram" : "Nothing changed"} onClick={onSave}>
+            <button className="btn pri" disabled={!savable || save.isPending} title={savable ? undefined : !valid ? "The subject needs at least 20 characters, the badge a monogram, and a Focus topic a rubric" : "Nothing changed"} onClick={onSave}>
               {current ? "Save" : "Follow"}
             </button>
             <button className="btn" onClick={() => void navigate({ to: "/settings/$page", params: { page: "topics" } })}>

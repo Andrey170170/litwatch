@@ -132,7 +132,7 @@ export function OverviewPage() {
               ))}
             </div>
           ) : (
-            <div className="empty">No replay has run yet.</div>
+            <div className="empty">{replay ? "This replay has no outcomes yet." : "No replay has run yet."}</div>
           )}
           <div className="cap">Precision at relevant</div>
           <div className="nsub">

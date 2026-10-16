@@ -388,11 +388,15 @@ describe("Settings", () => {
     expect(within(item as HTMLElement).queryByRole("button", { name: "Run it now" })).toBeNull();
   });
 
-  it("follows a class with its generated defaults as they are", async () => {
+  it("follows a class with its generated defaults once a Focus topic has a rubric", async () => {
     viewport(true);
     scriptFetch({ ...common, "GET /api/settings/taxonomy": { ...tree, topics: [] } });
     renderApp("/settings/topics/mi");
-    expect(await screen.findByRole("button", { name: "Follow" })).toBeEnabled();
+    const follow = await screen.findByRole("button", { name: "Follow" });
+    expect(follow).toBeDisabled();
+    expect(follow).toHaveAttribute("title", expect.stringContaining("a Focus topic a rubric"));
+    await userEvent.type(screen.getByRole("textbox", { name: "Rubric" }), "Central: finds a circuit.");
+    expect(follow).toBeEnabled();
   });
 
   it("offers Follow only once the subject would pass: a short generated one is not followed as it is", async () => {
@@ -400,10 +404,13 @@ describe("Settings", () => {
     scriptFetch({ ...common, "GET /api/settings/taxonomy": { classes: [{ ...cls, description: "Circuits." }], topics: [] } });
     renderApp("/settings/topics/mi");
     const follow = await screen.findByRole("button", { name: "Follow" });
+    await userEvent.type(screen.getByRole("textbox", { name: "Rubric" }), "Central: finds a circuit.");
     expect(follow).toBeDisabled();
     expect(follow).toHaveAttribute("title", expect.stringContaining("20 characters"));
     await userEvent.type(screen.getByLabelText(/Subject/), " Circuits and features in transformers.");
     expect(follow).toBeEnabled();
+    await userEvent.clear(screen.getByRole("textbox", { name: "Rubric" }));
+    expect(follow).toBeDisabled();
   });
 
   it("names a stuck Deep pass as a Deep card", async () => {
