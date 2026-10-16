@@ -236,8 +236,10 @@ describe("a paper's page", () => {
     renderApp("/paper/2409.01234");
     expect(await screen.findByRole("heading", { name: "Archive one" })).toBeInTheDocument();
     expect(screen.getByText("We study things.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Paste a DOI" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Process" }));
     expect(await screen.findByRole("button", { name: "Fetched · next run" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Paste a DOI" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Process" })).toBeNull();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
