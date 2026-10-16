@@ -49,7 +49,7 @@ Results are needed by 09:00 (the owner wakes then); the nightly starts at 02:00,
 - **Batch mode lifts the steps' concurrency limits** (`concurrency.bounded`'s limit, the full-text worker's claim of
   4), so a step's whole set goes in one batch. Normal calls stay bounded by a limit per provider in the gateway, so
   unbatched roles, a deadline's leftovers and fallbacks never go out all at once; archive reads keep their own limit.
-  A pass's lease is extended to cover the deadline.
+  A pass's lease is extended to cover the deadline and the cancelled batches' drain after it.
 - **A batch goes out** once no new call has joined it for 10 s, or once it holds 10,000 requests or 200 MB
   (Anthropic's limits are 100,000 and 256 MB; a pass's request is up to about 200 kB). Open batches are polled every
   60 s. Identical calls in one collection window share one request.
@@ -157,10 +157,10 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V1 | Sonnet's Briefs and Weights are good enough | P1's report (refusals, agreement with Opus per effort, tokens) and the owner's read of the pairs |
 | V2 | A refusal falls back to OpenRouter, once | pytest with a scripted refusal: one fallback call, journalled under its own provider; P1's fallback answers |
 | V3 | Trimming cuts the bibliography and nothing else | unit tests on real LaTeX and PDF texts from N6; P1's token counts |
-| V4 | An unchanged question costs nothing | pytest on PostgreSQL: a pass queued again for a newer version with the same text, title, abstract, area and revision is answered from the journal (no provider call, cost 0); a changed text calls |
+| V4 | An unchanged question costs nothing | pytest on PostgreSQL: a pass queued again for a newer version with the same text, title, abstract, area and revision is answered from the journal (no provider call, cost 0); a changed text calls; a question the fallback answered after a refusal is answered from the journal without asking the role's model again |
 | V5 | Batched steps leave the same records as normal calls | pytest with a fake batch provider across analysis, grading and passes: same records, reuse, refusal, truncation and an expired batch handled as today |
 | V6 | A restart submits nothing twice once a batch is recorded | pytest: a nightly killed after its batch ids are recorded, with batches open and passes leased, run again: the fake sees one submission, the passes are taken back and answered from the open batches; repeated on the scratch night |
-| V7 | The deadline finishes the night | pytest with a fake clock: cancel, wait for the batch to end, finished answers kept, cancelled ones sent as normal calls, the digests written; a run started again after 07:30 does not batch |
+| V7 | The deadline finishes the night | pytest with a fake clock: cancel, wait for the batch to end, finished answers kept, cancelled ones sent as normal calls, calls held but not sent at the deadline sent as normal calls, the digests written; a run started again after 07:30 does not batch and cancels and settles the batches a dead run left open |
 | V8 | The owner's actions do not wait on a batch | pytest through the API: "run it now" and Use the PDF during a nightly are worked by the service worker with normal calls; the worker leaves automatic passes alone while a nightly holds the run lock, and the nightly leaves the owner's |
 | V9 | A night costs what is projected and is done in time | P3's scratch night: cost per role at half price, matched to Anthropic's usage; digests written well before the deadline |
 | V10 | The migration is safe | pytest migrating a fresh schema; `db migrate` on a fresh scratch database, counts before and after |

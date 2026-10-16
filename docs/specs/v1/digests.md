@@ -82,7 +82,9 @@ The nightly run ends with grading. Digests are written after a **bounded wait**,
 ends, for the full-text passes the night queued that digests depend on: Focus Briefs and the Area Weight re-checks.
 The wait ends when each of them has finished, has failed in this run (it is retried on the next run, so waiting longer
 gains nothing), or is terminal (three failed runs; text awaited for more than seven days), or at the nightly run's deadline (`[schedule] deadline`, default 07:30; [models.md](models.md), batches), whichever
-comes first. A run without a deadline waits at most `[digests] wait_minutes` (default 120).
+comes first. Passes already under way at the deadline finish first (their cancelled batch's requests go as normal
+calls), so digests carry them and are written by about 08:00; a pass that finishes later updates its paper, not
+the digests. A run without a deadline waits at most `[digests] wait_minutes` (default 120).
 
 - A Focus paper without its Brief at that point is listed anyway; the writer reads its abstract instead.
 - An Area paper whose re-check has not finished, or failed in this run, is not due yet: it becomes due when the re-check finishes, and is a

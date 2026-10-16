@@ -242,7 +242,8 @@ to which version, that newer update queues its passes again once, as a new versi
 with the old revision (section 8), does not replace the current Weight, and a pass for the new revision is queued. A
 pass that reads the same text for the same revision again, with the same title, abstract and area (a newer arXiv
 version that changed none of them), asks the identical question, which the gateway answers from its journal at no cost ([models.md](models.md), the gateway). A
-running pass holds a lease (default 30 minutes, and until the deadline in a batching nightly run); when the lease
+running pass holds a lease (default 30 minutes; in a batching nightly run, until 30 minutes past the deadline's own 30, covering the cancelled
+batches and the normal calls after them); when the lease
 runs out, because the worker died, the pass goes back to ready, and a nightly holding the run lock takes back at once
 those a dead nightly held ([models.md](models.md), batches).
 

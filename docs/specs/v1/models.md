@@ -23,7 +23,8 @@ must come from another lab (refusals follow a lab's policy, so a second model fr
 paper); start-up refuses a configuration where it does not. `brief` falls back to a model on OpenRouter, chosen by
 the model-spend plan's replay ([`docs/plans/model-spend.md`](../../plans/model-spend.md), D5); until it settles the
 choice, and `brief`'s effort (D6), the values here and in [data.md](data.md) are the plan's leading candidates. A paper the fallback
-refuses too fails as any refused call does.
+refuses too fails as any refused call does. A question the fallback has answered is answered from the journal when it
+is asked again, without asking the role's model first, so an unchanged question costs nothing after a refusal either.
 
 ## The gateway
 
@@ -62,7 +63,8 @@ service's workers, the CLI's other commands and a nightly started outside that w
 - **Answers.** Open batches are polled every minute. Every answer of a batch is journalled with its own usage at half
   price, whether or not a call still awaits it, so a batch is accounted for in full; an awaited answer is validated
   and handled as in a normal call (a refusal goes to the fallback), and only a validated answer is reused. An answer
-  no call awaits keeps its usage on its journal row, unvalidated, for a run started again to take (below). A
+  no call awaits has its usage on its journal row; the answer itself stays in the batch, which a run started again
+  reads when it asks for it (below). A role's timeout bounds each request to the provider, not the wait for a batch. A
   request the batch could not answer (errored, expired, cancelled) is sent again as a normal call when it is asked.
 - **Nothing is paid twice once a batch is recorded.** A batched call's journal row is written before the batch is
   sent and given the batch id once the provider accepts it; its request key is its id in the batch. A run that asks a
@@ -71,14 +73,17 @@ service's workers, the CLI's other commands and a nightly started outside that w
   sent again: that one batch may be paid twice.
 - **The deadline.** `[schedule] deadline` (07:30 in the schedule's zone) is the nightly's: the first after the
   schedule's nightly time that the run belongs to, kept by a run started again the same night. At the deadline the
-  run cancels its open batches and waits for them to end (cancelling takes minutes; requests in flight may still be
+  run sends no more batches (calls held but not yet sent go as normal calls), cancels its open batches and waits for them to end (cancelling takes minutes; requests in flight may still be
   answered); the answers are kept, and the cancelled requests are sent as normal calls, as is everything the run asks
   after the deadline. A batch still cancelling 30 minutes after the deadline has its unanswered requests sent as normal
   calls all the same, at the risk of paying twice for some. Other batching jobs have no deadline and wait for their
   batches, up to the provider's 24 hours.
 - **A run started again.** The run lock means no other nightly runs, so a nightly that takes it takes back the leases
   of the automatic full-text passes a dead run held (pipeline.md, section 6), asks their calls again (which attach to
-  the open batches), and waits, before the digests, for the passes queued since the night's first run started.
+  the open batches), and waits, before the digests, for the passes queued since the night's first run started. A
+  nightly started outside the window (after the deadline, say) sends no batches but settles those a dead run left
+  open as at a deadline: it cancels them at once, waits for them to end (at most 30 minutes), keeps their answers,
+  and sends the rest as normal calls.
 - **The owner's actions during a nightly.** While a nightly holds the run lock, the service's full-text worker leaves
   automatic passes to it and works only the passes the owner asked for ("run it now", "Use the PDF"), with its gateway
   without batching; the nightly does not claim those. A pass the owner's word queues meanwhile (a label that makes a

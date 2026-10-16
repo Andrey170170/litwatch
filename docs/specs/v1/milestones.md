@@ -84,7 +84,8 @@ default with a query); paper pages and Process / Deep read for papers outside th
 archive. *Check:* "attention is all you need" returns 1706.03762 first; a fresh stack with an empty archive ingests a
 night and serves full text for it; the owner's instance applies the PDF policy.
 
-**N6 · Restart.** A fresh stack with an empty database (decision 48): the two most recent weeks are read from the
+**N6 · Restart.** A fresh stack with an empty database (decision 48): the two most recent weeks (one, by the owner's
+call of 2026-10-16) are read from the
 archive and run through the whole pipeline, unlabelled. *Check:* the counts and cost per step against the estimates;
 every Focus paper at central with its Brief, or the reason it has none; the digests of the window written.
 
