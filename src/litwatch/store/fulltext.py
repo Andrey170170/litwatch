@@ -32,9 +32,9 @@ from litwatch.store.taxonomy import lock_shared, row_to_class
 # keeps a done pass current while the paper's version is unknown.
 COVERS_UPDATE = "coalesce(f.paper_updated >= p.updated, p.updated IS NULL)"
 
+_PUBLISHED = "(" + ", ".join(f"'{s.value}'" for s in PUBLISHED) + ")"
 # The topics whose published digests picked paper `p`'s current revision: a pick of text that a
 # rewrite replaced was a judgement of text that no longer exists.
-_PUBLISHED = "(" + ", ".join(f"'{s.value}'" for s in PUBLISHED) + ")"
 PICKED_BY = f"""ARRAY(
     SELECT DISTINCT d.topic FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
     WHERE dp.paper_id = p.id AND dp.role = 'pick' AND dp.paper_revision = p.revision

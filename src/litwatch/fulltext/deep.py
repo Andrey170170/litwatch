@@ -8,10 +8,10 @@ urgent priority, and the `deep` integration's service is given it.
 Each submission is an attempt, recorded before it is sent and given its job once accepted, so a
 worker that dies while a job runs leaves the job to the next claim to follow, never paid for
 twice. When a job ends, with a card or failed, the attempt records the job's usage, or that it
-is unknown (the job was lost before it reported, the submission's answer never came). A failed
-job fails the pass: it is tried again on the next nightly run, and after `FAILED_RUNS` failed
-runs it waits for the owner on Quality, as every pass does. At most `max_per_day` automatic
-submissions are made in any 24 hours; the owner's requests do not count, and go first.
+is unknown (the job was lost before it reported, the submission's answer never came). A
+failed job fails the pass: it is tried again on the next nightly run, and after `FAILED_RUNS`
+failed runs it waits for the owner on Quality, as every pass does. At most `max_per_day`
+automatic submissions are made in any 24 hours; the owner's requests do not count, and go first.
 """
 
 from __future__ import annotations
