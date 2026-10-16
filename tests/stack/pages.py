@@ -101,6 +101,10 @@ def expect(paper: str, day: str, width: str) -> dict[str, tuple[str, str]]:
         "settings-needs": ("text", "Needs you"),
         "settings-calibrate": ("text", "Calibrate"),
         "settings-calibrate-session": ("locator", '[aria-label="Papers in the session"]'),
+        "settings-calibrate-review": (
+            "locator",
+            'button:has-text("Add the papers waiting for a word")',
+        ),
         "settings-misses": ("text", "Misses"),
         "settings-topics": ("text", "Topics"),
         "settings-topic-editor": ("text", "follows"),
@@ -142,8 +146,8 @@ def watch(page) -> list[str]:
 
 def found_pages(context, base: str, day: str) -> dict[str, str]:
     """The pages that exist only once the data does: the page of a digest written around `day`
-    (a day's or a week's), the first Calibrate session. A read that fails is an error, not an
-    absence."""
+    (a day's or a week's), the first Calibrate session, on its card or its review. A read that
+    fails is an error, not an absence."""
     extra: dict[str, str] = {}
     since = (date.fromisoformat(day) - timedelta(days=30)).isoformat()
     until = (date.fromisoformat(day) + timedelta(days=7)).isoformat()
@@ -155,8 +159,12 @@ def found_pages(context, base: str, day: str) -> dict[str, str]:
         extra["digest-one"] = f"/digests/{marks[0]['id']}"
     sessions = context.request.get(f"{base}/api/settings/calibrate")
     assert sessions.ok, f"reading the Calibrate sessions: HTTP {sessions.status}"
-    if sessions.json():
-        extra["settings-calibrate-session"] = f"/settings/calibrate/{sessions.json()[0]['id']}"
+    if rows := sessions.json():
+        # a session with a paper left to answer opens on that paper's card; one answered through,
+        # on its review
+        s = rows[0]
+        kind = "review" if s["answered"] >= s["papers"] else "session"
+        extra[f"settings-calibrate-{kind}"] = f"/settings/calibrate/{s['id']}"
     return extra
 
 
