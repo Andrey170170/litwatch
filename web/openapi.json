@@ -1196,7 +1196,7 @@
     "/api/misses": {
       "post": {
         "summary": "Report Miss",
-        "description": "File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper\nlitwatch lacks is fetched first, as Process fetches it; a refused report fetches nothing.",
+        "description": "File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper\nlitwatch lacks is fetched in the same transaction, as Process fetches it, so a refused\nreport stores nothing.",
         "operationId": "report_miss_api_misses_post",
         "requestBody": {
           "content": {

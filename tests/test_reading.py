@@ -580,6 +580,17 @@ async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, m
     assert fetched == [["2610.09999"]]
     (miss,) = await (await conn.execute("SELECT paper_id FROM misses")).fetchall()
     assert miss["paper_id"] == "2610.09999"
+    # A report refused after the fetch stores nothing of it.
+    from fastapi import HTTPException
+
+    async def refused(*_):
+        raise HTTPException(status_code=409, detail="refused")
+
+    with monkeypatch.context() as m:
+        m.setattr(misses, "report", refused)
+        body = {"paper_id": "2610.08888", "topic": FAITH.slug}
+        assert (await client.post("/api/misses", json=body)).status_code == 409
+    assert await papers_store.get(conn, "2610.08888") is None
     monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [])  # arXiv lacks it too
     body = {"paper_id": "2601.99999", "topic": FAITH.slug}
     assert (await client.post("/api/misses", json=body)).status_code == 404

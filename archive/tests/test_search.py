@@ -170,8 +170,10 @@ class SearchTests(unittest.TestCase):
         self.start().step()
         for scan in (256, 0):
             with patch('arxiv_archive.search.EXACT_SCAN', scan):
-                self.assertEqual([p['id'][-1] for p in self.search.search(q='Deep  learning')['items']],
-                                 ['2', '1'])
+                # As typed, or with the query's own punctuation aside.
+                for q in ('Deep  learning', '"deep learning"'):
+                    self.assertEqual([p['id'][-1] for p in self.search.search(q=q)['items']],
+                                     ['2', '1'], q)
 
     def test_sorting_filters_and_page_boundaries(self):
         for n, title, published in [(1, 'beta', '2026-09-03'),
