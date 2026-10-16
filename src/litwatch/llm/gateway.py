@@ -180,25 +180,56 @@ class Gateway:
         paper_id: str | None = None,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
     ) -> Answer[T]:
-        """A validated answer, reusing an identical earlier call. Raises `CallError`.
+        """A validated answer, reusing an identical earlier call. Raises `CallError`. A refusal
+        is asked once of the role's fallback, another lab's model, journalled as its own call.
 
         The reply is recorded before it is validated, so a rejected one still has its charge;
-        only validated outputs are reusable. The reply's text is kept only in debug mode.
+        only validated outputs are reusable. The reply's text is kept only in debug mode. A
+        question the fallback answered is reused without asking the role's model again.
         """
+        fallback = self.models.role(role_name).fallback
+        reachable = fallback and self.models.role(fallback).provider in self.providers
+        if reachable and (answer := await self._reused(fallback, request)):
+            return answer
+        try:
+            return await self._ask(role_name, request, paper_id=paper_id, send=send)
+        except CallError as exc:
+            if exc.kind != "refused" or fallback is None:
+                raise
+        log.info("role=%s paper=%s refused: asking %s", role_name, paper_id, fallback)
+        return await self._ask(fallback, request, paper_id=paper_id, send=send)
+
+    async def _reused[T: BaseModel](self, role_name: str, request: Request) -> Answer[T] | None:
+        """The validated answer of an identical earlier call, at no cost."""
+        role = self.models.role(role_name)
+        if not self.journal or not (
+            hit := await self.journal.cached(self.request_key(role, request))
+        ):
+            return None
+        original = Usage.model_validate(hit["usage"])
+        usage = original.model_copy(
+            update={
+                "cost": 0.0,
+                "reused": True,
+                "original_cost": original.cost,
+                "source_call_id": hit["id"],
+            }
+        )
+        return Answer(request.output.model_validate(hit["output"]), usage, role.label)
+
+    async def _ask[T: BaseModel](
+        self,
+        role_name: str,
+        request: Request,
+        *,
+        paper_id: str | None = None,
+        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
+    ) -> Answer[T]:
         role = self.models.role(role_name)
         key = self.request_key(role, request)
         journal = self.journal
-        if journal and (hit := await journal.cached(key)):
-            original = Usage.model_validate(hit["usage"])
-            usage = original.model_copy(
-                update={
-                    "cost": 0.0,
-                    "reused": True,
-                    "original_cost": original.cost,
-                    "source_call_id": hit["id"],
-                }
-            )
-            return Answer(request.output.model_validate(hit["output"]), usage, role.label)
+        if answer := await self._reused(role_name, request):
+            return answer
         call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None
         reply = None
         try:

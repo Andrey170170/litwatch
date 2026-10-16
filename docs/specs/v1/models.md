@@ -20,10 +20,11 @@ made by the `deep` service on its own subscription and are not a gateway role.
 
 A role may name a **fallback**, another role asked once, as a normal call, when the role's model refuses. The fallback
 must come from another lab (refusals follow a lab's policy, so a second model from the same lab tends to refuse the same
-paper); start-up refuses a configuration where it does not. `brief` falls back to a model on OpenRouter, chosen by
-the model-spend plan's replay ([`docs/plans/model-spend.md`](../../plans/model-spend.md), D5); until it settles the
-choice, and `brief`'s effort (D6), the values here and in [data.md](data.md) are the plan's leading candidates. A paper the fallback
-refuses too fails as any refused call does. A question the fallback has answered is answered from the journal when it
+paper); start-up refuses a configuration where it does not. `brief` runs at high effort and falls back to GPT-6.1 Sol
+on OpenRouter, at high effort too, both chosen by the model-spend plan's replay
+([`docs/plans/model-spend.md`](../../plans/model-spend.md), D5 and D6;
+[`evals/2026-10-16-sonnet-briefs.md`](../../../evals/2026-10-16-sonnet-briefs.md)). A paper the fallback refuses too
+fails as any refused call does. A question the fallback has answered is answered from the journal when it
 is asked again, without asking the role's model first, so an unchanged question costs nothing after a refusal either.
 
 ## The gateway

@@ -25,8 +25,8 @@ from litwatch.archive import (
     read_text,
 )
 from litwatch.core import Paper, Taxonomy
-from litwatch.fulltext import brief
-from litwatch.llm import CallError, Gateway
+from litwatch.fulltext import brief, trim
+from litwatch.llm import CallError, Gateway, Usage
 
 # The Brief asked for, and the Gist's hard limit (`brief.SYSTEM`, `brief.Output`).
 ASKED_BRIEF_WORDS = (120, 200)
@@ -67,6 +67,8 @@ class Result(BaseModel):
     output: brief.Output | None = None
     model: str | None = None
     cost: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None  # thinking included
     seconds: float | None = None
     error: str | None = None
     request: str  # `fingerprint`: answers to another request are not mixed into one run
@@ -84,12 +86,21 @@ def results(path: Path) -> dict[str, Result]:
     return {r.paper_id: r for r in found}
 
 
-def spent(path: Path) -> float:
-    """What every call of the run cost, failed ones and those answered again included."""
+def spent(path: Path) -> list[float | None]:
+    """What each call of the run cost, failed ones and those answered again included; None
+    where the charge is unknown."""
     if not path.exists():
-        return 0.0
+        return []
     lines = (line for line in path.read_text(encoding="utf-8").splitlines() if line)
-    return sum(Result.model_validate_json(line).cost or 0 for line in lines)
+    return [Result.model_validate_json(line).cost for line in lines]
+
+
+def dollars(costs: list[float | None]) -> str:
+    """What `costs` add up to, marked as a lower bound where a charge is unknown."""
+    if costs and all(c is None for c in costs):
+        return "cost unknown"
+    known = sum(c for c in costs if c is not None)
+    return f"{'≥ ' if None in costs else ''}${known:.2f}"
 
 
 def inputs(paper: Paper, entry: Entry) -> str:
@@ -99,10 +110,62 @@ def inputs(paper: Paper, entry: Entry) -> str:
     return hashlib.sha256(asked.encode()).hexdigest()[:12]
 
 
-def fingerprint(gateway: Gateway) -> str:
-    """The role's configuration and its instructions, hashed."""
-    role = gateway.models.role(brief.ROLE).model_dump_json()
-    return hashlib.sha256(f"{role}\n{brief.SYSTEM}".encode()).hexdigest()[:12]
+# What the model is sent of a paper's text: as passes send it, as read, or also without the
+# appendix (docs/plans/model-spend.md, P1).
+TEXTS: dict[str, Callable[[str, str], str]] = {
+    "pass": trim.without_references,
+    "as-read": lambda text, _source: text,
+    "no-appendix": trim.without_appendix,
+}
+
+
+def fingerprint(gateway: Gateway, text: str = "pass") -> str:
+    """The role's configuration and its fallback's, its instructions and the text variant,
+    hashed."""
+    role = gateway.models.role(brief.ROLE)
+    roles = [role] + ([gateway.models.role(role.fallback)] if role.fallback else [])
+    configured = "\n".join(r.model_dump_json() for r in roles)
+    return hashlib.sha256(f"{configured}\n{brief.SYSTEM}\n{text}".encode()).hexdigest()[:12]
+
+
+class _Spent:
+    """A journal that only adds up each paper's charges, so a refusal the fallback answered
+    counts in what its paper cost; a call with no known charge (none reported, or none
+    recorded, as after a timeout) makes the total unknown. Nothing is reused: an evaluation
+    asks afresh."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str | None, float | None]] = []  # paper, charge, by call id
+
+    def cost(self, paper_id: str) -> float | None:
+        charges = [cost for paper, cost in self.calls if paper == paper_id]
+        return None if None in charges else sum(charges)  # type: ignore[arg-type]
+
+    async def cached(self, key: str) -> None:
+        return None
+
+    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
+        self.calls.append((paper_id, None))
+        return len(self.calls) - 1
+
+    async def record(self, call_id: int, usage: Usage) -> None:
+        self.calls[call_id] = (self.calls[call_id][0], usage.cost)
+
+    async def accept(self, call_id: int, output: dict) -> None:
+        return None
+
+    async def reject(self, call_id: int, error: str, reply: str | None = None) -> None:
+        return None
+
+
+def _usage(usage: Usage | None) -> dict:
+    if usage is None:
+        return {}
+    return {
+        "cost": usage.cost,
+        "input_tokens": usage.prompt_tokens,
+        "output_tokens": usage.completion_tokens,
+    }
 
 
 async def _text(
@@ -132,15 +195,17 @@ async def run(
     out: Path,
     *,
     concurrency: int = 4,
+    text: str = "pass",
     wait_seconds: float = 20 * 60,
     poll: float = 20.0,
     progress: Callable[[Result], None] | None = None,
 ) -> list[Result]:
     """Write the Brief of every paper not yet answered in `out`, appending each answer as it
     arrives; a paper whose text could not be had is left to the next run. Refuses to resume a
-    run made with another configuration of the role; a paper whose title, abstract, version, update
-    or area changed since its answer is written again."""
-    asked = fingerprint(gateway)
+    run made with another configuration of the role or text variant (`TEXTS`); a paper whose
+    title, abstract, version, update or area changed since its answer is written again."""
+    asked = fingerprint(gateway, text)
+    prepare = TEXTS[text]
     now = {p.id: inputs(p, e) for p, e in papers}
     done = {pid for pid, r in results(out).items() if r.output and r.inputs == now.get(pid)}
     if other := {r.request for r in results(out).values()} - {asked}:
@@ -149,27 +214,31 @@ async def run(
         )
     gate = asyncio.Semaphore(concurrency)
     found: list[Result] = []
+    spent = _Spent()
+    if gateway.journal is None:  # a dry run's gateway: count what each paper cost
+        gateway.journal = spent
 
     async def one(paper: Paper, entry: Entry) -> None:
         area = tree.get(entry.area) if entry.area else None
-        text = await _text(archive, paper, wait_seconds, poll)
-        if isinstance(text, str):
-            result = Result(paper_id=paper.id, error=text, request=asked, inputs=now[paper.id])
+        read = await _text(archive, paper, wait_seconds, poll)
+        if isinstance(read, str):
+            result = Result(  # no call, so nothing charged
+                paper_id=paper.id, error=read, cost=0.0, request=asked, inputs=now[paper.id]
+            )
         else:
             async with gate:
                 started = time.monotonic()
                 try:
                     answer = await gateway.ask(
                         brief.ROLE,
-                        brief.request(paper, area, text.body, text.source),
+                        brief.request(paper, area, read.body, read.source, prepare=prepare),
                         paper_id=paper.id,
                     )
                 except CallError as exc:
-                    cost = exc.usage.cost if exc.usage else None
                     result = Result(
                         paper_id=paper.id,
                         error=str(exc),
-                        cost=cost,
+                        **_usage(exc.usage),
                         request=asked,
                         inputs=now[paper.id],
                     )
@@ -178,12 +247,15 @@ async def run(
                         paper_id=paper.id,
                         output=answer.value,
                         model=answer.model,
-                        cost=answer.usage.cost,
+                        **_usage(answer.usage),
                         request=asked,
                         inputs=now[paper.id],
                     )
                 result.seconds = round(time.monotonic() - started, 2)
-            result.version, result.source, result.chars = text.version, text.source, len(text.body)
+                if gateway.journal is spent:
+                    result.cost = spent.cost(paper.id)
+            result.version, result.source = read.version, read.source
+            result.chars = len(prepare(read.body, read.source))
         with out.open("a", encoding="utf-8") as f:
             f.write(result.model_dump_json() + "\n")
         found.append(result)
@@ -226,9 +298,10 @@ def report(
     papers: dict[str, Paper],
     found: dict[str, Result],
     abstract_gists: dict[str, str],
-    cost: float,
+    spent: list[float | None],
 ) -> str:
-    """The report, as markdown, from the run alone: no calls. `cost` is what the run spent. An
+    """The report, as markdown, from the run alone: no calls. `spent` is what each call of the
+    run cost, as `spent` reads it. An
     answer to other inputs than the paper's and entry's now is left out."""
     stale = {
         e.id
@@ -241,7 +314,7 @@ def report(
     models = sorted({r.model for r in answered if r.model})
     lines += [
         f"{len(answered)} of {len(entries)} papers answered by {', '.join(models) or 'no model'}, "
-        f"${cost:.2f} in all. Each paper's text was read from the archive as a full-text pass "
+        f"{dollars(spent)} in all. Each paper's text was read from the archive as a full-text pass "
         "reads it. The owner marks whether the abstract overstates in the preference set "
         "(`evals/preferences/briefs.yaml`); the milestone check is that the overstatement line "
         "appears where the owner agrees and nowhere else, and that no Gist repeats a claim its "
@@ -272,7 +345,7 @@ def report(
             f"## {p.id} · {p.title}",
             "",
             f"[arXiv]({p.url}) · area {e.area or 'not given'} · v{r.version or '?'} from its "
-            f"{r.source} · {r.chars:,} characters · {r.model} · ${r.cost or 0:.2f}",
+            f"{r.source} · {r.chars:,} characters · {r.model} · {dollars([r.cost])}",
             "",
             f"**Abstract.** {p.abstract}",
             "",

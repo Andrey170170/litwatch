@@ -36,7 +36,7 @@ from litwatch.core.fulltext import (
     wanted,
 )
 from litwatch.feedback import misses, word
-from litwatch.fulltext import brief
+from litwatch.fulltext import brief, trim
 from litwatch.jobs import nightly
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import analyses as analyses_store
@@ -696,6 +696,24 @@ async def test_a_new_arxiv_version_is_read_again_by_the_next_nightly_run(db, mon
     assert await fulltext_store.outdated(db) == []
 
 
+@pytest.mark.parametrize("changed", [False, True])
+async def test_a_new_version_with_the_same_text_is_answered_from_the_journal(db, changed):
+    await graded(db, "central")
+    writer = Writer()
+    await work(db, ready(FakeArchive()), writer)
+    await papers_store.upsert(db, [P.model_copy(update={"version": 2})])
+    await word.settle_all(db, await fulltext_store.outdated(db))
+    fake = FakeArchive()
+    fake.texts[P.id] = (2, BODY + " Revised." if changed else BODY)
+    await work(db, fake, writer)
+    old, new = await passes(db)
+    assert (old["state"], new["state"], new["arxiv_version"]) == ("done", "done", 2)
+    # The same text for the same revision is the same question: the journal answers it free.
+    assert len(writer.asked) == (2 if changed else 1)
+    calls = await (await db.execute("SELECT count(*) AS n FROM inference_calls")).fetchone()
+    assert calls["n"] == (2 if changed else 1)
+
+
 async def test_a_new_update_of_unknown_version_is_read_again_once(db):
     await graded(db, "central")
     await work(db, ready(FakeArchive()), Writer())
@@ -824,6 +842,32 @@ def test_a_long_text_is_cut_and_an_unknown_area_said():
     request = brief.request(P, None, "x" * (brief.MAX_TEXT_CHARS + 10), "pdf")
     assert request.user.endswith(brief.CUT)
     assert "Area: not known" in request.user and "(from its PDF)" in request.user
+
+
+LATEX = r"""\section{Results}
+Probes reach 0.98 AUROC \citep{a}.
+\begin{thebibliography}{2}
+\bibitem[A(2025)]{a} A.~Author. \newblock A paper. \newblock 2025.
+\end{thebibliography}
+
+\appendix
+\section{Proofs}
+Lemma 1 holds."""
+
+
+def test_a_pass_sends_latex_without_its_bibliography_and_pdf_text_as_read():
+    sent = trim.without_references(LATEX, "latex")
+    assert "0.98 AUROC" in sent and "Lemma 1 holds." in sent and r"\bibitem" not in sent
+    assert brief.request(P, None, LATEX, "latex").user.endswith(sent)
+    pdf = "Probes reach 0.98 AUROC.\nReferences\n[1] A. Author.\nAdditional Experiments\nMore."
+    assert trim.without_references(pdf, "pdf") == pdf
+    # The P1 variant drops LaTeX's appendix as well.
+    assert "Lemma 1" not in trim.without_appendix(LATEX, "latex")
+
+
+def test_a_text_without_a_bibliography_is_sent_as_read():
+    for source in ("latex", "pdf"):
+        assert trim.without_references(BODY, source) == BODY
 
 
 def test_the_fulltext_command_finds_an_archive_kept_in_dotenv(tmp_path, monkeypatch):

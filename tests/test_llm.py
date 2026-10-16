@@ -252,6 +252,61 @@ async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn, journal
     assert last["error"] == "provider: APIConnectionError" and last["usage"]["cost"] is None
 
 
+async def test_a_refusal_is_asked_once_of_the_roles_fallback_from_another_lab(conn, journal):
+    refused = SdkClient(anthropic_message("", stop_reason="refusal", category="cyber"))
+    answering = SdkClient(openrouter_completion(GOOD))
+    models = Models(brief_fallback=MUSE)
+    answer = await gateway(models, refused, answering, journal).ask("brief", REQUEST, paper_id="p")
+    assert answer.value.yes and answer.model == MUSE.label
+    assert (len(refused.sent), len(answering.sent)) == (1, 1)
+    rows = await calls(conn)
+    assert [(r["operation"], r["error"]) for r in rows] == [
+        ("brief", "refused: cyber"),
+        ("brief_fallback", None),
+    ]
+    # Without the fallback's credentials, the role's model is still asked.
+    alone = Gateway(
+        models, {"anthropic": AnthropicProvider(client=SdkClient(anthropic_message(GOOD)))}, journal
+    )
+    assert (await alone.ask("brief", Request(system="s", user="alone", output=Answer))).value.yes
+    # Asked again unchanged, the fallback's answer is reused without asking the role's model.
+    again = await gateway(models, refused, answering, journal).ask("brief", REQUEST, paper_id="p")
+    assert again.value.yes and again.usage.cost == 0 and again.model == MUSE.label
+    assert (len(refused.sent), len(answering.sent)) == (1, 1)
+    # The fallback refusing too is the call's refusal; it is not asked again, nor is it asked
+    # for anything but a refusal.
+    refusing = SdkClient(openrouter_completion("", refusal="I cannot"))
+    with pytest.raises(CallError, match="refused: unspecified"):
+        await gateway(models, refused, refusing).ask(
+            "brief", Request(system="s", user="other", output=Answer)
+        )
+    assert len(refusing.sent) == 1
+    invalid = SdkClient(anthropic_message("not json"))
+    with pytest.raises(CallError, match="invalid"):
+        await gateway(models, invalid, refusing).ask(
+            "brief", Request(system="s", user="third", output=Answer)
+        )
+    assert len(refusing.sent) == 1
+
+
+@pytest.mark.parametrize(
+    ("fallback", "why"),
+    [
+        ("brief", "not another role"),
+        ("nobody", "not another role"),
+        ("writer", "different labs"),
+    ],
+)
+def test_a_fallback_is_another_role_from_another_lab_without_its_own(fallback, why):
+    with pytest.raises(ValueError, match=why):
+        Models(brief=OPUS.model_copy(update={"fallback": fallback}))
+    chained = MUSE.model_copy(update={"fallback": "writer"})
+    with pytest.raises(ValueError, match="a fallback of its own"):
+        Models(brief_fallback=chained)
+    with pytest.raises(ValueError, match="Decisions or neither"):
+        Models(brief_fallback=MUSE.model_copy(update={"decisions": True}))
+
+
 async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, journal):
     client = SdkClient(anthropic_message(json.dumps({"yes": True, "why": "it\x00 says so"})))
     answer = await gateway(MODELS, client, journal=journal).ask("writer", REQUEST)
