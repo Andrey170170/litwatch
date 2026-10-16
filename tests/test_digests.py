@@ -753,6 +753,19 @@ async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_star
     assert (await shown(db, FAITH.slug, "week", MON - timedelta(days=7)))[0] == "nothing_new"
 
 
+async def test_a_nightly_run_without_digests_writes_none(db):
+    """`nightly --no-digests` (the restart, whose digests `digests write` makes for its window):
+    on a Monday with a paper listed, neither the day's dailies nor last week's weeklies."""
+    await focus(db, P, "central")
+    await verdicts.passed(db, [(P.id, 1)])
+    await db.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))  # no calls
+    await listed(db, MON, P)
+    await nightly.run(
+        db, Config(), fetch=False, gateway=Writer().gateway, today=MON, with_digests=False
+    )
+    assert (await (await db.execute("SELECT count(*) AS n FROM digests")).fetchone())["n"] == 0
+
+
 async def test_no_batch_of_passes_starts_after_the_deadline(db):
     """The full-text work before the digests stops at the wait's deadline; the worker takes
     the passes left."""

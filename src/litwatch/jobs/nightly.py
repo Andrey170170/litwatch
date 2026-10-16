@@ -161,6 +161,7 @@ async def run(
     limit: int | None = None,
     gateway: GatewayFactory = default_gateway,
     today: date | None = None,
+    with_digests: bool = True,
 ) -> int:
     """One run under the run lock. Returns the run id.
 
@@ -168,7 +169,9 @@ async def run(
     graded, and the gap stays open for the next run. `limit` caps the papers each step that
     spends takes, and the full-text passes tried; the full-text reconcile spends nothing and
     takes all. The digests are those of `today`, by default the day the run started on in the
-    schedule's zone, however long it runs.
+    schedule's zone, however long it runs. Without `with_digests` the run neither waits for
+    the passes nor writes digests: a window's are written by `jobs.digests.window` (the
+    restart), which today's would otherwise take the papers of.
     """
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
@@ -194,6 +197,8 @@ async def run(
         # The digests wait for the passes they depend on, from now and at most this long.
         deadline = time.monotonic() + config.digests.wait_minutes * 60
         done = await text_passes(conn, config, run, limit, deadline)
+        if not with_digests:
+            return run.run_id
         left = None if limit is None else limit - fulltext.worked(done)
         await wait_for_texts(conn, config, run, until, deadline, limit=left)
         await write_digests(conn, run, today)

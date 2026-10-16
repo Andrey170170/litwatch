@@ -152,11 +152,23 @@ def nightly(
     limit: Annotated[
         int | None, typer.Option(help="At most this many papers per step (a trial run).")
     ] = None,
+    digests: Annotated[
+        bool,
+        typer.Option(
+            help="Wait for the full-text passes and write today's digests; the restart says "
+            "--no-digests and writes its window's with `digests write`."
+        ),
+    ] = True,
     config: ConfigPath = None,
 ) -> None:
-    """The nightly run as the scheduler runs it: intake, classification, analysis, grading."""
+    """The nightly run as the scheduler runs it: intake, classification, analysis, grading,
+    the full-text passes and the digests."""
     cfg = configuration.load(config)
-    run_id = _run(lambda conn: nightly_job.run(conn, cfg, fetch=fetch, days=days, limit=limit))
+    run_id = _run(
+        lambda conn: nightly_job.run(
+            conn, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
+        )
+    )
     run = _run(lambda conn: runs.get(conn, run_id))
     console.print(f"run {run_id}: cost ${run['cost']}")
     console.print_json(data=run["counts"])
