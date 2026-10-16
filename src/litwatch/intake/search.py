@@ -210,12 +210,19 @@ async def fetch_by_ids(ids: list[str], client: httpx.AsyncClient | None = None) 
 
 
 def _papers(content: bytes) -> list[Paper]:
-    """The papers of an arXiv result feed, read by the `arxiv` library's parser."""
+    """The papers of an arXiv result feed, read by the `arxiv` library's parser, checked as the
+    nightly intake checks a page: a total with no entry read is a feed cut short, and an entry
+    the parser or `Paper` cannot read is no answer, not "arXiv lacks it"."""
     _check_feed(content)
-    feed = arxiv._feed.parse(content)
-    if feed.malformed:
-        raise _IncompleteFeedError("arXiv returned a malformed feed")
-    return [to_paper(r) for r in feed.results]
+    try:
+        feed = arxiv._feed.parse(content)
+        if feed.malformed or (not feed.results and feed.header.total_results > 0):
+            raise _IncompleteFeedError("arXiv returned a malformed feed")
+        return [to_paper(r) for r in feed.results]
+    except _IncompleteFeedError:
+        raise
+    except ValueError as exc:  # a timestamp fromisoformat refuses, a Paper that fails validation
+        raise _IncompleteFeedError(f"arXiv returned an entry litwatch cannot read: {exc}") from exc
 
 
 def search(query: str, max_results: int, client: arxiv.Client | None = None) -> list[Paper]:

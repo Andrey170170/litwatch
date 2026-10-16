@@ -206,6 +206,16 @@ async def test_an_owner_lookup_reads_arxivs_feed_in_one_try(monkeypatch):
         with pytest.raises(arxiv_source.NoAnswerError):
             await arxiv_source.fetch_by_ids(["2609.10001"], client)
         assert len(calls) == 1
+    # An entry the parser skips (no published) leaves a total with no entries: not "arXiv lacks
+    # it". One it cannot read (a bad timestamp) is no answer either, not an error of litwatch's.
+    published = "<published>2026-09-10T12:00:00Z</published>"
+    for broken in (
+        feed().replace(published.encode(), b""),
+        feed().replace(published.encode(), b"<published>soon</published>"),
+    ):
+        client, _ = arxiv_answering((200, broken))
+        with pytest.raises(arxiv_source.NoAnswerError):
+            await arxiv_source.fetch_by_ids(["2609.10001"], client)
 
 
 @pytest.mark.parametrize("paced", [False, True])
