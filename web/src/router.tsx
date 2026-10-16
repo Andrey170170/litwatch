@@ -1,7 +1,8 @@
 import { createRootRoute, createRoute, createRouter, type RouterHistory } from "@tanstack/react-router";
 import { Shell } from "@/components/Shell";
+import { isIsoDay } from "@/lib/digests";
 import { listSearch, parseSearch, str, stringifySearch } from "@/lib/search";
-import { DigestPage } from "@/routes/digest";
+import { DigestOnePage, DigestPage, HistoryPage, WeekPage } from "@/routes/digest";
 import { PaperPage } from "@/routes/paper";
 import { PapersPage } from "@/routes/papers";
 import { SettingsIndex, SettingsPage } from "@/routes/settings";
@@ -28,7 +29,35 @@ function NotFound() {
 
 const rootRoute = createRootRoute({ component: Shell, notFoundComponent: NotFound });
 
-export const digestRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: DigestPage });
+// The Digest's views: Day (`day`, today without), Week (`week`, a day of the week shown, last week's without) and
+// History (`view` cal, the list without). `digest` on any of them is the digest in the desktop's slide-over.
+const digestOf = (s: Record<string, unknown>) => {
+  const id = Number(s.digest);
+  return Number.isInteger(id) && id > 0 ? { digest: id } : {};
+};
+export const digestRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  validateSearch: (s: Record<string, unknown>): { day?: string; digest?: number } => ({ ...(isIsoDay(s.day) ? { day: s.day } : {}), ...digestOf(s) }),
+  component: DigestPage,
+});
+export const weekRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/week",
+  validateSearch: (s: Record<string, unknown>): { week?: string; digest?: number } => ({ ...(isIsoDay(s.week) ? { week: s.week } : {}), ...digestOf(s) }),
+  component: WeekPage,
+});
+export const historyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/history",
+  validateSearch: (s: Record<string, unknown>): { view?: "cal"; digest?: number } => ({ ...(s.view === "cal" ? { view: "cal" as const } : {}), ...digestOf(s) }),
+  component: HistoryPage,
+});
+function DigestById() {
+  const { id } = digestOneRoute.useParams();
+  return <DigestOnePage id={Number(id)} />;
+}
+export const digestOneRoute = createRoute({ getParentRoute: () => rootRoute, path: "/digests/$id", component: DigestById });
 export const topicsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/topics", component: TopicsPage });
 export const topicRoute = createRoute({ getParentRoute: () => rootRoute, path: "/topics/$slug", validateSearch: listSearch, component: TopicPage });
 export const papersRoute = createRoute({ getParentRoute: () => rootRoute, path: "/papers", validateSearch: listSearch, component: PapersPage });
@@ -60,7 +89,7 @@ export const settingsSessionRoute = createRoute({
 export const settingsJobsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/runs/jobs", component: JobsPage });
 export const settingsEventsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/integrations/$name", component: EventsPage });
 
-const routeTree = rootRoute.addChildren([digestRoute, topicsRoute, topicRoute, papersRoute, paperRoute, settingsRoute, settingsPageRoute, settingsTopicRoute, settingsSessionRoute, settingsJobsRoute, settingsEventsRoute]);
+const routeTree = rootRoute.addChildren([digestRoute, weekRoute, historyRoute, digestOneRoute, topicsRoute, topicRoute, papersRoute, paperRoute, settingsRoute, settingsPageRoute, settingsTopicRoute, settingsSessionRoute, settingsJobsRoute, settingsEventsRoute]);
 
 export function createAppRouter(history?: RouterHistory) {
   return createRouter({ routeTree, history, scrollRestoration: true, scrollToTopSelectors: [".main", ".screen"], parseSearch, stringifySearch });

@@ -33,13 +33,17 @@ export function SaveCell({ paper }: { paper: Paper }) {
   );
 }
 
-/** Deep read asks for a card; while the request is in, the cell says so (the hook remembers it for the page). */
+/** Deep read asks for a card, Write again a new one over the paper's own; while the request is in, or the owner's
+ * own pass is open, the cell says so (the hook remembers a request for the page until the pass is read back). An
+ * automatic pass leaves the cell live: the owner's request takes it over (`card_requestable`). */
 export function DeepReadCell({ paper, asked, wide }: { paper: Paper; asked: boolean; wide?: boolean }) {
   const deep = useDeepRead(paper.id);
-  if (paper.card || !paper.card_requestable) return null;
+  if (!paper.card_requestable && !paper.card_pass) return null;
+  const busy = asked || !paper.card_requestable;
+  const what = paper.card ? "Write again" : "Deep read";
   return (
-    <button className={wide ? "wide" : ""} onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked}>
-      {asked ? "Deep read · queued" : "Deep read"}
+    <button className={wide ? "wide" : ""} onClick={() => deep.mutate(undefined)} disabled={deep.isPending || busy}>
+      {busy ? `${what} · ${passWord(paper, asked)}` : what}
     </button>
   );
 }
@@ -62,6 +66,9 @@ export function ProcessCell({ paper, phone }: { paper: Paper; phone?: boolean })
     </button>
   );
 }
+
+/** Where the owner's own pass stands, for a control: queued until it runs or fails, and while the request is in. */
+export const passWord = (paper: Paper, asked: boolean) => (!asked && paper.card_pass?.state === "failed" ? "failed" : asked || paper.card_pass?.state !== "running" ? "queued" : "being written");
 
 const ext = (href: string, label: string) => (
   <a href={href} target="_blank" rel="noopener">

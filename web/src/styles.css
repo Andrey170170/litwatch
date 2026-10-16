@@ -339,6 +339,137 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
 .fbtn { position: relative; width: 44px; height: 42px; border: 1px solid var(--line); background: var(--surface); color: var(--fg2); font-size: 17px; flex: none; }
 .fbtn i { position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; font: 600 10px/16px var(--font-mono); font-style: normal; background: var(--acc); color: var(--acc-fg); text-align: center; }
 
+/* ── the Digest (DESIGN.md, "Digest") ────────────────────────────────────────────────────────────── */
+/* Day · Week · History, and History's List · Calendar at the right */
+.segbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.segbar .sp { flex: 1; }
+.vseg { display: inline-flex; border: 1px solid var(--line); background: var(--surface); clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+.vseg .vs { padding: 5px 16px; font: 700 13.5px var(--font-name); text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg2); }
+.vseg .vs:hover { color: var(--fg); }
+.vseg .vs.on { background: var(--sel); color: var(--sel-fg); }
+.modes { display: inline-flex; gap: 2px; }
+.modes a { min-width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; color: var(--fg3); }
+.modes a:hover { color: var(--fg); }
+.modes a.on { color: var(--acc); }
+html[data-theme="light"] .modes a.on { color: var(--fg); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .modes a.on { color: var(--fg); } }
+.modes.foot { display: flex; width: 100%; }
+.modes.foot a { flex: 1; height: 46px; font-size: 18px; }
+.modes.foot a span { font: 700 14px var(--font-name); text-transform: uppercase; letter-spacing: 0.12em; }
+/* ‹ Tue 13 Oct ›: a strip on the desktop, the bottom bar on the phone with large arrows */
+.stp { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; }
+.stp .ib { width: 36px; height: 36px; }
+.stp .ib[aria-disabled] { opacity: 0.3; }
+.stp .lbl { font: 700 15px var(--font-name); text-transform: uppercase; letter-spacing: 0.1em; white-space: nowrap; display: inline-flex; align-items: baseline; gap: 8px; }
+.stp .lbl small { font: 500 10px var(--font-mono); color: var(--fg3); letter-spacing: 0.12em; text-transform: uppercase; }
+.stp.foot { margin: 0; width: 100%; }
+.stp.foot .ib { width: 64px; height: 46px; font-size: 24px; }
+.stp.foot .lbl { flex: 1; flex-direction: column; align-items: center; gap: 0; line-height: 1.1; }
+/* "Weekly digests for 5–11 Oct are out ›" on a Monday */
+.wkline { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px; font: 700 13px var(--font-name); text-transform: uppercase; letter-spacing: 0.08em; border: 1px solid color-mix(in srgb, var(--acc) 45%, transparent); color: var(--acc); }
+.wkline:hover { background: color-mix(in srgb, var(--acc) 8%, transparent); }
+html[data-theme="light"] .wkline { color: var(--fg); border-color: var(--fg); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .wkline { color: var(--fg); border-color: var(--fg); } }
+.none { color: var(--fg3); font-size: 13px; padding: 4px 0 2px; }
+/* a digest card at Gist level; the whole card opens the digest */
+.dblock { background: var(--surface); border: 1px solid var(--line2); margin-bottom: 10px; cursor: pointer; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
+.dblock:hover { border-color: var(--acc); }
+.dblock .hd { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+.dblock .hd .n { font: 700 15.5px var(--font-name); text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg); }
+.dblock .hd .n:hover { color: var(--acc); }
+.dblock .hd .c, .drow .c { margin-left: auto; font: 11.5px var(--font-mono); text-transform: uppercase; color: var(--fg2); white-space: nowrap; }
+.dblock .p { margin: 0; padding: 0 12px 10px; font-size: 14px; line-height: 1.5; }
+.dblock .dlist { border-top: 1px solid var(--line2); }
+.dblock .more { padding: 6px 14px 8px; font: 12px var(--font-mono); color: var(--fg2); border-top: 1px solid var(--line2); }
+.dblock.quiet .hd { padding-bottom: 10px; }
+.dblock.quiet .hd .n { font-weight: 600; color: var(--fg2); }
+.dblock.failed { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--sig); padding: 8px 12px; border: 1px dashed color-mix(in srgb, var(--sig) 50%, transparent); background: none; }
+.dblock.failed .n { color: var(--sig); font-weight: 600; }
+/* phone: the count on its own line under the name, so it starts at the same place in every card */
+.phone .dblock .hd { flex-wrap: wrap; row-gap: 2px; }
+.phone .dblock .hd .n { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone .dblock .hd .c { order: 3; flex-basis: calc(100% - 28px); margin-left: 28px; }
+/* the digest's paper row (title and date; with .g its Gist and a pick's reason) and the Mark row */
+.row.dpr, .row.drow { --gs: 20%; display: grid; grid-template-columns: 1fr auto; column-gap: 10px; align-items: baseline; padding: 7px 10px 7px 14px; border-top: 1px solid var(--line2); font-size: 13.5px; }
+.row.dpr:first-child, .row.drow:first-child { border-top: 0; }
+.row.dpr .ti { font-weight: 500; line-height: 1.35; }
+.row.dpr.aside .ti { text-decoration: line-through; color: var(--fg2); }
+.row.dpr .gs { grid-column: 1 / -1; font-size: 13px; color: var(--fg2); line-height: 1.45; margin-top: 2px; }
+.row.dpr .wy { grid-column: 1 / -1; font-size: 12.5px; color: var(--fg3); font-style: italic; margin-top: 2px; }
+.row.drow { grid-template-columns: auto 1fr auto; align-items: center; padding: 6px 10px 6px 14px; font-size: 13px; }
+.row.drow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row.drow.quiet, .row.drow.quiet:hover { color: var(--fg3); box-shadow: none; background-image: none; }
+.row.drow.quiet .c { color: var(--fg3); }
+.row.drow.bad .c { color: var(--sig); }
+.dlist { background: var(--surface); border: 1px solid var(--line2); }
+.dblock .dlist { border-left: 0; border-right: 0; border-bottom: 0; }
+/* History's groups */
+.grp { margin: 18px 0 8px; display: flex; align-items: baseline; gap: 8px; }
+.grp:first-child, .segbar + .grp { margin-top: 0; }
+.grp .t { font: 700 13px var(--font-name); letter-spacing: 0.14em; text-transform: uppercase; }
+.grp a.t:hover { color: var(--acc); }
+.grp .t.quiet { color: var(--fg3); }
+.grp .s { font-size: 12px; color: var(--fg3); }
+.grp.pin .t { color: var(--sig); }
+.loadmore, .archstart { font-size: 12px; color: var(--fg3); }
+.archstart { text-align: center; padding: 14px 0; }
+/* the calendar: a month, a row per week, Monday to Friday and the week's weeklies */
+.calmonth { margin-bottom: 20px; }
+.calmonth .sec { margin-bottom: 6px; }
+.inner:has(.calmonth) { max-width: none; }
+.month { display: grid; grid-template-columns: repeat(5, 1fr) 1.7fr; gap: 5px; align-items: stretch; }
+.month .mh { font: 500 10.5px var(--font-mono); color: var(--fg3); text-transform: uppercase; letter-spacing: 0.1em; padding: 0 2px; }
+.mday, .mweek { background: var(--surface); border: 1px solid var(--line2); padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; min-height: 40px; }
+.mweek { background: color-mix(in srgb, var(--acc) 5%, var(--surface)); }
+.mweek .wcols { display: grid; grid-template-columns: 1fr 1fr; column-gap: 4px; }
+.mweek .wcols > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mday.empty, .mweek.empty { background: none; border-style: dashed; }
+.mday.off { background: none; }
+.mday.today { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.mnum { font: 500 11px var(--font-mono); color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mnum:hover { color: var(--acc); }
+.mday.today .mnum { color: var(--acc); font-weight: 700; }
+html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover { color: var(--fg); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) :is(.mday.today .mnum, .mnum:hover) { color: var(--fg); } }
+.mbar { display: block; height: 6px; background: var(--rc); }
+.mbar.h { background: none; box-shadow: inset 0 0 0 1px var(--line); }
+.mbar.none { background: none; }
+.mbar.x { background: repeating-linear-gradient(45deg, var(--sig) 0 3px, transparent 3px 6px); }
+.month:not(.text) .mday:not(.empty), .month:not(.text) .mweek:not(.empty) { cursor: pointer; }
+.month.text { gap: 6px; }
+.month.text .mday, .month.text .mweek { padding: 6px; gap: 3px; }
+.month.text .mbar { height: 22px; display: flex; align-items: center; gap: 6px; padding-right: 6px; background: color-mix(in srgb, var(--rc) 16%, transparent); box-shadow: inset 3px 0 0 var(--rc); }
+.month.text .mbar:hover { outline: 1px solid var(--fg); outline-offset: 1px; }
+.month.text .mbar.h { background: none; box-shadow: inset 0 0 0 1px var(--line2); }
+.month.text .mbar.x { box-shadow: inset 0 0 0 1px var(--sig); background: none; }
+.month.text .mbar .badge { margin-left: 6px; }
+.month.text .mc { font: 11px var(--font-mono); color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.month.text .mbar.h .mc { color: var(--fg3); }
+.month.text .mbar.x .mc { color: var(--sig); }
+/* a digest in full, and the desktop's slide-over */
+.dgfull .dghead { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.dghead .h1 a:hover { color: var(--acc); }
+.dghead .sub { font: 12.5px var(--font-mono); color: var(--fg2); margin-top: 3px; text-transform: uppercase; }
+.dgfull .cap { font: 700 11px var(--font-name); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg3); margin: 18px 0 6px; }
+.over {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(720px, 92%); overflow-y: auto; background: var(--bg); padding: 18px 24px 40px;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35), inset 2px 0 0 var(--acc); animation: lw-from-right 0.24s var(--ease);
+}
+@keyframes lw-from-right { from { transform: translateX(40px); opacity: 0; } }
+/* the digest strip: squares in the digest's best rarity, newest at the right; an empty square for nothing new, a
+   red × for a failed digest */
+.strip { display: flex; align-items: center; gap: 8px; min-width: 0; font: 500 11px var(--font-mono); color: var(--fg3); text-transform: uppercase; letter-spacing: 0.08em; }
+.thead ~ .strip { margin: -4px 0 14px; }
+.strip > span:first-child { flex: none; }
+/* squares that do not fit wrap to a second line the strip's height hides: the oldest drop out whole */
+.strip .sq { --sq: 14px; display: flex; flex-direction: row-reverse; flex-wrap: wrap; align-content: flex-start; gap: 3px; height: var(--sq); overflow: hidden; min-width: 0; }
+.strip .sq a { flex: none; width: var(--sq); height: var(--sq); background: var(--rc); position: relative; }
+.strip.sm .sq { --sq: 11px; }
+.strip .sq a.h { background: none; box-shadow: inset 0 0 0 1px var(--line); }
+.strip .sq a.x { background: none; box-shadow: inset 0 0 0 1px var(--sig); }
+.strip .sq a.x::after { content: "×"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--sig); font-size: 11px; line-height: 1; }
+.strip .sq a:hover { outline: 2px solid var(--fg); outline-offset: 1px; }
+
 /* ── the paper page ──────────────────────────────────────────────────────────────────────────── */
 .pg { container-type: inline-size; }
 .pghead { --gs: 15%; --gl: 132px; padding: 2px 0 2px 14px; margin-bottom: 12px; }
@@ -398,6 +529,12 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
 .rung.end .cfoot { border: 0; padding: 0; }
 .cardwait { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px dashed var(--line); font-size: 13px; color: var(--fg2); }
 .cardwait .dot { width: 8px; height: 8px; background: var(--acc); animation: lw-pulse 1.4s ease-in-out infinite; }
+.cardwait.stuck { border-color: color-mix(in srgb, var(--sig) 50%, transparent); color: var(--sig); }
+.rung.end .cardwait { border: 0; padding: 0; font-size: 12px; }
+/* Among the collection: a prior-work row with the paper's rarity stripe and the relation as a tag */
+.pw.among { --gs: 15%; padding-left: 14px; }
+.pw.among .rel .tag { margin: 0 6px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.spend.deep .sv2 { grid-column: 2 / -1; }
 .links { display: flex; gap: 16px; flex-wrap: wrap; }
 .vers { display: flex; flex-direction: column; }
 /* the ladder and the rail beside it, when there is room */

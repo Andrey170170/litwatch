@@ -230,6 +230,11 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   its paper) and links on prior work's arXiv ids; the card's label (revision, arXiv version, source, written); the
   `card_failed` open state; Quality's `deep` usage (attempts, list cost shown as "at least", unknown);
   `CardRequested.pass_id` in place of `event_id`. The pass reason `pick` (N4b, Area picks) beside `focus` and `request`.
+- **API gaps W3 found**: the sidebar's per-topic count for today (DESIGN.md, "Shell": the count beside a followed
+  topic where it has a digest today, highlighted for Focus) needs today's Marks on `/api/summary`, which carries the
+  topics as badges only; the sidebar shows none until then. Today's date in the configured timezone (digests.md): the
+  Digest's defaults (today's Day, the last complete Week, History's pinned week) use the browser's date, which is a
+  day off for the hours the two timezones disagree, so `/api/status` (or the summary) should carry today's date.
   With it (the owner, 2026-10-15): the phone layout's page wrapper becomes `<main>`, as on the desktop, and the stack
   smoke test checks `<main>` again instead of `.screen`.
 

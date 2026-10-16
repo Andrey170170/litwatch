@@ -177,7 +177,7 @@ describe("a paper's page", () => {
       "GET /api/papers/2610.00002": paper,
       "POST /api/papers/2610.00002/card": async () => {
         await held;
-        return { message: "queued" };
+        return { pass_id: 73 };
       },
     });
     renderApp("/paper/2610.00002");
@@ -188,7 +188,7 @@ describe("a paper's page", () => {
     await userEvent.click(within(sheet).getByRole("button", { name: "Done" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     release();
-    expect(await screen.findByText(/Queued · the card shows here/)).toBeInTheDocument();
+    expect(await screen.findByText(/Asked for · queued · the card shows here/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deep read" })).toBeNull();
   });
 
@@ -369,5 +369,76 @@ describe("a paper's page", () => {
     await userEvent.click(within(screen.getByRole("dialog", { name: "The paper" })).getByRole("button", { name: "Done" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(document.activeElement).toBe(more);
+  });
+
+  it("shows a Deep card's Among the collection rows, what it was written from, and Write again", async () => {
+    viewport(true);
+    const card = {
+      card: { key_claim: "A meta-verifier catches 71% of unfaithful chains.", summary: "SIFT trains a probe.", prior_work: [{ title: "Measuring Faithfulness", relation: "extends", arxiv_id: "2307.13702" }] },
+      model: "claude-fable-5-1",
+      written_at: "2026-10-15T21:10:00Z",
+      revision: 1,
+      arxiv_version: 1,
+      source: "latex",
+      among: [
+        { id: "2610.18105", title: "CoT Monitoring Can Fail", relation: "agrees", note: "Both find monitors miss steps.", rarity: "epic", in_collection: true },
+        { id: "2501.00001", title: "An outside paper", relation: "contradicts", note: "Finds the opposite.", rarity: null, in_collection: false },
+      ],
+    };
+    let reads = 0;
+    const pass = { id: 74, reason: "request", state: "ready", queued_at: "2026-10-15T21:20:00Z", failed_runs: 0, error: null };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, card } : { ...paper, card, card_requestable: false, card_pass: pass }), "POST /api/papers/2610.00002/card": { pass_id: 74 } });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    const among = screen.getByText("Among the collection").closest(".rung")!;
+    expect(within(among as HTMLElement).getByRole("link", { name: /CoT Monitoring Can Fail/ })).toHaveAttribute("href", "/paper/2610.18105");
+    expect(within(among as HTMLElement).getByText("agrees")).toBeInTheDocument();
+    expect(within(among as HTMLElement).getByText("outside the collection")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Measuring Faithfulness.*2307\.13702/ })).toHaveAttribute("href", "/paper/2307.13702");
+    expect(screen.getByText(/Written from the LaTeX source of arXiv v1 \(text revision 1\), .*, by claude-fable-5-1/)).toBeInTheDocument();
+    // Write again asks for a new card over this one; the card keeps its label, and the pass read back shows under it.
+    await userEvent.click(screen.getAllByRole("button", { name: "Write again" })[0]!);
+    expect(await screen.findByText("Writing again · queued")).toBeInTheDocument();
+    expect(screen.getByText(/Written from the LaTeX source/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write again" })).toBeNull();
+  });
+
+  it("says why a card is coming and where it stands while its pass is open", async () => {
+    viewport(true);
+    const pass = { id: 73, reason: "pick", state: "running", queued_at: "2026-10-15T21:00:00Z", failed_runs: 0, error: null };
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": { ...paper, card_pass: pass },
+      "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", card_requestable: false, card_pass: { ...pass, reason: "request", state: "failed", failed_runs: 3, error: "timed out" } },
+    });
+    const { unmount } = renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText("Automatic for an Area pick · being written")).toBeInTheDocument();
+    // An automatic pass is the owner's to take over: Deep read stays live.
+    expect(screen.getByRole("button", { name: "Deep read" })).toBeEnabled();
+    unmount();
+    renderApp("/paper/2610.00003");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText("Asked for · failed three runs in a row")).toBeInTheDocument();
+  });
+
+  it("takes an automatic pass over: the request is remembered until the pass read back is the owner's", async () => {
+    viewport(true);
+    const pass = { id: 73, reason: "pick", state: "failed", queued_at: "2026-10-15T21:00:00Z", failed_runs: 1, error: "timed out" };
+    let reads = 0;
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      // the first read shows the failed automatic pass; the one after the request shows it taken over and queued
+      "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, card_pass: pass } : { ...paper, card_requestable: false, card_pass: { ...pass, reason: "request", state: "ready", failed_runs: 0, error: null } }),
+      "POST /api/papers/2610.00002/card": { pass_id: 73 },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByText("Automatic for an Area pick · failed; it tries again on the next run (1 of 3)");
+    await userEvent.click(screen.getByRole("button", { name: "Deep read" }));
+    expect(await screen.findByText("Asked for · queued")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deep read · queued" })).toBeDisabled();
+    expect(reads).toBe(2);
   });
 });

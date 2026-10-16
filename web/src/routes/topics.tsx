@@ -5,6 +5,7 @@ import type { Schemas } from "@/api/client";
 import { topicsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { Fill } from "@/components/slots";
+import { Strip } from "@/components/Strip";
 import { useDesktop } from "@/hooks/useDesktop";
 import { DEPTH_NAME, RARITIES, RARITY_NAME, rc } from "@/lib/rarity";
 
@@ -36,6 +37,7 @@ function Card({ t }: { t: Schemas["TopicCard"] }) {
         </div>
       </div>
       <Thin counts={t.counts} />
+      <Strip strip={t.strip} depth={t.depth} small />
       {t.newest_must_read && (
         <div className="nm2">
           <span className="k2">Newest must read</span>

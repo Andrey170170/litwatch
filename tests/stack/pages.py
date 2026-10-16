@@ -61,11 +61,14 @@ def walk(base: str, token: str, paper: str, topic: str, out: Path) -> list[str]:
             for name, path in pages(paper, topic).items():
                 seen.clear()
                 page.goto(base + path, wait_until="networkidle")
-                # The desktop shell's <main>, or the phone shell's screen (it has no <main>).
-                main = page.locator("main, .screen").first
+                # Both shells put the page in <main>.
+                main = page.locator("main").first
                 text = main.inner_text().strip() if main.count() else ""
                 if not text:
                     seen.append("empty page: no text in the page's content")
+                elif main.locator(".loadmore", has_text="Could not load").count():
+                    # A failed read renders its own line with "Try again": not a page that works.
+                    seen.append("failed read: the page says it could not load")
                 page.screenshot(path=out / f"{name}-{width}.png", full_page=True)
                 failures += [f"{name} at {width} ({path}): {s}" for s in seen]
             context.close()

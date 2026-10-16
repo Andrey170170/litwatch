@@ -8,6 +8,7 @@ import { ListControls } from "@/components/ListControls";
 import { Back } from "@/components/Shell";
 import { Shelves } from "@/components/Shelves";
 import { Fill } from "@/components/slots";
+import { Strip } from "@/components/Strip";
 import { CADENCE, TOPIC_SHELVES, type Shelf } from "@/lib/rarity";
 import { visibleCount, type ListSearch } from "@/lib/search";
 
@@ -58,6 +59,7 @@ export function TopicPage() {
             </div>
           </div>
           <p className="tsub">{topic.subject}</p>
+          <Strip strip={topic.strip} depth={topic.depth} />
         </>
       )}
       <ListControls search={search} onChange={onChange} counts={page0?.counts} total={total} topic={topic ? { name: topic.name } : { name: "the topic" }} />

@@ -11,7 +11,7 @@ import { Fill } from "@/components/slots";
 import { placeOf } from "@/lib/listContext";
 import { gradeLine, rc } from "@/lib/rarity";
 import type { ReactionValue } from "@/lib/reactions";
-import { DeepReadCell, linkCells, MissPicker, ProcessCell, type Paper } from "./Actions";
+import { DeepReadCell, linkCells, MissPicker, type Paper, passWord, ProcessCell } from "./Actions";
 import { Classes, Published } from "./Ladder";
 import { FitControl, Reasons, whoseFit, type PaperTopic } from "./TopicRow";
 
@@ -158,9 +158,9 @@ export function PhoneBar({ paper, under, asked, sheet, setSheet }: { paper: Pape
         ) : (
           <>
             <ProcessCell paper={paper} phone />
-            {paper.card_requestable && !paper.card && (
-              <button onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked}>
-                <small>{asked ? "Queued" : "Deep read"}</small>
+            {(paper.card_requestable || paper.card_pass) && (
+              <button onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked || !paper.card_requestable}>
+                <small>{asked || !paper.card_requestable ? passWord(paper, asked) : paper.card ? "Write again" : "Deep read"}</small>
               </button>
             )}
             <span className="lbl" />
