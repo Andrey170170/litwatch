@@ -148,6 +148,22 @@ class ArchiveClient:
     async def record(self, paper_id: str) -> dict | None:
         return await self._json("GET", self._path(paper_id), missing=True)
 
+    async def paper(self, paper_id: str) -> Paper | None:
+        """The paper as the archive's catalog has it, None when the catalog lacks it."""
+        found = await self.record(paper_id)
+        if found is None:
+            return None
+        if not isinstance(found.get("item"), dict):
+            raise ArchiveError("archive record without its listing item")
+        return listed(found["item"])
+
+    async def indexed(self) -> int | None:
+        """How many papers the archive's search index holds; None before it has any."""
+        found = await self._json("GET", "/v1/search/status")
+        assert found is not None
+        count = found.get("indexed_papers")
+        return count if type(count) is int and count > 0 else None
+
     async def upsert_paper(self, paper: Paper) -> dict:
         result = await self._json(
             "PUT",

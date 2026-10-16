@@ -700,6 +700,81 @@ async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client
     assert "@" not in (await client.get("/api/bibtex", params=outside)).text
 
 
+# -- a paper outside the collection ----------------------------------------------------------------
+
+
+async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_after(
+    conn, monkeypatch
+):
+    """Before Process, the archive's record makes the page (DESIGN.md: title, authors,
+    abstract, links; no rarity); after it, the page says the paper is fetched and waits for
+    the next run (#56). Neither the archive nor litwatch holding it, nor an archive that cannot
+    answer, is a 404."""
+    from litwatch.archive import ArchiveClient
+    from litwatch.feedback import misses
+    from tests.fakes_http import FakeArchive, mock
+
+    await taxonomy_store.save(conn, TREE)
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    fake = FakeArchive()
+    pid = "2610.09999"
+    item = {
+        "id": pid,
+        "title": "Unfetched",
+        "abstract": "Only in the archive.",
+        "authors": ["Ada Lovelace"],
+        "categories": ["cs.CL"],
+        "published": "2026-10-01",
+        "updated": "2026-10-03",
+        "version": 2,
+        "version_history": [
+            {"version": 1, "date": "2026-10-01"},
+            {"version": 2, "date": "2026-10-03"},
+        ],
+    }
+    fake.records[pid] = {"id": pid, "latest_version": 2, "metadata": {}, "item": item}
+    fetched = []
+    monkeypatch.setattr(
+        misses, "fetch_by_ids", lambda ids: fetched.append(ids) or [paper(pid, title="Unfetched")]
+    )
+    down = ArchiveClient(
+        "http://archive.test", "archive-token", http=mock(lambda _: httpx.Response(503))
+    )
+    archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
+    app = create_app(dsn, TOKEN, Config(), archive=archive)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTH
+    ) as c:
+        page = (await c.get(f"/api/papers/{pid}")).json()
+        assert (page["title"], page["authors"], page["abstract"]) == (
+            "Unfetched",
+            ["Ada Lovelace"],
+            "Only in the archive.",
+        )
+        assert (page["stored"], page["in_collection"], page["rarity"], page["topics"]) == (
+            False,
+            False,
+            None,
+            [],
+        )
+        assert page["version"] == 2 and [v["version"] for v in page["versions"]] == [1, 2]
+        assert page["published"].startswith("2026-10-01")
+        assert page["pdf_url"] == f"/api/papers/{pid}/pdf" and not page["card_requestable"]
+        assert (await c.get("/api/papers/2610.08888")).status_code == 404
+        assert fetched == [] and await papers_store.get(conn, pid) is None
+
+        assert (await c.post("/api/lookup", json={"q": pid})).json()["fetched"]
+        page = (await c.get(f"/api/papers/{pid}")).json()
+        assert (page["stored"], page["in_collection"]) == (True, False)
+        assert fetched == [[pid]]
+    for given in (None, down):
+        app = create_app(dsn, TOKEN, Config(), archive=given)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
+            assert (await c.get("/api/papers/2610.07777")).status_code == 404
+            assert (await c.get(f"/api/papers/{pid}")).json()["stored"]
+
+
 # -- a paper's PDF ---------------------------------------------------------------------------------
 
 

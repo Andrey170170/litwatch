@@ -222,6 +222,25 @@ async def test_the_outside_band_keeps_the_providers_order_and_asks_for_their_new
     assert (first.asked[-1].sort, second.asked[-1].sort) == ("newest", "newest")
 
 
+async def test_the_search_box_names_the_archives_size(make):
+    from litwatch.archive import ArchiveClient
+    from litwatch.integrations.archive import Archive
+    from tests.fakes_http import mock
+
+    counts = iter([{"indexed_papers": 3_100_000}, {"indexed_papers": 0}])
+    status = mock(lambda req: httpx.Response(200, json=next(counts)))
+    archive = Archive(ArchiveClient("http://archive.test", "archive-token", http=status))
+    down = Archive(
+        ArchiveClient("http://archive.test", "t", http=mock(lambda _: httpx.Response(503)))
+    )
+    client = await make([archive])
+    assert (await client.get("/api/search/scope")).json() == {"archive_papers": 3_100_000}
+    assert (await client.get("/api/search/scope")).json() == {"archive_papers": None}  # building
+    for providers in ([], [Shelf("other")], [down]):
+        client = await make(providers)
+        assert (await client.get("/api/search/scope")).json() == {"archive_papers": None}
+
+
 async def test_the_changes_feed_reads_on_from_a_position_and_misses_no_late_commit(conn, make):
     client = await make()
     await settled(conn)

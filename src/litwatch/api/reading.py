@@ -265,9 +265,10 @@ async def pdf(paper_id: str, request: Request) -> Response:
 
 @router.get("/papers/{paper_id:path}", responses=NOT_FOUND)
 async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
+    """The paper's page; for a paper litwatch has not fetched, the archive's record of it."""
     found = await reading.paper(c, paper_id)
     if found is None:
-        raise HTTPException(status_code=404, detail="no such paper")
+        return await _unfetched(request, paper_id)
     tree = await taxonomy_store.load(c)
     looks = _looks(tree)
     weight = Weight(found["weight"]) if found["weight"] else None
@@ -352,6 +353,35 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         card=card,
         card_pass=card_pass,
         card_requestable=card_requestable,
+    )
+
+
+async def _unfetched(request: Request, paper_id: str) -> s.Paper:
+    """An archive paper litwatch has not fetched: its metadata, Process, Deep read (which
+    fetches it first) and Report as a miss. 404 without an archive, when the archive lacks it,
+    or when the archive cannot answer."""
+    archive = request.app.state.archive
+    try:
+        found = await archive.paper(paper_id) if archive is not None else None
+    except ArchiveError:
+        found = None
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such paper")
+    return s.Paper(
+        **found.model_dump(include={"id", "title", "authors", "abstract", "published", "updated"}),
+        version=found.version,
+        versions=[
+            s.Version(version=v["version"], date=v.get("date"))
+            for v in found.version_history
+            if v.get("version")
+        ],
+        arxiv_url=f"https://arxiv.org/abs/{found.id}",
+        pdf_url=f"/api/papers/{found.id}/pdf",
+        source_url=f"https://arxiv.org/e-print/{found.id}",
+        in_collection=False,
+        stored=False,
+        topics=[],
+        card_requestable=integrations_api.answers_card_requests(integrations_api.loaded(request)),
     )
 
 

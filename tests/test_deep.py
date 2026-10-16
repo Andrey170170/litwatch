@@ -26,7 +26,7 @@ from litwatch.core.fulltext import (
     deep_to_relabel,
     deep_wanted,
 )
-from litwatch.feedback import word
+from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
@@ -665,7 +665,29 @@ async def test_the_owner_may_ask_for_a_card_an_automatic_pass_waits_for(db):
     assert (after["card_pass"]["reason"], after["card_requestable"]) == ("request", False)
 
 
-async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(db):
+async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypatch):
+    """Deep read outside the collection: an archive paper not fetched yet is fetched as
+    Process fetches it, then its card is asked for; arXiv lacking it is a 404."""
+    fetched = []
+    found = {"2610.09999": paper("2610.09999", title="Elsewhere")}
+    monkeypatch.setattr(
+        misses,
+        "fetch_by_ids",
+        lambda ids: fetched.append(ids) or [found[i] for i in ids if i in found],
+    )
+    _, http = client(db, [make(FakeDeep(DONE))])
+    async with http:
+        asked = await http.post("/api/papers/2610.09999v2/card")
+        page = (await http.get("/api/papers/2610.09999")).json()
+        missing = await http.post("/api/papers/2601.99999/card")
+    assert asked.status_code == 202 and fetched == [["2610.09999"], ["2601.99999"]]
+    assert (page["stored"], page["in_collection"]) == (True, False)
+    assert page["card_pass"]["reason"] == "request" and missing.status_code == 404
+
+
+async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(
+    db, monkeypatch
+):
     await db.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
         "primary_class, model) VALUES (%s, 1, 'x', 'interpretability', 'm')",
@@ -681,6 +703,7 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     fake = FakeDeep(DONE)
     d = make(fake)
     app, http = client(db, [d])
+    monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [])  # arXiv lacks it too
     async with http:
         missing = await http.post("/api/papers/2601.99999/card")
         asked = await http.post(f"/api/papers/{P.id}/card")

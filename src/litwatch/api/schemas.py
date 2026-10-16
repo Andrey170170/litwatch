@@ -472,7 +472,8 @@ class CardPass(BaseModel):
 class Paper(BaseModel):
     """A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)
     and the rail, its open states and its history. Outside the collection (never classified)
-    it has no rarity."""
+    it has no rarity; an archive paper litwatch has not fetched is not `stored` either, and has
+    only the archive's metadata."""
 
     id: str
     title: str
@@ -487,6 +488,7 @@ class Paper(BaseModel):
     pdf_url: str  # litwatch's own: the archive's copy, else arXiv's (GET /api/papers/{id}/pdf)
     source_url: str  # the LaTeX source
     in_collection: bool
+    stored: bool = True  # litwatch holds it: fetched, and processed on the next run if unclassified
     rarity: Rarity | None = None
     badges: list[GradedBadge] = Field(default_factory=list)
     gist: Gist | None = None
@@ -736,6 +738,13 @@ class IntegrationCard(BaseModel):
     skipped: int = 0
     answers_card_requests: bool = False
     search: SearchStats | None = None  # for a search provider
+
+
+class SearchScope(BaseModel):
+    """What the search box reaches beyond the collection: the papers the archive's search index
+    holds, None without an archive or when it does not answer in time."""
+
+    archive_papers: int | None = None
 
 
 class CardRequested(BaseModel):
