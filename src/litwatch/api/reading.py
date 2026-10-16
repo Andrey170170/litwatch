@@ -216,9 +216,16 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
         answer.rows = [_row(tree, looks, r, s.Row) for r in listed.rows]
         answer.total, answer.counts = listed.total, s.RarityCounts(**listed.rarities)
     if params.q and params.offset == 0 and _shows_outside(params):
-        filters = SearchFilters(since=params.since, until=params.until, limit=params.limit)
+        # The providers rank by relevance whatever the collection's sort; a date sort asks them
+        # for their newest.
+        filters = SearchFilters(
+            since=params.since,
+            until=params.until,
+            limit=params.limit,
+            sort="newest" if params.sort == "newest" else "relevance",
+        )
         answer.outside, answer.left_out = await integrations_api.search_outside(
-            request, c, params.q, filters, params.sort
+            request, c, params.q, filters
         )
     return answer
 

@@ -298,7 +298,7 @@ async def test_an_archive_that_does_not_register_only_answers_searches(world, se
     assert [h.id for h in a.search("q", SearchFilters(limit=5))] == ["2401.00001"]
 
 
-async def test_the_archive_answers_searches_by_arxiv_id_with_its_rank_as_score():
+async def test_the_archive_answers_searches_by_arxiv_id_in_its_order():
     fake = FakeArchive()
     fake.search_items = [
         {
@@ -314,9 +314,10 @@ async def test_the_archive_answers_searches_by_arxiv_id_with_its_rank_as_score()
     assert [h.id for h in hits] == ["2401.00001", "2401.00002"]
     assert hits[0].authors == ["Ann Lee", "Bo Chen", "Cy Dee"]
     assert hits[0].published.year == 2024 and hits[1].published is None
-    assert hits[0].score > hits[1].score
+    archive(fake).search("hidden traces", SearchFilters(sort="newest"))
     assert fake.searches == [
-        {"q": "hidden traces", "limit": "10", "date_from": "2024-01-01", "date_to": "2024-01-31"}
+        {"q": "hidden traces", "limit": "10", "date_from": "2024-01-01", "date_to": "2024-01-31"},
+        {"q": "hidden traces", "limit": "20", "sort": "newest"},
     ]
 
 

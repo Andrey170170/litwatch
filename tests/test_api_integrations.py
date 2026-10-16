@@ -70,13 +70,12 @@ class Shelf:
         return self.hits
 
 
-def hit(pid: str, day: int, score: float | None = None) -> SearchHit:
+def hit(pid: str, day: int) -> SearchHit:
     return SearchHit(
         id=pid,
         title=f"Paper {pid}",
         authors=["A. Author"],
         published=datetime(2026, 9, day, tzinfo=UTC),
-        score=score,
     )
 
 
@@ -180,10 +179,10 @@ async def test_search_adds_what_providers_find_outside_the_collection(conn, make
 
     found = (await client.get("/api/papers", params={"q": "hidden"})).json()
     assert [r["id"] for r in found["rows"]] == [P.id]
-    # The collection's paper is not repeated; newest first; each says who found it.
+    # The collection's paper is not repeated; the archive's order; each says who found it.
     assert [(r["id"], r["source"]) for r in found["outside"]] == [
-        ("2609.00003", "archive"),
         ("2609.00002", "archive"),
+        ("2609.00003", "archive"),
     ]
     assert found["left_out"] == ["slow", "broken"]
     # On search's own pool: a provider stuck in its thread holds none of the default pool's.
@@ -208,11 +207,19 @@ async def test_search_adds_what_providers_find_outside_the_collection(conn, make
     assert only["rows"] == [] and len(only["outside"]) == 2
 
 
-async def test_best_match_orders_the_outside_band_by_score(make):
-    scored = Shelf("archive", [hit("2609.00002", 2, 1.0), hit("2609.00003", 9, 0.5)])
-    client = await make([scored])
-    found = (await client.get("/api/papers", params={"q": "x", "sort": "best"})).json()
-    assert [r["id"] for r in found["outside"]] == ["2609.00002", "2609.00003"]
+async def test_the_outside_band_keeps_the_providers_order_and_asks_for_their_newest(make):
+    # archive.md, Search: the archive ranks, and litwatch keeps its order; date orders stay.
+    first = Shelf("archive", [hit("2609.00002", 2), hit("2609.00003", 9)])
+    second = Shelf("other", [hit("2609.00004", 5), hit("2609.00002", 2)])
+    client = await make([first, second])
+    for sort in (None, "best", "rarest", "title"):
+        params = {"q": "x"} | ({"sort": sort} if sort else {})
+        found = (await client.get("/api/papers", params=params)).json()
+        assert [r["id"] for r in found["outside"]] == ["2609.00002", "2609.00003", "2609.00004"]
+        assert first.asked[-1].sort == "relevance"
+    found = (await client.get("/api/papers", params={"q": "x", "sort": "newest"})).json()
+    assert [r["id"] for r in found["outside"]] == ["2609.00003", "2609.00004", "2609.00002"]
+    assert (first.asked[-1].sort, second.asked[-1].sort) == ("newest", "newest")
 
 
 async def test_the_changes_feed_reads_on_from_a_position_and_misses_no_late_commit(conn, make):

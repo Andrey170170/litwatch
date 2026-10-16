@@ -117,18 +117,15 @@ def _published(value: Any) -> datetime | None:
 
 
 def hits(body: dict[str, Any]) -> list[SearchHit]:
-    """`/v1/search` items as hits. The archive ranks by relevance but gives no score, so a hit
-    carries its rank as one: the first is best."""
-    items = body.get("items") or []
+    """`/v1/search` items as hits, in the archive's order."""
     return [
         SearchHit(
             id=item["id"],
             title=item.get("title") or "",
             authors=_authors(item.get("authors")),
             published=_published(item.get("published")),
-            score=float(len(items) - rank),
         )
-        for rank, item in enumerate(items)
+        for item in body.get("items") or []
     ]
 
 
@@ -188,6 +185,8 @@ class Archive:
 
     def search(self, query: str, filters: SearchFilters) -> list[SearchHit]:
         params: dict[str, Any] = {"q": query, "limit": min(filters.limit, 50)}
+        if filters.sort == "newest":  # else the archive's default, relevance
+            params["sort"] = "newest"
         if filters.since:
             params["date_from"] = filters.since.isoformat()
         if filters.until:

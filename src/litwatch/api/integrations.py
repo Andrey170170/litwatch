@@ -251,14 +251,14 @@ async def _ask(
 
 
 async def search_outside(
-    request: Request, c: Any, query: str, filters: SearchFilters, sort: str | None
+    request: Request, c: Any, query: str, filters: SearchFilters
 ) -> tuple[list[s.OutsideRow], list[str]]:
     """Ask every search provider at once, each with a short timeout. Returns the hits the
     collection lacks, merged by arXiv id (the first provider to name a paper keeps it), and
     the names of the providers left out because they failed or were too slow.
 
-    The band sorts by published date, newest first; with `sort=best`, by the providers'
-    scores when every hit carries one."""
+    The band keeps each provider's order, the providers in turn (archive.md, Search: the
+    archive ranks); asked for the newest (`filters.sort`), it is newest first across them."""
     asked = providers(request)
     if not asked:
         return [], []
@@ -295,15 +295,11 @@ async def search_outside(
             authors=hit.authors,
             published=_aware(hit.published),
             source=name,
-            score=hit.score,
         )
         for name, hit in hits.values()
     ]
-    if sort == "best" and rows and all(r.score is not None for r in rows):
-        # Scores mean something only within one provider.
-        order = {p.name: i for i, p in enumerate(asked)}
-        rows.sort(key=lambda r: (order[r.source], -r.score))
-    else:
+    # `hits` holds each provider's hits in its order, the providers in turn.
+    if filters.sort == "newest":
         rows.sort(key=lambda r: r.published or datetime.min.replace(tzinfo=UTC), reverse=True)
     return rows, left_out
 

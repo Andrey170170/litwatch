@@ -142,7 +142,6 @@ class OutsideRow(BaseModel):
     authors: list[str] = Field(default_factory=list)
     published: datetime | None = None
     source: str  # the provider
-    score: float | None = None  # the provider's, for its "best match" order
 
 
 class RarityCounts(BaseModel):
