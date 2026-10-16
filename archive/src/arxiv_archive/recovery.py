@@ -193,11 +193,15 @@ def submit(campaign, catalog, *, limit=None, paper_id=None):
 
 
 def update_job(campaign, catalog, entry, job):
+    """Record what the job says of the candidate; nothing when that is what it says already."""
     # Preserve operator intent until the bounded feeder actually resets the job.
     if entry['status'] == 'retry_pending' and job['status'] == 'failed':
         return
     status = {'pending':'queued', 'held':'queued', 'running':'acquiring', 'complete':'available',
               'failed':'failed', 'unavailable':'unavailable'}[job['status']]
+    if (entry['status'], entry['job_id'], entry['error']) == (status, job['id'], job.get('error')) \
+            and (status != 'available' or entry['stored_size'] is not None):
+        return
     sizes = {}
     if status == 'available':
         artifact = catalog.get_artifact(entry['paper_id'], entry['kind'], entry['version'])
@@ -210,11 +214,13 @@ def update_job(campaign, catalog, entry, job):
 
 
 def reconcile(campaign, catalog):
-    for entry in campaign.candidates():
-        if entry.get('job_id') is not None:
-            job = catalog.get_job(int(entry['job_id']))
-            if job:
-                update_job(campaign, catalog, entry, job)
+    """Bring every submitted candidate up to its job, in one transaction for the cycle."""
+    with campaign.transaction():
+        for entry in campaign.candidates():
+            if entry.get('job_id') is not None:
+                job = catalog.get_job(int(entry['job_id']))
+                if job:
+                    update_job(campaign, catalog, entry, job)
     result = campaign.statistics()
     path = campaign.path.parent / 'summary.json'
     temporary = path.with_suffix('.tmp')

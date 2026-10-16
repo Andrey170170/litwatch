@@ -146,3 +146,25 @@ class RecoveryTests(unittest.TestCase):
             result=feed(self.campaign,self.store.catalog,max_outstanding=1,interval=1)
         self.assertEqual(len(completed),2)
         self.assertEqual(result['states'],{'unavailable':2})
+
+    def test_reconcile_writes_changes_in_one_transaction_and_skips_the_unchanged(self):
+        # archive.md, Deferred to N5: each candidate was marked in its own fsynced transaction
+        # on every feed cycle, changed or not.
+        class Discovery:
+            def fetch_page(self,*args,**kwargs):
+                return Page([record()],None,'2026-09-27T19:01:00Z')
+        prepare(self.campaign,self.store.catalog,Discovery(),self.manifest)
+        submit(self.campaign,self.store.catalog)
+        statements=[]
+        self.campaign.conn.set_trace_callback(statements.append)
+        def writes():
+            found=[s.split()[0].upper() for s in statements if s.split()[0].upper() in ('UPDATE','COMMIT')]
+            statements.clear()
+            return found
+        self.assertEqual(reconcile(self.campaign,self.store.catalog)['states'],{'queued':2})
+        self.assertNotIn('UPDATE',writes())
+        for _ in range(2):
+            job=self.store.catalog.claim_job()
+            self.store.catalog.finish_job(job['id'],job['lease_token'],'unavailable','HTTP 404')
+        self.assertEqual(reconcile(self.campaign,self.store.catalog)['states'],{'unavailable':2})
+        self.assertEqual(writes(),['UPDATE','UPDATE','COMMIT'])
