@@ -6,7 +6,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError } from "@/api/client";
-import { said, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
+import { digestGone, said, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
 import { qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
@@ -197,8 +197,9 @@ function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
 }
 
 /** A failed digest: which one and why; Write it again runs the writer now. A digest still failed after it (the
- * writer failed again, or the API refused: a job holds the run lock, or it is no longer one to write again) stays
- * on the page with the reason, still to be written, as the server still counts it. */
+ * writer failed again, or a job holds the run lock) stays on the page with the reason, still to be written, as the
+ * server still counts it; one the API says is no longer one to write again (written meanwhile, its topic paused)
+ * settles with that reason, as the server no longer counts it. */
 function FailedDigest({ d, badge, settle }: { d: FailedDigestRow; badge: React.ReactNode; settle: Settle }) {
   const write = useWriteAgain();
   const [note, setNote] = useState<string | null>(null);
@@ -216,7 +217,7 @@ function FailedDigest({ d, badge, settle }: { d: FailedDigestRow; badge: React.R
         <div className="nres">{d.settled}</div>
       ) : (
         <div className="nact">
-          <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id, { onSuccess: onDone, onError: (e) => setNote(`Not written now: ${said(e)}.`) })}>
+          <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id, { onSuccess: onDone, onError: (e) => (digestGone(e) ? settle(`No longer to be written: ${said(e)}.`) : setNote(`Not written now: ${said(e)}.`)) })}>
             {write.isPending ? "Writing…" : "Write it again"}
           </button>
         </div>

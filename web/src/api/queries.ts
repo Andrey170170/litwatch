@@ -65,11 +65,12 @@ const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowF
  * refetches them in the background when shown, its cached rows on screen meanwhile. Only the page gone to: the one
  * left keeps its reads for the way back. The shell's summary is never touched here. */
 export function freshVisit(qc: QueryClient, pathname: string) {
-  // A Settings page's reads are keyed by the page (below), so the page gone to is all that is marked.
   const path = pathname.replace(/\/$/, "") || "/";
   const topic = /^\/topics\/([^/]+)$/.exec(path);
-  const page = /^\/settings\/([^/]+)/.exec(path);
-  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : page?.[1] ? ["settings", page[1]] : null;
+  // A Settings page's reads are keyed by its path under /settings (below): the page gone to is all that is marked,
+  // a subpage (a session, a topic's editor) leaves the list it came from. /settings itself opens Overview.
+  const settings = /^\/settings(?:\/(.+))?$/.exec(path);
+  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : settings ? ["settings", settings[1] ? decodeURIComponent(settings[1]) : "overview"] : null;
   if (key) void qc.invalidateQueries({ queryKey: key, refetchType: "none" });
 }
 
@@ -117,9 +118,9 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
 
 // -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
 
-// A Settings page's reads live under its own key, `["settings", page, ...]`, so a fresh visit to one page
-// (`freshVisit`) refetches that page's reads only: a page left keeps its rows for the way back, whatever its siblings
-// read meanwhile. Two pages reading one endpoint each keep their own copy.
+// A Settings page's reads live under its own key, `["settings", <its path under /settings>, ...]`, so a fresh visit
+// to one page (`freshVisit`) refetches that page's reads only: a page left keeps its rows for the way back, whatever
+// its siblings or subpages read meanwhile. Two pages reading one endpoint each keep their own copy.
 
 /** Refetched in the background on each visit by a link (`freshVisit`), and still for the visit: nothing moves under
  * the reader while a page is open or on the way back to it. What a write settles is patched into the cached page
@@ -148,7 +149,7 @@ export const sessionsQuery = (page: "calibrate" | "overview") =>
 
 export const sessionQuery = (id: number) =>
   queryOptions({
-    queryKey: ["settings", "calibrate", "session", id],
+    queryKey: ["settings", `calibrate/${id}`],
     queryFn: async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session,
     ...settingsOptions,
   });
@@ -172,13 +173,21 @@ export const configQuery = queryOptions({
   staleTime: 5 * 60_000,
 });
 
-export const integrationsQuery = queryOptions({
-  queryKey: ["settings", "integrations", "cards"],
-  queryFn: async () => ok(await api.GET("/api/settings/integrations")),
-  ...settingsOptions,
+/** The reads of a Settings page and its subpages (`page` and `page/...`), for a write that changes what they show. */
+export const settingsReads = (page: string) => ({
+  predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "settings" && typeof q.queryKey[1] === "string" && (q.queryKey[1] === page || q.queryKey[1].startsWith(`${page}/`)),
 });
 
-export const taxonomyStatsQuery = (page: "topics" | "taxonomy") =>
+/** `page` is "integrations" or an integration's events page, `integrations/<name>`. */
+export const integrationsQuery = (page: string) =>
+  queryOptions({
+    queryKey: ["settings", page, "cards"],
+    queryFn: async () => ok(await api.GET("/api/settings/integrations")),
+    ...settingsOptions,
+  });
+
+/** `page` is "topics", "taxonomy" or a topic's editor, `topics/<slug>`. */
+export const taxonomyStatsQuery = (page: string) =>
   queryOptions({
     queryKey: ["settings", page, "stats"],
     queryFn: async () => ok(await api.GET("/api/settings/taxonomy/stats")),
@@ -188,7 +197,7 @@ export const taxonomyStatsQuery = (page: "topics" | "taxonomy") =>
 /** How many papers of the last 90 days each of a topic's keywords matches, for the editor. */
 export const keywordsQuery = (slug: string, enabled = true) =>
   queryOptions({
-    queryKey: ["settings", "topics", "keywords", slug],
+    queryKey: ["settings", `topics/${slug}`, "keywords"],
     queryFn: async () => ok(await api.GET("/api/settings/topics/{slug}/keywords", { params: { path: { slug } } })),
     staleTime: 5 * 60_000,
     enabled,

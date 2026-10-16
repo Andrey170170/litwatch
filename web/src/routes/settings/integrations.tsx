@@ -71,7 +71,7 @@ function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Map<string,
 }
 
 export function IntegrationsPage() {
-  const cards = useQuery(integrationsQuery);
+  const cards = useQuery(integrationsQuery("integrations"));
   // The event skipped on this visit per integration: each card keeps its result in place until the page is left.
   const [skipped, setSkipped] = useState<Map<string, number>>(new Map());
   return (
@@ -113,7 +113,7 @@ export function IntegrationsPage() {
 /** An integration's events: the page is here, its list waits on an events endpoint. */
 export function EventsPage() {
   const { name } = useParams({ from: "/settings/integrations/$name" });
-  const cards = useQuery(integrationsQuery);
+  const cards = useQuery(integrationsQuery(`integrations/${name}`));
   const c = cards.data?.find((x) => x.name === name);
   return (
     <div className="setpg">

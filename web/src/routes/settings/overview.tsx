@@ -6,7 +6,7 @@ import { Badge } from "@/components/Badge";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
 import { type ReactionReason, reasonLabel } from "@/lib/reactions";
-import { type Quality, spendTotals, usd, waiting } from "@/lib/settings";
+import { digests, type Quality, spendTotals, usd, waiting } from "@/lib/settings";
 import { Later, Load, PageHead, PaperLink, Share, useTopicCards } from "./parts";
 
 type Tone = "ask" | "fail" | "warn" | "ok" | "";
@@ -82,7 +82,7 @@ export function OverviewPage() {
             {open ? `${open === 1 ? "thing needs" : "things need"} you` : "Nothing needs you"}
           </Tile>
           <Tile to="runs" tone={night ? (night.error ? "fail" : "ok") : ""} big={night ? rowDate(night.started_at) : "–"}>
-            {night ? `Last night · ${night.counts?.classified ?? 0} classified · ${night.counts?.graded ?? 0} graded · ${usd(night.cost)}` : "No run yet"}
+            {night ? `Last night · ${night.counts?.classified ?? 0} classified · ${night.counts?.graded ?? 0} graded${digests(night) === null ? "" : ` · ${digests(night)} digests`} · ${usd(night.cost)}` : "No run yet"}
           </Tile>
           <Tile to="runs" tone={over.length ? "warn" : "ok"} big={usd(spent)}>
             {budget ? `of ${usd(budget)} this month` : "this month"}

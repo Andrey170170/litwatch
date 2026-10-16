@@ -6,7 +6,7 @@
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
-import { qualityQuery, refreshSummary } from "./queries";
+import { qualityQuery, refreshSummary, settingsReads } from "./queries";
 import { rememberCard } from "@/lib/remember";
 import { type Quality, settleFromPaper } from "@/lib/settings";
 import { plural } from "@/lib/format";
@@ -33,9 +33,11 @@ function patchSaved(qc: QueryClient, paperId: string, saved: boolean) {
 export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
   refreshSummary(qc);
-  // The paper refetched whether or not its page is open: the reconciliation below must read fresh states.
+  // A paper read before is refetched whether or not its page is open: the reconciliation reads fresh states or
+  // none (not the retained ones when the refetch fails). A paper never read has nothing cached to reconcile from;
+  // the page that sent the write settles its own row.
   await qc.invalidateQueries({ queryKey: ["paper", paperId], refetchType: "all" });
-  if (qc.getQueryState(["paper", paperId])?.status === "error") toast("Recorded, but the page could not be refreshed", "error");
+  if (qc.getQueryState(["paper", paperId])?.status === "error") return toast("Recorded, but the page could not be refreshed", "error");
   const paper = qc.getQueryData<Schemas["Paper"]>(["paper", paperId]);
   if (paper) qc.setQueryData<Quality>(qualityQuery("needs").queryKey, (old) => old && settleFromPaper(old, paper));
 }
@@ -268,9 +270,17 @@ export function useWriteAgain() {
   return useMutation({
     mutationFn: async (digestId: number) => ok(await api.POST("/api/digests/{digest_id}/write", { params: { path: { digest_id: digestId } } })),
     onSuccess: () => refreshSummary(qc),
-    onError: (e) => toast(said(e), "error"),
+    onError: (e) => {
+      toast(said(e), "error");
+      // A 409 says the server's view moved (written meanwhile, its topic paused, a job running): the counts follow.
+      if (e instanceof ApiError && e.status === 409) refreshSummary(qc);
+    },
   });
 }
+
+/** Whether a write-again's 409 says the digest is no longer one to write (written meanwhile, or its topic paused),
+ * rather than that a job holds the run lock. */
+export const digestGone = (e: unknown) => e instanceof ApiError && e.status === 409 && said(e).includes("not one to write again");
 
 /** BibTeX for one paper, as text; the API looks the published version up first. */
 export async function bibtexFor(id: string): Promise<string> {
@@ -301,7 +311,7 @@ export function useSaveTopic() {
         qc.invalidateQueries({ queryKey: ["summary"] }),
         qc.invalidateQueries({ queryKey: ["settings", "topics", "stats"] }),
         qc.invalidateQueries({ queryKey: ["settings", "taxonomy", "stats"] }),
-        qc.invalidateQueries({ queryKey: ["settings", "topics", "keywords", slug] }),
+        qc.invalidateQueries({ queryKey: ["settings", `topics/${slug}`] }),
       ]),
     onError: (e) => toast(said(e, "Could not save it"), "error"),
   });
@@ -337,7 +347,7 @@ export function useAnswer(sessionId: number) {
   return useMutation({
     mutationFn: async ({ position, answer }: { position: number; paperId: string; answer: Schemas["Answer"] }) =>
       ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: sessionId, position } }, body: answer })),
-    onSuccess: (_, { paperId }) => Promise.all([qc.invalidateQueries({ queryKey: ["settings", "calibrate", "session", sessionId], exact: true }), settled(qc, paperId)]),
+    onSuccess: (_, { paperId }) => Promise.all([qc.invalidateQueries({ queryKey: ["settings", `calibrate/${sessionId}`] }), settled(qc, paperId)]),
     onError: (e) => toast(said(e, "The answer did not go through"), "error"),
   });
 }
@@ -349,7 +359,7 @@ export function useMore(sessionId: number) {
     mutationFn: async () => ok(await api.POST("/api/settings/calibrate/{session_id}/more", { params: { path: { session_id: sessionId } } })),
     onSuccess: (r) => {
       toast(r.added ? `${plural(r.added, "more paper")} added` : "Nothing is waiting for a word");
-      return qc.invalidateQueries({ queryKey: ["settings", "calibrate", "session", sessionId] });
+      return qc.invalidateQueries({ queryKey: ["settings", `calibrate/${sessionId}`] });
     },
     onError: (e) => toast(said(e), "error"),
   });
@@ -361,7 +371,7 @@ export function useRetryIntegration() {
     mutationFn: async (name: string) => ok(await api.POST("/api/settings/integrations/{name}/retry", { params: { path: { name } } })),
     onSuccess: () => {
       toast("Trying the event again");
-      return qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+      return qc.invalidateQueries(settingsReads("integrations"));
     },
     onError: (e) => toast(said(e), "error"),
   });
@@ -375,11 +385,11 @@ export function useSkipEvent() {
       ok(await api.POST("/api/settings/integrations/{name}/skip", { params: { path: { name }, query: { event_id: eventId } } })),
     onSuccess: () => {
       refreshSummary(qc);
-      return qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+      return qc.invalidateQueries(settingsReads("integrations"));
     },
     onError: (e) => {
       toast(said(e), "error");
-      if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+      if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries(settingsReads("integrations"));
     },
   });
 }

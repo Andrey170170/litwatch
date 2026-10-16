@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { dateTime, rowDate } from "@/lib/format";
-import { type Run, spendBar, type Spend, took, usd } from "@/lib/settings";
+import { digests, type Run, spendBar, type Spend, took, usd } from "@/lib/settings";
 import { Later, Load, PageHead } from "./parts";
 
 function SpendRow({ s }: { s: Spend }) {
@@ -35,9 +35,11 @@ function failed(r: Run): string {
     c.classification_failed ? `${c.classification_failed} classification` : "",
     c.analysis_failed ? `${c.analysis_failed} analysis` : "",
     c.grading_failed ? `${c.grading_failed} grading` : "",
+    c.digests_failed ? `${c.digests_failed} digest${c.digests_failed > 1 ? "s" : ""}` : "",
   ].filter(Boolean);
   return parts.length ? `${parts.join(", ")} failed` : "";
 }
+
 
 export function RunsPage() {
   const quality = useQuery(qualityQuery("runs"));
@@ -83,7 +85,7 @@ export function RunsPage() {
                 </span>
                 <span className="mono">{r.counts?.classified ?? 0}</span>
                 {desktop && <span className="mono">{r.counts?.graded ?? 0}</span>}
-                {desktop && <span className="mono faint">–</span>}
+                {desktop && (digests(r) === null ? <span className="mono faint">–</span> : <span className="mono">{digests(r)}</span>)}
                 {desktop && <span className="mono">{took(r.started_at, r.finished_at) || "running"}</span>}
                 <span className="mono">{usd(r.cost)}</span>
                 <span>{bad ? <span className="badt">{desktop ? bad : "failed"}</span> : ""}</span>

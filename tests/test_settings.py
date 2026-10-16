@@ -227,8 +227,15 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
             reason=ReactionReason.OVERRATED,
         ),
     )
+    await word.react(
+        conn, Reaction(paper_id=Q.id, topic="agents", value=ReactionValue.UP, reason=None)
+    )
     page = (await client.get("/api/settings/quality")).json()
-    assert page["reactions"] == [{"topic": FAITH.slug, "reason": "overrated", "n": 1}]
+    # In the owner's topic order (agents comes first alphabetically, last in the taxonomy).
+    assert page["reactions"] == [
+        {"topic": FAITH.slug, "reason": "overrated", "n": 1},
+        {"topic": "agents", "reason": None, "n": 1},
+    ]
 
 
 async def test_taxonomy_stats_and_export(client, conn):

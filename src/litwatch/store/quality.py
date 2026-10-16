@@ -93,15 +93,15 @@ async def replay_recall(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
 
 async def reactions_by_topic(conn: psycopg.AsyncConnection, days: int = 30) -> list[dict]:
     """Thumbs per followed topic and reason over the trailing days (feedback.md, reactions:
-    each reason points at a stage), for Overview's table. A thumb without a reason has
-    `reason` null."""
+    each reason points at a stage), for Overview's table, in the owner's topic order. A thumb
+    without a reason has `reason` null."""
     return await _all(
         conn,
         """
         SELECT r.topic, r.reason, count(*) AS n FROM reactions r
         JOIN topics t ON t.class = r.topic
         WHERE r.reacted_at >= now() - make_interval(days => %s)
-        GROUP BY r.topic, r.reason ORDER BY r.topic, r.reason
+        GROUP BY t.position, r.topic, r.reason ORDER BY t.position, r.topic, r.reason
         """,
         (days,),
     )

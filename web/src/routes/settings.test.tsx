@@ -167,9 +167,16 @@ describe("Settings", () => {
   it("keeps a digest that failed again, or that the API would not write now, on the page with the reason", async () => {
     viewport(true);
     const failed = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "week", day: "2026-10-05", state: "failed", counts: {}, error: "the writer timed out again", written_at: "2026-10-15T10:00:00Z", papers: [] };
-    const twice = { ...quality, night: { ...quality.night, digests: [{ ...digest, period: "week", day: "2026-10-05" }, { ...digest, id: 4 }] } };
-    scriptFetch({ ...common, "GET /api/settings/quality": twice, "POST /api/digests/3/write": failed, "POST /api/digests/4/write": () => json({ detail: "another litwatch job is already running" }, 409) });
+    const three = { ...quality, night: { ...quality.night, digests: [{ ...digest, period: "week", day: "2026-10-05" }, { ...digest, id: 4 }, { ...digest, id: 5, day: "2026-10-09" }] } };
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/quality": three,
+      "POST /api/digests/3/write": failed,
+      "POST /api/digests/4/write": () => json({ detail: "another litwatch job is already running" }, 409),
+      "POST /api/digests/5/write": () => json({ detail: "the digest is not one to write again" }, 409),
+    });
     renderApp("/settings/needs");
+    expect(await screen.findByText("6 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     const weekly = (await screen.findByText("Weekly digest · the week of 5 Oct")).closest(".need")!;
     await userEvent.click(within(weekly as HTMLElement).getByRole("button", { name: "Write it again" }));
     await waitFor(() => expect(weekly).toHaveTextContent("Failed again: the writer timed out again. The next run writes it again."));
@@ -179,8 +186,45 @@ describe("Settings", () => {
     await userEvent.click(within(daily as HTMLElement).getByRole("button", { name: "Write it again" }));
     await waitFor(() => expect(daily).toHaveTextContent("Not written now: another litwatch job is already running."));
     expect(within(daily as HTMLElement).getByRole("button", { name: "Write it again" })).toBeEnabled();
-    // Both still wait, as the server still counts them.
+    // Both still wait, as the server still counts them. One the server no longer counts settles with its reason.
+    expect(screen.getByText("6 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    const gone = screen.getByText("Daily digest · 9 Oct").closest(".need")!;
+    await userEvent.click(within(gone as HTMLElement).getByRole("button", { name: "Write it again" }));
+    await waitFor(() => expect(gone).toHaveClass("settled"));
+    expect(gone).toHaveTextContent("No longer to be written: the digest is not one to write again.");
     expect(screen.getByText("5 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    // Each answer refreshed the summary: a write landed, or a 409 said the server's counts moved.
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/summary").length).toBe(4));
+  });
+
+  it("keeps a list as left on the way back from its subpage, and opens Overview afresh from /settings", async () => {
+    viewport(true);
+    const items = [{ position: 1, paper_id: "2610.00001", topic: "mi", why: "above", verdict: "related", answer: "related", answered_at: "2026-10-14T10:00:00Z", title: "Drawn 1", abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }];
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/calibrate": [{ id: 3, seed: 7, drawn_at: "2026-10-14T10:00:00Z", papers: 1, answered: 1, differ: 0 }],
+      "GET /api/settings/calibrate/3": { id: 3, seed: 7, drawn_at: "2026-10-14T10:00:00Z", items },
+      "GET /api/settings/runs": [],
+    });
+    const { router } = renderApp("/settings/overview", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Overview"));
+    const fetched = (url: string) => calls.filter((c) => c.url === url).length;
+    await waitFor(() => expect(fetched("/api/settings/quality")).toBe(1));
+    await userEvent.click(within(document.querySelector("aside.side")!).getByRole("link", { name: /Calibrate/ }));
+    const row = await screen.findByRole("button", { name: /14 Oct/ });
+    const listReads = fetched("/api/settings/calibrate"); // Overview's copy and Calibrate's own
+    await userEvent.click(row);
+    expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
+    router.history.back();
+    await screen.findByRole("button", { name: /14 Oct/ });
+    // The list was not refetched by the visit to its session.
+    expect(fetched("/api/settings/calibrate")).toBe(listReads);
+    expect(fetched("/api/settings/calibrate/3")).toBe(1);
+    // /settings opens Overview, by a redirect: a fresh visit all the same, refetched behind the tiles.
+    await router.navigate({ to: "/settings" });
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Overview"));
+    await waitFor(() => expect(fetched("/api/settings/quality")).toBe(2));
+    expect(screen.queryByText("Loading…")).toBeNull();
   });
 
   it("settles an item whose action answers 409 with the reason, in place", async () => {

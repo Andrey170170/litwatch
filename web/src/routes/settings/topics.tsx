@@ -144,7 +144,7 @@ export function TopicEditorPage() {
 }
 
 function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: Topic | null }) {
-  const stats = useQuery(taxonomyStatsQuery("topics"));
+  const stats = useQuery(taxonomyStatsQuery(`topics/${cls.slug}`));
   const save = useSaveTopic();
   const navigate = useNavigate();
   // The form against what was loaded, or what was last saved here; the taxonomy's refetch after a save does

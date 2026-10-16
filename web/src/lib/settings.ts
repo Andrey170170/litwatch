@@ -115,11 +115,17 @@ export type Run = {
   finished_at: string | null;
   cost: number | string;
   error: string | null;
-  counts: { classified?: number; classification_failed?: number; analysed?: number; analysis_failed?: number; graded?: number; grading_failed?: number; calls?: Record<string, { cost: number; calls: number }> } | null;
+  counts: { classified?: number; classification_failed?: number; analysed?: number; analysis_failed?: number; graded?: number; grading_failed?: number; digests_written?: number; digests_empty?: number; digests_failed?: number; calls?: Record<string, { cost: number; calls: number }> } | null;
   fetched: number;
   inserted: number;
   updated: number;
 };
+
+/** The digests a night wrote; null for a night that recorded none (before digests, or none due). */
+export function digests(r: Run): number | null {
+  const c = r.counts ?? {};
+  return c.digests_written ?? (c.digests_empty != null || c.digests_failed != null ? 0 : null);
+}
 
 export type SessionRow = { id: number; seed: number; drawn_at: string; papers: number; answered: number; differ: number };
 
