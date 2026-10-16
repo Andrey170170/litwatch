@@ -5,6 +5,7 @@ text read from it (`text`). Knows `core` and nothing else of litwatch."""
 from litwatch.archive.client import (
     BACKGROUND,
     URGENT,
+    WANTED,
     ArchiveClient,
     ArchiveError,
     ArchiveUnavailable,
@@ -18,6 +19,7 @@ from litwatch.archive.text import TextUnavailable, pdf_to_markdown, read_text, r
 __all__ = [
     "BACKGROUND",
     "URGENT",
+    "WANTED",
     "ArchiveClient",
     "ArchiveError",
     "ArchiveUnavailable",

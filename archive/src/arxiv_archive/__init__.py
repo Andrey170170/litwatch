@@ -1,3 +1,8 @@
 """Shared paper catalog, artifact store and acquisition service."""
 
-__version__ = "0.3.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("arxiv-archive")
+except PackageNotFoundError:  # run from a source tree that was never installed
+    __version__ = "0.0.0"

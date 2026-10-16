@@ -7,6 +7,13 @@ existing inventory and scan only LaTeX IDs, never payload content or hashes.
 `paper_dates` indexes each paper by its first version's submission date, derived from
 its metadata on every write, for listing papers by date window. A catalog that held
 papers before the table existed lists nothing until `index_dates` has filled it.
+
+The PDF policy (`settings`, key `pdfs`) is `all` or `wanted`. Under `wanted` a PDF job
+asked for at background priority or below (a number of `BACKGROUND` or more) is `held`: kept, never claimed,
+until someone asks for it at a higher priority, which makes it pending; one retried or
+left by its worker after the policy changed is held when it would be claimed. Sources are never
+held. A new catalog starts with `wanted`; one that held papers before the setting existed
+keeps every PDF (`all`) until it is changed (`set_pdfs`).
 """
 from __future__ import annotations
 
@@ -59,8 +66,11 @@ CREATE TABLE IF NOT EXISTS paper_dates (
  paper_id TEXT PRIMARY KEY, published TEXT NOT NULL
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS paper_dates_published ON paper_dates(published,paper_id);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 '''
 DATES_INDEXED = 'paper-dates'  # the import checkpoint saying every paper has its date row
+BACKGROUND = 100  # the priority of work nobody waits on; lower numbers run first
+PDF_POLICIES = ('all', 'wanted')
 
 
 def _json(value: Any) -> str:
@@ -136,6 +146,9 @@ class Catalog:
             # An empty catalog is completely indexed: every later write keeps it so.
             self.db.execute('''INSERT OR IGNORE INTO import_checkpoints
                 SELECT ?,?,0 WHERE NOT EXISTS (SELECT 1 FROM papers)''', (DATES_INDEXED, time.time()))
+            # A new catalog keeps only the PDFs asked for above background priority.
+            self.db.execute('''INSERT OR IGNORE INTO settings
+                SELECT 'pdfs','wanted' WHERE NOT EXISTS (SELECT 1 FROM papers)''')
 
     def close(self) -> None:
         with self.lock:
@@ -331,8 +344,37 @@ class Catalog:
                 'SELECT shard,row_group FROM latex_locations WHERE paper_id=? ORDER BY shard,row_group',
                 (paper_id,))]
 
-    def enqueue(self, paper_id: str, version: int, kind: str, priority: int = 100,
+    def pdfs(self) -> str:
+        """The PDF policy: `all`, or `wanted` (see the module's docstring)."""
+        with self.lock:
+            row = self.db.execute("SELECT value FROM settings WHERE key='pdfs'").fetchone()
+        return row[0] if row else 'all'
+
+    def set_pdfs(self, policy: str) -> dict:
+        """Change the PDF policy and bring the queue in line with it: under `wanted` pending
+        background PDF jobs are held, under `all` held jobs are pending again. Stored files
+        are never touched. Returns the policy and how many jobs changed."""
+        if policy not in PDF_POLICIES:
+            raise ValueError('the PDF policy is all or wanted')
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO settings VALUES ('pdfs',?) ON CONFLICT(key) "
+                            "DO UPDATE SET value=excluded.value", (policy,))
+            if policy == 'wanted':
+                cursor = self.db.execute('''UPDATE jobs SET status='held',updated_at=?
+                    WHERE status='pending' AND kind='pdf' AND priority>=?''', (time.time(), BACKGROUND))
+            else:
+                cursor = self.db.execute("UPDATE jobs SET status='pending',updated_at=? "
+                                         "WHERE status='held'", (time.time(),))
+            return {'pdfs': policy, 'jobs_changed': cursor.rowcount}
+
+    def _held(self, kind: str, priority: int, policy: str | None = None) -> bool:
+        """Whether the PDF policy holds a job of this kind at this priority."""
+        return kind == 'pdf' and priority >= BACKGROUND and (policy or self.pdfs()) == 'wanted'
+
+    def enqueue(self, paper_id: str, version: int, kind: str, priority: int = BACKGROUND,
                 provenance: dict | None = None) -> dict:
+        """Ask for an artifact; asking again keeps one job and raises its priority. Under the
+        `wanted` PDF policy a background PDF job is held until asked for above background."""
         _artifact_key(paper_id, version, kind, job=True)
         if isinstance(priority, bool) or not isinstance(priority, int):
             raise ValueError('priority must be an integer (lower runs first)')
@@ -340,13 +382,15 @@ class Catalog:
             self._ensure_paper(paper_id)
             now = time.time()
             available = self.get_artifact(paper_id, kind, version) is not None
+            status = 'complete' if available else 'held' if self._held(kind, priority) else 'pending'
             self.db.execute('''INSERT INTO jobs
                 (paper_id,version,kind,priority,status,provenance_json,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(paper_id,version,kind) DO UPDATE SET
                 priority=min(jobs.priority,excluded.priority), updated_at=excluded.updated_at,
-                status=CASE WHEN excluded.status='complete' THEN 'complete' ELSE jobs.status END''',
-                (paper_id, version, kind, priority, 'complete' if available else 'pending',
-                 _json(provenance or {}), now, now))
+                status=CASE WHEN excluded.status='complete' THEN 'complete'
+                    WHEN jobs.status='held' AND excluded.status='pending' THEN 'pending'
+                    ELSE jobs.status END''',
+                (paper_id, version, kind, priority, status, _json(provenance or {}), now, now))
             return self._decode(self.db.execute('SELECT * FROM jobs WHERE paper_id=? AND version=? AND kind=?',
                                                (paper_id, version, kind)).fetchone())
 
@@ -360,13 +404,19 @@ class Catalog:
         with self.lock:
             self.db.execute('BEGIN IMMEDIATE')
             try:
-                now = time.time()
-                row = self.db.execute('''SELECT * FROM jobs WHERE
-                    (status='pending' AND not_before<=?) OR (status='running' AND lease_until<=?)
-                    ORDER BY priority,created_at,id LIMIT 1''', (now, now)).fetchone()
-                if row is None:
-                    self.db.commit()
-                    return None
+                now, policy = time.time(), self.pdfs()
+                while True:
+                    row = self.db.execute('''SELECT * FROM jobs WHERE
+                        (status='pending' AND not_before<=?) OR (status='running' AND lease_until<=?)
+                        ORDER BY priority,created_at,id LIMIT 1''', (now, now)).fetchone()
+                    if row is None:
+                        self.db.commit()
+                        return None
+                    # A job retried or left by its worker after the policy changed is held now.
+                    if not self._held(row['kind'], row['priority'], policy):
+                        break
+                    self.db.execute('''UPDATE jobs SET status='held',lease_token=NULL,lease_until=NULL,
+                        updated_at=? WHERE id=?''', (now, row['id']))
                 token = uuid.uuid4().hex
                 self.db.execute('''UPDATE jobs SET status='running',attempts=attempts+1,
                     lease_token=?,lease_until=?,updated_at=? WHERE id=?''',
@@ -416,7 +466,7 @@ class Catalog:
         with self.lock:
             jobs = {r['status']: r['n'] for r in self.db.execute('SELECT status,count(*) n FROM jobs GROUP BY status')}
             oldest = self.db.execute("SELECT min(created_at) FROM jobs WHERE status IN ('pending','running')").fetchone()[0]
-            return {'papers': self.db.execute('SELECT count(*) FROM papers').fetchone()[0],
+            return {'pdfs': self.pdfs(), 'papers': self.db.execute('SELECT count(*) FROM papers').fetchone()[0],
                     'artifacts': [dict(r) for r in self.db.execute('''SELECT kind,status,count(*) count,
                         sum(stored_size) stored_bytes FROM artifacts GROUP BY kind,status''')],
                     'latex_locations': self.db.execute('SELECT count(*) FROM latex_locations').fetchone()[0],

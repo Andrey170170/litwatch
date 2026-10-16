@@ -196,7 +196,7 @@ def update_job(campaign, catalog, entry, job):
     # Preserve operator intent until the bounded feeder actually resets the job.
     if entry['status'] == 'retry_pending' and job['status'] == 'failed':
         return
-    status = {'pending':'queued', 'running':'acquiring', 'complete':'available',
+    status = {'pending':'queued', 'held':'queued', 'running':'acquiring', 'complete':'available',
               'failed':'failed', 'unavailable':'unavailable'}[job['status']]
     sizes = {}
     if status == 'available':

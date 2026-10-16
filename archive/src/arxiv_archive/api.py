@@ -35,7 +35,20 @@ def read_token(path: Path) -> str:
     info = path.stat()
     if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
         raise ValueError("token file must be a regular file with mode 0600 or stricter")
-    token = path.read_text().strip()
+    return _checked(path.read_text().strip())
+
+
+def serve_token(path: Path | None) -> str:
+    """The API's token: from `path`, else from $PAPER_ARCHIVE_TOKEN (a container's way)."""
+    if path is not None:
+        return read_token(path)
+    token = os.environ.get("PAPER_ARCHIVE_TOKEN", "").strip()
+    if not token:
+        raise ValueError("give --token-file or set PAPER_ARCHIVE_TOKEN")
+    return _checked(token)
+
+
+def _checked(token: str) -> str:
     if len(token) < 32 or len(token) > 512 or not re.fullmatch(r"[A-Za-z0-9._~-]+", token):
         raise ValueError("token must contain 32-512 URL-safe characters")
     return token

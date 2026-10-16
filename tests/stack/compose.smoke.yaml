@@ -1,0 +1,24 @@
+# The smoke test's additions to deploy/compose.yaml: its configuration, its scripts in the
+# litwatch container, and the fake deep service. Paths are relative to deploy/.
+
+services:
+  litwatch:
+    volumes:
+      - ../tests/stack:/smoke:ro
+    depends_on:
+      fake-deep: {condition: service_started}
+
+  fake-deep:
+    image: litwatch:${LITWATCH_TAG:-local}
+    entrypoint: ["python", "/smoke/fake_deep.py"]
+    read_only: true
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/healthz')"]
+      interval: 5s
+    environment:
+      LITWATCH_URL: http://litwatch:8080
+      LITWATCH_TOKEN: ${LITWATCH_READ_TOKEN}
+    volumes:
+      - ../tests/stack:/smoke:ro

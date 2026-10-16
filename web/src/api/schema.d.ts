@@ -44,6 +44,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/papers/{paper_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pdf
+         * @description The paper's PDF as the owner opens it: from the archive, which is asked for it urgently
+         *     (the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on
+         *     for its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,
+         *     or when the archive cannot get it in time. The database is read before the wait, which
+         *     holds no connection.
+         */
+        get: operations["pdf_api_papers__paper_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/papers/{paper_id}": {
         parameters: {
             query?: never;
@@ -2418,6 +2442,44 @@ export interface operations {
             };
             /** @description No such paper or topic */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pdf_api_papers__paper_id__pdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PDF, from the archive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description arXiv's PDF: no archive, or none it could get in time */
+            307: {
                 headers: {
                     [name: string]: unknown;
                 };

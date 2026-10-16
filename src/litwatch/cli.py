@@ -579,12 +579,15 @@ def serve(
     except integrations.IntegrationError as exc:
         raise SystemExit(str(exc)) from exc
     _run(store.migrate, migrate=False)
+    from litwatch import fulltext  # noqa: PLC0415
+
     app_ = create_app(
         configuration.database_url(),
         token,
         cfg,
         integrations=loaded,
         read_token=configuration.secret("LITWATCH_READ_TOKEN"),
+        archive=fulltext.archive_for(cfg),
     )
     uvicorn.run(app_, host=host, port=port)
 

@@ -1,5 +1,6 @@
 """archive: registers every new or revised paper with arxiv-archive, which keeps its PDF and
-source, and answers searches over the archive's titles and abstracts.
+source, asks for the PDFs the storage policy keeps, and answers searches over the archive's
+titles and abstracts.
 
 On `paper.added` and `paper.revised` it publishes the paper's metadata and asks for its PDF
 and source at background priority; the archive owns acquisition and deduplicates by paper,
@@ -7,6 +8,13 @@ version and kind, so asking twice is harmless. An artifact needs an explicit arX
 when neither the paper nor the archive's catalog knows one, only the metadata is published.
 Registration is independent of relevance: every paper intake stores is registered, except
 what intake read from the archive itself (the event's `source` is "archive"): it is there.
+
+The storage policy (archive.md) is the archive's to apply: under `paper-archive pdfs wanted`
+it holds PDFs asked for at background priority. On `grade.changed` to relevant or must read,
+on `paper.saved`, and on a revision (read from arXiv or from the archive), this asks for the
+paper's PDF at `WANTED` priority, above background, when the paper qualifies at the time the
+event is handled (`store.word.keeps_pdf`). A PDF the owner opens is asked for urgently by the
+API, and one a full-text pass falls back to by the queue.
 
 It is also a `SearchProvider`: litwatch's search box asks it beside the collection, which
 adds the papers litwatch never ingested. Other integrations (webdav, deep) read PDFs through
@@ -31,7 +39,13 @@ import httpx
 import psycopg
 
 from litwatch import events
-from litwatch.archive import ArchiveClient, ArchiveUnavailable, ArchiveVersionUnknown
+from litwatch.archive import (
+    BACKGROUND,
+    WANTED,
+    ArchiveClient,
+    ArchiveUnavailable,
+    ArchiveVersionUnknown,
+)
 from litwatch.config import Config
 from litwatch.core import SEARCH_TIMEOUT_SECONDS, Event, SearchFilters, SearchHit
 from litwatch.integrations import (
@@ -42,10 +56,20 @@ from litwatch.integrations import (
     required_secret,
 )
 from litwatch.store import papers as papers_store
+from litwatch.store import word as word_store
 
 log = logging.getLogger(__name__)
 
 ARTIFACTS = ("pdf", "source")
+KEPT = ("relevant", "must_read")  # the grades whose papers' PDFs the storage policy keeps
+
+
+def _registers(event: Event) -> bool:
+    """A new or revised paper the archive does not have yet: intake read it from arXiv."""
+    return (
+        event.type in (events.PAPER_ADDED, events.PAPER_REVISED)
+        and event.payload.get("source") != papers_store.ARCHIVE
+    )
 
 
 def client(options: dict[str, Any]) -> ArchiveClient:
@@ -58,9 +82,16 @@ def client(options: dict[str, Any]) -> ArchiveClient:
 
 
 def reader(config: Config) -> ArchiveClient | None:
-    """A client for reading PDFs when an archive integration is configured and enabled."""
+    """A client for reading PDFs when an archive integration is configured and enabled, its
+    section possibly empty (the stack gives its URL and token in the environment)."""
     section = enabled_using(config, "archive")
-    return client(section) if section else None
+    return client(section) if section is not None else None
+
+
+def switched_off(config: Config) -> bool:
+    """An archive section is there and says `enabled = false`, and none is enabled."""
+    sections = [o for n, o in config.integrations.items() if o.get("use", n) == "archive"]
+    return bool(sections) and not any(o.get("enabled", True) for o in sections)
 
 
 def source(config: Config) -> ArchiveClient:
@@ -123,10 +154,10 @@ class Archive:
         self.register = register
 
     def wants(self, event: Event) -> bool:
-        return (
-            self.register
-            and event.type in (events.PAPER_ADDED, events.PAPER_REVISED)
-            and event.payload.get("source") != papers_store.ARCHIVE
+        return self.register and (
+            _registers(event)
+            or event.type in (events.PAPER_REVISED, events.PAPER_SAVED)
+            or (event.type == events.GRADE_CHANGED and event.payload.get("after") in KEPT)
         )
 
     async def aclose(self) -> None:
@@ -137,14 +168,23 @@ class Archive:
         paper = await papers_store.get(conn, event.paper_id)
         if paper is None:
             return
-        await self.archive.upsert_paper(paper)
+        # Read when handled: a grade already taken back asks for nothing.
+        keep = await word_store.keeps_pdf(conn, paper.id)
+        if _registers(event):
+            await self.archive.upsert_paper(paper)
+        elif not keep:
+            return
         try:
             paper = await self.archive.resolve(paper)
         except ArchiveVersionUnknown:
-            log.info("archive: %s has no known arXiv version; metadata only", paper.id)
+            log.info("archive: %s has no known arXiv version; nothing to fetch", paper.id)
             return
-        for kind in ARTIFACTS:
-            await self.archive.request(paper, kind)
+        if _registers(event):
+            for kind in ARTIFACTS:
+                kept = kind == "pdf" and keep
+                await self.archive.request(paper, kind, WANTED if kept else BACKGROUND)
+        else:  # saved, graded up, or a revision the archive already has: only its PDF
+            await self.archive.request(paper, "pdf", WANTED)
 
     def search(self, query: str, filters: SearchFilters) -> list[SearchHit]:
         params: dict[str, Any] = {"q": query, "limit": min(filters.limit, 50)}

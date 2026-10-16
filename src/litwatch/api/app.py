@@ -17,6 +17,7 @@ from litwatch import fulltext
 from litwatch.api import digests, reading, settings
 from litwatch.api import integrations as integrations_api
 from litwatch.api.deps import authorised
+from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import (
     SEARCH_TIMEOUT_SECONDS,
@@ -39,7 +40,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     provider is loaded as well, and the integrations' dispatcher when any is loaded."""
     tasks = []
     enabled = app.state.config.schedule.enabled
-    archive = fulltext.archive_for(app.state.config) if enabled else None
+    archive = app.state.archive if enabled else None
     if archive is not None:
         tasks.append(
             asyncio.create_task(
@@ -79,8 +80,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         app.state.search_pool.shutdown(wait=False, cancel_futures=True)
-        if archive is not None:
-            await archive.aclose()
+        if app.state.archive is not None:
+            await app.state.archive.aclose()
 
 
 def create_app(
@@ -91,16 +92,20 @@ def create_app(
     publications: PublicationSource | None = None,
     integrations: list[Integration] | None = None,
     read_token: str | None = None,
+    archive: ArchiveClient | None = None,
 ) -> FastAPI:
     """The app over one database. Every request but the health check and signing in needs
     the shared token, as a bearer header or the cookie set by `/api/session`; `read_token`,
     when given, may only read papers (`deps.READABLE`). `integrations` are the loaded ones:
-    the dispatcher delivers to them and search asks those that are search providers."""
+    the dispatcher delivers to them and search asks those that are search providers.
+    `archive` serves the PDFs the owner opens, and the full-text queue's texts; the app
+    closes it when it stops."""
     app = FastAPI(title="litwatch", docs_url=None, redoc_url=None, lifespan=_lifespan)
     app.state.dsn, app.state.token, app.state.read_token = dsn, token, read_token
     app.state.config, app.state.gateway = config or Config(), gateway
     app.state.publications = publications or Dblp()
     app.state.integrations = integrations or []
+    app.state.archive = archive
     app.state.search_timeout = SEARCH_TIMEOUT_SECONDS
     app.state.search_pool = integrations_api.search_pool()
     app.state.search_stats = {}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildHosts, storeHits } from "../src/hosts.ts";
+import { buildHosts, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -45,4 +45,11 @@ test("the highest grade across the badges maps to the tier the agent knows", () 
   assert.equal(storeHits({ rows: [{ id: "1", title: "t", badges: tied }] })[0].tier, 1);
   assert.equal(storeHits({ rows: [{ id: "1", title: "t", badges: [{ grade: null }] }] })[0].tier, null);
   assert.deepEqual(storeHits({}), []);
+});
+
+test("Semantic Scholar is asked by arXiv id for a modern or a legacy id, any version", () => {
+  assert.equal(s2Id("2305.04388v2"), "arXiv:2305.04388");
+  assert.equal(s2Id("arXiv:cs/9901001"), "arXiv:cs/9901001");
+  assert.equal(s2Id("math.AG/0601001v3"), "arXiv:math.AG/0601001");
+  assert.equal(s2Id("cs/990100"), null);
 });

@@ -182,6 +182,10 @@ def main() -> None:
     parser.add_argument('--once', action='store_true', help='Process one bounded batch and exit.')
     parser.add_argument('--batch-size', type=int, default=1000)
     parser.add_argument('--interval', type=float, default=2, help='Idle polling interval in seconds.')
+    parser.add_argument('--no-mount-guard', action='store_true',
+                        help="skip the owner's ZFS data-mount check: for a container's volume")
+    parser.add_argument('--min-free-gb', type=float, default=8,
+                        help='stop below this much free space on the work disk (GB)')
     args = parser.parse_args()
     if not 1 <= args.batch_size <= 5000 or not 0.1 <= args.interval <= 300:
         parser.error('batch-size must be 1–5000 and interval 0.1–300 seconds')
@@ -195,18 +199,20 @@ def main() -> None:
             if not status['baseline_complete'] and status.get('baseline_high_water'):
                 print(f"Initial scan: {100 * status.get('baseline_rowid', 0) / status['baseline_high_water']:.1f}%")
         return
-    mount_guard(args.work, 'tank/arxiv-work')
+    def guard() -> None:
+        if not args.no_mount_guard:
+            mount_guard(args.work, 'tank/arxiv-work')
+        if shutil.disk_usage(args.work).free < args.min_free_gb * 1e9:
+            raise RuntimeError('Insufficient free SSD space for search indexing.')
+
+    guard()
     indexer = None
     try:
         # SSD-only: metadata indexing does not need an available payload/HDD mount.
-        if shutil.disk_usage(args.work).free < 8_000_000_000:
-            raise RuntimeError('Insufficient free SSD space for search indexing.')
         indexer = Indexer(args.work / 'catalog/catalog.sqlite', args.work / 'search/search.sqlite')
         last_log = 0.0
         while True:
-            mount_guard(args.work, 'tank/arxiv-work')
-            if shutil.disk_usage(args.work).free < 8_000_000_000:
-                raise RuntimeError('Insufficient free SSD space for search indexing.')
+            guard()
             result = indexer.step(args.batch_size)
             if args.once or time.monotonic() - last_log >= 30:
                 print(json.dumps(result), flush=True)

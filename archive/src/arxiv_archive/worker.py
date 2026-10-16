@@ -298,7 +298,8 @@ def main():
     parser.add_argument('--max-attempts', type=int, default=8)
     parser.add_argument('--user-agent', default='LocalPaperArchive/1.0')
     parser.add_argument('--no-mount-guard', action='store_true',
-                        help='skip the data-mount checks: only for a disposable archive (verification)')
+                        help="skip the owner's ZFS data-mount checks: for a container's volumes or a "
+                             'disposable archive, never for the owner\'s instance')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     stop = threading.Event()

@@ -155,6 +155,7 @@ def test_the_archive_integration_skips_papers_read_from_it():
     archive = Archive(client(FakeArchive()))
     for kind in (events.PAPER_ADDED, events.PAPER_REVISED):
         assert archive.wants(Event(type=kind, paper_id="2610.00001", payload={"source": "oai"}))
-        assert not archive.wants(
-            Event(type=kind, paper_id="2610.00001", payload={"source": "archive"})
-        )
+    added = Event(type=events.PAPER_ADDED, paper_id="2610.00001", payload={"source": "archive"})
+    assert not archive.wants(added)
+    # A revision read from it is not registered again, only checked against the storage
+    # policy (test_integrations.py).

@@ -80,8 +80,15 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 
 ### Stack and container
 - Works means: the image builds and runs, and a fresh stack starts and serves.
-- Evidence: CI's container smoke test; the stack smoke test once it exists.
-- How: CI.
+- Evidence: CI's container smoke test and the stack smoke test (`tests/stack/smoke.sh`): a fresh stack from
+  `deploy/compose.yaml` under its own project name, an empty archive seeded with real papers
+  (`tests/stack/papers.json`) and their text, the day read into litwatch from the archive, a Deep card from a fake
+  deep service that searched litwatch with the read token, then headless Playwright visiting every page at both
+  widths, failing on console errors, uncaught exceptions, 5xx or an empty page. Screenshots and the stack's logs are
+  CI artifacts.
+- How: CI; locally `tests/stack/smoke.sh OUT` (needs Playwright's Chromium:
+  `uv run --no-project --with playwright==1.64.0 playwright install chromium`). It removes only its own project's
+  containers and volumes.
 
 ### Specs and docs
 - Works means: an implementer reading it would build the intended thing.
@@ -122,6 +129,5 @@ preference set.
   rule checks and the owner's read so far; the judge model and the comparison with the last approved output join
   once the preference set holds approved outputs. Digests arrive in N4. Deep cards have none yet: N3's change to
   `deep/` did not build it, and it comes with the next.
-- **The stack smoke test** (a fresh stack on a seeded database built from real papers, headless Playwright visiting
-  every page at both widths, failing on console errors, 5xx or an empty page, screenshots kept as CI artifacts)
-  comes with N5, when the archive joins the stack; its page list grows with N7.
+- **The stack smoke test's page list** (`pages()` in `tests/stack/pages.py`) holds the pages W1 built; it grows
+  with W2–W4 and N7.

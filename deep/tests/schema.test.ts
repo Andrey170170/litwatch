@@ -108,3 +108,15 @@ test("among_collection names only collection papers this session's searches retu
   assert.equal(validate(without).ok, false, "required, though it may be empty");
   assert.equal(validate({ ...core, among_collection: [] }, [], found).ok, true);
 });
+
+test("an arXiv id is a modern or a legacy one, without its version", () => {
+  const legacy = ["cs/9901001", "math.AG/0601001", "hep-th/9901001"];
+  const found = { collection: new Set(legacy), self: "2605.00001" };
+  const among = legacy.map((arxiv_id) => ({ ...core.among_collection[0], arxiv_id }));
+  const prior = [{ ...core.prior_work[0], arxiv_id: "math.AG/0601001" }];
+  assert.equal(validate({ ...core, among_collection: among, prior_work: prior }, [], found).ok, true);
+  for (const bad of ["cs/9901001v2", "2604.01234v3", "9901001", "cs/990100", "CS/9901001x"]) {
+    const result = validate({ ...core, among_collection: [{ ...core.among_collection[0], arxiv_id: bad }] });
+    assert.equal(result.ok, false, bad);
+  }
+});

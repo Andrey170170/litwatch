@@ -460,7 +460,7 @@ class Paper(BaseModel):
     versions: list[Version] = Field(default_factory=list)  # arXiv versions seen
     revision: int = 1  # the paper's own: raised by each rewrite of title or abstract
     arxiv_url: str
-    pdf_url: str
+    pdf_url: str  # litwatch's own: the archive's copy, else arXiv's (GET /api/papers/{id}/pdf)
     source_url: str  # the LaTeX source
     in_collection: bool
     rarity: Rarity | None = None

@@ -8,11 +8,13 @@ from typing import Annotated, Any
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 
+from litwatch import store
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, budget_lines, set_token_cookie, token_ok
+from litwatch.archive import ArchiveError
 from litwatch.core import (
     Depth,
     Effective,
@@ -217,6 +219,39 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
     return answer
 
 
+# Declared before the paper's page, whose path would take "/pdf" as part of the id.
+@router.get(
+    "/papers/{paper_id:path}/pdf",
+    response_class=Response,
+    responses={
+        200: {"content": {"application/pdf": {}}, "description": "The PDF, from the archive"},
+        307: {"description": "arXiv's PDF: no archive, or none it could get in time"},
+    },
+)
+async def pdf(paper_id: str, request: Request) -> Response:
+    """The paper's PDF as the owner opens it: from the archive, which is asked for it urgently
+    (the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on
+    for its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,
+    or when the archive cannot get it in time. The database is read before the wait, which
+    holds no connection."""
+    archive = request.app.state.archive
+    async with await store.connect(request.app.state.dsn) as c:
+        held = await papers_store.get(c, paper_id)
+    if archive is not None and held is not None:
+        try:
+            body = await archive.pdf(held)
+        except ArchiveError:  # unreachable, no known version, a broken file: arXiv has it
+            body = None
+        if body is not None:
+            name = paper_id.replace("/", "_")
+            return Response(
+                body,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="{name}.pdf"'},
+            )
+    return RedirectResponse(f"https://arxiv.org/pdf/{paper_id}", status_code=307)
+
+
 @router.get("/papers/{paper_id:path}", responses=NOT_FOUND)
 async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
     found = await reading.paper(c, paper_id)
@@ -280,7 +315,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         ],
         revision=found["revision"],
         arxiv_url=f"https://arxiv.org/abs/{paper_id}",
-        pdf_url=f"https://arxiv.org/pdf/{paper_id}",
+        pdf_url=f"/api/papers/{paper_id}/pdf",
         source_url=f"https://arxiv.org/e-print/{paper_id}",
         in_collection=found["in_collection"],
         rarity=found["rarity"],

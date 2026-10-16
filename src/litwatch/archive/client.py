@@ -18,6 +18,9 @@ from litwatch.core import Paper
 
 MAX_PDF_BYTES = 128 * 1024 * 1024
 BACKGROUND = 100  # the archive's priority for papers nobody is waiting on
+# A PDF the storage policy keeps (archive.md): above background, so an archive that holds
+# background PDFs (`paper-archive pdfs wanted`) fetches it.
+WANTED = 50
 URGENT = 0  # for a paper a full-text pass is waiting on
 
 

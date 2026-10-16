@@ -1,0 +1,250 @@
+[
+ {
+  "id": "2610.19323",
+  "version": 1,
+  "title": "TopicMerge: A Divide and Conquer Approach to Topic Modeling",
+  "abstract": "Recent advancements in topic modeling have split into two main paths: efficient embedding-based methods that offer scalability but are often outperformed on standard clustering metrics, and Large Language Model (LLM) approaches that achieve state-of-the-art clustering performance but at the cost of prohibitive computational expense and poor scalability. This paper introduces TopicMerge, a novel multi-stage pipeline that bridges these approaches to achieve both state-of-the-art clustering performance and computational efficiency. TopicMerge first employs an efficient clustering pipeline to deliberately over-segment a document corpus into a large set of fine-grained, semantically pure micro-clusters, which are then given initial semantic labels. It then introduces a novel, iterative merging algorithm where an LLM, guided by local neighborhood context, arbitrates on consolidating candidate pairs. These approved merges are then selectively executed and semantically relabeled by the LLM, hierarchically building broader, more coherent topics. Extensive experiments on the Bills and Wiki datasets show that TopicMerge achieves state-of-the-art clustering performance while reducing required LLM calls by over 92% compared to document-level methods, offering a practical and scalable solution.",
+  "authors": [
+   "Matthew Raffel",
+   "Lizhong Chen",
+   "Sai Munikoti",
+   "Sameera Horawalavithana"
+  ],
+  "categories": [
+   "cs.CL",
+   "cs.LG"
+  ],
+  "primary_category": null,
+  "published": "2026-10-14",
+  "updated": "2026-10-15",
+  "version_history": [
+   {
+    "version": 1,
+    "date": "2026-10-14T00:01:35+00:00",
+    "size": "5227kb"
+   }
+  ],
+  "doi": null,
+  "journal_ref": null,
+  "license": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/"
+ },
+ {
+  "id": "2610.19331",
+  "version": 1,
+  "title": "LLM-jp-4 Technical Report",
+  "abstract": "This paper presents LLM-jp-4, a family of Japanese sovereign large language models (LLMs) developed with an emphasis on transparency, reproducibility, and practical usability. LLM-jp-4 comprises an 8B dense model and a 32B-A3B mixture-of-experts model, both trained from scratch on approximately 12 trillion tokens. To support independent verification and reproduction, we establish explicit criteria for selecting training data, external models, and software, and make the development process publicly available. Evaluation results demonstrate substantial improvements over previous LLM-jp models and competitive performance against open-weight models of similar scale. By documenting the development principles, training procedures, and empirical findings of LLM-jp-4, we aim to provide a reference for future sovereign AI development.",
+  "authors": [
+   "LLM-jp",
+   ":",
+   "Chaoran Liu",
+   "Daisuke Kawahara",
+   "Hideyuki Tachibana",
+   "Hirokazu Kiyomaru",
+   "Jun Suzuki",
+   "Koshi Eguchi",
+   "Kouta Nakayama",
+   "Qianying Liu",
+   "Rio Yokota",
+   "Ryo Takahashi",
+   "Sadao Kurohashi",
+   "Sosuke Hosokawa",
+   "Taishi Nakamura",
+   "Takashi Kodama",
+   "Yun-Ang Wu",
+   "Yusuke Miyao",
+   "Yusuke Oda"
+  ],
+  "categories": [
+   "cs.CL",
+   "cs.AI"
+  ],
+  "primary_category": null,
+  "published": "2026-10-14",
+  "updated": "2026-10-15",
+  "version_history": [
+   {
+    "version": 1,
+    "date": "2026-10-14T00:16:21+00:00",
+    "size": "986kb"
+   }
+  ],
+  "doi": null,
+  "journal_ref": null,
+  "license": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/"
+ },
+ {
+  "id": "2610.19344",
+  "version": 1,
+  "title": "Target-Token Asymmetry Can Masquerade As Depth Specialization",
+  "abstract": "Layer-ablation studies often perturb early or late layers of a language model, compare the damage to prediction on two corpora, and read a larger early-layer effect on one corpus as early-layer specialization for its task. Such a comparison averages over the tokens that each corpus asks the model to predict, and these target tokens differ: math solutions, for example, ask for far more whitespace and numbers than encyclopedia prose. We show that this difference can create the appearance of depth specialization. We split a cross-corpus early--late damage interaction by target-token type and recompute it under a target mixture shared by both corpora. Between GSM8K and Wikitext, a positive interaction replicates across five model instances. In the three fully decomposed models, only whitespace has a positive interaction. Removing whitespace reverses the pooled effect in all three, and matching the full target mixture reverses it in two. The diagnosis holds under position matching, adversarial reassignment of token types, and a continuous readout. The risk can also be anticipated from the tokenizer alone. A screen computed before any model runs places every held-out pair it scored in the region its label predicts, and on the pairs it rates at high or medium risk, removing whitespace reverses every positive pooled estimate. A smaller content-word effect one token ahead follows the share of content targets that the unablated model already predicts. A cross-corpus depth effect therefore supports an interpretation of task specialization only after the target-token mixture is reported, the effect is decomposed by token type, and a mixture-matched summary keeps its sign.",
+  "authors": [
+   "Danlin Li",
+   "Miao Li",
+   "Xu Han",
+   "Jiecheng Lu"
+  ],
+  "categories": [
+   "cs.CL",
+   "cs.LG"
+  ],
+  "primary_category": null,
+  "published": "2026-10-14",
+  "updated": "2026-10-15",
+  "version_history": [
+   {
+    "version": 1,
+    "date": "2026-10-14T00:36:45+00:00",
+    "size": "801kb"
+   }
+  ],
+  "doi": null,
+  "journal_ref": null,
+  "license": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/"
+ },
+ {
+  "id": "2610.19362",
+  "version": 1,
+  "title": "Tail Competition Explains Scaling in Best-of-N Sampling for Verifiable Problems",
+  "abstract": "Best-of-N sampling is a simple inference-time scaling strategy for large language models, yet its behavior under incomplete reward models remains poorly understood. We study Best-of-N as a competition between the extreme reward tails of correct and incorrect responses. This view shows that success depends not only on the probability of sampling a correct response, but also on whether correct responses dominate incorrect ones in the upper tail. Using extreme value theory, we characterize three asymptotic regimes: correct-tail-dominant, incorrect-tail-dominant, and critical explaining both monotonic gains and reward-hacking-induced degradation. We further derive finite-sample scaling laws for representative reward distributions, showing that, under Gaussian rewards, incorrect responses with sufficiently large variance can dominate selection even when their mean reward is lower. Unlike oracle selection, convergence with an incomplete selector can be polynomial rather than exponential. Finally, we propose a lightweight tail-tension criterion to estimate when additional sampling may become harmful. Experiments on synthetic data and real reward model scores are consistent with the theoretically predicted regimes, scaling laws, and diagnostic behavior, suggesting that tail competition provides a unified lens on Best-of-N sampling for verifiable problems.",
+  "authors": [
+   "Taro Yano",
+   "Yoichi Ishibashi",
+   "Masafumi Oyamada"
+  ],
+  "categories": [
+   "cs.CL",
+   "cs.AI",
+   "cs.LG"
+  ],
+  "primary_category": null,
+  "published": "2026-10-14",
+  "updated": "2026-10-15",
+  "version_history": [
+   {
+    "version": 1,
+    "date": "2026-10-14T01:09:16+00:00",
+    "size": "4185kb"
+   }
+  ],
+  "doi": null,
+  "journal_ref": null,
+  "license": "http://creativecommons.org/licenses/by/4.0/"
+ },
+ {
+  "id": "2610.19367",
+  "version": 1,
+  "title": "Beyond Corrected Actions: Training LLM Agents on Textual Critiques",
+  "abstract": "Large language models (LLMs) are increasingly used for multi-turn agentic tasks that require interactions with users and environments over extended sequences of actions. A common approach to improving LLM agents is to use more capable expert models to provide training supervision, either by behavior cloning the expert's trajectories or by using the expert to correct the actions in trajectories generated by the weaker student model. However, expert LLMs can provide richer supervision than actions alone: they can directly generate textual critique that explain why specific actions are incorrect. We study whether training on such feedback benefits LLM agents and propose Critique-Augmented Agentic Fine-Tuning (CAFT), a framework that elicits textual expert feedback on student-generated trajectories. For each incorrect action, the expert yields both a corrected action and a textual critique explaining the student's mistake--which we then use as the training target for fine-tuning. Across four student models from the Nemotron 3 and Gemma 4 families on the agentic domains $τ^2$-Bench Airline+Retail and WebShop, adding critiques to action-level supervision improves performance by 8% on average over action-only distillation. Additionally, CAFT checkpoints can also provide a better warm start for reinforcement learning than expert-trajectory distillation. Our results demonstrate that textual critiques can strengthen supervision for multi-turn LLM agents.",
+  "authors": [
+   "Thomas Zeng",
+   "Zelei Cheng",
+   "Mingyang Zhou",
+   "Sambit Sahu",
+   "William Campbell",
+   "Genta Indra Winata"
+  ],
+  "categories": [
+   "cs.CL",
+   "cs.AI"
+  ],
+  "primary_category": null,
+  "published": "2026-10-14",
+  "updated": "2026-10-15",
+  "version_history": [
+   {
+    "version": 1,
+    "date": "2026-10-14T01:12:03+00:00",
+    "size": "211kb"
+   }
+  ],
+  "doi": null,
+  "journal_ref": null,
+  "license": "http://creativecommons.org/licenses/by/4.0/"
+ },
+ {
+  "id": "2610.19373",
+  "version": 1,
+  "title": "Evaluating Compressed Memory: Dependence, Utility, and Content Benefit",
+  "abstract": "Does a language model answer better because its compressed memory contains useful document information? Replacing memory vectors with zeros can lower a trained model's score without showing that it outperforms a model trained without memory. We combine zeroing with separately trained models that cannot access stored text or receive the same constant input for every document. Across nine systems, some models rely on memory yet perform worse than the trained alternative. For example, in experiments that predict states in generated stories, zeroing memory worsens a model's prediction loss, yet a model trained without memory achieves lower loss than the original model with intact memory. On TriviaQA, giving xRAG memory from another question's passage raises F1, which measures word overlap with accepted answers, from 19.38 without a document to 24.78. Its effect on how often outputs contain an accepted answer is statistically uncertain. The question's retrieved passage scores higher still (29.88 F1). Thus a gain over no document alone does not establish that the gain requires the question's passage. Evaluations must therefore specify the comparison model, absolute performance, and generation and scoring conditions.",
+  "authors": [
+   "Minsu Oh",
+   "Seunghui Jwa",
+   "Chanjun Park",
+   "Yeo-Chan Yoon"
+  ],
+  "categories": [
+   "cs.CL",
+   "cs.AI"
+  ],
+  "primary_category": null,
+  "published": "2026-10-14",
+  "updated": "2026-10-15",
+  "version_history": [
+   {
+    "version": 1,
+    "date": "2026-10-14T01:17:03+00:00",
+    "size": "151kb"
+   }
+  ],
+  "doi": null,
+  "journal_ref": null,
+  "license": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/"
+ },
+ {
+  "id": "2610.19399",
+  "version": 1,
+  "title": "KoAGE: Do Large Language Models Know, Learn, and Coin Korean Neologisms?",
+  "abstract": "Korean neologisms arise through diverse mechanisms, a demanding test of language models beyond lexical memorization. To enable systematic evaluation, we introduce NeoTrace, an automated, rerunnable framework that collects and dates neologisms across genres. Its 4,271 entries support KoAGE, a cutoff-aware benchmark with three acquisition and two generation tasks---the latter, to our knowledge, the first to compare model coinages with attested neologisms under their original materials and community context. Across 21 models, lexical recall diverges from contextual inference: in a five-model temporal analysis, models define only 13-30% of cutoff-year words, yet can infer meaning from one usage. However, structural understanding remains limited: even correct definitions barely improve formation analysis of pre-cutoff neologisms. Given word-building materials, single models often follow human formation mechanisms, whereas multi-agent coinage favors abbreviation and depends on interaction framing. KoAGE thus separates what models know, learn from use, and coin.",
+  "authors": [
+   "SungHo Kim",
+   "Eojin Jeon",
+   "SangKeun Lee"
+  ],
+  "categories": [
+   "cs.CL",
+   "cs.AI"
+  ],
+  "primary_category": null,
+  "published": "2026-10-14",
+  "updated": "2026-10-15",
+  "version_history": [
+   {
+    "version": 1,
+    "date": "2026-10-14T01:49:19+00:00",
+    "size": "2009kb"
+   }
+  ],
+  "doi": null,
+  "journal_ref": null,
+  "license": "http://creativecommons.org/licenses/by/4.0/"
+ },
+ {
+  "id": "2610.19407",
+  "version": 1,
+  "title": "Vision-Language Models Integrate Conflicting Evidence Like Biased Bayesian Observers",
+  "abstract": "Vision-language models must reconcile conflicting text and images. Prior work has characterized the resulting behavior in terms of modality biases--e.g., a \"blind faith in text\"--but why preferences vary across models, domains, and input conditions remains unclear. We develop a predictive account from a Bayesian perspective, positing that VLMs combine conditionally independent evidence from each modality with prior beliefs, subject to modality-specific biases. The resulting two-parameter cue combination model accurately predicts VLM preferences under unseen combinations of input degradation and transfers to new forms of unreliability without refitting. Separating evidence strength from integration bias explains how VLMs can follow text even while weighting visual evidence more heavily, reconciling reports of text and vision dominance under a single combination rule.",
+  "authors": [
+   "Josh Barua",
+   "Kyle Mahowald",
+   "William Rudman"
+  ],
+  "categories": [
+   "cs.CL",
+   "cs.AI",
+   "cs.CV"
+  ],
+  "primary_category": null,
+  "published": "2026-10-14",
+  "updated": "2026-10-15",
+  "version_history": [
+   {
+    "version": 1,
+    "date": "2026-10-14T01:55:36+00:00",
+    "size": "2157kb"
+   }
+  ],
+  "doi": null,
+  "journal_ref": null,
+  "license": "http://creativecommons.org/licenses/by/4.0/"
+ }
+]

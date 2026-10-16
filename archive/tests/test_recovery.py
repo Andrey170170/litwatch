@@ -21,6 +21,7 @@ class RecoveryTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.store = Store(self.root/'work', self.root/'archive', guard=False)
+        self.store.catalog.set_pdfs('all')  # a PDF campaign under `wanted` needs priority below 100
         self.campaign = Campaign(self.root/'campaign'/'manifest.sqlite', SCOPE)
         self.manifest = self.root/'missing.csv'
         self.manifest.write_text('paper_id\n2608.10001\n')

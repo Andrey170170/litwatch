@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import quote
 
-from arxiv_archive.api import PaperServer, read_token
+from arxiv_archive.api import PaperServer, read_token, serve_token
 from arxiv_archive.store import Store
 
 from test_paper_store import tar_bytes
@@ -62,6 +62,14 @@ class ServiceTests(unittest.TestCase):
             read_token(path)
         path.chmod(0o600)
         self.assertEqual(read_token(path), self.token)
+        # In a container the token may come from the environment instead (the stack's compose).
+        with patch.dict("os.environ", {"PAPER_ARCHIVE_TOKEN": self.token}):
+            self.assertEqual(serve_token(None), self.token)
+            self.assertEqual(serve_token(path), self.token)
+        with patch.dict("os.environ", {"PAPER_ARCHIVE_TOKEN": "short"}), self.assertRaises(ValueError):
+            serve_token(None)
+        with patch.dict("os.environ", {}, clear=True), self.assertRaises(ValueError):
+            serve_token(None)
 
     def test_pdf_source_write_read_and_old_style_id(self):
         for paper_id, kind, original in (("2609.12345", "pdf", PDF),

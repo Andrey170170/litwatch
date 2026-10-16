@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-from .api import PaperServer, read_token
+from .api import PaperServer, serve_token
 from .store import Store
 
 def positive_int(value: str) -> int:
@@ -20,8 +20,8 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--work", type=Path, default=Path("/srv/arxiv-work"))
     cli.add_argument("--archive", type=Path, default=Path("/srv/arxiv-archive"))
     cli.add_argument("--no-mount-guard", action="store_true",
-                     help="skip the data-mount checks: only for a disposable archive in a scratch "
-                          "directory (verification), never for an instance's data")
+                     help="skip the owner's ZFS data-mount checks: for a container's volumes or a "
+                          "disposable archive in a scratch directory, never for the owner's instance")
     commands = cli.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
     retry = commands.add_parser("retry", help="retry a failed or unavailable acquisition")
@@ -31,12 +31,16 @@ def parser() -> argparse.ArgumentParser:
     strip.add_argument("--dry-run", action="store_true", help="report savings without writing")
     strip.add_argument("--limit", type=positive_int, help="process at most this many packages")
     commands.add_parser("index-dates", help="date every paper so papers can be listed by window (idempotent)")
+    pdfs = commands.add_parser("pdfs", help="show or set the PDF policy: all, or wanted (background "
+                                            "PDF jobs held until asked for above background)")
+    pdfs.add_argument("policy", nargs="?", choices=("all", "wanted"))
     imp = commands.add_parser("import-history")
     imp.add_argument("--ledger", type=Path)
     serve = commands.add_parser("serve")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8787)
-    serve.add_argument("--token-file", type=Path, required=True)
+    serve.add_argument("--token-file", type=Path,
+                       help="the API token's file (mode 0600); else $PAPER_ARCHIVE_TOKEN")
     serve.add_argument("--max-workers", type=int, default=4)
     for name in ("get", "put", "sources", "source-file", "enqueue", "metadata"):
         command = commands.add_parser(name)
@@ -58,7 +62,7 @@ def parser() -> argparse.ArgumentParser:
 def run(argv=None) -> int:
     args = parser().parse_args(argv)
     # Validate token before initializing runtime state for serve.
-    token = read_token(args.token_file) if args.command == "serve" else None
+    token = serve_token(args.token_file) if args.command == "serve" else None
     store = Store(work=args.work, archive=args.archive, guard=not args.no_mount_guard)
     try:
         if args.command == "serve":
@@ -74,6 +78,9 @@ def run(argv=None) -> int:
             result = store.status()
         elif args.command == "retry":
             result = store.catalog.retry_job(args.job_id)
+        elif args.command == "pdfs":
+            result = (store.catalog.set_pdfs(args.policy) if args.policy
+                      else {"pdfs": store.catalog.pdfs()})
         elif args.command == "strip-sources":
             swept = 0 if args.dry_run else store.sweep_replaced_sources()
             counts, before, after = {}, 0, 0

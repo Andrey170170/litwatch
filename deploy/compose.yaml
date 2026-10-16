@@ -1,0 +1,105 @@
+# litwatch's stack: the service and its web app, its Postgres, and the archive (its API, its
+# acquisition worker and its search indexer), with the deep service under the `deep` profile.
+# Settings and tokens come from `.env` beside this file (`env.example` lists them); see
+# README.md here. Run from this directory: `docker compose up -d --build`.
+
+name: litwatch
+
+x-archive: &archive
+  image: litwatch-archive:${LITWATCH_TAG:-local}
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges]
+  tmpfs: [/tmp]
+  volumes:
+    - archive-work:/srv/arxiv-work
+    - archive-files:/srv/arxiv-archive
+    - arxiv-pacing:/srv/arxiv-work/pacing
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: litwatch
+      POSTGRES_DB: litwatch
+      POSTGRES_PASSWORD: ${LITWATCH_DB_PASSWORD:?set LITWATCH_DB_PASSWORD in .env}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "litwatch", "-d", "litwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  litwatch:
+    build: {context: .., dockerfile: Dockerfile}
+    image: litwatch:${LITWATCH_TAG:-local}
+    restart: unless-stopped
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges]
+    tmpfs: [/tmp]
+    environment:
+      LITWATCH_CONFIG: /etc/litwatch/litwatch.toml
+      LITWATCH_DB_HOST: db
+      LITWATCH_DB_PASSWORD: ${LITWATCH_DB_PASSWORD}
+      LITWATCH_API_TOKEN: ${LITWATCH_API_TOKEN:?set LITWATCH_API_TOKEN in .env}
+      LITWATCH_READ_TOKEN: ${LITWATCH_READ_TOKEN:-}
+      LITWATCH_ARCHIVE_URL: http://archive:8787
+      # Intake's arXiv requests and the archive worker's downloads share one pacing.
+      ARXIV_PACING_DIR: /var/lib/arxiv-pacing
+      LITWATCH_ARCHIVE_TOKEN: ${LITWATCH_ARCHIVE_TOKEN}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    volumes:
+      - ${LITWATCH_TOML:-./litwatch.toml}:/etc/litwatch/litwatch.toml:ro
+      - arxiv-pacing:/var/lib/arxiv-pacing
+    ports:
+      - "${LITWATCH_BIND:-127.0.0.1}:${LITWATCH_PORT:-8080}:8080"
+    depends_on:
+      db: {condition: service_healthy}
+      # Started first, so the pacing volume takes the archive image's ownership.
+      archive: {condition: service_started}
+
+  archive:
+    <<: *archive
+    build: {context: ../archive}
+    command: ["paper-archive", "--no-mount-guard", "serve", "--host", "0.0.0.0", "--port", "8787"]
+    environment:
+      PAPER_ARCHIVE_TOKEN: ${LITWATCH_ARCHIVE_TOKEN:?set LITWATCH_ARCHIVE_TOKEN in .env}
+
+  archive-worker:
+    <<: *archive
+    # The only process that downloads from arXiv, paced to one connection per 3 seconds.
+    command: ["paper-archive-worker", "--no-mount-guard",
+              "--user-agent", "litwatch-archive (mailto:${ARXIV_CONTACT:?set ARXIV_CONTACT in .env})"]
+    depends_on: [archive]
+
+  archive-indexer:
+    <<: *archive
+    command: ["paper-archive-indexer", "--no-mount-guard", "--min-free-gb", "1"]
+    depends_on: [archive]
+
+  deep:
+    profiles: [deep]
+    build: {context: ../deep}
+    image: litwatch-deep:${LITWATCH_TAG:-local}
+    restart: unless-stopped
+    environment:
+      LITWATCH_URL: http://litwatch:8080
+      # Without it deep cannot search litwatch for "Among the collection" (deploy/README.md).
+      LITWATCH_TOKEN: ${LITWATCH_READ_TOKEN:-}
+      S2_API_KEY: ${S2_API_KEY:-}
+    volumes:
+      # Sign in once: docker compose run --rm deep login
+      - deep-auth:/var/lib/litwatch-deep
+
+volumes:
+  db:
+  archive-work:
+  archive-files:
+  arxiv-pacing:
+  deep-auth:

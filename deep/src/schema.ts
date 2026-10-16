@@ -41,7 +41,9 @@ export const MONITOR_TARGETS = [
 ] as const;
 export const PRESSURES = ["none", "prompted evasion", "optimization against the monitor", "both"] as const;
 export const RELATIONS = ["agrees", "contradicts", "extends", "supersedes"] as const;
-const ARXIV_ID = "^\\d{4}\\.\\d{4,5}$";
+// A version-stripped arXiv id, modern (2305.04388) or legacy (cs/9901001, math.AG/0601001), as
+// litwatch stores them.
+const ARXIV_ID = "^(?:\\d{4}\\.\\d{4,5}|[a-z-]+(?:\\.[A-Z]{2})?/\\d{7})$";
 
 const CORE = {
   summary: Type.String({
