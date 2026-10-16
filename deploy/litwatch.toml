@@ -8,7 +8,9 @@ categories = ["cs.CL", "cs.AI", "cs.LG"]
 # The nightly run (intake, classification, analysis, grading, the full-text queue, digests)
 # and its workers. It calls models: set the API keys in `.env` first.
 enabled = true
-nightly = "0 6 * * *"
+# At 02:00 in the owner's zone, so its batches are done by morning (docs/plans/model-spend.md).
+nightly = "0 2 * * *"
+timezone = "America/Denver"
 
 # The archive is part of the stack: every paper intake stores is registered with it, and it
 # serves texts, PDFs and search. Its URL and token come from the compose file.
