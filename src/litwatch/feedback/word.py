@@ -78,7 +78,7 @@ class Settled:
 async def lock_many(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
     """Hold the papers' settle locks to the end of the transaction, taken in id order so that
     two transactions locking papers in common never wait on each other. Every write that ends
-    in a settle takes them first, through `change`.
+    in a settle takes them first: through `change`, or intake's batch (`intake.batch.store`).
 
     The taxonomy lock is taken shared first: a taxonomy edit takes it exclusively before any
     paper, so locks are always taken taxonomy first, and a settle never reads a depth that an
