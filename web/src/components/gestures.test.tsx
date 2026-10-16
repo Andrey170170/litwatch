@@ -202,6 +202,10 @@ describe("The phone's gestures", () => {
     const { router } = renderApp("/settings/calibrate/1?at=1");
     await screen.findByText("Drawn 1");
     fireEvent.click(within(await screen.findByRole("group", { name: "Fit for cotf" })).getByRole("button", { name: "related" }));
+    // a drag that starts in the Note field selects text; it steps nothing
+    swipe(screen.getByRole("textbox", { name: "Note" }), [300, 300], [[290, 300], [150, 300]]);
+    await Promise.resolve();
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(0);
     // the swipe to the next paper records the answer first; nothing moves while that save is in flight
     swipe(screen.getByText("Drawn 1"), [300, 300], [[290, 300], [150, 300]]);
     await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));

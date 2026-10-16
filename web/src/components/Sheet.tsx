@@ -60,16 +60,19 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
   close.current = onClose;
   useEffect(() => {
     if (!panel) return;
+    // one pointer at a time, let go of when the sheet goes; nothing new while a release settles
+    let stop: (() => void) | null = null;
+    let settling = false;
     const down = (e: PointerEvent) => {
       const el = panel.current;
-      if (!el || e.button !== 0 || !e.isPrimary || !el.contains(e.target as Node)) return;
+      if (stop || settling || !el || e.button !== 0 || !e.isPrimary || e.pointerType === "mouse" || !el.contains(e.target as Node)) return;
       const fromHandle = (e.target as Element).closest(".hdl");
       if (!fromHandle && el.scrollTop > 0) return;
       const tracker = new Tracker();
       tracker.push(sample(e));
       let axis: ReturnType<typeof axisOf> = null;
       const height = () => el.offsetHeight || 300;
-      trackPointer(e, {
+      stop = trackPointer(e, {
         move: (m) => {
           tracker.push(sample(m));
           const dy = m.clientY - e.clientY;
@@ -84,7 +87,9 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
           if (shade.current) shade.current.style.opacity = String(1 - Math.max(0, dy) / height());
         },
         end: (u, cancelled) => {
+          stop = null;
           if (axis !== "y") return;
+          settling = true;
           swallowNextClick();
           tracker.push(sample(u));
           const dy = Math.max(0, u.clientY - e.clientY);
@@ -95,6 +100,7 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
             shade.current.style.opacity = goes ? "0" : "1";
           }
           settle(el, { transform: goes ? "translateY(100%)" : "translateY(0)" }, ms, () => {
+            settling = false;
             if (goes) close.current();
             else clearDrag(el, shade.current);
           });
@@ -102,6 +108,9 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
       });
     };
     document.addEventListener("pointerdown", down);
-    return () => document.removeEventListener("pointerdown", down);
+    return () => {
+      document.removeEventListener("pointerdown", down);
+      stop?.();
+    };
   }, [panel, shade]);
 }

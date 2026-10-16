@@ -58,11 +58,15 @@ def pages(paper: str, topic: str, day: str, missing: str = "0000.00001") -> dict
 
 
 NOT_A_PAGE = "There is no such page"
+# What a page says when what it was asked for is missing; a seeded page saying so has lost its data.
+MISSING = ("There is no such page", "No such digest", "is not in the collection")
+# The pages that are missing something by design.
+MAY_MISS = {"paper-outside", "share-outside"}
 
 
 def expect(paper: str, width: str) -> dict[str, tuple[str, str]]:
-    """What a page must show to count as working, beyond text in <main> that is not the shell's
-    "There is no such page": a word of its own where one holds whatever the data (a Settings page's
+    """What a page must show to count as working, beyond text in <main> that says nothing is
+    missing (`MISSING`): a word of its own where one holds whatever the data (a Settings page's
     title, the paper's id, Process for a paper outside the collection), the paper's sheet open on
     the share target's landing on the phone (`.sheet`; the desktop's rail is open already), or
     "Report as a miss" when the shared paper is one neither litwatch nor the archive has. The lists
@@ -155,8 +159,9 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
                 elif main.locator(".loadmore", has_text="Could not load").count():
                     # A failed read renders its own line with "Try again": not a page that works.
                     seen.append("failed read: the page says it could not load")
-                if NOT_A_PAGE in text:
-                    seen.append(f"the shell says {NOT_A_PAGE!r}")
+                for line in MISSING:
+                    if line in text and (name not in MAY_MISS or line == NOT_A_PAGE):
+                        seen.append(f"the page says {line!r}")
                 kind, want = expect(paper, width).get(name, (None, ""))
                 if kind == "text" and want.lower() not in text.lower():
                     seen.append(f"the page does not say {want!r}")

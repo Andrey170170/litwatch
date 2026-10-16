@@ -2,7 +2,8 @@
  * The phone's pointer handling (DESIGN.md, "Phone"). The shell's one handler: a drag from the left edge opens the
  * drawer on a top-level screen and goes back on a deeper one, the page following the finger with the screen it
  * returns to under it; a horizontal drag away from the edge steps the page's sequence (`lib/steps`); a drag that
- * starts vertical is left to the page, which scrolls. The sheets drag down by their handle (`Sheet.tsx`). Decisions
+ * starts vertical is left to the page, which scrolls; a mouse is not a finger, and a drag from a text field selects.
+ * The sheets drag down by their handle (`Sheet.tsx`). Decisions
  * come from `lib/gesture`; this file applies them to the elements, and mostly by writing styles, so a moving finger
  * re-renders nothing. A navigation from elsewhere (the system's Back, a tap) ends a drag in progress and voids the
  * settle of one just released: the screen it would have moved is gone.
@@ -225,11 +226,12 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
     };
 
     const down = (e: PointerEvent) => {
-      if (active || settling || e.button !== 0 || !e.isPrimary) return;
+      if (active || settling || e.button !== 0 || !e.isPrimary || e.pointerType === "mouse") return;
       const { deeper, menu } = live.current;
       const t = e.target as Element;
       const root = els.root.current;
-      if (!root) return;
+      // a mouse selects text, it does not swipe; a drag that starts in a text field selects, whatever the pointer
+      if (!root || t.closest("input, textarea, select, [contenteditable]")) return;
       let kind: Kind | null = null;
       if (menu) kind = els.panel.current?.contains(t) ? "drawer" : null;
       else if (!root.contains(t)) return;

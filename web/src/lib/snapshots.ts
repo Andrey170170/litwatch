@@ -15,7 +15,10 @@ export function keepSnapshot(index: number, screen: HTMLElement) {
   // the router restores scrolling by this id, and must find the live screen, not a copy
   for (const el of node.querySelectorAll("[data-scroll-restoration-id]")) el.removeAttribute("data-scroll-restoration-id");
   // a screen copied as a step leaves it has followed the finger and faded: the copy is at rest
-  for (const el of [node, ...node.querySelectorAll<HTMLElement>(".screen")]) for (const prop of ["transform", "transition", "opacity"]) el.style.removeProperty(prop);
+  for (const el of [node, ...node.querySelectorAll<HTMLElement>(".screen")]) {
+    for (const prop of ["transform", "transition", "opacity"]) el.style.removeProperty(prop);
+    el.removeAttribute("data-came"); // a copy plays no entry
+  }
   const scrollTop = screen.querySelector(".scroll")?.scrollTop ?? 0;
   kept.delete(index);
   kept.set(index, { node, scrollTop });

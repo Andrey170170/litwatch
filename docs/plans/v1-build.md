@@ -221,6 +221,11 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   as `fake_deep.py` fakes the deep service) and a drawn session, so `pages.py` walks them every run. A topic's
   digest strip keeps its 11 px squares on the phone (DESIGN.md asks 40 px of every control): a 40 px square per
   digest does not fit the card; the strip is a second way to the digests, which History lists at full size.
+  Likewise a Calibrate session's strip (20 squares), whose 40 px way to a paper is the "3/20" picker. The way
+  back shows the screen left under the finger for the last eight screens left; past them, the page colour.
+  A paper's swipe steps through the rows its list had loaded when it was opened, as its "3/22" counts them;
+  stepping past the loaded rows (a shelf's next page, a digest's papers beyond its preview) is the list
+  context's to grow (`web/src/lib/listContext.ts`).
 - **API gaps W1 found**, each for the core PR that owns it: a Brief on Paper (N3); a Deep card's queued state and
   "Write again", which POST answers 409 (N3's Deep cards); digests for the topic strips and the sidebar's counts (N4,
   W3); the "Among the

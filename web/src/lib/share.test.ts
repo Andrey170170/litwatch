@@ -8,6 +8,10 @@ describe("An arXiv id in a share", () => {
     expect(arxivIdIn("https://arxiv.org/abs/cs/9901001")).toBe("cs/9901001");
     expect(arxivIdIn("arXiv:math.GT/0309136v1")).toBe("math.GT/0309136");
   });
+  it("is an old-style id only under one of arXiv's archives", () => {
+    expect(arxivIdIn("https://arxiv.org/abs/math.GT/0309136v2")).toBe("math.GT/0309136");
+    expect(arxivIdIn("https://example.org/reports/1234567")).toBeNull();
+  });
   it("is the link's, whatever its style, before one the text mentions", () => {
     expect(arxivIdIn("https://arxiv.org/abs/hep-th/9901001", "see also 2401.12345")).toBe("hep-th/9901001");
   });
