@@ -5,17 +5,18 @@ Payloads stay on HDD. Each database uses SQLite's online backup API; catalog,
 acquisition and campaign snapshots are individually consistent, not one transaction.
 
 The export is one directory, `export-<time>`, named by the symlink `current` in the
-destination. A new export is written beside it and `current` is swapped to it in one
-rename, so a failure part-way leaves the previous export whole and current. An export only
-ever deletes what an export wrote, as its export.json marks it, and refuses a destination
-holding anything else.
+destination. A new export is written beside it, made durable, and `current` is swapped to
+it in one rename, so a failure part-way leaves the previous export whole and current. An
+export deletes only what it can prove an export wrote: a staging directory holding the
+marker written when it was made, and an earlier generation holding its export.json.
+Anything else in the destination stays, whatever its name: the flat layout an export wrote
+before `current` is removed by its owner (README.md, Backups).
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
 import fcntl
-from fnmatch import fnmatchcase
 import json
 import os
 from pathlib import Path
@@ -103,10 +104,9 @@ def database_storage_size(source: Path) -> int:
 
 CURRENT = 'current'
 LOCK = '.export.lock'
-# The names the flat layout before `current` wrote; a later export replaces them.
-FLAT = ('catalog.sqlite', 'catalog.sqlite-wal', 'catalog.sqlite-shm', 'progress.sqlite',
-        'progress.sqlite-wal', 'progress.sqlite-shm', 'campaigns', 'manifests', 'export.json',
-        'acquisition-job.json', '*.md', 'SHA256SUMS*', 'requirements.lock', 'pyproject.toml')
+STAGING = '.arxiv-export-'
+# Written in a staging directory as soon as it exists: the proof an export made it.
+MARKER = '.arxiv-export-staging'
 
 
 def exported(report: Path) -> bool:
@@ -120,65 +120,70 @@ def exported(report: Path) -> bool:
     return isinstance(written, dict) and {'created_at', 'databases', 'restore'} <= written.keys()
 
 
-def owned(entry: Path, flat: bool) -> bool:
-    """Whether an export wrote this entry of the destination: its lock, `current` and its
-    swap, a generation holding its export.json, a staging directory, or, when the destination
-    holds the flat layout's export.json (`flat`), a name of that layout."""
-    if entry.name in (CURRENT, '.current-new'):
-        return entry.is_symlink()
+def owned(entry: Path) -> bool:
+    """Whether an export provably wrote this entry, so an export may delete it: a generation
+    holding its export.json, or a staging directory holding the marker."""
+    if entry.is_symlink() or not entry.is_dir():
+        return False
     if re.fullmatch(r'export-\d+', entry.name):
-        return entry.is_dir() and not entry.is_symlink() and exported(entry / 'export.json')
-    # tempfile.mkdtemp's names; a killed export leaves one before its export.json is written.
-    if re.fullmatch(r'\.arxiv-export-[a-z0-9_]{8}', entry.name):
-        return entry.is_dir() and not entry.is_symlink()
-    if entry.name == LOCK:
-        return entry.is_file() and not entry.is_symlink()
-    return flat and any(fnmatchcase(entry.name, pattern) for pattern in FLAT)
+        return exported(entry / 'export.json')
+    if entry.name.startswith(STAGING):
+        marker = entry / MARKER
+        return marker.is_file() and not marker.is_symlink()
+    return False
+
+
+def retire(destination: Path, keep: str | None) -> None:
+    """Delete the generations and staging an export wrote, except the generation `keep`."""
+    for entry in destination.iterdir():
+        if entry.name != keep and owned(entry):
+            shutil.rmtree(entry)
 
 
 def export(work: Path, repo: Path, destination: Path) -> dict:
-    """Write a complete export beside the current one, then swap `current` to it under the
-    lock; earlier exports and the flat layout's files go once it is current. A destination
-    holding anything an export did not write is refused before anything is written there."""
+    """Write a complete export beside the current one, make it durable, then swap `current`
+    to it under the lock; the generation it replaces goes only after the swap is durable."""
     if destination.is_symlink():
         raise RuntimeError(f'Unsafe backup destination: {destination}')
-    # Read once: the flat layout's export.json goes with the rest of that layout.
-    flat = exported(destination / 'export.json')
-    if destination.is_dir():
-        unknown = sorted(entry.name for entry in destination.iterdir() if not owned(entry, flat))
-        if unknown:
-            raise RuntimeError(f'Refusing to export into {destination}: it holds entries no '
-                               f'export wrote ({", ".join(unknown[:5])})')
     destination.mkdir(parents=True, exist_ok=True)
     with (destination / LOCK).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        # A killed export (SIGTERM skips cleanup) leaves staging behind.
-        for stale in destination.glob('.arxiv-export-*'):
-            shutil.rmtree(stale)
+        current, swap = destination / CURRENT, destination / '.current-new'
+        for link in (current, swap):
+            if (link.exists() or link.is_symlink()) and not link.is_symlink():
+                raise RuntimeError(f'Refusing to export into {destination}: {link.name} is not '
+                                   'the symlink an export writes')
+        # A killed export (SIGTERM skips cleanup) leaves staging, or a generation never current.
+        retire(destination, os.readlink(current) if current.is_symlink() else None)
         # Staging shares the destination dataset so the final renames stay atomic.
         # Both backups exclude it and only read while holding this lock shared.
-        staging = Path(tempfile.mkdtemp(prefix='.arxiv-export-', dir=destination))
+        staging = Path(tempfile.mkdtemp(prefix=STAGING, dir=destination))
         try:
+            (staging / MARKER).touch()
             report = _write(work, repo, staging)
             generation = destination / f'export-{time.time_ns()}'
             os.rename(staging, generation)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        swap = destination / '.current-new'
+        (generation / MARKER).unlink()
+        _fsync_tree(generation)
         swap.unlink(missing_ok=True)
         swap.symlink_to(generation.name, target_is_directory=True)
-        os.replace(swap, destination / CURRENT)
+        os.replace(swap, current)
         _fsync_directory(destination)
-        for entry in destination.iterdir():
-            if entry.name in (LOCK, CURRENT, generation.name) or not owned(entry, flat):
-                continue
-            if entry.is_dir() and not entry.is_symlink():
-                shutil.rmtree(entry)
-            else:
-                entry.unlink()
+        retire(destination, generation.name)
         _fsync_directory(destination)
         return report
+
+
+def _fsync_tree(root: Path) -> None:
+    """Make every file and directory under `root` durable, children before their parents."""
+    for directory, _, files in os.walk(root, topdown=False):
+        for name in files:
+            with open(os.path.join(directory, name), 'rb') as written:
+                os.fsync(written.fileno())
+        _fsync_directory(Path(directory))
 
 
 def _fsync_directory(path: Path) -> None:

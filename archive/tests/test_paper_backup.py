@@ -2,6 +2,7 @@
 from pathlib import Path
 from contextlib import closing
 import json
+import os
 import sqlite3
 import tempfile
 import threading
@@ -12,12 +13,37 @@ from types import SimpleNamespace
 from arxiv_archive import backup as BACKUP
 
 
+# The flat layout an export wrote before `current`, as the owner's destination holds it.
+LEGACY = ('catalog.sqlite', 'progress.sqlite', 'export.json', 'acquisition-job.json',
+          'README.md', 'SHA256SUMS', 'pyproject.toml', 'requirements.lock', 'campaigns',
+          'manifests')
+
+
 def flat_layout(destination: Path) -> None:
-    """The export.json the flat layout before `current` wrote at the destination's root."""
     destination.mkdir(exist_ok=True)
-    (destination / 'export.json').write_text(json.dumps(
-        {'created_at': '2026-10-01T00:00:00+00:00', 'databases': {}, 'campaigns': {},
-         'restore': 'Restore catalog.sqlite to catalog/catalog.sqlite.'}))
+    for name in LEGACY:
+        if name in ('campaigns', 'manifests'):
+            (destination / name).mkdir()
+            (destination / name / 'kept').write_text('legacy')
+        elif name == 'export.json':
+            (destination / name).write_text(json.dumps(
+                {'created_at': '2026-10-01T00:00:00+00:00', 'databases': {}, 'campaigns': {},
+                 'restore': 'Restore catalog.sqlite to catalog/catalog.sqlite.'}))
+        else:
+            (destination / name).write_bytes(b'legacy')
+
+
+def sources(root: Path) -> tuple[Path, Path]:
+    """A work directory with both databases and a project with its manifests."""
+    work, repo = root / 'work', root / 'repo'
+    (work / 'catalog').mkdir(parents=True)
+    (work / 'state').mkdir()
+    (repo / 'manifests').mkdir(parents=True)
+    (repo / 'manifests/frozen.json').write_text('{}')
+    for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
+        with closing(sqlite3.connect(work / name)) as database:
+            database.execute('CREATE TABLE records (id INTEGER)')
+    return work, repo
 
 
 class BackupTests(unittest.TestCase):
@@ -127,25 +153,68 @@ class BackupTests(unittest.TestCase):
             with closing(sqlite3.connect(exported / 'catalog.sqlite')) as database:
                 self.assertEqual(database.execute('PRAGMA journal_mode').fetchone()[0], 'delete')
 
-    def test_export_clears_stale_staging_and_wal_side_files(self):
+    def test_an_export_deletes_only_what_it_proves_an_export_wrote(self):
+        # archive.md, Deferred to N5: names never prove ownership. The flat layout, someone's
+        # notes and look-alike names stay; marked staging and earlier generations go.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            work, repo, destination = root / 'work', root / 'repo', root / 'backup'
-            (work / 'catalog').mkdir(parents=True)
-            (work / 'state').mkdir()
-            (repo / 'manifests').mkdir(parents=True)
-            for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
-                with closing(sqlite3.connect(work / name)) as database:
-                    database.execute('CREATE TABLE records (id INTEGER)')
+            work, repo = sources(root)
+            destination = root / 'backup'
             flat_layout(destination)
-            (destination / '.arxiv-export-k1ll3d_x').mkdir(parents=True)
-            (destination / '.arxiv-export-k1ll3d_x/catalog.sqlite').write_bytes(b'partial')
-            (destination / 'catalog.sqlite-wal').write_bytes(b'stale wal')
-            (destination / 'catalog.sqlite-shm').write_bytes(b'stale shm')
+            (destination / 'notes.md').write_text('mine')
+            (destination / '.arxiv-export-x').mkdir()
+            (destination / '.arxiv-export-x/catalog.sqlite').write_bytes(b'unmarked')
+            (destination / 'export-123').mkdir()
+            (destination / 'export-123/data').write_text('no export.json')
+            killed = destination / '.arxiv-export-k1ll3d_x'
+            killed.mkdir()
+            (killed / BACKUP.MARKER).touch()
+            (killed / 'catalog.sqlite').write_bytes(b'partial')
+            strangers = {p.name for p in destination.iterdir()} - {killed.name}
             BACKUP.export(work, repo, destination)
-            self.assertEqual(sorted(p.name for p in destination.glob('.arxiv-export-*')), [])
-            self.assertFalse((destination / 'catalog.sqlite-wal').exists())
-            self.assertFalse((destination / 'catalog.sqlite-shm').exists())
+            first = (destination / 'current').resolve().name
+            BACKUP.export(work, repo, destination)
+            second = (destination / 'current').resolve().name
+            self.assertEqual({p.name for p in destination.iterdir()},
+                             strangers | {'current', '.export.lock', second})
+            self.assertNotEqual(first, second)
+            self.assertEqual((destination / 'catalog.sqlite').read_bytes(), b'legacy')
+            self.assertEqual((destination / '.arxiv-export-x/catalog.sqlite').read_bytes(), b'unmarked')
+            self.assertFalse((destination / second / BACKUP.MARKER).exists())
+
+    def test_a_generation_is_durable_before_current_names_it_and_its_predecessor_goes_after(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, repo = sources(root)
+            destination = root / 'backup'
+            BACKUP.export(work, repo, destination)
+            predecessor = (destination / 'current').resolve()
+            events = []
+            fsync, replace, rmtree = BACKUP.os.fsync, BACKUP.os.replace, BACKUP.shutil.rmtree
+
+            def synced(descriptor):
+                events.append(('fsync', Path(os.readlink(f'/proc/self/fd/{descriptor}'))))
+                fsync(descriptor)
+
+            def swapped(source, target):
+                events.append(('replace', Path(target)))
+                replace(source, target)
+
+            def removed(path, *args, **kwargs):
+                events.append(('rmtree', Path(path)))
+                rmtree(path, *args, **kwargs)
+
+            with mock.patch.object(BACKUP.os, 'fsync', synced), \
+                    mock.patch.object(BACKUP.os, 'replace', swapped), \
+                    mock.patch.object(BACKUP.shutil, 'rmtree', removed):
+                BACKUP.export(work, repo, destination)
+            generation = (destination / 'current').resolve()
+            swap = events.index(('replace', destination / 'current'))
+            before = {path for kind, path in events[:swap] if kind == 'fsync'}
+            written = {generation, *generation.rglob('*')}
+            self.assertEqual(written - before, set(), 'not durable before current names it')
+            retired = events.index(('rmtree', predecessor))
+            self.assertIn(('fsync', destination), events[swap:retired])
 
     def test_a_failed_export_leaves_the_previous_one_whole_and_current(self):
         # archive.md, Deferred to N5: refreshing the export entry by entry left new databases
@@ -160,14 +229,7 @@ class BackupTests(unittest.TestCase):
             for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
                 with closing(sqlite3.connect(work / name)) as database:
                     database.execute('CREATE TABLE records (id INTEGER)')
-            # An export in the layout before `current`: replaced once a new one is current.
-            flat_layout(destination)
-            (destination / 'catalog.sqlite').write_bytes(b'old layout')
-            (destination / 'README.md').write_text('old layout')
-            (destination / 'campaigns').mkdir()
             first = BACKUP.export(work, repo, destination)
-            self.assertEqual(sorted(p.name for p in destination.iterdir() if p.name.startswith('export-')),
-                             [(destination / 'current').resolve().name])
             self.assertEqual({p.name for p in destination.iterdir()} - {'current', '.export.lock'},
                              {(destination / 'current').resolve().name})
             with closing(sqlite3.connect(work / 'catalog/catalog.sqlite')) as database:
@@ -192,62 +254,29 @@ class BackupTests(unittest.TestCase):
             self.assertEqual({p.name for p in destination.iterdir()},
                              {'current', '.export.lock', current.resolve().name})
 
-    def test_a_destination_holding_what_no_export_wrote_is_refused_untouched(self):
+    def test_a_destination_shared_with_others_keeps_their_entries(self):
         # A wrong destination (say /srv/backups) must not lose its other entries.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            work, repo, destination = root / 'work', root / 'repo', root / 'backup'
-            (work / 'catalog').mkdir(parents=True)
-            (work / 'state').mkdir()
-            (repo / 'manifests').mkdir(parents=True)
-            for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
-                with closing(sqlite3.connect(work / name)) as database:
-                    database.execute('CREATE TABLE records (id INTEGER)')
+            work, repo = sources(root)
+            destination = root / 'backup'
             destination.mkdir()
-            (destination / 'catalog.sqlite').write_bytes(b'old layout')
             (destination / 'notes.txt').write_text('keep me')
             (destination / 'other-backups').mkdir()
             (destination / 'other-backups/data').write_text('keep me too')
             (destination / 'export-old').write_text('not a generation')
-            before = sorted(p.name for p in destination.iterdir())
-            with self.assertRaisesRegex(RuntimeError, 'export-old, notes.txt, other-backups'):
-                BACKUP.export(work, repo, destination)
-            self.assertEqual(sorted(p.name for p in destination.iterdir()), before)
+            before = {p.name for p in destination.iterdir()}
+            BACKUP.export(work, repo, destination)
+            BACKUP.export(work, repo, destination)
+            self.assertLessEqual(before, {p.name for p in destination.iterdir()})
             self.assertEqual((destination / 'other-backups/data').read_text(), 'keep me too')
-
-    def test_only_an_export_json_proves_an_export_wrote_an_entry(self):
-        # Names alone do not: a directory export-<digits> without an export's export.json, or
-        # notes and databases where the flat layout never was, are someone else's.
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            work, repo = root / 'work', root / 'repo'
-            (work / 'catalog').mkdir(parents=True)
-            (work / 'state').mkdir()
-            (repo / 'manifests').mkdir(parents=True)
-            for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
-                with closing(sqlite3.connect(work / name)) as database:
-                    database.execute('CREATE TABLE records (id INTEGER)')
-            cases = {
-                'export-123': lambda d: (d / 'export-123').mkdir() or (d / 'export-123/data').write_text('x'),
-                'NOTES.md': lambda d: (d / 'NOTES.md').write_text('mine'),
-                'catalog.sqlite': lambda d: (d / 'catalog.sqlite').write_bytes(b'mine'),
-                'export.json': lambda d: (d / 'export.json').write_text('{"mine": true}'),
-                '.arxiv-export-mine': lambda d: (d / '.arxiv-export-mine').mkdir(),
-            }
-            for name, plant in cases.items():
-                with self.subTest(entry=name):
-                    destination = root / f'backup-{len(name)}-{name.strip(".")}'
-                    destination.mkdir()
-                    plant(destination)
-                    with self.assertRaisesRegex(RuntimeError, 'no export wrote'):
-                        BACKUP.export(work, repo, destination)
-                    self.assertEqual([p.name for p in destination.iterdir()], [name])
-            # An export's own generation is owned, and replaced by the next.
-            destination = root / 'backup'
-            BACKUP.export(work, repo, destination)
-            first = (destination / 'current').resolve().name
-            BACKUP.export(work, repo, destination)
-            self.assertNotIn(first, {p.name for p in destination.iterdir()})
+            # A `current` that is not an export's symlink is someone else's: refused untouched.
+            elsewhere = root / 'elsewhere'
+            elsewhere.mkdir()
+            (elsewhere / 'current').write_text('mine')
+            with self.assertRaisesRegex(RuntimeError, 'current is not the symlink'):
+                BACKUP.export(work, repo, elsewhere)
+            self.assertEqual({p.name for p in elsewhere.iterdir()}, {'current', '.export.lock'})
 
     def test_campaign_discovery_rejects_symlink_escape(self):
         with tempfile.TemporaryDirectory() as directory:

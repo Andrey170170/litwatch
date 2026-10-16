@@ -99,7 +99,9 @@ Found in review when the code moved in (PR #41), left as they were in the old re
 `__version__` from the package metadata and made `pyarrow` and `zstandard` base dependencies for the image. N5b:
 
 - `backup.py` refreshed the stable export path one entry at a time, so a failure part-way left new database files
-  beside old directories. The export is now a directory `export-<time>` named by the symlink `current`, swapped in
-  one rename; earlier exports go once the new one is current. A restore reads `current/`.
+  beside old directories. The export is now a directory `export-<time>`, made durable, then named by the symlink
+  `current` in one rename; earlier exports go once the swap is durable. A restore reads `current/`. An export
+  deletes only what it proves an export wrote (a staging directory's marker, a generation's `export.json`), never
+  by name; the flat layout's files are the owner's to remove once (`archive/README.md`, Backups).
 - `recovery.py`'s reconcile marked every submitted candidate in its own fsynced transaction on each feed cycle. It
   now writes a cycle's changes in one transaction and skips the entries that did not change.
