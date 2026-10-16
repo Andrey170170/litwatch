@@ -180,7 +180,7 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
           <p className="prose">{paper.abstract}</p>
         </Rung>
       )}
-      {(paper.in_collection || paper.card || asked) && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
+      {(paper.in_collection || paper.card || paper.card_pass || asked) && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
       {desktop && <ThePaper paper={paper} />}
     </div>
   );

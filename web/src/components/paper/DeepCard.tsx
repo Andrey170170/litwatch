@@ -1,8 +1,43 @@
 /** The Deep card rung (DESIGN.md, "The ladder", 3): the claim, then each section as a rung of its own under it. */
 import { Link } from "@tanstack/react-router";
+import type { Schemas } from "@/api/client";
+import { useDeepRead } from "@/api/mutations";
 import { dateTime } from "@/lib/format";
+import { rc } from "@/lib/rarity";
 import type { Paper } from "./Actions";
 import { Rung } from "./Ladder";
+
+type CardPass = Schemas["CardPass"];
+const WHY: Record<CardPass["reason"], string> = { request: "Asked for", focus: "Automatic for a Focus must read", pick: "Automatic for an Area pick" };
+const DOING: Record<CardPass["state"], string> = { awaiting_text: "waits for the full text", ready: "queued", running: "being written", failed: "failed; it tries again on the next run" };
+
+/** The status line while a card is queued or being written (`card_pass`), or just asked for and not yet read back
+ * (`asked`): why it is coming and where it stands, with a pulsing dot. A pass failed for good is the note above
+ * the ladder; here it is one line. */
+export function CardStatus({ pass, asked, again }: { pass: CardPass | null | undefined; asked: boolean; again?: boolean }) {
+  if (!pass) return asked ? <div className="cardwait"><span className="dot" />Asked for · queued · the card shows here once it is written</div> : null;
+  const stuck = pass.state === "failed" && pass.failed_runs >= 3;
+  return (
+    <div className={`cardwait${stuck ? " stuck" : ""}`}>
+      {!stuck && <span className="dot" />}
+      {again ? "Writing again" : WHY[pass.reason]} · {stuck ? "failed three runs in a row" : DOING[pass.state]}
+      {pass.state === "failed" && !stuck ? ` (${pass.failed_runs} of 3)` : ""}
+    </div>
+  );
+}
+
+const RELATION: Record<Schemas["AmongRow"]["relation"], string> = { agrees: "agrees", contradicts: "contradicts", extends: "extends", supersedes: "supersedes" };
+
+/** What the card was written from and when: "Written from the LaTeX source of arXiv v2 (text revision 3), 14 Oct,
+ * 03:12, by model". */
+function label(card: Schemas["DeepCard"]): string {
+  const from = card.source ? `from the ${card.source === "latex" ? "LaTeX source" : "PDF"}` : "";
+  const version = card.arxiv_version ? ` of arXiv v${card.arxiv_version}` : "";
+  const revision = card.revision ? ` (text revision ${card.revision})` : "";
+  const when = card.written_at ? `, ${dateTime(card.written_at)}` : "";
+  const by = card.model ? `, by ${card.model}` : "";
+  return `Written ${from}${version}${revision}${when}${by}`.replace("Written  ", "Written ").replace("Written ,", "Written");
+}
 
 type Setup = { models?: string[]; tasks?: string[]; generalization?: string };
 type Prior = { title: string; relation: string; arxiv_id?: string };
@@ -52,14 +87,12 @@ function Fact({ name, value }: { name: string; value: unknown }) {
 }
 
 export function DeepCard({ paper, asked, deepRead }: { paper: Paper; asked: boolean; deepRead: React.ReactNode }) {
+  const again = useDeepRead(paper.id);
   if (!paper.card) {
-    if (asked)
+    if (asked || paper.card_pass)
       return (
         <Rung name="Deep card">
-          <div className="cardwait">
-            <span className="dot" />
-            Queued · the card shows here once it is written
-          </div>
+          <CardStatus pass={paper.card_pass} asked={asked} />
         </Rung>
       );
     return (
@@ -144,11 +177,36 @@ export function DeepCard({ paper, asked, deepRead }: { paper: Paper; asked: bool
           )}
         </Rung>
       ) : null}
+      {paper.card.among?.length ? (
+        <Rung name="Among the collection" className="sub">
+          {paper.card.among.map((a) => (
+            <Link key={a.id} to="/paper/$" params={{ _splat: a.id }} className="pw row among" style={{ "--rc": rc(a.rarity) } as React.CSSProperties}>
+              <span className="ti">{a.title}</span>
+              <span className="rel">
+                <i className="tag">{RELATION[a.relation]}</i>
+                {a.note}
+              </span>
+              <span className="mono">{a.in_collection ? a.id : "outside the collection"}</span>
+            </Link>
+          ))}
+        </Rung>
+      ) : null}
       <Rung name="" className="sub end">
-        <div className="cfoot">
-          Written {paper.card.written_at ? dateTime(paper.card.written_at) : ""}
-          {paper.card.model ? ` by ${paper.card.model}` : ""}
-        </div>
+        {asked || paper.card_pass ? (
+          <CardStatus pass={paper.card_pass} asked={asked} again />
+        ) : (
+          <div className="cfoot">
+            {label(paper.card)}
+            {paper.card_requestable && (
+              <>
+                {" · "}
+                <button className="inl" onClick={() => again.mutate(undefined)} disabled={again.isPending}>
+                  Write again
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </Rung>
     </>
   );

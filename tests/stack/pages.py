@@ -61,8 +61,8 @@ def walk(base: str, token: str, paper: str, topic: str, out: Path) -> list[str]:
             for name, path in pages(paper, topic).items():
                 seen.clear()
                 page.goto(base + path, wait_until="networkidle")
-                # The desktop shell's <main>, or the phone shell's screen (it has no <main>).
-                main = page.locator("main, .screen").first
+                # Both shells put the page in <main>.
+                main = page.locator("main").first
                 text = main.inner_text().strip() if main.count() else ""
                 if not text:
                     seen.append("empty page: no text in the page's content")

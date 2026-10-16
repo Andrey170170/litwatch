@@ -12,7 +12,7 @@ type Page = { rows: Row[]; total: number };
 /** The options for one shelf's query: a page of rows and the shelf's total, whatever else the response carries. */
 export type ShelfQuery<P extends Page = Page, K extends QueryKey = QueryKey> = (shelf: Shelf, limit: number) => UseInfiniteQueryOptions<P, Error, InfiniteData<P>, K, number>;
 
-function Sentinel({ onSeen }: { onSeen: () => void }) {
+export function Sentinel({ onSeen }: { onSeen: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;

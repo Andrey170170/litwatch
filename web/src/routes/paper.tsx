@@ -92,9 +92,10 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   const { data: paper, error, isPending } = read;
   const [gistAway, setGistAway] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
+  // The request is remembered until the page reads its pass (or the card itself) back.
   useEffect(() => {
-    if (asked && paper?.card) forgetCard(id);
-  }, [asked, paper?.card, id]);
+    if (asked && (paper?.card_pass || paper?.card)) forgetCard(id);
+  }, [asked, paper?.card_pass, paper?.card, id]);
   const onGistAway = useCallback((away: boolean) => setGistAway(away), []);
   const onLabel = (topic: string) => {
     if (!desktop) setSheet("more");
@@ -125,7 +126,7 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
       </>
     );
   }
-  const deepRead = paper.card_requestable && !asked ? <DeepReadInline paper={paper} /> : null;
+  const deepRead = paper.card_requestable && !asked && !paper.card_pass ? <DeepReadInline paper={paper} /> : null;
   return (
     <div className="pg">
       <Fill name="title">

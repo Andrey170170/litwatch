@@ -158,9 +158,9 @@ export function PhoneBar({ paper, under, asked, sheet, setSheet }: { paper: Pape
         ) : (
           <>
             <ProcessCell paper={paper} phone />
-            {paper.card_requestable && !paper.card && (
-              <button onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked}>
-                <small>{asked ? "Queued" : "Deep read"}</small>
+            {paper.card_requestable && (
+              <button onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked || !!paper.card_pass}>
+                <small>{asked || paper.card_pass ? "Queued" : paper.card ? "Write again" : "Deep read"}</small>
               </button>
             )}
             <span className="lbl" />

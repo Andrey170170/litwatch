@@ -5,7 +5,7 @@
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
-import { memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
 import { freshVisit } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { countRender } from "@/lib/renders";
@@ -25,7 +25,7 @@ const TABS = [
 
 /** A deeper screen has "‹ Back" (desktop) or "‹" and its title (phone); a top-level one the tabs' chrome. */
 export function isDeeper(pathname: string): boolean {
-  return !["/", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
+  return !["/", "/week", "/history", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
 }
 
 /** Settings owns the sidebar on its pages, and on a paper opened from one of them. */
@@ -86,12 +86,30 @@ const Following = memo(function Following({ onPick }: { onPick?: () => void }) {
   );
 });
 
+/** The Digest's views, under Digest in the drawer (DESIGN.md, "Shell"); the desktop has them in the tab. */
+const DIGEST_VIEWS = [
+  { to: "/", name: "Day" },
+  { to: "/week", name: "Week" },
+  { to: "/history", name: "History" },
+] as const;
+
+/** The tabs; Digest is on for any of its views. In the drawer the views follow it as sub-items. */
 function Tabs({ onPick, drawer }: { onPick?: () => void; drawer?: boolean }) {
+  const { pathname } = useLocation();
+  const inDigest = DIGEST_VIEWS.some((v) => v.to === (pathname.replace(/\/$/, "") || "/"));
   return TABS.map((t) => (
-    <Link key={t.to} to={t.to} className="it tab" activeOptions={{ exact: true }} activeProps={{ className: "it tab on" }} onClick={onPick}>
-      {t.name}
-      {drawer && t.name === "Digest" ? null : null}
-    </Link>
+    <Fragment key={t.to}>
+      <Link to={t.to} className={`it tab${t.name === "Digest" && inDigest ? " on" : ""}`} activeOptions={{ exact: true }} activeProps={{ className: "it tab on" }} onClick={onPick}>
+        {t.name}
+      </Link>
+      {drawer &&
+        t.name === "Digest" &&
+        DIGEST_VIEWS.map((v) => (
+          <Link key={v.to} to={v.to} className="it sub" activeOptions={{ exact: true }} activeProps={{ className: "it sub on" }} onClick={onPick}>
+            {v.name}
+          </Link>
+        ))}
+    </Fragment>
   ));
 }
 
@@ -162,11 +180,11 @@ function Phone() {
           ⚙
         </Link>
       </header>
-      <div className="scroll screen" data-came={came} key={location.pathname} data-scroll-restoration-id="screen">
+      <main className="scroll screen" data-came={came} key={location.pathname} data-scroll-restoration-id="screen">
         <div className="pp">
           <Outlet />
         </div>
-      </div>
+      </main>
       <Slot name="foot" />
       <Sheet open={menu} onClose={() => setMenu(false)} side="left" label="Menu">
         <div className="wm">

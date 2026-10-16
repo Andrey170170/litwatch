@@ -113,6 +113,9 @@ export type Recall = {
 export type Quality = {
   night: { run: number | null; error: string | null; splits: Split[]; awaiting_classification: Stuck[]; analysis_failed: Stuck[]; ungraded: Stuck[]; fulltext: TextPassStuck[]; digests: FailedDigest[] };
   cost: Spend[];
+  /** Deep cards' month to date at list prices: the attempts ended, their cost where known, and how many have their
+   * usage unknown (the cost is "at least" while any is). */
+  deep?: { attempts: number; list_cost: number; unknown: number };
   recall: { eval_run: number; started_at: string; finished_at: string | null; cost: number; recall: Recall[] } | null;
   calibration: { topic: string; precision: number | null; precision_n: number; dropped: number | null; dropped_n: number }[];
   matters_no_topic: { paper_id: string; note: string | null; at: string; title: string }[];

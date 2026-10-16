@@ -188,7 +188,7 @@ describe("a paper's page", () => {
     await userEvent.click(within(sheet).getByRole("button", { name: "Done" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     release();
-    expect(await screen.findByText(/Queued · the card shows here/)).toBeInTheDocument();
+    expect(await screen.findByText(/Asked for · queued · the card shows here/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deep read" })).toBeNull();
   });
 

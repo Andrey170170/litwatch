@@ -4,6 +4,7 @@ import { api, ok } from "./client";
 import type { Shelf } from "@/lib/rarity";
 import type { Quality, Run, Session, SessionRow } from "@/lib/settings";
 import { sortOf, type ListSearch } from "@/lib/search";
+import { addDays, nextSpan } from "@/lib/digests";
 
 /** The shell's summary (the status line, the sidebar's topics, the Settings hints): one read on every page,
  * polled, refreshed on focus and after the owner's own writes that change a count (`refreshSummary`), and never by
@@ -77,7 +78,11 @@ export function freshVisit(qc: QueryClient, pathname: string) {
   // A Settings page's reads are keyed by its path under /settings (below): the page gone to is all that is marked,
   // a subpage (a session, a topic's editor) leaves the list it came from. /settings itself opens Overview.
   const settings = /^\/settings(?:\/(.+))?$/.exec(path);
-  const key = path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : settings ? ["settings", settings[1] ? decodeURIComponent(settings[1]) : "overview"] : null;
+  // The Digest's views, each under its own key (below), and a digest's page; the slide-over on the desktop is a
+  // search param on the view, no visit.
+  const digest = path === "/" ? "day" : path === "/week" ? "week" : path === "/history" ? "history" : /^\/digests\/\d+$/.test(path) ? path.slice("/digests/".length) : null;
+  const key =
+    path === "/papers" ? ["papers"] : path === "/topics" ? ["topics"] : topic?.[1] ? ["topic", decodeURIComponent(topic[1])] : settings ? ["settings", settings[1] ? decodeURIComponent(settings[1]) : "overview"] : digest ? ["digest", digest] : null;
   if (key) void qc.invalidateQueries({ queryKey: key, refetchType: "none" });
 }
 
@@ -120,6 +125,31 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
     getNextPageParam: (last, pages) => (loaded(pages) < last.total ? loaded(pages) : undefined),
     // Rows stay while the filter changes, but never another topic's rows under this topic's name.
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === slug ? previous : undefined),
+    ...listOptions,
+  });
+
+// -- The Digest (DESIGN.md, "Digest") ----------------------------------------------------------------------------
+
+/** A Digest view's read, under `["digest", <view>, ...]`, kept as a list is (`listOptions`): a Day or Week stepped
+ * to stays as read for the visit and the way back, and a fresh visit of the view refetches it behind what is shown
+ * (`freshVisit`). A digest's own read is under its id, the same on the desktop's slide-over and the phone's page. */
+const digestRead = <T,>(key: (string | number)[], queryFn: () => Promise<T>) => queryOptions({ queryKey: ["digest", ...key], queryFn, ...listOptions });
+
+export const dayQuery = (day: string) => digestRead(["day", day], async () => ok(await api.GET("/api/digests/days/{day}", { params: { path: { day } } })));
+
+/** The week holding `day`. */
+export const weekQuery = (day: string) => digestRead(["week", day], async () => ok(await api.GET("/api/digests/weeks/{day}", { params: { path: { day } } })));
+
+export const digestQuery = (id: number) => digestRead([String(id)], async () => ok(await api.GET("/api/digests/{digest_id}", { params: { path: { digest_id: id } } })));
+
+/** History back from `until`, a span of days at a time (`SPAN`), older pages as the reader scrolls until the
+ * archive's start. */
+export const historyQuery = (until: string, span: number) =>
+  infiniteQueryOptions({
+    queryKey: ["digest", "history", until],
+    queryFn: async ({ pageParam }) => ok(await api.GET("/api/digests", { params: { query: { until: pageParam, since: addDays(pageParam, -span) } } })),
+    initialPageParam: until,
+    getNextPageParam: (_last, pages) => nextSpan(pages),
     ...listOptions,
   });
 

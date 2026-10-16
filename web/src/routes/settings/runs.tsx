@@ -4,8 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
-import { dateTime, rowDate } from "@/lib/format";
-import { digests, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
+import { dateTime, plural, rowDate } from "@/lib/format";
+import { digests, type Quality, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
 import { Failed, Later, Load, PageHead } from "./parts";
 
 function SpendRow({ s }: { s: Spend }) {
@@ -27,6 +27,22 @@ function SpendRow({ s }: { s: Spend }) {
   );
 }
 
+/** Deep cards' month to date as a subscription estimate: no budget, never amber, "at least" while an attempt's
+ * usage is unknown (DESIGN.md, "Runs and cost"). */
+function DeepSpend({ d }: { d: NonNullable<Quality["deep"]> }) {
+  return (
+    <div className="spend deep">
+      <span className="pn">Deep cards</span>
+      <span className="sv2">
+        {d.unknown ? "at least " : ""}
+        {usd(d.list_cost)} at list prices · {plural(d.attempts, "attempt")}
+        {d.unknown ? <span className="faint"> · {d.unknown} with usage unknown</span> : ""}
+        <span className="faint"> · a subscription, not budgeted</span>
+      </span>
+    </div>
+  );
+}
+
 export function RunsPage() {
   const quality = useQuery(qualityQuery("runs"));
   const runs = useQuery(runsQuery("runs"));
@@ -42,7 +58,7 @@ export function RunsPage() {
         <SpendRow key={s.provider} s={s} />
       ))}
       {quality.data && !cost.length && <div className="empty">No spend this month.</div>}
-      {quality.data && <Later>Deep cards' month to date as a subscription estimate comes with the usage columns on card attempts.</Later>}
+      {quality.data?.deep && <DeepSpend d={quality.data.deep} />}
       {schedule.data && (
         <div className="nsub mt-3">
           {schedule.data.enabled ? (next ? `Next run ${dateTime(next.next, schedule.data.zone)} (${schedule.data.zone}).` : "The schedule is on.") : "The schedule is off; runs start from the command line."}
