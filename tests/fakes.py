@@ -147,7 +147,7 @@ class BatchingProvider(ScriptedProvider):
         b["status"] = "ended"
 
     async def status(self, batch_id: str) -> str:
-        return self.batches[batch_id]["status"]
+        return self.batches[batch_id]["status"] if batch_id in self.batches else "gone"
 
     async def cancel(self, batch_id: str) -> None:
         self.cancelled.append(batch_id)

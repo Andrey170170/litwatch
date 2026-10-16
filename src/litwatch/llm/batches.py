@@ -38,7 +38,7 @@ class BatchProvider(Protocol):
     """A provider that batches (anthropic.AnthropicProvider). `custom_id` is the request key."""
 
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str: ...
-    async def status(self, batch_id: str) -> str: ...
+    async def status(self, batch_id: str) -> str: ...  # in_progress, canceling, ended or gone
     async def cancel(self, batch_id: str) -> None: ...
     async def results(self, batch_id: str) -> dict[str, Reply | None]: ...
 
@@ -46,6 +46,7 @@ class BatchProvider(Protocol):
 class BatchJournal(Protocol):
     async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None: ...
     async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None: ...
+    async def gone(self, batch_id: str) -> None: ...
 
 
 def _size(request: Request) -> int:
@@ -265,18 +266,25 @@ class Batcher:
                 await asyncio.sleep(self.poll)
 
     async def _check(self, batch_id: str, batch: _Open, now: datetime) -> None:
+        replies: dict[str, Reply | None] = {}
         try:
-            if await self._bounded(self.provider.status(batch_id)) != "ended":
+            status = await self._bounded(self.provider.status(batch_id))
+            if status not in ("ended", "gone"):
                 if now >= self.deadline and not batch.cancelled:
                     await self._bounded(self.provider.cancel(batch_id))
                     batch.cancelled = True
                     log.info("batch %s cancelled at the deadline", batch_id)
                 return
-            replies = await self._bounded(self.provider.results(batch_id))
+            if status == "ended":
+                replies = await self._bounded(self.provider.results(batch_id))
         except Exception:
             log.exception("batch %s could not be read; trying again", batch_id)
             return
+        if status == "gone":  # deleted, or another workspace's: it never answers
+            log.warning("batch %s is gone from its provider", batch_id)
         if self.journal:  # the batch is accounted for before it is let go
+            if status == "gone":
+                await self.journal.gone(batch_id)
             for key, reply in replies.items():
                 if key not in batch.waiting:
                     await self.journal.answered(batch_id, key, reply and reply.usage)

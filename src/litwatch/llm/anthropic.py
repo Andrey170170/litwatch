@@ -110,8 +110,12 @@ class AnthropicProvider:
         return batch.id
 
     async def status(self, batch_id: str) -> str:
-        """`in_progress`, `canceling` or `ended`."""
-        return (await self.client.messages.batches.retrieve(batch_id)).processing_status
+        """`in_progress`, `canceling` or `ended`; `gone` when the API no longer has it (deleted,
+        or the key is another workspace's)."""
+        try:
+            return (await self.client.messages.batches.retrieve(batch_id)).processing_status
+        except anthropic.NotFoundError:
+            return "gone"
 
     async def cancel(self, batch_id: str) -> None:
         await self.client.messages.batches.cancel(batch_id)

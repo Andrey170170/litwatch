@@ -544,6 +544,21 @@ async def test_batches_whose_reads_hang_are_given_up_together_not_one_after_anot
     await gw.close()
 
 
+async def test_a_batch_its_provider_no_longer_has_is_settled_not_waited_on(conn):
+    """Deleted, or the key is now another workspace's: it never answers, so it is not waited on
+    until the deadline's drain, nor recovered by every run until its results expire."""
+    anthropic, _ = await dead_batches(conn, 2)
+    del anthropic.batches["msgbatch_1"]
+    journal = CallJournal(conn, await runs.start(conn, "nightly"))
+    gw, _, _, _ = batching(journal, provider=anthropic)
+    await gw.recover()
+    await asyncio.wait_for(gw.settle(), 2)  # the deadline is hours away
+    assert await journal.open_batches() == []
+    errors = {c["batch_id"]: c["error"] for c in await calls(conn)}
+    assert errors["msgbatch_1"] == "provider: the batch is gone" and errors["msgbatch_2"] is None
+    await gw.close()
+
+
 async def test_retallies_on_two_connections_in_opposite_orders_do_not_deadlock(conn):
     first, second = await runs.start(conn, "nightly"), await runs.start(conn, "nightly")
     async with await store.connect(conn.test_dsn, conn.test_schema) as other:

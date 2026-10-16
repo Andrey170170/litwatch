@@ -2,7 +2,10 @@
 (docs/plans/model-spend.md): `nightly.run` with the night given rather than read from the
 schedule. Run it again with the same --start and --deadline to start the night again.
 
-    uv run python evals/2026-10-16-batched-night/night.py --start ISO --deadline ISO [--limit N]
+    uv run python evals/2026-10-16-batched-night/night.py \
+        --start ISO --deadline ISO --today DATE [--limit N]
+
+--start and --deadline carry their UTC offset (2026-10-16T18:59+00:00).
 """
 
 import argparse
@@ -21,6 +24,8 @@ from litwatch.store import runs
 async def main(args: argparse.Namespace) -> None:
     cfg = configuration.load(None)
     night = (datetime.fromisoformat(args.start), datetime.fromisoformat(args.deadline))
+    if any(t.tzinfo is None for t in night):
+        raise SystemExit("--start and --deadline need a UTC offset, e.g. 2026-10-16T18:59+00:00")
     async with await store.connect(os.environ["LITWATCH_DATABASE_URL"]) as conn:
         run_id = await nightly.run(
             conn,

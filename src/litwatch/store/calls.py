@@ -84,6 +84,16 @@ class CallJournal:
             )
         ).fetchall()
 
+    async def gone(self, batch_id: str) -> None:
+        """Batch `batch_id` is gone from its provider (deleted, or the key is another
+        workspace's): it never answers, so its calls not yet settled are settled with that."""
+        await self.conn.execute(
+            "UPDATE inference_calls SET error = 'provider: the batch is gone' "
+            "WHERE batch_id = %s AND output IS NULL AND error IS NULL "
+            "AND usage->>'cost' IS NULL",
+            (batch_id,),
+        )
+
     async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None:
         """An answer of batch `batch_id` that no call awaited: its charge, on the calls that
         asked for it and have none yet, so the batch is accounted for in full. None: the batch
