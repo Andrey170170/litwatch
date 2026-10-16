@@ -35,8 +35,10 @@ through a role.
 ```sh
 litwatch nightly                     # the nightly run: intake, classification, analysis, grading
 litwatch nightly --no-fetch --limit 20   # classify, analyse and grade a few stored papers, no intake
+litwatch nightly --no-fetch --no-digests # the restart: all but the wait and today's digests
 litwatch intake --days 1             # intake alone
 litwatch intake archive --days 14    # a window's papers read from the archive instead of arXiv
+litwatch digests write --since … --until …  # a window's dailies and weeklies (the restart)
 litwatch eval classify jev | classify-report jev    # the classifier comparison (candidates in evals/configs/classify.toml)
 litwatch eval replay                 # labelled and missed papers through classification and grading; shows the cost, asks
 litwatch eval replay --resume 7      # go on with replay 7 where it stopped or failed
