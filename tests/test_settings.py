@@ -10,7 +10,7 @@ from litwatch.feedback import word
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import FAITH, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
 
 TOKEN = "s3cret"
 P = paper("2610.00001", title="Faithful traces", abstract="Chain-of-thought omits steps.")
@@ -244,7 +244,11 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     assert t["classified"] and t["probability"] == 0.3 and t["threshold"] == 0.5
     assert (t["classifier"], t["uncertain"], t["keyword"]) == (False, True, False)
     assert t["below"] is False
-    assert (t["graded"], t["judge"], t["check"]) == (True, "related", "adjacent")
+    assert (t["graded"], t["fit"]) == (True, "related")
+    assert [(g["role"], g["fit"]) for g in t["graders"]] == [
+        ("judge", "related"),
+        ("check", "adjacent"),
+    ]
     # A miss on the parent: the classifier's membership in the Focus class stands in it too.
     from litwatch.feedback import misses as misses_store
 
@@ -304,6 +308,87 @@ async def test_taxonomy_stats_and_export(client, conn):
     assert (await client.get("/api/settings/topics/other/keywords")).status_code == 404
     text = (await client.get("/api/settings/taxonomy.yaml")).text
     assert text.startswith("classes:") and f"class: {FAITH.slug}" in text
+
+
+async def test_a_miss_reads_the_verdict_as_its_depth_graded_it(client, conn):
+    """A Field topic is graded by `field_grade` alone, an Area topic by the judge with the check
+    on doubt: the trace carries the graders asked and the Fit that stands by that depth's rule,
+    not a Focus pair read as pending."""
+    from litwatch.feedback import misses
+
+    await misses.report(conn, Q.id, AGENTS.slug)
+    await misses.report(conn, Q.id, INTERP.slug)
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=Q.id,
+            topic=AGENTS.slug,
+            topic_version="v",
+            fit=Fit.CENTRAL,
+            reason="r",
+            opinions={"field_grade": Opinion(fit=Fit.CENTRAL, reason="y", model="a")},
+        ),
+    )
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=Q.id,
+            topic=INTERP.slug,
+            topic_version="v",
+            fit=Fit.NONE,
+            reason="r",
+            escalated=True,
+            opinions={
+                "judge": Opinion(fit=Fit.CENTRAL, reason="y", model="a"),
+                "area_check": Opinion(model="d", holds=False, probability=0.2),
+                "check": Opinion(fit=Fit.NONE, reason="n", model="b"),
+            },
+        ),
+    )
+    found = {m["topic"]: m["trace"] for m in (await client.get("/api/settings/misses")).json()}
+    field = found[AGENTS.slug]
+    assert (field["graded"], field["fit"]) == (True, "central")
+    assert [(g["role"], g["fit"]) for g in field["graders"]] == [("field_grade", "central")]
+    area = found[INTERP.slug]
+    assert (area["graded"], area["fit"]) == (True, "none")
+    assert [(g["role"], g["fit"], g["holds"]) for g in area["graders"]] == [
+        ("judge", "central", None),
+        ("area_check", None, False),
+        ("check", "none", None),
+    ]
+
+
+async def test_a_split_on_an_older_text_no_longer_waits(client, conn):
+    """A paper rewritten since its split (a new revision) is graded again by the next run: the
+    old split is not the owner's to settle, on Needs you or in the sidebar's count."""
+    await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
+    opinions = {
+        "judge": Opinion(fit=Fit.CENTRAL, reason="yes", model="a"),
+        "check": Opinion(fit=Fit.NONE, reason="no", model="b"),
+    }
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=P.id,
+            topic=FAITH.slug,
+            topic_version="v",
+            fit=Fit.CENTRAL,
+            reason="yes",
+            opinions=opinions,
+            split=True,
+        ),
+    )
+    page = (await client.get("/api/settings/quality")).json()
+    assert [(r["paper_id"], r["revision"]) for r in page["night"]["splits"]] == [(P.id, 1)]
+    assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 1
+    rewritten = paper(
+        P.id, title=P.title, abstract="A new abstract on wholly other steps.", version=2
+    )
+    await papers_store.upsert(conn, [rewritten])
+    assert await papers_store.revision(conn, P.id) == 2
+    page = (await client.get("/api/settings/quality")).json()
+    assert page["night"]["splits"] == []
+    assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 0
 
 
 async def test_the_summary_carries_the_status_line_the_badges_and_the_hints(client, conn):

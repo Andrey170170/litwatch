@@ -1574,6 +1574,18 @@ export interface components {
             /** Error */
             error?: string | null;
         };
+        /**
+         * Grader
+         * @description One grader's answer in the verdict: its role, and its Fit, or for `area_check` whether
+         *     the judge's Fit holds.
+         */
+        Grader: {
+            /** Role */
+            role: string;
+            fit?: components["schemas"]["Fit"] | null;
+            /** Holds */
+            holds?: boolean | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1762,8 +1774,10 @@ export interface components {
          *     `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;
          *     `below` says the classifier admitted it to a class under the topic's only, not to the
          *     topic's own class.
-         *     `graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null
-         *     where only the judge was asked).
+         *     `graded`: a verdict exists; then `fit` is the Fit that stands by the rule of the depth it
+         *     was graded at (core.grading), and `graders` the answers it stands on, in the order the
+         *     topic's current depth asks its graders (the roles a verdict from another depth holds
+         *     after). The page reads where the paper was let go from `fit`, not from the graders.
          */
         MissTrace: {
             /** Classified */
@@ -1782,8 +1796,12 @@ export interface components {
             keyword?: boolean | null;
             /** Graded */
             graded: boolean;
-            judge?: components["schemas"]["Fit"] | null;
-            check?: components["schemas"]["Fit"] | null;
+            fit?: components["schemas"]["Fit"] | null;
+            /**
+             * Graders
+             * @default []
+             */
+            graders: components["schemas"]["Grader"][];
         };
         /** NextFire */
         NextFire: {
@@ -3430,7 +3448,7 @@ export interface operations {
                     "text/plain": string;
                 };
             };
-            /** @description Not Found */
+            /** @description No taxonomy yet */
             404: {
                 headers: {
                     [name: string]: unknown;

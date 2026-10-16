@@ -230,6 +230,16 @@ def current_verdict(verdicts: Iterable[Verdict]) -> Verdict | None:
 # -- which topics grade a paper -------------------------------------------------------------------
 
 
+# The graders each depth asks, in the order asked (the `grading` package asks them; Area's
+# `check` only when `area_check` doubts the judge). A verdict's opinions are keyed by these roles,
+# and its `fit` is what stands by the depth's rule.
+GRADERS: dict[Depth, tuple[str, ...]] = {
+    Depth.FOCUS: ("judge", "check"),
+    Depth.AREA: ("judge", "area_check", "check"),
+    Depth.FIELD: ("field_grade",),
+}
+
+
 def followed(tree: Taxonomy) -> dict[str, Depth]:
     """The followed topics and their depths. A draft topic is stored, not used by any run."""
     return {t.slug: t.depth for t in tree.topics if t.status != Status.DRAFT}

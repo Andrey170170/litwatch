@@ -20,6 +20,7 @@ from litwatch.api.deps import Conn, budget_lines
 from litwatch.core import FAILED_RUNS, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.core.budget import month_start
 from litwatch.core.classification import thresholds
+from litwatch.core.grading import GRADERS
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
@@ -168,6 +169,15 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
 # -- misses ----------------------------------------------------------------------------------------
 
 
+class Grader(BaseModel):
+    """One grader's answer in the verdict: its role, and its Fit, or for `area_check` whether
+    the judge's Fit holds."""
+
+    role: str
+    fit: Fit | None = None
+    holds: bool | None = None
+
+
 class MissTrace(BaseModel):
     """What each stage concluded for the owner's topic when the reported paper went through the
     pipeline (feedback.md, misses), on the paper's current text. `classified`: classification
@@ -175,8 +185,10 @@ class MissTrace(BaseModel):
     `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;
     `below` says the classifier admitted it to a class under the topic's only, not to the
     topic's own class.
-    `graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null
-    where only the judge was asked)."""
+    `graded`: a verdict exists; then `fit` is the Fit that stands by the rule of the depth it
+    was graded at (core.grading), and `graders` the answers it stands on, in the order the
+    topic's current depth asks its graders (the roles a verdict from another depth holds
+    after). The page reads where the paper was let go from `fit`, not from the graders."""
 
     classified: bool
     probability: float | None = None
@@ -186,8 +198,8 @@ class MissTrace(BaseModel):
     uncertain: bool | None = None
     keyword: bool | None = None
     graded: bool
-    judge: Fit | None = None
-    check: Fit | None = None
+    fit: Fit | None = None
+    graders: list[Grader] = []
 
 
 class Miss(BaseModel):
@@ -207,6 +219,9 @@ async def misses(request: Request, c: Conn) -> list[Miss]:
     found = []
     for r in await quality.misses(c, tree):
         opinions = r["opinions"] or {}
+        topic = tree.topic(r["topic"]) if tree else None
+        asked = GRADERS[topic.depth] if topic else ()
+        roles = [*asked, *(k for k in opinions if k not in asked)]
         sources = set(r["sources"])
         classified = r["classified"]
         found.append(
@@ -227,8 +242,12 @@ async def misses(request: Request, c: Conn) -> list[Miss]:
                     uncertain="uncertain" in sources if classified else None,
                     keyword="keyword" in sources if classified else None,
                     graded=r["opinions"] is not None,
-                    judge=(opinions.get("judge") or {}).get("fit"),
-                    check=(opinions.get("check") or {}).get("fit"),
+                    fit=r["verdict_fit"],
+                    graders=[
+                        Grader(role=k, fit=opinions[k].get("fit"), holds=opinions[k].get("holds"))
+                        for k in roles
+                        if k in opinions
+                    ],
                 ),
             )
         )

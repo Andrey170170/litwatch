@@ -34,17 +34,20 @@ def splits_window(night: dict[str, Any] | None) -> datetime | date:
 
 async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[str, Any]]:
     """Split or escalated verdicts recorded since `since` that are still current (Focus
-    splits, Area escalations), with every grader's answer and the owner's label, for the owner
-    to settle if they want to: followed topics only."""
+    splits, Area escalations, on the paper's current text: a verdict on an older revision
+    waits for the regrading, not the owner), with every grader's answer and the owner's label,
+    for the owner to settle if they want to: followed topics only. `revision` is the text the
+    verdict is on."""
     return await _all(
         conn,
         """
         SELECT * FROM (
             SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic, t.depth, v.fit,
                    v.reason, v.split, v.escalated, v.opinions, v.recorded_at, p.title,
+                   v.paper_revision AS revision,
                    (SELECT row_to_json(l) FROM (SELECT value FROM labels
                     WHERE paper_id = v.paper_id AND topic = v.topic) l) AS label
-            FROM verdicts v JOIN papers p ON p.id = v.paper_id
+            FROM verdicts v JOIN papers p ON p.id = v.paper_id AND p.revision = v.paper_revision
             JOIN topics t ON t.class = v.topic
             WHERE v.paper_id IN (SELECT paper_id FROM verdicts WHERE recorded_at >= %s)
             ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.recorded_at DESC,
@@ -125,8 +128,9 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
     classifier's probability for the topic's class, which of the classifier, the uncertain band
     and the keyword check made it a member (a classifier membership anywhere under the class
     counts, as it stands in the class, and reads `below` when it is under the class only; the
-    band and the keyword check admit a paper to one Focus class only), and the graders'
-    opinions from the current verdict. Null where a stage has not run on this text."""
+    band and the keyword check admit a paper to one Focus class only), and the current
+    verdict: the Fit that stands by its depth's rule and each grader's opinion. Null where a
+    stage has not run on this text."""
     # Each followed topic's class with every class under it, as (topic, class) pairs.
     pairs = [(t.slug, c) for t in (tree.topics if tree else []) for c in tree.subtree(t.slug)]
     return await _all(
@@ -149,10 +153,12 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
                   AND x.source IN ('classifier', 'uncertain', 'keyword')
                   AND (x.class = m.topic OR (x.source = 'classifier' AND x.class IN
                        (SELECT class FROM under WHERE under.topic = m.topic)))) AS sources,
-               (SELECT v.opinions FROM verdicts v WHERE v.paper_id = m.paper_id
-                AND v.topic = m.topic AND v.paper_revision = p.revision
-                ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) AS opinions
+               cur.opinions, cur.fit AS verdict_fit
         FROM misses m JOIN papers p ON p.id = m.paper_id
+        LEFT JOIN LATERAL (SELECT v.fit, v.opinions FROM verdicts v
+                           WHERE v.paper_id = m.paper_id AND v.topic = m.topic
+                             AND v.paper_revision = p.revision
+                           ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) cur ON true
         ORDER BY m.reported_at DESC, m.id DESC
         """,
         ([t for t, _ in pairs], [c for _, c in pairs]),

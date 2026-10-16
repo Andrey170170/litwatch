@@ -1503,7 +1503,7 @@
             }
           },
           "404": {
-            "description": "Not Found"
+            "description": "No taxonomy yet"
           }
         }
       }
@@ -4030,6 +4030,41 @@
         "title": "GradedOut",
         "description": "What grading now found: the Fit that stands, or why there is no verdict."
       },
+      "Grader": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "holds": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "Grader",
+        "description": "One grader's answer in the verdict: its role, and its Fit, or for `area_check` whether\nthe judge's Fit holds."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4545,7 +4580,7 @@
             "type": "boolean",
             "title": "Graded"
           },
-          "judge": {
+          "fit": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Fit"
@@ -4555,15 +4590,13 @@
               }
             ]
           },
-          "check": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Fit"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "graders": {
+            "items": {
+              "$ref": "#/components/schemas/Grader"
+            },
+            "type": "array",
+            "title": "Graders",
+            "default": []
           }
         },
         "type": "object",
@@ -4573,7 +4606,7 @@
           "graded"
         ],
         "title": "MissTrace",
-        "description": "What each stage concluded for the owner's topic when the reported paper went through the\npipeline (feedback.md, misses), on the paper's current text. `classified`: classification\nhas run; then `probability` is the classifier's for the topic's class against the class's\n`threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;\n`below` says the classifier admitted it to a class under the topic's only, not to the\ntopic's own class.\n`graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null\nwhere only the judge was asked)."
+        "description": "What each stage concluded for the owner's topic when the reported paper went through the\npipeline (feedback.md, misses), on the paper's current text. `classified`: classification\nhas run; then `probability` is the classifier's for the topic's class against the class's\n`threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;\n`below` says the classifier admitted it to a class under the topic's only, not to the\ntopic's own class.\n`graded`: a verdict exists; then `fit` is the Fit that stands by the rule of the depth it\nwas graded at (core.grading), and `graders` the answers it stands on, in the order the\ntopic's current depth asks its graders (the roles a verdict from another depth holds\nafter). The page reads where the paper was let go from `fit`, not from the graders."
       },
       "NextFire": {
         "properties": {
