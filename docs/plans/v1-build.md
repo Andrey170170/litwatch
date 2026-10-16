@@ -46,6 +46,7 @@ core      N0  tree, topics, evaluation labels
           N4  digests
           N5a archive in the stack, storage policy, smoke test
           N5b search relevance, papers outside the collection
+          N5c shared flows                                  (after N5b and W2)
           N6  restart
 web       W1  shell, look, Papers, topic page, paper page   (starts after N2b)
           W2  Settings
@@ -155,6 +156,26 @@ source package's documents by heuristic, so it keeps only the shallowest of inde
 (a root-level `cover.tex` beside `paper/main.tex` keeps the cover; the depth rule is there so standalone figure files
 in subfolders stay out) and drops inputs nested deeper than eight levels. If Briefs show it matters, read arXiv's
 `00README` directives, which name the top-level files, and take the PDF's text when a package stays ambiguous.
+
+**N5c · Shared flows**, after N5b and W2 merge (it changes their files) and before N6, so the restart runs on it.
+#66 gave three steps every call site repeated one place each (`.env` at CLI entry, intake's settle in its batch, the
+run record); four remain, found by the same search:
+
+- **A paper change owns its locks and its settle.** About fifteen sites (classification, analysis, grading, the
+  full-text and Deep workers, `feedback/word.py`, misses, `api/settings.py`, `api/reading.py`, digest picks) each open
+  the transaction, take the locks, write and settle by hand. One transaction-owning flow in `feedback/word.py` takes
+  the ordered locks, runs the action's checks and writes, and settles once before commit; Calibrate's labels write
+  together inside it, so a moved Fit emits no intermediate unsave and save; digest picks lock in id order.
+  `settle_topic`'s query moves into `store`. Its shape goes to the owner before it is built.
+- **One actionable-failure predicate** in `store/failures.py` (current revision, not dismissed, active topic), used by
+  the lists, counts, detail and the guarded retry. It fixes `failures.waiting()`, which skips the active-topic test,
+  and `grade_now`, which checks topic status outside the paper lock. `grading.record` checks the topic's status again
+  under its locks (`word.lock` holds the taxonomy lock shared) and drops a grading whose topic was paused during the
+  call, as it already drops one for a rewritten or dismissed paper.
+- **One bounded-concurrency helper** owning the tasks, completion order, cancel and drain, in place of the copies in
+  classification, analysis, grading and the full-text worker; consumers hold its results with `async with`.
+- **One current-Weight selector** in `store/analyses.py` beside `CURRENT_GIST`, with the revision guard and the
+  ordering, used by `store/analyses.py`, `store/reading.py` and `feedback/calibrate.py`.
 
 **N6 · Restart.** A fresh stack, the two most recent weeks read from the archive and run through the whole pipeline,
 unlabelled; no data carried from 0.14 or the first v1 (decision 48). Check: the run's counts and costs, every Focus
