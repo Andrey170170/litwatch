@@ -3,10 +3,12 @@ compositor (CDP `Input.dispatchTouchEvent`), so `touch-action`, the browser's ow
 `pointercancel` they send behave as on a phone, which a synthetic PointerEvent never shows. Each
 gesture must do what the design says, and a vertical finger must still scroll natively.
 
-    python touch.py BASE_URL TOKEN OUT
+    python touch.py BASE_URL TOKEN OUT [DAY]
 
-Needs `playwright` and its Chromium. A gesture whose data the stack lacks (an older day, a
-Calibrate session) is skipped and said so."""
+DAY is the Day the walk steps from, the stack's own day (its papers' day, as smoke.sh knows it);
+without it, the runner's today, which the stack's clock and the browser's may not share. Needs
+`playwright` and its Chromium. A gesture whose data the stack lacks (an older day, a Calibrate
+session) is skipped and said so."""
 
 from __future__ import annotations
 
@@ -91,113 +93,126 @@ def unfold(page) -> None:
             break
 
 
-def gestures(base: str, token: str, out: Path) -> list[str]:
-    """Every gesture, each a line when it fails or is skipped."""
+def gestures(base: str, token: str, out: Path, day: str) -> list[str]:
+    """Every gesture, each a line when it fails or is skipped. A check that cannot go on raises,
+    with what the browser saw by then noted on the error."""
     lines: list[str] = []
+    errors: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        context = browser.new_context(viewport=PHONE, has_touch=True, is_mobile=True)
-        assert context.request.post(f"{base}/api/session", data={"token": token}).ok, "signing in"
-        page = context.new_page()
-        errors = watch(page)
-        finger = Finger(page)
-        shot = lambda name: page.screenshot(path=out / f"touch-{name}.png")  # noqa: E731
-
-        def check(name: str, ok: bool, detail: str = "") -> bool:
-            shot(name)
-            if not ok:
-                lines.append(f"FAIL {name}{': ' + detail if detail else ''}")
-            return ok
-
-        # the drawer, by a swipe from the edge (inside Android's gesture strip); shut by a swipe
-        # from the shade
-        page.goto(f"{base}/", wait_until="networkidle")
-        finger.drag(36, 400, 230, 400)
-        settle(page)
-        if check("drawer-opens", page.locator('.drawer[data-state="open"]').count() == 1):
-            finger.drag(350, 400, 110, 400)
-            settle(page)
-            check("drawer-shuts-from-shade", page.locator(".drawer").count() == 0)
-
-        # the Day, stepped to the older one: a swipe to the right, past the edge zone
-        today = date.today().isoformat()
-        day = context.request.get(f"{base}/api/digests/days/{today}")
-        assert day.ok, f"reading the Day: HTTP {day.status}"
-        previous = day.json().get("previous")
-        if previous:
-            page.goto(f"{base}/", wait_until="networkidle")
-            finger.drag(100, 420, 340, 420)
-            settle(page)
-            check("day-steps-older", f"day={previous}" in page.url, page.url)
-        else:
-            lines.append("SKIP day-steps-older: no older day")
-
-        # a paper, stepped to the next in its list; then the edge swipe back, which returns to the
-        # first paper, as a step is a history entry
-        page.goto(f"{base}/papers", wait_until="networkidle")
-        unfold(page)
-        links = page.locator(PAPER_LINK)
-        hrefs = [a.get_attribute("href") or "" for a in links.all()]
-        if len(hrefs) >= 2:
-            first, second = hrefs[0], hrefs[1]
-            links.nth(0).click()
-            page.wait_for_url("**/paper/**")
-            settle(page, 500)
-            finger.drag(300, 420, 60, 420)
-            if check("paper-steps-next", arrived(page, second), page.url):
-                finger.drag(36, 420, 330, 420)
-                check("edge-swipe-goes-back", arrived(page, first), page.url)
-        else:
-            # the stack seeds its papers: fewer than two listed is the list's failure, not a skip
-            lines.append(f"FAIL paper-steps-next, edge-swipe-goes-back: {len(hrefs)} papers listed")
-
-        # a Calibrate session's cards
-        sessions = context.request.get(f"{base}/api/settings/calibrate")
-        assert sessions.ok, f"reading the Calibrate sessions: HTTP {sessions.status}"
-        rows = sessions.json()
-        if rows and rows[0]["papers"] >= 2:
-            page.goto(f"{base}/settings/calibrate/{rows[0]['id']}?at=1", wait_until="networkidle")
-            finger.drag(300, 500, 60, 500)
-            # a card with a standing Fit saves before the step: wait for it, within reason
-            check("calibrate-steps-next", arrived(page, "at=2"), page.url)
-        else:
-            lines.append("SKIP calibrate-steps-next: no session of two papers")
-
-        # a sheet, dragged down by its body from the top
-        page.goto(f"{base}/papers", wait_until="networkidle")
-        page.get_by_role("button", name="Filters").click()
-        sheet = page.locator(".sheet")
-        sheet.wait_for()
-        settle(page, 400)
-        box = sheet.bounding_box()
-        assert box, "the sheet has no box"
-        finger.drag(195, box["y"] + 70, 195, box["y"] + 330)
-        settle(page)
-        check("sheet-body-drags-shut", page.locator(".sheet").count() == 0)
-
-        # a vertical finger scrolls the page as the browser does: a paper's page, which is long
-        if hrefs:
-            page.goto(f"{base}{hrefs[0]}", wait_until="networkidle")
-            assert arrived(page, hrefs[0]), f"the paper's page did not show: {page.url}"
-            screen = "document.querySelector('.phone .scroll')"
-            if page.evaluate(f"{screen}.scrollHeight > {screen}.clientHeight"):
-                finger.drag(200, 700, 200, 250)
-                settle(page, 400)
-                scrolled = page.evaluate(f"{screen}.scrollTop")
-                check("vertical-scrolls", scrolled > 0, f"scrollTop {scrolled}")
-            else:
-                lines.append("SKIP vertical-scrolls: the paper's page does not overflow")
-        else:
-            lines.append("FAIL vertical-scrolls: no paper listed")
-
-        browser.close()
+        try:
+            context = browser.new_context(viewport=PHONE, has_touch=True, is_mobile=True)
+            signed = context.request.post(f"{base}/api/session", data={"token": token})
+            assert signed.ok, f"signing in: HTTP {signed.status}"
+            page = context.new_page()
+            errors = watch(page)
+            walk(page, base, out, day, lines)
+        except Exception as e:
+            for seen in errors:
+                e.add_note(f"the browser saw: {seen}")
+            raise
+        finally:
+            browser.close()
     return lines + [f"FAIL the browser saw: {e}" for e in errors]
 
 
-def main(base: str, token: str, out: str) -> None:
+def walk(page, base: str, out: Path, day: str, lines: list[str]) -> None:
+    """The gestures in turn, each adding its line to `lines` when it fails or is skipped."""
+    context = page.context
+    finger = Finger(page)
+    shot = lambda name: page.screenshot(path=out / f"touch-{name}.png")  # noqa: E731
+
+    def check(name: str, ok: bool, detail: str = "") -> bool:
+        shot(name)
+        if not ok:
+            lines.append(f"FAIL {name}{': ' + detail if detail else ''}")
+        return ok
+
+    # the drawer, by a swipe from the edge (inside Android's gesture strip); shut by a swipe
+    # from the shade
+    page.goto(f"{base}/", wait_until="networkidle")
+    finger.drag(36, 400, 230, 400)
+    settle(page)
+    if check("drawer-opens", page.locator('.drawer[data-state="open"]').count() == 1):
+        finger.drag(350, 400, 110, 400)
+        settle(page)
+        check("drawer-shuts-from-shade", page.locator(".drawer").count() == 0)
+
+    # the Day, stepped to the older one: a swipe to the right, past the edge zone
+    read = context.request.get(f"{base}/api/digests/days/{day}")
+    assert read.ok, f"reading the Day {day}: HTTP {read.status}"
+    previous = read.json().get("previous")
+    if previous:
+        page.goto(f"{base}/?day={day}", wait_until="networkidle")
+        finger.drag(100, 420, 340, 420)
+        settle(page)
+        check("day-steps-older", f"day={previous}" in page.url, page.url)
+    else:
+        lines.append("SKIP day-steps-older: no older day")
+
+    # a paper, stepped to the next in its list; then the edge swipe back, which returns to the
+    # first paper, as a step is a history entry
+    page.goto(f"{base}/papers", wait_until="networkidle")
+    unfold(page)
+    links = page.locator(PAPER_LINK)
+    hrefs = [a.get_attribute("href") or "" for a in links.all()]
+    if len(hrefs) >= 2:
+        first, second = hrefs[0], hrefs[1]
+        links.nth(0).click()
+        page.wait_for_url("**/paper/**")
+        settle(page, 500)
+        finger.drag(300, 420, 60, 420)
+        if check("paper-steps-next", arrived(page, second), page.url):
+            finger.drag(36, 420, 330, 420)
+            check("edge-swipe-goes-back", arrived(page, first), page.url)
+    else:
+        # the stack seeds its papers: fewer than two listed is the list's failure, not a skip
+        lines.append(f"FAIL paper-steps-next, edge-swipe-goes-back: {len(hrefs)} papers listed")
+
+    # a Calibrate session's cards
+    sessions = context.request.get(f"{base}/api/settings/calibrate")
+    assert sessions.ok, f"reading the Calibrate sessions: HTTP {sessions.status}"
+    rows = sessions.json()
+    if rows and rows[0]["papers"] >= 2:
+        page.goto(f"{base}/settings/calibrate/{rows[0]['id']}?at=1", wait_until="networkidle")
+        finger.drag(300, 500, 60, 500)
+        # a card with a standing Fit saves before the step: wait for it, within reason
+        check("calibrate-steps-next", arrived(page, "at=2"), page.url)
+    else:
+        lines.append("SKIP calibrate-steps-next: no session of two papers")
+
+    # a sheet, dragged down by its body from the top
+    page.goto(f"{base}/papers", wait_until="networkidle")
+    page.get_by_role("button", name="Filters").click()
+    sheet = page.locator(".sheet")
+    sheet.wait_for()
+    settle(page, 400)
+    box = sheet.bounding_box()
+    assert box, "the sheet has no box"
+    finger.drag(195, box["y"] + 70, 195, box["y"] + 330)
+    settle(page)
+    check("sheet-body-drags-shut", page.locator(".sheet").count() == 0)
+
+    # a vertical finger scrolls the page as the browser does: a paper's page, which is long
+    if hrefs:
+        page.goto(f"{base}{hrefs[0]}", wait_until="networkidle")
+        assert arrived(page, hrefs[0]), f"the paper's page did not show: {page.url}"
+        screen = "document.querySelector('.phone .scroll')"
+        if page.evaluate(f"{screen}.scrollHeight > {screen}.clientHeight"):
+            finger.drag(200, 700, 200, 250)
+            settle(page, 400)
+            scrolled = page.evaluate(f"{screen}.scrollTop")
+            check("vertical-scrolls", scrolled > 0, f"scrollTop {scrolled}")
+        else:
+            lines.append("SKIP vertical-scrolls: the paper's page does not overflow")
+    else:
+        lines.append("FAIL vertical-scrolls: no paper listed")
+
+
+def main(base: str, token: str, out: str, day: str = "") -> None:
     shots = Path(out)
     shots.mkdir(parents=True, exist_ok=True)
-    lines = gestures(base, token, shots)
+    lines = gestures(base, token, shots, day or date.today().isoformat())
     for line in lines:
         print(line)
     failures = [line for line in lines if line.startswith("FAIL")]
@@ -206,4 +221,4 @@ def main(base: str, token: str, out: str) -> None:
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])

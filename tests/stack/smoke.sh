@@ -63,4 +63,4 @@ dc exec -T litwatch python /smoke/classify.py /smoke/papers.json language-models
 uv run --no-project --with playwright==1.64.0 python "$here/pages.py" \
     "http://127.0.0.1:$port" "$api_token" "$here/papers.json" "$out"
 uv run --no-project --with playwright==1.64.0 python "$here/touch.py" \
-    "http://127.0.0.1:$port" "$api_token" "$out"
+    "http://127.0.0.1:$port" "$api_token" "$out" "$day"
