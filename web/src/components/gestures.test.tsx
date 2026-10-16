@@ -183,6 +183,22 @@ describe("The phone's gestures", () => {
     vi.advanceTimersByTime(400);
     document.dispatchEvent(new MouseEvent("pointerdown"));
     fireEvent.click(screen.getByRole("button", { name: "Menu" }));
+    const reopened = await screen.findByRole("dialog", { name: "Menu" });
+    expect(reopened).not.toHaveAttribute("data-drag");
+    // the same for a drawer still being swiped open when Esc shuts it: its release past halfway does nothing
+    fireEvent.keyDown(reopened, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    vi.advanceTimersByTime(400);
+    swipe(screen.getByRole("main"), [10, 300], [[30, 300], [120, 300]], { lift: false });
+    const opening = await screen.findByRole("dialog", { name: "Menu" });
+    expect(opening).toHaveAttribute("data-drag", "opening");
+    fireEvent.keyDown(opening, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.pointerUp(window, { clientX: 300, clientY: 300, pointerId: 1, isPrimary: true });
+    vi.advanceTimersByTime(400);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    document.dispatchEvent(new MouseEvent("pointerdown"));
+    fireEvent.click(screen.getByRole("button", { name: "Menu" }));
     expect(await screen.findByRole("dialog", { name: "Menu" })).not.toHaveAttribute("data-drag");
   });
 

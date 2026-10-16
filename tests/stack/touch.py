@@ -95,8 +95,9 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
         page.goto(f"{base}/papers", wait_until="networkidle")
         unfold(page)
         links = page.locator(PAPER_LINK)
-        if links.count() >= 2:
-            first = links.nth(0).get_attribute("href") or ""
+        hrefs = [a.get_attribute("href") or "" for a in links.all()]
+        if len(hrefs) >= 2:
+            first = hrefs[0]
             links.nth(0).click()
             page.wait_for_url("**/paper/**")
             settle(page, 500)
@@ -134,8 +135,8 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
         check("sheet-body-drags-shut", page.locator(".sheet").count() == 0)
 
         # a vertical finger scrolls the page as the browser does: a paper's page, which is long
-        if links.count():
-            page.goto(f"{base}{links.nth(0).get_attribute('href')}", wait_until="networkidle")
+        if hrefs:
+            page.goto(f"{base}{hrefs[0]}", wait_until="networkidle")
             screen = "document.querySelector('.phone .scroll')"
             if page.evaluate(f"{screen}.scrollHeight > {screen}.clientHeight"):
                 finger.drag(200, 700, 200, 250)
