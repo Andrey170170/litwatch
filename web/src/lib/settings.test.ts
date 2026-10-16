@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { answerFits, differs, level, openSplits, savedLine, settle, settleFromPaper, spendBar, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
+import { answerFits, differs, level, openSplits, savedLine, settle, settleFromPaper, spendBar, spendTotals, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
 
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
@@ -94,6 +94,12 @@ describe("level", () => {
 });
 
 describe("spendBar", () => {
+  it("sets only the budgeted providers' spend against the budget", () => {
+    const line = (provider: string, spent: number, budget: number | null) => ({ provider, spent, projected: spent, budget, over: false });
+    expect(spendTotals([line("a", 100, 150), line("b", 50, null)])).toEqual({ spent: 100, budget: 150, unbudgeted: 50 });
+    expect(spendTotals([line("a", 100, null), line("b", 50, null)])).toEqual({ spent: 150, budget: 0, unbudgeted: 0 });
+  });
+
   it("fills the bar with the wider of the budget and the projection", () => {
     expect(spendBar({ provider: "a", spent: 25, projected: 50, budget: 100, over: false })).toEqual({ spent: 0.25, projected: 0.5, budget: 1 });
     expect(spendBar({ provider: "a", spent: 60, projected: 120, budget: 100, over: true })).toEqual({ spent: 0.5, projected: 1, budget: 100 / 120 });

@@ -57,7 +57,8 @@ class RunStatus(BaseModel):
 class SettingsHints(BaseModel):
     """What the Settings sidebar says beside each page: how many things wait on the owner, the
     last Calibrate session, the misses reported, the topics followed and the classes, the
-    month's spend against its budget, and the integrations failing."""
+    month's spend against its budget (the budgeted providers' spend, or every provider's when
+    none has a budget), and the integrations failing."""
 
     waiting: int
     last_session: datetime | None = None

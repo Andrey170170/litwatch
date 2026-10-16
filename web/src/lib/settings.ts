@@ -231,9 +231,13 @@ export function level(x: number, { hi = true, good = 0.9, ok = 0.8 } = {}): Leve
   return x <= good ? "ok" : x <= ok ? "warn" : "bad";
 }
 
-/** This month's spend and budget over every provider. */
-export function spendTotals(cost: Spend[]): { spent: number; budget: number } {
-  return { spent: cost.reduce((s, c) => s + c.spent, 0), budget: cost.reduce((s, c) => s + (c.budget ?? 0), 0) };
+/** This month's spend against its budget. Budgets are per provider, so once any provider has one the spend set
+ * against it is the budgeted providers' only, and `unbudgeted` is the rest; with no budget, `spent` is all of it. */
+export function spendTotals(cost: Spend[]): { spent: number; budget: number; unbudgeted: number } {
+  const sum = (xs: Spend[]) => xs.reduce((s, c) => s + c.spent, 0);
+  const budgeted = cost.filter((c) => c.budget != null);
+  if (!budgeted.length) return { spent: sum(cost), budget: 0, unbudgeted: 0 };
+  return { spent: sum(budgeted), budget: budgeted.reduce((s, c) => s + (c.budget ?? 0), 0), unbudgeted: sum(cost.filter((c) => c.budget == null)) };
 }
 
 /** The spend bar's three marks as shares of its width: month to date, the projection, the budget tick. The widest

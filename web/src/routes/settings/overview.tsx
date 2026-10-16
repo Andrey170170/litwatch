@@ -70,7 +70,7 @@ export function OverviewPage() {
     );
   };
   const open = q ? waiting(q) : 0;
-  const { spent, budget } = spendTotals(q?.cost ?? []);
+  const { spent, budget, unbudgeted } = spendTotals(q?.cost ?? []);
   const over = q?.cost.filter((c) => c.over).map((c) => c.provider) ?? [];
   const replay = q?.recall;
   return (
@@ -91,6 +91,7 @@ export function OverviewPage() {
           </Tile>
           <Tile to="runs" tone={over.length ? "warn" : "ok"} big={usd(spent)}>
             {budget ? `of ${usd(budget)} this month` : "this month"}
+            {unbudgeted ? ` · ${usd(unbudgeted)} more without a budget` : ""}
             {over.length ? ` · ${over.join(", ")} projected over` : ""}
           </Tile>
           <Tile to="calibrate" tone="" big={last ? rowDate(last.drawn_at) : "–"}>

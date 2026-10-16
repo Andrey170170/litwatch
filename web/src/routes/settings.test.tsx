@@ -276,6 +276,29 @@ describe("Settings", () => {
     expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
   });
 
+  it("starts Fix the text from the paper's text, so a title-only fix keeps the abstract", async () => {
+    viewport(true);
+    const garbled = { ...stuck, paper_id: "2610.00009", title: "A garbld title" };
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/quality": { ...quality, night: { ...quality.night, awaiting_classification: [garbled] } },
+      "GET /api/papers/2610.00009": { id: "2610.00009", title: "A garbld title", abstract: "The abstract as stored." },
+      "POST /api/settings/classification/2610.00009/correction": () => new Response(null, { status: 204 }),
+    });
+    renderApp("/settings/needs");
+    const item = (await screen.findByRole("link", { name: "A garbld title" })).closest(".need") as HTMLElement;
+    await userEvent.click(within(item).getByRole("button", { name: "Fix the text" }));
+    expect(await within(item).findByRole("textbox", { name: "Abstract" })).toHaveValue("The abstract as stored.");
+    const save = within(item).getByRole("button", { name: "Save the text" });
+    expect(save).toBeDisabled();
+    const title = within(item).getByRole("textbox", { name: "Title" });
+    await userEvent.clear(title);
+    await userEvent.type(title, "A garbled title");
+    await userEvent.click(save);
+    await waitFor(() => expect(item).toHaveClass("settled"));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ revision: 1, title: "A garbled title", abstract: "The abstract as stored." });
+  });
+
   it("lists a full-text pass that failed three runs and runs it now, settling it in place", async () => {
     viewport(true);
     const calls = scriptFetch({ ...common, "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }) });

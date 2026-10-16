@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError } from "@/api/client";
 import { digestGone, said, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
-import { qualityQuery, taxonomyQuery } from "@/api/queries";
+import { paperQuery, qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
 import { type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, settle, type Settled, type Split, type Stuck, type TextPassStuck, type Waiting, waiting } from "@/lib/settings";
@@ -101,8 +101,20 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
   const { data: tree } = useQuery(taxonomyQuery);
   const [form, setForm] = useState<"classes" | "text" | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
+  const qc = useQueryClient();
   const [title, setTitle] = useState(s.title);
   const [abstract, setAbstract] = useState("");
+  const [was, setWas] = useState({ title: s.title, abstract: "" });
+  /** The form starts from the paper's text as it stands, so a fix changes only what it touches. */
+  const openText = async () => {
+    const p = await qc.fetchQuery(paperQuery(s.paper_id)).catch(() => null);
+    const text = { title: p?.title ?? s.title, abstract: p?.abstract ?? "" };
+    setTitle(text.title);
+    setAbstract(text.abstract);
+    setWas(text);
+    setForm("text");
+  };
+  const changed = title.trim() !== was.title.trim() || abstract.trim() !== was.abstract.trim();
   return (
     <Stuck s={s} kind="awaiting">
       {form === "classes" ? (
@@ -129,7 +141,7 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
           <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Title" />
           <textarea className="field" rows={5} value={abstract} onChange={(e) => setAbstract(e.target.value)} aria-label="Abstract" placeholder="The abstract, as it should read" />
           <div className="nact">
-            <button className="btn pri" disabled={fix.isPending || !abstract.trim()} onClick={() => fix.mutate({ revision: s.revision, title, abstract }, { onSuccess: () => settle("Text fixed; the next run classifies it again."), onError: gone(settle) })}>
+            <button className="btn pri" disabled={fix.isPending || !changed || !(title.trim() || abstract.trim())} onClick={() => fix.mutate({ revision: s.revision, title, abstract }, { onSuccess: () => settle("Text fixed; the next run classifies it again."), onError: gone(settle) })}>
               Save the text
             </button>
             <button className="btn" onClick={() => setForm(null)}>
@@ -145,7 +157,7 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
           <button className="btn" onClick={() => setForm("classes")}>
             Classify by hand
           </button>
-          <button className="btn" onClick={() => setForm("text")}>
+          <button className="btn" onClick={() => void openText()}>
             Fix the text
           </button>
         </div>

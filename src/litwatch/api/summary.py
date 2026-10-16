@@ -37,7 +37,8 @@ async def summary(request: Request, c: Conn) -> s.Summary:
     )
     sessions = await calibrate.sessions(c, limit=1)
     spend = await budget_lines(c, request.app.state.config.budget)
-    budgets = [line.budget for line in spend if line.budget is not None]
+    # Budgets are per provider: once one has a budget, the spend set against them is theirs only.
+    budgeted = [line for line in spend if line.budget is not None]
     cards = await integrations_api.status(request, c)
     return s.Summary(
         status=status,
@@ -48,8 +49,8 @@ async def summary(request: Request, c: Conn) -> s.Summary:
             misses=await quality.count_misses(c),
             topics=len(tree.topics) if tree else 0,
             classes=len(tree.classes) if tree else 0,
-            spent=sum(line.spent for line in spend),
-            budget=sum(budgets) if budgets else None,
+            spent=sum(line.spent for line in budgeted or spend),
+            budget=sum(line.budget for line in budgeted) if budgeted else None,
             failing=[card.name for card in cards if card.enabled and card.failing],
         ),
     )
