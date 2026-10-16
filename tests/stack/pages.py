@@ -20,7 +20,8 @@ from playwright.sync_api import sync_playwright
 WIDTHS = {"phone": (390, 844), "desktop": (1440, 900)}
 CARD_WAIT_SECONDS = 120
 # A paper neither litwatch nor the archive has: the one 404 the walk expects.
-MISSING_ID = "0000.00001"
+# an id no paper has, shaped as a real one (the share target reads a month into it)
+MISSING_ID = "0001.00001"
 
 
 def pages(paper: str, topic: str, day: str, missing: str = MISSING_ID) -> dict[str, str]:
