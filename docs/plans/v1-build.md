@@ -169,7 +169,9 @@ run record); four remain, found by the same search:
   `settle_topic`'s query moves into `store`. Its shape goes to the owner before it is built.
 - **One actionable-failure predicate** in `store/failures.py` (current revision, not dismissed, active topic), used by
   the lists, counts, detail and the guarded retry. It fixes `failures.waiting()`, which skips the active-topic test,
-  and `grade_now`, which checks topic status outside the paper lock.
+  and `grade_now`, which checks topic status outside the paper lock. `grading.record` checks the topic's status again
+  under its locks (`word.lock` holds the taxonomy lock shared) and drops a grading whose topic was paused during the
+  call, as it already drops one for a rewritten or dismissed paper.
 - **One bounded-concurrency helper** owning the tasks, completion order, cancel and drain, in place of the copies in
   classification, analysis, grading and the full-text worker; consumers hold its results with `async with`.
 - **One current-Weight selector** in `store/analyses.py` beside `CURRENT_GIST`, with the revision guard and the
