@@ -86,12 +86,21 @@ def results(path: Path) -> dict[str, Result]:
     return {r.paper_id: r for r in found}
 
 
-def spent(path: Path) -> float:
-    """What every call of the run cost, failed ones and those answered again included."""
+def spent(path: Path) -> list[float | None]:
+    """What each call of the run cost, failed ones and those answered again included; None
+    where the charge is unknown."""
     if not path.exists():
-        return 0.0
+        return []
     lines = (line for line in path.read_text(encoding="utf-8").splitlines() if line)
-    return sum(Result.model_validate_json(line).cost or 0 for line in lines)
+    return [Result.model_validate_json(line).cost for line in lines]
+
+
+def dollars(costs: list[float | None]) -> str:
+    """What `costs` add up to, marked as a lower bound where a charge is unknown."""
+    if costs and all(c is None for c in costs):
+        return "cost unknown"
+    known = sum(c for c in costs if c is not None)
+    return f"{'≥ ' if None in costs else ''}${known:.2f}"
 
 
 def inputs(paper: Paper, entry: Entry) -> str:
@@ -213,7 +222,9 @@ async def run(
         area = tree.get(entry.area) if entry.area else None
         read = await _text(archive, paper, wait_seconds, poll)
         if isinstance(read, str):
-            result = Result(paper_id=paper.id, error=read, request=asked, inputs=now[paper.id])
+            result = Result(  # no call, so nothing charged
+                paper_id=paper.id, error=read, cost=0.0, request=asked, inputs=now[paper.id]
+            )
         else:
             async with gate:
                 started = time.monotonic()
@@ -287,9 +298,10 @@ def report(
     papers: dict[str, Paper],
     found: dict[str, Result],
     abstract_gists: dict[str, str],
-    cost: float,
+    spent: list[float | None],
 ) -> str:
-    """The report, as markdown, from the run alone: no calls. `cost` is what the run spent. An
+    """The report, as markdown, from the run alone: no calls. `spent` is what each call of the
+    run cost, as `spent` reads it. An
     answer to other inputs than the paper's and entry's now is left out."""
     stale = {
         e.id
@@ -302,7 +314,7 @@ def report(
     models = sorted({r.model for r in answered if r.model})
     lines += [
         f"{len(answered)} of {len(entries)} papers answered by {', '.join(models) or 'no model'}, "
-        f"${cost:.2f} in all. Each paper's text was read from the archive as a full-text pass "
+        f"{dollars(spent)} in all. Each paper's text was read from the archive as a full-text pass "
         "reads it. The owner marks whether the abstract overstates in the preference set "
         "(`evals/preferences/briefs.yaml`); the milestone check is that the overstatement line "
         "appears where the owner agrees and nowhere else, and that no Gist repeats a claim its "
@@ -333,7 +345,7 @@ def report(
             f"## {p.id} · {p.title}",
             "",
             f"[arXiv]({p.url}) · area {e.area or 'not given'} · v{r.version or '?'} from its "
-            f"{r.source} · {r.chars:,} characters · {r.model} · ${r.cost or 0:.2f}",
+            f"{r.source} · {r.chars:,} characters · {r.model} · {dollars([r.cost])}",
             "",
             f"**Abstract.** {p.abstract}",
             "",

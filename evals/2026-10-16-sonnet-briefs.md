@@ -36,8 +36,13 @@ Agreement is over the 37 papers Opus answered.
   choices, which is how Google's filter shows) and spent 5,857 output tokens a pass. Sol answered all three, at
   $0.094 a pass. The fallback is GPT-6.1 Sol at high (D5); MiMo was not needed.
 - **The appendix.** Cutting it takes the median input from 37,894 to 22,021 tokens (−42 %) and the pass from $0.094
-  to $0.062. Agreement moves by one paper on Weight and two on the overstatement line, within what two runs of one
-  model differ by. But Briefs lose numbers and limits only the appendix has (below), so the appendix stays.
+  to $0.062. Agreement moves by one paper on Weight and two on the overstatement line. But Briefs lose numbers and
+  limits only the appendix has (below), so the appendix stays.
+- **The bibliography.** The plan's third variant, the text as read with its bibliography, was not replayed: the cut
+  was built before P1, so every run above already had it. Measured on the 40 texts without calls
+  ([texts.py](2026-10-16-sonnet-briefs/texts.py)), 16 of the 40 LaTeX texts inline a `thebibliography` block; cutting
+  it removes 5.9 % of all 40 texts' characters, and a median 10 % of a text that has one. Opus read the texts with their bibliographies,
+  so the agreement above measures the cut and the model together.
 
 ## The appendix, side by side
 

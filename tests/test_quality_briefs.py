@@ -78,7 +78,7 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     billed = briefs.Result(paper_id=P.id, error="invalid", cost=0.2, request=third[0].request)
     with out.open("a") as f:
         f.write(billed.model_dump_json() + "\n" + third[0].model_dump_json() + "\n")
-    assert briefs.spent(out) == pytest.approx(0.203 + third[0].cost)
+    assert sum(briefs.spent(out)) == pytest.approx(0.203 + third[0].cost)
     assert briefs.results(out)[P.id].output is not None
 
     other = Gateway(Models(brief=ROLE.model_copy(update={"model": "another"})), {})
@@ -148,7 +148,7 @@ def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():
         ),
     }  # fmt: skip
     text = briefs.report(
-        "Briefs", entries(), {P.id: P, Q.id: Q}, found, {P.id: "An old Gist."}, 0.6
+        "Briefs", entries(), {P.id: P, Q.id: Q}, found, {P.id: "An old Gist."}, [0.6]
     )
     assert (
         f"| {P.id} | yes | not read yet | 108 | 19 | Brief of 108 words (asked 120–200) |" in text
@@ -160,13 +160,18 @@ def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():
     assert "**Overstatement.** The abstract overstates: the probes" in text
     assert "$0.60 in all" in text
 
+    # A charge not known makes the total a lower bound, and its paper's cost unknown.
+    unknown = {**found, Q.id: found[Q.id].model_copy(update={"cost": None})}
+    text = briefs.report("Briefs", entries(), {P.id: P, Q.id: Q}, unknown, {}, [0.6, None])
+    assert "≥ $0.60 in all" in text and "· m · cost unknown" in text
+
     # An answer to an abstract since changed is not shown beside the new one.
     revised = P.model_copy(update={"abstract": "We detect some hidden steps."})
-    text = briefs.report("Briefs", entries(), {P.id: revised, Q.id: Q}, found, {}, 0.6)
+    text = briefs.report("Briefs", entries(), {P.id: revised, Q.id: Q}, found, {}, [0.6])
     assert f"| {P.id} | answered for other inputs: run it again |" in text
     assert "We detect all hidden steps." not in text
 
     # Nor is one to a paper updated since while its version stays unknown.
     later = Q.model_copy(update={"updated": "2026-10-14T00:00:00Z"})
-    text = briefs.report("Briefs", entries(), {P.id: P, Q.id: later}, found, {}, 0.6)
+    text = briefs.report("Briefs", entries(), {P.id: P, Q.id: later}, found, {}, [0.6])
     assert f"| {Q.id} | answered for other inputs: run it again |" in text

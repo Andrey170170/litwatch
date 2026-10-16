@@ -500,7 +500,7 @@ def eval_briefs(
         console.print(f"[yellow]not in the database, left out: {', '.join(missing)}[/yellow]")
 
     def progress(r: briefs.Result) -> None:
-        console.print(f"{r.paper_id}: {r.error or 'answered'} ${r.cost or 0:.2f}")
+        console.print(f"{r.paper_id}: {r.error or 'answered'} {briefs.dollars([r.cost])}")
 
     async def main() -> list[briefs.Result]:
         try:
@@ -514,8 +514,8 @@ def eval_briefs(
             await archive.aclose()
 
     new = asyncio.run(main())
-    cost = sum(r.cost or 0 for r in new)
-    console.print(f"{sum(r.output is not None for r in new)} of {len(new)} answered, ${cost:.2f}")
+    cost = briefs.dollars([r.cost for r in new])
+    console.print(f"{sum(r.output is not None for r in new)} of {len(new)} answered, {cost}")
 
 
 @eval_app.command("briefs-report")
