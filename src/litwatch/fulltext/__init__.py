@@ -34,6 +34,7 @@ from litwatch.archive import (
     read_text,
     retry_downloads,
 )
+from litwatch.concurrency import bounded
 from litwatch.config import Config
 from litwatch.core.fulltext import LEASE, PassKind, TextRead
 from litwatch.feedback import word
@@ -99,35 +100,28 @@ async def read(archive: ArchiveClient, c: Claimed) -> Attempt:
     return a
 
 
-async def _write(attempts: list[Attempt], gateway: Gateway) -> AsyncIterator[Attempt]:
-    """Ask the `brief` role about each attempt's text, yielding each as it is answered. Close
-    it (`contextlib.aclosing`) when leaving early, so no call goes on behind the caller."""
-    limit = asyncio.Semaphore(CONCURRENCY)
+def _write(
+    attempts: list[Attempt], gateway: Gateway
+) -> contextlib.AbstractAsyncContextManager[AsyncIterator[Attempt]]:
+    """Ask the `brief` role about each attempt's text, giving each as it is answered, held with
+    `async with` (`concurrency.bounded`: leaving it stops every call)."""
 
     async def one(a: Attempt) -> Attempt:
         assert a.text is not None
         c = a.claimed
-        async with limit:
-            try:
-                answer = await gateway.ask(
-                    brief.ROLE,
-                    brief.request(c.paper, c.area, a.text.body, a.text.source),
-                    paper_id=c.paper.id,
-                )
-            except CallError as exc:
-                a.error, a.counts = str(exc), exc.unusable
-                return a
+        try:
+            answer = await gateway.ask(
+                brief.ROLE,
+                brief.request(c.paper, c.area, a.text.body, a.text.source),
+                paper_id=c.paper.id,
+            )
+        except CallError as exc:
+            a.error, a.counts = str(exc), exc.unusable
+            return a
         a.output, a.model = answer.value, answer.model
         return a
 
-    tasks = [asyncio.create_task(one(a)) for a in attempts]
-    try:
-        for done in asyncio.as_completed(tasks):
-            yield await done
-    finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+    return bounded(attempts, one, CONCURRENCY)
 
 
 def _read_of(text: PaperText | None) -> TextRead | None:
@@ -284,7 +278,7 @@ async def work(
             if run
             else model_run(conn, config, "fulltext", gateway=gateway)
         )
-        async with opened as r, contextlib.aclosing(_write(texts, r.gateway)) as answered:
+        async with opened as r, _write(texts, r.gateway) as answered:
             async for a in answered:
                 if await record(conn, a):
                     counts[_outcome(a)] += 1

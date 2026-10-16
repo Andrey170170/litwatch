@@ -5,14 +5,15 @@ The comparison of classifiers (`litwatch eval classify`) uses the same request."
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import Any
 
 import psycopg
 
 from litwatch import events
+from litwatch.concurrency import bounded
 from litwatch.core import Paper
 from litwatch.core.classification import (
     CHOSEN,
@@ -108,32 +109,17 @@ async def _one(
     return found
 
 
-async def classify(
+def classify(
     papers: list[Paper],
     tree: Taxonomy,
     gateway: Gateway,
     thresholds: Thresholds = CHOSEN,
     concurrency: int = 16,
-) -> AsyncIterator[Classification]:
-    """Ask the `classify` role about each paper and yield results as they arrive. Writes
-    nothing. A paper whose call fails is yielded with its error and stops nothing else. Close
-    it (`contextlib.aclosing`) when leaving early, so no call goes on behind the caller."""
-    limit = asyncio.Semaphore(concurrency)
-
-    async def bounded(paper: Paper) -> Classification:
-        async with limit:
-            return await _one(paper, tree, gateway, thresholds)
-
-    tasks = [asyncio.create_task(bounded(p)) for p in papers]
-    try:
-        for done in asyncio.as_completed(tasks):
-            yield await done
-    finally:
-        # Left early (the caller failed or stopped): no call may outlive the run that pays
-        # for it, so every worker is cancelled and awaited before the generator closes.
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+) -> AbstractAsyncContextManager[AsyncIterator[Classification]]:
+    """Ask the `classify` role about each paper, giving results as they arrive, held with
+    `async with` (`concurrency.bounded`: leaving it stops every call). Writes nothing. A paper
+    whose call fails is given with its error and stops nothing else."""
+    return bounded(papers, lambda p: _one(p, tree, gateway, thresholds), concurrency)
 
 
 async def _announce(

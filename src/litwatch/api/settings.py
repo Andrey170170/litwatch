@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import AsyncIterator
-from contextlib import aclosing, asynccontextmanager
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -376,7 +376,7 @@ async def grade_now(
     recorded = False
     async with (
         model_run(c, config, "grading", gateway=request.app.state.gateway) as run,
-        aclosing(grading.grade(due, run.gateway, config.grading)) as found,
+        grading.grade(due, run.gateway, config.grading) as found,
     ):
         async for g in found:
             if recorded := await grading.record(c, g):

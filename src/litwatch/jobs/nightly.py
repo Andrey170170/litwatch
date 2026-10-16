@@ -9,7 +9,6 @@ import asyncio
 import logging
 import time
 from collections import Counter
-from contextlib import aclosing
 from datetime import UTC, date, datetime, timedelta
 
 import psycopg
@@ -44,7 +43,7 @@ async def classify(
         return
     papers = await classifications_store.due(conn, FAILED_RUNS, limit)
     thresholds = config.classification.thresholds
-    async with aclosing(classification.classify(papers, tree, run.gateway, thresholds)) as found:
+    async with classification.classify(papers, tree, run.gateway, thresholds) as found:
         async for c in found:
             if await classification.record(conn, c):
                 run.add("classified" if c.error is None else "classification_failed")
@@ -55,7 +54,7 @@ async def analyse(conn: psycopg.AsyncConnection, run: ModelRun, limit: int | Non
     A paper whose answers were unusable `FAILED_RUNS` runs in a row is left for the owner, who
     can have it tried again."""
     papers = await analyses_store.due(conn, FAILED_RUNS, limit)
-    async with aclosing(analysis.analyse(papers, run.gateway)) as found:
+    async with analysis.analyse(papers, run.gateway) as found:
         async for a in found:
             if await analysis.record(conn, a):
                 run.add("analysed" if a.error is None else "analysis_failed")
@@ -71,7 +70,7 @@ async def grade(
     if tree is None:
         return
     due, passes = await grading.due(conn, tree, FAILED_RUNS, limit)
-    async with aclosing(grading.grade(due, run.gateway, config.grading)) as found:
+    async with grading.grade(due, run.gateway, config.grading) as found:
         async for g in found:
             if await grading.record(conn, g):
                 run.add("graded" if g.verdict is not None else "grading_failed")

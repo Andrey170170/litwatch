@@ -280,7 +280,8 @@ async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_a
 async def test_a_result_for_text_that_changed_meanwhile_records_nothing(conn, models):
     tree = await taxonomy_store.load(conn)
     gateway = models.gateway(CONFIG, None)
-    (found,) = [c async for c in classification.classify([A], tree, gateway)]
+    async with classification.classify([A], tree, gateway) as results:
+        (found,) = [c async for c in results]
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
     await papers_store.upsert(conn, [rewritten])
     assert not await classification.record(conn, found)

@@ -349,8 +349,11 @@ async def test_grading_now_checks_the_topic_under_the_taxonomy_lock(conn, models
 async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(conn, models):
     paper = await papers_store.get(conn, B.id)
     due = grading.Due(paper, FAITH, "Chain-of-thought faithfulness")
-    async with model_run(conn, CONFIG, "grading", gateway=models.gateway) as run:
-        (graded,) = [g async for g in grading.grade([due], run.gateway)]
+    async with (
+        model_run(conn, CONFIG, "grading", gateway=models.gateway) as run,
+        grading.grade([due], run.gateway) as results,
+    ):
+        (graded,) = [g async for g in results]
     assert graded.verdict is not None
     await word.save_taxonomy(conn, paused())  # paused while the graders were asked
     assert await grading.record(conn, graded) is False
