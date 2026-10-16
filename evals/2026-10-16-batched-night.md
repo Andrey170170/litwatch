@@ -55,7 +55,14 @@ papers had 8.1 %. At N6's share it is about $65. Either way it is under the $100
 
 ## Not shown here
 
-- **The journal against Anthropic's own usage** (V9, R6): there is no admin key on this host, so the owner reads the
-  console's usage for 2026-10-16 18:59–20:09 UTC: about $3.15 on the batch tier, from the eight batches above.
+- **The journal against Anthropic's own usage, by the hour** (V9, R6). The console shows usage only by day. For
+  2026-10-16 the owner read $65: Opus $51, Sonnet $11, Haiku the rest. The journals of that day's runs come to $62.14:
+  - Opus $48.44: N6's restart $47.70 and this night $0.74.
+  - Sonnet $11.90: P1's replay $9.64 at normal prices and this night $2.26.
+  - Haiku $1.80.
+
+  The $3 gap is calls these journals do not hold, such as production 0.14's on that day. This night's Sonnet calls charged at normal
+  prices would have made Sonnet's day about $14, not $11, so the batch tier did apply. Its exact charge cannot be read
+  apart from the day.
 - **The deadline** is shown by tests with a fake clock (V7, `tests/test_batches.py`), not by this night, which ended
   three hours before it.
