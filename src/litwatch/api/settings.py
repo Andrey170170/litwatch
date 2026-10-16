@@ -275,11 +275,11 @@ WAITING = {
 async def _awaiting(
     c: Any, paper_id: str, revision: int, step: failures.Step = "classification", topic: str = ""
 ) -> AsyncIterator[Paper]:
-    """The paper, locked to the end of the action's transaction, if `step` still waits for the
-    owner on it at `revision`; 409 if its text changed or it no longer waits (a nightly
-    rewrite, another action). Eligibility is read after the lock, in the transaction that
-    acts."""
-    async with c.transaction():
+    """The paper, in a change of it (`word.change`) that is the action's, if `step` still waits
+    for the owner on it at `revision` (`failures.waiting`); 409 if its text changed or it no
+    longer waits (a nightly rewrite, another action, its topic paused). Eligibility is read
+    after the locks, in the transaction that acts, and the paper is settled at its end."""
+    async with word.change(c, paper_id):
         paper = await papers_store.lock(c, paper_id)
         if paper is None:
             raise HTTPException(status_code=404, detail="no such paper")
@@ -305,20 +305,16 @@ class ClassesIn(Awaiting):
 @router.put("/classification/{paper_id:path}", responses=WAITING)
 async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
     """The owner names the paper's classes, which go on as usual with source `owner`."""
-    # One transaction, with the settle lock taken first as by every write that settles: its
-    # shared taxonomy lock holds the tree still until the classification is recorded, and the
-    # paper is classified and settled together.
-    async with c.transaction():
-        await word.lock(c, paper_id)
+    # The change's shared taxonomy lock holds the tree still until the classification is
+    # recorded, and the paper is classified and settled together.
+    async with _awaiting(c, paper_id, body.revision) as paper:
         tree = await taxonomy_store.load(c)
         if tree is None:
             raise HTTPException(status_code=409, detail="no taxonomy")
-        async with _awaiting(c, paper_id, body.revision) as paper:
-            try:
-                await classification.by_hand(c, paper, tree, body.classes, body.primary)
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
-        await word.settle(c, paper_id)  # classified: in the collection, with a rarity
+        try:
+            await classification.by_hand(c, paper, tree, body.classes, body.primary)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "classes": list(dict.fromkeys(body.classes)),
         "primary": body.primary or body.classes[0],
@@ -338,11 +334,9 @@ async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
     abstract = (body.abstract or "").strip() or None
     if not (title or abstract):
         raise HTTPException(status_code=422, detail="give a title or an abstract")
-    async with c.transaction():  # the new text and the grades without its old Weight, together
-        await word.lock(c, paper_id)
-        async with _awaiting(c, paper_id, body.revision):
-            await papers_store.correct(c, paper_id, title, abstract)
-        await word.settle(c, paper_id)
+    # The new text and the grades without its old Weight, together.
+    async with _awaiting(c, paper_id, body.revision):
+        await papers_store.correct(c, paper_id, title, abstract)
 
 
 @router.post("/analysis/{paper_id:path}/retry", status_code=204, responses=WAITING)
@@ -367,15 +361,16 @@ async def grade_now(
     """A grading failed three runs in a row on this text: grade it now, as a run of its own.
     It counts as the first of three more runs. Until it is recorded the grading stays a pending
     failure, so a request cut short leaves it to the next nightly run; 409 when the paper's text
-    changed or it was dismissed while it was graded."""
-    tree = await taxonomy_store.load(c)
-    followed = tree.topic(topic) if tree else None
-    if tree is None or followed is None:
-        raise HTTPException(status_code=404, detail="no such topic")
-    if followed.status != Status.ACTIVE:
-        raise HTTPException(status_code=409, detail=f"{topic} is {followed.status}: not graded")
-    async with _awaiting(c, paper_id, body.revision, "grading", topic) as paper:
-        await failures.reset(c, paper_id, "grading", topic)
+    changed, it was dismissed or the topic was paused while it was graded."""
+    async with word.change(c, paper_id):  # the topic read under the taxonomy lock, shared
+        tree = await taxonomy_store.load(c)
+        followed = tree.topic(topic) if tree else None
+        if tree is None or followed is None:
+            raise HTTPException(status_code=404, detail="no such topic")
+        if followed.status != Status.ACTIVE:
+            raise HTTPException(status_code=409, detail=f"{topic} is {followed.status}: not graded")
+        async with _awaiting(c, paper_id, body.revision, "grading", topic) as paper:
+            await failures.reset(c, paper_id, "grading", topic)
     config = request.app.state.config
     due = [grading.Due(paper, followed, tree.get(topic).name)]
     recorded = False
@@ -387,7 +382,9 @@ async def grade_now(
             if recorded := await grading.record(c, g):
                 run.add("graded" if g.verdict is not None else "grading_failed")
     if not recorded:
-        raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
+        raise HTTPException(
+            status_code=409, detail="the paper's text changed, or the topic was paused, meanwhile"
+        )
     v = g.verdict
     return GradedOut(graded=v is not None, fit=v.fit if v else None, error=g.error)
 
@@ -416,11 +413,10 @@ async def use_pdf(pass_id: int, request: Request, c: Conn) -> None:
 
 
 async def _run_now(pass_id: int, request: Request, c: Any, *, pdf: bool) -> None:
-    async with c.transaction():
-        paper_id = await fulltext_store.paper_of(c, pass_id)
-        if paper_id is None:
-            raise HTTPException(status_code=404, detail="no such full-text pass")
-        await word.lock(c, paper_id)  # as every write to a paper's passes
+    paper_id = await fulltext_store.paper_of(c, pass_id)  # a pass never changes paper
+    if paper_id is None:
+        raise HTTPException(status_code=404, detail="no such full-text pass")
+    async with word.change(c, paper_id):  # as every write to a paper's passes
         if not await fulltext_store.run_now(c, pass_id, FAILED_RUNS, pdf=pdf):
             raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
     request.app.state.fulltext_wake.set()

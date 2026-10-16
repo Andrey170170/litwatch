@@ -161,8 +161,7 @@ async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
     stay and outrank them (`core.classification.standing`). The paper is settled: classified,
     it is in the collection and has a rarity, from its Weight alone until it is graded.
     """
-    async with conn.transaction():
-        await word.lock(conn, c.paper.id)  # before any write, as every write that settles
+    async with word.change(conn, c.paper.id):
         if not await papers_store.still_current(conn, c.paper):
             return False
         if c.error is not None or c.classified is None or c.model is None:
@@ -174,7 +173,6 @@ async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
         await store.replace(conn, c.paper, c.memberships, c.versions)
         await failures.succeeded(conn, c.paper.id, "classification")
         await _announce(conn, c.paper, primary, by_owner=False)
-        await word.settle(conn, c.paper.id)
     return True
 
 
@@ -188,7 +186,7 @@ async def by_hand(
     """The owner classifies a paper: its classes, each an owner membership, and its primary
     class (the first named, unless given). The keyword check runs as usual. Raises ValueError
     for a class not in the tree. Returns False when the paper's text changed meanwhile, or it
-    was dismissed. The caller settles the paper once its transaction ends (`word.settle`)."""
+    was dismissed. A change of the paper (`word.change`), alone or in the caller's."""
     if not classes:
         raise ValueError("name at least one class")
     if unknown := sorted(set(classes) - {c.slug for c in tree.classes}):
@@ -198,7 +196,7 @@ async def by_hand(
         raise ValueError("the primary class must be one of the classes named")
     versions = {c.slug: c.version for c in tree.classes}
     hits = keyword(tree, paper.title, paper.abstract)
-    async with conn.transaction():
+    async with word.change(conn, paper.id):
         if not await papers_store.still_current(conn, paper):
             return False
         await store.add(conn, paper, tree.classes_version, primary, None, OWNER)

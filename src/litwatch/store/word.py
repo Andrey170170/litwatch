@@ -148,6 +148,20 @@ async def rarity_of(
     return Rarity(row["level"]), row["best_topic"], Weight(row["weight"]) if row["weight"] else None
 
 
+async def topic_papers(conn: psycopg.AsyncConnection, slug: str) -> list[str]:
+    """The papers the topic has a grade, verdict, label or reaction for, in id order."""
+    rows = await (
+        await conn.execute(
+            "SELECT paper_id FROM effective_grades WHERE topic = %(t)s "
+            "UNION SELECT paper_id FROM verdicts WHERE topic = %(t)s "
+            "UNION SELECT paper_id FROM labels WHERE topic = %(t)s "
+            "UNION SELECT paper_id FROM reactions WHERE topic = %(t)s ORDER BY 1",
+            {"t": slug},
+        )
+    ).fetchall()
+    return [r["paper_id"] for r in rows]
+
+
 async def tied(conn: psycopg.AsyncConnection) -> list[str]:
     """Papers whose highest level in a mixed list comes from two or more followed topics: the
     owner's order picks their best topic (`core.mixed_rarity`), so a new order can change it."""

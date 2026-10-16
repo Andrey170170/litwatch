@@ -22,12 +22,10 @@ async def main(fixture: Path, slug: str) -> None:
     async with await store.connect(config.database_url()) as conn:
         tree = await taxonomy_store.load(conn)
         for paper_id in ids:
-            async with conn.transaction():
-                await word.lock(conn, paper_id)
+            async with word.change(conn, paper_id):  # classified and settled together
                 paper = await papers_store.get(conn, paper_id)
                 if paper is None or not await classification.by_hand(conn, paper, tree, [slug]):
                     raise SystemExit(f"{paper_id}: not stored, or changed meanwhile")
-            await word.settle(conn, paper_id)
     print(f"classified {len(ids)} papers into {slug}")
 
 

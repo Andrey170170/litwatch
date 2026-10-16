@@ -149,8 +149,7 @@ async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
     `gist.written` when that Gist is current, and settle the paper (its grades and rarity
     follow the Weight); or record its failure. Returns False when there was nothing to record:
     the paper's text changed meanwhile, or it was dismissed."""
-    async with conn.transaction():
-        await word.lock(conn, a.paper.id)  # before any write, as every write that settles
+    async with word.change(conn, a.paper.id):
         if not await papers_store.still_current(conn, a.paper):
             return False
         if a.analysis is None or a.model is None:
@@ -169,5 +168,4 @@ async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
                 source="abstract",
                 gist_id=gist,
             )
-        await word.settle(conn, a.paper.id)
     return True

@@ -753,7 +753,7 @@ async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, c
     await client.delete(f"/api/labels/{FAITH.slug}/{Q.id}")
     async with await store.sibling(conn) as other:
         async with other.transaction():
-            await word.lock(other, Q.id)  # a correction, part way through
+            await word.lock_many(other, [Q.id])  # a correction, part way through
             again = asyncio.create_task(
                 client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
             )

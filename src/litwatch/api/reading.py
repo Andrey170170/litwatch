@@ -44,6 +44,7 @@ from litwatch.jobs import publications as lookups
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import digests as digests_store
+from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import reading
@@ -723,9 +724,10 @@ def _speaks(topic: Topic | None, reason: ReactionReason | None) -> bool:
     return topic is not None and topic.depth == Depth.FOCUS and reason in REACTION_WORDS
 
 
-# Each action below checks the topic and the paper under the paper's lock (`word.lock`, after
-# the taxonomy's, shared), then writes and settles in the same transaction: a topic edited
-# meanwhile cannot take a write, or a message, it no longer qualifies for.
+# Each action below is a change of the paper (`word.change`): it checks the topic and the paper
+# under the paper's lock, after the taxonomy's, shared, then writes, and the paper is settled in
+# the same transaction: a topic edited meanwhile cannot take a write, or a message, it no
+# longer qualifies for.
 
 
 @router.put("/reactions/{paper_id:path}", responses=NOT_FOUND)
@@ -738,11 +740,11 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    async with c.transaction():
-        await word.lock(c, paper_id)
+    async with word.change(c, paper_id) as change:
         await _known(c, paper_id)
         name, topic = await _topic(c, body.topic) if body.topic else (None, None)
-        _, settled = await word.react(c, reaction)
+        await word_store.set_reaction(c, reaction)
+    settled = change.settled[paper_id]
     if not _speaks(topic, body.reason):
         return _ack(settled)
     if body.reason == ReactionReason.WRONG_TOPIC:
@@ -754,12 +756,12 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
 async def unreact(paper_id: str, c: Conn, topic: str | None = None) -> s.Ack:
     """Clear a thumb: it takes back its own word and nothing else. A thumb on a topic no longer
     shown can be cleared too; it carried no word, so nothing is said."""
-    async with c.transaction():
-        await word.lock(c, paper_id)
+    async with word.change(c, paper_id) as change:
         thumbs = await word_store.reactions_for(c, paper_id)
         thumb = next((r for r in thumbs if r.topic == topic), None)
         shown = await _shown(c, topic) if thumb and topic else None
-        settled = await word.unreact(c, paper_id, topic)
+        await word_store.clear_reaction(c, paper_id, topic)
+    settled = change.settled[paper_id]
     if shown and _speaks(shown[1], thumb.reason):
         return _ack(settled, f"Mark on {shown[0]} taken back")
     return _ack(settled)
@@ -768,8 +770,10 @@ async def unreact(paper_id: str, c: Conn, topic: str | None = None) -> s.Ack:
 @router.put("/library/{paper_id:path}", responses=NOT_FOUND)
 async def save(paper_id: str, body: s.SaveIn, c: Conn) -> s.Ack:
     """Save or unsave by hand; the newest use outranks every other reason."""
-    await _known(c, paper_id)
-    return _ack(await word.toggle(c, paper_id, Hand.SAVE if body.saved else Hand.UNSAVE))
+    async with word.change(c, paper_id) as change:
+        await _known(c, paper_id)
+        await word_store.set_hand(c, paper_id, Hand.SAVE if body.saved else Hand.UNSAVE)
+    return _ack(change.settled[paper_id])
 
 
 @router.put("/labels/{topic}/{paper_id:path}", responses=NOT_FOUND)
@@ -777,18 +781,17 @@ async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn) -> s.Ack:
     """The Fit control on a paper's page: the owner's own word on any shown topic (origin
     `reader`). Unsure is stored and counts nowhere."""
     given = Label(paper_id=paper_id, topic=topic, value=body.value, origin=LabelOrigin.READER)
-    async with c.transaction():
-        await word.lock(c, paper_id)
+    async with word.change(c, paper_id) as change:
         await _topic(c, topic)
         await _known(c, paper_id)
-        _, settled = await word.label(c, given)
-    return _ack(settled)
+        await feedback_store.set_label(c, given)
+    return _ack(change.settled[paper_id])
 
 
 @router.delete("/labels/{topic}/{paper_id:path}")
 async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
     """Tapping the filled segment: the label goes, and the verdict's Fit stands again."""
-    return _ack(await word.unlabel(c, paper_id, topic))
+    return _ack((await word.unlabel(c, paper_id, topic)).settled[paper_id])
 
 
 @router.post(
@@ -804,13 +807,13 @@ async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    async with c.transaction():
+    async with word.change(c, paper_id) as change:
         name, topic = await _topic(c, body.topic)
         if topic.depth != Depth.FOCUS:
             raise HTTPException(status_code=409, detail="not a Focus topic")
-        found, _ = await misses.keep(c, paper_id, fetched)
-        await word.lock(c, found.id)
-        _, settled, new = await misses.report(c, found.id, body.topic, body.fit)
+        await misses.keep(c, paper_id, fetched)
+        _, _, new = await misses.report(c, paper_id, body.topic, body.fit)
+    settled = change.settled[paper_id]
     if not new:
         return _ack(settled, f"Already reported as missed for {name}")
     return _ack(settled, f"Reported as missed for {name}")

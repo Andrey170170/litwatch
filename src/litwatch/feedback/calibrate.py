@@ -185,6 +185,10 @@ class Answer(BaseModel):
 async def answer(
     conn: psycopg.AsyncConnection, session_id: int, position: int, given: Answer
 ) -> None:
+    """Store an item's answers as one change of its paper (`word.change`): its labels are
+    written together and settled once, so a Fit moved from one topic to another does not take
+    the paper out of the library and back. LookupError for no such item; ValueError for a
+    missing Fit or one for a topic not at Focus."""
     item = await (
         await conn.execute(
             "SELECT * FROM calibration_items WHERE session_id = %s AND position = %s",
@@ -195,11 +199,10 @@ async def answer(
         raise LookupError("no such item")
     if item["topic"] not in given.fit and item["answered_at"] is None:
         raise ValueError(f"fit for {item['topic']} is required")
-    focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
-    if unknown := sorted(set(given.fit) - focus):
-        raise ValueError(f"not Focus topics: {', '.join(unknown)}")
-    async with conn.transaction():
-        await word.lock(conn, item["paper_id"])
+    async with word.change(conn, item["paper_id"]):
+        focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
+        if unknown := sorted(set(given.fit) - focus):
+            raise ValueError(f"not Focus topics: {', '.join(unknown)}")
         # A firm label already saying this Fit is not written again: writing renews its time,
         # which would put it above a reaction given since (the newest word wins).
         firm = {

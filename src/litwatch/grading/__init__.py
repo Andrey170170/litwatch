@@ -24,6 +24,7 @@ from litwatch.llm.types import DecisionRequest, Predicate
 from litwatch.store import analyses as analyses_store
 from litwatch.store import failures
 from litwatch.store import papers as papers_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as store
 
 HOLDS = "holds"  # the `area_check` question
@@ -227,11 +228,13 @@ async def due(
 async def record(conn: psycopg.AsyncConnection, g: Graded) -> bool:
     """Store one grading with `verdict.recorded` and settle the paper (its effective grade,
     rarity and library state follow); or record its failure. Returns False when there was
-    nothing to record: the paper's text changed meanwhile, or it was dismissed."""
+    nothing to record: the paper's text changed meanwhile, it was dismissed, or the topic is
+    no longer active (paused during the call: a paused topic grades nothing)."""
     paper, slug = g.due.paper, g.due.topic.slug
-    async with conn.transaction():
-        await word.lock(conn, paper.id)
+    async with word.change(conn, paper.id):
         if not await papers_store.still_current(conn, paper):
+            return False
+        if slug not in {t.slug for t in await taxonomy_store.topics(conn, Status.ACTIVE)}:
             return False
         if g.verdict is None:
             error = g.error or "no answer"
@@ -253,5 +256,4 @@ async def record(conn: psycopg.AsyncConnection, g: Graded) -> bool:
             split=stored.split,
             escalated=stored.escalated,
         )
-        await word.settle(conn, paper.id)
     return True

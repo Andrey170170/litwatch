@@ -40,7 +40,7 @@ class Saved:
 
 async def lock(conn: psycopg.AsyncConnection) -> None:
     """Hold the taxonomy edit lock to the end of the transaction. It waits for settles in
-    flight, which hold the lock shared (`feedback.word.lock`). Every write to classes or
+    flight, which hold the lock shared (`feedback.word.lock_many`). Every write to classes or
     topics takes it first."""
     await conn.execute("SELECT pg_advisory_xact_lock(%s)", (TAXONOMY_LOCK,))
 

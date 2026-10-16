@@ -43,8 +43,7 @@ async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
     included ("Write again"): their request takes over the open Deep pass or queues one, with
     `card.requested`, under the paper's lock. Returns the pass's id; None for a paper that is
     not there or dismissed, whose passes are never worked."""
-    async with conn.transaction():
-        await word.lock(conn, paper_id)
+    async with word.change(conn, paper_id):
         found = await store_.deep_facts(conn, paper_id)
         if found is None or found.dismissed:
             return None
@@ -106,12 +105,11 @@ async def _work_one(
             await record(conn, a)
             return "awaiting_text" if a.waiting else "card_failed"
         text = TextRead(a.text.version, a.text.source, a.text.sha256)
-        async with conn.transaction():
+        async with word.change(conn, c.paper.id):
             # Under the paper's lock, judged again as at its claim: the paper may have been
             # dismissed or unsaved during the read, and nothing is spent then. The owner's
             # request may have taken the pass over since its claim, and then the submission and
             # its attempt are theirs.
-            await word.lock(conn, c.paper.id)
             if why := await judged(conn, c):
                 return why
             reason = await store_.submitted(conn, c, text)
@@ -138,8 +136,7 @@ async def _work_one(
         return await _ended(
             conn, c, attempt["id"], outcome.usage, outcome.error or "no card", outcome.trace
         )
-    async with conn.transaction():
-        await word.lock(conn, c.paper.id)
+    async with word.change(conn, c.paper.id):
         if not await store_.held(conn, c):
             return "lost"
         revision, text = await store_.read_of(conn, c.id)
@@ -180,15 +177,13 @@ async def _ended(
     """An attempt that made no card: its usage (None, unknown) and the error, and the pass
     failed for this run, a run that counts."""
     log.warning("%s: deep card failed: %s", c.paper.id, error)
-    async with conn.transaction():
-        await word.lock(conn, c.paper.id)
+    async with word.change(conn, c.paper.id):
         await cards.attempt_ended(conn, attempt_id, usage, error)
         if not await store_.held(conn, c):
             return "lost"
         await cards.card_failed(conn, c.paper.id, error, usage, trace)
         revision, text = await store_.read_of(conn, c.id)
         await store_.failed(conn, c, error, counts=True, text=text)
-        await word.settle(conn, c.paper.id)
     return "card_failed"
 
 

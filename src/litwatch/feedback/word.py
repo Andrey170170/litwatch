@@ -7,11 +7,18 @@ them, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the same t
 also queues the paper's full-text passes when it qualifies for them (its Brief or Weight
 re-check, its Deep card), so the owner's word can queue one too, and drops one not started that
 it no longer qualifies for.
+
+A change to a paper goes through `change`, which opens the transaction, takes the locks in
+their order, runs the action's checks and writes, and settles each paper once before commit;
+the helpers below (`label`, `react`, `toggle`, …) are changes, alone or inside a caller's.
 """
 
 from __future__ import annotations
 
 import logging
+import weakref
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 
 import psycopg
@@ -68,22 +75,60 @@ class Settled:
     saved: bool = False
 
 
-async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
-    """Hold the paper's settle lock to the end of the transaction. Every write that ends in a
-    settle takes it first, so no two transactions wait on each other's rows.
+async def lock_many(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
+    """Hold the papers' settle locks to the end of the transaction, taken in id order so that
+    two transactions locking papers in common never wait on each other. Every write that ends
+    in a settle takes them first, through `change`.
 
     The taxonomy lock is taken shared first: a taxonomy edit takes it exclusively before any
     paper, so locks are always taken taxonomy first, and a settle never reads a depth that an
     edit in flight is about to change.
     """
-    await lock_many(conn, [paper_id])
-
-
-async def lock_many(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
-    """`lock` for several papers, taken in id order so that two transactions locking papers in
-    common never wait on each other."""
     await taxonomy_store.lock_shared(conn)
     await word_store.lock_settles(conn, sorted(set(paper_ids)))
+
+
+@dataclass
+class Change:
+    """A change to some papers (`change`): the papers it locked, in id order, and what settling
+    them did, filled when the outermost change exits."""
+
+    paper_ids: tuple[str, ...]
+    settled: dict[str, Settled] = field(default_factory=dict)
+
+
+# The change open on each connection, which a nested `change` joins.
+_open: weakref.WeakKeyDictionary[psycopg.AsyncConnection, Change] = weakref.WeakKeyDictionary()
+
+
+@asynccontextmanager
+async def change(conn: psycopg.AsyncConnection, *paper_ids: str) -> AsyncIterator[Change]:
+    """Change the papers in one transaction: their locks first (`lock_many`), then the block's
+    checks and writes, then a settle of each paper, in id order, before commit. The block may
+    return early with nothing to record: the papers are settled all the same, which changes
+    nothing then. An exception rolls the change back, unsettled.
+
+    Inside another change on the connection, it joins that one, in a savepoint: the outermost
+    change settles once at its exit, and only then is `settled` filled. A nested change names
+    only papers the outer one locked; a lock taken late would break the order, so it raises.
+    """
+    outer = _open.get(conn)
+    if outer is not None:
+        if late := sorted(set(paper_ids) - set(outer.paper_ids)):
+            raise RuntimeError(f"a nested change on papers the outer one did not lock: {late}")
+        async with conn.transaction():
+            yield outer
+        return
+    current = Change(tuple(sorted(set(paper_ids))))
+    async with conn.transaction():
+        await lock_many(conn, list(current.paper_ids))
+        _open[conn] = current
+        try:
+            yield current
+            for paper_id in current.paper_ids:
+                current.settled[paper_id] = await settle(conn, paper_id)
+        finally:
+            del _open[conn]
 
 
 def _value(e: Effective | None) -> dict[str, str | None]:
@@ -102,7 +147,7 @@ async def settle(
     """
 
     async with conn.transaction():
-        await lock(conn, paper_id)
+        await lock_many(conn, [paper_id])
         # Followed topics in the owner's order; a draft topic is not used.
         topics = {t.slug: t for t in await taxonomy_store.topics(conn) if t.status != Status.DRAFT}
         labels = {x.topic: x for x in await feedback_store.labels_for(conn, paper_id)}
@@ -251,41 +296,40 @@ async def _deep_pass(
         await fulltext_store.queue_deep(conn, paper_id, found.revision, want)
 
 
-async def label(conn: psycopg.AsyncConnection, given: Label) -> tuple[Label, Settled]:
-    async with conn.transaction():
-        await lock(conn, given.paper_id)
+# Each helper below is a change of one paper (`change`): alone it settles the paper before it
+# returns; inside a caller's change, that change settles it at its exit.
+
+
+async def label(conn: psycopg.AsyncConnection, given: Label) -> tuple[Label, Change]:
+    async with change(conn, given.paper_id) as done:
         stored = await feedback_store.set_label(conn, given)
-        return stored, await settle(conn, given.paper_id)
+    return stored, done
 
 
-async def unlabel(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> Settled:
-    async with conn.transaction():
-        await lock(conn, paper_id)
+async def unlabel(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> Change:
+    async with change(conn, paper_id) as done:
         await feedback_store.delete_label(conn, paper_id, topic)
-        return await settle(conn, paper_id)
+    return done
 
 
-async def react(conn: psycopg.AsyncConnection, given: Reaction) -> tuple[Reaction, Settled]:
-    async with conn.transaction():
-        await lock(conn, given.paper_id)
+async def react(conn: psycopg.AsyncConnection, given: Reaction) -> tuple[Reaction, Change]:
+    async with change(conn, given.paper_id) as done:
         stored = await word_store.set_reaction(conn, given)
-        return stored, await settle(conn, given.paper_id)
+    return stored, done
 
 
-async def unreact(conn: psycopg.AsyncConnection, paper_id: str, topic: str | None) -> Settled:
+async def unreact(conn: psycopg.AsyncConnection, paper_id: str, topic: str | None) -> Change:
     """Clear a thumb. It takes back its own word and nothing else."""
-    async with conn.transaction():
-        await lock(conn, paper_id)
+    async with change(conn, paper_id) as done:
         await word_store.clear_reaction(conn, paper_id, topic)
-        return await settle(conn, paper_id)
+    return done
 
 
-async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Settled:
+async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Change:
     """Save or unsave by hand. The newest use outranks every other reason, until the next."""
-    async with conn.transaction():
-        await lock(conn, paper_id)
+    async with change(conn, paper_id) as done:
         await word_store.set_hand(conn, paper_id, hand)
-        return await settle(conn, paper_id)
+    return done
 
 
 async def save_taxonomy(conn: psycopg.AsyncConnection, tree: Taxonomy) -> taxonomy_store.Saved:
@@ -331,20 +375,13 @@ async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> Non
 
 
 async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
-    """Settle every paper the topic has a grade, verdict or word for, in id order. Call it in
-    the transaction that changed the topic, after `taxonomy.lock`."""
-    rows = await (
-        await conn.execute(
-            "SELECT paper_id FROM effective_grades WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM verdicts WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM labels WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM reactions WHERE topic = %(t)s ORDER BY 1",
-            {"t": slug},
-        )
-    ).fetchall()
-    for row in rows:
-        await settle(conn, row["paper_id"])
-    return len(rows)
+    """Settle every paper the topic has a grade, verdict or word for, in id order
+    (`word.topic_papers`). Call it in the transaction that changed the topic, after
+    `taxonomy.lock`."""
+    papers = await word_store.topic_papers(conn, slug)
+    for paper_id in papers:
+        await settle(conn, paper_id)
+    return len(papers)
 
 
 async def sync(conn: psycopg.AsyncConnection) -> dict[str, int]:
