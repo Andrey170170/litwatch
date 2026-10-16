@@ -39,10 +39,10 @@ export function settleNeeds(qc: QueryClient, patch: (q: Quality) => Quality) {
  * read in flight is cancelled first, since begun before the write it would land as fresh. */
 async function digestsStale(qc: QueryClient) {
   await qc.cancelQueries({ queryKey: ["digest"] });
-  // a read interrupted before it had anything (a view just gone to) is started again rather than left pending
-  const empty = (q: { state: { data: unknown } }) => q.state.data === undefined;
-  await qc.invalidateQueries({ queryKey: ["digest"], refetchType: "active", predicate: empty });
-  await qc.invalidateQueries({ queryKey: ["digest"], refetchType: "none", predicate: (q) => !empty(q) });
+  // all are marked stale at once; a read interrupted before it had anything (a view just gone to) is then started
+  // again rather than left pending
+  await qc.invalidateQueries({ queryKey: ["digest"], refetchType: "none" });
+  await qc.refetchQueries({ queryKey: ["digest"], type: "active", predicate: (q) => q.state.data === undefined });
 }
 
 /** After a write on a paper: refetch its page and patch its star in lists; the lists change no further until the
@@ -419,6 +419,7 @@ export function useSaveTopic() {
         qc.invalidateQueries({ queryKey: ["taxonomy"] }),
         qc.invalidateQueries({ queryKey: ["topics"] }),
         qc.invalidateQueries({ queryKey: ["summary"] }),
+        digestsStale(qc),
         qc.invalidateQueries(settingsReads("topics")),
         qc.invalidateQueries(settingsReads("taxonomy")),
       ]),
@@ -455,6 +456,7 @@ export function useReorderTopics() {
       Promise.all([
         qc.invalidateQueries({ queryKey: ["taxonomy"] }),
         qc.invalidateQueries({ queryKey: ["topics"] }),
+        digestsStale(qc),
         qc.invalidateQueries({ queryKey: ["summary"] }),
         qc.invalidateQueries(settingsReads("topics")),
         qc.invalidateQueries(settingsReads("taxonomy")),

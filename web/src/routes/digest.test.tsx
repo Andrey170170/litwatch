@@ -102,6 +102,11 @@ describe("the Digest", () => {
     // The calendar: a row per week, the week's weeklies in the W cell, today's cell marked.
     await userEvent.click(screen.getByRole("link", { name: "Calendar" }));
     expect(await screen.findByText("W 5–11 Oct")).toBeInTheDocument();
+    // one current mode and one current view, whatever the search says
+    expect(screen.getByRole("link", { name: "Calendar" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "List" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: "History" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Day" })).not.toHaveAttribute("aria-current");
     expect(document.querySelector(".mday.today .mnum")).toHaveTextContent("14");
     expect(document.querySelectorAll(".mday.empty").length).toBeGreaterThan(0);
   });

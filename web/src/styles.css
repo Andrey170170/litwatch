@@ -399,7 +399,7 @@ html[data-theme="light"] .wkline { color: var(--fg); border-color: var(--fg); }
 .row.dpr .wy { grid-column: 1 / -1; font-size: 12.5px; color: var(--fg3); font-style: italic; margin-top: 2px; }
 .row.drow { grid-template-columns: auto 1fr auto; align-items: center; padding: 6px 10px 6px 14px; font-size: 13px; }
 .row.drow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row.drow.quiet { color: var(--fg3); }
+.row.drow.quiet, .row.drow.quiet:hover { color: var(--fg3); box-shadow: none; background-image: none; }
 .row.drow.quiet .c { color: var(--fg3); }
 .row.drow.bad .c { color: var(--sig); }
 .dlist { background: var(--surface); border: 1px solid var(--line2); }

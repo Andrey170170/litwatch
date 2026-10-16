@@ -40,7 +40,7 @@ function Views({ view, children }: { view: View; children?: ReactNode }) {
     <div className="segbar">
       <nav className="vseg" aria-label="Digest views">
         {VIEWS.map((v) => (
-          <Link key={v.view} to={v.to} className={`vs${v.view === view ? " on" : ""}`} aria-current={v.view === view ? "page" : undefined}>
+          <Link key={v.view} to={v.to} className={`vs${v.view === view ? " on" : ""}`} activeOptions={{ exact: true, includeSearch: false }}>
             {v.name}
           </Link>
         ))}
@@ -264,10 +264,10 @@ export function WeekPage() {
 function Modes({ cal, foot }: { cal: boolean; foot?: boolean }) {
   return (
     <nav className={`modes${foot ? " foot" : ""}`} aria-label="History as">
-      <Link to="/history" search={{}} replace className={cal ? "" : "on"} aria-current={cal ? undefined : "page"} aria-label="List">
+      <Link to="/history" search={{}} replace className={cal ? "" : "on"} activeOptions={{ exact: true }} aria-label="List">
         ☰{foot && <span>List</span>}
       </Link>
-      <Link to="/history" search={{ view: "cal" }} replace className={cal ? "on" : ""} aria-current={cal ? "page" : undefined} aria-label="Calendar">
+      <Link to="/history" search={{ view: "cal" }} replace className={cal ? "on" : ""} activeOptions={{ exact: true }} aria-label="Calendar">
         ▦{foot && <span>Calendar</span>}
       </Link>
     </nav>

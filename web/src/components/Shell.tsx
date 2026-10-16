@@ -105,7 +105,7 @@ function Tabs({ onPick, drawer }: { onPick?: () => void; drawer?: boolean }) {
       {drawer &&
         t.name === "Digest" &&
         DIGEST_VIEWS.map((v) => (
-          <Link key={v.to} to={v.to} className="it sub" activeOptions={{ exact: true }} activeProps={{ className: "it sub on" }} onClick={onPick}>
+          <Link key={v.to} to={v.to} className="it sub" activeOptions={{ exact: true, includeSearch: false }} activeProps={{ className: "it sub on" }} onClick={onPick}>
             {v.name}
           </Link>
         ))}
