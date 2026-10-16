@@ -19,7 +19,8 @@ docker compose exec litwatch litwatch taxonomy import    # the seed tree and top
 The web app is at `http://127.0.0.1:8080` (`LITWATCH_BIND`, `LITWATCH_PORT`); sign in with `LITWATCH_API_TOKEN`.
 `docker compose exec litwatch litwatch …` runs any other command, such as `intake --days 1` for a first night.
 
-Deep cards: uncomment `[integrations.deep]` in `litwatch.toml`, then
+Deep cards: set `LITWATCH_READ_TOKEN` in `.env` (deep searches litwatch with it for a card's "Among the
+collection"), uncomment `[integrations.deep]` in `litwatch.toml`, then
 
 ```sh
 docker compose --profile deep run --rm deep login    # sign in once; the session stays in its volume

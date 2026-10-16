@@ -82,9 +82,10 @@ def client(options: dict[str, Any]) -> ArchiveClient:
 
 
 def reader(config: Config) -> ArchiveClient | None:
-    """A client for reading PDFs when an archive integration is configured and enabled."""
+    """A client for reading PDFs when an archive integration is configured and enabled, its
+    section possibly empty (the stack gives its URL and token in the environment)."""
     section = enabled_using(config, "archive")
-    return client(section) if section else None
+    return client(section) if section is not None else None
 
 
 def source(config: Config) -> ArchiveClient:

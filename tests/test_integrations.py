@@ -101,6 +101,21 @@ def test_webdav_finds_its_zotero_by_module_whatever_the_section_is_called(secret
     assert webdav.archive is not None  # found as `papers`, by the module it uses
 
 
+def test_an_archive_section_with_its_settings_in_the_environment_still_serves_pdfs(
+    secrets, monkeypatch
+):
+    monkeypatch.setenv("LITWATCH_ARCHIVE_URL", "http://archive:8787")  # as deploy/compose.yaml
+    config = Config(
+        integrations={
+            "archive": {},
+            "zotero": {"user_id": "1"},
+            "webdav": {"url": "https://dav.test/zotero", "username": "u"},
+        }
+    )
+    webdav = next(i for i in integrations.load(config) if i.name == "webdav")
+    assert webdav.archive is not None and webdav.archive.base_url == "http://archive:8787"
+
+
 def test_the_archive_gives_up_on_a_search_before_search_gives_up_on_it(secrets):
     with pytest.raises(IntegrationError, match="below 5"):
         integrations.load(

@@ -90,7 +90,8 @@ services:
     restart: unless-stopped
     environment:
       LITWATCH_URL: http://litwatch:8080
-      LITWATCH_TOKEN: ${LITWATCH_READ_TOKEN:?set LITWATCH_READ_TOKEN in .env for deep}
+      # Without it deep cannot search litwatch for "Among the collection" (deploy/README.md).
+      LITWATCH_TOKEN: ${LITWATCH_READ_TOKEN:-}
       S2_API_KEY: ${S2_API_KEY:-}
     volumes:
       # Sign in once: docker compose run --rm deep login
