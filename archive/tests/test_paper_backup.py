@@ -12,6 +12,14 @@ from types import SimpleNamespace
 from arxiv_archive import backup as BACKUP
 
 
+def flat_layout(destination: Path) -> None:
+    """The export.json the flat layout before `current` wrote at the destination's root."""
+    destination.mkdir(exist_ok=True)
+    (destination / 'export.json').write_text(json.dumps(
+        {'created_at': '2026-10-01T00:00:00+00:00', 'databases': {}, 'campaigns': {},
+         'restore': 'Restore catalog.sqlite to catalog/catalog.sqlite.'}))
+
+
 class BackupTests(unittest.TestCase):
     def test_online_snapshot_contains_committed_wal_and_is_independent(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -66,7 +74,7 @@ class BackupTests(unittest.TestCase):
             (work / 'catalog').mkdir(parents=True)
             (work / 'state').mkdir()
             (repo / 'manifests').mkdir(parents=True)
-            destination.mkdir()
+            flat_layout(destination)
             previous = destination / 'catalog.sqlite'
             previous.write_bytes(b'previous snapshot')
             with self.assertRaises(FileNotFoundError):
@@ -129,8 +137,9 @@ class BackupTests(unittest.TestCase):
             for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
                 with closing(sqlite3.connect(work / name)) as database:
                     database.execute('CREATE TABLE records (id INTEGER)')
-            (destination / '.arxiv-export-killed').mkdir(parents=True)
-            (destination / '.arxiv-export-killed/catalog.sqlite').write_bytes(b'partial')
+            flat_layout(destination)
+            (destination / '.arxiv-export-k1ll3d_x').mkdir(parents=True)
+            (destination / '.arxiv-export-k1ll3d_x/catalog.sqlite').write_bytes(b'partial')
             (destination / 'catalog.sqlite-wal').write_bytes(b'stale wal')
             (destination / 'catalog.sqlite-shm').write_bytes(b'stale shm')
             BACKUP.export(work, repo, destination)
@@ -152,8 +161,9 @@ class BackupTests(unittest.TestCase):
                 with closing(sqlite3.connect(work / name)) as database:
                     database.execute('CREATE TABLE records (id INTEGER)')
             # An export in the layout before `current`: replaced once a new one is current.
-            destination.mkdir()
+            flat_layout(destination)
             (destination / 'catalog.sqlite').write_bytes(b'old layout')
+            (destination / 'README.md').write_text('old layout')
             (destination / 'campaigns').mkdir()
             first = BACKUP.export(work, repo, destination)
             self.assertEqual(sorted(p.name for p in destination.iterdir() if p.name.startswith('export-')),
@@ -204,6 +214,40 @@ class BackupTests(unittest.TestCase):
                 BACKUP.export(work, repo, destination)
             self.assertEqual(sorted(p.name for p in destination.iterdir()), before)
             self.assertEqual((destination / 'other-backups/data').read_text(), 'keep me too')
+
+    def test_only_an_export_json_proves_an_export_wrote_an_entry(self):
+        # Names alone do not: a directory export-<digits> without an export's export.json, or
+        # notes and databases where the flat layout never was, are someone else's.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, repo = root / 'work', root / 'repo'
+            (work / 'catalog').mkdir(parents=True)
+            (work / 'state').mkdir()
+            (repo / 'manifests').mkdir(parents=True)
+            for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
+                with closing(sqlite3.connect(work / name)) as database:
+                    database.execute('CREATE TABLE records (id INTEGER)')
+            cases = {
+                'export-123': lambda d: (d / 'export-123').mkdir() or (d / 'export-123/data').write_text('x'),
+                'NOTES.md': lambda d: (d / 'NOTES.md').write_text('mine'),
+                'catalog.sqlite': lambda d: (d / 'catalog.sqlite').write_bytes(b'mine'),
+                'export.json': lambda d: (d / 'export.json').write_text('{"mine": true}'),
+                '.arxiv-export-mine': lambda d: (d / '.arxiv-export-mine').mkdir(),
+            }
+            for name, plant in cases.items():
+                with self.subTest(entry=name):
+                    destination = root / f'backup-{len(name)}-{name.strip(".")}'
+                    destination.mkdir()
+                    plant(destination)
+                    with self.assertRaisesRegex(RuntimeError, 'no export wrote'):
+                        BACKUP.export(work, repo, destination)
+                    self.assertEqual([p.name for p in destination.iterdir()], [name])
+            # An export's own generation is owned, and replaced by the next.
+            destination = root / 'backup'
+            BACKUP.export(work, repo, destination)
+            first = (destination / 'current').resolve().name
+            BACKUP.export(work, repo, destination)
+            self.assertNotIn(first, {p.name for p in destination.iterdir()})
 
     def test_campaign_discovery_rejects_symlink_escape(self):
         with tempfile.TemporaryDirectory() as directory:

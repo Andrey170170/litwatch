@@ -7,7 +7,8 @@ acquisition and campaign snapshots are individually consistent, not one transact
 The export is one directory, `export-<time>`, named by the symlink `current` in the
 destination. A new export is written beside it and `current` is swapped to it in one
 rename, so a failure part-way leaves the previous export whole and current. An export only
-ever deletes what an export wrote, and refuses a destination holding anything else.
+ever deletes what an export wrote, as its export.json marks it, and refuses a destination
+holding anything else.
 """
 from __future__ import annotations
 
@@ -108,14 +109,31 @@ FLAT = ('catalog.sqlite', 'catalog.sqlite-wal', 'catalog.sqlite-shm', 'progress.
         'acquisition-job.json', '*.md', 'SHA256SUMS*', 'requirements.lock', 'pyproject.toml')
 
 
-def owned(entry: Path) -> bool:
+def exported(report: Path) -> bool:
+    """Whether `report` is the export.json an export writes: the marker of an export's files."""
+    if report.is_symlink() or not report.is_file():
+        return False
+    try:
+        written = json.loads(report.read_text())
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    return isinstance(written, dict) and {'created_at', 'databases', 'restore'} <= written.keys()
+
+
+def owned(entry: Path, flat: bool) -> bool:
     """Whether an export wrote this entry of the destination: its lock, `current` and its
-    swap, a generation, a staging directory, or a name of the flat layout."""
+    swap, a generation holding its export.json, a staging directory, or, when the destination
+    holds the flat layout's export.json (`flat`), a name of that layout."""
     if entry.name in (CURRENT, '.current-new'):
         return entry.is_symlink()
-    if re.fullmatch(r'export-\d+|\.arxiv-export-.+', entry.name):
+    if re.fullmatch(r'export-\d+', entry.name):
+        return entry.is_dir() and not entry.is_symlink() and exported(entry / 'export.json')
+    # tempfile.mkdtemp's names; a killed export leaves one before its export.json is written.
+    if re.fullmatch(r'\.arxiv-export-[a-z0-9_]{8}', entry.name):
         return entry.is_dir() and not entry.is_symlink()
-    return entry.name == LOCK or any(fnmatchcase(entry.name, pattern) for pattern in FLAT)
+    if entry.name == LOCK:
+        return entry.is_file() and not entry.is_symlink()
+    return flat and any(fnmatchcase(entry.name, pattern) for pattern in FLAT)
 
 
 def export(work: Path, repo: Path, destination: Path) -> dict:
@@ -124,8 +142,10 @@ def export(work: Path, repo: Path, destination: Path) -> dict:
     holding anything an export did not write is refused before anything is written there."""
     if destination.is_symlink():
         raise RuntimeError(f'Unsafe backup destination: {destination}')
+    # Read once: the flat layout's export.json goes with the rest of that layout.
+    flat = exported(destination / 'export.json')
     if destination.is_dir():
-        unknown = sorted(entry.name for entry in destination.iterdir() if not owned(entry))
+        unknown = sorted(entry.name for entry in destination.iterdir() if not owned(entry, flat))
         if unknown:
             raise RuntimeError(f'Refusing to export into {destination}: it holds entries no '
                                f'export wrote ({", ".join(unknown[:5])})')
@@ -151,7 +171,7 @@ def export(work: Path, repo: Path, destination: Path) -> dict:
         os.replace(swap, destination / CURRENT)
         _fsync_directory(destination)
         for entry in destination.iterdir():
-            if entry.name in (LOCK, CURRENT, generation.name) or not owned(entry):
+            if entry.name in (LOCK, CURRENT, generation.name) or not owned(entry, flat):
                 continue
             if entry.is_dir() and not entry.is_symlink():
                 shutil.rmtree(entry)
