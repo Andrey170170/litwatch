@@ -1,0 +1,17 @@
+# The smoke test's configuration: the workers on (the full-text queue and Deep cards need the
+# schedule) with the nightly run not due (1 January), the archive, and the fake deep service,
+# polled quickly.
+
+[intake]
+categories = ["cs.CL"]
+
+[schedule]
+enabled = true
+nightly = "0 0 1 1 *"
+publications = "0 0 1 1 *"
+
+[integrations.archive]
+
+[integrations.deep]
+url = "http://fake-deep:8081"
+poll_seconds = 1
