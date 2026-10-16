@@ -49,7 +49,8 @@ function Rail({ paper, gistAway, asked }: { paper: Paper; gistAway: boolean; ask
         <>
           <div className="agrid">
             <ProcessCell paper={paper} />
-            <DeepReadCell paper={paper} asked={asked} />
+            {linkCells(paper, ["bib"])}
+            <DeepReadCell paper={paper} asked={asked} wide />
             <button className="wide" onClick={() => setMiss((m) => !m)}>
               Report as a miss
             </button>
