@@ -158,6 +158,24 @@ class SearchTests(unittest.TestCase):
         newest = self.search.search(q='attention is all you need', sort='newest')['items']
         self.assertEqual([p['id'][-1] for p in newest], ['6', '5', '4', '3', '2', '1'])
 
+    def test_the_tiers_read_one_snapshot_of_the_index(self):
+        # A page joined from tiers read across an indexer commit could repeat or skip a paper.
+        for n, title in [(1, 'Neural circuits'), (2, 'Neural circuits in mice'), (3, 'A neural study')]:
+            self.paper(n, title, abstract='Of neural circuits.', published=f'2026-09-{n:02}')
+        self.start().step()
+        connect, seen = self.search._connect, []
+
+        def traced():
+            db = connect()
+            db.set_trace_callback(lambda sql: seen.append((sql.split()[0], db.in_transaction)))
+            return db
+
+        with patch.object(self.search, '_connect', traced):
+            self.assertEqual(len(self.search.search(q='neural circuits')['items']), 3)
+        reads = [inside for verb, inside in seen if verb in ('SELECT', 'WITH')]
+        self.assertGreater(len(reads), 2)
+        self.assertTrue(all(reads), seen)
+
     def test_a_quoted_phrase_stays_a_phrase_in_every_tier_and_order(self):
         # As websearch_to_tsquery reads a query in litwatch's own collection: "neural circuits"
         # is the phrase, never the two words apart, whichever tier or order finds the paper.

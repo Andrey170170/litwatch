@@ -233,7 +233,17 @@ class SearchIndex:
         (which weighs the title over the abstract, `search_indexer`). `base`, `clauses` and
         `params` are the search's own, its match the first clause and parameter. Each tier is
         its own query, ordered and cut short by FTS5, and the tiers stop once the page is full,
-        so a broad phrase costs one ranked tier and no query sorts every match by hand."""
+        so a broad phrase costs one ranked tier and no query sorts every match by hand. The
+        tiers read one snapshot, so an indexer commit between them cannot repeat or drop a hit."""
+        db.execute('BEGIN')
+        try:
+            return SearchIndex._tiers(db, base, clauses, params, terms, q, wanted)
+        finally:
+            db.rollback()
+
+    @staticmethod
+    def _tiers(db: sqlite3.Connection, base: str, clauses: list[str], params: list,
+               terms: list[str], q: str, wanted: int) -> list[sqlite3.Row]:
         phrase = '"' + ' '.join(terms) + '"'
         rows: list[sqlite3.Row] = []
         # An index the indexer has not opened since `title_keys` was added has no table yet.
