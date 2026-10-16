@@ -264,6 +264,11 @@ async def test_a_refusal_is_asked_once_of_the_roles_fallback_from_another_lab(co
         ("brief", "refused: cyber"),
         ("brief_fallback", None),
     ]
+    # Without the fallback's credentials, the role's model is still asked.
+    alone = Gateway(
+        models, {"anthropic": AnthropicProvider(client=SdkClient(anthropic_message(GOOD)))}, journal
+    )
+    assert (await alone.ask("brief", Request(system="s", user="alone", output=Answer))).value.yes
     # Asked again unchanged, the fallback's answer is reused without asking the role's model.
     again = await gateway(models, refused, answering, journal).ask("brief", REQUEST, paper_id="p")
     assert again.value.yes and again.usage.cost == 0 and again.model == MUSE.label
@@ -298,6 +303,8 @@ def test_a_fallback_is_another_role_from_another_lab_without_its_own(fallback, w
     chained = MUSE.model_copy(update={"fallback": "writer"})
     with pytest.raises(ValueError, match="a fallback of its own"):
         Models(brief_fallback=chained)
+    with pytest.raises(ValueError, match="Decisions or neither"):
+        Models(brief_fallback=MUSE.model_copy(update={"decisions": True}))
 
 
 async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, journal):

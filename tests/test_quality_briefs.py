@@ -8,7 +8,7 @@ import pytest
 from litwatch import seeds
 from litwatch.archive import ArchiveClient
 from litwatch.config import Models, RoleConfig
-from litwatch.llm import Gateway
+from litwatch.llm import Gateway, Reply, Stop, Usage
 from litwatch.quality import briefs
 from tests.conftest import paper
 from tests.fakes import ScriptedProvider
@@ -19,6 +19,7 @@ P = paper(
 )
 Q = paper("2610.00002", title="Monitors under pressure", abstract="Monitors fail.")
 ROLE = RoleConfig(provider="anthropic", model="test-brief")
+OTHER = RoleConfig(provider="openrouter", model="lab/fallback")
 BRIEF = " ".join(["Probes trained on every layer recover the hidden steps of a computation."] * 9)
 ANSWER = {
     "overstatement": "The abstract overstates: the probes find hidden steps on two tasks only.",
@@ -83,6 +84,36 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     other = Gateway(Models(brief=ROLE.model_copy(update={"model": "another"})), {})
     with pytest.raises(ValueError, match="another request"):
         await briefs.run(other, seeds.taxonomy(), pairs, archive, out)
+
+
+async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_path):
+    fake = FakeArchive()
+    fake.texts[P.id] = (1, "\\section{Method} Probes on two tasks. " * 20)
+    archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
+
+    def refuse(role, request):
+        return Reply("", Stop.REFUSED, Usage(model=role.model, cost=0.05), refusal="cyber")
+
+    def answer(role, request):
+        return Reply(json.dumps(ANSWER), Stop.COMPLETE, Usage(model=role.model, cost=0.02))
+
+    models = Models(
+        brief=ROLE.model_copy(update={"fallback": "brief_fallback"}), brief_fallback=OTHER
+    )
+    providers = {
+        "anthropic": ScriptedProvider("anthropic", refuse),
+        "openrouter": ScriptedProvider("openrouter", answer),
+    }
+    out = tmp_path / "brief.jsonl"
+    pair = [(P, entries()[0])]
+    (result,) = await briefs.run(Gateway(models, providers), seeds.taxonomy(), pair, archive, out)
+    assert result.output is not None and result.cost == pytest.approx(0.07)
+    # Another fallback is another configuration: the run is not resumed into the same file.
+    other = Models(
+        brief=models.brief, brief_fallback=OTHER.model_copy(update={"model": "lab/another"})
+    )
+    with pytest.raises(ValueError, match="another request"):
+        await briefs.run(Gateway(other, providers), seeds.taxonomy(), pair, archive, out)
 
 
 def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():

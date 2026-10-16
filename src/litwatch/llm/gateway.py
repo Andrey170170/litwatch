@@ -188,7 +188,8 @@ class Gateway:
         question the fallback answered is reused without asking the role's model again.
         """
         fallback = self.models.role(role_name).fallback
-        if fallback and (answer := await self._reused(fallback, request)):
+        reachable = fallback and self.models.role(fallback).provider in self.providers
+        if reachable and (answer := await self._reused(fallback, request)):
             return answer
         try:
             return await self._ask(role_name, request, paper_id=paper_id, send=send)

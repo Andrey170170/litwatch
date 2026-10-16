@@ -14,11 +14,14 @@ APPENDIX = re.compile(r"\\appendix\b.*?(?=\\end\{document\}|\Z)", re.DOTALL)
 REFERENCES = re.compile(
     r"^[#*\s]*(?:\d+\.?\s+)?(?:references|bibliography)[*\s]*$", re.IGNORECASE | re.MULTILINE
 )
-# The heading after them: Markdown's, or an appendix's in plain text ("Appendix A ...",
-# "A Proofs", "B.1 Setup"), short and without the commas of a reference.
-# A wrapped reference that looks like one ends the cut early, which only keeps some references.
+# The heading after them: Markdown's, or a section's in plain text ("Appendix A ...",
+# "Supplementary Material", "A Proofs", "B.1 Setup", "8 Additional Experiments"), short and
+# without the commas of a reference. A wrapped reference that looks like one ends the cut early,
+# which only keeps some references: when unsure, the text is kept.
 HEADING = re.compile(
-    r"^(?:#{1,6}\s+\S|\*\*[^*\n]+\*\*\s*$|(?i:appendix)\b|[A-Z](?:\.\d+)*\.?\s+[A-Z][^,\n]{0,80}$)",
+    r"^(?:#{1,6}\s+\S|\*\*[^*\n]+\*\*\s*$"
+    r"|(?i:appendix|appendices|supplementary|supplemental)\b"
+    r"|(?:[A-Z]|\d+)(?:\.\d+)*\.?\s+[A-Z][^,\n]{0,80}$)",
     re.MULTILINE,
 )
 

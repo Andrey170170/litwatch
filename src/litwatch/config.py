@@ -118,6 +118,8 @@ class Models(_Section):
                 )
             if other.lab == role.lab:
                 raise ValueError(f"{name} and its fallback must come from different labs")
+            if other.decisions != role.decisions:  # the request is shaped for one endpoint
+                raise ValueError(f"{name} and its fallback must both use Decisions or neither")
         return self
 
     def role(self, name: str) -> RoleConfig:

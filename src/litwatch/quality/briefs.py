@@ -111,9 +111,38 @@ TEXTS: dict[str, Callable[[str, str], str]] = {
 
 
 def fingerprint(gateway: Gateway, text: str = "pass") -> str:
-    """The role's configuration, its instructions and the text variant, hashed."""
-    role = gateway.models.role(brief.ROLE).model_dump_json()
-    return hashlib.sha256(f"{role}\n{brief.SYSTEM}\n{text}".encode()).hexdigest()[:12]
+    """The role's configuration and its fallback's, its instructions and the text variant,
+    hashed."""
+    role = gateway.models.role(brief.ROLE)
+    roles = [role] + ([gateway.models.role(role.fallback)] if role.fallback else [])
+    configured = "\n".join(r.model_dump_json() for r in roles)
+    return hashlib.sha256(f"{configured}\n{brief.SYSTEM}\n{text}".encode()).hexdigest()[:12]
+
+
+class _Spent:
+    """A journal that only adds up each paper's charges, so a refusal the fallback answered
+    counts in what its paper cost. Nothing is reused: an evaluation asks afresh."""
+
+    def __init__(self) -> None:
+        self.papers: dict[int, str | None] = {}
+        self.cost: dict[str | None, float] = {}
+
+    async def cached(self, key: str) -> None:
+        return None
+
+    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
+        self.papers[len(self.papers)] = paper_id
+        return len(self.papers) - 1
+
+    async def record(self, call_id: int, usage: Usage) -> None:
+        paper = self.papers[call_id]
+        self.cost[paper] = self.cost.get(paper, 0.0) + (usage.cost or 0.0)
+
+    async def accept(self, call_id: int, output: dict) -> None:
+        return None
+
+    async def reject(self, call_id: int, error: str, reply: str | None = None) -> None:
+        return None
 
 
 def _usage(usage: Usage | None) -> dict:
@@ -172,6 +201,9 @@ async def run(
         )
     gate = asyncio.Semaphore(concurrency)
     found: list[Result] = []
+    spent = _Spent()
+    if gateway.journal is None:  # a dry run's gateway: count what each paper cost
+        gateway.journal = spent
 
     async def one(paper: Paper, entry: Entry) -> None:
         area = tree.get(entry.area) if entry.area else None
@@ -205,6 +237,8 @@ async def run(
                         inputs=now[paper.id],
                     )
                 result.seconds = round(time.monotonic() - started, 2)
+                if paper.id in spent.cost:
+                    result.cost = spent.cost[paper.id]
             result.version, result.source = read.version, read.source
             result.chars = len(prepare(read.body, read.source))
         with out.open("a", encoding="utf-8") as f:
