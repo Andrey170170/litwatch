@@ -93,7 +93,7 @@ export function linkCells(paper: Paper, keys: ("arxiv" | "pdf" | "latex" | "code
 
 /** Report as a miss: the Focus topic (the API takes no other), and whether it is central or related, asked at once
  * (feedback.md). */
-export function MissPicker({ paper, onDone }: { paper: Paper; onDone: () => void }) {
+export function MissPicker({ paper, onDone }: { paper: Pick<Paper, "id">; onDone: () => void }) {
   const { data } = useQuery(topicsQuery);
   const miss = useMiss(paper.id);
   const [topic, setTopic] = useState<string | null>(null);

@@ -129,7 +129,7 @@ def create_app(
 
 def _serve_web(app: FastAPI) -> None:
     """The web app's files, and its index for every other path so client-side routes such as
-    `/papers?lookup=...` (the share target) load the app. Unknown `/api` paths stay 404."""
+    `/share?url=...` (the share target) load the app. Unknown `/api` paths stay 404."""
     if not (WEB / "index.html").exists():
 
         @app.get("/", response_class=HTMLResponse, include_in_schema=False)

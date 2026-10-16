@@ -51,13 +51,13 @@ export function renderApp(path: string, client = freshClient()) {
   return { ...view, router };
 }
 
-/** A desktop or phone viewport for the layout hook. */
-export function viewport(desktop: boolean) {
+/** A desktop or phone viewport for the layout hook; `reducedMotion` for a system that asks for none. */
+export function viewport(desktop: boolean, reducedMotion = false) {
   vi.stubGlobal(
     "matchMedia",
     (query: string) =>
       ({
-        matches: query.includes("min-width") ? desktop : false,
+        matches: query.includes("min-width") ? desktop : query.includes("reduced-motion") ? reducedMotion : false,
         media: query,
         addEventListener: () => {},
         removeEventListener: () => {},

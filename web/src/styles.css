@@ -197,21 +197,41 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 @keyframes lw-in-back { from { transform: translateX(-28px); opacity: 0.4; } }
 @keyframes lw-fade { from { opacity: 0; } }
 
-/* phone */
-.phone { display: flex; flex-direction: column; height: 100dvh; }
+/* phone: the page (header, screen, bottom bar) over the screen a swipe back returns to (`.under`, DESIGN.md "Phone") */
+.phone { position: relative; height: 100dvh; overflow: hidden; touch-action: pan-y pinch-zoom; overscroll-behavior-x: none; }
+.page { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; background: var(--bg); }
+.page[style*="transform"] { box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25); }
+.under { position: absolute; inset: 0; --f: 0; transform: translateX(calc(-30% * (1 - var(--f)))); }
+.under > * { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.under::after { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, calc(0.4 * (1 - var(--f)))); pointer-events: none; }
+.under[hidden] { display: none; }
 .pbar { display: flex; align-items: center; gap: 4px; height: 50px; padding: 0 4px 0 2px; background: var(--surface); box-shadow: inset 0 -2px 0 var(--acc); flex: none; }
 .pbar .wm { margin: 0; padding: 0 4px; font-size: 16px; }
 .pbar .ttl { display: flex; align-items: center; gap: 8px; min-width: 0; font: 700 15px var(--font-name); text-transform: uppercase; letter-spacing: 0.08em; }
 .pbar .ttl .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pbar .sp { flex: 1; }
 .pbar .st { margin: 0 4px; }
-.scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* the screen scrolls and zooms, and a horizontal finger in it is the shell's (a scroll container resolves its own
+   touch-action, so `.phone`'s would not reach it); Chrome's own swipe navigation keeps off the edge */
+.scroll { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y pinch-zoom; overscroll-behavior-x: none; }
+/* a list scrolling on its own inside a screen (a class picker) is a scroll container too, and says the same */
+.phone .overflow-y-auto { touch-action: pan-y pinch-zoom; }
 .pp { padding: 12px; }
 .pfoot { flex: none; border-top: 1px solid var(--line); background: var(--surface); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
 .screen[data-came="go"] { animation: lw-in-go 0.24s var(--ease); }
 .screen[data-came="back"] { animation: lw-in-back 0.24s var(--ease); }
+/* a step: the next content enters from the side it was stepped to, 40 px, 200 ms (DESIGN.md, "Motion") */
+.screen[data-came="next"] { animation: lw-step-next 0.2s var(--ease); }
+.screen[data-came="prev"] { animation: lw-step-prev 0.2s var(--ease); }
+@keyframes lw-step-next { from { transform: translateX(40px); opacity: 0; } }
+@keyframes lw-step-prev { from { transform: translateX(-40px); opacity: 0; } }
 /* the drawer, from the left */
-.shade { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.45); animation: lw-fade 0.2s ease-out; }
+/* the shade: a finger on it may shut the drawer, so it leaves horizontal pans to the shell */
+.shade { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.45); animation: lw-fade 0.2s ease-out; touch-action: pan-y pinch-zoom; }
+/* held by a finger, or left open by one: no entry of its own; opening, it starts shut and follows */
+:is(.shade, .drawer, .sheet)[data-drag] { animation: none; }
+.shade[data-drag="opening"] { opacity: 0; }
+.drawer[data-drag="opening"] { transform: translateX(-100%); }
 .drawer {
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 41; width: min(300px, 82%); background: var(--surface); padding: 14px 8px;
   display: flex; flex-direction: column; overflow-y: auto; box-shadow: 4px 0 24px rgba(0, 0, 0, 0.22); animation: lw-from-left 0.24s var(--ease);
@@ -222,12 +242,19 @@ html[data-theme="dark"] .drawer { box-shadow: inset -1px 0 0 var(--acc); }
 .drawer .nav .it { padding: 9px 10px; font-size: 14px; }
 .drawer .nav .it.sub { padding: 6px 10px 6px 26px; font: 500 14px var(--font-ui); color: var(--fg2); }
 .drawer .foot { margin-top: auto; }
+.drawer { touch-action: pan-y pinch-zoom; }
 /* a phone sheet, from the bottom */
 .sheet {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; max-height: 86dvh; overflow-y: auto; background: var(--surface); border-top: 1px solid var(--line);
   padding: 10px 12px calc(14px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; animation: lw-up 0.24s var(--ease);
 }
-.sheet::before { content: ""; align-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--fg3); flex: none; }
+/* the sheet scrolls: its children keep their height (a flex column would shrink them to fit) */
+.sheet > * { flex-shrink: 0; }
+/* the handle: a band across the top to drag the sheet down by, the bar drawn in its middle; the sheet's body drags too while scrolled to its top */
+.sheet .hdl { align-self: stretch; height: 24px; margin: -10px 0 -12px; flex: none; display: flex; align-items: center; justify-content: center; touch-action: none; cursor: grab; }
+.sheet .hdl::before { content: ""; width: 36px; height: 4px; border-radius: 2px; background: var(--fg3); }
+/* the body scrolls; a finger moving down from its top is the sheet's (Sheet.tsx tells the browser's pan no) */
+.sheet { touch-action: pan-y pinch-zoom; }
 @keyframes lw-up { from { transform: translateY(40px); opacity: 0; } }
 .sheet .cap { font: 700 11px var(--font-name); letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg3); }
 .sheet .done { align-self: stretch; height: 44px; border: 1px solid var(--acc); color: var(--acc); font: 700 14px var(--font-name); letter-spacing: 0.12em; text-transform: uppercase; }
@@ -285,13 +312,14 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
 .phone .rseg { padding: 8px 7px; }
 .phone .rseg span { display: none; }
 /* shelf head: a rarity square, the name, the count */
-.shh { display: flex; align-items: center; gap: 8px; width: 100%; font: 700 12px var(--font-name); color: var(--fg2); text-transform: uppercase; letter-spacing: 0.1em; margin: 18px 0 6px; text-align: left; }
+/* a shelf head: a band of the rarity's colour, found before its name is read, with room above and below it */
+.shh { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 12px; margin: 24px 0 10px; font: 700 14px var(--font-name); color: var(--fg); text-transform: uppercase; letter-spacing: 0.1em; text-align: left; background: color-mix(in srgb, var(--rc) 16%, transparent); box-shadow: inset 4px 0 0 var(--rc); }
 .shh:first-child { margin-top: 0; }
-.shh .sq { width: 10px; height: 10px; background: var(--rc); flex: none; }
-.shh .k { font: 12px var(--font-mono); color: var(--fg3); letter-spacing: 0; }
-.shh .tg { margin-left: auto; font-size: 11px; color: var(--fg3); }
-.shh.fold { padding: 8px 10px; border: 1px dashed var(--line); margin-top: 8px; }
-.shh.fold:hover { color: var(--fg); border-color: var(--fg3); }
+.shh .sq { width: 12px; height: 12px; background: var(--rc); flex: none; }
+.shh .k { font: 600 13px var(--font-mono); color: var(--fg2); letter-spacing: 0; }
+.shh .tg { margin-left: auto; font: 600 11.5px var(--font-name); color: var(--fg2); letter-spacing: 0.08em; }
+.shh.fold { color: var(--fg2); }
+.shh.fold:hover { color: var(--fg); background: color-mix(in srgb, var(--rc) 26%, transparent); }
 .loadmore { padding: 10px 0; font-size: 12px; color: var(--fg3); }
 .loadmore.quiet { opacity: 0.55; font-size: 12px; }
 /* the table row: one line */
@@ -576,6 +604,13 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 .why.big button:not(.seg) { padding: 10px 14px; font-size: 14px; }
 .why:has(.fitseg) { padding: 8px 10px 10px; }
 /* the Fit control: five equal segments; the owner's label filled, the verdict's underlined */
+/* the appearance, three ways on one row, the chosen one lit */
+.appr { display: flex; width: 100%; }
+.appr button { flex: 1; height: 40px; border: 1px solid var(--line); margin-left: -1px; font-size: 13px; color: var(--fg2); }
+.appr button:first-child { margin-left: 0; }
+.appr button:hover { color: var(--fg); }
+.appr button.on { background: var(--sel); color: var(--sel-fg); font-weight: 600; }
+.side .foot .appr { margin: 8px 8px 0; width: auto; }
 .fitseg { display: flex; width: 100%; }
 .fitseg .seg { flex: 1; text-align: center; padding: 7px 0; border: 1px solid var(--line); margin-left: -1px; font-size: 12.5px; color: var(--fg2); }
 .fitseg .seg:first-child { margin-left: 0; }
@@ -742,7 +777,7 @@ a.nt:hover { text-decoration: underline; }
 .pfoot.calf .on small { color: var(--acc); }
 .pfoot.pgf.calf > .lbl { flex: none; width: 74px; height: 40px; border: 1px solid var(--line); color: var(--fg); font-size: 12px; }
 /* the phone's list of a session's papers */
-.cpk { max-height: 50vh; overflow-y: auto; margin: 0 -4px 8px; }
+.cpk { max-height: 50vh; overflow-y: auto; margin: 0 -4px 8px; touch-action: pan-y pinch-zoom; }
 .cpk button { display: grid; width: 100%; grid-template-columns: 26px minmax(0, 1fr) 16px; gap: 8px; align-items: center; padding: 9px 4px; border-top: 1px solid var(--line2); font-size: 13px; text-align: left; }
 .cpk button .n { font: 500 11.5px var(--font-mono); color: var(--fg3); text-align: right; }
 .cpk button .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -856,12 +891,20 @@ button.car:hover { color: var(--fg); background: var(--line2); }
 
 /* the phone, last so these win over the base rules: every control is at least 40px tall (DESIGN.md, "Every control has a hit area of at least 40 px") */
 @media (max-width: 55.99rem) {
-  :is(button.shh, .btn, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input, .trow .grip, .crow .car, .crow .nm, .cpk button, .kw, .sess, .tile, .setlist .it, .calprog button) { min-height: 40px; }
+  :is(button.shh, .btn, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input, .trow .grip, .crow .car, .crow .nm, .cpk button, .kw, .sess, .tile, .setlist .it, .calprog button, .drawer .nav .it) { min-height: 40px; }
+  /* a digest's one-line paper or Mark row: 40px tall, its line centred; a two-line one keeps its height */
+  :is(.row.dpr, .row.drow) { min-height: 40px; align-content: center; }
   .sws button { width: 40px; height: 40px; }
   .trow .grip, .crow .car { width: 40px; }
   .tin.sm { min-height: 40px; }
   .rseg { min-width: 40px; }
+  .tf { min-width: 40px; }
+  .pbar .ib { flex: none; }
+  :is(.wkline, .qbox, .field) { min-height: 40px; }
+  /* a truncating link clips a hit area drawn around it: this one is 40px tall itself */
+  .tcard .t2 { min-height: 40px; display: flex; align-items: center; }
+  a.nt { min-height: 40px; align-content: center; }
   /* inline controls keep their size in the text and take a 40px hit area around it, as .hit does */
-  :is(.cp, .pghead .au .more, .inl, .st, a.nt) { position: relative; }
-  :is(.cp, .pghead .au .more, .inl, .st, a.nt)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
+  :is(.cp, .pghead .au .more, .inl, .st, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n, .dghead .h1 a) { position: relative; }
+  :is(.cp, .pghead .au .more, .inl, .st, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n, .dghead .h1 a)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
 }

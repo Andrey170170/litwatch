@@ -62,6 +62,21 @@ describe("Settings", () => {
     expect(screen.getByRole("link", { name: /Runs and cost/ })).toHaveTextContent("$1.50 of $20.00 this month");
   });
 
+  it("keeps the appearance on the device and puts it on the page at once", async () => {
+    viewport(false);
+    scriptFetch(common);
+    renderApp("/settings");
+    const group = await screen.findByRole("group", { name: "Appearance" });
+    expect(within(group).getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(group).getByRole("button", { name: "Dark" }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("litwatch.appearance")).toBe("dark");
+    expect(within(group).getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(group).getByRole("button", { name: "System" }));
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+    expect(localStorage.getItem("litwatch.appearance")).toBeNull();
+  });
+
   it("settles a split in place: the label is recorded, the item keeps its spot and the count drops", async () => {
     viewport(true);
     const calls = scriptFetch({ ...common, "GET /api/summary": () => summaryOf(4 - calls.filter((c) => c.method === "PUT").length + calls.filter((c) => c.method === "DELETE").length), "PUT /api/labels/mi/2610.00001": { saved: false }, "DELETE /api/labels/mi/2610.00001": { saved: false } });

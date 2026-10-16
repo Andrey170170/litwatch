@@ -36,11 +36,15 @@ with "‹ Back" at its top.
 **Phone.** A header, the page, and on most pages a bottom bar.
 - The header on a top-level screen: ☰ and the wordmark (or the page's name), then the run status and ⚙ at the right.
   On a deeper screen: ‹ and the page's title.
-- The drawer slides from the left, opened by ☰ or a swipe from the left edge on a top-level screen. It holds the
+- The drawer slides from the left, opened by ☰ or a swipe from the left edge on a top-level screen. The edge is the
+  first 48 px: Android's gesture navigation owns about the first 24 dp and passes on a finger that landed just inside
+  them, so half the zone is where such a finger lands and half is edge the page can reach. The drawer holds the
   sidebar's items, with Day, Week and History under Digest. It follows the finger and settles open or shut by where
-  the finger let go and how fast; a drag that starts vertical scrolls instead.
+  the finger let go and how fast, and a drag on it or on its shade shuts it; a drag that starts vertical scrolls
+  instead.
 - On a deeper screen the same edge swipe goes back, iOS style: the page follows the finger with the previous one
-  under it. Every step is a history entry, so the system back gesture walks the same steps.
+  under it. Every step is a history entry, so the system back gesture walks the same steps; a Calibrate session's
+  cards are the one exception, as its arrows are: the session is one entry, and Back leaves it.
 - A horizontal swipe away from the edge steps the page where there is a sequence: a Day or Week to the older or newer
   one, a paper to the previous or next in the list it was opened from. The content follows the finger; past a quarter
   of the width, or flicked, the next one comes in; where nothing lies the drag resists.
@@ -181,7 +185,9 @@ the pages in three groups, Reading (Overview, Needs you, Calibrate, Misses), Fol
 Overview. A page inside a page (a topic's editor, Jobs, an integration's events, a past Calibrate session) has
 "‹ Back"; a paper opened from Settings keeps the Settings sidebar. On the phone the gear opens the list of pages in the
 same groups, each with a line under its name ("6 waiting", "Last session 6 Oct"), and every page is a deeper screen.
-Page heads stack on the phone, and wide tables drop columns rather than scroll sideways.
+Page heads stack on the phone, and wide tables drop columns rather than scroll sideways. Under the pages, in the
+desktop sidebar's foot and at the end of the phone's list, Appearance: System, Light or Dark, System by default. The
+choice is kept on the device and put on the page, and on the browser's bar, before its first paint.
 
 **Colours.** An item carries a 3 px left edge: yellow (`--acc`) asks for the owner's word, red (`--sig`) reports a
 failure, cyan (`--cy`) is fine or settled, amber (`--warn`) is a projection over budget or a difference worth a look.
@@ -386,8 +392,9 @@ everywhere.
 how many papers the other filters leave at that level (with a minimum, so every level stays tappable), each showing
 its count and name. A tap filters to that level; several can be on, and the rest dim.
 
-**Shelf head.** A rarity square, the shelf's name and its count; a folded shelf adds "show", an open lower shelf
-"fold".
+**Shelf head.** A band of the rarity's colour, 40 px tall with air above and below, carrying the rarity square, the
+shelf's name and its count: the colour is found before the name is read. A folded shelf adds "show", an open lower
+shelf "fold".
 
 **Digest strip.** Squares of 14 px (11 px on Topics cards), 3 px apart, in the digest's best rarity; nothing new is an
 empty square, a failed digest a red ×. Newest at the right, after the label "Daily digests" or "Weekly digests".

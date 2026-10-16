@@ -216,6 +216,22 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   Interpretability) and the full-text cost it brings (about $9 per 1,000 papers) are accepted for the restart.
   Reassess them after one to two weeks of running, together with the cost, and tune then. The Focus related ×
   incremental cell stays: two papers are not enough to move it. The Field offset is 2 (`evals/2026-10-15-tuning.md`).
+- **W4 found**, for the smoke stack (`tests/stack`): a digest's own page and a Calibrate session's are walked
+  only when the stack has one, and the fresh stack has neither. Give `smoke.sh` a written digest (a fake writer,
+  as `fake_deep.py` fakes the deep service) and a drawn session, so `pages.py` walks them every run and `touch.py`
+  steps a Day and a Calibrate card every run; the touch walk then also wants a Week step, the sheet's handle, a
+  scroll inside the open drawer, and a drag's follow, resist and spring back, which only the compositor can show.
+  A screen left by Back and changed shows its earlier copy under a drag back after a Forward: the copies are kept
+  on PUSH only. A topic's digest strip keeps its 11 px squares on the phone (DESIGN.md asks 40 px of every
+  control): a 40 px square per digest does not fit the card; the strip is a second way to the digests, which
+  History lists at full size.
+  Likewise a Calibrate session's strip (20 squares), whose 40 px way to a paper is the "3/20" picker. The way
+  back shows the screen left under the finger for the last eight screens left; past them, the page colour.
+  A paper's swipe steps through the rows its list had loaded when it was opened, as its "3/22" counts them;
+  stepping past the loaded rows (a shelf's next page, a digest's papers beyond its preview), and an older entry
+  from another list, which shows no place once a newer list has registered, are the list context's to grow
+  (`web/src/lib/listContext.ts`). The icon (`web/public/icon.svg` and the PNGs) is still the
+  placeholder serif "L" and needs a design pass later.
 - **API gaps W1 found**, each for the core PR that owns it: a Brief on Paper (N3); a Deep card's queued state and
   "Write again", which POST answers 409 (N3's Deep cards); digests for the topic strips and the sidebar's counts (N4,
   W3); the "Among the

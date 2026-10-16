@@ -48,6 +48,24 @@ describe("a paper's page", () => {
     expect(screen.queryByText(/older revision/)).toBeNull();
   });
 
+  it("labels a full-text Gist with its Brief's source, the one text both were written from", async () => {
+    viewport(true);
+    const gist = { text: "The gist.", source: "full_text" };
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": { ...paper, gist, brief: { ...brief, source: "pdf" } },
+      "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", gist, brief },
+    });
+    const { router } = renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getAllByText("from the PDF")).toHaveLength(2);
+    expect(screen.queryByText("from the full text")).toBeNull();
+    await router.navigate({ to: "/paper/$", params: { _splat: "2610.00003" } });
+    await waitFor(() => expect(screen.getAllByText("from the LaTeX")).toHaveLength(2));
+    expect(screen.queryByText("from the PDF")).toBeNull();
+  });
+
   it("says which revision an older Brief read, and why the abstract stands in without one", async () => {
     viewport(true);
     scriptFetch({

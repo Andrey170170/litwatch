@@ -1,16 +1,18 @@
 /**
  * The shell (DESIGN.md, "Shell"): on the desktop a sidebar and the main column; on the phone a header, the page,
- * the page's bottom bar, and the drawer. The main column records how it was reached (go, back, top) so the page
- * can slide in from the right side.
+ * the page's bottom bar, the drawer, and the gestures (`gestures.ts`). The main column records how it was reached
+ * (go, back, top, or stepped to) so the page can slide in from the right side.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
-import { Fragment, memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { freshVisit } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { countRender } from "@/lib/renders";
+import { arrival, historyIndex } from "@/lib/steps";
 import { SettingsSide } from "@/routes/settings";
 import { Badge } from "./Badge";
+import { usePhoneGestures } from "./gestures";
 import { RunStatus } from "./RunStatus";
 import { Sheet } from "./Sheet";
 import { Unavailable, useSummary } from "./Summary";
@@ -23,9 +25,13 @@ const TABS = [
   { to: "/papers", name: "Papers" },
 ] as const;
 
-/** A deeper screen has "‹ Back" (desktop) or "‹" and its title (phone); a top-level one the tabs' chrome. */
-export function isDeeper(pathname: string): boolean {
-  return !["/", "/week", "/history", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
+/** Where the app is: its path, and the history state the way there left. */
+export type Where = { pathname: string; state: { page?: boolean } };
+
+/** A deeper screen has "‹ Back" (desktop) or "‹" and its title (phone); a top-level one the tabs' chrome. A Day or
+ * Week opened from History is a page, by the state its link set, and its steps keep. */
+export function isDeeper({ pathname, state }: Where): boolean {
+  return !!state.page || !["/", "/week", "/history", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
 }
 
 /** Settings owns the sidebar on its pages, and on a paper opened from one of them. */
@@ -45,19 +51,24 @@ export function SideHead() {
   );
 }
 
-type Came = "go" | "back" | "top" | "keep";
+type Came = "go" | "back" | "top" | "keep" | "next" | "prev" | "still";
 
-/** How the current page was reached, from the history index: forward is deeper, backward is back. */
+/** The screen's key: its path, and on the phone the number of the last arrival by gesture, so a step within one
+ * route (a Day to the next) mounts afresh and plays its entry. */
+const screenKey = (pathname: string) => `${pathname}#${arrival().n}`;
+
+/** How the current screen was reached, kept until the screen changes: by a gesture (stepped next or prev, or
+ * already in view after a swipe back), else from the history index: forward is deeper, backward is back. */
 function useCame(): Came {
   const location = useLocation();
-  const last = useRef<{ key: string; index: number } | null>(null);
-  const index = (location.state as { __TSR_index?: number }).__TSR_index ?? 0;
-  const key = location.pathname;
-  if (last.current?.key === key) return "keep";
-  const before = last.current;
-  last.current = { key, index };
-  if (!before || !isDeeper(key)) return "top";
-  return index < before.index ? "back" : "go";
+  const index = historyIndex(location);
+  const a = arrival();
+  const key = screenKey(location.pathname);
+  const [seen, setSeen] = useState<{ key: string; n: number; index: number; came: Came }>(() => ({ key, n: a.n, index, came: "top" }));
+  if (seen.key === key) return seen.came;
+  const came: Came = a.n !== seen.n && a.how ? a.how : !isDeeper(location) ? "top" : index < seen.index ? "back" : "go";
+  setSeen({ key, n: a.n, index, came });
+  return came;
 }
 
 /** The followed topics, from the shell's summary: the list re-renders only when the topics themselves change. A
@@ -139,7 +150,8 @@ function Desktop() {
     <div className="app">
       {inSettings(location) ? <SettingsSide /> : <ReadingSide />}
       <main className="main" data-came={came} data-scroll-restoration-id="main">
-        <div className="inner">
+        {/* keyed by screen: a navigation mounts the column anew, so its arrival plays again even from the same side */}
+        <div className="inner" key={screenKey(location.pathname)}>
           <Outlet />
         </div>
       </main>
@@ -152,41 +164,49 @@ function Phone() {
   const location = useLocation();
   const router = useRouter();
   const came = useCame();
-  const deeper = isDeeper(location.pathname);
+  const deeper = isDeeper(location);
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [location.pathname]);
   const back = () => (router.history.canGoBack() ? router.history.back() : router.navigate({ to: "/" }));
+  const els = { root: useRef<HTMLElement | null>(null), page: useRef<HTMLElement | null>(null), main: useRef<HTMLElement | null>(null), under: useRef<HTMLElement | null>(null), panel: useRef<HTMLElement | null>(null), shade: useRef<HTMLElement | null>(null) };
+  const { drawerDrag, onRendered } = usePhoneGestures(els, { deeper, menu, setMenu, deeperAt: isDeeper });
+  const key = screenKey(location.pathname);
+  // a screen a swipe back brought in has rendered: the page that followed the finger gives way to it
+  useLayoutEffect(onRendered, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="phone">
-      <header className="pbar">
-        {deeper ? (
-          <>
-            <button className="ib" onClick={back} aria-label="Back">
-              ‹
-            </button>
-            <Slot name="title" className="ttl" />
-          </>
-        ) : (
-          <>
-            <button className="ib" onClick={() => setMenu(true)} aria-label="Menu">
-              ☰
-            </button>
-            <Slot name="bar" className="ttl" />
-          </>
-        )}
-        <span className="sp" />
-        <RunStatus />
-        <Link to="/settings" className="ib" aria-label="Settings">
-          ⚙
-        </Link>
-      </header>
-      <main className="scroll screen" data-came={came} key={location.pathname} data-scroll-restoration-id="screen">
-        <div className="pp">
-          <Outlet />
-        </div>
-      </main>
-      <Slot name="foot" />
-      <Sheet open={menu} onClose={() => setMenu(false)} side="left" label="Menu">
+    <div className="phone" ref={els.root as React.RefObject<HTMLDivElement>}>
+      <div className="under" ref={els.under as React.RefObject<HTMLDivElement>} hidden />
+      <div className="page" ref={els.page as React.RefObject<HTMLDivElement>}>
+        <header className="pbar">
+          {deeper ? (
+            <>
+              <button className="ib" onClick={back} aria-label="Back">
+                ‹
+              </button>
+              <Slot name="title" className="ttl" />
+            </>
+          ) : (
+            <>
+              <button className="ib" onClick={() => setMenu(true)} aria-label="Menu">
+                ☰
+              </button>
+              <Slot name="bar" className="ttl" />
+            </>
+          )}
+          <span className="sp" />
+          <RunStatus />
+          <Link to="/settings" className="ib" aria-label="Settings">
+            ⚙
+          </Link>
+        </header>
+        <main className="scroll screen" ref={els.main} data-came={came} key={key} data-scroll-restoration-id="screen">
+          <div className="pp">
+            <Outlet />
+          </div>
+        </main>
+        <Slot name="foot" />
+      </div>
+      <Sheet open={menu} onClose={() => setMenu(false)} side="left" label="Menu" drag={drawerDrag} panelRef={els.panel} shadeRef={els.shade}>
         <div className="wm">
           <Link to="/" className="mark" onClick={() => setMenu(false)}>
             litwatch

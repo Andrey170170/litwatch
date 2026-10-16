@@ -144,9 +144,12 @@ export function BriefBody({ paper, brief }: { paper: Paper; brief: Brief }) {
   );
 }
 
+/** Where a Brief, and the Gist written with it, came from: the paper's LaTeX source or its PDF. */
+const from = (brief: Brief) => (brief.source === "latex" ? "from the LaTeX" : "from the PDF");
+
 function BriefRung({ paper, brief }: { paper: Paper; brief: Brief }) {
   return (
-    <Rung name="Brief" extra={<span className="faint normal-case tracking-normal">{brief.source === "latex" ? "from the LaTeX" : "from the PDF"}</span>}>
+    <Rung name="Brief" extra={<span className="faint normal-case tracking-normal">{from(brief)}</span>}>
       <BriefBody paper={paper} brief={brief} />
     </Rung>
   );
@@ -167,7 +170,10 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
     <div className="ladder">
       {paper.gist && !analysisFailed && (
         <div ref={gistRef}>
-          <Rung name="Gist" extra={paper.gist.source === "full_text" ? <span className="faint normal-case tracking-normal">from the full text</span> : undefined}>
+          {/* a full-text Gist is written by the Brief's pass from the same text, so it carries the Brief's label; the
+              Brief of an older revision stands while its Gist does not, so a Gist without one says only that it read
+              the full text */}
+          <Rung name="Gist" extra={paper.gist.source === "full_text" ? <span className="faint normal-case tracking-normal">{paper.brief ? from(paper.brief) : "from the full text"}</span> : undefined}>
             <p className="prose gist">{paper.gist.text}</p>
           </Rung>
         </div>
