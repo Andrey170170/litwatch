@@ -51,6 +51,15 @@ at a smaller one (litwatch asks at 50, or 0 when a PDF is opened), and `pdfs all
 `all`. LaTeX sources are never held. Recovery campaigns enqueue at priority 200, so under `wanted` their PDF jobs are
 held; give `paper-archive-recovery prepare` a `--priority` below 100 to fetch them.
 
+## Exact titles
+
+A search by relevance puts first the papers whose title is the query itself, case, accents and punctuation aside: an
+indexed lookup of each title's key (`title_keys` in the search index). The indexer keys every title it writes; an
+index built before the keys existed needs them once. Owner step, as with `index-dates`: back up the catalog
+(`paper-archive-backup`), then run `paper-archive index-titles` beside the running indexer. It works in batches,
+resumes after a stop and can run again; on the owner's index (3.17M papers) it took about two minutes and adds about
+0.6 GB. Until it has run, searches skip the exact-title lookup and rank by their other tiers.
+
 ## Container
 
 `Dockerfile` builds the image litwatch's stack runs (`deploy/compose.yaml`) as the API, the worker and the indexer,

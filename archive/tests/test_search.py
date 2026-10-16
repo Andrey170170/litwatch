@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from arxiv_archive.catalog import Catalog
 from arxiv_archive.search import SearchIndex, normalize_paper
-from arxiv_archive.search_indexer import Indexer
+from arxiv_archive.search_indexer import Indexer, index_titles
 
 
 class SearchTests(unittest.TestCase):
@@ -152,10 +152,6 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(paged, ids)
         later = self.search.search(q='attention is all you need', date_from='2026-09-05')['items']
         self.assertEqual([p['id'][-1] for p in later], ['5', '6'])
-        # Past EXACT_SCAN titles starting with the phrase, the exact title is matched by its
-        # letters, case aside.
-        with patch('arxiv_archive.search.EXACT_SCAN', 0):
-            self.assertEqual(self.search.search(q='attention is all you need')['items'][0]['id'][-1], '4')
         # One word: the title weighs more than an abstract that repeats it.
         self.assertEqual(self.search.search(q='circuits')['items'][0]['id'][-1], '7')
         # Date orders stay available and take no tiers.
@@ -178,18 +174,72 @@ class SearchTests(unittest.TestCase):
                     found = {p['id'][-1] for p in self.search.search(q=q, sort=sort)['items']}
                     self.assertEqual(found, wanted)
 
-    def test_past_exact_scan_an_exact_title_still_matches_by_its_words(self):
-        # A title repeating the phrase outranks the exact one by BM25; the exact tier keeps it
-        # first even when too many titles start with the phrase to read them all.
-        self.paper(1, 'Deep learning, deep learning, deep learning', published='2026-09-02')
-        self.paper(2, 'Deep Learning?', published='2026-09-01')
-        self.start().step()
-        for scan in (256, 0):
-            with patch('arxiv_archive.search.EXACT_SCAN', scan):
-                # As typed, or with the query's own punctuation aside.
-                for q in ('Deep  learning', '"deep learning"'):
-                    self.assertEqual([p['id'][-1] for p in self.search.search(q=q)['items']],
-                                     ['2', '1'], q)
+    def test_an_exact_title_comes_first_whatever_its_case_punctuation_or_accents(self):
+        # The exact title is an indexed lookup of the title's key (`title_key`), so no number of
+        # titles starting with the same words hides it, and one word is a query like any other.
+        self.paper(1, 'Circuits circuits circuits circuits', published='2026-09-03')
+        self.paper(2, 'Circuits', published='2026-09-01')
+        self.paper(3, 'Deep-Learning?', published='2026-09-01')
+        self.paper(4, 'Réseaux de neurones', published='2026-09-01')
+        for n in range(5, 305):
+            self.paper(n, f'Deep learning for task {n}', published='2026-09-02')
+            self.paper(n + 300, f'Reseaux de neurones et tache {n}', published='2026-09-02')
+        self.paper(700, 'Deep learning, deep learning, deep learning', published='2026-09-02')
+        self.paper(701, 'Réseaux de neurones, réseaux de neurones', published='2026-09-02')
+        self.start().step(5000)
+        for q, exact in [('circuits', 2), ('CIRCUITS', 2),
+                         ('deep learning', 3), ('Deep  Learning', 3), ('"deep learning"', 3),
+                         ('deep-learning!', 3),
+                         ('reseaux de neurones', 4), ('RÉSEAUX DE NEURONES', 4)]:
+            with self.subTest(q=q):
+                self.assertEqual(self.search.search(q=q)['items'][0]['id'], f'2609.{exact:05}')
+        # The rest follow in their tiers: titles holding the phrase, ranked.
+        rest = [p['id'] for p in self.search.search(q='deep learning', limit=50)['items'][1:]]
+        self.assertEqual(len(rest), 50 - 1)
+        self.assertNotIn('2609.00003', rest)
+        # An ID asks for that paper alone, as before: no title lookup.
+        self.paper(800, '2609.00001', published='2026-09-04')
+        self.indexer.step(5000)
+        self.assertEqual([p['id'] for p in self.search.search(q='2609.00001')['items']], ['2609.00001'])
+        self.assertEqual([p['id'] for p in self.search.search(q='arXiv:2609.00002v3')['items']], ['2609.00002'])
+
+    def test_the_indexer_keys_titles_it_writes_and_index_titles_keys_the_rest(self):
+        a = self.paper(1, 'Old title')
+        b = self.paper(2, 'To delete')
+        self.paper(3, 'Kept')
+        worker = self.start()
+        worker.step(10)
+        key = lambda docid: worker.db.execute('SELECT key FROM title_keys WHERE docid=?', (docid,)).fetchone()
+        rowid = lambda pid: worker.db.execute('SELECT rowid FROM documents WHERE id=?', (pid,)).fetchone()[0]
+        self.assertEqual(key(rowid(a))[0], 'old title')
+        doomed = rowid(b)
+        self.catalog.upsert_paper(a, {'title': 'Nouveau Titre!'}, 2)
+        with self.catalog.db:
+            self.catalog.db.execute('DELETE FROM papers WHERE id=?', (b,))
+        worker.step(10)
+        self.assertEqual(key(rowid(a))[0], 'nouveau titre')
+        self.assertIsNone(key(doomed))
+        self.assertTrue(self.search.status()['titles_keyed'])
+        # An index built before the keys: none, until index_titles has keyed them, in batches
+        # it resumes after a stop.
+        with worker.db:
+            worker.db.execute('DELETE FROM title_keys')
+            worker.db.execute("DELETE FROM state WHERE key='titles_keyed'")
+        self.assertEqual(self.search.search(q='kept')['items'][0]['id'], '2609.00003')  # by its tiers
+
+        def stop(done):
+            raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            index_titles(self.path, batch=1, progress=stop)
+        self.assertEqual(worker.db.execute('SELECT count(*) FROM title_keys').fetchone()[0], 1)
+        self.assertNotIn('titles_keyed', self.search.status())
+        done = []
+        self.assertEqual(index_titles(self.path, batch=1, progress=done.append), {'titles': 1, 'keyed': 2})
+        self.assertEqual(done, [{'titles': 1, 'rowid': rowid('2609.00003')}])
+        self.assertTrue(self.search.status()['titles_keyed'])
+        self.assertEqual(index_titles(self.path), {'titles': 0, 'keyed': 2})
+        self.assertEqual(self.search.search(q='nouveau titre')['items'][0]['id'], a)
 
     def test_sorting_filters_and_page_boundaries(self):
         for n, title, published in [(1, 'beta', '2026-09-03'),

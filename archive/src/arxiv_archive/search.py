@@ -50,6 +50,8 @@ CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
  VALUES(new.rowid,new.id,new.title,new.abstract,new.authors,new.doi,new.journal_ref);
 END;
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS title_keys (docid INTEGER PRIMARY KEY, key TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS title_keys_key ON title_keys(key);
 '''
 
 
@@ -63,6 +65,12 @@ def words(text: str) -> list[str]:
     plain = ''.join(c for c in unicodedata.normalize('NFKD', text.casefold())
                     if not unicodedata.combining(c))
     return re.findall(r'[^\W_]+', plain, re.UNICODE)
+
+
+def title_key(text: str) -> str:
+    """A title as the exact-title lookup compares it, and a query the same way: case-folded,
+    accents stripped, punctuation turned to spaces and whitespace collapsed (`words`)."""
+    return ' '.join(words(text))
 
 
 def _date(value: Any) -> str:
@@ -197,10 +205,6 @@ def _decode(row: sqlite3.Row) -> dict:
     return item
 
 
-# How many titles starting with a phrase are read to find the one that is the phrase itself;
-# a phrase starting more titles is matched to a title by its letters alone (`_ranked`).
-EXACT_SCAN = 256
-EXACT_SLACK = 32
 FTS_JOIN = ' JOIN documents_fts ON documents_fts.rowid=d.rowid'
 
 
@@ -218,45 +222,26 @@ class SearchIndex:
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA cache_size=-8192')
         db.execute('PRAGMA temp_store=MEMORY')
-        db.create_function('words', 1, lambda text: ' '.join(words(text or '')), deterministic=True)
         return db
 
     @staticmethod
     def _ranked(db: sqlite3.Connection, base: str, clauses: list[str], params: list,
                 terms: list[str], q: str, wanted: int) -> list[sqlite3.Row]:
-        """The first `wanted` hits of a search of several words, by relevance: a title that is
-        the query itself first, then titles holding it as a phrase, then abstracts holding the
-        phrase, then the rest by BM25 (which weighs the title over the abstract,
-        `search_indexer`). `base`, `clauses` and `params` are the search's own, its match the
-        first clause and parameter. Each tier is its own query, ordered and cut short by FTS5,
-        and the tiers stop once the page is full, so a broad phrase costs one ranked tier and no
-        query sorts every match by hand.
-
-        A title is the query itself when their words are the same (`words`: case, accents and
-        punctuation aside). Reading every title that starts with a common phrase is slow on the
-        full index, so beyond `EXACT_SCAN` of them the candidates are the titles starting with
-        the query as typed or with its words (case aside, off the title index) and at most
-        `EXACT_SLACK` characters longer: a title whose punctuation or accents differ from both
-        is then ranked in the phrase tier."""
+        """The first `wanted` hits of a search by relevance: a title that is the query itself
+        first (`title_key`: case, accents and punctuation aside, an indexed lookup), then titles
+        holding the query as a phrase, then abstracts holding the phrase, then the rest by BM25
+        (which weighs the title over the abstract, `search_indexer`). `base`, `clauses` and
+        `params` are the search's own, its match the first clause and parameter. Each tier is
+        its own query, ordered and cut short by FTS5, and the tiers stop once the page is full,
+        so a broad phrase costs one ranked tier and no query sorts every match by hand."""
         phrase = '"' + ' '.join(terms) + '"'
-        query = ' '.join(words(q))
-        plain, filters = base.replace(FTS_JOIN, ''), clauses[1:]
-        starting = [r[0] for r in db.execute(
-            'SELECT rowid FROM documents_fts WHERE documents_fts MATCH ? LIMIT ?',
-            (f'title : ^ {phrase}', EXACT_SCAN + 1))]
-        if len(starting) <= EXACT_SCAN:
-            exact = ['d.rowid IN (SELECT value FROM json_each(?))', 'words(d.title)=?']
-            exact_params = [json.dumps(starting), query]
-        else:
-            starts = sorted({' '.join(q.split()), query})
-            prefix = ('SELECT rowid FROM documents WHERE title>=? COLLATE NOCASE '
-                      'AND title<? COLLATE NOCASE AND length(title)<=?')
-            exact = [f"d.rowid IN ({' UNION '.join([prefix] * len(starts))})", 'words(d.title)=?']
-            exact_params = [*(v for start in starts
-                              for v in (start, start + '\U0010ffff', len(start) + EXACT_SLACK)), query]
-        where = ' AND '.join(exact + filters)
-        rows = db.execute(f'SELECT d.* FROM {plain} WHERE {where} ORDER BY d.published DESC,d.id '
-                          'LIMIT ?', [*exact_params, *params[1:], wanted]).fetchall()
+        rows: list[sqlite3.Row] = []
+        # An index the indexer has not opened since `title_keys` was added has no table yet.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='title_keys'").fetchone():
+            plain = base.replace(FTS_JOIN, '')
+            where = ' AND '.join(['d.rowid IN (SELECT docid FROM title_keys WHERE key=?)', *clauses[1:]])
+            rows = db.execute(f'SELECT d.* FROM {plain} WHERE {where} ORDER BY d.published DESC,d.id '
+                              'LIMIT ?', [title_key(q), *params[1:], wanted]).fetchall()
         seen = {row['id'] for row in rows}
         ranked = f"SELECT d.* FROM {base} WHERE {' AND '.join(clauses)} ORDER BY documents_fts.rank LIMIT ?"
         expression = params[0]
@@ -397,8 +382,8 @@ class SearchIndex:
             # the page's wide metadata rows. Avoid sorting thousands of abstracts.
             sql = (f'WITH page AS MATERIALIZED ({sql}) SELECT d.* FROM page '
                    f'JOIN documents d ON d.rowid=page.rowid ORDER BY {ordering}')
-        # Several words by relevance: the exact title and the phrase first (`_ranked`).
-        tiered = sort == 'relevance' and len(terms) > 1 and not is_id
+        # Words by relevance: the exact title and the phrase first (`_ranked`).
+        tiered = sort == 'relevance' and bool(terms) and not is_id
         db = self._connect()
         try:
             db.set_progress_handler(lambda: time.monotonic() - started >= self.query_timeout, 1000)

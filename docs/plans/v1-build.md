@@ -148,7 +148,9 @@ check: the restart weeks' digests read against 0.14's Notion.
   is a query; paper pages for archive papers not yet fetched, Process showing the fetched state (#56), Deep read
   outside the collection; the archive's size for the search box; "Use the PDF" (#59, migration 0026 if it needs
   one); the archive's `backup.py` and `recovery.py` items (archive.md); the `00README` assembly only if Briefs show
-  it matters. *Check:* "attention is all you need" returns 1706.03762 first.
+  it matters. *Check:* "attention is all you need" returns 1706.03762 first. Owner step: the archive's search index
+  keys its titles once (`archive/README.md`, Exact titles): back up the catalog first, as for `index-dates`, then run
+  `paper-archive index-titles` (about two minutes on the owner's 3.17M papers).
 
 Deferred from #54 (the owner, 2026-10-15: a
 heuristic is fine to start with): the archive's text assembly (`archive/src/arxiv_archive/source_text.py`) picks a
