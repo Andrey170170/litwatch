@@ -3,7 +3,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { topicsQuery } from "@/api/queries";
+import { summaryQuery } from "@/api/queries";
 import { FITS, Seg } from "@/components/Seg";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
@@ -95,6 +95,6 @@ export function Later({ children }: { children: ReactNode }) {
 
 /** The followed topics' cards by slug, for a badge or a name beside a row. */
 export function useTopicCards() {
-  const { data } = useQuery(topicsQuery);
-  return Object.fromEntries((data ?? []).flatMap((g) => g.topics).map((t) => [t.slug, t]));
+  const { data } = useQuery({ ...summaryQuery, select: (s) => Object.fromEntries(s.topics.map((t) => [t.slug, t])) });
+  return data ?? {};
 }

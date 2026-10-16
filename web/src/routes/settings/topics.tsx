@@ -8,7 +8,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Schemas } from "@/api/client";
 import { useReorderTopics, useSaveTopic } from "@/api/mutations";
-import { keywordsQuery, taxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
+import { keywordsQuery, settingsTaxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { Seg } from "@/components/Seg";
 import { DEPTH_NAME, type Depth } from "@/lib/rarity";
@@ -93,7 +93,7 @@ function DepthList({ depth, topics, tree, revisions, onOrder }: { depth: Depth; 
 }
 
 export function TopicsPage() {
-  const tree = useQuery(taxonomyQuery);
+  const tree = useQuery(settingsTaxonomyQuery("topics"));
   const stats = useQuery(taxonomyStatsQuery("topics"));
   const reorder = useReorderTopics();
   const t = tree.data;
@@ -135,7 +135,7 @@ function fresh(cls: Class): Topic {
 
 export function TopicEditorPage() {
   const { slug } = useParams({ from: "/settings/topics/$slug" });
-  const tree = useQuery(taxonomyQuery);
+  const tree = useQuery(settingsTaxonomyQuery(`topics/${slug}`));
   if (!tree.data) return <Load q={tree} />;
   const cls = tree.data.classes.find((c) => c.slug === slug);
   if (!cls) return <p className="empty">There is no such class.</p>;

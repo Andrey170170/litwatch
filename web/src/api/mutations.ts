@@ -309,9 +309,8 @@ export function useSaveTopic() {
         qc.invalidateQueries({ queryKey: ["taxonomy"] }),
         qc.invalidateQueries({ queryKey: ["topics"] }),
         qc.invalidateQueries({ queryKey: ["summary"] }),
-        qc.invalidateQueries({ queryKey: ["settings", "topics", "stats"] }),
-        qc.invalidateQueries({ queryKey: ["settings", "taxonomy", "stats"] }),
-        qc.invalidateQueries({ queryKey: ["settings", `topics/${slug}`] }),
+        qc.invalidateQueries(settingsReads("topics")),
+        qc.invalidateQueries(settingsReads("taxonomy")),
       ]),
     onError: (e) => toast(said(e, "Could not save it"), "error"),
   });
@@ -322,7 +321,14 @@ export function useReorderTopics() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (slugs: string[]) => ok(await api.PUT("/api/settings/topics-order", { body: { slugs } })),
-    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["taxonomy"] }), qc.invalidateQueries({ queryKey: ["topics"] }), qc.invalidateQueries({ queryKey: ["summary"] })]),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["taxonomy"] }),
+        qc.invalidateQueries({ queryKey: ["topics"] }),
+        qc.invalidateQueries({ queryKey: ["summary"] }),
+        qc.invalidateQueries(settingsReads("topics")),
+        qc.invalidateQueries(settingsReads("taxonomy")),
+      ]),
     onError: (e) => toast(said(e, "Could not save the order"), "error"),
   });
 }

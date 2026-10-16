@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { Schemas } from "@/api/client";
-import { taxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
+import { settingsTaxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { Field, Later, Load, PageHead } from "./parts";
 
@@ -39,7 +39,7 @@ export function foldedAtFirst(tree: Tree): Set<string> {
 }
 
 export function TaxonomyPage() {
-  const tree = useQuery(taxonomyQuery);
+  const tree = useQuery(settingsTaxonomyQuery("taxonomy"));
   const stats = useQuery(taxonomyStatsQuery("taxonomy"));
   const [folded, setFolded] = useState<Set<string> | null>(null);
   const [open, setOpen] = useState<string | null>(null);

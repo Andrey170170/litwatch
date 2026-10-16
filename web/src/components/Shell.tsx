@@ -184,11 +184,15 @@ function Phone() {
 export function Shell() {
   const router = useRouter();
   const qc = useQueryClient();
-  // A list reached by a link loads afresh; Back finds it as it was left.
-  useEffect(
-    () => router.history.subscribe(({ location, action }) => action.type === "PUSH" && freshVisit(qc, location.pathname)),
-    [router, qc],
-  );
+  // A page reached by a link loads afresh; Back finds it as it was left. A push within the page (a filter,
+  // Calibrate's `?at=`) is no visit.
+  useEffect(() => {
+    let at = router.state.location.pathname;
+    return router.history.subscribe(({ location, action }) => {
+      if (action.type === "PUSH" && location.pathname !== at) freshVisit(qc, location.pathname);
+      at = location.pathname;
+    });
+  }, [router, qc]);
   return useDesktop() ? <Desktop /> : <Phone />;
 }
 

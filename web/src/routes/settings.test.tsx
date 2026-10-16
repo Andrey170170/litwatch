@@ -283,8 +283,9 @@ describe("Settings", () => {
   it("records a Calibrate answer on Next, then shows the next paper", async () => {
     viewport(true);
     const items = [1, 2].map((position) => ({ position, paper_id: `2610.0000${position}`, topic: "mi", why: "above", verdict: "related", answer: null, answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }));
-    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items }, "PUT /api/settings/calibrate/1/items/1": { recorded: true } });
-    const { router } = renderApp("/settings/calibrate/1");
+    const calls = scriptFetch({ ...common, "GET /api/settings/config": {}, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items }, "PUT /api/settings/calibrate/1/items/1": { recorded: true } });
+    // The app's client keeps a page's read while no page shows it (the harness's drops it at once).
+    const { router } = renderApp("/settings/calibrate/1", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
     expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
     await screen.findByRole("group", { name: "Fit for Mech interp" });
     await userEvent.click(within(screen.getByRole("group", { name: "Fit for Mech interp" })).getByRole("button", { name: "related" }));
@@ -293,5 +294,13 @@ describe("Settings", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: { mi: "related" }, value: "matters", note: null }));
     expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
     expect(router.state.location.href).toBe("/settings/calibrate/1?at=2");
+    // The move to the next paper is no visit: away and back, the session is not read again (the write read it).
+    const reads = () => calls.filter((c) => c.url === "/api/settings/calibrate/1").length;
+    await waitFor(() => expect(reads()).toBe(2));
+    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
+    router.history.back();
+    expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
+    expect(reads()).toBe(2);
   });
 });

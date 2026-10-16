@@ -279,13 +279,17 @@ async def test_the_summary_carries_the_status_line_the_badges_and_the_hints(clie
         await client.post("/api/misses", json={"paper_id": P.id, "topic": FAITH.slug})
     ).status_code in (200, 201)
     await conn.execute(
-        "INSERT INTO runs (kind, started_at, finished_at) VALUES ('nightly', now(), now())"
-    )
-    await conn.execute(
         "INSERT INTO digests (topic, period, day, state, error) "
         "VALUES (%s, 'day', '2026-10-08', 'failed', 'timed out')",
         (FAITH.slug,),
     )
+    # A digest written by hand can fail before the first night: it waits all the same.
     after = (await client.get("/api/summary")).json()
+    assert (after["status"]["state"], after["status"]["digests_failed"]) == ("none", 1)
     assert (after["settings"]["misses"], after["settings"]["waiting"]) == (1, 1)
-    assert after["status"]["digests_failed"] == 1
+    await conn.execute(
+        "INSERT INTO runs (kind, started_at, finished_at) VALUES ('nightly', now(), now())"
+    )
+    after = (await client.get("/api/summary")).json()
+    assert (after["status"]["state"], after["status"]["digests_failed"]) == ("attention", 1)
+    assert after["settings"]["waiting"] == 1

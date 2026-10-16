@@ -118,87 +118,46 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
 
 // -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
 
-// A Settings page's reads live under its own key, `["settings", <its path under /settings>, ...]`, so a fresh visit
-// to one page (`freshVisit`) refetches that page's reads only: a page left keeps its rows for the way back, whatever
-// its siblings or subpages read meanwhile. Two pages reading one endpoint each keep their own copy.
-
-/** Refetched in the background on each visit by a link (`freshVisit`), and still for the visit: nothing moves under
- * the reader while a page is open or on the way back to it. What a write settles is patched into the cached page
- * (`settle`, `settleFromPaper`). */
-const settingsOptions = { staleTime: Infinity, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
-
-export const qualityQuery = (page: "needs" | "overview" | "runs") =>
-  queryOptions({
-    queryKey: ["settings", page, "quality"],
-    queryFn: async () => ok(await api.GET("/api/settings/quality")) as unknown as Quality,
-    ...settingsOptions,
-  });
-
-export const missesQuery = queryOptions({
-  queryKey: ["settings", "misses", "list"],
-  queryFn: async () => ok(await api.GET("/api/settings/misses")),
-  ...settingsOptions,
-});
-
-export const sessionsQuery = (page: "calibrate" | "overview") =>
-  queryOptions({
-    queryKey: ["settings", page, "sessions"],
-    queryFn: async () => ok(await api.GET("/api/settings/calibrate")) as unknown as SessionRow[],
-    ...settingsOptions,
-  });
-
-export const sessionQuery = (id: number) =>
-  queryOptions({
-    queryKey: ["settings", `calibrate/${id}`],
-    queryFn: async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session,
-    ...settingsOptions,
-  });
-
-export const runsQuery = (page: "overview" | "runs") =>
-  queryOptions({
-    queryKey: ["settings", page, "runs"],
-    queryFn: async () => ok(await api.GET("/api/settings/runs")) as unknown as Run[],
-    ...settingsOptions,
-  });
-
-export const scheduleQuery = queryOptions({
-  queryKey: ["settings", "runs", "schedule"],
-  queryFn: async () => ok(await api.GET("/api/settings/schedule")),
-  staleTime: 5 * 60_000,
-});
-
-export const configQuery = queryOptions({
-  queryKey: ["settings", "configuration", "config"],
-  queryFn: async () => ok(await api.GET("/api/settings/config")) as Record<string, unknown>,
-  staleTime: 5 * 60_000,
-});
+/** A Settings page's read, under the page's own key, `["settings", <its path under /settings>, name]`: refetched
+ * in the background on each visit by a link (`freshVisit`), and still for the visit: nothing moves under the reader
+ * while a page is open or on the way back to it, and a page left keeps its rows whatever its siblings or subpages
+ * read meanwhile (two pages reading one endpoint each keep their own copy). What a write settles is patched into
+ * the cached page (`settle`, `settleFromPaper`); a write that changes a page invalidates its reads
+ * (`settingsReads`). */
+const settingsRead = <T,>(page: string, name: string, queryFn: () => Promise<T>) =>
+  queryOptions({ queryKey: ["settings", page, name], queryFn, staleTime: Infinity, refetchOnWindowFocus: false, refetchOnReconnect: false });
 
 /** The reads of a Settings page and its subpages (`page` and `page/...`), for a write that changes what they show. */
 export const settingsReads = (page: string) => ({
   predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "settings" && typeof q.queryKey[1] === "string" && (q.queryKey[1] === page || q.queryKey[1].startsWith(`${page}/`)),
 });
 
-/** `page` is "integrations" or an integration's events page, `integrations/<name>`. */
-export const integrationsQuery = (page: string) =>
-  queryOptions({
-    queryKey: ["settings", page, "cards"],
-    queryFn: async () => ok(await api.GET("/api/settings/integrations")),
-    ...settingsOptions,
-  });
+export const qualityQuery = (page: "needs" | "overview" | "runs") => settingsRead(page, "quality", async () => ok(await api.GET("/api/settings/quality")) as unknown as Quality);
 
-/** `page` is "topics", "taxonomy" or a topic's editor, `topics/<slug>`. */
-export const taxonomyStatsQuery = (page: string) =>
-  queryOptions({
-    queryKey: ["settings", page, "stats"],
-    queryFn: async () => ok(await api.GET("/api/settings/taxonomy/stats")),
-    ...settingsOptions,
-  });
+export const missesQuery = settingsRead("misses", "list", async () => ok(await api.GET("/api/settings/misses")));
+
+export const sessionsQuery = (page: "calibrate" | "overview") => settingsRead(page, "sessions", async () => ok(await api.GET("/api/settings/calibrate")) as unknown as SessionRow[]);
+
+export const sessionQuery = (id: number) =>
+  settingsRead(`calibrate/${id}`, "session", async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session);
+
+export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs", async () => ok(await api.GET("/api/settings/runs")) as unknown as Run[]);
+
+export const scheduleQuery = settingsRead("runs", "schedule", async () => ok(await api.GET("/api/settings/schedule")));
+
+export const configQuery = settingsRead("configuration", "config", async () => ok(await api.GET("/api/settings/config")) as Record<string, unknown>);
+
+/** `page` is "integrations" or an integration's events page, `integrations/<name>`. */
+export const integrationsQuery = (page: string) => settingsRead(page, "cards", async () => ok(await api.GET("/api/settings/integrations")));
+
+/** The tree as a Settings page reads it (`page` is "topics", "taxonomy" or a topic's editor, `topics/<slug>`); the
+ * paper's page and the labels elsewhere read `taxonomyQuery`. */
+export const settingsTaxonomyQuery = (page: string) => settingsRead(page, "taxonomy", async () => ok(await api.GET("/api/settings/taxonomy")));
+
+export const taxonomyStatsQuery = (page: string) => settingsRead(page, "stats", async () => ok(await api.GET("/api/settings/taxonomy/stats")));
 
 /** How many papers of the last 90 days each of a topic's keywords matches, for the editor. */
-export const keywordsQuery = (slug: string, enabled = true) =>
-  queryOptions({
-    queryKey: ["settings", `topics/${slug}`, "keywords"],
-    queryFn: async () => ok(await api.GET("/api/settings/topics/{slug}/keywords", { params: { path: { slug } } })),
-    staleTime: 5 * 60_000,
-    enabled,
-  });
+export const keywordsQuery = (slug: string, enabled = true) => ({
+  ...settingsRead(`topics/${slug}`, "keywords", async () => ok(await api.GET("/api/settings/topics/{slug}/keywords", { params: { path: { slug } } }))),
+  enabled,
+});
