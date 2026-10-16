@@ -12,8 +12,9 @@ const base: RunStatus = {
 };
 
 describe("statusLine", () => {
-  it("says nothing before the first run", () => {
+  it("says nothing before the first run, unless something waits on the owner already", () => {
     expect(statusLine({ ...base, state: "none", papers: 0 })).toBeNull();
+    expect(statusLine({ ...base, state: "none", papers: 0, digests_failed: 1 })).toMatchObject({ text: "1 failed", tone: "failed", page: "needs" });
   });
   it("shows the count when all is quiet", () => {
     expect(statusLine(base)).toMatchObject({ text: "212", tone: "ok", page: "overview" });
