@@ -39,7 +39,10 @@ export function settleNeeds(qc: QueryClient, patch: (q: Quality) => Quality) {
  * read in flight is cancelled first, since begun before the write it would land as fresh. */
 async function digestsStale(qc: QueryClient) {
   await qc.cancelQueries({ queryKey: ["digest"] });
-  await qc.invalidateQueries({ queryKey: ["digest"], refetchType: "none" });
+  // a read interrupted before it had anything (a view just gone to) is started again rather than left pending
+  const empty = (q: { state: { data: unknown } }) => q.state.data === undefined;
+  await qc.invalidateQueries({ queryKey: ["digest"], refetchType: "active", predicate: empty });
+  await qc.invalidateQueries({ queryKey: ["digest"], refetchType: "none", predicate: (q) => !empty(q) });
 }
 
 /** After a write on a paper: refetch its page and patch its star in lists; the lists change no further until the
@@ -354,6 +357,8 @@ export function useWriteAgain() {
       if (!(e instanceof ApiError && e.status === 409)) return;
       // A 409 says the server's view moved (written meanwhile, its topic paused, a job running): the digest is
       // reread, its squares follow it, and its views and the counts are reread too.
+      const key = ["digest", String(digestId)];
+      await qc.cancelQueries({ queryKey: key, exact: true }); // a read begun before the write would be joined, and is old
       const d = await qc.fetchQuery({ ...digestQuery(digestId), staleTime: 0 }).catch(() => null);
       if (d) await restripe(qc, d);
       digestViewsStale(qc);
