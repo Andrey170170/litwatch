@@ -55,9 +55,9 @@ export interface paths {
          * Pdf
          * @description The paper's PDF as the owner opens it: from the archive, which is asked for it urgently
          *     (the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on
-         *     for its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,
-         *     or when the archive cannot get it in time. The database is read before the wait, which
-         *     holds no connection.
+         *     for its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record
+         *     of it. arXiv's PDF without an archive, for a paper neither holds, or when the archive
+         *     cannot get it in time. The database is read before the wait, which holds no connection.
          */
         get: operations["pdf_api_papers__paper_id__pdf_get"];
         put?: never;
@@ -2810,6 +2810,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description The archive, asked for a paper litwatch lacks, did not answer */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

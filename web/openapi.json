@@ -267,7 +267,7 @@
     "/api/papers/{paper_id}/pdf": {
       "get": {
         "summary": "Pdf",
-        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,\nor when the archive cannot get it in time. The database is read before the wait, which\nholds no connection.",
+        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record\nof it. arXiv's PDF without an archive, for a paper neither holds, or when the archive\ncannot get it in time. The database is read before the wait, which holds no connection.",
         "operationId": "pdf_api_papers__paper_id__pdf_get",
         "parameters": [
           {
@@ -332,6 +332,9 @@
           },
           "404": {
             "description": "No such paper or topic"
+          },
+          "503": {
+            "description": "The archive, asked for a paper litwatch lacks, did not answer"
           },
           "422": {
             "description": "Validation Error",

@@ -8,6 +8,7 @@ import { paperQuery } from "@/api/queries";
 import { forgetCard, useCardAsked } from "@/lib/remember";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
+import { Failed } from "@/routes/settings/parts";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rc } from "@/lib/rarity";
 import { DeepReadCell, linkCells, MissPicker, ProcessCell, SaveCell, type Paper } from "@/components/paper/Actions";
@@ -75,7 +76,7 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   // likewise while a full-text pass is queued or running, and more slowly while it awaits its text, so the Brief
   // appears once written. A pass waiting on the owner (its note above) is not polled for.
   const asked = useCardAsked(id);
-  const { data: paper, error, isPending } = useQuery({
+  const read = useQuery({
     ...paperQuery(id),
     refetchInterval: (q) => {
       const p = q.state.data;
@@ -84,6 +85,7 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
       return p?.text_pass?.state === "awaiting_text" && !stuck ? 60_000 : false;
     },
   });
+  const { data: paper, error, isPending } = read;
   const [gistAway, setGistAway] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
   useEffect(() => {
@@ -97,19 +99,25 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   if (isPending) return <div className="loadmore">Loading…</div>;
   // A failed poll while a card is awaited keeps the page: only a paper that never loaded shows the error.
   // A paper neither litwatch nor the archive has (or no archive is configured): Process asks arXiv for it.
+  // Anything else (the archive did not answer, a 503) says nothing of the paper: try again.
   if (!paper) {
     const unheld = error instanceof ApiError && error.status === 404;
+    if (!unheld)
+      return (
+        <>
+          <Back />
+          <Failed q={read} what="the paper" says={error instanceof ApiError && error.status === 503 ? error.message : undefined} />
+        </>
+      );
     return (
       <>
         <Back />
-        <div className="empty">{unheld ? `${id} is not in the collection.` : "Could not load the paper."}</div>
-        {unheld && (
-          <div className="agrid" style={{ maxWidth: 320 }}>
-            <button className="pri" onClick={() => process.mutate(id)} disabled={process.isPending}>
-              Process
-            </button>
-          </div>
-        )}
+        <div className="empty">{`${id} is not in the collection.`}</div>
+        <div className="agrid" style={{ maxWidth: 320 }}>
+          <button className="pri" onClick={() => process.mutate(id)} disabled={process.isPending}>
+            Process
+          </button>
+        </div>
       </>
     );
   }

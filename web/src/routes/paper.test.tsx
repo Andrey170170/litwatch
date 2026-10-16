@@ -201,6 +201,23 @@ describe("a paper's page", () => {
     expect(await screen.findByText("9999.99999 is not in the collection.")).toBeInTheDocument();
   });
 
+  it("says the archive did not answer, not that the paper is missing, and tries again", async () => {
+    viewport(true);
+    let down = true;
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => (down ? json({ detail: "The archive did not answer" }, 503) : paper),
+    });
+    renderApp("/paper/2610.00002");
+    const said = await screen.findByText(/The archive did not answer/);
+    expect(screen.queryByText(/not in the collection/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Process" })).not.toBeInTheDocument();
+    down = false;
+    await userEvent.click(within(said).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Epic one" })).toBeInTheDocument();
+  });
+
   it("fetches a paper it does not hold from its own page, then shows it", async () => {
     viewport(true);
     let held = true;

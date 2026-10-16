@@ -81,12 +81,13 @@ export function Load({ q }: { q: Pick<UseQueryResult, "isError" | "isPending" | 
 }
 
 /** A read beside the page's own that failed (counts, the schedule, the classes a form offers): what it would have
- * shown is named, with the way to try again, so its absence never passes for content; nothing otherwise. */
-export function Failed({ q, what }: { q: Pick<UseQueryResult, "isError" | "refetch">; what: string }) {
+ * shown is named, with the way to try again, so its absence never passes for content; nothing otherwise. `says`
+ * takes the line's place where the error says more (the archive did not answer). */
+export function Failed({ q, what, says }: { q: Pick<UseQueryResult, "isError" | "refetch">; what: string; says?: string }) {
   if (!q.isError) return null;
   return (
     <div className="loadmore">
-      Could not load {what} ·{" "}
+      {says ?? `Could not load ${what}`} ·{" "}
       <button className="inl" onClick={() => void q.refetch()}>
         Try again
       </button>

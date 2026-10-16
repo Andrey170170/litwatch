@@ -889,7 +889,14 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
         app = create_app(dsn, TOKEN, Config(), archive=given)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
-            assert (await c.get("/api/papers/2610.07777")).status_code == 404
+            # No archive: the paper is unknown. An archive that cannot answer says nothing of
+            # the paper: a 503, never the missing paper's 404 (L5-8).
+            unknown = await c.get("/api/papers/2610.07777")
+            if given is None:
+                assert unknown.status_code == 404
+            else:
+                assert unknown.status_code == 503
+                assert unknown.json()["detail"] == "The archive did not answer"
             assert (await c.get(f"/api/papers/{pid}")).json()["stored"]
 
 
