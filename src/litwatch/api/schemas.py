@@ -498,7 +498,8 @@ class Paper(BaseModel):
     pdf_url: str  # litwatch's own: the archive's copy, else arXiv's (GET /api/papers/{id}/pdf)
     source_url: str  # the LaTeX source
     in_collection: bool
-    stored: bool = True  # litwatch holds it: fetched, and processed on the next run if unclassified
+    stored: bool = True  # litwatch holds it: fetched
+    next_run: bool = False  # the next run classifies it: not dismissed, its text not yet classified
     rarity: Rarity | None = None
     badges: list[GradedBadge] = Field(default_factory=list)
     gist: Gist | None = None

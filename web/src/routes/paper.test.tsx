@@ -244,7 +244,7 @@ describe("a paper's page", () => {
     const calls = scriptFetch({
       "GET /api/status": status,
       "GET /api/topics": [],
-      "GET /api/papers/2409.01234": () => ({ ...outside, stored }),
+      "GET /api/papers/2409.01234": () => ({ ...outside, stored, next_run: stored }),
       "POST /api/lookup": () => {
         stored = true;
         return { fetched: true };
@@ -259,6 +259,15 @@ describe("a paper's page", () => {
     expect(screen.getByRole("button", { name: "Paste a DOI" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Process" })).toBeNull();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("says a fetched paper no run will process is fetched, without promising the next run", async () => {
+    viewport(true);
+    const dismissed = { ...paper, id: "2409.01234", title: "Dismissed one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": dismissed });
+    renderApp("/paper/2409.01234");
+    expect(await screen.findByRole("button", { name: "Fetched" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /next run/ })).toBeNull();
   });
 
   it("cites a paper litwatch has not fetched from its page on the phone, with no DOI form", async () => {

@@ -347,6 +347,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         pdf_url=f"/api/papers/{paper_id}/pdf",
         source_url=f"https://arxiv.org/e-print/{paper_id}",
         in_collection=found["in_collection"],
+        next_run=found["next_run"],
         rarity=found["rarity"],
         badges=_badges(looks, standings),
         gist=s.Gist(text=found["gist"], source=found["gist_source"]) if found["gist"] else None,

@@ -1964,6 +1964,11 @@ export interface components {
              * @default true
              */
             stored: boolean;
+            /**
+             * Next Run
+             * @default false
+             */
+            next_run: boolean;
             rarity?: components["schemas"]["Rarity"] | null;
             /** Badges */
             badges?: components["schemas"]["GradedBadge"][];

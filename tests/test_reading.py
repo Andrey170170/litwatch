@@ -908,8 +908,12 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
 
         assert (await c.post("/api/lookup", json={"q": pid})).json()["fetched"]
         page = (await c.get(f"/api/papers/{pid}")).json()
-        assert (page["stored"], page["in_collection"]) == (True, False)
+        assert (page["stored"], page["in_collection"], page["next_run"]) == (True, False, True)
         assert fetched == [[pid]]
+        # Dismissed, it stays fetched and no run processes it (L6-7).
+        assert await papers_store.dismiss(conn, pid)
+        page = (await c.get(f"/api/papers/{pid}")).json()
+        assert (page["stored"], page["next_run"]) == (True, False)
     for given in (None, down):
         app = create_app(dsn, TOKEN, Config(), archive=given)
         transport = httpx.ASGITransport(app=app)

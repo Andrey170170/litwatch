@@ -44,17 +44,19 @@ export function DeepReadCell({ paper, asked, wide }: { paper: Paper; asked: bool
   );
 }
 
-/** Process, for a paper litwatch has not fetched; once fetched it waits for the next run, which processes it. */
+/** Process, for a paper litwatch has not fetched. Once fetched it says so, and that the next run processes it only
+ * while one will (`next_run`): a dismissed paper, say, is fetched and never processed. */
 export function ProcessCell({ paper, phone }: { paper: Paper; phone?: boolean }) {
   const process = useProcess();
   const fetched = paper.stored !== false;
-  const label = fetched ? (phone ? "Fetched" : "Fetched · next run") : "Process";
+  const waits = fetched && paper.next_run;
+  const label = fetched ? (waits && !phone ? "Fetched · next run" : "Fetched") : "Process";
   return (
     <button
       className={phone ? (fetched ? "" : "on") : "pri"}
       onClick={() => process.mutate(paper.id)}
       disabled={fetched || process.isPending}
-      title={fetched ? "Fetched; it is processed on the next run" : undefined}
+      title={waits ? "Fetched; the next run processes it" : undefined}
     >
       {phone ? <small>{label}</small> : label}
     </button>

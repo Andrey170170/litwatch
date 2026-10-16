@@ -520,6 +520,13 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
                coalesce(l.saved, false) AS saved, l.hand, r.level AS rarity,
                {CURRENT_GIST} AS gist, {CURRENT_GIST_SOURCE} AS gist_source,
                EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = p.id) AS in_collection,
+               -- What the next run classifies (`classifications.due`).
+               (p.dismissed_at IS NULL
+                AND NOT EXISTS (SELECT 1 FROM classifications c
+                                WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
+                AND coalesce((SELECT failed_runs FROM step_failures f
+                              WHERE f.paper_id = p.id AND f.step = 'classification'
+                                AND f.paper_revision = p.revision), 0) < %s) AS next_run,
                w.weight, w.reason AS weight_reason, w.source AS weight_source,
                a.contribution, a.releases_code, a.releases_weights
         FROM papers p
@@ -535,7 +542,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         ) a ON true
         WHERE p.id = %s
         """,
-        (paper_id,),
+        (FAILED_RUNS, paper_id),
     )
     if found is None:
         return None

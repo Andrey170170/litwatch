@@ -5000,6 +5000,11 @@
             "title": "Stored",
             "default": true
           },
+          "next_run": {
+            "type": "boolean",
+            "title": "Next Run",
+            "default": false
+          },
           "rarity": {
             "anyOf": [
               {
