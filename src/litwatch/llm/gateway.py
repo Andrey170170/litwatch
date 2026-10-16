@@ -112,17 +112,19 @@ class Gateway:
         retry_delays: tuple[float, ...] = RETRY_DELAYS,
         debug: bool = False,
         normal_calls: int = NORMAL_CALLS,
+        batch_options: dict[str, Any] | None = None,
     ) -> None:
         self.models, self.providers, self.journal = models, providers, journal
         self.retry_delays, self.debug = retry_delays, debug
+        self.batch_options = batch_options or {}  # the `Batcher`'s timings and clock (tests)
         self.batchers: dict[str, Batcher] = {}
         self._gates = {name: asyncio.Semaphore(normal_calls) for name in providers}
 
-    def batch_until(self, deadline: datetime, **options: Any) -> None:
+    def batch_until(self, deadline: datetime) -> None:
         """Send each call on a provider that batches in its batches until `deadline` (aware),
-        and as a normal call after it. `options` tune the `Batcher`s (tests)."""
+        and as a normal call after it."""
         self.batchers = {
-            name: Batcher(provider, self.journal, deadline, **options)
+            name: Batcher(provider, self.journal, deadline, **self.batch_options)
             for name, provider in self.providers.items()
             if isinstance(provider, BatchProvider)
         }
