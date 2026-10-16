@@ -92,7 +92,9 @@ def pair_of(page) -> list[str]:
         folded = page.locator("main button.shh.fold:has(.k:not(:empty))").first
         if not folded.count():
             return []
-        section = folded.locator("xpath=ancestor::section[1]")
+        # the shelf by its name: the head loses its `fold` class as it opens
+        name = folded.locator("xpath=ancestor::section[1]").get_attribute("aria-label")
+        section = page.locator(f'main section[aria-label="{name}"]')
         folded.click()
         for _ in range(20):
             page.wait_for_timeout(500)
