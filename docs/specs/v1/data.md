@@ -156,7 +156,13 @@ model = "claude-haiku-5-5"
 
 [models.brief]
 provider = "anthropic"
-model = "claude-opus-5-5"
+model = "claude-sonnet-5-5"
+effort = "high"
+fallback = "brief_fallback" # asked once when brief refuses (models.md, roles)
+
+[models.brief_fallback]    # another lab, chosen by the model-spend plan's replay
+provider = "openrouter"
+model = "google/gemini-4-argon"
 
 [models.writer]
 provider = "anthropic"
@@ -178,8 +184,13 @@ area_check_min_confidence = 0.7
 wait_minutes = 120
 
 [budget]
-anthropic_monthly = 200
-openrouter_monthly = 30
+anthropic_monthly = 100
+openrouter_monthly = 25
+
+[schedule]
+nightly = "0 2 * * *"
+deadline = "07:30"         # the nightly's batches end here (models.md, batches)
+timezone = "America/Denver" # the owner's; none is the server's own zone
 ```
 
 The models are proposals until N1 and N2 measure them. The taxonomy and topics live in the database, edited in

@@ -218,6 +218,9 @@ used instead when it is installed. For a pass queued by the nightly run, litwatc
 the source at **urgent** priority, so the papers that matter arrive within minutes rather than behind a night's
 background downloads.
 
+**What the model reads.** The text without its bibliography: the `thebibliography` block of LaTeX text, and from PDF
+text the last "References" heading up to the next heading or the end. References carry nothing a Brief uses. The rest is sent as read, cut at its first 160,000 characters.
+
 **The Brief** is one paragraph (about 120–200 words): what was done, the main result with its numbers, and the main
 limit. When the full text does not support the abstract's claim, the Brief opens with one line saying so, for example
 "The abstract overstates: the gain holds only for 7B models on GSM8K." A paper without a Brief shows its abstract in
@@ -237,8 +240,10 @@ text, its source (LaTeX or PDF), a hash of it and the paper's arXiv update it wa
 say which arXiv version its text is, the version is recorded as unknown. When intake knows a paper was updated but not
 to which version, that newer update queues its passes again once, as a new version does (section 8). A pass that finishes after its paper got a new revision stores its result labelled
 with the old revision (section 8), does not replace the current Weight, and a pass for the new revision is queued. A
-running pass holds a lease (default 30 minutes); when the lease runs out, because the worker died, the pass goes back
-to ready.
+pass whose text has the same hash as the text the paper's last finished Brief was written from (the same text, read
+again for a newer version or revision) makes no call: that pass's Brief, Gist and Weight are recorded for it, and it
+is done. A running pass holds a lease (default 30 minutes, and until the deadline in a batching nightly run); when
+the lease runs out, because the worker died, the pass goes back to ready.
 
 **A Deep pass** is one per paper, open until done, and not tied to a revision: it records the revision and text it
 read when it submits, and its card is labelled with them (section 8). The owner's request takes over an automatic pass
@@ -271,7 +276,8 @@ current. A Brief or Deep card made from an older revision is kept and labelled w
 Gist from an older revision's full text is not: the new revision's analysis gives the current Gist.
 
 A new arXiv version that leaves title and abstract close enough does not raise the revision, but its body may have
-changed: a paper that has a Brief or a Weight from the full text gets those passes queued again for the new version.
+changed: a paper that has a Brief or a Weight from the full text gets those passes queued again for the new version, and a
+pass whose text turns out unchanged reuses the last one's result (section 6).
 A Deep card is labelled with the version it read and is remade only on request.
 
 ## 9. Failures that need the owner
@@ -329,4 +335,10 @@ Classification, analysis and grading came to $2.68 per 1,000 papers, two thirds 
 run processed the fortnight at once; its costs split by submission day, weekends folded into Monday, give $1.04–1.70
 for a night Tuesday to Friday and $2.45–3.29 for a Monday.
 
-The restart (milestone N6) runs this over the two most recent weeks of papers, read from the archive.
+The restart (milestone N6, [evals/2026-10-16-restart.md](../../../evals/2026-10-16-restart.md)) ran one week of
+papers for $17.06 per 1,000: $2.65 for the pipeline, $13.31 for the full-text passes (64 per 1,000 at $0.208, on Opus
+5.5) and $1.09 for the digests. At about 12,700 papers a month that is about $215 a month on Anthropic and $4 on
+OpenRouter, against the owner's caps of about $100 and $20–30 (2026-10-16). The model-spend plan
+([`docs/plans/model-spend.md`](../../plans/model-spend.md)) brings it under them: `brief` on Sonnet 5.5, full text
+without its bibliography, an unchanged text read once, and the nightly's Anthropic calls batched at half price
+([models.md](models.md), batches), for a projected $60–90 a month.

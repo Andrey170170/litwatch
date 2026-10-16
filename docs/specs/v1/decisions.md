@@ -137,6 +137,19 @@ The build plan is [`docs/plans/v1-build.md`](../../plans/v1-build.md).
     filters search litwatch's index only. Relevance is the default with a query; the newest-first order asks each
     provider for its newest, and litwatch no longer re-sorts their hits.
 
+## Decided 2026-10-16, model spend
+
+The plan is [`docs/plans/model-spend.md`](../../plans/model-spend.md). The owner's caps: about $100 a month on the
+Anthropic API and $20–30 on OpenRouter, against about $215 and $4 at the restart's rates.
+
+60. **The nightly run's Anthropic calls are batched**, at half price, inside the gateway: the job decides, not the
+    request, and the owner's actions are never batched. The nightly starts at 02:00 in the owner's zone and has a
+    07:30 deadline, after which what is left goes as normal calls. OpenRouter's calls are not batched for now.
+61. **`brief` runs on Sonnet 5.5**, after a replay of the restart's passes and the owner's read; a refusal is asked
+    once of a model on OpenRouter from another lab, never again of an Anthropic model.
+62. **The full text is read without its bibliography, and once.** A pass whose text is unchanged reuses the last
+    one's result.
+
 ## Open
 
 - The grade table and rarity offsets are starting points, tuned in N2.

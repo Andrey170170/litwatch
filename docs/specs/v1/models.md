@@ -12,11 +12,17 @@ Pipeline code names roles, never models; moving a role between providers or labs
 | `check` | chat | second-lab Fit for Focus topics and escalated Area disagreements | Muse Spark 1.3 (contributor) |
 | `area_check` | decision | "does this Fit hold?" for Area verdicts; a "no" or a low-confidence "yes" escalates | the N1 decision model |
 | `field_grade` | chat | Fit for Field topics | Haiku 5.5 |
-| `brief` | chat | Briefs, Weight and Gists from the full text | Opus 5.5 |
+| `brief` | chat | Briefs, Weight and Gists from the full text | Sonnet 5.5 at high effort, its refusals asked of a fallback on OpenRouter (below) |
 | `writer` | chat | digests and their Gists | Opus 5.5 |
 
 The first v1's `triage` and `review` roles are removed (`classify`, `analyse` and `writer` replace them). Deep cards are
 made by the `deep` service on its own subscription and are not a gateway role.
+
+A role may name a **fallback**, another role asked once, as a normal call, when the role's model refuses. The fallback
+must come from another lab (refusals follow a lab's policy, so a second model from the same lab tends to refuse the same
+paper); start-up refuses a configuration where it does not. `brief` falls back to a model on OpenRouter, chosen by
+the model-spend plan's replay ([`docs/plans/model-spend.md`](../../plans/model-spend.md), D5). A paper the fallback
+refuses too fails as any refused call does.
 
 ## The gateway
 
@@ -38,6 +44,31 @@ questions); any other model is asked the same questions as a chat with a strict 
 endpoint's reply is translated into that schema, so both are validated alike (every question answered, every
 probability in [0, 1], every choice one of its options) and journalled, priced and reused like chat calls (Luna
 Decisions and Jev bill input tokens only).
+
+## Batches
+
+The nightly run's Anthropic calls go through Message Batches, at half the price of normal calls; the run starts at
+02:00 and its results are needed by morning, so latency costs nothing. Batching is inside the gateway: a pipeline step
+asks for one answer and awaits it as before, and neither requests nor passes say whether they may be batched. **The
+job decides**: the nightly run's gateway batches; the app, the service's workers and the CLI's other commands use a
+gateway without batching, so the owner's actions are answered at once.
+
+- **Collecting.** A batching gateway holds each call it cannot reuse and sends the held calls as one batch once none
+  has joined for 10 seconds, or once they reach 10,000 requests or 200 MB. Identical calls held together share one
+  request. A step queues all its calls at once in batch mode: the concurrency limits are lifted, so a step is one
+  batch, not many.
+- **Answers.** Open batches are polled every minute. Each answer is validated, journalled with its own usage at half
+  price, and reused like any other call; a refused, truncated or invalid answer is handled as it would be in a normal
+  call, the fallback included. A request the batch could not answer (errored, expired) is sent again as a normal call.
+- **No call is paid twice.** A batched call's journal row is written when it is submitted, with its batch id; its
+  request key is its id in the batch. A run that asks a key already in an open batch waits on that batch, so a run
+  started again after a crash attaches to its batches instead of resubmitting.
+- **The deadline.** The nightly run has one, `[schedule] deadline` (07:30 in the schedule's zone): open batches are
+  cancelled, the answers already in are kept, and the rest are sent as normal calls, as is everything the run asks
+  after it. Other batching jobs have none and wait for their batches, up to the provider's 24 hours.
+- **Providers.** Batching is a provider capability (submit, poll, cancel, results with usage per call). `anthropic`
+  has it; a role on a provider without it is sent as normal calls in any job. OpenRouter's calls are not batched: its
+  batch API has no Decisions endpoint and reports cost per batch, not per call.
 
 ## Lab diversity
 
@@ -62,7 +93,8 @@ overview, where an error costs little.
 ## Budgets
 
 - Month-to-date spend per provider, from the journal, shown in Settings and on Quality.
-- A monthly budget per provider in configuration. When the month's projected spend exceeds it, the status line turns
+- A monthly budget per provider in configuration (by default $100 on Anthropic and $25 on OpenRouter, the owner's
+  caps since 2026-10-16). When the month's projected spend exceeds it, the status line turns
   amber. Nightly runs are never downgraded or stopped automatically.
 - Deep cards, for observation only. The `deep` service counts each card's tokens, turns and list cost (what the run
   would cost at API prices); litwatch records them with the card's attempt. Settings' Runs and cost shows the month to

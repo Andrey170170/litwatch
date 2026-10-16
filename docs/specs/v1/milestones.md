@@ -36,8 +36,10 @@ with the text they read, Write again, the "among the collection" section in `dee
 (`litwatch eval briefs`, the ten papers in `evals/2026-10-15-briefs.md`); N5a's archive in the stack (the compose file runs the archive, the PDF storage policy with held jobs and PDFs fetched when opened, the stack smoke test in CI); N5b's search and papers outside the collection (exact title and phrase first in the
 archive, its order kept; pages for archive papers not fetched, the fetched state, Deep read outside the collection,
 the archive's size in the search box; Use the PDF; a PDF read without the AGPL extra; the archive's whole-export
-backup and one-transaction recovery reconcile). Next: the owner's read of N3's ten Briefs; the owner's instance
-applies the PDF policy; N6, the restart.
+backup and one-transaction recovery reconcile). N6, the restart (#71,
+`evals/2026-10-16-restart.md`). Next: the owner's read of N3's ten Briefs; the owner's instance applies the PDF
+policy; the model-spend plan ([`docs/plans/model-spend.md`](../../plans/model-spend.md), decisions 60–62), which brings
+the nightly under the owner's caps before the switch.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).

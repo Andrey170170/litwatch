@@ -68,6 +68,10 @@ its Gist, grade, Fit reason and Brief where one exists, and for a weekly digest 
 objective and does not address the reader: no "for you", "for X builders", "required reading". Grades, model names,
 splits and other pipeline terms do not appear in digest text.
 
+Topics' digests are written concurrently, each topic's in its own order (its failed digests tried again, the day's
+digest, Monday's weekly), so the nightly run's writer calls go out in a few batches ([models.md](models.md), batches)
+rather than one after another.
+
 Each digest has a **Gist** of its own: a short paragraph, longer than a paper's one sentence because only a few
 digests are read a day. It is written in the same call.
 
@@ -76,7 +80,8 @@ digests are read a day. It is written in the same call.
 The nightly run ends with grading. Digests are written after a **bounded wait**, which starts when that run's grading
 ends, for the full-text passes the night queued that digests depend on: Focus Briefs and the Area Weight re-checks.
 The wait ends when each of them has finished, has failed in this run (it is retried on the next run, so waiting longer
-gains nothing), or is terminal (three failed runs; text awaited for more than seven days), or after `[digests] wait_minutes` (default 120), whichever comes first.
+gains nothing), or is terminal (three failed runs; text awaited for more than seven days), or at the nightly run's deadline (`[schedule] deadline`, default 07:30; [models.md](models.md), batches), whichever
+comes first. A run without a deadline waits at most `[digests] wait_minutes` (default 120).
 
 - A Focus paper without its Brief at that point is listed anyway; the writer reads its abstract instead.
 - An Area paper whose re-check has not finished, or failed in this run, is not due yet: it becomes due when the re-check finishes, and is a
