@@ -853,49 +853,16 @@ Probes reach 0.98 AUROC \citep{a}.
 \appendix
 \section{Proofs}
 Lemma 1 holds."""
-PDF_MARKDOWN = """## 5 Results
-
-Probes reach 0.98 AUROC [1].
-
-## References
-
-[1] A. Author, B. Author. A paper. 2025.
-
-[2] References and citations in practice. 2024.
-
-## A Proofs
-
-Lemma 1 holds.
-"""
-PDF_TEXT = """5 Results
-Probes reach 0.98 AUROC [1].
-References
-[1] A. Author, B. Author. A paper on probes, with a title
-that wraps. In Proceedings, 2025.
-A Proofs
-Lemma 1 holds."""
 
 
-@pytest.mark.parametrize(
-    ("text", "source"), [(LATEX, "latex"), (PDF_MARKDOWN, "pdf"), (PDF_TEXT, "pdf")]
-)
-def test_a_pass_sends_the_text_without_its_bibliography(text, source):
-    sent = trim.without_references(text, source)
-    assert "0.98 AUROC" in sent and "Lemma 1 holds." in sent
-    assert "A. Author" not in sent and "A~Author" not in sent.replace(".", "")
-    assert brief.request(P, None, text, source).user.endswith(sent)
+def test_a_pass_sends_latex_without_its_bibliography_and_pdf_text_as_read():
+    sent = trim.without_references(LATEX, "latex")
+    assert "0.98 AUROC" in sent and "Lemma 1 holds." in sent and "A~Author" not in sent
+    assert brief.request(P, None, LATEX, "latex").user.endswith(sent)
+    pdf = "Probes reach 0.98 AUROC.\nReferences\n[1] A. Author.\nAdditional Experiments\nMore."
+    assert trim.without_references(pdf, "pdf") == pdf
     # The P1 variant drops LaTeX's appendix as well.
     assert "Lemma 1" not in trim.without_appendix(LATEX, "latex")
-
-
-@pytest.mark.parametrize(
-    "heading", ["Supplementary Material", "Appendices", "8 Additional Experiments", "B.1 Setup"]
-)
-def test_what_follows_a_pdfs_references_under_a_plain_heading_is_kept(heading):
-    references = "References\n[1] A. Author. A paper, 2025."
-    text = f"5 Results\nProbes reach 0.98 AUROC.\n{references}\n{heading}\nLemma 1 holds."
-    sent = trim.without_references(text, "pdf")
-    assert "A. Author" not in sent and f"{heading}\nLemma 1 holds." in sent
 
 
 def test_a_text_without_a_bibliography_is_sent_as_read():

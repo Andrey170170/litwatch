@@ -121,24 +121,26 @@ def fingerprint(gateway: Gateway, text: str = "pass") -> str:
 
 class _Spent:
     """A journal that only adds up each paper's charges, so a refusal the fallback answered
-    counts in what its paper cost; one unknown charge makes the total unknown. Nothing is
-    reused: an evaluation asks afresh."""
+    counts in what its paper cost; a call with no known charge (none reported, or none
+    recorded, as after a timeout) makes the total unknown. Nothing is reused: an evaluation
+    asks afresh."""
 
     def __init__(self) -> None:
-        self.papers: dict[int, str | None] = {}
-        self.cost: dict[str | None, float | None] = {}
+        self.calls: list[tuple[str | None, float | None]] = []  # paper, charge, by call id
+
+    def cost(self, paper_id: str) -> float | None:
+        charges = [cost for paper, cost in self.calls if paper == paper_id]
+        return None if None in charges else sum(charges)  # type: ignore[arg-type]
 
     async def cached(self, key: str) -> None:
         return None
 
     async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
-        self.papers[len(self.papers)] = paper_id
-        return len(self.papers) - 1
+        self.calls.append((paper_id, None))
+        return len(self.calls) - 1
 
     async def record(self, call_id: int, usage: Usage) -> None:
-        paper = self.papers[call_id]
-        known = self.cost.get(paper, 0.0)
-        self.cost[paper] = None if known is None or usage.cost is None else known + usage.cost
+        self.calls[call_id] = (self.calls[call_id][0], usage.cost)
 
     async def accept(self, call_id: int, output: dict) -> None:
         return None
@@ -239,8 +241,8 @@ async def run(
                         inputs=now[paper.id],
                     )
                 result.seconds = round(time.monotonic() - started, 2)
-                if paper.id in spent.cost:
-                    result.cost = spent.cost[paper.id]
+                if gateway.journal is spent:
+                    result.cost = spent.cost(paper.id)
             result.version, result.source = read.version, read.source
             result.chars = len(prepare(read.body, read.source))
         with out.open("a", encoding="utf-8") as f:

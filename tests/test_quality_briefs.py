@@ -11,7 +11,7 @@ from litwatch.config import Models, RoleConfig
 from litwatch.llm import Gateway, Reply, Stop, Usage
 from litwatch.quality import briefs
 from tests.conftest import paper
-from tests.fakes import ScriptedProvider
+from tests.fakes import ProviderError, ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
 
 P = paper(
@@ -116,6 +116,15 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
         Gateway(models, providers), seeds.taxonomy(), pair, archive, tmp_path / "unknown.jsonl"
     )
     assert unknown.output is not None and unknown.cost is None
+    # So does a fallback that timed out, after a refusal that was charged.
+
+    def down(role, request):
+        raise ProviderError("APITimeoutError", transient=True)
+
+    providers["openrouter"] = ScriptedProvider("openrouter", down)
+    gw = Gateway(models, providers, retry_delays=())
+    (failed,) = await briefs.run(gw, seeds.taxonomy(), pair, archive, tmp_path / "down.jsonl")
+    assert failed.error and failed.cost is None
     # Another fallback is another configuration: the run is not resumed into the same file.
     other = Models(
         brief=models.brief, brief_fallback=OTHER.model_copy(update={"model": "lab/another"})
