@@ -54,6 +54,31 @@ class RunStatus(BaseModel):
 # -- topics and rows -------------------------------------------------------------------------------
 
 
+class SettingsHints(BaseModel):
+    """What the Settings sidebar says beside each page: how many things wait on the owner, the
+    last Calibrate session, the misses reported, the topics followed and the classes, the
+    month's spend against its budget (the budgeted providers' spend, or every provider's when
+    none has a budget), and the integrations failing."""
+
+    waiting: int
+    last_session: datetime | None = None
+    misses: int
+    topics: int
+    classes: int
+    spent: float
+    budget: float | None = None
+    failing: list[str] = Field(default_factory=list)
+
+
+class Summary(BaseModel):
+    """What the shell shows on every page (the status line, the sidebar's topics, the Settings
+    hints), read by one poll and never through a page's own reads: counts only."""
+
+    status: RunStatus
+    topics: list[Badge]  # the shown topics in the fixed order
+    settings: SettingsHints
+
+
 class Badge(BaseModel):
     """A followed topic as a badge shows it: its class's slug and name, its depth (the badge's
     shape), monogram and colour."""

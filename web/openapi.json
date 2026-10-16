@@ -1486,6 +1486,93 @@
         }
       }
     },
+    "/api/settings/taxonomy.yaml": {
+      "get": {
+        "summary": "Taxonomy Yaml",
+        "description": "The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML).",
+        "operationId": "taxonomy_yaml_api_settings_taxonomy_yaml_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No taxonomy yet"
+          }
+        }
+      }
+    },
+    "/api/settings/taxonomy/stats": {
+      "get": {
+        "summary": "Taxonomy Stats",
+        "operationId": "taxonomy_stats_api_settings_taxonomy_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyStats"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics/{slug}/keywords": {
+      "get": {
+        "summary": "Keyword Matches",
+        "description": "How many papers of the last 90 days each of the topic's keywords matches (the editor).",
+        "operationId": "keyword_matches_api_settings_topics__slug__keywords_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Keyword Matches Api Settings Topics  Slug  Keywords Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such topic"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/topics/{slug}": {
       "put": {
         "summary": "Save Topic",
@@ -1524,6 +1611,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such class"
           },
           "422": {
             "description": "Validation Error",
@@ -1584,6 +1674,29 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Quality Page Api Settings Quality Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/misses": {
+      "get": {
+        "summary": "Misses",
+        "description": "Reported misses, newest first, each with its trace.",
+        "operationId": "misses_api_settings_misses_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Miss"
+                  },
+                  "type": "array",
+                  "title": "Response Misses Api Settings Misses Get"
                 }
               }
             }
@@ -1992,6 +2105,9 @@
               }
             }
           },
+          "404": {
+            "description": "No such session"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2035,6 +2151,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such session"
           },
           "422": {
             "description": "Validation Error",
@@ -2086,6 +2205,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such session, or no paper at that position in it"
           },
           "422": {
             "description": "Validation Error",
@@ -2205,6 +2327,12 @@
           "204": {
             "description": "Successful Response"
           },
+          "404": {
+            "description": "No such integration is loaded"
+          },
+          "409": {
+            "description": "Nothing is failing"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2260,6 +2388,12 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such integration is loaded"
+          },
+          "409": {
+            "description": "Nothing is failing, or another event than the one named is"
           },
           "422": {
             "description": "Validation Error",
@@ -2366,6 +2500,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/summary": {
+      "get": {
+        "summary": "Summary",
+        "operationId": "summary_api_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Summary"
                 }
               }
             }
@@ -2545,7 +2697,7 @@
           "fit"
         ],
         "title": "Answer",
-        "description": "One paper's answers. Fit for the topic it was drawn or taken for is required: central,\nrelated, adjacent, none or unsure."
+        "description": "One paper's answers. Fit for the topic it was drawn or taken for (central, related,\nadjacent, none or unsure) is required on the first answer; an edit after it may leave it\nout, and the recorded answer stands. A Fit sent is a label; one left out writes none, so\nediting the appraisal alone recreates no label the owner has since taken back."
       },
       "Awaiting": {
         "properties": {
@@ -3878,6 +4030,41 @@
         "title": "GradedOut",
         "description": "What grading now found: the Fit that stands, or why there is no verdict."
       },
+      "Grader": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "holds": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "Grader",
+        "description": "One grader's answer in the verdict: its role, and its Fit, or for `area_check` whether\nthe judge's Fit holds."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4259,6 +4446,44 @@
         ],
         "title": "LookupIn"
       },
+      "Miss": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "reported_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reported At"
+          },
+          "trace": {
+            "$ref": "#/components/schemas/MissTrace"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "paper_id",
+          "title",
+          "topic",
+          "reported_at",
+          "trace"
+        ],
+        "title": "Miss"
+      },
       "MissIn": {
         "properties": {
           "paper_id": {
@@ -4285,6 +4510,103 @@
           "topic"
         ],
         "title": "MissIn"
+      },
+      "MissTrace": {
+        "properties": {
+          "classified": {
+            "type": "boolean",
+            "title": "Classified"
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability"
+          },
+          "threshold": {
+            "type": "number",
+            "title": "Threshold"
+          },
+          "classifier": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classifier"
+          },
+          "below": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Below"
+          },
+          "uncertain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertain"
+          },
+          "keyword": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keyword"
+          },
+          "graded": {
+            "type": "boolean",
+            "title": "Graded"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "graders": {
+            "items": {
+              "$ref": "#/components/schemas/Grader"
+            },
+            "type": "array",
+            "title": "Graders",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "classified",
+          "threshold",
+          "graded"
+        ],
+        "title": "MissTrace",
+        "description": "What each stage concluded for the owner's topic when the reported paper went through the\npipeline (feedback.md, misses), on the paper's current text. `classified`: classification\nhas run; then `probability` is the classifier's for the topic's class against the class's\n`threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;\n`below` says the classifier admitted it to a class under the topic's only, not to the\ntopic's own class.\n`graded`: a verdict exists; then `fit` is the Fit that stands by the rule of the depth it\nwas graded at (core.grading), and `graders` the answers it stands on, in the order the\ntopic's current depth asks its graders (the roles a verdict from another depth holds\nafter). The page reads where the paper was let go from `fit`, not from the graders."
       },
       "NextFire": {
         "properties": {
@@ -5695,6 +6017,70 @@
         ],
         "title": "SessionIn"
       },
+      "SettingsHints": {
+        "properties": {
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting"
+          },
+          "last_session": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Session"
+          },
+          "misses": {
+            "type": "integer",
+            "title": "Misses"
+          },
+          "topics": {
+            "type": "integer",
+            "title": "Topics"
+          },
+          "classes": {
+            "type": "integer",
+            "title": "Classes"
+          },
+          "spent": {
+            "type": "number",
+            "title": "Spent"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "failing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "waiting",
+          "misses",
+          "topics",
+          "classes",
+          "spent"
+        ],
+        "title": "SettingsHints",
+        "description": "What the Settings sidebar says beside each page: how many things wait on the owner, the\nlast Calibrate session, the misses reported, the topics followed and the classes, the\nmonth's spend against its budget (the budgeted providers' spend, or every provider's when\nnone has a budget), and the integrations failing."
+      },
       "Sort": {
         "type": "string",
         "enum": [
@@ -5748,6 +6134,31 @@
         ],
         "title": "StripDigest",
         "description": "One square of a topic's digest strip: a digest, coloured by its best rarity (none for\nnothing new), red when it failed."
+      },
+      "Summary": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/Badge"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/SettingsHints"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "topics",
+          "settings"
+        ],
+        "title": "Summary",
+        "description": "What the shell shows on every page (the status line, the sidebar's topics, the Settings\nhints), read by one poll and never through a page's own reads: counts only."
       },
       "Taxonomy": {
         "properties": {
@@ -5827,6 +6238,39 @@
         ],
         "title": "TaxonomyClass",
         "description": "One node of the tree. `parent` is the parent's slug, None at the top."
+      },
+      "TaxonomyStats": {
+        "properties": {
+          "members": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Members"
+          },
+          "thresholds": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Thresholds"
+          },
+          "topic_revisions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Topic Revisions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "members",
+          "thresholds",
+          "topic_revisions"
+        ],
+        "title": "TaxonomyStats",
+        "description": "What the Taxonomy and Topics pages show beside the tree: papers standing in each class or\nunder it, the threshold each class is admitted at (its own, or the configured default for\nits depth), and the current revision of each followed topic."
       },
       "TextPass": {
         "properties": {

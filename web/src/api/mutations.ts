@@ -6,7 +6,10 @@
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
+import { patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
 import { rememberCard } from "@/lib/remember";
+import { labelled, noted, type Quality, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
+import { plural } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 type Ack = Schemas["Ack"];
@@ -23,14 +26,28 @@ function patchSaved(qc: QueryClient, paperId: string, saved: boolean) {
     );
 }
 
+/** The one place the cached Needs you page is patched with what a write settled, or unsettled (DESIGN.md: a settled
+ * item keeps its result in place, and the sidebar's count follows). It is called from the write's own mutation,
+ * with the identity the write took when it was sent, so the row settles whether or not the page is still shown
+ * when the write returns; `patchRead` keeps a read in flight from landing over it. */
+export function settleNeeds(qc: QueryClient, patch: (q: Quality) => Quality) {
+  return patchRead<Quality>(qc, qualityQuery("needs").queryKey, patch);
+}
+
 /** After a write on a paper: refetch its page and patch its star in lists; the lists change no further until the
  * reader goes to one afresh. The write counts as pending until the page is refetched, so the controls show the new
- * state before they re-enable. */
+ * state before they re-enable. An open state the refetched page no longer carries is marked settled, in place, on
+ * the cached Needs you page (DESIGN.md: settling one settles it there too). */
 export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
-  void qc.invalidateQueries({ queryKey: ["status"] });
-  await qc.invalidateQueries({ queryKey: ["paper", paperId] });
-  if (qc.getQueryState(["paper", paperId])?.status === "error") toast("Recorded, but the page could not be refreshed", "error");
+  refreshSummary(qc);
+  // A paper read before is refetched whether or not its page is open: the reconciliation reads fresh states or
+  // none (not the retained ones when the refetch fails). A paper never read has nothing cached to reconcile from;
+  // the write that settles a Needs you row settles it by name (`stepped`, `useLabel`).
+  await qc.invalidateQueries({ queryKey: ["paper", paperId], refetchType: "all" });
+  if (qc.getQueryState(["paper", paperId])?.status === "error") return toast("Recorded, but the page could not be refreshed", "error");
+  const paper = qc.getQueryData<Schemas["Paper"]>(["paper", paperId]);
+  if (paper) await settleNeeds(qc, (q) => settleFromPaper(q, paper));
 }
 
 export function said(e: unknown, fallback = "That did not go through"): string {
@@ -52,18 +69,22 @@ function usePaperBusy(paperId: string): boolean {
 /**
  * A write on one paper, one at a time per paper. The paper's id is taken when `mutate` is called, as one of the
  * write's variables: the hook's options follow the latest render, so a page that moves to another paper before
- * the write runs or returns would otherwise write to, or settle, the wrong one.
+ * the write runs or returns would otherwise write to, or settle, the wrong one. `done` and `failed` run on the
+ * mutation itself, with the variables sent, whatever page is shown when the write returns.
  */
-function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Promise<R>, done: (qc: QueryClient, id: string, r: R) => void | Promise<void>) {
+function usePaperMutation<V, R>(paperId: string, call: (id: string, v: V) => Promise<R>, done: (qc: QueryClient, id: string, r: R, v: V) => unknown, failed?: (qc: QueryClient, id: string, v: V, e: unknown) => unknown) {
   const qc = useQueryClient();
   const m = useMutation({
     mutationKey: PAPER_WRITE,
     mutationFn: ({ id, v }: { id: string; v: V }) => call(id, v),
-    onSuccess: (r, { id }) => done(qc, id, r),
-    onError: (e) => toast(said(e), "error"),
+    onSuccess: (r, { id, v }) => done(qc, id, r, v),
+    onError: (e, { id, v }) => {
+      toast(said(e), "error");
+      return failed?.(qc, id, v, e);
+    },
   });
   const busy = usePaperBusy(paperId);
-  return { isPending: busy, mutate: (v: V, options?: { onSuccess?: () => void }) => m.mutate({ id: paperId, v }, options) };
+  return { isPending: busy, mutate: (v: V, options?: { onSuccess?: (r: R) => void; onError?: (e: unknown) => void }) => m.mutate({ id: paperId, v }, options) };
 }
 
 const acked = (qc: QueryClient, id: string, ack: Ack) => {
@@ -97,20 +118,23 @@ export function useUnreact(paperId: string) {
   );
 }
 
+/** A label, from the paper's page or a split on Needs you, named with the paper revision the page showed: the
+ * split's row for that revision settles with it (`labelled`), and the paper is settled as after any write. */
 export function useLabel(paperId: string) {
   return usePaperMutation(
     paperId,
-    async (id, v: { topic: string; value: Schemas["LabelValue"] }) =>
+    async (id, v: { topic: string; value: Schemas["LabelValue"]; revision: number }) =>
       ok(await api.PUT("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } }, body: { value: v.value } })),
-    acked,
+    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, v.value, v.revision)), acked(qc, id, ack)]),
   );
 }
 
+/** A label taken back: the split waits again on Needs you, where it was. */
 export function useUnlabel(paperId: string) {
   return usePaperMutation(
     paperId,
-    async (id, topic: string) => ok(await api.DELETE("/api/labels/{topic}/{paper_id}", { params: { path: { topic, paper_id: id } } })),
-    acked,
+    async (id, v: { topic: string; revision: number }) => ok(await api.DELETE("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } } })),
+    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, null, v.revision)), acked(qc, id, ack)]),
   );
 }
 
@@ -175,19 +199,41 @@ export function usePublication(paperId: string) {
   );
 }
 
-// The open states' actions (pipeline.md, section 9), each named by the paper revision the page showed.
+// The open states' actions (pipeline.md, section 9), each named by the paper revision the page showed. Each
+// settles its row on the cached Needs you page from the mutation, by the paper, its revision and the topic or
+// pass where a paper has several; a 409 (it ran, the text changed, another action took it) settles the row too,
+// with the API's reason, as the item no longer waits on the owner.
 
-const stepped = (done: string) => (qc: QueryClient, id: string) => {
-  toast(done);
-  return settled(qc, id);
+/** Which row of `list` the write's variables name, beside its paper. */
+type Which<V> = (v: V) => Omit<Settled, "paper_id">;
+
+/** The row's settlement: with `what` once the action is done, with the API's reason on a 409. */
+const settling = <V,>(list: Waiting, which: Which<V>) => ({
+  done: (qc: QueryClient, id: string, v: V, what: string) => settleNeeds(qc, (q) => settle(q, list, { paper_id: id, ...which(v) }, what)),
+  failed: (qc: QueryClient, id: string, v: V, e: unknown) => (e instanceof ApiError && e.status === 409 ? settleNeeds(qc, (q) => settle(q, list, { paper_id: id, ...which(v) }, `No longer waits on the owner: ${said(e)}.`)) : undefined),
+});
+
+/** A step's action done: the toast, the row settled with the same words, the paper settled as after any write. */
+const stepped = <V,>(list: Waiting, which: Which<V>, done: string) => {
+  const on = settling(list, which);
+  return [
+    (qc: QueryClient, id: string, _r: unknown, v: V) => {
+      toast(done);
+      return Promise.all([on.done(qc, id, v, `${done}.`), settled(qc, id)]);
+    },
+    on.failed,
+  ] as const;
 };
+
+/** The row for the paper's revision the action named, sent as the variable or in it. */
+const atRevision = (v: number | { revision: number }) => ({ revision: typeof v === "number" ? v : v.revision });
 
 export function useDismiss(paperId: string) {
   return usePaperMutation(
     paperId,
     async (id, revision: number) =>
       ok(await api.POST("/api/settings/classification/{paper_id}/dismiss", { params: { path: { paper_id: id } }, body: { revision } })),
-    stepped("Dismissed; it stays searchable in the archive"),
+    ...stepped("awaiting_classification", atRevision, "Dismissed; it stays searchable in the archive"),
   );
 }
 
@@ -196,7 +242,7 @@ export function useClassifyByHand(paperId: string) {
     paperId,
     async (id, v: { revision: number; classes: string[]; primary?: string }) =>
       ok(await api.PUT("/api/settings/classification/{paper_id}", { params: { path: { paper_id: id } }, body: v })),
-    stepped("Classified; it goes on as usual"),
+    ...stepped("awaiting_classification", atRevision, "Classified by hand; grading follows tonight"),
   );
 }
 
@@ -205,7 +251,7 @@ export function useFixText(paperId: string) {
     paperId,
     async (id, v: { revision: number; title?: string; abstract?: string }) =>
       ok(await api.POST("/api/settings/classification/{paper_id}/correction", { params: { path: { paper_id: id } }, body: v })),
-    stepped("Text fixed; the next run classifies it again"),
+    ...stepped("awaiting_classification", atRevision, "Text fixed; the next run classifies it again"),
   );
 }
 
@@ -214,11 +260,14 @@ export function useRetryAnalysis(paperId: string) {
     paperId,
     async (id, revision: number) =>
       ok(await api.POST("/api/settings/analysis/{paper_id}/retry", { params: { path: { paper_id: id } }, body: { revision } })),
-    stepped("Analysis gets three more runs, from the next one"),
+    ...stepped("analysis_failed", atRevision, "Analysis gets three more runs, from the next one"),
   );
 }
 
+/** Grade it now counts as the first of three more runs: a grading that fails again settles the item too, since
+ * the nightly runs take it from here and it no longer waits on the owner. */
 export function useGradeNow(paperId: string) {
+  const on = settling<{ topic: string; revision: number }>("ungraded", (v) => v);
   return usePaperMutation(
     paperId,
     async (id, v: { topic: string; revision: number }) =>
@@ -228,12 +277,62 @@ export function useGradeNow(paperId: string) {
           body: { revision: v.revision },
         }),
       ),
-    (qc, id, r) => {
+    (qc, id, r, v) => {
       toast(r.graded ? `Graded: ${r.fit}` : `Grading failed again: ${r.error ?? "no verdict"}`, r.graded ? "plain" : "error");
-      return settled(qc, id);
+      const what = r.graded ? `Graded again: ${r.fit}. The result shows on its topic.` : `Grading failed again: ${r.error ?? "no verdict"}. The nightly runs try twice more.`;
+      return Promise.all([on.done(qc, id, v, what), settled(qc, id)]);
+    },
+    on.failed,
+  );
+}
+
+/** Run a full-text pass that waits on the owner now: failed three runs (`state` failed), or awaiting its text over
+ * a week. A 409 means the page is behind (it ran, or the text changed): the pass's row settles with the reason,
+ * and the paper is refetched and the cached Needs you page reconciled from it, as after a write. */
+export function useRunPassNow(paperId: string) {
+  const on = settling<{ id: number; state: "failed" | "awaiting_text" }>("fulltext", (v) => ({ id: v.id }));
+  return usePaperMutation(
+    paperId,
+    async (id, v: { id: number; state: "failed" | "awaiting_text" }) => ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: v.id } } })),
+    (qc, id, _r, v) => {
+      toast("Running the pass now; its Brief shows here once written");
+      const what = v.state === "failed" ? "Running now, first in line, with three more runs." : "Asked for the text again, at urgent priority; the pass runs once it arrives.";
+      return Promise.all([on.done(qc, id, v, what), settled(qc, id)]);
+    },
+    async (qc, id, v, e) => {
+      if (!(e instanceof ApiError && e.status === 409)) return;
+      await on.failed(qc, id, v, e);
+      await settled(qc, id);
     },
   );
 }
+
+/** Write a failed digest again now, as a run of its own; the digest comes back with its new state. Written, its
+ * Needs you row settles; failed again, the row stays to be written, with the reason. The API answers 409 when it
+ * no longer waits (written meanwhile, its topic paused: the row settles with that reason) or another job holds the
+ * run lock (the row stays, with the reason). The row is patched from the mutation, so it is whether or not Needs
+ * you is still shown when the write returns. */
+export function useWriteAgain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (digestId: number) => ok(await api.POST("/api/digests/{digest_id}/write", { params: { path: { digest_id: digestId } } })),
+    onSuccess: (r, digestId) => {
+      refreshSummary(qc);
+      return settleNeeds(qc, (q) => (r.state === "failed" ? noted(q, digestId, `Failed again: ${r.error ?? "no text"}. The next run writes it again.`) : settle(q, "digests", { id: digestId }, "Written again; it shows in the Digest.")));
+    },
+    onError: (e, digestId) => {
+      toast(said(e), "error");
+      if (!(e instanceof ApiError && e.status === 409)) return;
+      // A 409 says the server's view moved (written meanwhile, its topic paused, a job running): the counts follow.
+      refreshSummary(qc);
+      return settleNeeds(qc, (q) => (digestGone(e) ? settle(q, "digests", { id: digestId }, `No longer to be written: ${said(e)}.`) : noted(q, digestId, `Not written now: ${said(e)}.`)));
+    },
+  });
+}
+
+/** Whether a write-again's 409 says the digest is no longer one to write (written meanwhile, or its topic paused),
+ * rather than that a job holds the run lock. */
+export const digestGone = (e: unknown) => e instanceof ApiError && e.status === 409 && said(e).includes("not one to write again");
 
 /** BibTeX for one paper, as text; the API looks the published version up first. */
 export async function bibtexFor(id: string): Promise<string> {
@@ -247,4 +346,152 @@ export async function copyText(text: string, done: string) {
   } catch {
     toast("Could not reach the clipboard", "error");
   }
+}
+
+// -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
+
+/** Follow a class, or save its topic's edit. The tree and the topic lists are refetched; the pages show the offer. */
+export function useSaveTopic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ slug, topic }: { slug: string; topic: Schemas["Topic"] }) =>
+      ok(await api.PUT("/api/settings/topics/{slug}", { params: { path: { slug } }, body: topic })),
+    onSuccess: (_, { slug }) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["taxonomy"] }),
+        qc.invalidateQueries({ queryKey: ["topics"] }),
+        qc.invalidateQueries({ queryKey: ["summary"] }),
+        qc.invalidateQueries(settingsReads("topics")),
+        qc.invalidateQueries(settingsReads("taxonomy")),
+      ]),
+    onError: (e) => toast(said(e, "Could not save it"), "error"),
+  });
+}
+
+const REORDER = ["topics-order"];
+
+/** The order the latest reorder still being saved put the topics in, if any. The Topics page lays its rows in it
+ * over whatever its read holds, so no read landing meanwhile (one begun before the move, a fresh visit's during
+ * it) puts a moved row back; it lasts until the last save in line has refreshed the reads, which is when the
+ * mutation leaves its pending state. */
+export function usePendingOrder(): string[] | undefined {
+  const orders = useMutationState({ filters: { mutationKey: REORDER, status: "pending" }, select: (m) => m.state.variables as string[] });
+  return orders.at(-1);
+}
+
+/** The owner's order of the topics, which the sidebar and the Digest follow. The saves go one at a time (`scope`),
+ * in the order they were made, whatever page is shown meanwhile, each from the order the page showed when the row
+ * was dropped (`usePendingOrder`). Only the last save in line refreshes the reads, or on failure lets the page's
+ * read be refetched: an earlier one's refetch would land the server's order of that moment, and a failed one's
+ * rollback would undo the moves still in line. */
+export function useReorderTopics() {
+  const qc = useQueryClient();
+  // A save counts as pending until its callbacks are done: more than one pending means another waits its turn.
+  const last = () => qc.isMutating({ mutationKey: REORDER }) <= 1;
+  return useMutation({
+    mutationKey: REORDER,
+    scope: { id: "topics-order" },
+    mutationFn: async (slugs: string[]) => ok(await api.PUT("/api/settings/topics-order", { body: { slugs } })),
+    onSuccess: () =>
+      last() &&
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["taxonomy"] }),
+        qc.invalidateQueries({ queryKey: ["topics"] }),
+        qc.invalidateQueries({ queryKey: ["summary"] }),
+        qc.invalidateQueries(settingsReads("topics")),
+        qc.invalidateQueries(settingsReads("taxonomy")),
+      ]),
+    onError: (e) => {
+      toast(said(e, "Could not save the order"), "error");
+      return last() && qc.invalidateQueries(settingsReads("topics")); // the page's order back to the saved one
+    },
+  });
+}
+
+/** The past-session lists, Calibrate's and Overview's: a new session is read on their next visit. */
+const SESSION_LISTS = ["calibrate", "overview"] as const;
+
+export function useDrawSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => ok(await api.POST("/api/settings/calibrate", { body: {} })),
+    onSuccess: () => {
+      refreshSummary(qc);
+      return Promise.all([qc.invalidateQueries({ queryKey: ["settings", "calibrate"] }), ...SESSION_LISTS.map((page) => qc.invalidateQueries({ queryKey: sessionsQuery(page).queryKey }))]);
+    },
+    onError: (e) => toast(said(e, "Could not draw a session"), "error"),
+  });
+}
+
+/** After a write on a session: the session is refetched (shown or not) so the strip and the review follow, and
+ * its row in the past-session lists is patched from it, in place (`patchRead`: a list read in flight does not
+ * land over it), so Back finds the counts as they are now. */
+async function sessionChanged(qc: QueryClient, sessionId: number) {
+  const key = sessionQuery(sessionId).queryKey;
+  await qc.invalidateQueries({ queryKey: key, refetchType: "all" });
+  if (qc.getQueryState(key)?.status === "error") return;
+  const s = qc.getQueryData<Session>(key);
+  if (s) for (const page of SESSION_LISTS) await patchRead<SessionRow[]>(qc, sessionsQuery(page).queryKey, (rows) => rows.map((r) => (r.id === sessionId ? sessionRow(r, s) : r)));
+}
+
+/** One paper's answers in a session: a write on the paper like its others, one at a time with them (a Calibrate
+ * screen or a label control opened while one is in flight waits for it), named by the session and position it was
+ * sent for. The session is refetched so the strip and the review follow, its row in the past-session lists is
+ * patched, and the paper is settled as after any write on it. */
+export function useAnswer(paperId: string) {
+  return usePaperMutation(
+    paperId,
+    async (_id, v: { sessionId: number; position: number; answer: Schemas["Answer"] }) =>
+      ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: v.sessionId, position: v.position } }, body: v.answer })),
+    (qc, id, _r, v) => Promise.all([sessionChanged(qc, v.sessionId), settled(qc, id)]),
+  );
+}
+
+/** Add the papers waiting for a word to a session. */
+export function useMore(sessionId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => ok(await api.POST("/api/settings/calibrate/{session_id}/more", { params: { path: { session_id: sessionId } } })),
+    onSuccess: (r) => {
+      toast(r.added ? `${plural(r.added, "more paper")} added` : "Nothing is waiting for a word");
+      return sessionChanged(qc, sessionId);
+    },
+    onError: (e) => toast(said(e), "error"),
+  });
+}
+
+/** Retry only clears the event's wait; the dispatcher sends it on its next pass, so the cards are read again over
+ * the next half minute to show how it went. */
+export function useRetryIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => ok(await api.POST("/api/settings/integrations/{name}/retry", { params: { path: { name } } })),
+    onSuccess: () => {
+      toast("Trying the event again");
+      const again = () => {
+        refreshSummary(qc);
+        return qc.invalidateQueries(settingsReads("integrations"));
+      };
+      for (const ms of [3_000, 10_000, 30_000]) setTimeout(() => void again(), ms);
+      return again();
+    },
+    onError: (e) => toast(said(e), "error"),
+  });
+}
+
+/** Skip the failing event the card showed; a 409 means another is failing by now, and the cards are refetched. */
+export function useSkipEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name, eventId }: { name: string; eventId: number }) =>
+      ok(await api.POST("/api/settings/integrations/{name}/skip", { params: { path: { name }, query: { event_id: eventId } } })),
+    onSuccess: () => {
+      refreshSummary(qc);
+      return qc.invalidateQueries(settingsReads("integrations"));
+    },
+    onError: (e) => {
+      toast(said(e), "error");
+      if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries(settingsReads("integrations"));
+    },
+  });
 }

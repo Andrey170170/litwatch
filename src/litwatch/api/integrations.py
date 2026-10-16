@@ -106,7 +106,15 @@ def _known(request: Request, name: str) -> None:
         raise HTTPException(status_code=404, detail="no such integration is loaded")
 
 
-@router.post("/settings/integrations/{name}/retry", status_code=204)
+# What retry and skip answer besides success, for the API schema.
+NOT_LOADED = {404: {"description": "No such integration is loaded"}}
+RETRY_REFUSED = NOT_LOADED | {409: {"description": "Nothing is failing"}}
+SKIP_REFUSED = NOT_LOADED | {
+    409: {"description": "Nothing is failing, or another event than the one named is"}
+}
+
+
+@router.post("/settings/integrations/{name}/retry", status_code=204, responses=RETRY_REFUSED)
 async def retry(name: str, request: Request, c: Conn) -> None:
     """Try the failing event again now, without waiting out its backoff."""
     _known(request, name)
@@ -114,7 +122,7 @@ async def retry(name: str, request: Request, c: Conn) -> None:
         raise HTTPException(status_code=409, detail="nothing is failing")
 
 
-@router.post("/settings/integrations/{name}/skip")
+@router.post("/settings/integrations/{name}/skip", responses=SKIP_REFUSED)
 async def skip(name: str, request: Request, c: Conn, event_id: int | None = None) -> s.Failing:
     """Give up on the failing event; the integration goes on with the next. Returns the
     event skipped. `event_id` names the event the owner confirmed: when another one is

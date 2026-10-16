@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from litwatch import fulltext
-from litwatch.api import digests, reading, settings
+from litwatch.api import digests, reading, settings, summary
 from litwatch.api import integrations as integrations_api
 from litwatch.api.deps import authorised
 from litwatch.archive import ArchiveClient
@@ -116,6 +116,7 @@ def create_app(
     app.include_router(digests.router, dependencies=protected)
     app.include_router(settings.router, dependencies=protected)
     app.include_router(integrations_api.router, dependencies=protected)
+    app.include_router(summary.router, dependencies=protected)
     app.include_router(reading.session)
 
     @app.get("/healthz", include_in_schema=False)

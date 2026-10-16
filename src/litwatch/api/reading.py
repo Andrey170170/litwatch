@@ -172,11 +172,15 @@ def _topics_known(tree: Taxonomy | None, slugs: list[str]) -> None:
 # -- the status line -------------------------------------------------------------------------------
 
 
-@router.get("/status")
-async def status(request: Request, c: Conn) -> s.RunStatus:
+async def run_status(request: Request, c: psycopg.AsyncConnection) -> s.RunStatus:
     spend = await budget_lines(c, _config(request).budget)
     over = [line.provider for line in spend if line.over]
     return s.RunStatus(**await reading.status(c), over_budget=over)
+
+
+@router.get("/status")
+async def status(request: Request, c: Conn) -> s.RunStatus:
+    return await run_status(request, c)
 
 
 # -- papers ----------------------------------------------------------------------------------------

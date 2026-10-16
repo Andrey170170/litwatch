@@ -133,21 +133,30 @@ async def _one(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> d
 
 
 async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
-    """The latest nightly run: running, failed (or stuck past `STALE_AFTER`), or done; done
-    with papers awaiting classification, with analysis, a grading or a full-text pass stopped,
-    or with a digest that failed, needs the owner's attention. `papers` are those the run
-    classified; while it runs, `waiting` are those still to classify."""
-    run = await _one(conn, "SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
-    if run is None:
-        return {"state": "none"}
-    now = (await _one(conn, "SELECT now() AS now"))["now"]
+    """The latest nightly run: none yet, running, failed (or stuck past `STALE_AFTER`), or done;
+    done with papers awaiting classification, with analysis, a grading or a full-text pass
+    stopped, or with a digest that failed, needs the owner's attention. What is stopped is
+    counted whether or not a night ran (a digest written by hand can fail before the first).
+    `papers` are those the run classified; while it runs, `waiting` are those still to
+    classify."""
+    from litwatch.store import digests  # it reads this module's SCOPE
+
     awaiting = await failures.count_stuck(conn, "classification", FAILED_RUNS)
     analysis = await failures.count_stuck(conn, "analysis", FAILED_RUNS)
     ungraded = await failures.count_stuck(conn, "grading", FAILED_RUNS)
     texts = await fulltext.count_stuck(conn, FAILED_RUNS)
-    from litwatch.store import digests  # it reads this module's SCOPE
-
     failed_digests = await digests.count_failed(conn)
+    stopped = {
+        "awaiting_classification": awaiting,
+        "analysis_failed": analysis,
+        "ungraded": ungraded,
+        "fulltext_failed": texts,
+        "digests_failed": failed_digests,
+    }
+    run = await _one(conn, "SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
+    if run is None:
+        return {"state": "none", **stopped}
+    now = (await _one(conn, "SELECT now() AS now"))["now"]
     papers = await _one(
         conn,
         # The owner's classifications by hand (model `owner`) during the run are not its work.
@@ -160,11 +169,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         "started_at": run["started_at"],
         "finished_at": run["finished_at"],
         "papers": papers["n"],
-        "awaiting_classification": awaiting,
-        "analysis_failed": analysis,
-        "ungraded": ungraded,
-        "fulltext_failed": texts,
-        "digests_failed": failed_digests,
+        **stopped,
     }
     if run["finished_at"] is None and now - run["started_at"] < STALE_AFTER:
         waiting = await _one(

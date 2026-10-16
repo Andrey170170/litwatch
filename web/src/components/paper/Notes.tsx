@@ -1,11 +1,12 @@
 /**
  * The open states under the header (DESIGN.md, "Open states"): yellow for a split or escalation, red for ungraded,
- * a failed analysis or awaiting classification, each with its buttons. Settling one settles it on Needs you too.
+ * a failed analysis, a full-text pass waiting on the owner or awaiting classification, each with its buttons.
+ * Settling one settles it on Needs you too.
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { Schemas } from "@/api/client";
-import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useRetryAnalysis } from "@/api/mutations";
+import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useRetryAnalysis, useRunPassNow } from "@/api/mutations";
 import { taxonomyQuery } from "@/api/queries";
 import type { Paper } from "./Actions";
 
@@ -62,6 +63,7 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
   const dismiss = useDismiss(paper.id);
   const retry = useRetryAnalysis(paper.id);
   const gradeNow = useGradeNow(paper.id);
+  const runPass = useRunPassNow(paper.id);
   const topic = paper.topics.find((t) => t.topic.slug === state.topic);
   const name = topic?.topic.name ?? state.topic ?? "";
   switch (state.kind) {
@@ -113,6 +115,32 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
           </div>
         </div>
       );
+    case "fulltext_failed":
+    case "awaiting_text": {
+      // An older revision's Brief is kept until the new one is written; without one the abstract stands in.
+      const meanwhile = paper.brief ? `the Brief from revision ${paper.brief.revision} stands meanwhile` : "the abstract stands in for the Brief";
+      return (
+        <div className="note fail">
+          <div>
+            {state.kind === "fulltext_failed" ? (
+              <>
+                <b>Full text failed three runs in a row.</b> Until a pass succeeds, {meanwhile}.
+              </>
+            ) : (
+              <>
+                <b>Awaiting the full text for over a week.</b> The archive has not delivered it; {meanwhile}.
+              </>
+            )}
+            {state.error && <div className="err">{state.error}</div>}
+          </div>
+          <div className="acts">
+            <button className="btn" disabled={runPass.isPending} onClick={() => runPass.mutate({ id: state.pass_id!, state: state.kind === "awaiting_text" ? "awaiting_text" : "failed" })}>
+              {runPass.isPending ? "Starting…" : "Run it now"}
+            </button>
+          </div>
+        </div>
+      );
+    }
     case "awaiting_classification":
       return (
         <div className="note fail">
@@ -145,8 +173,9 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
 export function Notes({ paper, onLabel }: { paper: Paper; onLabel: (topic: string) => void }) {
   return (
     <>
-      {paper.states?.map((s, i) => (
-        <Note key={`${s.kind}:${s.topic ?? ""}:${i}`} paper={paper} state={s} onLabel={onLabel} />
+      {paper.states?.map((s) => (
+        // One state per kind and topic or pass: a refetch that drops one keeps the others' open forms.
+        <Note key={`${s.kind}:${s.topic ?? ""}:${s.pass_id ?? ""}`} paper={paper} state={s} onLabel={onLabel} />
       ))}
     </>
   );

@@ -77,6 +77,7 @@ async def test_a_draw_skips_a_verdict_on_text_since_rewritten(db):
 async def test_answers_become_labels_and_appraisals(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    assert item["verdict"] == "related"  # the pipeline's side, for the review
     with pytest.raises(ValueError, match="required"):
         await calibrate.answer(db, session_id, item["position"], Answer(fit={}))
     await calibrate.answer(
@@ -93,6 +94,9 @@ async def test_answers_become_labels_and_appraisals(db):
         await db.execute("SELECT * FROM labels WHERE paper_id = %s", (item["paper_id"],))
     ).fetchone()
     assert (label["value"], label["origin"]) == ("none", "sample")
+    # The answer is recorded on the item, for the review, whatever the label says later.
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    assert item["answer"] == "none" and item["answered_at"] is not None
     # It matters but fits no Focus topic: a missing topic or a narrow rubric.
     (listed,) = await calibrate.matters_no_topic(db)
     assert (listed["paper_id"], listed["note"]) == (item["paper_id"], "about steering, not traces")
@@ -182,6 +186,54 @@ async def test_more_takes_in_an_unmarked_miss_for_a_focus_topic_only(db):
     assert (elsewhere.id, "miss") not in taken  # no label can be given for an Area topic
 
 
+async def test_a_miss_keeps_the_verdict_standing_when_it_joins(db):
+    """A past review shows what the pipeline said when the paper joined the session, not a
+    later regrade."""
+    missed = ABOVE[0]
+    await db.execute(
+        "INSERT INTO misses (paper_id, topic) VALUES (%s, %s)", (missed.id, FAITH.slug)
+    )
+    session_id = await calibrate.draw(db, seed=5, size=0)
+    await calibrate.more(db, session_id)
+    await verdicts.add(db, verdict(missed.id, Fit.CENTRAL))  # regraded after the session
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "miss"]
+    assert item["verdict"] == "related"
+
+
+async def test_an_answer_does_not_renew_a_label_it_leaves_as_it_was(db):
+    """Editing only the appraisal sends the drawn Fit again; the label keeps its time, so a
+    reaction given since still outranks it."""
+    session_id = await calibrate.draw(db, seed=1, size=2)
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    fit = {FAITH.slug: LabelValue.NONE}
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+    at = "SELECT labelled_at FROM labels WHERE paper_id = %s AND topic = %s"
+    before = await (await db.execute(at, (item["paper_id"], FAITH.slug))).fetchone()
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
+    after = await (await db.execute(at, (item["paper_id"], FAITH.slug))).fetchone()
+    assert after["labelled_at"] == before["labelled_at"]
+
+
+async def test_an_appraisal_edit_after_the_first_answer_writes_no_label(db):
+    """The drawn topic's Fit is required on the first answer only. An edit of the appraisal
+    alone leaves the Fit out, so a label the owner has since taken back is not recreated from
+    the recorded answer; the answer stands as recorded."""
+    session_id = await calibrate.draw(db, seed=1, size=2)
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    with pytest.raises(ValueError, match="required"):
+        await calibrate.answer(db, session_id, item["position"], Answer(fit={}, value="fine"))
+    fit = {FAITH.slug: LabelValue.NONE}
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+    await word.unlabel(db, item["paper_id"], FAITH.slug)
+    await calibrate.answer(db, session_id, item["position"], Answer(fit={}, value="matters"))
+    labels = await (
+        await db.execute("SELECT * FROM labels WHERE paper_id = %s", (item["paper_id"],))
+    ).fetchall()
+    assert labels == []
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    assert (item["answer"], item["fit"], item["appraisal"]["value"]) == ("none", {}, "matters")
+
+
 async def test_fit_names_only_focus_topics(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
@@ -201,3 +253,30 @@ async def test_an_appraisal_can_be_cleared(db):
     assert await calibrate.matters_no_topic(db) == []
     rows = await (await db.execute("SELECT count(*) AS n FROM appraisals")).fetchone()
     assert rows["n"] == 2  # matters once, then cleared
+
+
+async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db):
+    """The past-session rows say how many answers differ from the pipeline's Fit: another Fit
+    than the verdict's, as the review marks them. Unsure never differs."""
+    import httpx
+
+    from litwatch.api import create_app
+    from litwatch.config import Config
+
+    session_id = await calibrate.draw(db, seed=3, size=4)
+    above = [i for i in await items(db, session_id) if i["why"] == "above"]  # verdict related
+    below = [i for i in await items(db, session_id) if i["why"] == "below"]  # verdict none
+    for item, fit in (
+        (above[0], LabelValue.NONE),  # differs
+        (above[1], LabelValue.CENTRAL),  # differs: another Fit, though on the same side
+        (below[0], LabelValue.RELATED),  # differs
+        (below[1], LabelValue.UNSURE),  # answered, never differs
+    ):
+        await calibrate.answer(db, session_id, item["position"], Answer(fit={FAITH.slug: fit}))
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    transport = httpx.ASGITransport(app=create_app(dsn, "t", Config()))
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://t", headers={"authorization": "Bearer t"}
+    ) as c:
+        (row,) = (await c.get("/api/settings/calibrate")).json()
+    assert (row["papers"], row["answered"], row["differ"]) == (4, 4, 3)

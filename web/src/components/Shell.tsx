@@ -3,14 +3,17 @@
  * the page's bottom bar, and the drawer. The main column records how it was reached (go, back, top) so the page
  * can slide in from the right side.
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
-import { freshVisit, topicsQuery } from "@/api/queries";
+import { memo, useEffect, useRef, useState } from "react";
+import { freshVisit } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
+import { countRender } from "@/lib/renders";
+import { SettingsSide } from "@/routes/settings";
 import { Badge } from "./Badge";
 import { RunStatus } from "./RunStatus";
 import { Sheet } from "./Sheet";
+import { Unavailable, useSummary } from "./Summary";
 import { Slot } from "./slots";
 import { Toaster } from "./Toaster";
 
@@ -23,6 +26,23 @@ const TABS = [
 /** A deeper screen has "‹ Back" (desktop) or "‹" and its title (phone); a top-level one the tabs' chrome. */
 export function isDeeper(pathname: string): boolean {
   return !["/", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
+}
+
+/** Settings owns the sidebar on its pages, and on a paper opened from one of them. */
+function inSettings(location: { pathname: string; state: { settings?: boolean } }): boolean {
+  return location.pathname.startsWith("/settings") || !!location.state.settings;
+}
+
+/** The sidebar's head: the wordmark and the run's status. */
+export function SideHead() {
+  return (
+    <div className="wm">
+      <Link to="/" className="mark">
+        litwatch
+      </Link>
+      <RunStatus />
+    </div>
+  );
 }
 
 type Came = "go" | "back" | "top" | "keep";
@@ -40,10 +60,19 @@ function useCame(): Came {
   return index < before.index ? "back" : "go";
 }
 
-function Following({ onPick }: { onPick?: () => void }) {
-  const { data } = useQuery(topicsQuery);
-  const topics = data?.flatMap((g) => g.topics) ?? [];
-  if (!topics.length) return null;
+/** The followed topics, from the shell's summary: the list re-renders only when the topics themselves change. A
+ * summary never read leaves the section with that word, not empty. */
+const Following = memo(function Following({ onPick }: { onPick?: () => void }) {
+  const { data: topics, unavailable, retry } = useSummary((s) => s.topics);
+  countRender("following");
+  if (unavailable)
+    return (
+      <>
+        <div className="sec">Following</div>
+        <Unavailable what="topics" retry={retry} />
+      </>
+    );
+  if (!topics?.length) return null;
   return (
     <>
       <div className="sec">Following</div>
@@ -55,7 +84,7 @@ function Following({ onPick }: { onPick?: () => void }) {
       ))}
     </>
   );
-}
+});
 
 function Tabs({ onPick, drawer }: { onPick?: () => void; drawer?: boolean }) {
   return TABS.map((t) => (
@@ -66,27 +95,31 @@ function Tabs({ onPick, drawer }: { onPick?: () => void; drawer?: boolean }) {
   ));
 }
 
+/** The reading sidebar; memoised, with nothing passed in, so a route change re-renders only its active links. */
+const ReadingSide = memo(function ReadingSide() {
+  countRender("side");
+  return (
+    <aside className="side">
+      <SideHead />
+      <nav className="nav">
+        <Tabs />
+        <Following />
+      </nav>
+      <nav className="foot nav">
+        <Link to="/settings" className="it">
+          ⚙ Settings
+        </Link>
+      </nav>
+    </aside>
+  );
+});
+
 function Desktop() {
   const came = useCame();
+  const location = useLocation();
   return (
     <div className="app">
-      <aside className="side">
-        <div className="wm">
-          <Link to="/" className="mark">
-            litwatch
-          </Link>
-          <RunStatus />
-        </div>
-        <nav className="nav">
-          <Tabs />
-          <Following />
-        </nav>
-        <nav className="foot nav">
-          <Link to="/settings/$page" params={{ page: "overview" }} className="it" activeProps={{ className: "it on" }}>
-            ⚙ Settings
-          </Link>
-        </nav>
-      </aside>
+      {inSettings(location) ? <SettingsSide /> : <ReadingSide />}
       <main className="main" data-came={came} data-scroll-restoration-id="main">
         <div className="inner">
           <Outlet />
@@ -125,7 +158,7 @@ function Phone() {
         )}
         <span className="sp" />
         <RunStatus />
-        <Link to="/settings/$page" params={{ page: "overview" }} className="ib" aria-label="Settings">
+        <Link to="/settings" className="ib" aria-label="Settings">
           ⚙
         </Link>
       </header>
@@ -147,7 +180,7 @@ function Phone() {
           <Following onPick={() => setMenu(false)} />
         </nav>
         <nav className="foot nav">
-          <Link to="/settings/$page" params={{ page: "overview" }} className="it" onClick={() => setMenu(false)}>
+          <Link to="/settings" className="it" onClick={() => setMenu(false)}>
             ⚙ Settings
           </Link>
         </nav>
@@ -160,11 +193,15 @@ function Phone() {
 export function Shell() {
   const router = useRouter();
   const qc = useQueryClient();
-  // A list reached by a link loads afresh; Back finds it as it was left.
-  useEffect(
-    () => router.history.subscribe(({ location, action }) => action.type === "PUSH" && freshVisit(qc, location.pathname)),
-    [router, qc],
-  );
+  // A page reached by a link loads afresh; Back finds it as it was left. A push within the page (a filter,
+  // Calibrate's `?at=`) is no visit.
+  useEffect(() => {
+    let at = router.state.location.pathname;
+    return router.history.subscribe(({ location, action }) => {
+      if (action.type === "PUSH" && location.pathname !== at) freshVisit(qc, location.pathname);
+      at = location.pathname;
+    });
+  }, [router, qc]);
   return useDesktop() ? <Desktop /> : <Phone />;
 }
 

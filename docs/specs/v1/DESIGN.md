@@ -207,11 +207,13 @@ the bottom bar holds ‹ Back, "3/20 ▴" and Next ›, and "3/20" opens a sheet
 past session opens its review: each paper with the owner's Fit against the pipeline's, amber where they differ; a row
 opens its paper.
 
-**Misses.** Each report with its topic, date and the stage that let it go, and its trace: the miss record's five cells
-(classifier, uncertain band, keywords, judge, check), what each stage concluded for the owner's topic when the reported
-paper went through the pipeline. A cell's top edge is cyan where the stage would have admitted it, red where it would
-have let it go, grey while the run is pending; judge and check always have a Fit, since grading for the reported topic
-runs whatever classification said. Edit the topic, Edit the class, Resolved.
+**Misses.** Each report with its topic, date and the stage that let it go, and its trace: what each stage concluded
+for the owner's topic when the reported paper went through the pipeline, in the miss record's cells: classifier,
+uncertain band, keywords, then one per grader the topic's depth asks (Focus: judge, check; Area: judge, area check,
+check; Field: field grade). A cell's top edge is cyan where the stage would have admitted it, red where it would have
+let it go, grey while the run is pending or the grader was not asked; grading always answers, since it runs for the
+reported topic whatever classification said, and "the stage that let it go" reads the Fit that stands by the depth's
+rule, which the API carries. Edit the topic, Edit the class, Resolved.
 
 **Topics and the topic editor.** Focus, Area and Field lists in the fixed order. A row drags by its ⋮⋮ grip to a new
 place within its depth, which becomes the order of the sidebar and the Digest; the rest of the row opens the topic's

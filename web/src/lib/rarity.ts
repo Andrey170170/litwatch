@@ -5,6 +5,9 @@ export type Rarity = Schemas["Rarity"];
 export type Grade = Schemas["Grade"];
 export type GradeLevel = Schemas["GradeLevel"];
 export type Fit = Schemas["Fit"];
+
+/** A Fit that admits the paper to the topic: central or related. */
+export const admits = (fit: string | null | undefined): boolean => fit === "central" || fit === "related";
 export type Weight = Schemas["Weight"];
 export type Depth = Schemas["Depth"];
 

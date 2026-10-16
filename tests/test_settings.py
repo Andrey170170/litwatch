@@ -10,7 +10,7 @@ from litwatch.feedback import word
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import FAITH, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
 
 TOKEN = "s3cret"
 P = paper("2610.00001", title="Faithful traces", abstract="Chain-of-thought omits steps.")
@@ -144,6 +144,41 @@ async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secret
     assert config["models"]["writer"]["model"] == "claude-opus-5-5"
 
 
+def test_configuration_masks_what_a_url_may_carry():
+    from litwatch.api.settings import _mask
+
+    shown = _mask({"integrations": {"hook": {"url": "https://n8n.test/webhook/s3cret?k=1"}}})
+    assert shown["integrations"]["hook"]["url"] == "https://n8n.test/••••"
+    assert _mask({"archive_url": "http://archive:8787"}) == {"archive_url": "http://archive:8787"}
+    assert _mask({"url": "https://u:p@dav.test"}) == {"url": "https://dav.test/••••"}
+    # A limit whose name carries a secret word is a number to show, not a credential.
+    limits = {"max_output_tokens": 4096, "max_tokens": 10, "api_key": "k", "token_file": "f"}
+    assert _mask({"judge": limits}) == {
+        "judge": {
+            "max_output_tokens": 4096,
+            "max_tokens": 10,
+            "api_key": "••••",
+            "token_file": "••••",
+        }
+    }
+
+
+def test_the_schema_declares_the_settings_errors_a_page_can_meet():
+    """The client's types come from the schema: every error a Settings action can answer with
+    is declared on its route."""
+    paths = create_app("postgresql://x/y", TOKEN, Config()).openapi()["paths"]
+    declared = {
+        ("/api/settings/topics/{slug}", "put"): {"404"},
+        ("/api/settings/calibrate/{session_id}", "get"): {"404"},
+        ("/api/settings/calibrate/{session_id}/more", "post"): {"404"},
+        ("/api/settings/calibrate/{session_id}/items/{position}", "put"): {"404"},
+        ("/api/settings/integrations/{name}/retry", "post"): {"404", "409"},
+        ("/api/settings/integrations/{name}/skip", "post"): {"404", "409"},
+    }
+    for (path, method), codes in declared.items():
+        assert codes <= set(paths[path][method]["responses"]), (path, method)
+
+
 async def test_bad_input_is_refused_not_crashed(client):
     body = _body(FAITH) | {"keywords": ["["]}
     assert (await client.put(f"/api/settings/topics/{FAITH.slug}", json=body)).status_code == 422
@@ -153,3 +188,241 @@ async def test_bad_input_is_refused_not_crashed(client):
 
 async def test_settings_refuse_what_does_not_exist(client):
     assert (await client.post("/api/settings/calibrate/999/more")).status_code == 404
+
+
+async def _classify(conn, paper, probabilities, primary):
+    """Record a classification as the nightly step would, with the memberships it makes."""
+    from litwatch import classification
+    from litwatch.core.classification import Classified, memberships
+
+    found = Classified(probabilities=probabilities, primary=primary)
+    c = classification.Classification(
+        paper=paper,
+        taxonomy_revision=TREE.classes_version,
+        versions={k.slug: k.version for k in TREE.classes},
+        classified=found,
+        memberships=memberships(TREE, found, paper.title, paper.abstract),
+        response={"probabilities": probabilities},
+        model="m",
+    )
+    assert await classification.record(conn, c)
+
+
+async def test_a_miss_carries_what_each_stage_concluded(client, conn):
+    from litwatch.core import Reaction, ReactionReason, ReactionValue
+    from litwatch.feedback import misses
+
+    # Reported before any stage ran: every cell pending.
+    await misses.report(conn, Q.id, FAITH.slug)
+    (m,) = (await client.get("/api/settings/misses")).json()
+    assert (m["paper_id"], m["topic"], m["trace"]["classified"]) == (Q.id, FAITH.slug, False)
+    assert m["trace"]["classifier"] is None and m["trace"]["graded"] is False
+    # Classified by hand from Needs you: the owner's word, not the classifier's; still pending.
+    from litwatch import classification
+
+    assert await classification.by_hand(conn, Q, TREE, [FAITH.slug])
+    (m,) = (await client.get("/api/settings/misses")).json()
+    assert m["trace"]["classified"] is False and m["trace"]["probability"] is None
+    # Classified under the Focus threshold, kept in by the band; graded by both labs.
+    await _classify(conn, Q, {FAITH.slug: 0.3, "other": 0.9}, "other")
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=Q.id,
+            topic=FAITH.slug,
+            topic_version="v",
+            fit=Fit.RELATED,
+            reason="r",
+            opinions={
+                "judge": Opinion(fit=Fit.RELATED, reason="y", model="a"),
+                "check": Opinion(fit=Fit.ADJACENT, reason="n", model="b"),
+            },
+        ),
+    )
+    (m,) = (await client.get("/api/settings/misses")).json()
+    t = m["trace"]
+    assert t["classified"] and t["probability"] == 0.3 and t["threshold"] == 0.5
+    assert (t["classifier"], t["uncertain"], t["keyword"]) == (False, True, False)
+    assert t["below"] is False
+    assert (t["graded"], t["fit"]) == (True, "related")
+    assert [(g["role"], g["fit"]) for g in t["graders"]] == [
+        ("judge", "related"),
+        ("check", "adjacent"),
+    ]
+    # A miss on the parent: the classifier's membership in the Focus class stands in it too.
+    from litwatch.feedback import misses as misses_store
+
+    await misses_store.report(conn, P.id, "interpretability")
+    await _classify(conn, P, {FAITH.slug: 0.9, "interpretability": 0.1}, FAITH.slug)
+    found = (await client.get("/api/settings/misses")).json()
+    (parent,) = [x for x in found if x["topic"] == "interpretability"]
+    assert parent["trace"]["classifier"] is True and parent["trace"]["probability"] == 0.1
+    assert parent["trace"]["below"] is True  # in a class under it, not in its own
+    # The classifier choosing the topic's own class, under its threshold, is no class under it.
+    await _classify(conn, P, {FAITH.slug: 0.1, "interpretability": 0.1}, "interpretability")
+    found = (await client.get("/api/settings/misses")).json()
+    (parent,) = [x for x in found if x["topic"] == "interpretability"]
+    assert (parent["trace"]["classifier"], parent["trace"]["below"]) == (True, False)
+    # The band admits a paper to one Focus class for grading, not to the classes above it.
+    await misses_store.report(conn, Q.id, "interpretability")
+    found = (await client.get("/api/settings/misses")).json()
+    (band,) = [x for x in found if x["topic"] == "interpretability" and x["paper_id"] == Q.id]
+    assert (band["trace"]["classifier"], band["trace"]["uncertain"]) == (False, False)
+
+    # Reactions over 30 days per topic and reason, for Overview.
+    await word.react(
+        conn,
+        Reaction(
+            paper_id=Q.id,
+            topic=FAITH.slug,
+            value=ReactionValue.DOWN,
+            reason=ReactionReason.OVERRATED,
+        ),
+    )
+    await word.react(
+        conn, Reaction(paper_id=Q.id, topic="agents", value=ReactionValue.UP, reason=None)
+    )
+    page = (await client.get("/api/settings/quality")).json()
+    # In the owner's topic order (agents comes first alphabetically, last in the taxonomy).
+    assert page["reactions"] == [
+        {"topic": FAITH.slug, "reason": "overrated", "n": 1},
+        {"topic": "agents", "reason": None, "n": 1},
+    ]
+
+
+async def test_taxonomy_stats_and_export(client, conn):
+    from datetime import UTC, datetime
+
+    recent = P.model_copy(update={"published": datetime.now(UTC).isoformat()})
+    await papers_store.upsert(conn, [recent])  # the keyword window is the last 90 days
+    await _classify(conn, recent, {FAITH.slug: 0.9}, FAITH.slug)
+    stats = (await client.get("/api/settings/taxonomy/stats")).json()
+    # A member of the Focus class stands in its parent too.
+    assert stats["members"] == {FAITH.slug: 1, "interpretability": 1}
+    assert stats["topic_revisions"][FAITH.slug] == 1
+    # Each class at its own threshold, or the configured one for its depth (the test config: 0.8
+    # by default, 0.5 for Focus).
+    assert (stats["thresholds"][FAITH.slug], stats["thresholds"]["other"]) == (0.5, 0.8)
+    kw = await client.get(f"/api/settings/topics/{FAITH.slug}/keywords")
+    assert kw.json() == {r"chain.of.thought": 1, r"\bCoT\b": 0, "faithful": 1}
+    assert (await client.get("/api/settings/topics/other/keywords")).status_code == 404
+    text = (await client.get("/api/settings/taxonomy.yaml")).text
+    assert text.startswith("classes:") and f"class: {FAITH.slug}" in text
+
+
+async def test_a_miss_reads_the_verdict_as_its_depth_graded_it(client, conn):
+    """A Field topic is graded by `field_grade` alone, an Area topic by the judge with the check
+    on doubt: the trace carries the graders asked and the Fit that stands by that depth's rule,
+    not a Focus pair read as pending."""
+    from litwatch.feedback import misses
+
+    await misses.report(conn, Q.id, AGENTS.slug)
+    await misses.report(conn, Q.id, INTERP.slug)
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=Q.id,
+            topic=AGENTS.slug,
+            topic_version="v",
+            fit=Fit.CENTRAL,
+            reason="r",
+            opinions={"field_grade": Opinion(fit=Fit.CENTRAL, reason="y", model="a")},
+        ),
+    )
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=Q.id,
+            topic=INTERP.slug,
+            topic_version="v",
+            fit=Fit.NONE,
+            reason="r",
+            escalated=True,
+            opinions={
+                "judge": Opinion(fit=Fit.CENTRAL, reason="y", model="a"),
+                "area_check": Opinion(model="d", holds=False, probability=0.2),
+                "check": Opinion(fit=Fit.NONE, reason="n", model="b"),
+            },
+        ),
+    )
+    found = {m["topic"]: m["trace"] for m in (await client.get("/api/settings/misses")).json()}
+    field = found[AGENTS.slug]
+    assert (field["graded"], field["fit"]) == (True, "central")
+    assert [(g["role"], g["fit"]) for g in field["graders"]] == [("field_grade", "central")]
+    area = found[INTERP.slug]
+    assert (area["graded"], area["fit"]) == (True, "none")
+    assert [(g["role"], g["fit"], g["holds"]) for g in area["graders"]] == [
+        ("judge", "central", None),
+        ("area_check", None, False),
+        ("check", "none", None),
+    ]
+
+
+async def test_a_split_on_an_older_text_no_longer_waits(client, conn):
+    """A paper rewritten since its split (a new revision) is graded again by the next run: the
+    old split is not the owner's to settle, on Needs you or in the sidebar's count."""
+    await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
+    opinions = {
+        "judge": Opinion(fit=Fit.CENTRAL, reason="yes", model="a"),
+        "check": Opinion(fit=Fit.NONE, reason="no", model="b"),
+    }
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=P.id,
+            topic=FAITH.slug,
+            topic_version="v",
+            fit=Fit.CENTRAL,
+            reason="yes",
+            opinions=opinions,
+            split=True,
+        ),
+    )
+    page = (await client.get("/api/settings/quality")).json()
+    assert [(r["paper_id"], r["revision"]) for r in page["night"]["splits"]] == [(P.id, 1)]
+    assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 1
+    rewritten = paper(
+        P.id, title=P.title, abstract="A new abstract on wholly other steps.", version=2
+    )
+    await papers_store.upsert(conn, [rewritten])
+    assert await papers_store.revision(conn, P.id) == 2
+    page = (await client.get("/api/settings/quality")).json()
+    assert page["night"]["splits"] == []
+    assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 0
+
+
+async def test_the_summary_carries_the_status_line_the_badges_and_the_hints(client, conn):
+    """One read for the shell: the run status, the shown topics in the fixed order as badges, and
+    the Settings sidebar's counts, which follow the misses reported and the digests that failed."""
+    before = (await client.get("/api/summary")).json()
+    assert before["status"]["state"] == "none"
+    assert [t["slug"] for t in before["topics"]] == [t.slug for t in TREE.shown()]
+    hints = before["settings"]
+    assert isinstance(hints.pop("budget"), float | None)  # the configured budgets' sum
+    assert hints == {
+        "waiting": 0,
+        "last_session": None,
+        "misses": 0,
+        "topics": len(TREE.topics),
+        "classes": len(TREE.classes),
+        "spent": 0.0,
+        "failing": [],
+    }
+    assert (
+        await client.post("/api/misses", json={"paper_id": P.id, "topic": FAITH.slug})
+    ).status_code in (200, 201)
+    await conn.execute(
+        "INSERT INTO digests (topic, period, day, state, error) "
+        "VALUES (%s, 'day', '2026-10-08', 'failed', 'timed out')",
+        (FAITH.slug,),
+    )
+    # A digest written by hand can fail before the first night: it waits all the same.
+    after = (await client.get("/api/summary")).json()
+    assert (after["status"]["state"], after["status"]["digests_failed"]) == ("none", 1)
+    assert (after["settings"]["misses"], after["settings"]["waiting"]) == (1, 1)
+    await conn.execute(
+        "INSERT INTO runs (kind, started_at, finished_at) VALUES ('nightly', now(), now())"
+    )
+    after = (await client.get("/api/summary")).json()
+    assert (after["status"]["state"], after["status"]["digests_failed"]) == ("attention", 1)
+    assert after["settings"]["waiting"] == 1

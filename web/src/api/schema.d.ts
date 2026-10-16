@@ -412,6 +412,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/taxonomy.yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Taxonomy Yaml
+         * @description The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML).
+         */
+        get: operations["taxonomy_yaml_api_settings_taxonomy_yaml_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/taxonomy/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Taxonomy Stats */
+        get: operations["taxonomy_stats_api_settings_taxonomy_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/topics/{slug}/keywords": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Keyword Matches
+         * @description How many papers of the last 90 days each of the topic's keywords matches (the editor).
+         */
+        get: operations["keyword_matches_api_settings_topics__slug__keywords_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/topics/{slug}": {
         parameters: {
             query?: never;
@@ -467,6 +524,26 @@ export interface paths {
          * @description At the top, what last night left; below, how well the Focus topics are doing.
          */
         get: operations["quality_page_api_settings_quality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/misses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Misses
+         * @description Reported misses, newest first, each with its trace.
+         */
+        get: operations["misses_api_settings_misses_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -840,6 +917,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_api_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -906,8 +1000,10 @@ export interface components {
         };
         /**
          * Answer
-         * @description One paper's answers. Fit for the topic it was drawn or taken for is required: central,
-         *     related, adjacent, none or unsure.
+         * @description One paper's answers. Fit for the topic it was drawn or taken for (central, related,
+         *     adjacent, none or unsure) is required on the first answer; an edit after it may leave it
+         *     out, and the recorded answer stands. A Fit sent is a label; one left out writes none, so
+         *     editing the appraisal alone recreates no label the owner has since taken back.
          */
         Answer: {
             /** Fit */
@@ -1478,6 +1574,18 @@ export interface components {
             /** Error */
             error?: string | null;
         };
+        /**
+         * Grader
+         * @description One grader's answer in the verdict: its role, and its Fit, or for `area_check` whether
+         *     the judge's Fit holds.
+         */
+        Grader: {
+            /** Role */
+            role: string;
+            fit?: components["schemas"]["Fit"] | null;
+            /** Holds */
+            holds?: boolean | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1628,6 +1736,23 @@ export interface components {
              */
             q: string;
         };
+        /** Miss */
+        Miss: {
+            /** Id */
+            id: number;
+            /** Paper Id */
+            paper_id: string;
+            /** Title */
+            title: string;
+            /** Topic */
+            topic: string;
+            /**
+             * Reported At
+             * Format: date-time
+             */
+            reported_at: string;
+            trace: components["schemas"]["MissTrace"];
+        };
         /** MissIn */
         MissIn: {
             /** Paper Id */
@@ -1640,6 +1765,43 @@ export interface components {
              * @enum {string}
              */
             fit: "central" | "related";
+        };
+        /**
+         * MissTrace
+         * @description What each stage concluded for the owner's topic when the reported paper went through the
+         *     pipeline (feedback.md, misses), on the paper's current text. `classified`: classification
+         *     has run; then `probability` is the classifier's for the topic's class against the class's
+         *     `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;
+         *     `below` says the classifier admitted it to a class under the topic's only, not to the
+         *     topic's own class.
+         *     `graded`: a verdict exists; then `fit` is the Fit that stands by the rule of the depth it
+         *     was graded at (core.grading), and `graders` the answers it stands on, in the order the
+         *     topic's current depth asks its graders (the roles a verdict from another depth holds
+         *     after). The page reads where the paper was let go from `fit`, not from the graders.
+         */
+        MissTrace: {
+            /** Classified */
+            classified: boolean;
+            /** Probability */
+            probability?: number | null;
+            /** Threshold */
+            threshold: number;
+            /** Classifier */
+            classifier?: boolean | null;
+            /** Below */
+            below?: boolean | null;
+            /** Uncertain */
+            uncertain?: boolean | null;
+            /** Keyword */
+            keyword?: boolean | null;
+            /** Graded */
+            graded: boolean;
+            fit?: components["schemas"]["Fit"] | null;
+            /**
+             * Graders
+             * @default []
+             */
+            graders: components["schemas"]["Grader"][];
         };
         /** NextFire */
         NextFire: {
@@ -2126,6 +2288,31 @@ export interface components {
             /** Token */
             token: string;
         };
+        /**
+         * SettingsHints
+         * @description What the Settings sidebar says beside each page: how many things wait on the owner, the
+         *     last Calibrate session, the misses reported, the topics followed and the classes, the
+         *     month's spend against its budget (the budgeted providers' spend, or every provider's when
+         *     none has a budget), and the integrations failing.
+         */
+        SettingsHints: {
+            /** Waiting */
+            waiting: number;
+            /** Last Session */
+            last_session?: string | null;
+            /** Misses */
+            misses: number;
+            /** Topics */
+            topics: number;
+            /** Classes */
+            classes: number;
+            /** Spent */
+            spent: number;
+            /** Budget */
+            budget?: number | null;
+            /** Failing */
+            failing?: string[];
+        };
         /** @enum {string} */
         Sort: "rarest" | "newest" | "added" | "title" | "best";
         /**
@@ -2149,6 +2336,17 @@ export interface components {
             day: string;
             state: components["schemas"]["DigestState"];
             best_rarity?: components["schemas"]["Rarity"] | null;
+        };
+        /**
+         * Summary
+         * @description What the shell shows on every page (the status line, the sidebar's topics, the Settings
+         *     hints), read by one poll and never through a page's own reads: counts only.
+         */
+        Summary: {
+            status: components["schemas"]["RunStatus"];
+            /** Topics */
+            topics: components["schemas"]["Badge"][];
+            settings: components["schemas"]["SettingsHints"];
         };
         /**
          * Taxonomy
@@ -2176,6 +2374,26 @@ export interface components {
             parent?: string | null;
             /** Threshold */
             threshold?: number | null;
+        };
+        /**
+         * TaxonomyStats
+         * @description What the Taxonomy and Topics pages show beside the tree: papers standing in each class or
+         *     under it, the threshold each class is admitted at (its own, or the configured default for
+         *     its depth), and the current revision of each followed topic.
+         */
+        TaxonomyStats: {
+            /** Members */
+            members: {
+                [key: string]: number;
+            };
+            /** Thresholds */
+            thresholds: {
+                [key: string]: number;
+            };
+            /** Topic Revisions */
+            topic_revisions: {
+                [key: string]: number;
+            };
         };
         /**
          * TextPass
@@ -3212,6 +3430,93 @@ export interface operations {
             };
         };
     };
+    taxonomy_yaml_api_settings_taxonomy_yaml_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description No taxonomy yet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    taxonomy_stats_api_settings_taxonomy_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyStats"];
+                };
+            };
+        };
+    };
+    keyword_matches_api_settings_topics__slug__keywords_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description No such topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     save_topic_api_settings_topics__slug__put: {
         parameters: {
             query?: never;
@@ -3237,6 +3542,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Topic"];
                 };
+            };
+            /** @description No such class */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -3298,6 +3610,26 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    misses_api_settings_misses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Miss"][];
                 };
             };
         };
@@ -3666,6 +3998,13 @@ export interface operations {
                     };
                 };
             };
+            /** @description No such session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3699,6 +4038,13 @@ export interface operations {
                     };
                 };
             };
+            /** @description No such session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3728,6 +4074,13 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such session, or no paper at that position in it */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3846,6 +4199,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description No such integration is loaded */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nothing is failing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3878,6 +4245,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Failing"];
                 };
+            };
+            /** @description No such integration is loaded */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nothing is failing, or another event than the one named is */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -3963,6 +4344,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    summary_api_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Summary"];
                 };
             };
         };

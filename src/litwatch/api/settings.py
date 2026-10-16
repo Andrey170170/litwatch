@@ -1,21 +1,26 @@
 """Settings, the kitchen behind the gear: the taxonomy and its topics, Quality and the papers
-awaiting classification, Calibrate, runs, and the configuration (read-only, spec decision 11)."""
+awaiting classification, Calibrate, the misses, runs, and the configuration (read-only, spec
+decision 11)."""
 
 from __future__ import annotations
 
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ValidationError
 
-from litwatch import classification, grading
+from litwatch import classification, grading, seeds
 from litwatch.api.deps import Conn, budget_lines
 from litwatch.core import FAILED_RUNS, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.core.budget import month_start
+from litwatch.core.classification import thresholds
+from litwatch.core.grading import GRADERS
 from litwatch.feedback import calibrate, word
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
@@ -40,7 +45,55 @@ async def taxonomy(c: Conn) -> Taxonomy | None:
     return await taxonomy_store.load(c)
 
 
-@router.put("/topics/{slug}")
+@router.get(
+    "/taxonomy.yaml",
+    response_class=PlainTextResponse,
+    responses={404: {"description": "No taxonomy yet"}},
+)
+async def taxonomy_yaml(c: Conn) -> str:
+    """The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML)."""
+    tree = await taxonomy_store.load(c)
+    if tree is None:
+        raise HTTPException(status_code=404, detail="no taxonomy yet")
+    return seeds.dump_taxonomy(tree)
+
+
+class TaxonomyStats(BaseModel):
+    """What the Taxonomy and Topics pages show beside the tree: papers standing in each class or
+    under it, the threshold each class is admitted at (its own, or the configured default for
+    its depth), and the current revision of each followed topic."""
+
+    members: dict[str, int]
+    thresholds: dict[str, float]
+    topic_revisions: dict[str, int]
+
+
+def _thresholds(request: Request, tree: Taxonomy | None) -> dict[str, float]:
+    """The threshold each class is admitted at, under the loaded configuration."""
+    return thresholds(tree, request.app.state.config.classification.thresholds) if tree else {}
+
+
+@router.get("/taxonomy/stats")
+async def taxonomy_stats(request: Request, c: Conn) -> TaxonomyStats:
+    tree = await taxonomy_store.load(c)
+    members = await quality.class_members(c, tree) if tree else {}
+    revisions = await quality.topic_revisions(c)
+    return TaxonomyStats(
+        members=members, thresholds=_thresholds(request, tree), topic_revisions=revisions
+    )
+
+
+@router.get("/topics/{slug}/keywords", responses={404: {"description": "No such topic"}})
+async def keyword_matches(slug: str, c: Conn) -> dict[str, int]:
+    """How many papers of the last 90 days each of the topic's keywords matches (the editor)."""
+    tree = await taxonomy_store.load(c)
+    topic = tree.topic(slug) if tree else None
+    if topic is None:
+        raise HTTPException(status_code=404, detail="no such topic")
+    return await quality.keyword_matches(c, topic.keywords)
+
+
+@router.put("/topics/{slug}", responses={404: {"description": "No such class"}})
 async def save_topic(slug: str, body: dict[str, Any], c: Conn) -> Topic:
     """Follow class `slug`, or edit its topic. The class takes the subject as its description.
     Edits apply forward; a change of depth or content settles the topic's papers again (see
@@ -82,7 +135,7 @@ async def order(body: Order, c: Conn) -> None:
 async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
     """At the top, what last night left; below, how well the Focus topics are doing."""
     night = await quality.last_night(c)
-    since = night["started_at"] if night else date.today() - timedelta(days=1)
+    since = quality.splits_window(night)
     return {
         "night": {
             "run": night["id"] if night else None,
@@ -109,7 +162,96 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
         "calibration": await calibrate.precision(c),
         "matters_no_topic": await calibrate.matters_no_topic(c),
         "collected": await quality.collected_reactions(c),
+        "reactions": await quality.reactions_by_topic(c),
     }
+
+
+# -- misses ----------------------------------------------------------------------------------------
+
+
+class Grader(BaseModel):
+    """One grader's answer in the verdict: its role, and its Fit, or for `area_check` whether
+    the judge's Fit holds."""
+
+    role: str
+    fit: Fit | None = None
+    holds: bool | None = None
+
+
+class MissTrace(BaseModel):
+    """What each stage concluded for the owner's topic when the reported paper went through the
+    pipeline (feedback.md, misses), on the paper's current text. `classified`: classification
+    has run; then `probability` is the classifier's for the topic's class against the class's
+    `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;
+    `below` says the classifier admitted it to a class under the topic's only, not to the
+    topic's own class.
+    `graded`: a verdict exists; then `fit` is the Fit that stands by the rule of the depth it
+    was graded at (core.grading), and `graders` the answers it stands on, in the order the
+    topic's current depth asks its graders (the roles a verdict from another depth holds
+    after). The page reads where the paper was let go from `fit`, not from the graders."""
+
+    classified: bool
+    probability: float | None = None
+    threshold: float
+    classifier: bool | None = None
+    below: bool | None = None
+    uncertain: bool | None = None
+    keyword: bool | None = None
+    graded: bool
+    fit: Fit | None = None
+    graders: list[Grader] = []
+
+
+class Miss(BaseModel):
+    id: int
+    paper_id: str
+    title: str
+    topic: str
+    reported_at: datetime
+    trace: MissTrace
+
+
+@router.get("/misses")
+async def misses(request: Request, c: Conn) -> list[Miss]:
+    """Reported misses, newest first, each with its trace."""
+    tree = await taxonomy_store.load(c)
+    at = _thresholds(request, tree)
+    found = []
+    for r in await quality.misses(c, tree):
+        opinions = r["opinions"] or {}
+        topic = tree.topic(r["topic"]) if tree else None
+        asked = GRADERS[topic.depth] if topic else ()
+        roles = [*asked, *(k for k in opinions if k not in asked)]
+        sources = set(r["sources"])
+        classified = r["classified"]
+        found.append(
+            Miss(
+                id=r["id"],
+                paper_id=r["paper_id"],
+                title=r["title"],
+                topic=r["topic"],
+                reported_at=r["reported_at"],
+                trace=MissTrace(
+                    classified=classified,
+                    probability=r["probability"],
+                    threshold=at.get(r["topic"], classification.CHOSEN.default),
+                    classifier=bool(sources & {"classifier", "below"}) if classified else None,
+                    below="below" in sources and "classifier" not in sources
+                    if classified
+                    else None,
+                    uncertain="uncertain" in sources if classified else None,
+                    keyword="keyword" in sources if classified else None,
+                    graded=r["opinions"] is not None,
+                    fit=r["verdict_fit"],
+                    graders=[
+                        Grader(role=k, fit=opinions[k].get("fit"), holds=opinions[k].get("holds"))
+                        for k in roles
+                        if k in opinions
+                    ],
+                ),
+            )
+        )
+    return found
 
 
 # -- papers classification kept failing on (pipeline.md, section 9) -------------------------------
@@ -290,17 +432,15 @@ async def draw(body: DrawIn, c: Conn) -> dict[str, int]:
 
 @router.get("/calibrate")
 async def sessions(c: Conn) -> list[dict[str, Any]]:
-    return await (
-        await c.execute(
-            "SELECT s.id, s.seed, s.drawn_at, count(i.*) AS papers, "
-            "count(i.answered_at) AS answered FROM calibration_sessions s "
-            "LEFT JOIN calibration_items i ON i.session_id = s.id "
-            "GROUP BY s.id ORDER BY s.id DESC LIMIT 20"
-        )
-    ).fetchall()
+    return await calibrate.sessions(c)
 
 
-@router.get("/calibrate/{session_id}")
+# What the session endpoints answer besides success, for the API schema.
+NO_SESSION = {404: {"description": "No such session"}}
+NO_ITEM = {404: {"description": "No such session, or no paper at that position in it"}}
+
+
+@router.get("/calibrate/{session_id}", responses=NO_SESSION)
 async def session(session_id: int, c: Conn) -> dict[str, Any]:
     found = await calibrate.session(c, session_id)
     if found is None:
@@ -308,7 +448,7 @@ async def session(session_id: int, c: Conn) -> dict[str, Any]:
     return found
 
 
-@router.post("/calibrate/{session_id}/more")
+@router.post("/calibrate/{session_id}/more", responses=NO_SESSION)
 async def more(session_id: int, c: Conn) -> dict[str, int]:
     """Continue with the papers waiting for a word: splits, misses and thumbed papers."""
     if await calibrate.session(c, session_id) is None:
@@ -316,7 +456,7 @@ async def more(session_id: int, c: Conn) -> dict[str, int]:
     return {"added": await calibrate.more(c, session_id)}
 
 
-@router.put("/calibrate/{session_id}/items/{position}", status_code=204)
+@router.put("/calibrate/{session_id}/items/{position}", status_code=204, responses=NO_ITEM)
 async def answer(session_id: int, position: int, body: calibrate.Answer, c: Conn) -> None:
     try:
         await calibrate.answer(c, session_id, position, body)
@@ -375,6 +515,27 @@ def _mask(value: Any, key: str = "") -> Any:
         return {k: _mask(v, k) for k, v in value.items()}
     if isinstance(value, list):
         return [_mask(v, key) for v in value]
-    if value and any(w in key.lower() for w in SECRET_WORDS):
+    if value and _secret(key):
         return "••••"
+    if isinstance(value, str) and (key == "url" or key.endswith("_url")):
+        return _mask_url(value)
     return value
+
+
+def _secret(key: str) -> bool:
+    """Whether a setting's key names a credential: one of the secret words in it, unless the
+    key names a limit (`max_output_tokens`, `max_*`), which the Configuration page shows."""
+    k = key.lower()
+    if k.startswith("max_") or k.endswith("_tokens"):
+        return False
+    return any(w in k for w in SECRET_WORDS)
+
+
+def _mask_url(url: str) -> str:
+    """A URL as far as its host: a webhook's path, query or user part may carry its token."""
+    parts = urlsplit(url)
+    if not parts.hostname:
+        return "••••"
+    host = parts.hostname + (f":{parts.port}" if parts.port else "")
+    rest = parts.username or parts.password or parts.path.strip("/") or parts.query
+    return f"{parts.scheme}://{host}" + ("/••••" if rest else "")

@@ -127,12 +127,17 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = s.paper_id
                           AND l.topic = s.topic AND NOT l.provisional)
         UNION ALL
-        SELECT m.paper_id, m.topic, 'miss', NULL FROM misses m
+        -- a miss or a reaction keeps the verdict standing when it joins, as a draw does
+        SELECT m.paper_id, m.topic, 'miss', (SELECT v.id FROM verdicts v
+            WHERE v.paper_id = m.paper_id AND v.topic = m.topic
+            ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) FROM misses m
         JOIN topics t ON t.class = m.topic AND t.depth = 'focus'
         WHERE NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = m.paper_id
                           AND l.topic = m.topic AND NOT l.provisional)
         UNION ALL
-        SELECT r.paper_id, r.topic, 'reaction', NULL FROM reactions r
+        SELECT r.paper_id, r.topic, 'reaction', (SELECT v.id FROM verdicts v
+            WHERE v.paper_id = r.paper_id AND v.topic = r.topic
+            ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) FROM reactions r
         JOIN topics t ON t.class = r.topic AND t.depth = 'focus'
         WHERE r.reason IN ('wrong_topic', 'great_find')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = r.paper_id
@@ -167,8 +172,10 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
 
 
 class Answer(BaseModel):
-    """One paper's answers. Fit for the topic it was drawn or taken for is required: central,
-    related, adjacent, none or unsure."""
+    """One paper's answers. Fit for the topic it was drawn or taken for (central, related,
+    adjacent, none or unsure) is required on the first answer; an edit after it may leave it
+    out, and the recorded answer stands. A Fit sent is a label; one left out writes none, so
+    editing the appraisal alone recreates no label the owner has since taken back."""
 
     fit: dict[str, LabelValue]
     value: Literal["matters", "fine", "not_for_me"] | None = None
@@ -186,13 +193,26 @@ async def answer(
     ).fetchone()
     if item is None:
         raise LookupError("no such item")
-    if item["topic"] not in given.fit:
+    if item["topic"] not in given.fit and item["answered_at"] is None:
         raise ValueError(f"fit for {item['topic']} is required")
     focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
     if unknown := sorted(set(given.fit) - focus):
         raise ValueError(f"not Focus topics: {', '.join(unknown)}")
     async with conn.transaction():
+        await word.lock(conn, item["paper_id"])
+        # A firm label already saying this Fit is not written again: writing renews its time,
+        # which would put it above a reaction given since (the newest word wins).
+        firm = {
+            r["topic"]: r["value"]
+            for r in await _all(
+                conn,
+                "SELECT topic, value FROM labels WHERE paper_id = %s AND NOT provisional",
+                (item["paper_id"],),
+            )
+        }
         for topic, fit in given.fit.items():
+            if firm.get(topic) == fit.value:
+                continue
             # The drawn topic's answer is the sample; any other is the owner's own choice.
             drawn = topic == item["topic"] and item["why"] in ("above", "below")
             await word.label(
@@ -219,15 +239,47 @@ async def answer(
                 "INSERT INTO appraisals (paper_id, value, note) VALUES (%s, %s, %s)",
                 (item["paper_id"], *said),
             )
+        answered = given.fit.get(item["topic"])
         await conn.execute(
-            "UPDATE calibration_items SET answer = %s, answered_at = now() "
+            "UPDATE calibration_items SET answer = coalesce(%s, answer), answered_at = now() "
             "WHERE session_id = %s AND position = %s",
-            (given.fit[item["topic"]].value, session_id, position),
+            (answered.value if answered else None, session_id, position),
         )
 
 
+# The pipeline's Fit on a session item's drawn topic: the verdict the draw read, else the current.
+_VERDICT = """coalesce((SELECT v.fit FROM verdicts v WHERE v.id = i.verdict_id),
+                 (SELECT v.fit FROM verdicts v WHERE v.paper_id = i.paper_id
+                  AND v.topic = i.topic ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1))"""
+
+# Whether the owner's answer differs from the pipeline's Fit: another Fit than its verdict's,
+# or, while the verdict is gone, the other side from the draw's. Unsure never differs.
+DIFFERS = f"""i.answer IS NOT NULL AND i.answer <> 'unsure' AND CASE
+    WHEN ({_VERDICT}) IS NOT NULL THEN i.answer <> ({_VERDICT})
+    WHEN i.why = 'above' THEN i.answer IN ('adjacent', 'none')
+    WHEN i.why = 'below' THEN i.answer IN ('central', 'related')
+    ELSE false END"""
+
+
+async def sessions(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict[str, Any]]:
+    """The newest sessions: how many papers each drew, how many are answered, and how many
+    answers differ from the pipeline's Fit (`DIFFERS`)."""
+    return await _all(
+        conn,
+        f"""
+        SELECT s.id, s.seed, s.drawn_at, count(i.*) AS papers, count(i.answered_at) AS answered,
+               count(*) FILTER (WHERE {DIFFERS}) AS differ
+        FROM calibration_sessions s LEFT JOIN calibration_items i ON i.session_id = s.id
+        GROUP BY s.id ORDER BY s.id DESC LIMIT %s
+        """,
+        (limit,),
+    )
+
+
 async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, Any] | None:
-    """A session's papers in order, each with what the owner has said."""
+    """A session's papers in order, each with the pipeline's Fit on the drawn topic (the verdict
+    the draw read, else the current one), the answer recorded for it (`answer`, null until
+    given) and what the owner has said since (`fit`, every current label; `appraisal`)."""
     found = await (
         await conn.execute("SELECT * FROM calibration_sessions WHERE id = %s", (session_id,))
     ).fetchone()
@@ -235,10 +287,10 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
         return None
     items = await _all(
         conn,
-        """
-        SELECT i.position, i.paper_id, i.topic, i.why, i.answered_at, p.title, p.abstract,
-               p.authors, p.published,
-               (SELECT coalesce(jsonb_object_agg(l.topic, l.value), '{}') FROM labels l
+        f"""
+        SELECT i.position, i.paper_id, i.topic, i.why, i.answer, i.answered_at, p.title,
+               p.abstract, p.authors, p.published, {_VERDICT} AS verdict,
+               (SELECT coalesce(jsonb_object_agg(l.topic, l.value), '{{}}') FROM labels l
                 WHERE l.paper_id = i.paper_id AND NOT l.provisional) AS fit,
                (SELECT row_to_json(a) FROM (SELECT value, note FROM appraisals
                 WHERE paper_id = i.paper_id ORDER BY at DESC, id DESC LIMIT 1) a) AS appraisal

@@ -29,9 +29,78 @@ const paper = {
   publication_by_owner: false,
   card_requestable: true,
 };
-const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 };
+const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
+const brief = { id: 1, text: "The brief, from the full text.", overstatement: "The abstract overstates: the gain holds only for 7B models.", revision: 1, arxiv_version: 1, source: "latex", written_at: "2026-10-14T03:00:00Z" };
 
 describe("a paper's page", () => {
+  it("shows the Brief in the abstract's place, its overstatement first, and the abstract only without one", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, brief } });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText("The brief, from the full text.")).toBeInTheDocument();
+    const callout = screen.getByText("The abstract overstates: the gain holds only for 7B models.");
+    expect(callout.compareDocumentPosition(screen.getByText("The brief, from the full text."))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.queryByText("We study things.")).toBeNull();
+    expect(screen.queryByText(/No Brief yet/)).toBeNull();
+    expect(screen.queryByText(/older revision/)).toBeNull();
+  });
+
+  it("says which revision an older Brief read, and why the abstract stands in without one", async () => {
+    viewport(true);
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": { ...paper, revision: 2, brief },
+      "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", text_pass: { id: 7, kind: "brief", state: "awaiting_text", queued_at: "2026-10-14T03:00:00Z" } },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText(/Written for revision 1 of the text \(arXiv v1\); the current one, revision 2, waits for its full text/)).toBeInTheDocument();
+    renderApp("/paper/2610.00003");
+    await waitFor(() => expect(screen.getByText("The Brief waits for the paper's full text; the abstract stands in.")).toBeInTheDocument());
+    expect(screen.getByText("We study things.")).toBeInTheDocument();
+  });
+
+  it("runs a stuck full-text pass now from its note, and says so when the page is behind", async () => {
+    viewport(true);
+    const states = [
+      { kind: "fulltext_failed", revision: 1, error: "the LaTeX did not build", pass_id: 7 },
+      { kind: "awaiting_text", revision: 1, error: null, pass_id: 8 },
+    ];
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      // Each run drops its pass from the page: the first on success, the second on a 409 (the page was behind).
+      "GET /api/papers/2610.00002": () => ({ ...paper, states: states.slice(calls.filter((c) => c.method === "POST").length), text_pass: { id: 7, kind: "brief", state: "failed", queued_at: "2026-10-14T03:00:00Z" } }),
+      "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }),
+      "POST /api/settings/fulltext/8/now": () => json({ detail: "the pass is not waiting for the owner" }, 409),
+    });
+    // The Needs you page the reader came from lists both passes; each is settled there as it leaves the paper.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const row = (id: number, state: string) => ({ id, paper_id: "2610.00002", revision: 1, title: "Epic one", kind: "brief", state, failed_runs: 0, last_error: null, queued_at: "2026-10-08T03:00:00Z" });
+    client.setQueryData(["settings", "needs", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")], digests: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
+    const settledRows = () => (client.getQueryData(["settings", "needs", "quality"]) as { night: { fulltext: { id: number; settled?: string }[] } }).night.fulltext.map((r) => r.settled);
+    renderApp("/paper/2610.00002", client);
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText(/Full text failed three runs in a row/)).toBeInTheDocument();
+    expect(screen.getByText("the LaTeX did not build")).toBeInTheDocument();
+    expect(screen.getByText("The full-text pass failed three runs in a row; the abstract stands in until it is run again.")).toBeInTheDocument();
+    expect(screen.getByText(/Awaiting the full text for over a week/)).toBeInTheDocument();
+    const [failed] = screen.getAllByRole("button", { name: "Run it now" });
+    await userEvent.click(failed!);
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url === "/api/settings/fulltext/7/now")).toBe(true));
+    // The page is refetched: the pass that ran is gone from the notes, the other's note stays. The row on Needs you
+    // settles from the write itself, with what happened, as it would have from that page.
+    await waitFor(() => expect(screen.queryByText(/Full text failed three runs in a row/)).toBeNull());
+    expect(settledRows()).toEqual(["Running now, first in line, with three more runs.", undefined]);
+    await userEvent.click(screen.getByRole("button", { name: "Run it now" }));
+    expect(await screen.findByText("the pass is not waiting for the owner")).toBeInTheDocument();
+    // The 409 settles the row on Needs you with its reason, and the refetch finds the pass gone from the page too.
+    await waitFor(() => expect(settledRows()).toEqual(["Running now, first in line, with three more runs.", "No longer waits on the owner: the pass is not waiting for the owner."]));
+    await waitFor(() => expect(screen.queryByText(/Awaiting the full text for over a week/)).toBeNull());
+  });
+
   it("records a thumb only once a reason is picked, on the topic's row", async () => {
     viewport(true);
     const calls = scriptFetch({
