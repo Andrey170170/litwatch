@@ -11,7 +11,7 @@ import { paperQuery, qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
 import { type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, type Split, type Stuck, type TextPassStuck, waiting } from "@/lib/settings";
-import { FitSeg, Load, PageHead, PaperLink, useTopicCards } from "./parts";
+import { Failed, FitSeg, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 /** The groups: their name, the line under it, and for a stuck step the name of what failed. */
 const KIND = {
@@ -92,7 +92,7 @@ function Awaiting({ s }: { s: Stuck }) {
   const dismiss = useDismiss(s.paper_id);
   const classify = useClassifyByHand(s.paper_id);
   const fix = useFixText(s.paper_id);
-  const { data: tree } = useQuery(taxonomyQuery);
+  const tree = useQuery(taxonomyQuery);
   const [form, setForm] = useState<"classes" | "text" | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
   const qc = useQueryClient();
@@ -115,12 +115,13 @@ function Awaiting({ s }: { s: Stuck }) {
         <div className="nform">
           <div className="cap2">Its classes</div>
           <div className="row max-h-48 overflow-y-auto">
-            {(tree?.classes ?? []).map((c) => (
+            {(tree.data?.classes ?? []).map((c) => (
               <button key={c.slug} className={`fchip${chosen.includes(c.slug) ? " on" : ""}`} aria-pressed={chosen.includes(c.slug)} onClick={() => setChosen((x) => (x.includes(c.slug) ? x.filter((v) => v !== c.slug) : [...x, c.slug]))}>
                 {c.name}
               </button>
             ))}
           </div>
+          <Failed q={tree} what="the classes" />
           <div className="nact">
             <button className="btn pri" disabled={!chosen.length || classify.isPending} onClick={() => classify.mutate({ revision: s.revision, classes: chosen })}>
               Save

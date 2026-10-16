@@ -17,7 +17,7 @@ import { useDesktop } from "@/hooks/useDesktop";
 import { authorsShort, rowDate } from "@/lib/format";
 import { answerOf, differs, type Edits, type LabelValue, pipelineSide, type Session, type SessionItem, type SessionRow, type Value } from "@/lib/settings";
 import { BriefBody } from "@/components/paper/Ladder";
-import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
+import { Failed, FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 const VALUES: Value[] = ["matters", "fine", "not_for_me"];
 
@@ -101,6 +101,7 @@ function BlindPaper({ item }: { item: SessionItem }) {
         )}
       </div>
       {classes.length > 0 && <div className="faint calcls">Classes: {classes.join(" · ")}</div>}
+      <Failed q={paper} what="the paper's Gist, Brief and classes" />
     </div>
   );
 }
@@ -126,8 +127,9 @@ function SessionBody({ s, id, at, review }: { s: Session; id: string; at: number
   }
   const item = s.items.find((it) => it.position === at);
   if (!item) return <p className="empty">There is no such paper in the session.</p>;
-  // Keyed by position: each paper starts from its own recorded answer.
-  return <Screen key={item.position} s={s} item={item} />;
+  // Keyed by the session and the position: each paper starts from its own recorded answer, whatever screen showed
+  // before.
+  return <Screen key={`${s.id}:${item.position}`} s={s} item={item} />;
 }
 
 /** One paper's screen. The draft is the item as last read (the baseline, refreshed under the screen by the
@@ -210,6 +212,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
                 <FitSeg value={shown.fit(t.class)} auto={t.class === item.topic && !item.fit[item.topic] ? item.answer : null} label={`Fit for ${name(t.class)}`} disabled={saving} clear={t.class in edits.fit} onPick={(f) => setFit(t.class, f)} />
               </div>
             ))}
+            <Failed q={tree} what="the other Focus topics" />
             {missing && !complete && (
               <div className="nb warnt" role="alert">
                 Choose the Fit for {name(item.topic)} to record this paper; it is the one it was drawn for.

@@ -75,17 +75,23 @@ export function Share({ x, hi, good, ok }: { x: number; hi?: boolean; good?: num
 /** A query that failed, with the way to try again; "Loading…" while it loads with nothing to show; a quiet
  * "Updating…" while a fresh visit refetches it behind its cached rows; nothing otherwise. */
 export function Load({ q }: { q: Pick<UseQueryResult, "isError" | "isPending" | "isFetching" | "refetch"> }) {
-  if (q.isError)
-    return (
-      <div className="loadmore">
-        Could not load this ·{" "}
-        <button className="inl" onClick={() => void q.refetch()}>
-          Try again
-        </button>
-      </div>
-    );
+  if (q.isError) return <Failed q={q} what="this" />;
   if (q.isPending) return <div className="loadmore">Loading…</div>;
   return q.isFetching ? <div className="loadmore quiet">Updating…</div> : null;
+}
+
+/** A read beside the page's own that failed (counts, the schedule, the classes a form offers): what it would have
+ * shown is named, with the way to try again, so its absence never passes for content; nothing otherwise. */
+export function Failed({ q, what }: { q: Pick<UseQueryResult, "isError" | "refetch">; what: string }) {
+  if (!q.isError) return null;
+  return (
+    <div className="loadmore">
+      Could not load {what} ·{" "}
+      <button className="inl" onClick={() => void q.refetch()}>
+        Try again
+      </button>
+    </div>
+  );
 }
 
 /** A line that says the surface waits on an endpoint a later PR brings. */

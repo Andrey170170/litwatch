@@ -702,10 +702,19 @@ describe("Settings", () => {
     const topicOf = (slug: string, depth: string) => ({ ...topic, class: slug, depth, monogram: slug.toUpperCase() });
     const classOf = (slug: string) => ({ ...cls, slug, name: slug.toUpperCase() });
     const four = { classes: ["a", "b", "c", "d"].map(classOf), topics: [topicOf("a", "focus"), topicOf("b", "focus"), topicOf("c", "area"), topicOf("d", "area")] };
-    let releaseFirst!: () => void;
-    const calls = scriptFetch({ ...common, "GET /api/settings/taxonomy": four, "PUT /api/settings/topics-order": () => (calls.filter((c) => c.method === "PUT").length === 1 ? new Promise<Response>((r) => (releaseFirst = () => r(new Response(null, { status: 204 })))) : new Response(null, { status: 204 })) });
+    // The server's order follows each save as it lands; both saves wait to land until told to.
+    let server = ["a", "b", "c", "d"];
+    const release: (() => void)[] = [];
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/taxonomy": () => ({ ...four, topics: server.map((slug) => four.topics.find((t) => t.class === slug)!) }),
+      "PUT /api/settings/topics-order": (c) => new Promise<Response>((r) => release.push(() => ((server = (c.body as { slugs: string[] }).slugs), r(new Response(null, { status: 204 }))))),
+    });
     renderApp("/settings/topics");
     await screen.findByRole("button", { name: "Move A" });
+    const rows = () => screen.getAllByRole("button", { name: /^Move/ }).map((b) => b.getAttribute("aria-label"));
+    const reads = () => calls.filter((c) => c.method === "GET" && c.url === "/api/settings/taxonomy").length;
+    const puts = () => calls.filter((c) => c.method === "PUT").map((c) => c.body);
     // jsdom has no hit-testing or pointer capture: the drag lands on the row named.
     Element.prototype.setPointerCapture = () => {};
     const drag = (from: string, over: string) => {
@@ -716,13 +725,44 @@ describe("Settings", () => {
       fireEvent.pointerUp(grip, { pointerId: 1 });
     };
     drag("A", "B");
-    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
+    await waitFor(() => expect(puts().length).toBe(1));
     drag("C", "D");
     // The second save waits for the first, and starts from its order.
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Move/ }).map((b) => b.getAttribute("aria-label"))).toEqual(["Move B", "Move A", "Move D", "Move C"]));
-    expect(calls.filter((c) => c.method === "PUT").length).toBe(1);
-    releaseFirst();
-    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").map((c) => c.body)).toEqual([{ slugs: ["b", "a", "c", "d"] }, { slugs: ["b", "a", "d", "c"] }]));
+    await waitFor(() => expect(rows()).toEqual(["Move B", "Move A", "Move D", "Move C"]));
+    expect(puts().length).toBe(1);
+    const before = reads();
+    release[0]!();
+    await waitFor(() => expect(puts()).toEqual([{ slugs: ["b", "a", "c", "d"] }, { slugs: ["b", "a", "d", "c"] }]));
+    // The first save landed reads the tree again only once no other waits: the server's order of this moment would
+    // put C back under the reader until the second landed.
+    expect(reads()).toBe(before);
+    expect(rows()).toEqual(["Move B", "Move A", "Move D", "Move C"]);
+    release[1]!();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    await waitFor(() => expect(rows()).toEqual(["Move B", "Move A", "Move D", "Move C"]));
+  });
+
+  it("says when the topics' revisions could not be loaded, showing no version meanwhile", async () => {
+    viewport(true);
+    let fail = true;
+    scriptFetch({ ...common, "GET /api/settings/taxonomy/stats": () => (fail ? json({ detail: "gone" }, 500) : stats) });
+    renderApp("/settings/topics");
+    expect(await screen.findByText(/Could not load the topics' revisions/)).toBeInTheDocument();
+    const row = screen.getByText("Mech interp", { selector: ".txt" }).closest(".trow")!;
+    expect(row).not.toHaveTextContent(/v\d/);
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(row).toHaveTextContent("v2"));
+    expect(screen.queryByText(/Could not load/)).toBeNull();
+  });
+
+  it("says when the runs could not be loaded, rather than that last night is gone from them", async () => {
+    viewport(true);
+    scriptFetch({ ...common, "GET /api/settings/runs": json({ detail: "gone" }, 500) });
+    renderApp("/settings/overview");
+    expect(await screen.findByText(/Could not load the runs/)).toBeInTheDocument();
+    expect(screen.queryByText(/no longer among the runs listed/)).toBeNull();
+    expect(screen.getByText("No Calibrate session yet")).toBeInTheDocument();
   });
 
   it("shows a draft topic as one, activated only by an explicit choice", async () => {

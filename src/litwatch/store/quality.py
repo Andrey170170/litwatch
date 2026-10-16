@@ -4,6 +4,7 @@ the counts the Topics and Taxonomy pages show."""
 from __future__ import annotations
 
 import asyncio
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -23,6 +24,12 @@ async def last_night(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
     return await (
         await conn.execute("SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
     ).fetchone()
+
+
+def splits_window(night: dict[str, Any] | None) -> datetime | date:
+    """Since when Needs you lists splits, on every surface that counts or shows them: last
+    night's run, or the last day while no night has run yet."""
+    return night["started_at"] if night else date.today() - timedelta(days=1)
 
 
 async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[str, Any]]:

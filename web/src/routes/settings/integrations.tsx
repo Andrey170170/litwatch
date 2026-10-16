@@ -119,6 +119,7 @@ export function EventsPage() {
   return (
     <div className="setpg">
       <PageHead title={`${name} · events`} sub={c?.description ?? undefined} deeper />
+      <Load q={cards} />
       {c && <div className="ist mb-3">{status(c)}</div>}
       <Later>The list of events (time, event, paper, result; all, failed or waiting) comes with an events endpoint on the outbox. Until then the failing event shows on the integration's card.</Later>
     </div>

@@ -7,7 +7,7 @@ import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
 import { type ReactionReason, reasonLabel } from "@/lib/reactions";
 import { digests, type Quality, runFailed, spendTotals, usd, waiting } from "@/lib/settings";
-import { Later, Load, PageHead, PaperLink, Share, useTopicCards } from "./parts";
+import { Failed, Later, Load, PageHead, PaperLink, Share, useTopicCards } from "./parts";
 
 type Tone = "ask" | "fail" | "warn" | "ok" | "";
 
@@ -89,7 +89,9 @@ export function OverviewPage() {
               ? `Last night · ${night.counts?.classified ?? 0} classified · ${night.counts?.graded ?? 0} graded${digests(night) === null ? "" : ` · ${digests(night)} digests`} · ${usd(night.cost)}`
               : q?.night.run == null
                 ? "No night yet"
-                : "Last night · no longer among the runs listed"}
+                : runs.data
+                  ? "Last night · no longer among the runs listed"
+                  : ""}
           </Tile>
           <Tile to="runs" tone={over.length ? "warn" : "ok"} big={usd(spent)}>
             {budget ? `of ${usd(budget)} this month` : "this month"}
@@ -97,10 +99,12 @@ export function OverviewPage() {
             {over.length ? ` · ${over.join(", ")} projected over` : ""}
           </Tile>
           <Tile to="calibrate" tone="" big={last ? rowDate(last.drawn_at) : "–"}>
-            {last ? `Last Calibrate session · ${last.answered} of ${last.papers} answered` : "No Calibrate session yet"}
+            {last ? `Last Calibrate session · ${last.answered} of ${last.papers} answered` : sessions.data ? "No Calibrate session yet" : ""}
           </Tile>
         </div>
       )}
+      <Failed q={runs} what="the runs" />
+      <Failed q={sessions} what="the Calibrate sessions" />
       {q && (
         <>
           <div className="cap">Recall per Focus topic</div>

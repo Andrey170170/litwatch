@@ -6,7 +6,7 @@ import { qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { dateTime, rowDate } from "@/lib/format";
 import { digests, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
-import { Later, Load, PageHead } from "./parts";
+import { Failed, Later, Load, PageHead } from "./parts";
 
 function SpendRow({ s }: { s: Spend }) {
   const bar = spendBar(s);
@@ -48,6 +48,7 @@ export function RunsPage() {
           {schedule.data.enabled ? (next ? `Next run ${dateTime(next.next)} (${schedule.data.zone}).` : "The schedule is on.") : "The schedule is off; runs start from the command line."}
         </div>
       )}
+      <Failed q={schedule} what="the schedule" />
       <div className="cap">Nights</div>
       <Load q={runs} />
       {runs.data && (

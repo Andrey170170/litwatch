@@ -4,8 +4,6 @@ lists stay with the pages that show them."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-
 from fastapi import APIRouter, Request
 
 from litwatch.api import integrations as integrations_api
@@ -23,8 +21,7 @@ router = APIRouter(prefix="/api")
 async def summary(request: Request, c: Conn) -> s.Summary:
     status = await run_status(request, c)
     tree = await taxonomy_store.load(c)
-    night = await quality.last_night(c)
-    since = night["started_at"] if night else date.today() - timedelta(days=1)
+    since = quality.splits_window(await quality.last_night(c))
     # What Needs you lists: last night's splits still unlabelled, and the stuck steps, passes
     # and digests the status line counts.
     splits = [v for v in await quality.splits_since(c, since) if v["label"] is None]

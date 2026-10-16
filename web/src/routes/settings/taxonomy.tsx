@@ -6,7 +6,7 @@ import { useState } from "react";
 import type { Schemas } from "@/api/client";
 import { settingsTaxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
-import { Field, Later, Load, PageHead } from "./parts";
+import { Failed, Field, Later, Load, PageHead } from "./parts";
 
 type Class = Schemas["TaxonomyClass"];
 type Tree = Schemas["Taxonomy"];
@@ -63,6 +63,7 @@ export function TaxonomyPage() {
         </button>
       </PageHead>
       <Load q={tree} />
+      <Failed q={stats} what="the members and thresholds" />
       {t && (
         <div className="list ctree">
           <div className="crow hd">

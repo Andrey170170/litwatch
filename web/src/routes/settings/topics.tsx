@@ -13,7 +13,7 @@ import { Badge } from "@/components/Badge";
 import { Seg } from "@/components/Seg";
 import { DEPTH_NAME, type Depth } from "@/lib/rarity";
 import { savedLine } from "@/lib/settings";
-import { Field, Later, Load, PageHead } from "./parts";
+import { Failed, Field, Later, Load, PageHead } from "./parts";
 
 type Topic = Schemas["Topic"];
 type Tree = Schemas["Taxonomy"];
@@ -84,7 +84,7 @@ function DepthList({ depth, topics, tree, revisions, onOrder }: { depth: Depth; 
                   {t.status !== "active" && <span className="faint"> · {t.status}</span>}
                   <span className="g">{path.join(" › ")}</span>
                 </span>
-                <span className="mono faint">v{revisions[slug] ?? 1}</span>
+                {revisions[slug] != null && <span className="mono faint">v{revisions[slug]}</span>}
               </Link>
             </div>
           );
@@ -111,6 +111,7 @@ export function TopicsPage() {
         </Link>
       </PageHead>
       <Load q={tree} />
+      <Failed q={stats} what="the topics' revisions" />
       {t && DEPTHS.map((d) => <DepthList key={d} depth={d} topics={byDepth(d)} tree={t} revisions={stats.data?.topic_revisions ?? {}} onOrder={onOrder} />)}
       {t && !topics.length && <div className="empty">No topic is followed yet. Pick a class in the Taxonomy to follow it.</div>}
     </>
@@ -176,7 +177,8 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
       setForm(next);
     }
   }, [loaded, dirty, saved, base]);
-  const version = stats.data?.topic_revisions[cls.slug] ?? 1;
+  // The topic's version once the stats arrive; until then the head leaves it out and a save says "a new version".
+  const version = stats.data?.topic_revisions[cls.slug];
   // An edit after a save brings Save back in the offer's place.
   const set = (patch: Partial<Topic>) => {
     setForm((f) => ({ ...f, ...patch }));
@@ -205,7 +207,8 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
   };
   return (
     <div className="setpg">
-      <PageHead title={cls.name} sub={current ? `Version ${version} · follows ${path.join(" › ")}` : `Not followed yet · ${path.join(" › ")}`} deeper />
+      <PageHead title={cls.name} sub={current ? `${version == null ? "" : `Version ${version} · `}follows ${path.join(" › ")}` : `Not followed yet · ${path.join(" › ")}`} deeper />
+      <Failed q={stats} what="the topic's version" />
       <div className="form">
         <Field label="Class">
           <div className="tin one faint">{path.join(" › ")}</div>
@@ -255,6 +258,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
               </button>
             )}
           </div>
+          <Failed q={matches} what="the keyword matches" />
         </Field>
         <Field label="Look">
           <div className="look">

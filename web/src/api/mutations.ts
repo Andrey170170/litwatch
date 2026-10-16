@@ -372,10 +372,13 @@ export function useSaveTopic() {
 
 /** The owner's order of the topics, which the sidebar and the Digest follow. The page's tree takes the order at
  * once, so a second move while one is being saved starts from the first's order, not the one the page loaded;
- * and the saves go one at a time (`scope`), in the order they were made, whatever page is shown meanwhile. */
+ * and the saves go one at a time (`scope`), in the order they were made, whatever page is shown meanwhile. Only
+ * the last save in line refreshes the reads: an earlier one's refetch would land the server's order of that
+ * moment over the page's, undoing the later move under the reader until its own save returned. */
 export function useReorderTopics() {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: ["topics-order"],
     scope: { id: "topics-order" },
     mutationFn: async (slugs: string[]) => ok(await api.PUT("/api/settings/topics-order", { body: { slugs } })),
     onMutate: (slugs) => {
@@ -383,6 +386,8 @@ export function useReorderTopics() {
       qc.setQueryData<Schemas["Taxonomy"]>(settingsTaxonomyQuery("topics").queryKey, (old) => old && { ...old, topics: [...(old.topics ?? [])].sort((a, b) => (at.get(a.class) ?? 0) - (at.get(b.class) ?? 0)) });
     },
     onSuccess: () =>
+      // This save counts as pending until its callbacks are done: more than one means another waits its turn.
+      qc.isMutating({ mutationKey: ["topics-order"] }) > 1 ||
       Promise.all([
         qc.invalidateQueries({ queryKey: ["taxonomy"] }),
         qc.invalidateQueries({ queryKey: ["topics"] }),

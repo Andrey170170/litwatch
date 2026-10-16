@@ -346,11 +346,11 @@ export function differs(item: SessionItem): boolean {
 }
 
 /** The first line of the re-run offer after a save (DESIGN.md, "The re-run offer"). */
-export function savedLine(before: Schemas["Topic"] | null, after: Schemas["Topic"], version: number): string {
+export function savedLine(before: Schemas["Topic"] | null, after: Schemas["Topic"], version: number | undefined): string {
   if (!before) return "Followed. Its papers show ungraded until a run grades them.";
   if (before.depth !== after.depth) return "Saved. Topic pages and rarity follow the new depth now; the Fits already given stand until a re-run is asked for.";
   const read = (t: Schemas["Topic"]) => JSON.stringify([t.subject, t.rubric ?? "", t.interests ?? "", t.keywords ?? []]);
-  if (read(before) !== read(after)) return `Saved as version ${version}. It applies to papers classified or graded from now on.`;
+  if (read(before) !== read(after)) return `Saved as ${version == null ? "a new version" : `version ${version}`}. It applies to papers classified or graded from now on.`;
   return "Saved.";
 }
 

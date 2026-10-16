@@ -7,7 +7,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -44,7 +44,11 @@ async def taxonomy(c: Conn) -> Taxonomy | None:
     return await taxonomy_store.load(c)
 
 
-@router.get("/taxonomy.yaml", response_class=PlainTextResponse, responses={404: {}})
+@router.get(
+    "/taxonomy.yaml",
+    response_class=PlainTextResponse,
+    responses={404: {"description": "No taxonomy yet"}},
+)
 async def taxonomy_yaml(c: Conn) -> str:
     """The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML)."""
     tree = await taxonomy_store.load(c)
@@ -130,7 +134,7 @@ async def order(body: Order, c: Conn) -> None:
 async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
     """At the top, what last night left; below, how well the Focus topics are doing."""
     night = await quality.last_night(c)
-    since = night["started_at"] if night else date.today() - timedelta(days=1)
+    since = quality.splits_window(night)
     return {
         "night": {
             "run": night["id"] if night else None,
@@ -222,7 +226,7 @@ async def misses(request: Request, c: Conn) -> list[Miss]:
                     else None,
                     uncertain="uncertain" in sources if classified else None,
                     keyword="keyword" in sources if classified else None,
-                    graded=bool(r["opinions"]),
+                    graded=r["opinions"] is not None,
                     judge=(opinions.get("judge") or {}).get("fit"),
                     check=(opinions.get("check") or {}).get("fit"),
                 ),
