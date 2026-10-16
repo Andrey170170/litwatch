@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -20,6 +21,7 @@ class CallJournal:
 
     def __init__(self, conn: psycopg.AsyncConnection, run_id: int) -> None:
         self.conn, self.run_id = conn, run_id
+        self._retallying = asyncio.Lock()  # the connection holds one retally's lock at a time
 
     async def cached(self, key: str) -> dict[str, Any] | None:
         return await (
@@ -116,14 +118,15 @@ class CallJournal:
         if row is None or row["run_id"] == self.run_id:
             return
         # One retally of a run at a time, each reading the calls once it holds the lock, so a
-        # concurrent one cannot write a total older than its own.
-        await self.conn.execute("SELECT pg_advisory_lock(%s, %s)", (RETALLY_LOCK, row["run_id"]))
-        try:
-            await self._retally_now(row["run_id"])
-        finally:
-            await self.conn.execute(
-                "SELECT pg_advisory_unlock(%s, %s)", (RETALLY_LOCK, row["run_id"])
-            )
+        # concurrent one cannot write a total older than its own. The calls on this connection
+        # retally in turn: one waiting for a lock would hold up another's release.
+        lock = (RETALLY_LOCK, row["run_id"])
+        async with self._retallying:
+            await self.conn.execute("SELECT pg_advisory_lock(%s, %s)", lock)
+            try:
+                await self._retally_now(row["run_id"])
+            finally:
+                await self.conn.execute("SELECT pg_advisory_unlock(%s, %s)", lock)
 
     async def _retally_now(self, run_id: int) -> None:
         await self.conn.execute(

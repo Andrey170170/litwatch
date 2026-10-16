@@ -494,6 +494,39 @@ async def test_a_provider_operation_that_hangs_gives_way_to_normal_calls(monkeyp
     await gw.close()
 
 
+async def test_batches_whose_reads_hang_are_given_up_together_not_one_after_another(
+    conn, monkeypatch
+):
+    anthropic, _ = await dead_batches(conn, 8)
+
+    async def hangs(batch_id):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(anthropic, "status", hangs)
+    gw, _, _, clock = batching(
+        CallJournal(conn, await runs.start(conn, "nightly")), provider=anthropic
+    )
+    gw.batch_until(clock.now, drain=timedelta(0))  # as the service's worker attaches
+    gw.batchers["anthropic"].operation = 0.1  # one after another would take 0.8 s
+    await asyncio.wait_for(asyncio.gather(*(gw.ask("brief", ask(i)) for i in range(8))), 0.5)
+    assert len(anthropic.calls) == 8
+    await gw.close()
+
+
+async def test_retallies_on_two_connections_in_opposite_orders_do_not_deadlock(conn):
+    first, second = await runs.start(conn, "nightly"), await runs.start(conn, "nightly")
+    async with await store.connect(conn.test_dsn, conn.test_schema) as other:
+        mine = CallJournal(conn, await runs.start(conn, "nightly"))
+        theirs = CallJournal(other, await runs.start(conn, "nightly"))
+        both = [
+            mine._retally({"run_id": first}),
+            mine._retally({"run_id": second}),
+            theirs._retally({"run_id": second}),
+            theirs._retally({"run_id": first}),
+        ]
+        await asyncio.wait_for(asyncio.gather(*both), 5)
+
+
 async def test_a_dead_runs_batch_is_recovered_by_its_provider_whatever_roles_use_now(conn):
     anthropic, clock = await dead_batches(conn, 1)
     moved = Models(brief=OTHER)  # brief moved to OpenRouter since the run died

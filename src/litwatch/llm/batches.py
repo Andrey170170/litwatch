@@ -245,8 +245,8 @@ class Batcher:
         while self._open:
             now = self.now()
             looked = list(self._open.items())
-            for batch_id, batch in looked:
-                await self._check(batch_id, batch, now)
+            # Together, so a pass takes two operations at most however many batches are open.
+            await asyncio.gather(*(self._check(i, b, now) for i, b in looked))
             if self.now() >= self.deadline + self.drain:  # each given up looked at first
                 left = [(i, b) for i, b in looked if i in self._open]
                 if left:
