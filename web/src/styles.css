@@ -198,7 +198,7 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 @keyframes lw-fade { from { opacity: 0; } }
 
 /* phone: the page (header, screen, bottom bar) over the screen a swipe back returns to (`.under`, DESIGN.md "Phone") */
-.phone { position: relative; height: 100dvh; overflow: hidden; touch-action: pan-y; }
+.phone { position: relative; height: 100dvh; overflow: hidden; touch-action: pan-y; overscroll-behavior-x: none; }
 .page { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; background: var(--bg); }
 .page[style*="transform"] { box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25); }
 .under { position: absolute; inset: 0; --f: 0; transform: translateX(calc(-30% * (1 - var(--f)))); }
@@ -211,7 +211,9 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 .pbar .ttl .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pbar .sp { flex: 1; }
 .pbar .st { margin: 0 4px; }
-.scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* the screen scrolls, and a horizontal finger in it is the shell's (a scroll container resolves its own touch-action,
+   so `.phone`'s pan-y would not reach it); Chrome's own swipe navigation keeps off the edge */
+.scroll { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; overscroll-behavior-x: none; }
 .pp { padding: 12px; }
 .pfoot { flex: none; border-top: 1px solid var(--line); background: var(--surface); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
 .screen[data-came="go"] { animation: lw-in-go 0.24s var(--ease); }
@@ -222,7 +224,8 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 @keyframes lw-step-next { from { transform: translateX(40px); opacity: 0; } }
 @keyframes lw-step-prev { from { transform: translateX(-40px); opacity: 0; } }
 /* the drawer, from the left */
-.shade { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.45); animation: lw-fade 0.2s ease-out; }
+/* the shade: a finger on it may shut the drawer, so it leaves horizontal pans to the shell */
+.shade { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.45); animation: lw-fade 0.2s ease-out; touch-action: pan-y; }
 /* held by a finger, or left open by one: no entry of its own; opening, it starts shut and follows */
 :is(.shade, .drawer, .sheet)[data-drag] { animation: none; }
 .shade[data-drag="opening"] { opacity: 0; }
@@ -764,7 +767,7 @@ a.nt:hover { text-decoration: underline; }
 .pfoot.calf .on small { color: var(--acc); }
 .pfoot.pgf.calf > .lbl { flex: none; width: 74px; height: 40px; border: 1px solid var(--line); color: var(--fg); font-size: 12px; }
 /* the phone's list of a session's papers */
-.cpk { max-height: 50vh; overflow-y: auto; margin: 0 -4px 8px; }
+.cpk { max-height: 50vh; overflow-y: auto; margin: 0 -4px 8px; touch-action: pan-y; }
 .cpk button { display: grid; width: 100%; grid-template-columns: 26px minmax(0, 1fr) 16px; gap: 8px; align-items: center; padding: 9px 4px; border-top: 1px solid var(--line2); font-size: 13px; text-align: left; }
 .cpk button .n { font: 500 11.5px var(--font-mono); color: var(--fg3); text-align: right; }
 .cpk button .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

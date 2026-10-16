@@ -70,8 +70,10 @@ def expect(paper: str, day: str, width: str) -> dict[str, tuple[str, str]]:
     """What a page must show to count as working, beyond text in <main> that says nothing is
     missing (`MISSING`): an element of its own, or a word. The Digest's views show their place
     (Today in the Day's stepper, the day asked for, the Week in the phone's bar or the desktop's
-    view tabs, History's active form); the lists show their data (a paper link, an archive
-    search's heading, a topic card, the topic's heading); a paper shows its id, or Process when
+    view tabs, History's active form); the lists show their data (Papers a paper link, a shelf
+    folded on its count, or its loaded empty state: a fresh stack's papers are classified by hand
+    and ungraded, so common, in the shelf folded by default; an archive search's heading, a topic
+    card, the topic's heading); a paper shows its id, or Process when
     outside the collection; the share target's landing has the paper's sheet open on its labels on
     the phone (the desktop's rail is open already), or the picker of Report as a miss open when the
     shared paper is one neither litwatch nor the archive has; the Settings pages their titles. A
@@ -88,7 +90,7 @@ def expect(paper: str, day: str, width: str) -> dict[str, tuple[str, str]]:
         ),
         "history": ("locator", '[aria-label="History as"] .on[aria-label="List"]'),
         "history-calendar": ("locator", '[aria-label="History as"] .on[aria-label="Calendar"]'),
-        "papers": ("locator", 'main a[href^="/paper/"]'),
+        "papers": ("locator", 'main :is(a[href^="/paper/"], .shh .k:not(:empty), .empty)'),
         "search": ("locator", ".outh"),
         "topics": ("locator", ".tcard"),
         "topic": ("locator", ".thead .h1"),

@@ -275,7 +275,8 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
       // a mouse selects text, it does not swipe; a drag that starts in a text field selects, whatever the pointer
       if (!root || t.closest("input, textarea, select, [contenteditable]")) return;
       let kind: Kind | null = null;
-      if (menu) kind = els.panel.current?.contains(t) ? "drawer" : null;
+      // the open drawer shuts by a drag on it or on its shade
+      if (menu) kind = els.panel.current?.contains(t) || els.shade.current?.contains(t) ? "drawer" : null;
       else if (!root.contains(t)) return;
       else if (e.clientX <= EDGE) kind = deeper ? "back" : "drawer";
       else if (stepsNow() && els.main.current?.contains(t) && !scrollsSideways(t, els.main.current)) kind = "step";

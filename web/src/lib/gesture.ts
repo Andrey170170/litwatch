@@ -12,8 +12,10 @@ export const SLOP = 8;
 export const VELOCITY_WINDOW_MS = 90;
 /** The speed, in px per ms, that commits a drag whatever its distance: a flick. */
 export const FLICK = 0.5;
-/** How far from the left edge, in px, a swipe counts as an edge swipe. */
-export const EDGE = 24;
+/** How far from the left edge, in px, a swipe counts as an edge swipe. Android's gesture navigation owns the first
+ * ~24 dp and hands the app a finger that landed just inside it, so the zone reaches 48 px: half of it is where
+ * such a finger lands, half is edge the page can reach. */
+export const EDGE = 48;
 /** How far a step slides after the finger, and from where the next content enters (DESIGN.md, "Motion"). */
 export const STEP_SLIDE = 40;
 

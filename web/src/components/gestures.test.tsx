@@ -155,6 +155,18 @@ describe("The phone's gestures", () => {
     expect(await screen.findByRole("dialog", { name: "Menu" })).toHaveAttribute("data-drag", "opening");
   });
 
+  it("takes an edge swipe from inside Android's gesture strip, and a drag on the shade shuts the drawer", async () => {
+    scriptFetch(routes);
+    renderApp("/");
+    await screen.findByText("Today");
+    // a finger the system handed over, landing 40 px in: the edge, not a step
+    swipe(screen.getByRole("main"), [40, 300], [[60, 300], [250, 300]]);
+    await screen.findByRole("dialog", { name: "Menu" });
+    vi.advanceTimersByTime(400);
+    swipe(document.querySelector(".shade")!, [350, 300], [[330, 300], [100, 300]]);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("calls a release's settle off when the shell goes before it lands", async () => {
     viewport(false, false); // with motion: the settle takes its 200 ms
     scriptFetch({ ...routes, [`GET /api/papers/${paper.id}`]: full(paper.id, {}) });
@@ -267,7 +279,10 @@ describe("A sheet", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     viewport(false, true);
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    document.dispatchEvent(new MouseEvent("pointerdown"));
+    vi.useRealTimers();
+  });
   it("closes when dragged down past a third of its height by the handle, and springs back from less", async () => {
     scriptFetch({ ...routes, "GET /api/papers": papers });
     renderApp("/papers");
@@ -288,6 +303,49 @@ describe("A sheet", () => {
     Object.defineProperty(again, "offsetHeight", { value: 300 });
     swipe(again.querySelector(".hdl")!, [195, 500], [[195, 512], [195, 540]], { ms: 20 });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("keeps the browser from panning a finger moving down its body from the top, and lets the body scroll otherwise", async () => {
+    scriptFetch({ ...routes, "GET /api/papers": papers });
+    renderApp("/papers");
+    fireEvent.click(await screen.findByRole("button", { name: "Filters" }));
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    Object.defineProperty(sheet, "offsetHeight", { value: 300 });
+    const init = (x: number, y: number) => ({ clientX: x, clientY: y, pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, buttons: 1 });
+    // the browser's touchmove, dispatched where the finger is; whether the sheet's own listener (the last one on
+    // it, so a listener added now reads after it) let the pan go: Radix's scroll lock says no to every touchmove
+    // under jsdom, where nothing can scroll, so the answer is read before the event reaches the document
+    const panned = (x: number, y: number) => {
+      const t = new Event("touchmove", { bubbles: true, cancelable: true });
+      Object.defineProperty(t, "touches", { value: [{ clientX: x, clientY: y }] });
+      let prevented = false;
+      sheet.addEventListener("touchmove", () => (prevented = t.defaultPrevented), { once: true });
+      sheet.dispatchEvent(t);
+      return !prevented;
+    };
+    // down from the top: the sheet's, from the first move, and still once the drag has locked
+    fireEvent.pointerDown(sheet, init(195, 500));
+    expect(panned(197, 530)).toBe(false);
+    vi.advanceTimersByTime(300);
+    fireEvent.pointerMove(window, init(197, 530));
+    expect(panned(150, 540)).toBe(false);
+    vi.advanceTimersByTime(300);
+    fireEvent.pointerUp(window, init(150, 540));
+    await waitFor(() => expect(sheet.style.transform).toBe(""));
+    expect(screen.getByRole("dialog", { name: "Filters" })).toBeInTheDocument();
+    // up, or sideways: the body's scroll
+    vi.advanceTimersByTime(400);
+    fireEvent.pointerDown(sheet, init(195, 500));
+    expect(panned(195, 470)).toBe(true);
+    expect(panned(240, 505)).toBe(true);
+    fireEvent.pointerUp(window, init(195, 470));
+    expect(screen.getByRole("dialog", { name: "Filters" })).toBeInTheDocument();
+    // from a scrolled body: not a drag at all
+    Object.defineProperty(sheet, "scrollTop", { value: 40, configurable: true });
+    fireEvent.pointerDown(sheet, init(195, 500));
+    expect(panned(195, 560)).toBe(true);
+    fireEvent.pointerUp(window, init(195, 560));
+    expect(screen.getByRole("dialog", { name: "Filters" })).toBeInTheDocument();
   });
 });
 

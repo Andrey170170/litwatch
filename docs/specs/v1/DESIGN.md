@@ -36,9 +36,12 @@ with "‹ Back" at its top.
 **Phone.** A header, the page, and on most pages a bottom bar.
 - The header on a top-level screen: ☰ and the wordmark (or the page's name), then the run status and ⚙ at the right.
   On a deeper screen: ‹ and the page's title.
-- The drawer slides from the left, opened by ☰ or a swipe from the left edge on a top-level screen. It holds the
+- The drawer slides from the left, opened by ☰ or a swipe from the left edge on a top-level screen. The edge is the
+  first 48 px: Android's gesture navigation owns about the first 24 dp and passes on a finger that landed just inside
+  them, so half the zone is where such a finger lands and half is edge the page can reach. The drawer holds the
   sidebar's items, with Day, Week and History under Digest. It follows the finger and settles open or shut by where
-  the finger let go and how fast; a drag that starts vertical scrolls instead.
+  the finger let go and how fast, and a drag on it or on its shade shuts it; a drag that starts vertical scrolls
+  instead.
 - On a deeper screen the same edge swipe goes back, iOS style: the page follows the finger with the previous one
   under it. Every step is a history entry, so the system back gesture walks the same steps.
 - A horizontal swipe away from the edge steps the page where there is a sequence: a Day or Week to the older or newer
