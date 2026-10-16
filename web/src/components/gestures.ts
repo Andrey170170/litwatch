@@ -90,9 +90,11 @@ type Kind = "drawer" | "back" | "step";
 export type DrawerDrag = "opening" | "shutting" | "open" | null;
 type Drag = { kind: Kind; x0: number; y0: number; axis: Axis; tracker: Tracker; steps: Steps | null; wasOpen: boolean; stop: () => void };
 
-/** A control that takes the finger itself (`touch-action: none`: the topic reorder grip) owns the pointer too, however
- * near the edge it sits; without this the shell would move the page under a drag the control is following. */
-function ownsTouch(from: Element, upTo: Element): boolean {
+/** Whether a pointer down on `from` is a control's own, not the shell's or a sheet's: a drag in a text field selects,
+ * whatever the pointer, and a control that takes the finger itself (`touch-action: none`: the topic reorder grip) is
+ * following it already, however near the edge it sits. */
+export function ownsPointer(from: Element, upTo: Element): boolean {
+  if (from.closest("input, textarea, select, [contenteditable]")) return true;
   for (let el: Element | null = from; el && el !== upTo; el = el.parentElement) {
     if (getComputedStyle(el).touchAction === "none") return true;
   }
@@ -290,8 +292,8 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
       const { deeper, menu } = live.current;
       const t = e.target as Element;
       const root = els.root.current;
-      // a mouse selects text, it does not swipe; a drag that starts in a text field selects, whatever the pointer
-      if (!root || t.closest("input, textarea, select, [contenteditable]") || ownsTouch(t, root)) return;
+      // a mouse selects text, it does not swipe
+      if (!root || ownsPointer(t, root)) return;
       let kind: Kind | null = null;
       // the open drawer shuts by a drag on it or on its shade
       if (menu) kind = els.panel.current?.contains(t) || els.shade.current?.contains(t) ? "drawer" : null;

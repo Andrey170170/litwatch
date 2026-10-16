@@ -10,15 +10,19 @@ Needs `playwright` and its Chromium (`playwright install chromium`)."""
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from datetime import date, timedelta
 from pathlib import Path
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 WIDTHS = {"phone": (390, 844), "desktop": (1440, 900)}
 CARD_WAIT_SECONDS = 120
+LOAD_SECONDS = 15
+LOADING = re.compile(r"^(Loading|Searching)…$")
 # A paper neither litwatch nor the archive has: the one 404 the walk expects.
 # an id no paper has, shaped as a real one (the share target reads a month into it)
 MISSING_ID = "0001.00001"
@@ -122,10 +126,11 @@ def expect(paper: str, day: str, width: str) -> dict[str, tuple[str, str]]:
 
 
 def watch(page) -> list[str]:
-    """The page's errors as they happen: console errors, uncaught exceptions, 5xx answers, 401 or
-    403 ones (a lost session shows the token prompt, which has text of its own), and 404s, which a
-    missing asset or a wrong API path make. The read of `MISSING_ID`, which the walk asks for, is
-    the one 404 expected, and the browser's console note of it goes with it."""
+    """The page's errors as they happen: console errors, uncaught exceptions, and every answer of
+    400 or more: a 5xx, a 401 or 403 (a lost session shows the token prompt, which has text of its
+    own), a 404, which a missing asset or a wrong API path make, a 422 the page would retry out of
+    sight. The read of `MISSING_ID`, which the walk asks for, is the one 404 expected, and the
+    browser's console note of it goes with it."""
     seen: list[str] = []
     expected = lambda url: MISSING_ID in url  # noqa: E731
     page.on(
@@ -140,7 +145,8 @@ def watch(page) -> list[str]:
     page.on(
         "response",
         lambda r: (
-            (r.status >= 500 or r.status in (401, 403) or (r.status == 404 and not expected(r.url)))
+            r.status >= 400
+            and not (r.status == 404 and expected(r.url))
             and seen.append(f"HTTP {r.status} {r.url}")
         ),
     )
@@ -185,8 +191,16 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
             for name, path in (pages(paper, topic, day) | found_pages(context, base, day)).items():
                 seen.clear()
                 page.goto(base + path, wait_until="networkidle")
-                # Both shells put the page in <main>.
+                # Both shells put the page in <main>. A read still loading (a retry waits between
+                # tries, quiet on the network) is given its time, within reason; a long list's
+                # "Loading more…" at its foot is not a load, it waits to be scrolled to.
                 main = page.locator("main").first
+                try:
+                    main.locator(".loadmore", has_text=LOADING).first.wait_for(
+                        state="hidden", timeout=LOAD_SECONDS * 1000
+                    )
+                except PlaywrightTimeoutError:
+                    seen.append(f"the page still loads after {LOAD_SECONDS} s")
                 text = main.inner_text().strip() if main.count() else ""
                 if not text:
                     seen.append("empty page: no text in the page's content")

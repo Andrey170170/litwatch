@@ -73,6 +73,11 @@ def reaches(url: str, where: str) -> bool:
     return parts.path.endswith(urlparse(where).path)
 
 
+def shelf_links(section) -> list[str]:
+    """The papers a shelf lists, by href."""
+    return [a.get_attribute("href") or "" for a in section.locator('a[href^="/paper/"]').all()]
+
+
 def unfold(page) -> None:
     """Open a list's folded shelves that hold papers: a fresh stack's papers are common, in the
     shelf folded by default. A head shows its count once its shelf has loaded; an empty one is
@@ -150,15 +155,16 @@ def walk(page, base: str, out: Path, day: str, lines: list[str]) -> None:
     else:
         lines.append("SKIP day-steps-older: no older day")
 
-    # a paper, stepped to the next in its list; then the edge swipe back, which returns to the
-    # first paper, as a step is a history entry
+    # a paper, stepped to the next in its list, which is its shelf's: two papers of one shelf;
+    # then the edge swipe back, which returns to the first paper, as a step is a history entry
     page.goto(f"{base}/papers", wait_until="networkidle")
     unfold(page)
-    links = page.locator(PAPER_LINK)
-    hrefs = [a.get_attribute("href") or "" for a in links.all()]
-    if len(hrefs) >= 2:
-        first, second = hrefs[0], hrefs[1]
-        links.nth(0).click()
+    hrefs = [a.get_attribute("href") or "" for a in page.locator(PAPER_LINK).all()]
+    shelves = (shelf_links(s) for s in page.locator("main section").all())
+    pair = next((links for links in shelves if len(links) >= 2), [])
+    if pair:
+        first, second = pair[0], pair[1]
+        page.locator(f'main a[href="{first}"]').first.click()
         page.wait_for_url("**/paper/**")
         settle(page, 500)
         finger.drag(300, 420, 60, 420)
@@ -166,15 +172,16 @@ def walk(page, base: str, out: Path, day: str, lines: list[str]) -> None:
             finger.drag(36, 420, 330, 420)
             check("edge-swipe-goes-back", arrived(page, first), page.url)
     else:
-        # the stack seeds its papers: fewer than two listed is the list's failure, not a skip
-        lines.append(f"FAIL paper-steps-next, edge-swipe-goes-back: {len(hrefs)} papers listed")
+        # the stack seeds its papers in one shelf: no shelf of two is the list's failure, not a skip
+        listed = f"no shelf of two papers, {len(hrefs)} listed"
+        lines.append(f"FAIL paper-steps-next, edge-swipe-goes-back: {listed}")
 
     # a Calibrate session's cards
     sessions = context.request.get(f"{base}/api/settings/calibrate")
     assert sessions.ok, f"reading the Calibrate sessions: HTTP {sessions.status}"
-    rows = sessions.json()
-    if rows and rows[0]["papers"] >= 2:
-        page.goto(f"{base}/settings/calibrate/{rows[0]['id']}?at=1", wait_until="networkidle")
+    session = next((r for r in sessions.json() if r["papers"] >= 2), None)
+    if session:
+        page.goto(f"{base}/settings/calibrate/{session['id']}?at=1", wait_until="networkidle")
         finger.drag(300, 500, 60, 500)
         # a card with a standing Fit saves before the step: wait for it, within reason
         check("calibrate-steps-next", arrived(page, "at=2"), page.url)

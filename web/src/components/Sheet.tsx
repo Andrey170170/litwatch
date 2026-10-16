@@ -1,7 +1,7 @@
 import { Dialog } from "radix-ui";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { axisOf, motionMs, sheetCloses, Tracker } from "@/lib/gesture";
-import { clearDrag, EASE, finishEntry, sample, settle, swallowNextClick, trackPointer, type DrawerDrag } from "./gestures";
+import { clearDrag, EASE, finishEntry, ownsPointer, sample, settle, swallowNextClick, trackPointer, type DrawerDrag } from "./gestures";
 
 const CLASS = { bottom: "sheet", left: "drawer", right: "over" };
 
@@ -64,11 +64,13 @@ function scrolled(from: Element, sheet: Element): boolean {
   return false;
 }
 
-/** Drag a sheet down to close it: from its handle, or from its body while that is scrolled to the top. It follows
- * the finger and its shade fades; past a third of its height, or flicked, it goes, else it springs back. A release
- * still settling when the sheet closes by other means is called off. The body keeps `touch-action: pan-y` for its
- * scrolling, so the browser would take a finger moving down from the top for a pan and end the pointer: the touch
- * events under the drag are told no from the first move down, and the pointer stream goes on. */
+/** Drag a sheet down to close it: from its handle, or by a finger on its body while that is scrolled to the top. It
+ * follows the finger and its shade fades; past a third of its height, or flicked, it goes, else it springs back. A
+ * release still settling when the sheet closes by other means is called off. The body keeps `touch-action: pan-y`
+ * for its scrolling, so the browser would take a finger moving down from the top for a pan and end the pointer: the
+ * touch events under the drag are told no from the first move down, and the pointer stream goes on. A pen has no
+ * touch events to tell, so on the body it pans as the browser has it; a text field or a control taking the pointer
+ * keeps it. */
 function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObject<HTMLElement | null>, onClose: () => void) {
   const close = useRef(onClose);
   close.current = onClose;
@@ -81,8 +83,8 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
     const down = (e: PointerEvent) => {
       const el = panel.current;
       if (stop || settling || !el || e.button !== 0 || !e.isPrimary || e.pointerType === "mouse" || !el.contains(e.target as Node)) return;
-      const fromHandle = (e.target as Element).closest(".hdl");
-      if (!fromHandle && scrolled(e.target as Element, el)) return;
+      const t = e.target as Element;
+      if (!t.closest(".hdl") && (e.pointerType !== "touch" || ownsPointer(t, el) || scrolled(t, el))) return;
       const tracker = new Tracker();
       tracker.push(sample(e));
       let axis: ReturnType<typeof axisOf> = null;
