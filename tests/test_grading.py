@@ -375,6 +375,21 @@ async def test_a_rewrite_settles_with_its_page_when_a_later_page_fails(conn, mod
     await assert_settled_on_solid(conn)
 
 
+async def test_a_rewrite_whose_settle_fails_is_not_stored(conn, models, monkeypatch):
+    async def failing(conn, paper_id, **kwargs):
+        raise RuntimeError("settle failed")
+
+    monkeypatch.setattr(word, "settle", failing)
+    fake = FakeArchive()
+    fake.listing = [B_REWRITTEN]
+    client = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
+    with pytest.raises(RuntimeError, match="settle failed"):
+        await intake_job.from_archive(conn, CONFIG, client, *WINDOW)
+    stored = await papers_store.get(conn, B.id)
+    assert (stored.version, stored.revision, stored.abstract) == (B.version, 1, B.abstract)
+    assert await rows(conn, "SELECT * FROM outbox WHERE type = 'paper.revised'") == []
+
+
 async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(conn, models, monkeypatch):
     models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
     await night(conn, models)
