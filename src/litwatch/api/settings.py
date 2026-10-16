@@ -167,7 +167,9 @@ class MissTrace(BaseModel):
     """What each stage concluded for the owner's topic when the reported paper went through the
     pipeline (feedback.md, misses), on the paper's current text. `classified`: classification
     has run; then `probability` is the classifier's for the topic's class against the class's
-    `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it.
+    `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;
+    `below` says the classifier admitted it to a class under the topic's only, not to the
+    topic's own class.
     `graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null
     where only the judge was asked)."""
 
@@ -175,6 +177,7 @@ class MissTrace(BaseModel):
     probability: float | None = None
     threshold: float
     classifier: bool | None = None
+    below: bool | None = None
     uncertain: bool | None = None
     keyword: bool | None = None
     graded: bool
@@ -212,7 +215,10 @@ async def misses(request: Request, c: Conn) -> list[Miss]:
                     classified=classified,
                     probability=r["probability"],
                     threshold=at.get(r["topic"], classification.CHOSEN.default),
-                    classifier="classifier" in sources if classified else None,
+                    classifier=bool(sources & {"classifier", "below"}) if classified else None,
+                    below="below" in sources and "classifier" not in sources
+                    if classified
+                    else None,
                     uncertain="uncertain" in sources if classified else None,
                     keyword="keyword" in sources if classified else None,
                     graded=bool(r["opinions"]),

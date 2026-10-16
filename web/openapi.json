@@ -4484,6 +4484,17 @@
             ],
             "title": "Classifier"
           },
+          "below": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Below"
+          },
           "uncertain": {
             "anyOf": [
               {
@@ -4538,7 +4549,7 @@
           "graded"
         ],
         "title": "MissTrace",
-        "description": "What each stage concluded for the owner's topic when the reported paper went through the\npipeline (feedback.md, misses), on the paper's current text. `classified`: classification\nhas run; then `probability` is the classifier's for the topic's class against the class's\n`threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it.\n`graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null\nwhere only the judge was asked)."
+        "description": "What each stage concluded for the owner's topic when the reported paper went through the\npipeline (feedback.md, misses), on the paper's current text. `classified`: classification\nhas run; then `probability` is the classifier's for the topic's class against the class's\n`threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;\n`below` says the classifier admitted it to a class under the topic's only, not to the\ntopic's own class.\n`graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null\nwhere only the judge was asked)."
       },
       "NextFire": {
         "properties": {
@@ -6011,7 +6022,7 @@
           "spent"
         ],
         "title": "SettingsHints",
-        "description": "What the Settings sidebar says beside each page: how many things wait on the owner, the\nlast Calibrate session, the misses reported, the topics followed and the classes, the\nmonth's spend against its budget, and the integrations failing."
+        "description": "What the Settings sidebar says beside each page: how many things wait on the owner, the\nlast Calibrate session, the misses reported, the topics followed and the classes, the\nmonth's spend against its budget (the budgeted providers' spend, or every provider's when\nnone has a budget), and the integrations failing."
       },
       "Sort": {
         "type": "string",

@@ -151,7 +151,7 @@ describe("savedLine", () => {
 describe("toToml", () => {
   it("writes sections with dotted tables and masked strings as they are", () => {
     const text = toToml({ debug: false, budget: { anthropic: 100 }, models: { judge: { provider: "anthropic", model: "x", effort: null } }, intake: { categories: ["cs.CL", "cs.LG"] } });
-    expect(text).toBe('debug = false\n\n[budget]\nanthropic = 100\n\n[models.judge]\nprovider = "anthropic"\nmodel = "x"\neffort = ""\n\n[intake]\ncategories = ["cs.CL", "cs.LG"]\n');
+    expect(text).toBe('debug = false\n\n[budget]\nanthropic = 100\n\n[models.judge]\nprovider = "anthropic"\nmodel = "x"\n\n[intake]\ncategories = ["cs.CL", "cs.LG"]\n');
   });
   it("writes an array of tables as repeated headers", () => {
     expect(toToml({ schedule: { jobs: [{ kind: "night", cron: "0 3 * * *" }] } })).toBe('[[schedule.jobs]]\nkind = "night"\ncron = "0 3 * * *"\n');

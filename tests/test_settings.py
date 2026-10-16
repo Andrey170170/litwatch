@@ -202,6 +202,7 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     t = m["trace"]
     assert t["classified"] and t["probability"] == 0.3 and t["threshold"] == 0.5
     assert (t["classifier"], t["uncertain"], t["keyword"]) == (False, True, False)
+    assert t["below"] is False
     assert (t["graded"], t["judge"], t["check"]) == (True, "related", "adjacent")
     # A miss on the parent: the classifier's membership in the Focus class stands in it too.
     from litwatch.feedback import misses as misses_store
@@ -211,6 +212,12 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     found = (await client.get("/api/settings/misses")).json()
     (parent,) = [x for x in found if x["topic"] == "interpretability"]
     assert parent["trace"]["classifier"] is True and parent["trace"]["probability"] == 0.1
+    assert parent["trace"]["below"] is True  # in a class under it, not in its own
+    # The classifier choosing the topic's own class, under its threshold, is no class under it.
+    await _classify(conn, P, {FAITH.slug: 0.1, "interpretability": 0.1}, "interpretability")
+    found = (await client.get("/api/settings/misses")).json()
+    (parent,) = [x for x in found if x["topic"] == "interpretability"]
+    assert (parent["trace"]["classifier"], parent["trace"]["below"]) == (True, False)
     # The band admits a paper to one Focus class for grading, not to the classes above it.
     await misses_store.report(conn, Q.id, "interpretability")
     found = (await client.get("/api/settings/misses")).json()

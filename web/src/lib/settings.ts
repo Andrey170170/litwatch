@@ -294,7 +294,7 @@ export function toToml(value: Record<string, unknown>): string {
     for (const [k, v] of Object.entries(table)) {
       if (isRecord(v)) tables.push([k, v]);
       else if (Array.isArray(v) && v.length && v.every(isRecord)) arrays.push([k, v as Record<string, unknown>[]]);
-      else lines.push(`${k} = ${tomlValue(v)}`);
+      else if (v != null) lines.push(`${k} = ${tomlValue(v)}`); // an unset setting is left out, as TOML has no null
     }
     if (lines.length || (header && !tables.length && !arrays.length)) blocks.push([header, ...lines].filter(Boolean).join("\n"));
     for (const [k, v] of tables) walk(v, [...path, k], `[${[...path, k].join(".")}]`);

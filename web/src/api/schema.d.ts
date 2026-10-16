@@ -1757,7 +1757,9 @@ export interface components {
          * @description What each stage concluded for the owner's topic when the reported paper went through the
          *     pipeline (feedback.md, misses), on the paper's current text. `classified`: classification
          *     has run; then `probability` is the classifier's for the topic's class against the class's
-         *     `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it.
+         *     `threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;
+         *     `below` says the classifier admitted it to a class under the topic's only, not to the
+         *     topic's own class.
          *     `graded`: a verdict exists; then `judge` and `check` are the graders' Fits (check null
          *     where only the judge was asked).
          */
@@ -1770,6 +1772,8 @@ export interface components {
             threshold: number;
             /** Classifier */
             classifier?: boolean | null;
+            /** Below */
+            below?: boolean | null;
             /** Uncertain */
             uncertain?: boolean | null;
             /** Keyword */
@@ -2268,7 +2272,8 @@ export interface components {
          * SettingsHints
          * @description What the Settings sidebar says beside each page: how many things wait on the owner, the
          *     last Calibrate session, the misses reported, the topics followed and the classes, the
-         *     month's spend against its budget, and the integrations failing.
+         *     month's spend against its budget (the budgeted providers' spend, or every provider's when
+         *     none has a budget), and the integrations failing.
          */
         SettingsHints: {
             /** Waiting */

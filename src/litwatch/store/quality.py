@@ -117,9 +117,9 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
     on the paper's current text (feedback.md, misses): whether it has been classified and the
     classifier's probability for the topic's class, which of the classifier, the uncertain band
     and the keyword check made it a member (a classifier membership anywhere under the class
-    counts, as it stands in the class; the band and the keyword check admit a paper to one
-    Focus class only), and the graders' opinions from the current verdict. Null where a stage
-    has not run on this text."""
+    counts, as it stands in the class, and reads `below` when it is under the class only; the
+    band and the keyword check admit a paper to one Focus class only), and the graders'
+    opinions from the current verdict. Null where a stage has not run on this text."""
     # Each followed topic's class with every class under it, as (topic, class) pairs.
     pairs = [(t.slug, c) for t in (tree.topics if tree else []) for c in tree.subtree(t.slug)]
     return await _all(
@@ -132,7 +132,10 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
                (SELECT (c.response->'probabilities'->>m.topic)::float FROM classifications c
                 WHERE c.paper_id = m.paper_id AND c.paper_revision = p.revision
                 ORDER BY c.id DESC LIMIT 1) AS probability,
-               (SELECT coalesce(array_agg(DISTINCT x.source), '{}') FROM memberships x
+               -- 'below': a classifier membership in a class under the topic's, not in it
+               (SELECT coalesce(array_agg(DISTINCT CASE WHEN x.class = m.topic THEN x.source
+                                                        ELSE 'below' END), '{}')
+                FROM memberships x
                 WHERE x.paper_id = m.paper_id AND x.member AND x.paper_revision = p.revision
                   AND x.source IN ('classifier', 'uncertain', 'keyword')
                   AND (x.class = m.topic OR (x.source = 'classifier' AND x.class IN

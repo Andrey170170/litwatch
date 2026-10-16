@@ -18,7 +18,7 @@ export function cells(t: Miss["trace"]): Cell[] {
   const pending: Cell["tone"] = "off";
   const p = t.probability;
   const read = p == null ? "no answer" : `${p.toFixed(2)} ${p >= t.threshold ? "over" : "under"} ${t.threshold.toFixed(2)}`;
-  const under = t.classifier && (p == null || p < t.threshold) ? " · in a class under it" : "";
+  const under = t.below ? " · in a class under it" : "";
   return [
     { name: "Classifier", value: !t.classified ? "pending" : read + under, tone: !t.classified ? pending : t.classifier ? "ok" : "bad" },
     { name: "Uncertain band", value: !t.classified ? "pending" : t.uncertain ? "member" : t.classifier ? "–" : "under", tone: !t.classified ? pending : t.uncertain ? "ok" : t.classifier ? "off" : "bad" },
