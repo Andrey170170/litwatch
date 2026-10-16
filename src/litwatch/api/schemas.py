@@ -173,7 +173,8 @@ class ListQuery(BaseModel):
     """A list's filters, as query parameters. Rarity and grade are the levels: several may be
     given, and the counts in the answer leave them out. A grade on Papers is a badge's; on a
     topic page the page's own. `rarest` sorts by rarity, then newest first; `best` by search
-    rank while `q` is given, else as `rarest`."""
+    rank while `q` is given, else as `rarest`. Omitted, the sort is `best` while `q` is given,
+    else `rarest`."""
 
     q: str | None = None
     rarity: list[Rarity] = Field(default_factory=list)
@@ -183,7 +184,16 @@ class ListQuery(BaseModel):
     weight: list[Weight] = Field(default_factory=list)
     since: date | None = None  # published on or after (UTC)
     until: date | None = None  # published on or before (UTC)
-    sort: Sort = "rarest"
+    sort: Sort | None = Field(
+        default=None,
+        description="Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+    )
+
+    @model_validator(mode="after")
+    def _sort_by_default(self) -> ListQuery:
+        if self.sort is None:
+            self.sort = "best" if self.q else "rarest"
+        return self
 
 
 class PaperQuery(ListQuery):

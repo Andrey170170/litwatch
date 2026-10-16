@@ -2040,8 +2040,8 @@ export interface components {
             since?: string | null;
             /** Until */
             until?: string | null;
-            /** @default rarest */
-            sort: components["schemas"]["Sort"];
+            /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
+            sort?: components["schemas"]["Sort"] | null;
             /** Topic */
             topic?: string[];
             depth?: components["schemas"]["Depth"] | null;
@@ -2698,7 +2698,8 @@ export interface operations {
                 weight?: components["schemas"]["Weight"][];
                 since?: string | null;
                 until?: string | null;
-                sort?: components["schemas"]["Sort"];
+                /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
+                sort?: components["schemas"]["Sort"] | null;
                 topic?: string[];
                 depth?: components["schemas"]["Depth"] | null;
                 source?: ("collection" | "outside") | null;
@@ -2887,7 +2888,8 @@ export interface operations {
                 weight?: components["schemas"]["Weight"][];
                 since?: string | null;
                 until?: string | null;
-                sort?: components["schemas"]["Sort"];
+                /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
+                sort?: components["schemas"]["Sort"] | null;
                 topic?: string[];
                 depth?: components["schemas"]["Depth"] | null;
                 source?: ("collection" | "outside") | null;
@@ -3031,7 +3033,8 @@ export interface operations {
                 weight?: components["schemas"]["Weight"][];
                 since?: string | null;
                 until?: string | null;
-                sort?: components["schemas"]["Sort"];
+                /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
+                sort?: components["schemas"]["Sort"] | null;
             };
             header?: never;
             path: {

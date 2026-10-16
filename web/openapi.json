@@ -175,9 +175,18 @@
             "in": "query",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/Sort",
-              "default": "rarest"
-            }
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
           },
           {
             "name": "topic",
@@ -592,9 +601,18 @@
             "in": "query",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/Sort",
-              "default": "rarest"
-            }
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
           },
           {
             "name": "topic",
@@ -898,9 +916,18 @@
             "in": "query",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/Sort",
-              "default": "rarest"
-            }
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
           }
         ],
         "responses": {
@@ -5270,8 +5297,15 @@
             "title": "Until"
           },
           "sort": {
-            "$ref": "#/components/schemas/Sort",
-            "default": "rarest"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
           },
           "topic": {
             "items": {

@@ -206,10 +206,20 @@ async def test_a_keyword_or_band_membership_shows_a_paper_only_once_graded(clien
 
 
 async def test_search_reads_title_abstract_and_authors_best_match_first(client, conn):
-    hidden = paper("2610.00007", title="Other things", abstract="Traces hide steps, briefly.")
+    # Newer than P: rarest (then newest) would put it first, the best match puts P first.
+    hidden = paper(
+        "2610.00007",
+        title="Other things",
+        abstract="Traces hide steps, briefly.",
+        published="2026-10-14T00:00:00+00:00",
+    )
     await papers_store.upsert(conn, [hidden])
     assert set(await ids(client, q="Alice Smith")) == {P.id, Q.id, hidden.id}
+    assert await ids(client, q="hide steps", sort="rarest") == [hidden.id, P.id]
+    # A search without a sort is best match first; an explicit sort wins (L5-4).
+    assert await ids(client, q="hide steps") == [P.id, hidden.id]
     assert await ids(client, q="hide steps", sort="best") == [P.id, hidden.id]
+    assert await ids(client) == [hidden.id, P.id, Q.id]  # no search: rarest, newest first
     assert await ids(client, q="sparse") == [Q.id]
     rows = (await client.get("/api/papers", params={"q": "hidden computation"})).json()["rows"]
     assert [r["id"] for r in rows] == [P.id]
