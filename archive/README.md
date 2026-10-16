@@ -19,7 +19,8 @@ The installable package is `src/arxiv_archive/`:
 - `api.py`: authenticated internal HTTP endpoints.
 - `cli.py`: administration commands and server lifecycle.
 - `worker.py`: acquisition, shared provider pacing and retries.
-- `backup.py`: consistent database and manifest exports.
+- `backup.py`: consistent database and manifest exports, each a directory `export-<time>` behind the symlink
+  `current`; it refuses a destination holding anything an export did not write.
 - `search.py` / `search_indexer.py`: bounded lexical search and resumable incremental indexing.
 - `web_server.py` / `web/`: the read-only browser interface, retired once litwatch covers it (decision 49).
 - `citations.py`: preprint BibTeX exports.

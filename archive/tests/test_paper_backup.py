@@ -182,6 +182,29 @@ class BackupTests(unittest.TestCase):
             self.assertEqual({p.name for p in destination.iterdir()},
                              {'current', '.export.lock', current.resolve().name})
 
+    def test_a_destination_holding_what_no_export_wrote_is_refused_untouched(self):
+        # A wrong destination (say /srv/backups) must not lose its other entries.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, repo, destination = root / 'work', root / 'repo', root / 'backup'
+            (work / 'catalog').mkdir(parents=True)
+            (work / 'state').mkdir()
+            (repo / 'manifests').mkdir(parents=True)
+            for name in ('catalog/catalog.sqlite', 'state/progress.sqlite'):
+                with closing(sqlite3.connect(work / name)) as database:
+                    database.execute('CREATE TABLE records (id INTEGER)')
+            destination.mkdir()
+            (destination / 'catalog.sqlite').write_bytes(b'old layout')
+            (destination / 'notes.txt').write_text('keep me')
+            (destination / 'other-backups').mkdir()
+            (destination / 'other-backups/data').write_text('keep me too')
+            (destination / 'export-old').write_text('not a generation')
+            before = sorted(p.name for p in destination.iterdir())
+            with self.assertRaisesRegex(RuntimeError, 'export-old, notes.txt, other-backups'):
+                BACKUP.export(work, repo, destination)
+            self.assertEqual(sorted(p.name for p in destination.iterdir()), before)
+            self.assertEqual((destination / 'other-backups/data').read_text(), 'keep me too')
+
     def test_campaign_discovery_rejects_symlink_escape(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

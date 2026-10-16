@@ -6,16 +6,19 @@ acquisition and campaign snapshots are individually consistent, not one transact
 
 The export is one directory, `export-<time>`, named by the symlink `current` in the
 destination. A new export is written beside it and `current` is swapped to it in one
-rename, so a failure part-way leaves the previous export whole and current.
+rename, so a failure part-way leaves the previous export whole and current. An export only
+ever deletes what an export wrote, and refuses a destination holding anything else.
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
 import fcntl
+from fnmatch import fnmatchcase
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -99,13 +102,33 @@ def database_storage_size(source: Path) -> int:
 
 CURRENT = 'current'
 LOCK = '.export.lock'
+# The names the flat layout before `current` wrote; a later export replaces them.
+FLAT = ('catalog.sqlite', 'catalog.sqlite-wal', 'catalog.sqlite-shm', 'progress.sqlite',
+        'progress.sqlite-wal', 'progress.sqlite-shm', 'campaigns', 'manifests', 'export.json',
+        'acquisition-job.json', '*.md', 'SHA256SUMS*', 'requirements.lock', 'pyproject.toml')
+
+
+def owned(entry: Path) -> bool:
+    """Whether an export wrote this entry of the destination: its lock, `current` and its
+    swap, a generation, a staging directory, or a name of the flat layout."""
+    if entry.name in (CURRENT, '.current-new'):
+        return entry.is_symlink()
+    if re.fullmatch(r'export-\d+|\.arxiv-export-.+', entry.name):
+        return entry.is_dir() and not entry.is_symlink()
+    return entry.name == LOCK or any(fnmatchcase(entry.name, pattern) for pattern in FLAT)
 
 
 def export(work: Path, repo: Path, destination: Path) -> dict:
     """Write a complete export beside the current one, then swap `current` to it under the
-    lock; earlier exports, and any other entry the destination holds, go once it is current."""
+    lock; earlier exports and the flat layout's files go once it is current. A destination
+    holding anything an export did not write is refused before anything is written there."""
     if destination.is_symlink():
         raise RuntimeError(f'Unsafe backup destination: {destination}')
+    if destination.is_dir():
+        unknown = sorted(entry.name for entry in destination.iterdir() if not owned(entry))
+        if unknown:
+            raise RuntimeError(f'Refusing to export into {destination}: it holds entries no '
+                               f'export wrote ({", ".join(unknown[:5])})')
     destination.mkdir(parents=True, exist_ok=True)
     with (destination / LOCK).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -128,7 +151,7 @@ def export(work: Path, repo: Path, destination: Path) -> dict:
         os.replace(swap, destination / CURRENT)
         _fsync_directory(destination)
         for entry in destination.iterdir():
-            if entry.name in (LOCK, CURRENT, generation.name):
+            if entry.name in (LOCK, CURRENT, generation.name) or not owned(entry):
                 continue
             if entry.is_dir() and not entry.is_symlink():
                 shutil.rmtree(entry)
