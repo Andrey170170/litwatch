@@ -3,6 +3,7 @@ paper's page, and the owner's word (docs/specs/v1/DESIGN.md, Shell, Pages and In
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from typing import Annotated, Any
 
@@ -55,6 +56,8 @@ NOT_FOUND = {404: {"description": "No such paper or topic"}}
 # An owner action that fetches a paper from arXiv, when arXiv does not answer in time.
 ARXIV_SILENT = {503: {"description": "arXiv did not answer in time; nothing was stored"}}
 ARCHIVE_DOWN = "The archive did not answer"
+# Past the archive's wait for a PDF, the time left to read one that became ready at its end.
+PDF_READ_SLACK = 10.0
 
 
 def _config(request: Request) -> Any:
@@ -255,9 +258,11 @@ async def pdf(paper_id: str, request: Request) -> Response:
     body = None
     if archive is not None:
         try:
-            known = held or await archive.paper(paper_id)
-            body = await archive.pdf(known) if known is not None else None
-        except ArchiveError:  # unreachable, no known version, a broken file: arXiv has it
+            # One bound over every archive call: the record, the request, the wait, the file.
+            async with asyncio.timeout(archive.wait_seconds + PDF_READ_SLACK):
+                known = held if held is not None else await archive.paper(paper_id)
+                body = await archive.pdf(known) if known is not None else None
+        except (ArchiveError, TimeoutError):  # unreachable, slow, no known version, a broken file
             body = None
         if body is not None:
             name = paper_id.replace("/", "_")

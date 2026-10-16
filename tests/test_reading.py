@@ -903,7 +903,12 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
 # -- a paper's PDF ---------------------------------------------------------------------------------
 
 
-async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(conn):
+async def hang(req: httpx.Request) -> httpx.Response:
+    await asyncio.sleep(30)
+    return httpx.Response(504)
+
+
+async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(conn, monkeypatch):
     """The storage policy keeps few PDFs; the others are fetched when the owner opens them.
     Without an archive, or when it cannot get the PDF in time, arXiv's PDF is the answer."""
     from litwatch.archive import ArchiveClient
@@ -944,3 +949,14 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
             assert opened.headers["location"] == f"https://arxiv.org/pdf/{P.id}"
             assert unknown.status_code == 307
             assert unknown.headers["location"] == "https://arxiv.org/pdf/2610.09999"
+    # An archive that hangs costs the owner its wait at most, whichever call hangs (P5).
+    hung_archive = ArchiveClient(
+        "http://archive.test", "archive-token", http=mock(hang), wait_seconds=0.2
+    )
+    app = create_app(dsn, TOKEN, Config(), archive=hung_archive)
+    transport = httpx.ASGITransport(app=app)
+    monkeypatch.setattr("litwatch.api.reading.PDF_READ_SLACK", 0.3)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
+        for pid in (P.id, "2610.05555"):  # held, then known only by the archive's record
+            hung = await asyncio.wait_for(c.get(f"/api/papers/{pid}/pdf"), 3)
+            assert hung.status_code == 307, pid
