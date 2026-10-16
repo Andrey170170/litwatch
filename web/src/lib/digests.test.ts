@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, weekRange, type HistoryPage, type Mark } from "./digests";
+import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, slotted, weekRange, type HistoryPage, type Mark } from "./digests";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" } as const;
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" } as const;
@@ -92,6 +92,14 @@ describe("History as a list", () => {
     const rows = listRows([p], "2026-10-22");
     const quiet = rows.findIndex((r) => r.kind === "quiet" && r.from === "2026-10-12");
     expect(rows[quiet + 1]).toMatchObject({ kind: "week", monday: "2026-10-05" });
+  });
+});
+
+describe("a calendar cell's slots", () => {
+  it("keeps every topic in its place, a gap where it has no digest, and a topic no longer followed after them", () => {
+    const b = mark({ id: 1, topic: area });
+    const gone = mark({ id: 2, topic: { ...area, slug: "gone", name: "Gone" } });
+    expect(slotted([gone, b], [focus.slug, area.slug]).map((m) => m?.id ?? null)).toEqual([null, 1, 2]);
   });
 });
 

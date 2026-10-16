@@ -9,14 +9,15 @@ import { Link, useNavigate, useSearch, type LinkProps } from "@tanstack/react-ro
 import { Fragment, useEffect, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain } from "@/api/mutations";
-import { dayQuery, digestQuery, historyQuery, weekQuery } from "@/api/queries";
+import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { Sheet } from "@/components/Sheet";
 import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
-import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, SPAN, weekRange, type Card, type DigestPaper, type Mark } from "@/lib/digests";
+import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, weekRange, type Card, type DigestPaper, type Mark } from "@/lib/digests";
+import { openedFrom } from "@/lib/listContext";
 import { rowDate } from "@/lib/format";
 import { rc } from "@/lib/rarity";
 import { Failed, Load } from "./settings/parts";
@@ -90,11 +91,18 @@ function useOpenDigest(): (id: number) => LinkProps {
 const rarityStyle = (r: Schemas["Rarity"] | null | undefined) => ({ "--rc": rc(r) }) as CSSProperties;
 const countStyle = (m: Mark) => ({ color: m.state === "written" && m.best_rarity ? rc(m.best_rarity) : undefined });
 
+type List = { key: string; ids: string[]; total: number };
+
 /** A paper as a digest lists it: the stripe and glow, the title, the date; with `gist`, its Gist and a pick's reason
- * under them. Set aside since, it is struck through (digests.md). */
-function PaperRow({ p, topic, gist }: { p: DigestPaper; topic: string; gist?: boolean }) {
+ * under them. Set aside since, it is struck through (digests.md). The row carries the list it is in, so the paper's
+ * page knows its place (`listContext`). */
+function PaperRow({ p, topic, gist, list }: { p: DigestPaper; topic: string; gist?: boolean; list: List }) {
+  const onClick = (e: MouseEvent) => {
+    stop(e);
+    openedFrom(list.key, list.ids, list.total);
+  };
   return (
-    <Link to="/paper/$" params={{ _splat: p.id }} search={{ topic }} className={`row dpr${gist ? " g" : ""}${p.set_aside ? " aside" : ""}`} style={rarityStyle(p.rarity)} onClick={stop} title={p.set_aside ? "Set aside since" : undefined}>
+    <Link to="/paper/$" params={{ _splat: p.id }} search={{ topic }} state={{ list: list.key }} className={`row dpr${gist ? " g" : ""}${p.set_aside ? " aside" : ""}`} style={rarityStyle(p.rarity)} onClick={onClick} title={p.set_aside ? "Set aside since" : undefined}>
       <span className="ti">{p.title}</span>
       <span className="dt">{rowDate(p.announced)}</span>
       {gist && p.gist && <span className="gs">{p.gist}</span>}
@@ -139,7 +147,7 @@ function DigestCard({ card }: { card: Card }) {
           {card.papers.length > 0 && (
             <div className="dlist">
               {card.papers.map((p) => (
-                <PaperRow key={p.id} p={p} topic={card.topic.slug} />
+                <PaperRow key={p.id} p={p} topic={card.topic.slug} list={{ key: `digest:${card.id}`, ids: card.papers.map((x) => x.id), total: card.papers.length + card.more }} />
               ))}
             </div>
           )}
@@ -333,6 +341,12 @@ function Calendar({ pages }: { pages: Schemas["History"][] }) {
   const desktop = useDesktop();
   const navigate = useNavigate();
   const now = today();
+  // The topics' fixed order, from the summary the shell reads; a day's bars and the W cell's columns keep a slot per
+  // topic, empty where it has no digest, so a topic is always in the same place (digests.md).
+  const topics = useQuery(summaryQuery).data?.topics ?? [];
+  const daily = topics.filter((t) => t.depth !== "field").map((t) => t.slug);
+  const weekly = topics.filter((t) => t.depth === "field").map((t) => t.slug);
+  const bars = (marks: Mark[], order: string[]) => slotted(marks, order).map((m, i) => (m ? <Bar key={m.id} m={m} text={desktop} /> : <span key={`-${i}`} className="mbar none" />));
   // On the phone the bars are too thin to tap: a tap anywhere in the cell opens its Day or Week (the date is the link
   // the keyboard reaches).
   const cell = (to: LinkProps) => (desktop ? {} : { onClick: () => void navigate(to) });
@@ -359,9 +373,7 @@ function Calendar({ pages }: { pages: Schemas["History"][] }) {
                     <Link {...dayTo} className="mnum" onClick={stop}>
                       {num === 1 || (wi === 0 && i === 0) ? `${num} ${monthLabel(day).slice(0, 3)}` : num}
                     </Link>
-                    {d.marks.map((m) => (
-                      <Bar key={m.id} m={m} text={desktop} />
-                    ))}
+                    {bars(d.marks, daily)}
                   </div>
                 );
               })}
@@ -371,13 +383,8 @@ function Calendar({ pages }: { pages: Schemas["History"][] }) {
                     W {weekRange(w.monday)}
                   </Link>
                   <div className="wcols">
-                    {[w.weekly.filter((m) => m.topic.depth !== "field"), w.weekly.filter((m) => m.topic.depth === "field")].map((col, ci) => (
-                      <div key={ci}>
-                        {col.map((m) => (
-                          <Bar key={m.id} m={m} text={desktop} />
-                        ))}
-                      </div>
-                    ))}
+                    <div>{bars(w.weekly.filter((m) => m.topic.depth !== "field"), daily)}</div>
+                    <div>{bars(w.weekly.filter((m) => m.topic.depth === "field"), weekly)}</div>
                   </div>
                 </div>
               ) : (
@@ -415,7 +422,7 @@ export function HistoryPage() {
           <Modes cal={cal} />
         </Views>
       )}
-      <State q={q} what="the history" />
+      {!q.isFetchNextPageError && <State q={q} what="the history" />}
       {pages.length > 0 && !start && <div className="empty">No digests have been written yet.</div>}
       {start && (cal ? <Calendar pages={pages} /> : <HistoryList pages={pages} />)}
       {q.hasNextPage && !q.isFetchingNextPage && !q.isError && <Sentinel onSeen={() => void q.fetchNextPage()} />}
@@ -444,6 +451,9 @@ export function DigestView({ id }: { id: number }) {
   const write = useWriteAgain();
   const d = q.data;
   if (!d) return q.isError ? q.error instanceof ApiError && q.error.status === 404 ? <div className="empty">No such digest.</div> : <Failed q={q} what="the digest" /> : <Load q={q} />;
+  const secs = sections(d.topic.depth, d.period, d.papers);
+  const ids = secs.flatMap((s) => s.papers.map((p) => p.id));
+  const list = { key: `digest:${d.id}:full`, ids, total: ids.length };
   return (
     <div className="dgfull" style={rarityStyle(d.best_rarity)}>
       <State q={q} what="the digest" />
@@ -480,12 +490,12 @@ export function DigestView({ id }: { id: number }) {
             {p}
           </p>
         ))}
-      {sections(d.topic.depth, d.period, d.papers).map((s) => (
+      {secs.map((s) => (
         <Fragment key={s.name}>
           <div className="cap">{s.name}</div>
           <div className="dlist">
             {s.papers.map((p) => (
-              <PaperRow key={p.id} p={p} topic={d.topic.slug} gist={s.gist} />
+              <PaperRow key={p.id} p={p} topic={d.topic.slug} gist={s.gist} list={list} />
             ))}
           </div>
         </Fragment>

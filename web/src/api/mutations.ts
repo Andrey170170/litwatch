@@ -6,7 +6,7 @@
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
-import { patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
+import { digestQuery, patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
 import { rememberCard } from "@/lib/remember";
 import { labelled, noted, type Quality, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
 import { plural } from "@/lib/format";
@@ -34,6 +34,14 @@ export function settleNeeds(qc: QueryClient, patch: (q: Quality) => Quality) {
   return patchRead<Quality>(qc, qualityQuery("needs").queryKey, patch);
 }
 
+/** A write on a paper (a label, a reaction, an answer) may move its set-aside mark, the one live element of the
+ * digests it is in (digests.md): the Digest's cached reads are reread when next shown, kept on screen meanwhile. A
+ * read in flight is cancelled first, since begun before the write it would land as fresh. */
+async function digestsStale(qc: QueryClient) {
+  await qc.cancelQueries({ queryKey: ["digest"] });
+  await qc.invalidateQueries({ queryKey: ["digest"], refetchType: "none" });
+}
+
 /** After a write on a paper: refetch its page and patch its star in lists; the lists change no further until the
  * reader goes to one afresh. The write counts as pending until the page is refetched, so the controls show the new
  * state before they re-enable. An open state the refetched page no longer carries is marked settled, in place, on
@@ -41,6 +49,7 @@ export function settleNeeds(qc: QueryClient, patch: (q: Quality) => Quality) {
 export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
   refreshSummary(qc);
+  await digestsStale(qc);
   // A paper read before is refetched whether or not its page is open: the reconciliation reads fresh states or
   // none (not the retained ones when the refetch fails). A paper never read has nothing cached to reconcile from;
   // the write that settles a Needs you row settles it by name (`stepped`, `useLabel`).
@@ -125,20 +134,16 @@ export function useLabel(paperId: string) {
     paperId,
     async (id, v: { topic: string; value: Schemas["LabelValue"]; revision: number }) =>
       ok(await api.PUT("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } }, body: { value: v.value } })),
-    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, v.value, v.revision)), acked(qc, id, ack), digestsStale(qc)]),
+    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, v.value, v.revision)), acked(qc, id, ack)]),
   );
 }
-
-/** A label moves a paper's set-aside mark, the one live element of the digests it is in (digests.md): the Digest's
- * cached reads are reread when next shown, kept on screen meanwhile. */
-const digestsStale = (qc: QueryClient) => qc.invalidateQueries({ queryKey: ["digest"], refetchType: "none" });
 
 /** A label taken back: the split waits again on Needs you, where it was. */
 export function useUnlabel(paperId: string) {
   return usePaperMutation(
     paperId,
     async (id, v: { topic: string; revision: number }) => ok(await api.DELETE("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } } })),
-    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, null, v.revision)), acked(qc, id, ack), digestsStale(qc)]),
+    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, null, v.revision)), acked(qc, id, ack)]),
   );
 }
 
@@ -169,8 +174,10 @@ export function useDeepRead(paperId: string) {
   return usePaperMutation(
     paperId,
     async (id, _: undefined) => {
+      // the card asked over is the one on the page as the request goes, not one a poll reads back meanwhile
+      const over = qc.getQueryData<Schemas["Paper"]>(["paper", id])?.card?.written_at ?? null;
       try {
-        return ok(await api.POST("/api/papers/{paper_id}/card", { params: { path: { paper_id: id } } }));
+        return { ...ok(await api.POST("/api/papers/{paper_id}/card", { params: { path: { paper_id: id } } })), over };
       } catch (e) {
         // a 409 means the page is behind (a card exists, or none can be asked): refetch the paper asked for
         if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["paper", id] });
@@ -178,8 +185,8 @@ export function useDeepRead(paperId: string) {
       }
     },
     // remembered here, not by the page, which may have gone by the time the request returns
-    (qc, id) => {
-      rememberCard(id, qc.getQueryData<Schemas["Paper"]>(["paper", id])?.card?.written_at ?? null);
+    (qc, id, r) => {
+      rememberCard(id, r.over);
       toast("Deep card requested");
       return settled(qc, id); // a paper litwatch lacked is fetched first: the page shows it fetched
     },
@@ -342,12 +349,13 @@ export function useWriteAgain() {
       refreshSummary(qc);
       return settleNeeds(qc, (q) => (r.state === "failed" ? noted(q, digestId, `Failed again: ${r.error ?? "no text"}. The next run writes it again.`) : settle(q, "digests", { id: digestId }, "Written again; it shows in the Digest.")));
     },
-    onError: (e, digestId) => {
+    onError: async (e, digestId) => {
       toast(said(e), "error");
       if (!(e instanceof ApiError && e.status === 409)) return;
-      // A 409 says the server's view moved (written meanwhile, its topic paused, a job running): the digest, its
-      // views and the counts follow.
-      void qc.invalidateQueries({ queryKey: ["digest", String(digestId)] });
+      // A 409 says the server's view moved (written meanwhile, its topic paused, a job running): the digest is
+      // reread, its squares follow it, and its views and the counts are reread too.
+      const d = await qc.fetchQuery({ ...digestQuery(digestId), staleTime: 0 }).catch(() => null);
+      if (d) await restripe(qc, d);
       digestViewsStale(qc);
       refreshSummary(qc);
       return settleNeeds(qc, (q) => (digestGone(e) ? settle(q, "digests", { id: digestId }, `No longer to be written: ${said(e)}.`) : noted(q, digestId, `Not written now: ${said(e)}.`)));

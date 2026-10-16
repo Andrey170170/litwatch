@@ -43,7 +43,7 @@ export function DeepReadCell({ paper, asked, wide }: { paper: Paper; asked: bool
   const what = paper.card ? "Write again" : "Deep read";
   return (
     <button className={wide ? "wide" : ""} onClick={() => deep.mutate(undefined)} disabled={deep.isPending || busy}>
-      {busy ? `${what} · queued` : what}
+      {busy ? `${what} · ${passWord(paper, asked)}` : what}
     </button>
   );
 }
@@ -66,6 +66,9 @@ export function ProcessCell({ paper, phone }: { paper: Paper; phone?: boolean })
     </button>
   );
 }
+
+/** Where the owner's own pass stands, for a control: queued until it runs or fails, and while the request is in. */
+export const passWord = (paper: Paper, asked: boolean) => (!asked && paper.card_pass?.state === "failed" ? "failed" : asked || paper.card_pass?.state !== "running" ? "queued" : "being written");
 
 const ext = (href: string, label: string) => (
   <a href={href} target="_blank" rel="noopener">

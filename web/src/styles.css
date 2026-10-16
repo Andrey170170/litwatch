@@ -434,6 +434,7 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) :is(.mday.today .mnum, .mnum:hover) { color: var(--fg); } }
 .mbar { display: block; height: 6px; background: var(--rc); }
 .mbar.h { background: none; box-shadow: inset 0 0 0 1px var(--line); }
+.mbar.none { background: none; }
 .mbar.x { background: repeating-linear-gradient(45deg, var(--sig) 0 3px, transparent 3px 6px); }
 .month:not(.text) .mday:not(.empty), .month:not(.text) .mweek:not(.empty) { cursor: pointer; }
 .month.text { gap: 6px; }

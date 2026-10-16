@@ -143,6 +143,13 @@ export function listRows(pages: HistoryPage[], today: string): ListRow[] {
   return rows;
 }
 
+/** Marks laid into fixed slots (digests.md: a topic is always in the same place): one per topic of `order`, null where
+ * the topic has no digest that day, then the Marks of topics no longer in the order. */
+export function slotted(marks: Mark[], order: string[]): (Mark | null)[] {
+  const by = new Map(marks.map((m) => [m.topic.slug, m]));
+  return [...order.map((slug) => by.get(slug) ?? null), ...marks.filter((m) => !order.includes(m.topic.slug))];
+}
+
 export type CalWeek = { monday: string; days: (HistoryDay | null)[]; weekly: Mark[] };
 export type CalMonth = { month: string; weeks: CalWeek[] };
 
