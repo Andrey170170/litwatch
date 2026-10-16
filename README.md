@@ -11,6 +11,11 @@ place before the switch; the nightly run is intake, classification, analysis, gr
 full-text queue and the digests, the API serves Papers, the topics, a paper's page and the
 digests, and the web app is a placeholder. Release 0.14 lives on `main`.
 
+## Running it
+
+`deploy/` holds the stack: litwatch, its Postgres, the archive and, optionally, the deep service, with
+`docker compose` (see `deploy/README.md`). The setup below is for development.
+
 ## Setup
 
 ```sh

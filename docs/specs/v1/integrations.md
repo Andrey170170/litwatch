@@ -34,7 +34,9 @@ carries Fit, Weight and the derived grade; new `digest.written` (topic, period, 
 
 **Changed: `archive` is no longer an integration.** It is part of the stack ([archive.md](archive.md)); the archive
 client moves to its own module used by intake, the full-text queue, search and `webdav`, and `SearchProvider` stays as
-the protocol through which it answers searches.
+the protocol through which it answers searches. What litwatch tells the archive still rides the outbox, under
+`[integrations.archive]` (on in the stack): new and revised papers to register (`paper.added`, `paper.revised`), and
+the PDFs the storage policy keeps (`grade.changed` to relevant or must read, `paper.saved`).
 
 **Changed: Zotero.** The collections 0.x named "Tier 1" and "Tier 2" become "Must read" and "Relevant", renamed at the
 switch. The note on an item carries the Gist and Brief instead of a take, and the Deep card when there is one.

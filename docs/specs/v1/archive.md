@@ -35,6 +35,18 @@ and for the owner's (whose payload disk has 2.0 TB free):
 
 The policy is configuration (an instance can keep every PDF), and changing it does not delete files already stored.
 
+How it is kept (N5a). The archive holds the setting, `paper-archive pdfs all|wanted`: a new archive starts at
+`wanted`, and one that held papers before the setting existed reads `all`. Under `wanted` a PDF asked for at
+background priority waits as `held`; asking for it above background releases it, and `pdfs all` releases every held
+job (`pdfs wanted` holds the background ones again). LaTeX is never held. litwatch asks above background for:
+
+- a paper graded relevant or must read on an active topic, or saved: the archive integration reacts to
+  `grade.changed` and `paper.saved` and asks at the time it handles the event, so a grade already taken back asks
+  for nothing;
+- a PDF opened: `GET /api/papers/{id}/pdf` asks urgently and waits up to the client's `wait_seconds`, then sends
+  the reader to arXiv;
+- a full-text pass with no LaTeX source: the queue already asks urgently for the PDF (N3).
+
 ## Search
 
 One search box, one result list, as in the first v1 (decision 6), with these changes:
@@ -73,12 +85,11 @@ litwatch's Papers tab and paper pages cover search and paper pages, keeping its 
 
 ## Deferred to N5
 
-Found in review when the code moved in (PR #41), left as they were in the old repository:
+Found in review when the code moved in (PR #41), left as they were in the old repository. N5a derived
+`__version__` from the package metadata and made `pyarrow` and `zstandard` base dependencies for the image; the
+other two are N5b's:
 
-- `arxiv_archive.__version__` says 0.3.0 while `pyproject.toml` says 0.5.1; derive it from the package metadata.
 - `backup.py` refreshes the stable export path one entry at a time, so a failure part-way leaves new database files
   beside old directories; swap the whole export at once.
 - `recovery.py`'s reconcile marks every submitted candidate in its own fsynced transaction on each feed cycle; batch
   the writes and skip unchanged ones.
-- `store.py` imports `pyarrow` and `zstandard`, which `pyproject.toml` lists only in the `server` extra, so a plain
-  `pip install .` gives commands that fail at start; make them base dependencies when the archive's image is built.

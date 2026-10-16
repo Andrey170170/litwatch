@@ -40,3 +40,18 @@ uv venv && uv pip install -r requirements.lock -e .
 ```
 
 Tests use temporary directories and touch no real storage.
+
+## PDF policy
+
+`paper-archive pdfs [all|wanted]` shows or sets which PDFs the archive downloads. Under `wanted`, the default for a
+new archive, a PDF job at priority 100 (background) or a larger number waits as `held` until someone asks for it
+at a smaller one (litwatch asks at 50, or 0 when a PDF is opened), and `pdfs all` releases every held job. An archive that held papers before the setting existed reads
+`all`. LaTeX sources are never held. Recovery campaigns enqueue at priority 200, so under `wanted` their PDF jobs are
+held; give `paper-archive-recovery prepare` a `--priority` below 100 to fetch them.
+
+## Container
+
+`Dockerfile` builds the image litwatch's stack runs (`deploy/compose.yaml`) as the API, the worker and the indexer,
+with `/srv/arxiv-work` and `/srv/arxiv-archive` as volumes. In a container the API's token comes from
+`PAPER_ARCHIVE_TOKEN` when no `--token-file` is given, and the commands run with `--no-mount-guard`, since the ZFS
+mount checks are the owner's server's.

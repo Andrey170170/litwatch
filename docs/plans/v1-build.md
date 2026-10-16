@@ -44,7 +44,8 @@ core      N0  tree, topics, evaluation labels
           N2c replay, the two-week run
           N3  full-text queue
           N4  digests
-          N5  archive in the stack
+          N5a archive in the stack, storage policy, smoke test
+          N5b search relevance, papers outside the collection
           N6  restart
 web       W1  shell, look, Papers, topic page, paper page   (starts after N2b)
           W2  Settings
@@ -134,9 +135,21 @@ verification. The harness gains Briefs.
 asides, the bounded wait, failed digests; the day, week, history and digest API; reviews and issues removed. Owner
 check: the restart weeks' digests read against 0.14's Notion.
 
-**N5 · The archive in the stack.** The compose file runs the archive; the storage policy; the relevance fixes (exact
-title and phrase first, title over abstract) and litwatch keeping the archive's order; paper pages, Process and Deep
-read for papers outside the collection; the stack smoke test. Deferred from #54 (the owner, 2026-10-15: a
+**N5 · The archive in the stack**, in two PRs.
+
+- **N5a:** the compose file runs the archive (its image, with `pyarrow` and `zstandard` as base dependencies and
+  `__version__` from the package metadata); the storage policy (the archive's `pdfs` setting and held jobs,
+  litwatch asking for the PDFs it keeps, PDFs opened through `GET /api/papers/{id}/pdf`); the stack smoke test with a
+  fake deep service and its CI job; `deep/` accepting legacy arXiv ids. Owner step: the owner's instance applies the
+  PDF policy (`paper-archive pdfs wanted`).
+- **N5b:** the relevance fixes in the archive (exact title and phrase first, title over abstract, checked read-only
+  against the live index for speed) and litwatch keeping the archive's order with relevance by default when there
+  is a query; paper pages for archive papers not yet fetched, Process showing the fetched state (#56), Deep read
+  outside the collection; the archive's size for the search box; "Use the PDF" (#59, migration 0026 if it needs
+  one); the archive's `backup.py` and `recovery.py` items (archive.md); the `00README` assembly only if Briefs show
+  it matters. *Check:* "attention is all you need" returns 1706.03762 first.
+
+Deferred from #54 (the owner, 2026-10-15: a
 heuristic is fine to start with): the archive's text assembly (`archive/src/arxiv_archive/source_text.py`) picks a
 source package's documents by heuristic, so it keeps only the shallowest of independent documents at different depths
 (a root-level `cover.tex` beside `paper/main.tex` keeps the cover; the depth rule is there so standalone figure files
@@ -159,13 +172,13 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
 
 ### Deferred to later PRs
 
-- **N5:** after Process fetches a paper outside the collection, `/api/lookup` stores only its metadata and
+- **N5b:** after Process fetches a paper outside the collection, `/api/lookup` stores only its metadata and
   `in_collection` stays false until it is classified, so the paper page offers Process again and a second tap only
-  says "Already in the collection" (#56, Codex). N5's page for papers outside the collection shows the fetched state,
-  read from the API. Also N5: DESIGN.md's "Use the PDF", for a paper whose LaTeX reads badly, has no endpoint yet
-  (#59); it belongs with the archive's text assembly and its PDF fallback, and the paper page takes it once merged.
-  Also N5: the stack smoke test shows a Deep card with live "Among the collection" rows, the deep service reaching
-  litwatch with `LITWATCH_URL` and `LITWATCH_TOKEN`; #61 wrote a real card only without them.
+  says "Already in the collection" (#56, Codex). N5b's page for papers outside the collection shows the fetched
+  state, read from the API. Also N5b: DESIGN.md's "Use the PDF", for a paper whose LaTeX reads badly, has no
+  endpoint yet (#59); it belongs with the archive's text assembly and its PDF fallback, and the paper page takes it
+  once merged. (N5a's stack smoke test shows a Deep card with live "Among the collection" rows, from a fake deep
+  service reaching litwatch with `LITWATCH_URL` and `LITWATCH_TOKEN`.)
 - **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
   paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
   the restart's digests.
@@ -178,7 +191,7 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   incremental cell stays: two papers are not enough to move it. The Field offset is 2 (`evals/2026-10-15-tuning.md`).
 - **API gaps W1 found**, each for the core PR that owns it: a Brief on Paper (N3); a Deep card's queued state and
   "Write again", which POST answers 409 (N3's Deep cards); digests for the topic strips and the sidebar's counts (N4,
-  W3); a page for an archive paper not yet fetched and the archive's size for the search box (N5); the "Among the
+  W3); a page for an archive paper not yet fetched and the archive's size for the search box (N5b); the "Among the
   collection" rows; rung ✓/✗ ratings; code and weights URLs on the facets; listing unclassified papers; splits and
   escalations on the status line; which source set the owner's word.
 - **W2 or W3, the Deep card's web parts** (from N3's Deep cards): "Asked for" and the pulsing status line from
@@ -277,7 +290,7 @@ the branch's UI before then. Not taken: prune page by page, patching pages W1 de
 | V5 | End-to-end Focus recall is at least the first v1's, or each loss looked at; cost per weekday measured (N2c) | `eval replay` and `eval report` per cohort; the two-week sandbox run; the cost table in pipeline.md |
 | V6 | Every Focus central or related paper has a Brief and every Area must-read candidate a re-checked Weight within the wait, or shows failed or awaiting text; a paper with a Brief shows the Gist written with it; every finished Deep attempt, carded or failed, has its usage or says it is unknown (N3) | A test night on the sandbox against a disposable archive; pytest for the lease, revisions, what a pass read, the current Gist and Deep usage; the overstatement line on ten hand-read papers, whose Gists repeat no claim the Brief corrects (owner check, added to the preference set) |
 | V7 | Digests per depth for the restart weeks; every Focus central paper appears; Area dailies have a few picks at most (N4) | pytest for due, quiet days, records, the wait and failed digests; the owner's read against 0.14's Notion; the harness on digest voice |
-| V8 | "attention is all you need" returns 1706.03762 first; a fresh stack with an empty archive ingests a night and serves full text (N5) | A search test in `archive/`; the stack smoke test |
+| V8 | "attention is all you need" returns 1706.03762 first (N5b); a fresh stack with an empty archive ingests a night and serves full text (N5a) | A search test in `archive/`; the stack smoke test (seeded papers in CI) and one night read from arXiv on a fresh stack, in N5a's report |
 | V9 | The restart produces a readable v1 from nothing (N6) | Counts and cost per step for the window; every Focus central paper with its Brief or reason; digests written |
 | V10 | Every page does what DESIGN.md says on both widths (W1–W4) | vitest for logic; each flow walked on the sandbox in T3's browser at 390 and 1440 px, dark and light, empty and quiet states, the way back from every action; screenshots beside the sketch; motion recorded; the owner's read |
 
