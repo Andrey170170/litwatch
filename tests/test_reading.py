@@ -608,6 +608,52 @@ async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, m
     assert (await client.post("/api/misses", json=body)).status_code == 404
 
 
+@pytest.mark.parametrize("second_caller", ["owner", "nightly"])
+async def test_two_requests_storing_the_same_fetched_paper_both_get_it(conn, second_caller):
+    """An owner request and another owner request, or the nightly intake, that fetched the same
+    unfetched paper store it once: the second waits on the first's settle lock, then stores
+    over it as intake would, and there is one `paper.added` (L5-2)."""
+    from litwatch import store
+    from litwatch.feedback import misses
+    from litwatch.intake import batch
+
+    fetched = paper("2610.06666")
+    async with await store.connect(conn.test_dsn, conn.test_schema) as other:
+        async with other.transaction():
+            first = await misses.keep(other, fetched.id, fetched)
+            # The second runs into the first's settle lock, and waits on it.
+            second = asyncio.create_task(
+                misses.keep(conn, fetched.id, fetched)
+                if second_caller == "owner"
+                else batch.store(conn, [fetched], source="arxiv")
+            )
+            for _ in range(100):
+                waiting = await (
+                    await other.execute(
+                        "SELECT count(*) AS n FROM pg_stat_activity "
+                        "WHERE pid = %s AND wait_event_type = 'Lock'",
+                        (conn.info.backend_pid,),
+                    )
+                ).fetchone()
+                if waiting["n"]:
+                    break
+                await asyncio.sleep(0.02)
+            assert waiting["n"], "the second did not wait on the first"
+        second = await asyncio.wait_for(second, 5)
+    assert first[1] is True
+    if second_caller == "owner":
+        assert second == (first[0], False)
+    else:
+        assert second.inserted == 0 and second.rewritten == []
+    added = await (
+        await conn.execute(
+            "SELECT count(*) AS n FROM outbox WHERE type = 'paper.added' AND paper_id = %s",
+            (fetched.id,),
+        )
+    ).fetchone()
+    assert added["n"] == 1
+
+
 async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monkeypatch):
     """Process and Report as a miss on a paper litwatch lacks wait on arXiv for its budget at
     most (P5): then a 503 that says so, and nothing stored."""

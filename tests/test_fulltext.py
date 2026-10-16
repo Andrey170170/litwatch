@@ -35,7 +35,7 @@ from litwatch.core.fulltext import (
     to_relabel,
     wanted,
 )
-from litwatch.feedback import word
+from litwatch.feedback import misses, word
 from litwatch.fulltext import brief
 from litwatch.jobs import nightly
 from litwatch.llm import Gateway, ProviderError
@@ -753,6 +753,17 @@ async def test_a_rewrite_whose_settle_was_cut_short_is_settled_by_the_nightly_sw
     await word.settle_all(db, await fulltext_store.outdated(db))
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
     assert await fulltext_store.outdated(db) == []
+
+
+async def test_an_owners_fetch_over_an_older_version_settles_its_rewrite(db):
+    # Process or a miss fetched a newer version than litwatch holds (it stored the paper
+    # meanwhile): stored as intake stores it, and its rewrite settled with it (L5-2, #66).
+    await graded(db, "central")
+    rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
+    stored, inserted = await misses.keep(db, P.id, rewrite)
+    assert (stored.version, stored.title, inserted) == (2, rewrite.title, False)
+    assert await fulltext_store.outdated(db) == []
+    assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
 
 
 async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(db):

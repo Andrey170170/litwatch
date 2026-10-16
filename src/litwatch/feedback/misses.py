@@ -64,12 +64,15 @@ async def resolve(conn: psycopg.AsyncConnection, text: str) -> tuple[str, Paper 
 async def keep(
     conn: psycopg.AsyncConnection, paper_id: str, fetched: Paper | None
 ) -> tuple[Paper, bool]:
-    """Store the record `resolve` fetched, unless litwatch holds the paper by now. Returns the
-    paper and whether it was stored just now."""
-    if fetched is not None and await papers_store.get(conn, paper_id) is None:
-        await batch.store(conn, [fetched], source="arxiv")
-        return await papers_store.get(conn, paper_id), True
-    return await papers_store.get(conn, paper_id), False
+    """Store the record `resolve` fetched, through intake's writer (`batch.store`): the paper's
+    settle lock first, so a request or an intake storing it meanwhile goes first and this one
+    stores over it as intake would, settling a rewrite. Returns the paper and whether it was
+    inserted just now."""
+    if fetched is not None:
+        stored = await batch.store(conn, [fetched], source="arxiv")
+    paper = await papers_store.get(conn, paper_id)
+    assert paper is not None  # stored now, or held when resolve looked
+    return paper, fetched is not None and stored.inserted > 0
 
 
 async def report(
