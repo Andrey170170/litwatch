@@ -61,11 +61,12 @@ async def run_record(
 
 
 async def _closing(step: Awaitable[None], failed: bool, run_id: int, what: str) -> None:
-    """Await a step that closes a run. If the job failed already, a failure here is logged and
-    not raised, so the error that ended the job is the one recorded and raised."""
+    """Await a step that closes a run. If the job failed already, a failure here (a cancellation
+    included) is logged and not raised, so the error that ended the job is the one recorded and
+    raised."""
     try:
         await step
-    except Exception:
+    except BaseException:
         if not failed:
             raise
         log.exception("run %s: %s failed after the job did", run_id, what)

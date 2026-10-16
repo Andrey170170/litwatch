@@ -346,11 +346,14 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(conn, mod
     assert run["finished_at"] and "the database went away" in run["error"]
 
 
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("the journal's connection went away"), asyncio.CancelledError()]
+)
 async def test_a_journal_that_fails_after_the_job_keeps_the_jobs_error_and_its_cost(
-    conn, monkeypatch
+    conn, monkeypatch, failure
 ):
     async def lost(self):
-        raise RuntimeError("the journal's connection went away")
+        raise failure
 
     monkeypatch.setattr(CallJournal, "by_role", lost)
     with pytest.raises(ValueError, match="the job's own"):

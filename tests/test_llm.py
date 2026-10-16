@@ -1,6 +1,7 @@
 """The gateway: one request through either provider, cost, failures, the journal and reuse."""
 
 import json
+import os
 import sys
 
 import anthropic
@@ -339,9 +340,10 @@ def test_debug_mode_is_off_unless_the_file_or_the_environment_turns_it_on(tmp_pa
         ["nightly"],
         ["intake"],  # a group's own command
         ["digests", "write", "--since", "2026-10-01", "--until", "2026-10-02"],
+        ["taxonomy", "check"],  # reads no configuration, so no helper loaded .env for it
     ],
 )
-def test_the_commands_see_a_debug_switch_kept_in_dotenv(tmp_path, monkeypatch, args):
+def test_every_command_sees_dotenv_loaded_once_on_entry(tmp_path, monkeypatch, args):
     from typer.testing import CliRunner  # noqa: PLC0415
 
     from litwatch import cli  # noqa: PLC0415
@@ -351,16 +353,22 @@ def test_the_commands_see_a_debug_switch_kept_in_dotenv(tmp_path, monkeypatch, a
     monkeypatch.delenv("LITWATCH_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("LITWATCH_DEBUG=1\n")
-    seen, real = [], cli.configuration.load
+    loads, seen, real = [], [], cli.configuration.load_dotenv
 
-    def load(path):  # the command's configuration as read, then no further: no database
-        seen.append(real(path).debug)
+    def load_dotenv():
+        loads.append(1)
+        real()
+
+    def entered(*args):  # the command's first read, then no further: no database, no file
+        seen.append(os.environ.get("LITWATCH_DEBUG"))
         raise SystemExit(0)
 
-    monkeypatch.setattr(cli.configuration, "load", load)
+    monkeypatch.setattr(cli.configuration, "load_dotenv", load_dotenv)
+    monkeypatch.setattr(cli.configuration, "load", entered)
+    monkeypatch.setattr(cli.seeds, "taxonomy", entered)
     result = CliRunner().invoke(cli.app, args)
     assert result.exit_code == 0, result.output
-    assert seen == [True]
+    assert (seen, len(loads)) == (["1"], 1)
 
 
 def test_the_sdk_clients_leave_retrying_to_the_gateway():
