@@ -19,7 +19,7 @@ from litwatch.store import failures, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, answering, paper
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -584,11 +584,12 @@ async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, m
 
     fetched = []
 
-    def fetch(ids):
-        # arXiv may keep the fetch waiting for minutes: no transaction holds the taxonomy then.
-        with psycopg.connect(conn.test_dsn, autocommit=True) as other:
-            free = other.execute("SELECT pg_try_advisory_lock(%s)", (TAXONOMY_LOCK,)).fetchone()[0]
-            other.execute("SELECT pg_advisory_unlock_all()")
+    async def fetch(ids):
+        # arXiv may keep the fetch waiting for its budget: no transaction holds the taxonomy then.
+        async with await psycopg.AsyncConnection.connect(conn.test_dsn, autocommit=True) as other:
+            lock = await other.execute("SELECT pg_try_advisory_lock(%s)", (TAXONOMY_LOCK,))
+            free = (await lock.fetchone())[0]
+            await other.execute("SELECT pg_advisory_unlock_all()")
         assert free, "a taxonomy edit would wait on the fetch"
         fetched.append(ids)
         return [paper(i) for i in ids]
@@ -613,7 +614,7 @@ async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, m
         body = {"paper_id": "2610.08888", "topic": FAITH.slug}
         assert (await client.post("/api/misses", json=body)).status_code == 409
     assert await papers_store.get(conn, "2610.08888") is None
-    monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [])  # arXiv lacks it too
+    monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: []))  # arXiv lacks it too
     body = {"paper_id": "2601.99999", "topic": FAITH.slug}
     assert (await client.post("/api/misses", json=body)).status_code == 404
 
@@ -673,7 +674,7 @@ async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn, mon
 
     pid = "2610.04444"
     older = paper(pid, title="As first submitted", version=1, updated="2026-10-01T10:00:00Z")
-    monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [older])
+    monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: [older]))
     _, fetched = await misses.resolve(conn, pid)
     newer = paper(pid, title="As revised since", updated="2026-10-05T00:00:00Z")
     await batch.store(conn, [newer], source="oai")
@@ -875,7 +876,9 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
     fake.records[pid] = {"id": pid, "latest_version": 2, "metadata": {}, "item": item}
     fetched = []
     monkeypatch.setattr(
-        misses, "fetch_by_ids", lambda ids: fetched.append(ids) or [paper(pid, title="Unfetched")]
+        misses,
+        "fetch_by_ids",
+        answering(lambda ids: fetched.append(ids) or [paper(pid, title="Unfetched")]),
     )
     down = ArchiveClient(
         "http://archive.test", "archive-token", http=mock(lambda _: httpx.Response(503))

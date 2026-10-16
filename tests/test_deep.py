@@ -38,7 +38,7 @@ from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, answering, paper
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.test_digests import MON, TUE, Writer, area, day, listed, week
 from tests.test_reading import analyse, classify
@@ -674,7 +674,7 @@ async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypa
     monkeypatch.setattr(
         misses,
         "fetch_by_ids",
-        lambda ids: fetched.append(ids) or [found[i] for i in ids if i in found],
+        answering(lambda ids: fetched.append(ids) or [found[i] for i in ids if i in found]),
     )
     _, http = client(db, [make(FakeDeep(DONE))])
     async with http:
@@ -714,7 +714,7 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     fake = FakeDeep(DONE)
     d = make(fake)
     app, http = client(db, [d])
-    monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [])  # arXiv lacks it too
+    monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: []))  # arXiv lacks it too
     async with http:
         missing = await http.post("/api/papers/2601.99999/card")
         # arXiv trickling its answer in: the request ends within its budget, with a 503 (P5).

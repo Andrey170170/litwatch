@@ -1,16 +1,16 @@
 """Exercise backoff through the real arxiv parser and pagination."""
 
+import asyncio
 import fcntl
-import io
-import threading
 import time
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import arxiv
+import httpx
 import pytest
 import requests
-from requests.structures import CaseInsensitiveDict
 
 from litwatch.intake import search as arxiv_source
 
@@ -27,21 +27,6 @@ def feed(paper_id="2609.10001", total=1):
       </entry></feed>""".encode()
 
 
-class Body:
-    """A response body read as urllib3's is: `read1` and no connection."""
-
-    connection = None
-
-    def __init__(self, content: bytes) -> None:
-        self.body = io.BytesIO(content)
-
-    def read1(self, amt: int, decode_content: bool = True) -> bytes:
-        return self.body.read1(amt)
-
-    def close(self) -> None:
-        pass
-
-
 @pytest.fixture
 def transport(monkeypatch):
     responses, calls, sleeps = [], [], []
@@ -52,10 +37,7 @@ def transport(monkeypatch):
         if isinstance(response, Exception):
             raise response
         status, content, headers = response
-        answer = requests.Response()
-        answer.status_code, answer.headers = status, CaseInsensitiveDict(headers)
-        answer.raw = Body(content)
-        return answer
+        return SimpleNamespace(status_code=status, content=content, headers=headers)
 
     monkeypatch.setattr(requests.Session, "get", get)
     monkeypatch.setattr("time.sleep", sleeps.append)
@@ -181,7 +163,7 @@ def test_budget_counts_request_time(transport, monkeypatch):
     responses, calls, sleeps = transport
     responses.append((429, b"", {}))
     times = iter([0, 2380])
-    monkeypatch.setattr(arxiv_source.time, "monotonic", lambda: next(times, 2380))
+    monkeypatch.setattr(arxiv_source.time, "monotonic", lambda: next(times))
     with pytest.raises(arxiv.HTTPError):
         fetch()
     assert len(calls) == 1
@@ -197,57 +179,53 @@ def test_interrupted_response_recovers(transport):
     assert 60 in sleeps
 
 
-def test_an_owner_lookup_waits_on_arxiv_within_its_budget_and_nightly_keeps_its_own(transport):
-    # Process, Deep read and Report as a miss wait on arXiv for LOOKUP_BUDGET at most; a
-    # throttled or silent arXiv is NoAnswerError at once, not 40 minutes of backoff.
-    responses, calls, sleeps = transport
-    responses.extend([(429, b"", {})] * 6)
-    with pytest.raises(arxiv_source.NoAnswerError):
-        arxiv_source.fetch_by_ids(["2609.10001"])
-    assert len(calls) == 1 and not sleeps
-    connect, read = calls[0][1]["timeout"]
-    assert connect <= 10 and read <= arxiv_source.LOOKUP_BUDGET
-    responses.clear()
-    responses.append(requests.ReadTimeout("silent"))
-    with pytest.raises(arxiv_source.NoAnswerError):
-        arxiv_source.fetch_by_ids(["2609.10001"])
-    # The nightly intake keeps 40 minutes per page and its full backoff.
-    assert arxiv_source._ArxivClient().budget == 40 * 60
-    calls.clear()
-    responses.clear()
-    responses.extend([(429, b"", {})] * 6)
-    with pytest.raises(arxiv.HTTPError):
-        fetch()
-    assert [s for s in sleeps if s >= 60] == [60, 120, 240, 480, 900]
-    assert all(kwargs["timeout"] == (10, 60) for _, kwargs in calls)
+# -- an owner's lookup (Process, Deep read, Report as a miss) ---------------------------------
+
+
+def arxiv_answering(*answers):
+    """An httpx client whose arXiv answers each request with the next of `answers`."""
+    calls = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        status, content = answers[len(calls) - 1]
+        return httpx.Response(status, content=content)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handle)), calls
+
+
+async def test_an_owner_lookup_reads_arxivs_feed_in_one_try(monkeypatch):
+    monkeypatch.delenv("ARXIV_PACING_DIR", raising=False)
+    client, calls = arxiv_answering((200, feed()))
+    (found,) = await arxiv_source.fetch_by_ids(["2609.10001"], client)
+    assert (found.id, found.version, found.title) == ("2609.10001", 1, "Test")
+    assert parse_qs(calls[0].url.query.decode())["id_list"] == ["2609.10001"]
+    # A throttled arXiv, a page that is no feed, an answer too large: no answer, at once.
+    for answer in ((429, b""), (200, b"<html/>"), (200, b" " * (4 * 1024 * 1024 + 1))):
+        client, calls = arxiv_answering(answer)
+        with pytest.raises(arxiv_source.NoAnswerError):
+            await arxiv_source.fetch_by_ids(["2609.10001"], client)
+        assert len(calls) == 1
 
 
 @pytest.mark.parametrize("paced", [False, True])
-def test_an_owner_lookup_ends_at_its_deadline_on_a_trickling_body(
-    slow_arxiv, monkeypatch, tmp_path, paced
+@pytest.mark.parametrize("trickle", ["headers", "body"])
+async def test_an_owner_lookup_ends_at_its_deadline_however_arxiv_trickles(
+    slow_arxiv, monkeypatch, tmp_path, trickle, paced
 ):
-    # One deadline covers the pacing slot, the connection and the whole body (L5-3): a body that
-    # trickles in keeps every socket read short, and must not keep the thread, nor the slot.
+    # One deadline covers the pacing slot, the connection, the headers, the body and the parse
+    # (L6-4): bytes trickling in keep every socket read short, and must not keep the request,
+    # nor the slot.
+    slow_arxiv.trickle = trickle
     monkeypatch.setattr(arxiv_source, "LOOKUP_BUDGET", 0.5)
     if paced:
         monkeypatch.setenv("ARXIV_PACING_DIR", str(tmp_path))
     else:
         monkeypatch.delenv("ARXIV_PACING_DIR", raising=False)
-    outcome = []
-
-    def lookup():
-        try:
-            outcome.append(arxiv_source.fetch_by_ids(["2609.10001"]))
-        except Exception as exc:  # noqa: BLE001 - what it raised is the assertion below
-            outcome.append(exc)
-
-    thread = threading.Thread(target=lookup, daemon=True)
     started = time.monotonic()
-    thread.start()
-    thread.join(3)
-    assert not thread.is_alive(), "the fetch outlived its deadline"
-    assert time.monotonic() - started < 1.5
-    assert isinstance(outcome[0], arxiv_source.NoAnswerError)
+    with pytest.raises(arxiv_source.NoAnswerError):
+        await asyncio.wait_for(arxiv_source.fetch_by_ids(["2609.10001"]), 3)
+    assert time.monotonic() - started < 0.5 + 0.3
     if paced:
         with open(tmp_path / "arxiv-rate.lock", "r+b") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # the slot is free

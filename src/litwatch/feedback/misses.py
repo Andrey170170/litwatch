@@ -7,8 +7,6 @@ says), and the owner's newest Save (feedback.md, misses).
 
 from __future__ import annotations
 
-import asyncio
-
 import psycopg
 
 from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Paper
@@ -47,7 +45,7 @@ async def resolve(conn: psycopg.AsyncConnection, text: str) -> tuple[str, Paper 
         raise NotFoundError(str(exc)) from exc
     if await papers_store.get(conn, paper_id):
         return paper_id, None
-    fetched = await asyncio.to_thread(fetch_by_ids, [paper_id])
+    fetched = await fetch_by_ids([paper_id])
     if not fetched:
         raise NotFoundError(f"arXiv has no paper {paper_id}")
     return paper_id, fetched[0]

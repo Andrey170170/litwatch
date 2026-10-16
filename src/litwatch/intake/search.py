@@ -1,5 +1,6 @@
 """arXiv access through the `arxiv` library: lookups, searches, and the windowed daily fetch."""
 
+import asyncio
 import logging
 import random
 import re
@@ -8,13 +9,15 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlencode
 
 import arxiv
+import arxiv._feed
+import httpx
 import requests
-import urllib3
 
 from litwatch.core import Paper
-from litwatch.intake.pacing import PacingError, shared_pacer
+from litwatch.intake.pacing import PacingError, async_response, shared_pacer
 
 _VERSION_RE = re.compile(r"v\d+$")
 
@@ -23,8 +26,11 @@ log = logging.getLogger(__name__)
 _BACKOFF = (60, 120, 240, 480, 900)
 _RETRY_BUDGET = 40 * 60  # the nightly intake's wait on one page, retries included
 # An owner's request (Process, Deep read, Report as a miss) waits this long on arXiv at most:
-# the shared pacer's slot, the connection and the whole body. No backoff fits, so it is one try.
+# the shared pacer's slot, the connection, the headers, the body and the parse. No backoff
+# fits, so it is one try.
 LOOKUP_BUDGET = 45.0
+# The most of arXiv's answer a lookup reads: one paper's feed is a few kilobytes.
+_LOOKUP_BYTES = 4 * 1024 * 1024
 
 
 class NoAnswerError(RuntimeError):
@@ -43,76 +49,49 @@ def _retry_after(value: str) -> float:
 
 
 class _ArxivSession(requests.Session):
-    """Bound each request by its page's deadline and retain Retry-After, which arxiv.HTTPError
-    discards."""
+    """Bound socket waits and retain Retry-After, which arxiv.HTTPError discards."""
 
     retry_after = 0.0
 
     def get(self, url, **kwargs):
-        """One request within the page's deadline: the pacing slot, the connection and the whole
-        body. Past it, requests.Timeout, with the connection closed and the slot free, so no
-        thread is left holding them."""
         self.retry_after = 0
-        deadline = getattr(self, "deadline", time.monotonic() + _RETRY_BUDGET)
-        kwargs["stream"] = True
+        kwargs.setdefault("timeout", (10, 60))
         pacer = shared_pacer()
         if pacer is None:
-            response = self._read(url, deadline, None, **kwargs)
+            response = super().get(url, **kwargs)
         else:
+            # arxiv consumes buffered content; close it before releasing the slot.
             # The API endpoint does not need redirects. Reject instead of silently
             # following one without provider pacing.
             kwargs["allow_redirects"] = False
+            kwargs["stream"] = True
+            deadline = getattr(self, "pacing_deadline", time.monotonic() + _RETRY_BUDGET)
             with pacer.slot(timeout=max(0, deadline - time.monotonic())):
-                response = self._read(url, deadline, pacer, **kwargs)
+                response = super().get(url, **kwargs)
+                try:
+                    pacer.defer(response.headers.get("Retry-After"))
+                    _ = response.content
+                finally:
+                    response.close()
         self.retry_after = _retry_after(response.headers.get("Retry-After", ""))
         if response.status_code == 200:
-            try:
-                root = ET.fromstring(response.content)
-                total = root.find("{http://a9.com/-/spec/opensearch/1.1/}totalResults")
-                if (
-                    root.tag != "{http://www.w3.org/2005/Atom}feed"
-                    or total is None
-                    or int(total.text or "") < 0
-                ):
-                    raise ValueError("not an arXiv Atom result feed")
-            except (ET.ParseError, ValueError) as exc:
-                raise _IncompleteFeedError("arXiv returned an invalid result feed") from exc
+            _check_feed(response.content)
         return response
 
-    def _read(self, url, deadline: float, pacer, **kwargs) -> requests.Response:
-        """The response with its body read, chunk by chunk against `deadline`."""
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise requests.Timeout("arXiv's deadline passed")
-        kwargs.setdefault("timeout", (min(10, remaining), min(60, remaining)))
-        response = super().get(url, **kwargs)
-        try:
-            if pacer is not None:
-                pacer.defer(response.headers.get("Retry-After"))
-            body = bytearray()
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise requests.ReadTimeout("arXiv's deadline passed mid-body")
-                # Each read is one socket read, and waits no longer than the deadline allows.
-                connection = response.raw.connection
-                if connection is not None and connection.sock is not None:
-                    connection.sock.settimeout(min(60, remaining))
-                try:
-                    chunk = response.raw.read1(65536, decode_content=True)
-                except urllib3.exceptions.ReadTimeoutError as exc:
-                    raise requests.ReadTimeout(exc) from exc
-                except urllib3.exceptions.ProtocolError as exc:
-                    raise requests.exceptions.ChunkedEncodingError(exc) from exc
-                except urllib3.exceptions.DecodeError as exc:
-                    raise requests.exceptions.ContentDecodingError(exc) from exc
-                if not chunk:
-                    break
-                body += chunk
-            response._content = bytes(body)
-        finally:
-            response.close()
-        return response
+
+def _check_feed(content: bytes) -> None:
+    """Raise _IncompleteFeedError unless `content` is an arXiv Atom result feed."""
+    try:
+        root = ET.fromstring(content)
+        total = root.find("{http://a9.com/-/spec/opensearch/1.1/}totalResults")
+        if (
+            root.tag != "{http://www.w3.org/2005/Atom}feed"
+            or total is None
+            or int(total.text or "") < 0
+        ):
+            raise ValueError("not an arXiv Atom result feed")
+    except (ET.ParseError, ValueError) as exc:
+        raise _IncompleteFeedError("arXiv returned an invalid result feed") from exc
 
 
 class _IncompleteFeedError(ValueError):
@@ -122,17 +101,16 @@ class _IncompleteFeedError(ValueError):
 class _ArxivClient(arxiv.Client):
     """Retry one page at a time; successful pages are never replayed."""
 
-    def __init__(self, page_size: int = 100, *, budget: float = _RETRY_BUDGET):
+    def __init__(self, page_size: int = 100):
         # One retry owner: disable the library's rapid recursive retry loop.
         super().__init__(page_size=page_size, delay_seconds=3, num_retries=0)
         self._session.close()
         self._session = _ArxivSession()
-        self.budget = budget  # seconds per page, retries included
 
     def _parse_feed(self, url: str, first_page: bool = True, _try_index: int = 0):
         # arxiv has no public transport/parser seam; real-parser tests cover this override.
-        deadline = time.monotonic() + self.budget
-        self._session.deadline = deadline
+        deadline = time.monotonic() + _RETRY_BUDGET
+        self._session.pacing_deadline = deadline
         for attempt in range(len(_BACKOFF) + 1):
             try:
                 feed = super()._parse_feed(url, first_page, _try_index=0)
@@ -205,14 +183,39 @@ def to_paper(result: arxiv.Result) -> Paper:
     )
 
 
-def fetch_by_ids(ids: list[str], client: arxiv.Client | None = None) -> list[Paper]:
-    """The papers arXiv has of `ids`, for an owner's request: within `LOOKUP_BUDGET`, else
-    NoAnswerError."""
-    client = client or _ArxivClient(budget=LOOKUP_BUDGET)
+async def fetch_by_ids(ids: list[str], client: httpx.AsyncClient | None = None) -> list[Paper]:
+    """The papers arXiv has of `ids`, for an owner's request: one try, within `LOOKUP_BUDGET`
+    from the shared pacing slot through the connection, the headers, the body and the parse;
+    else NoAnswerError. At the deadline the request is cancelled: its connection closes, then
+    the slot is released. The nightly intake keeps its own client, budget and backoff."""
+    args = {"search_query": "", "id_list": ",".join(ids), "start": 0, "max_results": len(ids)}
+    url = arxiv.Client.query_url_format.format(urlencode(args))
     try:
-        return [to_paper(r) for r in client.results(arxiv.Search(id_list=ids))]
-    except (requests.RequestException, arxiv.ArxivError, _IncompleteFeedError, PacingError) as exc:
+        async with asyncio.timeout(LOOKUP_BUDGET):
+            async with httpx.AsyncClient(timeout=LOOKUP_BUDGET) as own:
+                agent = {"user-agent": arxiv._USER_AGENT}
+                async with async_response(client or own, "GET", url, headers=agent) as response:
+                    if response.status_code != 200:
+                        raise NoAnswerError(f"arXiv answered HTTP {response.status_code}")
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body += chunk
+                        if len(body) > _LOOKUP_BYTES:
+                            raise NoAnswerError("arXiv's answer is larger than a lookup reads")
+            return await asyncio.to_thread(_papers, bytes(body))
+    except TimeoutError as exc:
+        raise NoAnswerError("arXiv gave no answer in time") from exc
+    except (httpx.HTTPError, PacingError, _IncompleteFeedError) as exc:
         raise NoAnswerError(f"{type(exc).__name__}: {exc}"[:300]) from exc
+
+
+def _papers(content: bytes) -> list[Paper]:
+    """The papers of an arXiv result feed, read by the `arxiv` library's parser."""
+    _check_feed(content)
+    feed = arxiv._feed.parse(content)
+    if feed.malformed:
+        raise _IncompleteFeedError("arXiv returned a malformed feed")
+    return [to_paper(r) for r in feed.results]
 
 
 def search(query: str, max_results: int, client: arxiv.Client | None = None) -> list[Paper]:

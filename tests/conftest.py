@@ -113,21 +113,37 @@ async def deliver(conn, integration, now=None) -> int:
     return await dispatch.deliver(conn, integration, now)
 
 
+def answering(answer):
+    """A fake arXiv lookup (`search.fetch_by_ids`) that answers `answer(ids)` at once."""
+
+    async def fetch_by_ids(ids):
+        return answer(ids)
+
+    return fetch_by_ids
+
+
 @pytest.fixture
 def slow_arxiv(monkeypatch):
-    """arXiv's API on a local socket: it answers 200, then trickles its body a byte every 50 ms
-    and never finishes, so no socket read ever times out. Requests' real reads are what run."""
+    """arXiv's API on a local socket that never finishes answering: it trickles a byte every
+    50 ms, so no socket read ever times out. With `trickle = "body"` (the default) it sends its
+    status and headers, then the body; with `"headers"`, the headers themselves."""
     stop = threading.Event()
 
     class Trickle(BaseHTTPRequestHandler):
         def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "application/atom+xml")
-            self.send_header("Content-Length", "1000000")
-            self.end_headers()
             try:
+                if server.trickle == "headers":
+                    self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+                    while not stop.wait(0.05):
+                        self.wfile.write(b"X")
+                        self.wfile.flush()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/atom+xml")
+                self.send_header("Content-Length", "1000000")
+                self.end_headers()
                 while not stop.wait(0.05):
                     self.wfile.write(b" ")
+                    self.wfile.flush()
             except OSError:
                 pass  # the client hung up
 
@@ -135,6 +151,7 @@ def slow_arxiv(monkeypatch):
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Trickle)
+    server.trickle = "body"
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_port}/api/query?{{}}"
