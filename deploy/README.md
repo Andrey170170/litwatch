@@ -24,6 +24,7 @@ Deep cards: uncomment `[integrations.deep]` in `litwatch.toml`, then
 ```sh
 docker compose --profile deep run --rm deep login    # sign in once; the session stays in its volume
 docker compose --profile deep up -d
+docker compose restart litwatch    # litwatch reads its integrations when it starts
 ```
 
 ## The archive

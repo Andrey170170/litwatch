@@ -203,6 +203,24 @@ async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_paper
     assert WANTED < BACKGROUND  # an archive under `pdfs wanted` holds background PDFs only
 
 
+async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(world):
+    conn, fake = world, FakeArchive()
+    a = archive(fake)
+    await start(conn, a)
+    await papers_store.upsert(conn, [paper(P.id, version=2)])
+    await word_store.set_saved(conn, P.id, True)
+    await deliver(conn, a)
+    fake.jobs.clear()
+    # Still saved, so no event says so again: the revision itself asks.
+    await papers_store.upsert(conn, [P])
+    await deliver(conn, a)
+
+    assert [(j["paper_id"], j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [
+        (P.id, 3, "pdf", WANTED),
+        (P.id, 3, "source", BACKGROUND),
+    ]
+
+
 async def test_an_archive_that_does_not_register_only_answers_searches(world, secrets):
     with pytest.raises(IntegrationError, match="register must be true or false"):
         integrations.load(

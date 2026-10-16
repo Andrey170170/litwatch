@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sqlite3
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -47,6 +48,21 @@ class CatalogTests(unittest.TestCase):
                                     ('2607.02102', 'source'): 'pending'})
         with self.assertRaises(ValueError):
             self.db.set_pdfs('some')
+
+    def test_a_background_pdf_in_flight_when_wanted_is_set_is_held_not_claimed_again(self):
+        self.db.set_pdfs('all')
+        self.db.upsert_paper('2607.02101', {'title': 'x'}, 1)
+        self.db.upsert_paper('2607.02102', {'title': 'y'}, 1)
+        self.db.enqueue('2607.02101', 1, 'pdf')
+        self.db.enqueue('2607.02102', 1, 'pdf')
+        retried = self.db.claim_job()
+        self.db.claim_job(lease_seconds=0.001)
+        self.db.set_pdfs('wanted')
+        # One comes back for a retry, the other's lease runs out: neither is claimed again.
+        self.assertTrue(self.db.finish_job(retried['id'], retried['lease_token'], 'pending'))
+        with patch('arxiv_archive.catalog.time.time', return_value=time.time() + 1):
+            self.assertIsNone(self.db.claim_job())
+        self.assertEqual([r[0] for r in self.db.db.execute('SELECT status FROM jobs')], ['held', 'held'])
 
     def test_a_catalog_with_papers_before_the_setting_keeps_every_pdf(self):
         path = self.root / 'old.sqlite'

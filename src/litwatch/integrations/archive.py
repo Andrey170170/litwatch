@@ -12,7 +12,8 @@ what intake read from the archive itself (the event's `source` is "archive"): it
 The storage policy (archive.md) is the archive's to apply: under `paper-archive pdfs wanted`
 it holds PDFs asked for at background priority. On `grade.changed` to relevant or must read,
 and on `paper.saved`, this asks for the paper's PDF at `WANTED` priority, above background,
-once the paper still qualifies when the event is handled (`store.word.keeps_pdf`). A PDF the owner
+once the paper still qualifies when the event is handled (`store.word.keeps_pdf`), and a revision of
+a paper that qualifies asks for its new PDF the same way. A PDF the owner
 opens is asked for urgently by the API, and one a full-text pass falls back to by the queue.
 
 It is also a `SearchProvider`: litwatch's search box asks it beside the collection, which
@@ -38,7 +39,13 @@ import httpx
 import psycopg
 
 from litwatch import events
-from litwatch.archive import WANTED, ArchiveClient, ArchiveUnavailable, ArchiveVersionUnknown
+from litwatch.archive import (
+    BACKGROUND,
+    WANTED,
+    ArchiveClient,
+    ArchiveUnavailable,
+    ArchiveVersionUnknown,
+)
 from litwatch.config import Config
 from litwatch.core import SEARCH_TIMEOUT_SECONDS, Event, Paper, SearchFilters, SearchHit
 from litwatch.integrations import (
@@ -158,8 +165,10 @@ class Archive:
         except ArchiveVersionUnknown:
             log.info("archive: %s has no known arXiv version; metadata only", paper.id)
             return
+        # A revision of a paper the policy keeps asks for its new PDF above background too.
+        kept = WANTED if await word_store.keeps_pdf(conn, paper.id) else BACKGROUND
         for kind in ARTIFACTS:
-            await self.archive.request(paper, kind)
+            await self.archive.request(paper, kind, kept if kind == "pdf" else BACKGROUND)
 
     async def _keep_pdf(self, paper: Paper) -> None:
         try:

@@ -10,7 +10,8 @@ papers before the table existed lists nothing until `index_dates` has filled it.
 
 The PDF policy (`settings`, key `pdfs`) is `all` or `wanted`. Under `wanted` a PDF job
 asked for at background priority or below (a number of `BACKGROUND` or more) is `held`: kept, never claimed,
-until someone asks for it at a higher priority, which makes it pending. Sources are never
+until someone asks for it at a higher priority, which makes it pending; one retried or
+left by its worker after the policy changed is held when it would be claimed. Sources are never
 held. A new catalog starts with `wanted`; one that held papers before the setting existed
 keeps every PDF (`all`) until it is changed (`set_pdfs`).
 """
@@ -366,6 +367,10 @@ class Catalog:
                                          "WHERE status='held'", (time.time(),))
             return {'pdfs': policy, 'jobs_changed': cursor.rowcount}
 
+    def _held(self, kind: str, priority: int, policy: str | None = None) -> bool:
+        """Whether the PDF policy holds a job of this kind at this priority."""
+        return kind == 'pdf' and priority >= BACKGROUND and (policy or self.pdfs()) == 'wanted'
+
     def enqueue(self, paper_id: str, version: int, kind: str, priority: int = BACKGROUND,
                 provenance: dict | None = None) -> dict:
         """Ask for an artifact; asking again keeps one job and raises its priority. Under the
@@ -377,8 +382,7 @@ class Catalog:
             self._ensure_paper(paper_id)
             now = time.time()
             available = self.get_artifact(paper_id, kind, version) is not None
-            held = kind == 'pdf' and priority >= BACKGROUND and self.pdfs() == 'wanted'
-            status = 'complete' if available else 'held' if held else 'pending'
+            status = 'complete' if available else 'held' if self._held(kind, priority) else 'pending'
             self.db.execute('''INSERT INTO jobs
                 (paper_id,version,kind,priority,status,provenance_json,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(paper_id,version,kind) DO UPDATE SET
@@ -400,13 +404,19 @@ class Catalog:
         with self.lock:
             self.db.execute('BEGIN IMMEDIATE')
             try:
-                now = time.time()
-                row = self.db.execute('''SELECT * FROM jobs WHERE
-                    (status='pending' AND not_before<=?) OR (status='running' AND lease_until<=?)
-                    ORDER BY priority,created_at,id LIMIT 1''', (now, now)).fetchone()
-                if row is None:
-                    self.db.commit()
-                    return None
+                now, policy = time.time(), self.pdfs()
+                while True:
+                    row = self.db.execute('''SELECT * FROM jobs WHERE
+                        (status='pending' AND not_before<=?) OR (status='running' AND lease_until<=?)
+                        ORDER BY priority,created_at,id LIMIT 1''', (now, now)).fetchone()
+                    if row is None:
+                        self.db.commit()
+                        return None
+                    # A job retried or left by its worker after the policy changed is held now.
+                    if not self._held(row['kind'], row['priority'], policy):
+                        break
+                    self.db.execute('''UPDATE jobs SET status='held',lease_token=NULL,lease_until=NULL,
+                        updated_at=? WHERE id=?''', (now, row['id']))
                 token = uuid.uuid4().hex
                 self.db.execute('''UPDATE jobs SET status='running',attempts=attempts+1,
                     lease_token=?,lease_until=?,updated_at=? WHERE id=?''',
