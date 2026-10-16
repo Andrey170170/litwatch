@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.llm.types import Usage
+
+RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
 
 
 class CallJournal:
@@ -51,33 +53,44 @@ class CallJournal:
         )
 
     async def in_batch(self, key: str) -> dict[str, Any] | None:
-        """The newest call of the last day sent in a batch with this request and not yet settled
-        (no output, no error): a run started again waits on its batch instead of paying again.
-        Older batches' answers are gone or soon will be."""
+        """The newest call sent in a batch with this request and not yet settled (no output, no
+        error): a run started again waits on its batch instead of paying again. Anthropic keeps
+        a batch's results for 29 days; `RESULTS_KEPT` stays inside that."""
         return await (
             await self.conn.execute(
                 "SELECT id, batch_id FROM inference_calls WHERE request_key = %s "
                 "AND batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
-                "AND started_at > now() - interval '1 day' ORDER BY id DESC LIMIT 1",
-                (key,),
+                "AND started_at > now() - %s ORDER BY id DESC LIMIT 1",
+                (key, RESULTS_KEPT),
             )
         ).fetchone()
 
     async def open_batches(self) -> list[dict[str, Any]]:
-        """The batches of the last day with calls not yet answered or charged, with a role
-        that asked in each: a dead run's, whose charges are read when they end."""
+        """The batches with calls not yet answered or charged, with a role that asked in each:
+        a dead run's, or one given up on after a deadline, whose charges are read when they
+        end."""
         return await (
             await self.conn.execute(
                 "SELECT batch_id, min(operation) AS role FROM inference_calls "
                 "WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
-                "AND usage->>'cost' IS NULL AND started_at > now() - interval '1 day' "
-                "GROUP BY batch_id ORDER BY batch_id"
+                "AND usage->>'cost' IS NULL AND started_at > now() - %s "
+                "GROUP BY batch_id ORDER BY batch_id",
+                (RESULTS_KEPT,),
             )
         ).fetchall()
 
-    async def answered(self, batch_id: str, key: str, usage: Usage) -> None:
+    async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None:
         """An answer of batch `batch_id` that no call awaited: its charge, on the calls that
-        asked for it and have none yet, so the batch is accounted for in full."""
+        asked for it and have none yet, so the batch is accounted for in full. None: the batch
+        did not answer it, and its call is settled with that."""
+        if usage is None:
+            await self.conn.execute(
+                "UPDATE inference_calls SET error = 'provider: the batch did not answer it' "
+                "WHERE batch_id = %s AND request_key = %s AND output IS NULL AND error IS NULL "
+                "AND usage->>'cost' IS NULL",
+                (batch_id, key),
+            )
+            return
         await self.conn.execute(
             "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
             "WHERE id = (SELECT min(id) FROM inference_calls WHERE batch_id = %s "

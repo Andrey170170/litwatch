@@ -2,7 +2,10 @@
 each call it cannot reuse to its provider's `Batcher`, which holds the calls until none has joined
 for a while, sends them as one batch, polls it, and answers each held call with its reply. A call
 it cannot answer from a batch (the deadline passed, the batch did not answer it, the provider
-failed) gets None, and the gateway sends it as a normal call."""
+failed) gets None, and the gateway sends it as a normal call. A batch given up on while still open
+(the drain ran out, the gateway closed) may still answer: the journal rows its requests are on
+are `unsettled`, left for a later run to account for, and their normal calls get rows of their
+own."""
 
 from __future__ import annotations
 
@@ -11,7 +14,7 @@ import contextlib
 import dataclasses
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
@@ -40,7 +43,7 @@ class BatchProvider(Protocol):
 
 class BatchJournal(Protocol):
     async def batched(self, call_ids: list[int], batch_id: str) -> None: ...
-    async def answered(self, batch_id: str, key: str, usage: Usage) -> None: ...
+    async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None: ...
 
 
 @dataclass
@@ -54,9 +57,11 @@ class _Held:
 
 @dataclass
 class _Open:
-    """A batch sent: the futures awaiting its answers, by request key."""
+    """A batch sent: the futures awaiting its answers, and the journal rows its requests are
+    on, by request key."""
 
     waiting: dict[str, asyncio.Future[Reply | None]] = field(default_factory=dict)
+    rows: dict[str, int] = field(default_factory=dict)
     cancelled: bool = False
 
 
@@ -83,6 +88,7 @@ class Batcher:
         self._futures: dict[str, asyncio.Future[Reply | None]] = {}  # held or sent, by key
         self._open: dict[str, _Open] = {}
         self._joined = 0.0  # when the last call joined the held ones (monotonic)
+        self.unsettled: set[int] = set()  # journal rows of requests given up on, batch open
         self._flusher: asyncio.Task[None] | None = None
         self._poller: asyncio.Task[None] | None = None
 
@@ -100,20 +106,22 @@ class Batcher:
             return await self._shared(self._futures[key])
         future = asyncio.get_running_loop().create_future()
         self._futures[key] = future
-        size = len(request.system) + len(request.user) + 2_000  # the schema and the envelope
+        # UTF-8 bytes, and the schema and envelope; JSON's escapes fit in the provider's margin.
+        size = len(request.system.encode()) + len(request.user.encode()) + 2_000
         self._held.append(_Held(key, role, request, call_id, size))
         self._joined = time.monotonic()
         if self._flusher is None or self._flusher.done():
-            self._flusher = asyncio.create_task(self._flush_when_quiet())
+            self._flusher = self._supervised(self._flush_when_quiet())
         return await asyncio.shield(future)
 
-    async def attach(self, batch_id: str, key: str) -> Reply | None:
-        """The reply of a call a dead run sent in batch `batch_id`."""
+    async def attach(self, batch_id: str, key: str, call_id: int) -> Reply | None:
+        """The reply of a call a dead run sent in batch `batch_id`, on journal row `call_id`."""
         if key in self._futures:
             return await self._shared(self._futures[key])
         future = asyncio.get_running_loop().create_future()
         self._futures[key] = future
-        self._open.setdefault(batch_id, _Open()).waiting[key] = future
+        batch = self._open.setdefault(batch_id, _Open())
+        batch.waiting[key], batch.rows[key] = future, call_id
         self._start_polling()
         return await asyncio.shield(future)
 
@@ -133,14 +141,42 @@ class Batcher:
         self._open.setdefault(batch_id, _Open())
         self._start_polling()
 
+    async def settle(self) -> None:
+        """Wait until every open batch is read, or given up on after the deadline's drain."""
+        if self._poller is not None:
+            await asyncio.shield(self._poller)
+
     async def close(self) -> None:
         """Stop collecting and polling; whatever still waits is sent as normal calls."""
         for task in (self._flusher, self._poller):
-            if task is not None:
+            if task is not None and not task.done():  # one that failed has failed its calls
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-        self._resolve_all(None)
+        self._held = []
+        for batch in self._open.values():
+            self._give_up(batch)
+        self._open = {}
+        for key in list(self._futures):
+            self._resolve(key, None)
+
+    def _supervised(self, work: Coroutine[None, None, None]) -> asyncio.Task[None]:
+        """A background task whose failure (the journal's, say) fails every call still
+        waiting, rather than leaving them waiting for good."""
+
+        def failed(task: asyncio.Task[None]) -> None:
+            if task.cancelled() or (exc := task.exception()) is None:
+                return
+            log.error("batches stopped: %r", exc)
+            self._held, self._open = [], {}
+            for future in self._futures.values():
+                if not future.done():
+                    future.set_exception(exc)
+            self._futures = {}
+
+        task = asyncio.create_task(work)
+        task.add_done_callback(failed)
+        return task
 
     # -- collecting ----------------------------------------------------------------------------
 
@@ -156,7 +192,12 @@ class Batcher:
             if left > 0 and not self._full() and self.open():
                 await asyncio.sleep(min(left, 1.0))
                 continue
-            take, self._held = self._held[: self.max_requests], self._held[self.max_requests :]
+            count, size = 0, 0  # a batch within both ceilings, of one call at least
+            for h in self._held[: self.max_requests]:
+                if count and size + h.size > self.max_bytes:
+                    break
+                count, size = count + 1, size + h.size
+            take, self._held = self._held[:count], self._held[count:]
             await self._send(take)
 
     async def _send(self, held: list[_Held]) -> None:
@@ -177,14 +218,17 @@ class Batcher:
         if self.journal:
             ids = [h.call_id for h in held if h.call_id is not None]
             await self.journal.batched(ids, batch_id)
-        self._open[batch_id] = _Open({h.key: self._futures[h.key] for h in held})
+        self._open[batch_id] = _Open(
+            {h.key: self._futures[h.key] for h in held},
+            {h.key: h.call_id for h in held if h.call_id is not None},
+        )
         self._start_polling()
 
     # -- polling -------------------------------------------------------------------------------
 
     def _start_polling(self) -> None:
         if self._poller is None or self._poller.done():
-            self._poller = asyncio.create_task(self._poll())
+            self._poller = self._supervised(self._poll())
 
     async def _poll(self) -> None:
         while self._open:
@@ -192,7 +236,9 @@ class Batcher:
             if now >= self.deadline + self.drain:
                 log.warning("%d batches still open after the deadline's drain", len(self._open))
                 for batch_id in list(self._open):
-                    for key in self._open.pop(batch_id).waiting:
+                    batch = self._open.pop(batch_id)
+                    self._give_up(batch)
+                    for key in batch.waiting:
                         self._resolve(key, None)
                 return
             for batch_id, batch in list(self._open.items()):
@@ -212,22 +258,19 @@ class Batcher:
         except Exception:
             log.exception("batch %s could not be read; trying again", batch_id)
             return
+        if self.journal:  # the batch is accounted for before it is let go
+            for key, reply in replies.items():
+                if key not in batch.waiting:
+                    await self.journal.answered(batch_id, key, reply and reply.usage)
         del self._open[batch_id]
-        for key, reply in replies.items():
-            if key in batch.waiting:
-                self._resolve(key, reply)
-            elif reply is not None and self.journal:
-                await self.journal.answered(batch_id, key, reply.usage)
-        for key in batch.waiting:  # a request the results did not name
-            self._resolve(key, None)
+        for key in batch.waiting:  # None too for a request the results did not name
+            self._resolve(key, replies.get(key))
+
+    def _give_up(self, batch: _Open) -> None:
+        """Its waiting calls go as normal calls while it may still answer them."""
+        self.unsettled.update(batch.rows[key] for key in batch.waiting if key in batch.rows)
 
     def _resolve(self, key: str, reply: Reply | None) -> None:
         future = self._futures.pop(key, None)
         if future is not None and not future.done():
             future.set_result(reply)
-
-    def _resolve_all(self, reply: Reply | None) -> None:
-        self._held = []
-        self._open = {}
-        for key in list(self._futures):
-            self._resolve(key, reply)

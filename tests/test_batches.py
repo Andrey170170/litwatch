@@ -192,6 +192,55 @@ async def test_a_batch_still_cancelling_after_the_drain_has_its_requests_sent_no
     await gw.close()
 
 
+async def test_a_batch_given_up_on_is_left_open_on_its_row_for_a_later_run_to_account_for(conn):
+    gw, anthropic, _, clock = batching(
+        CallJournal(conn, await runs.start(conn, "nightly")), hold=True
+    )
+    asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await until(lambda: anthropic.batches)
+    clock.now = DEADLINE + DRAIN
+    await asked  # a normal call, on a row of its own
+    assert [(c["batch_id"], c["answered"], c["cost"]) for c in await calls(conn)] == [
+        ("msgbatch_1", False, None),
+        (None, True, 0.001),
+    ]
+    await gw.close()
+    # Days later, a run accounts for the answer the batch gave after all: both charges stand.
+    await conn.execute("UPDATE inference_calls SET started_at = now() - interval '2 days'")
+    later, _, _, _ = batching(
+        CallJournal(conn, await runs.start(conn, "nightly")), provider=anthropic
+    )
+    await later.recover()
+    anthropic.end("msgbatch_1")
+    await later.settle()
+    assert [(c["batch_id"], c["answered"], c["cost"]) for c in await calls(conn)] == [
+        ("msgbatch_1", False, 0.0005),
+        (None, True, 0.001),
+    ]
+    await later.close()
+
+
+async def test_a_journal_that_fails_fails_the_calls_waiting_on_their_batch(conn, monkeypatch):
+    journal = CallJournal(conn, await runs.start(conn, "nightly"))
+    gw, _, _, _ = batching(journal)
+
+    async def down(call_ids, batch_id):
+        raise OSError("the database went away")
+
+    monkeypatch.setattr(journal, "batched", down)
+    with pytest.raises(OSError):
+        await asyncio.wait_for(gw.ask("brief", ask(0)), 2)
+    await gw.close()
+
+
+async def test_a_batch_stays_within_the_byte_ceiling():
+    gw, anthropic, _, _ = batching()
+    gw.batchers["anthropic"].max_bytes = 12_000  # each request is about 5,000 bytes
+    await asyncio.gather(*(gw.ask("brief", ask(f"{n} " + "x" * 3_000)) for n in range(3)))
+    assert sorted(len(keys) for keys in anthropic.submitted) == [1, 2]
+    await gw.close()
+
+
 async def test_closing_the_gateway_sends_what_still_waits_as_normal_calls():
     gw, anthropic, _, _ = batching(hold=True)
     asked = asyncio.create_task(gw.ask("brief", ask(0)))
@@ -309,13 +358,12 @@ async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_agai
     again = await runs.start(conn, "nightly")
     gw, _, _, _ = batching(CallJournal(conn, again), provider=anthropic, clock=clock)
     await gw.recover()
+    settling = asyncio.create_task(gw.settle())  # as a nightly does before it ends
+    await asyncio.sleep(0.05)
+    assert not settling.done()
     anthropic.end("msgbatch_1")
-
-    async def charged():
-        return all(c["cost"] == 0.0005 for c in await calls(conn))
-
-    await until(charged)
-    assert [c["answered"] for c in await calls(conn)] == [False, False]
+    await settling
+    assert [(c["answered"], c["cost"]) for c in await calls(conn)] == [(False, 0.0005)] * 2
     await gw.close()
 
 
@@ -369,9 +417,9 @@ async def test_a_call_whose_batch_did_not_answer_it_is_settled_and_asked_again(c
     found = await calls(conn)
     assert [(c["run_id"], c["batch_id"], c["error"], c["answered"]) for c in found] == [
         (dead, "msgbatch_1", "provider: the batch did not answer it", False),
-        (again, "msgbatch_2", None, True),
+        (again, None, None, True),
     ]
-    assert anthropic.calls == []
+    assert (len(anthropic.batches), len(anthropic.calls)) == (1, 1)  # a normal call, no batch
     await gw.close()
 
 
@@ -481,6 +529,11 @@ async def test_a_nightly_started_again_takes_back_its_passes_and_pays_for_nothin
     await asyncio.gather(killed, return_exceptions=True)
     (row,) = await ft.passes(conn)
     assert row["state"] == "running" and row["lease_until"] > datetime.now(UTC) + LEASE
+    # Started again late: less of the lease is left than a worker's, and it is still taken back.
+    await conn.execute(
+        "UPDATE fulltext_passes SET tried_at = now() - interval '5 hours', "
+        "lease_until = now() + interval '10 minutes'"
+    )
 
     anthropic.end("msgbatch_1")
     run_id = await nightly.run(
@@ -520,6 +573,29 @@ async def test_during_a_nightly_its_automatic_passes_are_its_own_batched(conn):
         assert (await ft.passes(conn))[0]["state"] == "awaiting_text"
         assert await batching_work(conn, writer, fake, anthropic) == {"briefs_written": 1}
     assert (len(anthropic.submitted), anthropic.calls) == (1, [])
+
+
+async def test_a_worker_leaves_the_nightly_its_passes_from_the_claim_after_it_starts(
+    conn, monkeypatch
+):
+    """V8: a worker already working when the nightly starts takes no automatic pass after."""
+    await passing(conn)
+    other = ft.P.model_copy(update={"id": "2610.00099"})  # its Brief queued after P's
+    await papers_store.upsert(conn, [other])
+    cols = ", ".join(c for c in (await ft.passes(conn))[0] if c not in ("id", "paper_id"))
+    await conn.execute(
+        f"INSERT INTO fulltext_passes (paper_id, {cols}) SELECT %s, {cols} "
+        "FROM fulltext_passes WHERE paper_id = %s",
+        (other.id, ft.P.id),
+    )
+    starts = iter([False, True, True])  # the nightly takes the lock after the first claim
+
+    async def held(conn):
+        return next(starts)
+
+    monkeypatch.setattr(fulltext, "held_elsewhere", held)
+    monkeypatch.setattr(fulltext, "BATCH", 1)
+    assert await ft.work(conn, ft.ready(FakeArchive()), ft.Writer()) == {"briefs_written": 1}
 
 
 @pytest.mark.parametrize("action", ["now", "pdf"])

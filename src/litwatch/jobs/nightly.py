@@ -204,6 +204,7 @@ async def run(
             run.counts["rewritten"] = len(result.rewritten)
         try:
             await _steps(conn, config, run, until, today, limit, with_digests, batch_night)
+            await run.gateway.settle()  # the batches a dead run left are accounted for too
         finally:
             await run.gateway.close()
         return run.run_id

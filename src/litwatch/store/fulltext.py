@@ -330,11 +330,11 @@ async def claim(
 
 
 async def take_back(conn: psycopg.AsyncConnection, lease: timedelta) -> int:
-    """End the leases on text passes longer than `lease`: a batching nightly's, which only a
+    """End the leases on text passes taken for longer than `lease`: a batching nightly's, which a
     nightly holding the run lock calls, so the run that held them is dead. Returns how many."""
     cur = await conn.execute(
         "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' "
-        "WHERE kind <> 'deep' AND state = 'running' AND lease_until > now() + %s",
+        "WHERE kind <> 'deep' AND state = 'running' AND lease_until - tried_at > %s",
         (lease,),
     )
     return cur.rowcount

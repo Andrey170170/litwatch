@@ -79,7 +79,7 @@ class Journal(Protocol):
     async def in_batch(self, key: str) -> dict[str, Any] | None: ...
     async def open_batches(self) -> list[dict[str, Any]]: ...
     async def batched(self, call_ids: list[int], batch_id: str) -> None: ...
-    async def answered(self, batch_id: str, key: str, usage: Usage) -> None: ...
+    async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -152,6 +152,11 @@ class Gateway:
         """A step's calls in flight: all of them while batching, so a step is one batch (normal
         calls stay bounded per provider); else `limit`."""
         return MAX_REQUESTS if self.batching else limit
+
+    async def settle(self) -> None:
+        """Wait until the open batches, a dead run's included, are read or given up on."""
+        for batcher in self.batchers.values():
+            await batcher.settle()
 
     async def close(self) -> None:
         """Stop batching; calls still waiting on a batch go as normal calls."""
@@ -329,19 +334,25 @@ class Gateway:
     ) -> tuple[int | None, Reply | None]:
         """The call's journal row, and its reply when a batch gave one (None: send it as a
         normal call). A key a dead run left in an open batch waits on that batch, on its row,
-        past the deadline too (the batch is cancelled then)."""
+        past the deadline too (the batch is cancelled then); one the batch did not answer is
+        sent as a normal call. A normal call has a row of its own when the batch it was given
+        up on may still answer it on its row."""
         journal = self.journal
         batcher = self.batchers.get(role.provider) if send is None else None
         if batcher and journal and (row := await journal.in_batch(key)):
-            if reply := await batcher.attach(row["batch_id"], key):
+            if reply := await batcher.attach(row["batch_id"], key, row["id"]):
                 if reply.usage.reused:  # shared with a call on that row: a row of its own
                     return await journal.start(role_name, role.model, key, paper_id), reply
                 return row["id"], _of_role(reply, role)
-            await journal.reject(row["id"], "provider: the batch did not answer it")
+            if row["id"] not in batcher.unsettled:
+                await journal.reject(row["id"], "provider: the batch did not answer it")
+            return await journal.start(role_name, role.model, key, paper_id), None
         call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None
         if batcher is None or not batcher.open():
             return call_id, None
         reply = await batcher.ask(key, role, request, call_id)
+        if reply is None and journal and call_id in batcher.unsettled:
+            return await journal.start(role_name, role.model, key, paper_id), None
         return call_id, _of_role(reply, role) if reply else None
 
 

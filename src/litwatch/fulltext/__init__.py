@@ -259,8 +259,6 @@ async def work(
     lease, wide, owners = LEASE, False, None
     if run and (until := run.gateway.batching_until()):
         lease, wide, owners = until - datetime.now(UTC) + DRAIN + LEASE, True, False
-    elif run is None and await held_elsewhere(conn):
-        owners = True
     reads = asyncio.Semaphore(CONCURRENCY)
 
     async def read_one(c: Claimed) -> Attempt:
@@ -270,6 +268,8 @@ async def work(
     while (limit is None or len(tried) < limit) and (
         deadline is None or time.monotonic() < deadline
     ):
+        if run is None:  # asked at each claim: a nightly may have started meanwhile
+            owners = True if await held_elsewhere(conn) else None
         size = BATCH if limit is None else min(BATCH, limit - len(tried))
         if wide:
             size = None if limit is None else limit - len(tried)
