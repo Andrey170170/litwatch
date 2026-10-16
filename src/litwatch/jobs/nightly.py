@@ -10,13 +10,14 @@ import logging
 import time
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
+from typing import Literal
 
 import psycopg
 
 from litwatch import analysis, classification, digests, fulltext, grading, intake
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
-from litwatch.core.fulltext import RECONCILE_LOOKBACK
+from litwatch.core.fulltext import LEASE, RECONCILE_LOOKBACK
 from litwatch.feedback import word
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
@@ -92,6 +93,8 @@ async def text_passes(
     every pass that is due once, up to `limit` and until `deadline`: the passes this run queued
     have their text asked for now, and the service's worker runs each once its text is there.
     Returns how the tries ended."""
+    # Only one nightly runs at a time, so a lease longer than a worker's is a dead run's.
+    run.add("fulltext_taken_back", await fulltext_store.take_back(conn, LEASE))
     reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK)
     await word.settle_all(conn, reconciled)
     run.add("fulltext_reconciled", len(reconciled))
@@ -162,8 +165,15 @@ async def run(
     gateway: GatewayFactory = default_gateway,
     today: date | None = None,
     with_digests: bool = True,
+    night: tuple[datetime, datetime] | None | Literal["schedule"] = "schedule",
 ) -> int:
     """One run under the run lock. Returns the run id.
+
+    A run started between the schedule's nightly time and its deadline (`night`: its start
+    and deadline, by default `Schedule.night` of now) sends its calls on a provider that
+    batches in batches until the deadline. Then its digests wait for the passes until the
+    deadline, those queued since the night's first run started included (docs/specs/v1/
+    models.md, batches).
 
     An incomplete harvest does not stop the rest: what arrived is classified, analysed and
     graded, and the gap stays open for the next run. `limit` caps the papers each step that
@@ -175,6 +185,7 @@ async def run(
     """
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
+    batch_night = config.schedule.night(until) if night == "schedule" else night
     today = today or until.astimezone(config.schedule.zone).date()
     async with (
         run_lock(conn),
@@ -191,15 +202,43 @@ async def run(
                 intake=result.details,
             )
             run.counts["rewritten"] = len(result.rewritten)
-        await classify(conn, config, run, limit)
-        await analyse(conn, run, limit)
-        await grade(conn, config, run, limit)
-        # The digests wait for the passes they depend on, from now and at most this long.
-        deadline = time.monotonic() + config.digests.wait_minutes * 60
-        done = await text_passes(conn, config, run, limit, deadline)
-        if not with_digests:
-            return run.run_id
-        left = None if limit is None else limit - fulltext.worked(done)
-        await wait_for_texts(conn, config, run, until, deadline, limit=left)
-        await write_digests(conn, run, today)
+        try:
+            await _steps(conn, config, run, until, today, limit, with_digests, batch_night)
+        finally:
+            await run.gateway.close()
         return run.run_id
+
+
+async def _steps(
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    run: ModelRun,
+    until: datetime,
+    today: date,
+    limit: int | None,
+    with_digests: bool,
+    night: tuple[datetime, datetime] | None,
+) -> None:
+    since = until
+    if night:
+        run.gateway.batch_until(night[1])
+    if not run.gateway.batching:
+        night = None  # nothing to batch on: the run goes as an unbatched one
+    if night:
+        since = await runs.first_since(conn, "nightly", night[0]) or until
+    await classify(conn, config, run, limit)
+    await analyse(conn, run, limit)
+    await grade(conn, config, run, limit)
+    # The digests wait for the passes they depend on: until the night's deadline, or from now
+    # and at most `wait_minutes`.
+    if night:
+        wait = (night[1] - datetime.now(UTC)).total_seconds()
+    else:
+        wait = config.digests.wait_minutes * 60
+    deadline = time.monotonic() + wait
+    done = await text_passes(conn, config, run, limit, deadline)
+    if not with_digests:
+        return
+    left = None if limit is None else limit - fulltext.worked(done)
+    await wait_for_texts(conn, config, run, since, deadline, limit=left)
+    await write_digests(conn, run, today)

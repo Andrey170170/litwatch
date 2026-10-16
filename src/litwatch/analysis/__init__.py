@@ -127,7 +127,7 @@ def analyse(
     """Ask the `analyse` role about each paper, judged in its primary class, giving results as
     they arrive, held with `async with` (`concurrency.bounded`: leaving it stops every call).
     Writes nothing. A failed call is given with its error."""
-    return bounded(papers, lambda pa: _one(*pa, gateway), concurrency)
+    return bounded(papers, lambda pa: _one(*pa, gateway), gateway.width(concurrency))
 
 
 async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:

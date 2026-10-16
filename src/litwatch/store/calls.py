@@ -44,6 +44,35 @@ class CallJournal:
         ).fetchone()
         return row["id"]
 
+    async def batched(self, call_ids: list[int], batch_id: str) -> None:
+        """The calls went out in the provider's batch `batch_id`."""
+        await self.conn.execute(
+            "UPDATE inference_calls SET batch_id = %s WHERE id = ANY(%s)", (batch_id, call_ids)
+        )
+
+    async def in_batch(self, key: str) -> dict[str, Any] | None:
+        """The newest call of the last day sent in a batch with this request and not yet settled
+        (no output, no error): a run started again waits on its batch instead of paying again.
+        Older batches' answers are gone or soon will be."""
+        return await (
+            await self.conn.execute(
+                "SELECT id, batch_id FROM inference_calls WHERE request_key = %s "
+                "AND batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
+                "AND started_at > now() - interval '1 day' ORDER BY id DESC LIMIT 1",
+                (key,),
+            )
+        ).fetchone()
+
+    async def answered(self, batch_id: str, key: str, usage: Usage) -> None:
+        """An answer of batch `batch_id` that no call awaited: its charge, on the calls that
+        asked for it and have none yet, so the batch is accounted for in full."""
+        await self.conn.execute(
+            "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
+            "WHERE id = (SELECT min(id) FROM inference_calls WHERE batch_id = %s "
+            "AND request_key = %s AND usage->>'cost' IS NULL)",
+            (Jsonb(usage.model_dump(mode="json")), batch_id, key),
+        )
+
     async def record(self, call_id: int, usage: Usage) -> None:
         await self.conn.execute(
             "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() WHERE id = %s",

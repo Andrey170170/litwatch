@@ -21,6 +21,7 @@ import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import psycopg
 
@@ -42,16 +43,19 @@ from litwatch.fulltext import brief
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
+from litwatch.jobs.lock import held_elsewhere
 from litwatch.llm import CallError, Gateway
+from litwatch.llm.batches import DRAIN
 from litwatch.store import fulltext as store_
 from litwatch.store import papers as papers_store
 from litwatch.store.fulltext import Claimed
 
 log = logging.getLogger(__name__)
 
-CONCURRENCY = 4  # `brief` calls at a time
+CONCURRENCY = 4  # `brief` calls at a time, and archive reads
 # Passes claimed at a time: one wave of calls, which ends well within the lease even when each
-# call takes its whole timeout and retries.
+# call takes its whole timeout and retries. A batching run claims every pass due at once, held
+# until its deadline (models.md, batches).
 BATCH = CONCURRENCY
 TICK_SECONDS = 30  # how often the service's worker looks at the queue
 
@@ -121,7 +125,7 @@ def _write(
         a.output, a.model = answer.value, answer.model
         return a
 
-    return bounded(attempts, one, CONCURRENCY)
+    return bounded(attempts, one, gateway.width(CONCURRENCY))
 
 
 def _read_of(text: PaperText | None) -> TextRead | None:
@@ -245,14 +249,35 @@ async def work(
     """Try every pass that is due once, up to `limit`, `BATCH` at a time: read its text, and
     write from it. No batch starts after `deadline` (`time.monotonic()`); those left are the
     worker's. The calls go on `run`, or on a run of kind `fulltext` opened only when some text
-    arrived. Returns how the tries ended."""
+    arrived. Returns how the tries ended.
+
+    A batching `run` claims all the automatic passes due at once, held until its gateway's
+    deadline, and leaves the owner's to the service's worker; without a run, while another
+    job holds the run lock, only the owner's are worked (models.md, batches)."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
+    lease, wide, owners = LEASE, False, None
+    if run and (until := run.gateway.batching_until()):
+        lease, wide, owners = until - datetime.now(UTC) + DRAIN + LEASE, True, False
+    elif run is None and await held_elsewhere(conn):
+        owners = True
+    reads = asyncio.Semaphore(CONCURRENCY)
+
+    async def read_one(c: Claimed) -> Attempt:
+        async with reads:
+            return await read(archive, c)
+
     while (limit is None or len(tried) < limit) and (
         deadline is None or time.monotonic() < deadline
     ):
         size = BATCH if limit is None else min(BATCH, limit - len(tried))
-        claimed = [c for c in await store_.claim(conn, LEASE, size, tried) if c.id not in tried]
+        if wide:
+            size = None if limit is None else limit - len(tried)
+        claimed = [
+            c
+            for c in await store_.claim(conn, lease, size, tried, owners=owners)
+            if c.id not in tried
+        ]
         if not claimed:
             break
         tried.update(c.id for c in claimed)
@@ -264,7 +289,7 @@ async def work(
                 counts[why] += 1
                 if run:
                     run.add(why)
-        attempts = await asyncio.gather(*(read(archive, c) for c in wanted))
+        attempts = await asyncio.gather(*(read_one(c) for c in wanted))
         for a in attempts:
             if a.text is None and await record(conn, a):
                 counts[_outcome(a)] += 1

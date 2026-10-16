@@ -28,6 +28,17 @@ async def start(
     return row["id"]
 
 
+async def first_since(conn: psycopg.AsyncConnection, kind: str, since: datetime) -> datetime | None:
+    """When the first run of `kind` started at or after `since`."""
+    row = await (
+        await conn.execute(
+            "SELECT min(started_at) AS at FROM runs WHERE kind = %s AND started_at >= %s",
+            (kind, since),
+        )
+    ).fetchone()
+    return row["at"]
+
+
 async def update(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
     """Set any of fetched, inserted, updated, cost, error, counts, intake on a run that is
     still going."""

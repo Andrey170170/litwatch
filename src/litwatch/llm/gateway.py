@@ -1,4 +1,5 @@
-"""Roles to providers, with retries, a timeout, the call journal and reuse."""
+"""Roles to providers, with retries, a timeout, the call journal and reuse, and in a batching
+job Message Batches (`llm.batches`)."""
 
 from __future__ import annotations
 
@@ -8,11 +9,13 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, ValidationError
 
 from litwatch.config import Models, RoleConfig, secret
+from litwatch.llm.batches import MAX_REQUESTS, Batcher, BatchProvider
 from litwatch.llm.decisions import Decision, chat_request, decision_of
 from litwatch.llm.types import (
     DecisionRequest,
@@ -31,6 +34,7 @@ log = logging.getLogger(__name__)
 RETRY_DELAYS = (1.0, 5.0, 20.0)
 # Bump when validation changes what counts as an acceptable reply.
 VALIDATION_VERSION = 1
+NORMAL_CALLS = 16  # normal calls in flight per provider, whatever the steps' own limits
 
 
 def _without_nul(value: Any) -> Any:
@@ -72,6 +76,9 @@ class Journal(Protocol):
     async def record(self, call_id: int, usage: Usage) -> None: ...
     async def accept(self, call_id: int, output: dict[str, Any]) -> None: ...
     async def reject(self, call_id: int, error: str, reply: str | None = None) -> None: ...
+    async def in_batch(self, key: str) -> dict[str, Any] | None: ...
+    async def batched(self, call_ids: list[int], batch_id: str) -> None: ...
+    async def answered(self, batch_id: str, key: str, usage: Usage) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -93,7 +100,8 @@ class DecisionProvider(Provider, Protocol):
 class Gateway:
     """`ask(role, request)` and `decide(role, request)` are the whole interface the pipeline
     uses. In `debug` mode a reply that could not be used is journalled with the call, and an
-    invalid one's error carries what the validator said."""
+    invalid one's error carries what the validator said. After `batch_until`, the calls on a
+    provider that batches go in its batches; the caller does not know."""
 
     def __init__(
         self,
@@ -103,9 +111,39 @@ class Gateway:
         *,
         retry_delays: tuple[float, ...] = RETRY_DELAYS,
         debug: bool = False,
+        normal_calls: int = NORMAL_CALLS,
     ) -> None:
         self.models, self.providers, self.journal = models, providers, journal
         self.retry_delays, self.debug = retry_delays, debug
+        self.batchers: dict[str, Batcher] = {}
+        self._gates = {name: asyncio.Semaphore(normal_calls) for name in providers}
+
+    def batch_until(self, deadline: datetime, **options: Any) -> None:
+        """Send each call on a provider that batches in its batches until `deadline` (aware),
+        and as a normal call after it. `options` tune the `Batcher`s (tests)."""
+        self.batchers = {
+            name: Batcher(provider, self.journal, deadline, **options)
+            for name, provider in self.providers.items()
+            if isinstance(provider, BatchProvider)
+        }
+
+    @property
+    def batching(self) -> bool:
+        return any(b.open() for b in self.batchers.values())
+
+    def batching_until(self) -> datetime | None:
+        """The deadline while batching, else None."""
+        return next((b.deadline for b in self.batchers.values() if b.open()), None)
+
+    def width(self, limit: int) -> int:
+        """A step's calls in flight: all of them while batching, so a step is one batch (normal
+        calls stay bounded per provider); else `limit`."""
+        return MAX_REQUESTS if self.batching else limit
+
+    async def close(self) -> None:
+        """Stop batching; calls still waiting on a batch go as normal calls."""
+        for batcher in self.batchers.values():
+            await batcher.close()
 
     def _provider(self, role: RoleConfig) -> Provider:
         if role.provider not in self.providers:
@@ -140,7 +178,7 @@ class Gateway:
         provider = self._provider(role)
         for delay in (*self.retry_delays, None):
             try:
-                async with asyncio.timeout(role.timeout_seconds):
+                async with self._gates[role.provider], asyncio.timeout(role.timeout_seconds):
                     if send:
                         return await send(provider, role)
                     return await provider.complete(role, request)
@@ -230,10 +268,10 @@ class Gateway:
         journal = self.journal
         if answer := await self._reused(role_name, request):
             return answer
-        call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None
-        reply = None
+        call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
         try:
-            reply = await self.complete(role_name, request, send)
+            if reply is None:
+                reply = await self.complete(role_name, request, send)
             reply.usage.source_call_id = call_id
             if journal:
                 await journal.record(call_id, reply.usage)
@@ -266,6 +304,37 @@ class Gateway:
         if journal:
             await journal.accept(call_id, value.model_dump(mode="json"))
         return Answer(value, reply.usage, role.label)
+
+    async def _batched(
+        self,
+        role_name: str,
+        role: RoleConfig,
+        key: str,
+        request: Request,
+        paper_id: str | None,
+        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None,
+    ) -> tuple[int | None, Reply | None]:
+        """The call's journal row, and its reply when a batch gave one (None: send it as a
+        normal call). A key a dead run left in an open batch waits on that batch, on its row."""
+        journal = self.journal
+        batcher = self.batchers.get(role.provider) if send is None else None
+        if batcher is not None and not batcher.open():
+            batcher = None
+        if batcher and journal and (row := await journal.in_batch(key)):
+            if reply := await batcher.attach(row["batch_id"], key):
+                return row["id"], _of_role(reply, role)
+            await journal.reject(row["id"], "provider: the batch did not answer it")
+        call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None
+        if batcher is None:
+            return call_id, None
+        reply = await batcher.ask(key, role, request, call_id)
+        return call_id, _of_role(reply, role) if reply else None
+
+
+def _of_role(reply: Reply, role: RoleConfig) -> Reply:
+    """A batch's reply knows its model, not the effort it was asked at."""
+    reply.usage.effort = role.effort
+    return reply
 
 
 def build(models: Models, journal: Journal | None = None, *, debug: bool = False) -> Gateway:

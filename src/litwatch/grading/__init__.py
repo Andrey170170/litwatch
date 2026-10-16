@@ -177,7 +177,7 @@ def grade(
     (`concurrency.bounded`: leaving it stops every call). Writes nothing. A grading whose
     graders fail is given with its error and stops nothing else."""
     chosen = settings or Grading()
-    return bounded(due, lambda d: _one(d, gateway, chosen), concurrency)
+    return bounded(due, lambda d: _one(d, gateway, chosen), gateway.width(concurrency))
 
 
 async def due(
