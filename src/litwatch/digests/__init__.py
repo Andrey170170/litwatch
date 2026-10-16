@@ -6,7 +6,8 @@ written on Monday for the week before.
 A digest covers the papers due when it is written (`store.digests.due`), so a paper that became
 eligible late is in the next one. Published digests are final; one whose writer call failed is
 failed, its papers stay due, and the next run writes it again. A digest with nothing due is
-published as nothing new, without a call."""
+published as nothing new, without a call. Its picks are settled as it is published, so an Area
+pick gets its Deep card (`feedback.word.settle`)."""
 
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import psycopg
 from litwatch.core import FAILED_RUNS, Depth, Rarity, Status, Taxonomy, Topic
 from litwatch.core.digests import DAILY, PUBLISHED, DigestPeriod, DigestRole, DigestState
 from litwatch.digests import writer
+from litwatch.feedback import word
 from litwatch.jobs.context import ModelRun
 from litwatch.llm import CallError, Request
 from litwatch.store import digests as store_
@@ -136,12 +138,19 @@ async def write(
     day: date,
 ) -> DigestState | None:
     """Write and store the digest, unless it is published already (None: a re-run of the same
-    day rewrites nothing). Returns the state stored."""
+    day rewrites nothing), and settle its picks in the same transaction, under their locks: an
+    Area pick's Deep pass is queued with it. Returns the state stored."""
     if await store_.state_of(conn, topic.slug, period, day) in PUBLISHED:
         return None
     o = await compose(conn, run, tree, topic, period, day)
-    if await store_.record(conn, o, run.run_id) is None:
-        return None
+    picks = sorted({s.due.paper_id for s in o.papers if s.role == DigestRole.PICK})
+    async with conn.transaction():
+        for paper_id in picks:
+            await word.lock(conn, paper_id)
+        if await store_.record(conn, o, run.run_id) is None:
+            return None
+        for paper_id in picks:
+            await word.settle(conn, paper_id)
     if o.error:
         log.warning("%s digest of %s for %s failed: %s", period, day, topic.slug, o.error)
     run.add(f"digests_{o.state.value}")

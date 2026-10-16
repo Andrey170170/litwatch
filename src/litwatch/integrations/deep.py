@@ -2,7 +2,7 @@
 and when, is the full-text queue's (`litwatch.fulltext.deep`): a card is a pass like a Brief,
 so it waits for the paper's text and is re-checked under the paper's lock before it runs. This
 module is how one is asked for: what a submission carries (the paper's text from the archive,
-the Focus topics the card is for and the card extensions they ask for), and the service's job
+the topics the card is for and the card extensions they ask for), and the service's job
 protocol, followed to the job's end with its usage.
 
 The service is a stateless job runner that does not deduplicate, so the queue records each
@@ -30,6 +30,7 @@ from litwatch.archive import PaperText
 from litwatch.config import Config
 from litwatch.core import Depth, Event, Grade, Paper, Status, Topic
 from litwatch.integrations import IntegrationError, enabled_using, required, required_secret
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
@@ -122,8 +123,8 @@ class DeepClient:
 class Deep:
     name = "deep"
     description = (
-        "Writes a Deep card for every saved Focus must read, and for any paper the owner asks "
-        "about, through the full-text queue."
+        "Writes a Deep card for every Focus must read and Area pick, unless unsaved, and for "
+        "any paper the owner asks about, through the full-text queue."
     )
 
     def __init__(
@@ -182,15 +183,24 @@ class Deep:
         self, conn: psycopg.AsyncConnection, paper_id: str, requested: bool
     ) -> list[tuple[str, Topic]]:
         """The topics the card is for, each with its class's name: the active Focus topics that
-        grade the paper must read, else, for the owner's request, every active Focus topic."""
+        grade the paper must read and the active Area topics whose published digests picked it,
+        else, for the owner's request, every active Focus topic."""
         grades = await word_store.focus_grades(conn, paper_id)
+        found = await fulltext_store.deep_facts(conn, paper_id)
+        picked = found.picked_by if found else frozenset()
         tree = await taxonomy_store.load(conn)
-        focus = [
+        active = [
             (tree.get(t.slug).name, t)
             for t in (tree.topics if tree else [])
-            if t.depth == Depth.FOCUS and t.status == Status.ACTIVE
+            if t.status == Status.ACTIVE
         ]
-        chosen = [(n, t) for n, t in focus if grades.get(t.slug) == Grade.MUST_READ]
+        chosen = [
+            (n, t)
+            for n, t in active
+            if (t.depth == Depth.FOCUS and grades.get(t.slug) == Grade.MUST_READ)
+            or (t.depth == Depth.AREA and t.slug in picked)
+        ]
+        focus = [(n, t) for n, t in active if t.depth == Depth.FOCUS]
         return chosen or (focus if requested else [])
 
 
