@@ -174,7 +174,9 @@ def export(work: Path, repo: Path, destination: Path) -> dict:
         # A killed export leaves its swap, naming a generation never made current.
         if link(swap) is not None:
             swap.unlink()
-        # A killed export (SIGTERM skips cleanup) leaves staging, or a generation never current.
+        # A killed export (SIGTERM skips cleanup) leaves staging, or a generation never current;
+        # one killed after its swap leaves its predecessor, and `current` durable only once synced.
+        _fsync_directory(destination)
         retire(destination, kept)
         # Staging shares the destination dataset so the final renames stay atomic.
         # Both backups exclude it and only read while holding this lock shared.

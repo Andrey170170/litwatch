@@ -90,7 +90,7 @@ def _check_feed(content: bytes) -> None:
             or int(total.text or "") < 0
         ):
             raise ValueError("not an arXiv Atom result feed")
-    except (ET.ParseError, ValueError) as exc:
+    except (ET.ParseError, ValueError, LookupError) as exc:  # LookupError: an unknown encoding
         raise _IncompleteFeedError("arXiv returned an invalid result feed") from exc
 
 
@@ -221,7 +221,8 @@ def _papers(content: bytes) -> list[Paper]:
         return [to_paper(r) for r in feed.results]
     except _IncompleteFeedError:
         raise
-    except ValueError as exc:  # a timestamp fromisoformat refuses, a Paper that fails validation
+    # A timestamp fromisoformat refuses or cannot carry to UTC, a Paper that fails validation.
+    except (ValueError, OverflowError) as exc:
         raise _IncompleteFeedError(f"arXiv returned an entry litwatch cannot read: {exc}") from exc
 
 

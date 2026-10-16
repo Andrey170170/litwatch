@@ -219,6 +219,39 @@ class BackupTests(unittest.TestCase):
             retired = events.index(('rmtree', predecessor))
             self.assertIn(('fsync', destination), events[swap:retired])
 
+    def test_an_export_killed_after_its_swap_is_durable_before_its_predecessor_goes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, repo = sources(root)
+            destination = root / 'backup'
+            BACKUP.export(work, repo, destination)
+            predecessor = (destination / 'current').resolve()
+            replace = BACKUP.os.replace
+
+            def killed(source, target):  # killed right after the swap, before its sync
+                replace(source, target)
+                raise KeyboardInterrupt
+
+            with mock.patch.object(BACKUP.os, 'replace', killed), self.assertRaises(KeyboardInterrupt):
+                BACKUP.export(work, repo, destination)
+            self.assertTrue(predecessor.exists())
+            self.assertNotEqual((destination / 'current').resolve(), predecessor)
+            events = []
+            fsync, rmtree = BACKUP.os.fsync, BACKUP.shutil.rmtree
+
+            def synced(descriptor):
+                events.append(('fsync', Path(os.readlink(f'/proc/self/fd/{descriptor}'))))
+                fsync(descriptor)
+
+            def removed(path, *args, **kwargs):
+                events.append(('rmtree', Path(path)))
+                rmtree(path, *args, **kwargs)
+
+            with mock.patch.object(BACKUP.os, 'fsync', synced), \
+                    mock.patch.object(BACKUP.shutil, 'rmtree', removed):
+                BACKUP.export(work, repo, destination)
+            self.assertIn(('fsync', destination), events[:events.index(('rmtree', predecessor))])
+
     def test_a_failed_export_leaves_the_previous_one_whole_and_current(self):
         # archive.md, Deferred to N5: refreshing the export entry by entry left new databases
         # beside old directories when it failed part-way.
