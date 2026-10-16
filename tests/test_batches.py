@@ -4,6 +4,7 @@ cuts or a dead run left open is handled without paying twice."""
 
 import asyncio
 import json
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.batches import DRAIN, MAX_REQUESTS
 from litwatch.llm.prices import anthropic_cost
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
@@ -230,6 +232,35 @@ async def test_a_journal_that_fails_fails_the_calls_waiting_on_their_batch(conn,
     monkeypatch.setattr(journal, "batched", down)
     with pytest.raises(OSError):
         await asyncio.wait_for(gw.ask("brief", ask(0)), 2)
+    await gw.close()
+
+
+async def test_a_journal_that_fails_on_one_batch_lets_the_others_checks_end_first(
+    conn, monkeypatch
+):
+    anthropic, _ = await dead_batches(conn, 2)
+    journal = CallJournal(conn, await runs.start(conn, "nightly"))
+    gw, _, _, _ = batching(journal, provider=anthropic)
+    answered, results, ended = journal.answered, anthropic.results, []
+
+    async def fails_on_the_first(batch_id, key, usage):
+        if batch_id == "msgbatch_1":
+            raise OSError("the database went away")
+        await answered(batch_id, key, usage)
+
+    async def slow_second(batch_id):
+        if batch_id == "msgbatch_2":
+            await asyncio.sleep(0.2)
+        replies = await results(batch_id)
+        ended.append(batch_id)
+        return replies
+
+    monkeypatch.setattr(journal, "answered", fails_on_the_first)
+    monkeypatch.setattr(anthropic, "results", slow_second)
+    await gw.recover()
+    with pytest.raises(OSError):
+        await asyncio.wait_for(gw.settle(), 2)
+    assert sorted(ended) == ["msgbatch_1", "msgbatch_2"]  # none still running past the failure
     await gw.close()
 
 
@@ -648,14 +679,28 @@ async def test_a_run_whose_deadline_passes_before_its_steps_waits_for_the_nights
     waited = []
 
     async def wait_for_texts(conn, config, run, since, deadline, limit=None):
-        waited.append(since)
+        waited.append((since, deadline - time.monotonic()))
 
     monkeypatch.setattr(nightly, "wait_for_texts", wait_for_texts)
     anthropic = BatchingProvider("anthropic", respond)
     gateway = factory(respond, anthropic)
     await nightly.run(conn, steps.CONFIG, fetch=False, gateway=gateway, night=night)
     started = (await runs.get(conn, first))["started_at"]
-    assert waited == [started] and anthropic.batches == {}
+    ((since, left),) = waited
+    assert since == started and anthropic.batches == {}
+    assert left <= 0  # the night's deadline has passed: no wait begins again
+
+
+async def test_leases_are_taken_back_after_a_taxonomy_edit_in_flight(conn):
+    """Under the taxonomy lock, shared, as every settle: never in another order than a taxonomy
+    save dropping the same passes."""
+    async with await store.connect(conn.test_dsn, conn.test_schema) as other:
+        async with other.transaction():
+            await taxonomy_store.lock(other)
+            taking = asyncio.create_task(fulltext_store.take_back(conn, LEASE))
+            await asyncio.sleep(0.3)
+            assert not taking.done()
+        assert await asyncio.wait_for(taking, 2) == 0
 
 
 async def passing(conn):

@@ -227,19 +227,17 @@ async def _steps(
     # left open are cancelled and settled as at a deadline.
     run.gateway.batch_until(night[1] if night else datetime.now(UTC))
     await run.gateway.recover()
-    if not run.gateway.batching:
-        # Nothing to batch on, or the deadline passed meanwhile: the passes go as normal calls,
-        # and the digests wait for them as an unbatched run's do.
-        night = None
+    batching = run.gateway.batching
     await classify(conn, config, run, limit)
     await analyse(conn, run, limit)
     await grade(conn, config, run, limit)
-    # The digests wait for the passes they depend on: until the night's deadline, or from now
-    # and at most `wait_minutes`.
+    # The digests wait for the passes they depend on: until the night's deadline; from now and
+    # at most `wait_minutes` outside the night, or when nothing batches (the passes go as
+    # normal calls), though never past the night's deadline.
+    wait = config.digests.wait_minutes * 60
     if night:
-        wait = (night[1] - datetime.now(UTC)).total_seconds()
-    else:
-        wait = config.digests.wait_minutes * 60
+        left = max(0.0, (night[1] - datetime.now(UTC)).total_seconds())
+        wait = left if batching else min(left, wait)
     deadline = time.monotonic() + wait
     done = await text_passes(conn, config, run, limit, deadline)
     if not with_digests:

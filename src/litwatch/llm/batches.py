@@ -245,8 +245,12 @@ class Batcher:
         while self._open:
             now = self.now()
             looked = list(self._open.items())
-            # Together, so a pass takes two operations at most however many batches are open.
-            await asyncio.gather(*(self._check(i, b, now) for i, b in looked))
+            # Together, so a pass takes two operations at most however many batches are open;
+            # a failure is raised once every check has ended, none left running past it.
+            checks = (self._check(i, b, now) for i, b in looked)
+            ended = await asyncio.gather(*checks, return_exceptions=True)
+            if failed := next((e for e in ended if isinstance(e, BaseException)), None):
+                raise failed
             if self.now() >= self.deadline + self.drain:  # each given up looked at first
                 left = [(i, b) for i, b in looked if i in self._open]
                 if left:
