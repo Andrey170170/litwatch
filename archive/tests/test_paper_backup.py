@@ -278,6 +278,52 @@ class BackupTests(unittest.TestCase):
                 BACKUP.export(work, repo, elsewhere)
             self.assertEqual({p.name for p in elsewhere.iterdir()}, {'current', '.export.lock'})
 
+    def test_only_an_exports_own_links_and_generations_are_trusted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, repo = sources(root)
+            outside = root / 'outside'
+            BACKUP.export(work, repo, outside)
+            foreign = (outside / 'current').resolve()  # a real generation, but not beside them
+            # A `current` or `.current-new` naming anything but a generation beside it: refused,
+            # and left as it was.
+            for name, target in (('current', foreign), ('.current-new', foreign),
+                                 ('current', 'export-5')):
+                with self.subTest(link=name, target=str(target)):
+                    destination = root / f'backup-{name.strip(".")}-{Path(target).name}'
+                    destination.mkdir()
+                    (destination / 'export-5').mkdir()
+                    (destination / name).symlink_to(target, target_is_directory=True)
+                    before = {p.name for p in destination.iterdir()} | {BACKUP.LOCK}
+                    with self.assertRaisesRegex(RuntimeError, 'not a generation an export wrote'):
+                        BACKUP.export(work, repo, destination)
+                    self.assertEqual({p.name for p in destination.iterdir()}, before)
+                    self.assertEqual(os.readlink(destination / name), str(target))
+            # Symlinks never prove an export wrote anything, nor lead cleanup elsewhere.
+            destination = root / 'backup'
+            BACKUP.export(work, repo, destination)
+            (destination / 'export-7').symlink_to(foreign, target_is_directory=True)
+            marked = root / 'marked'
+            marked.mkdir()
+            (marked / BACKUP.MARKER).touch()
+            (destination / '.arxiv-export-linked').symlink_to(marked, target_is_directory=True)
+            (destination / '.arxiv-export-fake').mkdir()
+            (destination / '.arxiv-export-fake' / BACKUP.MARKER).symlink_to(marked / BACKUP.MARKER)
+            BACKUP.export(work, repo, destination)
+            for name in ('export-7', '.arxiv-export-linked', '.arxiv-export-fake'):
+                self.assertTrue((destination / name).is_symlink() or (destination / name).is_dir(), name)
+            self.assertTrue((foreign / 'export.json').is_file() and (marked / BACKUP.MARKER).is_file())
+            # A generation's name already taken, even by an empty directory, is refused.
+            current = (destination / 'current').resolve()
+            (destination / 'export-42').mkdir()
+            with mock.patch.object(BACKUP.time, 'time_ns', return_value=42):
+                with self.assertRaisesRegex(RuntimeError, 'export-42 already exists'):
+                    BACKUP.export(work, repo, destination)
+            self.assertEqual(list((destination / 'export-42').iterdir()), [])
+            self.assertEqual((destination / 'current').resolve(), current)
+            self.assertEqual({p.name for p in destination.glob('.arxiv-export-*')},
+                             {'.arxiv-export-linked', '.arxiv-export-fake'})
+
     def test_campaign_discovery_rejects_symlink_escape(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

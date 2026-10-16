@@ -120,17 +120,38 @@ def exported(report: Path) -> bool:
     return isinstance(written, dict) and {'created_at', 'databases', 'restore'} <= written.keys()
 
 
+def generation(entry: Path) -> bool:
+    """Whether `entry` is a generation an export wrote: a real directory `export-<n>` holding
+    its export.json."""
+    return (re.fullmatch(r'export-\d+', entry.name) is not None and entry.is_dir()
+            and not entry.is_symlink() and exported(entry / 'export.json'))
+
+
 def owned(entry: Path) -> bool:
     """Whether an export provably wrote this entry, so an export may delete it: a generation
     holding its export.json, or a staging directory holding the marker."""
     if entry.is_symlink() or not entry.is_dir():
         return False
     if re.fullmatch(r'export-\d+', entry.name):
-        return exported(entry / 'export.json')
+        return generation(entry)
     if entry.name.startswith(STAGING):
         marker = entry / MARKER
         return marker.is_file() and not marker.is_symlink()
     return False
+
+
+def link(path: Path) -> str | None:
+    """The generation the symlink `path` names, or None when there is no `path`. Anything but
+    an export's own symlink, naming a generation in its directory directly, is refused."""
+    if not path.is_symlink():
+        if path.exists():
+            raise RuntimeError(f'Refusing to export: {path} is not the symlink an export writes')
+        return None
+    target = os.readlink(path)
+    if '/' in target or not generation(path.parent / target):
+        raise RuntimeError(f'Refusing to export: {path} names {target!r}, not a generation an '
+                           'export wrote beside it')
+    return target
 
 
 def retire(destination: Path, keep: str | None) -> None:
@@ -149,30 +170,32 @@ def export(work: Path, repo: Path, destination: Path) -> dict:
     with (destination / LOCK).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         current, swap = destination / CURRENT, destination / '.current-new'
-        for link in (current, swap):
-            if (link.exists() or link.is_symlink()) and not link.is_symlink():
-                raise RuntimeError(f'Refusing to export into {destination}: {link.name} is not '
-                                   'the symlink an export writes')
+        kept = link(current)
+        # A killed export leaves its swap, naming a generation never made current.
+        if link(swap) is not None:
+            swap.unlink()
         # A killed export (SIGTERM skips cleanup) leaves staging, or a generation never current.
-        retire(destination, os.readlink(current) if current.is_symlink() else None)
+        retire(destination, kept)
         # Staging shares the destination dataset so the final renames stay atomic.
         # Both backups exclude it and only read while holding this lock shared.
         staging = Path(tempfile.mkdtemp(prefix=STAGING, dir=destination))
         try:
             (staging / MARKER).touch()
             report = _write(work, repo, staging)
-            generation = destination / f'export-{time.time_ns()}'
-            os.rename(staging, generation)
+            published = destination / f'export-{time.time_ns()}'
+            # rename() would replace an empty directory; the lock keeps other exports out.
+            if published.exists() or published.is_symlink():
+                raise RuntimeError(f'Refusing to export: {published} already exists')
+            os.rename(staging, published)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        (generation / MARKER).unlink()
-        _fsync_tree(generation)
-        swap.unlink(missing_ok=True)
-        swap.symlink_to(generation.name, target_is_directory=True)
+        (published / MARKER).unlink()
+        _fsync_tree(published)
+        swap.symlink_to(published.name, target_is_directory=True)
         os.replace(swap, current)
         _fsync_directory(destination)
-        retire(destination, generation.name)
+        retire(destination, published.name)
         _fsync_directory(destination)
         return report
 
