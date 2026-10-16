@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 
 import arxiv
 import requests
+import urllib3
 
 from litwatch.core import Paper
 from litwatch.intake.pacing import PacingError, shared_pacer
@@ -21,8 +22,8 @@ _VERSION_RE = re.compile(r"v\d+$")
 log = logging.getLogger(__name__)
 _BACKOFF = (60, 120, 240, 480, 900)
 _RETRY_BUDGET = 40 * 60  # the nightly intake's wait on one page, retries included
-# An owner's request (Process, Deep read, Report as a miss) waits this long on arXiv at most,
-# socket waits and the shared pacer's slot included; no backoff fits in it, so it is one try.
+# An owner's request (Process, Deep read, Report as a miss) waits this long on arXiv at most:
+# the shared pacer's slot, the connection and the whole body. No backoff fits, so it is one try.
 LOOKUP_BUDGET = 45.0
 
 
@@ -42,34 +43,27 @@ def _retry_after(value: str) -> float:
 
 
 class _ArxivSession(requests.Session):
-    """Bound socket waits and retain Retry-After, which arxiv.HTTPError discards."""
+    """Bound each request by its page's deadline and retain Retry-After, which arxiv.HTTPError
+    discards."""
 
     retry_after = 0.0
 
     def get(self, url, **kwargs):
+        """One request within the page's deadline: the pacing slot, the connection and the whole
+        body. Past it, requests.Timeout, with the connection closed and the slot free, so no
+        thread is left holding them."""
         self.retry_after = 0
         deadline = getattr(self, "deadline", time.monotonic() + _RETRY_BUDGET)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise requests.Timeout("arXiv's deadline passed")
-        # Socket waits never run past the page's deadline.
-        kwargs.setdefault("timeout", (min(10, remaining), min(60, remaining)))
+        kwargs["stream"] = True
         pacer = shared_pacer()
         if pacer is None:
-            response = super().get(url, **kwargs)
+            response = self._read(url, deadline, None, **kwargs)
         else:
-            # arxiv consumes buffered content; close it before releasing the slot.
             # The API endpoint does not need redirects. Reject instead of silently
             # following one without provider pacing.
             kwargs["allow_redirects"] = False
-            kwargs["stream"] = True
             with pacer.slot(timeout=max(0, deadline - time.monotonic())):
-                response = super().get(url, **kwargs)
-                try:
-                    pacer.defer(response.headers.get("Retry-After"))
-                    _ = response.content
-                finally:
-                    response.close()
+                response = self._read(url, deadline, pacer, **kwargs)
         self.retry_after = _retry_after(response.headers.get("Retry-After", ""))
         if response.status_code == 200:
             try:
@@ -83,6 +77,41 @@ class _ArxivSession(requests.Session):
                     raise ValueError("not an arXiv Atom result feed")
             except (ET.ParseError, ValueError) as exc:
                 raise _IncompleteFeedError("arXiv returned an invalid result feed") from exc
+        return response
+
+    def _read(self, url, deadline: float, pacer, **kwargs) -> requests.Response:
+        """The response with its body read, chunk by chunk against `deadline`."""
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise requests.Timeout("arXiv's deadline passed")
+        kwargs.setdefault("timeout", (min(10, remaining), min(60, remaining)))
+        response = super().get(url, **kwargs)
+        try:
+            if pacer is not None:
+                pacer.defer(response.headers.get("Retry-After"))
+            body = bytearray()
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise requests.ReadTimeout("arXiv's deadline passed mid-body")
+                # Each read is one socket read, and waits no longer than the deadline allows.
+                connection = response.raw.connection
+                if connection is not None and connection.sock is not None:
+                    connection.sock.settimeout(min(60, remaining))
+                try:
+                    chunk = response.raw.read1(65536, decode_content=True)
+                except urllib3.exceptions.ReadTimeoutError as exc:
+                    raise requests.ReadTimeout(exc) from exc
+                except urllib3.exceptions.ProtocolError as exc:
+                    raise requests.exceptions.ChunkedEncodingError(exc) from exc
+                except urllib3.exceptions.DecodeError as exc:
+                    raise requests.exceptions.ContentDecodingError(exc) from exc
+                if not chunk:
+                    break
+                body += chunk
+            response._content = bytes(body)
+        finally:
+            response.close()
         return response
 
 

@@ -1,12 +1,16 @@
 """Exercise backoff through the real arxiv parser and pagination."""
 
+import fcntl
+import io
+import threading
+import time
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import arxiv
 import pytest
 import requests
+from requests.structures import CaseInsensitiveDict
 
 from litwatch.intake import search as arxiv_source
 
@@ -23,6 +27,21 @@ def feed(paper_id="2609.10001", total=1):
       </entry></feed>""".encode()
 
 
+class Body:
+    """A response body read as urllib3's is: `read1` and no connection."""
+
+    connection = None
+
+    def __init__(self, content: bytes) -> None:
+        self.body = io.BytesIO(content)
+
+    def read1(self, amt: int, decode_content: bool = True) -> bytes:
+        return self.body.read1(amt)
+
+    def close(self) -> None:
+        pass
+
+
 @pytest.fixture
 def transport(monkeypatch):
     responses, calls, sleeps = [], [], []
@@ -33,7 +52,10 @@ def transport(monkeypatch):
         if isinstance(response, Exception):
             raise response
         status, content, headers = response
-        return SimpleNamespace(status_code=status, content=content, headers=headers)
+        answer = requests.Response()
+        answer.status_code, answer.headers = status, CaseInsensitiveDict(headers)
+        answer.raw = Body(content)
+        return answer
 
     monkeypatch.setattr(requests.Session, "get", get)
     monkeypatch.setattr("time.sleep", sleeps.append)
@@ -198,3 +220,34 @@ def test_an_owner_lookup_waits_on_arxiv_within_its_budget_and_nightly_keeps_its_
         fetch()
     assert [s for s in sleeps if s >= 60] == [60, 120, 240, 480, 900]
     assert all(kwargs["timeout"] == (10, 60) for _, kwargs in calls)
+
+
+@pytest.mark.parametrize("paced", [False, True])
+def test_an_owner_lookup_ends_at_its_deadline_on_a_trickling_body(
+    slow_arxiv, monkeypatch, tmp_path, paced
+):
+    # One deadline covers the pacing slot, the connection and the whole body (L5-3): a body that
+    # trickles in keeps every socket read short, and must not keep the thread, nor the slot.
+    monkeypatch.setattr(arxiv_source, "LOOKUP_BUDGET", 0.5)
+    if paced:
+        monkeypatch.setenv("ARXIV_PACING_DIR", str(tmp_path))
+    else:
+        monkeypatch.delenv("ARXIV_PACING_DIR", raising=False)
+    outcome = []
+
+    def lookup():
+        try:
+            outcome.append(arxiv_source.fetch_by_ids(["2609.10001"]))
+        except Exception as exc:  # noqa: BLE001 - what it raised is the assertion below
+            outcome.append(exc)
+
+    thread = threading.Thread(target=lookup, daemon=True)
+    started = time.monotonic()
+    thread.start()
+    thread.join(3)
+    assert not thread.is_alive(), "the fetch outlived its deadline"
+    assert time.monotonic() - started < 1.5
+    assert isinstance(outcome[0], arxiv_source.NoAnswerError)
+    if paced:
+        with open(tmp_path / "arxiv-rate.lock", "r+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # the slot is free

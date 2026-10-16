@@ -16,7 +16,7 @@ from litwatch.core.classification import Source
 from litwatch.feedback import word
 from litwatch.feedback.word import Settled
 from litwatch.intake import batch
-from litwatch.intake.search import LOOKUP_BUDGET, NoAnswerError, fetch_by_ids, id_from_url
+from litwatch.intake.search import fetch_by_ids, id_from_url
 from litwatch.store import classifications as classifications_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -28,9 +28,6 @@ class NotFoundError(LookupError):
 
 
 SILENT = "arXiv did not answer in time, and nothing was stored; try again in a minute"
-# Past its budget the fetch's thread may still be in a socket read that trickles in; the owner's
-# request does not wait for it.
-_GRACE = 10.0
 
 
 async def lookup(conn: psycopg.AsyncConnection, text: str) -> tuple[Paper, bool]:
@@ -41,21 +38,16 @@ async def lookup(conn: psycopg.AsyncConnection, text: str) -> tuple[Paper, bool]
 
 async def resolve(conn: psycopg.AsyncConnection, text: str) -> tuple[str, Paper | None]:
     """The arXiv id `text` names, and arXiv's record of the paper when litwatch lacks it. Call
-    it outside a transaction: arXiv may keep it waiting up to a minute. NotFoundError when the text
-    names no paper or arXiv does not know it; NoAnswerError when arXiv does not answer within
-    `LOOKUP_BUDGET`."""
+    it outside a transaction: arXiv may keep it waiting for `search.LOOKUP_BUDGET`. NotFoundError
+    when the text names no paper or arXiv does not know it; NoAnswerError when arXiv gives no
+    answer in that time."""
     try:
         paper_id = id_from_url(text)
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
     if await papers_store.get(conn, paper_id):
         return paper_id, None
-    try:
-        fetched = await asyncio.wait_for(
-            asyncio.to_thread(fetch_by_ids, [paper_id]), LOOKUP_BUDGET + _GRACE
-        )
-    except TimeoutError as exc:
-        raise NoAnswerError(SILENT) from exc
+    fetched = await asyncio.to_thread(fetch_by_ids, [paper_id])
     if not fetched:
         raise NotFoundError(f"arXiv has no paper {paper_id}")
     return paper_id, fetched[0]

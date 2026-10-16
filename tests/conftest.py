@@ -1,9 +1,13 @@
-"""Shared fixtures: a migrated database in a throwaway schema, and a few topics and papers."""
+"""Shared fixtures: a migrated database in a throwaway schema, a few topics and papers, and an
+arXiv that stays slow."""
 
 import asyncio
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 
+import arxiv
 import pytest
 
 from litwatch import store
@@ -107,3 +111,35 @@ async def deliver(conn, integration, now=None) -> int:
     """`dispatch.deliver`, once the events written so far are settled."""
     await settled(conn)
     return await dispatch.deliver(conn, integration, now)
+
+
+@pytest.fixture
+def slow_arxiv(monkeypatch):
+    """arXiv's API on a local socket: it answers 200, then trickles its body a byte every 50 ms
+    and never finishes, so no socket read ever times out. Requests' real reads are what run."""
+    stop = threading.Event()
+
+    class Trickle(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/atom+xml")
+            self.send_header("Content-Length", "1000000")
+            self.end_headers()
+            try:
+                while not stop.wait(0.05):
+                    self.wfile.write(b" ")
+            except OSError:
+                pass  # the client hung up
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Trickle)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}/api/query?{{}}"
+    monkeypatch.setattr(arxiv.Client, "query_url_format", url)
+    yield server
+    stop.set()
+    server.shutdown()
+    server.server_close()

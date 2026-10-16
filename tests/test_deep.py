@@ -5,7 +5,6 @@ shows."""
 
 import asyncio
 import contextlib
-import threading
 
 import httpx
 import pytest
@@ -29,6 +28,7 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
+from litwatch.intake import search
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
@@ -697,7 +697,7 @@ async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypa
 
 
 async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(
-    db, monkeypatch
+    db, monkeypatch, slow_arxiv
 ):
     await db.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
@@ -717,16 +717,12 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [])  # arXiv lacks it too
     async with http:
         missing = await http.post("/api/papers/2601.99999/card")
-        # arXiv silent: the request ends within its budget, with a 503 (P5).
-        release = threading.Event()
+        # arXiv trickling its answer in: the request ends within its budget, with a 503 (P5).
         with monkeypatch.context() as m:
-            m.setattr(misses, "LOOKUP_BUDGET", 0.2)
-            m.setattr(misses, "_GRACE", 0.1)
-            m.setattr(misses, "fetch_by_ids", lambda ids: release.wait(30) and [])
-            try:
-                silent = await asyncio.wait_for(http.post("/api/papers/2601.99998/card"), 5)
-            finally:
-                release.set()
+            m.setattr(search, "LOOKUP_BUDGET", 0.3)
+            m.setattr(misses, "fetch_by_ids", search.fetch_by_ids)
+            m.delenv("ARXIV_PACING_DIR", raising=False)
+            silent = await asyncio.wait_for(http.post("/api/papers/2601.99998/card"), 5)
         assert silent.status_code == 503 and silent.json()["detail"] == misses.SILENT
         asked = await http.post(f"/api/papers/{P.id}/card")
         queued = (await http.get(f"/api/papers/{P.id}")).json()

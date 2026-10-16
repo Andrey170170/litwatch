@@ -654,27 +654,22 @@ async def test_two_requests_storing_the_same_fetched_paper_both_get_it(conn, sec
     assert added["n"] == 1
 
 
-async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monkeypatch):
+async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monkeypatch, slow_arxiv):
     """Process and Report as a miss on a paper litwatch lacks wait on arXiv for its budget at
-    most (P5): then a 503 that says so, and nothing stored."""
-    import threading
-
+    most (P5), however slowly arXiv trickles its answer in: then a 503 that says so, and
+    nothing stored."""
     from litwatch.feedback import misses
+    from litwatch.intake import search
 
-    release = threading.Event()
-    monkeypatch.setattr(misses, "LOOKUP_BUDGET", 0.2)
-    monkeypatch.setattr(misses, "_GRACE", 0.1)
-    monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: release.wait(30) and [])
-    try:
-        for path, body in [
-            ("/api/lookup", {"q": "2610.07777"}),
-            ("/api/misses", {"paper_id": "2610.07777", "topic": FAITH.slug}),
-        ]:
-            answer = await asyncio.wait_for(client.post(path, json=body), 5)
-            assert answer.status_code == 503, path
-            assert answer.json()["detail"] == misses.SILENT
-    finally:
-        release.set()
+    monkeypatch.setattr(search, "LOOKUP_BUDGET", 0.3)
+    monkeypatch.delenv("ARXIV_PACING_DIR", raising=False)
+    for path, body in [
+        ("/api/lookup", {"q": "2610.07777"}),
+        ("/api/misses", {"paper_id": "2610.07777", "topic": FAITH.slug}),
+    ]:
+        answer = await asyncio.wait_for(client.post(path, json=body), 5)
+        assert answer.status_code == 503, path
+        assert answer.json()["detail"] == misses.SILENT
     assert await papers_store.get(conn, "2610.07777") is None
 
 
