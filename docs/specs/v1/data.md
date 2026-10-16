@@ -91,7 +91,7 @@ awaits its text); the first v1's
 `memberships` (paper in a field) is replaced by the new one. `regression` and the M2 labelling tables stay as
 evaluation history.
 
-**Kept as they are:** `papers`, `intake_checkpoints`, `intake_snapshots`, `runs`, `inference_calls` (plus the reply of a failed call, kept in debug mode), `labels` (plus
+**Kept as they are:** `papers`, `intake_checkpoints`, `intake_snapshots`, `runs`, `inference_calls` (plus the batch a call went in, and the reply of a failed call, kept in debug mode), `labels` (plus
 class labels; the value is a Fit or unsure, and the grade column is gone: the grade follows from the Fit), `reactions` (reason values changed: wrong_topic, overrated, not_interesting, already_knew, underrated, great_find), `appraisals`, `calibration_sessions`,
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
@@ -104,7 +104,8 @@ subtree, and the graded Fit; the keyword hit, both opinions, split and the two e
 `schema_migrations`.
 
 The restart ([milestones.md](milestones.md), N6) starts from an empty database (decision 48): the migrations run on
-a fresh schema, and the two most recent weeks are read from the archive. Nothing is carried from 0.14 or the first
+a fresh schema, and the most recent week is read from the archive (two weeks until the owner's call of 2026-10-16;
+the week before comes with the backfill). Nothing is carried from 0.14 or the first
 v1; the first v1's database was dumped before its deployment stopped (2026-10-14).
 
 The owner's earlier labels are kept as the evaluation set, as files in `evals/labels/` (decision 55), mapped onto the
@@ -156,7 +157,13 @@ model = "claude-haiku-5-5"
 
 [models.brief]
 provider = "anthropic"
-model = "claude-opus-5-5"
+model = "claude-sonnet-5-5"
+effort = "high"
+fallback = "brief_fallback" # asked once when brief refuses (models.md, roles)
+
+[models.brief_fallback]    # another lab, chosen by the model-spend plan's replay
+provider = "openrouter"
+model = "google/gemini-4-argon"
 
 [models.writer]
 provider = "anthropic"
@@ -178,8 +185,13 @@ area_check_min_confidence = 0.7
 wait_minutes = 120
 
 [budget]
-anthropic_monthly = 200
-openrouter_monthly = 30
+anthropic_monthly = 100
+openrouter_monthly = 25
+
+[schedule]
+nightly = "0 2 * * *"
+deadline = "07:30"         # the nightly's batches end here (models.md, batches)
+timezone = "America/Denver" # the owner's; none is the server's own zone
 ```
 
 The models are proposals until N1 and N2 measure them. The taxonomy and topics live in the database, edited in
