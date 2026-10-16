@@ -72,7 +72,7 @@ export type TextPassStuck = {
   paper_id: string;
   revision: number;
   title: string;
-  kind: "brief" | "weight";
+  kind: "brief" | "weight" | "deep";
   state: "failed" | "awaiting_text";
   failed_runs: number;
   last_error: string | null;

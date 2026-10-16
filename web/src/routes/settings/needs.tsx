@@ -184,7 +184,7 @@ function Ungraded({ s, badge, settle }: { s: Stuck; badge: React.ReactNode; sett
 /** A full-text pass that failed three runs or waits for its text over a week; Run it now puts it first in line. */
 function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
   const run = useRunPassNow(s.paper_id);
-  const what = s.kind === "brief" ? "Brief" : "Weight re-check";
+  const what = { brief: "Brief", weight: "Weight re-check", deep: "Deep card" }[s.kind];
   return (
     <div className={`need fail${s.settled ? " settled" : ""}`}>
       <div className="nh">

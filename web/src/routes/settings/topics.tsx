@@ -162,6 +162,8 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
   const matches = useQuery(keywordsQuery(cls.slug, !!current));
   const path = classPath(tree, cls.slug);
   const dirty = JSON.stringify(form) !== JSON.stringify(base);
+  // A class not followed yet can be followed with its generated defaults as they are.
+  const savable = dirty || !current;
   // The taxonomy refreshed behind a pristine form (edited elsewhere meanwhile): the form follows it, so a save sends
   // the current fields, not the ones loaded before. An edited form keeps its edits.
   const loaded = JSON.stringify(asForm(current ?? fresh(cls)));
@@ -291,7 +293,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
           </div>
         ) : (
           <div className="nact">
-            <button className="btn pri" disabled={!dirty || save.isPending} title={dirty ? undefined : "Nothing changed"} onClick={onSave}>
+            <button className="btn pri" disabled={!savable || save.isPending} title={savable ? undefined : "Nothing changed"} onClick={onSave}>
               {current ? "Save" : "Follow"}
             </button>
             <button className="btn" onClick={() => void navigate({ to: "/settings/$page", params: { page: "topics" } })}>

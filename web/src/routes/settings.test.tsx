@@ -333,6 +333,22 @@ describe("Settings", () => {
     expect(within(item as HTMLElement).queryByRole("button", { name: "Run it now" })).toBeNull();
   });
 
+  it("follows a class with its generated defaults as they are", async () => {
+    viewport(true);
+    scriptFetch({ ...common, "GET /api/settings/taxonomy": { ...tree, topics: [] } });
+    renderApp("/settings/topics/mi");
+    expect(await screen.findByRole("button", { name: "Follow" })).toBeEnabled();
+  });
+
+  it("names a stuck Deep pass as a Deep card", async () => {
+    viewport(true);
+    const deep = { ...pass, id: 8, kind: "deep", title: "A carded paper" };
+    scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night: { ...quality.night, fulltext: [deep] } } });
+    renderApp("/settings/needs");
+    const item = (await screen.findByRole("link", { name: "A carded paper" })).closest(".need")!;
+    expect(item).toHaveTextContent("Deep card failed 3 runs");
+  });
+
   it("saves a topic only once something changed, then offers the re-run in place of Save", async () => {
     viewport(true);
     const after = { ...topic, interests: "Sparse circuits" };
