@@ -119,7 +119,8 @@ does not know.
 
 - **R1. Sonnet refuses more of the feed, or so does the fallback.** Sonnet declines in `frontier_llm` and
   `general_harms` as well as `cyber` and `bio`, and the feed is mostly papers about frontier LLMs. P1 measures it on
-  N6's papers, including the three Opus refused; the fallback candidates are asked of every refusal. A paper all of
+  N6's papers, including the three Opus refused (one Brief, and two papers whose grading `judge` refused, asked
+  here for their Brief); the fallback candidates are asked of every refusal. A paper all of
   them refuse stays failed, listed on Quality as today.
 - **R2. A batch runs long.** Most finish within an hour; 24 hours is allowed. The deadline cancels what is left and
   sends it as normal calls: at worst a night's remaining passes cost full price (about $3), and digests still land
@@ -143,8 +144,8 @@ All work is in a worktree off `v1`; each PR follows [`docs/agents/workflow.md`](
 
 | Stage | What | Shows before the next starts |
 | --- | --- | --- |
-| P1 | **Sonnet replay.** 40 of N6's passes (the 3 refused, 12 Focus Briefs, 25 re-checks) replayed on the `n6_restart` database as an evaluation (evaluation tables only). Sonnet at high and at medium; three text variants at high (as now, bibliography cut, appendix also cut). The fallback candidates on every refusal. About $8–10; the owner confirms before it passes $5. | A report in `evals/`: refusals by category; agreement with Opus on Weight and on the overstatement line, per effort; output tokens and cost per effort; tokens per text variant; each fallback candidate's answers. About 8 Opus/Sonnet pairs for the owner to read. **The owner's read decides Sonnet.** |
-| P2 | **PR 1.** `brief` on Sonnet with the fallback, trimming as P1 settled it, budgets, 02:00 and the schedule's zone. | Checks green. A full-text pass end to end on a scratch database. A refusal reaches the fallback (shown with a fake). The pass's cost lower in the journal. |
+| P1 | **Sonnet replay.** 40 of N6's papers (the 3 Opus refused: one Brief, two in grading, asked for their Brief; 12 Focus Briefs; 25 re-checks) replayed on the `n6_restart` database as an evaluation (evaluation tables only). Sonnet at high and at medium; three text variants at high (as now, bibliography cut, appendix also cut). The fallback candidates on every refusal. About $8–10; the owner confirms before it passes $5. | A report in `evals/`: refusals by category; agreement with Opus on Weight and on the overstatement line, per effort; output tokens and cost per effort; tokens per text variant; each fallback candidate's answers. About 8 Opus/Sonnet pairs for the owner to read. **The owner's read decides Sonnet.** |
+| P2 | **PR 1.** `brief` on Sonnet with the fallback and effort P1 chose (the spec amended to match), trimming as P1 settled it, budgets, 02:00 and the schedule's zone. | Checks green. A full-text pass end to end on a scratch database. A refusal reaches the fallback (shown with a fake). The pass's cost lower in the journal. |
 | P3 | **PR 2.** The batch path in the gateway (collector, poller, the Anthropic batch provider, batch ids by a migration, the deadline), lifted concurrency and pass claims in batch mode, the worker's sit-out, the digest wait ending at the deadline, topics' digests written in parallel. | Tests with a fake batch provider. One real batch per call shape. A night on a scratch database through batches: rounds, times, cost against the projection, the journal against Anthropic's usage, a killed and restarted run that submits nothing twice. |
 
 ## Verification
@@ -156,9 +157,9 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V1 | Sonnet's Briefs and Weights are good enough | P1's report (refusals, agreement with Opus per effort, tokens) and the owner's read of the pairs |
 | V2 | A refusal falls back to OpenRouter, once | pytest with a scripted refusal: one fallback call, journalled under its own provider; P1's fallback answers |
 | V3 | Trimming cuts the bibliography and nothing else | unit tests on real LaTeX and PDF texts from N6; P1's token counts |
-| V4 | An unchanged text costs nothing | pytest on PostgreSQL: a pass queued again for a newer version with the same text and revision is answered from the journal (no provider call, cost 0); a changed text calls |
+| V4 | An unchanged question costs nothing | pytest on PostgreSQL: a pass queued again for a newer version with the same text, title, abstract, area and revision is answered from the journal (no provider call, cost 0); a changed text calls |
 | V5 | Batched steps leave the same records as normal calls | pytest with a fake batch provider across analysis, grading and passes: same records, reuse, refusal, truncation and an expired batch handled as today |
-| V6 | A restart submits nothing twice once a batch is recorded | pytest: a nightly killed with batches open and passes leased, run again: the fake sees one submission, the passes are taken back and answered from the open batches; repeated on the scratch night |
+| V6 | A restart submits nothing twice once a batch is recorded | pytest: a nightly killed after its batch ids are recorded, with batches open and passes leased, run again: the fake sees one submission, the passes are taken back and answered from the open batches; repeated on the scratch night |
 | V7 | The deadline finishes the night | pytest with a fake clock: cancel, wait for the batch to end, finished answers kept, cancelled ones sent as normal calls, the digests written; a run started again after 07:30 does not batch |
 | V8 | The owner's actions do not wait on a batch | pytest through the API: "run it now" and Use the PDF during a nightly are worked by the service worker with normal calls; the worker leaves automatic passes alone while a nightly holds the run lock, and the nightly leaves the owner's |
 | V9 | A night costs what is projected and is done in time | P3's scratch night: cost per role at half price, matched to Anthropic's usage; digests written well before the deadline |

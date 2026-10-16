@@ -21,7 +21,8 @@ made by the `deep` service on its own subscription and are not a gateway role.
 A role may name a **fallback**, another role asked once, as a normal call, when the role's model refuses. The fallback
 must come from another lab (refusals follow a lab's policy, so a second model from the same lab tends to refuse the same
 paper); start-up refuses a configuration where it does not. `brief` falls back to a model on OpenRouter, chosen by
-the model-spend plan's replay ([`docs/plans/model-spend.md`](../../plans/model-spend.md), D5). A paper the fallback
+the model-spend plan's replay ([`docs/plans/model-spend.md`](../../plans/model-spend.md), D5); until it settles the
+choice, and `brief`'s effort (D6), the values here and in [data.md](data.md) are the plan's leading candidates. A paper the fallback
 refuses too fails as any refused call does.
 
 ## The gateway
@@ -60,7 +61,8 @@ service's workers, the CLI's other commands and a nightly started outside that w
   step whose calls are not batched, a deadline's leftovers or a burst of fallbacks never go out all at once.
 - **Answers.** Open batches are polled every minute. Every answer of a batch is journalled with its own usage at half
   price, whether or not a call still awaits it, so a batch is accounted for in full; an awaited answer is validated
-  and handled as in a normal call (a refusal goes to the fallback), and any answer is reused like any other call. A
+  and handled as in a normal call (a refusal goes to the fallback), and only a validated answer is reused. An answer
+  no call awaits keeps its usage on its journal row, unvalidated, for a run started again to take (below). A
   request the batch could not answer (errored, expired, cancelled) is sent again as a normal call when it is asked.
 - **Nothing is paid twice once a batch is recorded.** A batched call's journal row is written before the batch is
   sent and given the batch id once the provider accepts it; its request key is its id in the batch. A run that asks a

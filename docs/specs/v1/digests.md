@@ -70,7 +70,8 @@ splits and other pipeline terms do not appear in digest text.
 
 Topics' digests are written concurrently, each topic on its own database connection and in its own order (its failed digests tried again, the day's
 digest, Monday's weekly), so the nightly run's writer calls go out in a few batches ([models.md](models.md), batches)
-rather than one after another.
+rather than one after another. When the wait runs to the nightly's deadline, the digests are written after it as
+normal calls at full price (about $0.50 a night).
 
 Each digest has a **Gist** of its own: a short paragraph, longer than a paper's one sentence because only a few
 digests are read a day. It is written in the same call.

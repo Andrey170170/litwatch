@@ -147,8 +147,9 @@ Anthropic API and $20–30 on OpenRouter, against about $215 and $4 at the resta
     07:30 deadline, after which what is left goes as normal calls. OpenRouter's calls are not batched for now.
 61. **`brief` runs on Sonnet 5.5**, after a replay of the restart's passes and the owner's read; a refusal is asked
     once of a model on OpenRouter from another lab, never again of an Anthropic model.
-62. **The full text is read without its bibliography, and paid for once.** A pass that reads unchanged text for the
-    same revision asks the identical question, which the gateway's journal already answers at no cost.
+62. **The full text is read without its bibliography, and paid for once.** A pass that asks the identical question
+    again (the same text, title, abstract and area, the journal's request key) is answered by the gateway's journal at
+    no cost.
 
 ## Open
 

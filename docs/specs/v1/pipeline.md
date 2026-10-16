@@ -240,8 +240,8 @@ text, its source (LaTeX or PDF), a hash of it and the paper's arXiv update it wa
 say which arXiv version its text is, the version is recorded as unknown. When intake knows a paper was updated but not
 to which version, that newer update queues its passes again once, as a new version does (section 8). A pass that finishes after its paper got a new revision stores its result labelled
 with the old revision (section 8), does not replace the current Weight, and a pass for the new revision is queued. A
-pass that reads the same text for the same revision again (a newer arXiv version whose body did not change) asks the
-identical question, which the gateway answers from its journal at no cost ([models.md](models.md), the gateway). A
+pass that reads the same text for the same revision again, with the same title, abstract and area (a newer arXiv
+version that changed none of them), asks the identical question, which the gateway answers from its journal at no cost ([models.md](models.md), the gateway). A
 running pass holds a lease (default 30 minutes, and until the deadline in a batching nightly run); when the lease
 runs out, because the worker died, the pass goes back to ready, and a nightly holding the run lock takes back at once
 those a dead nightly held ([models.md](models.md), batches).
@@ -278,7 +278,7 @@ Gist from an older revision's full text is not: the new revision's analysis give
 
 A new arXiv version that leaves title and abstract close enough does not raise the revision, but its body may have
 changed: a paper that has a Brief or a Weight from the full text gets those passes queued again for the new version; one whose
-text turns out unchanged costs nothing (section 6).
+question turns out unchanged (the same text, title, abstract and area) costs nothing (section 6).
 A Deep card is labelled with the version it read and is remade only on request.
 
 ## 9. Failures that need the owner

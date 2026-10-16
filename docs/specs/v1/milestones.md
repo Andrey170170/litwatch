@@ -37,7 +37,8 @@ with the text they read, Write again, the "among the collection" section in `dee
 archive, its order kept; pages for archive papers not fetched, the fetched state, Deep read outside the collection,
 the archive's size in the search box; Use the PDF; a PDF read without the AGPL extra; the archive's whole-export
 backup and one-transaction recovery reconcile). N6, the restart (#71,
-`evals/2026-10-16-restart.md`). Next: the owner's read of N3's ten Briefs; the owner's instance applies the PDF
+`evals/2026-10-16-restart.md`), over one week rather than two by the owner's call of 2026-10-16 (the week before comes
+with the backfill). Next: the owner's read of N3's ten Briefs; the owner's instance applies the PDF
 policy; the model-spend plan ([`docs/plans/model-spend.md`](../../plans/model-spend.md), decisions 60–62), which brings
 the nightly under the owner's caps before the switch.
 
