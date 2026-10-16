@@ -328,7 +328,16 @@ class SearchIndex:
         exact = q.strip().removeprefix('arXiv:').strip()
         exact = re.sub(r'v\d+$', '', exact)
         is_id = bool(re.fullmatch(r'(?:\d{4}\.\d{4,5}|[A-Za-z][A-Za-z0-9.-]*/\d{7})', exact))
-        expression = ' AND '.join('"' + t + '"' for t in terms)
+        # Words in double quotes are a phrase, as PostgreSQL's websearch_to_tsquery reads them
+        # (an unclosed quote runs to the end); every other word stands alone.
+        matched = []
+        for quoted, part in enumerate(q.split('"')):
+            found = re.findall(r'[^\W_]+', part, re.UNICODE)
+            if quoted % 2 and found:
+                matched.append('"' + ' '.join(found) + '"')
+            else:
+                matched.extend('"' + t + '"' for t in found)
+        expression = ' AND '.join(matched)
         clauses, params = [], []
         ordered_scan = not is_id and sort.startswith('title_')
         if terms and not is_id and sort != 'relevance':

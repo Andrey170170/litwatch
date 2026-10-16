@@ -162,6 +162,22 @@ class SearchTests(unittest.TestCase):
         newest = self.search.search(q='attention is all you need', sort='newest')['items']
         self.assertEqual([p['id'][-1] for p in newest], ['6', '5', '4', '3', '2', '1'])
 
+    def test_a_quoted_phrase_stays_a_phrase_in_every_tier_and_order(self):
+        # As websearch_to_tsquery reads a query in litwatch's own collection: "neural circuits"
+        # is the phrase, never the two words apart, whichever tier or order finds the paper.
+        self.paper(1, 'Neural circuits in mice', published='2026-09-01')
+        self.paper(2, 'Neural study of circuits', published='2026-09-02')
+        self.paper(3, 'A survey', abstract='Of neural circuits.', published='2026-09-03')
+        self.paper(4, 'Pruning neural nets', abstract='Circuits matter.', published='2026-09-04')
+        self.start().step()
+        for q, wanted in [('"neural circuits"', {'1', '3'}), ('"neural circuits" mice', {'1'}),
+                          ('pruning "neural nets"', {'4'}), ('"neural circuits', {'1', '3'}),
+                          ('neural circuits', {'1', '2', '3', '4'})]:
+            for sort in ('relevance', 'newest', 'title_asc'):
+                with self.subTest(q=q, sort=sort):
+                    found = {p['id'][-1] for p in self.search.search(q=q, sort=sort)['items']}
+                    self.assertEqual(found, wanted)
+
     def test_past_exact_scan_an_exact_title_still_matches_by_its_words(self):
         # A title repeating the phrase outranks the exact one by BM25; the exact tier keeps it
         # first even when too many titles start with the phrase to read them all.

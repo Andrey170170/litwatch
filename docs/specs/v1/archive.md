@@ -62,8 +62,10 @@ One search box, one result list, as in the first v1 (decision 6), with these cha
   1706.03762 at the top). For a query of two or more words the archive ranks in tiers: a title equal to the query
   (case, punctuation and accents aside; past 256 titles starting with the phrase, only titles starting with the
   query's own letters are compared), then titles holding the phrase, then abstracts holding it, then the other
-  matches; within a tier by bm25, where the title weighs eight times the abstract. litwatch shows each provider's
-  hits in its order, no longer re-sorted by date; the newest-first order asks the providers for their newest.
+  matches; within a tier by bm25, where the title weighs eight times the abstract. Words in double quotes are a
+  phrase in every tier and order, as PostgreSQL's `websearch_to_tsquery` reads them in litwatch's own index (an
+  unclosed quote runs to the end). litwatch shows each provider's hits in its order, no longer re-sorted by date;
+  the newest-first order asks the providers for their newest.
 
 ## Papers outside the collection
 
