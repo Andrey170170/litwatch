@@ -56,7 +56,8 @@ export function OverviewPage() {
   const sessions = useQuery(sessionsQuery("overview"));
   const desktop = useDesktop();
   const q = quality.data;
-  const night = runs.data?.find((r) => r.kind === "nightly") ?? runs.data?.[0];
+  // Last night is the run the quality read names; its counts come from the runs list, which may no longer hold it.
+  const night = q?.night.run != null ? runs.data?.find((r) => r.id === q.night.run) : undefined;
   const last = sessions.data?.[0];
   const cards = useTopicCards();
   const name = (slug: string) => {
@@ -81,8 +82,12 @@ export function OverviewPage() {
           <Tile to="needs" tone={open ? "ask" : "ok"} big={open ? String(open) : "✓"}>
             {open ? `${open === 1 ? "thing needs" : "things need"} you` : "Nothing needs you"}
           </Tile>
-          <Tile to="runs" tone={night ? (night.error ? "fail" : "ok") : ""} big={night ? rowDate(night.started_at) : "–"}>
-            {night ? `Last night · ${night.counts?.classified ?? 0} classified · ${night.counts?.graded ?? 0} graded${digests(night) === null ? "" : ` · ${digests(night)} digests`} · ${usd(night.cost)}` : "No run yet"}
+          <Tile to="runs" tone={q?.night.run == null ? "" : q.night.error ? "fail" : "ok"} big={night ? rowDate(night.started_at) : "–"}>
+            {night
+              ? `Last night · ${night.counts?.classified ?? 0} classified · ${night.counts?.graded ?? 0} graded${digests(night) === null ? "" : ` · ${digests(night)} digests`} · ${usd(night.cost)}`
+              : q?.night.run == null
+                ? "No night yet"
+                : "Last night · no longer among the runs listed"}
           </Tile>
           <Tile to="runs" tone={over.length ? "warn" : "ok"} big={usd(spent)}>
             {budget ? `of ${usd(budget)} this month` : "this month"}

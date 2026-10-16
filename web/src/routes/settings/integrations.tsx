@@ -19,7 +19,8 @@ function status(c: Card): string {
 }
 
 /** Whether the card's failing event was skipped on this visit: the card keeps saying so after the refetch
- * clears it, until another event fails. */
+ * clears it, until another event fails; what the refetched card says of the rest (events waiting, up to date)
+ * follows the acknowledgement. */
 const skippedOn = (c: Card, skipped: Map<string, number>) => skipped.has(c.name) && (!c.failing || c.failing.event_id === skipped.get(c.name));
 
 function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Map<string, number>; onSkip: (eventId: number) => void }) {
@@ -34,7 +35,7 @@ function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Map<string,
         <span className="faint">{c.enabled ? "on" : "off"}</span>
       </div>
       {c.description && <div className="nb">{c.description}</div>}
-      <div className="ist">{done ? "Event skipped · up to date" : status(c)}</div>
+      <div className="ist">{done ? `Event skipped${c.failing ? "" : ` · ${status(c)}`}` : status(c)}</div>
       {f && (
         <div className="ierr mono">
           {f.type}

@@ -136,11 +136,15 @@ function fresh(cls: Class): Topic {
 export function TopicEditorPage() {
   const { slug } = useParams({ from: "/settings/topics/$slug" });
   const tree = useQuery(settingsTaxonomyQuery(`topics/${slug}`));
-  if (!tree.data) return <Load q={tree} />;
-  const cls = tree.data.classes.find((c) => c.slug === slug);
-  if (!cls) return <p className="empty">There is no such class.</p>;
-  const current = tree.data.topics?.find((t) => t.class === slug) ?? null;
-  return <TopicEditor key={slug} tree={tree.data} cls={cls} current={current} />;
+  const cls = tree.data?.classes.find((c) => c.slug === slug);
+  const current = tree.data?.topics?.find((t) => t.class === slug) ?? null;
+  // The editor shows on the cached tree while a fresh visit refetches it ("Updating…" above).
+  return (
+    <>
+      <Load q={tree} />
+      {tree.data && (cls ? <TopicEditor key={slug} tree={tree.data} cls={cls} current={current} /> : <p className="empty">There is no such class.</p>)}
+    </>
+  );
 }
 
 function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: Topic | null }) {

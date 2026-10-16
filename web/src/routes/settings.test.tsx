@@ -197,13 +197,42 @@ describe("Settings", () => {
     await waitFor(() => expect(calls.filter((c) => c.url === "/api/summary").length).toBe(4));
   });
 
+  it("names last night from the quality read, never a run of another kind", async () => {
+    viewport(true);
+    const manual = { id: 9, kind: "digests", started_at: "2026-10-15T12:00:00Z", finished_at: "2026-10-15T12:01:00Z", cost: 0.2, error: null, counts: { digests_written: 1 }, fetched: 0, inserted: 0, updated: 0 };
+    const night = { ...manual, id: 6, kind: "nightly", started_at: "2026-10-14T03:00:00Z", counts: { classified: 40, graded: 12, digests_written: 2, digests_failed: 1 } };
+    scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night: { ...quality.night, run: null } }, "GET /api/settings/runs": [manual] });
+    const { unmount } = renderApp("/settings/overview");
+    expect(await screen.findByText("No night yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Last night/)).toBeNull();
+    unmount();
+    scriptFetch({ ...common, "GET /api/settings/runs": [manual, night] });
+    renderApp("/settings/overview");
+    expect(await screen.findByText("Last night · 40 classified · 12 graded · 2 digests · $0.20")).toBeInTheDocument();
+  });
+
+  it("says what the refreshed card says after a skipped event", async () => {
+    viewport(true);
+    const failing = { event_id: 41, type: "paper.graded", paper_id: "2610.00001", failures: 3, retry_at: null, error: "502" };
+    const card = (f: typeof failing | null, lag: number) => ({ name: "zotero", description: "The library", enabled: true, lag, failing: f, last_error: f?.error ?? null, skipped: f ? 0 : 1 });
+    let reads = 0;
+    scriptFetch({ ...common, "GET /api/settings/integrations": () => [card(++reads > 1 ? null : failing, 2)], "POST /api/settings/integrations/zotero/skip": { skipped: true } });
+    renderApp("/settings/integrations");
+    await userEvent.click(await screen.findByRole("button", { name: "Skip this event" }));
+    expect(await screen.findByText("Event skipped · 2 events waiting")).toBeInTheDocument();
+  });
+
   it("keeps a list as left on the way back from its subpage, and opens Overview afresh from /settings", async () => {
     viewport(true);
     const items = [{ position: 1, paper_id: "2610.00001", topic: "mi", why: "above", verdict: "related", answer: "related", answered_at: "2026-10-14T10:00:00Z", title: "Drawn 1", abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }];
+    // The session's second read (a fresh visit) lands only when told to.
+    const session = { id: 3, seed: 7, drawn_at: "2026-10-14T10:00:00Z", items };
+    let sessionReads = 0;
+    let land!: () => void;
     const calls = scriptFetch({
       ...common,
       "GET /api/settings/calibrate": [{ id: 3, seed: 7, drawn_at: "2026-10-14T10:00:00Z", papers: 1, answered: 1, differ: 0 }],
-      "GET /api/settings/calibrate/3": { id: 3, seed: 7, drawn_at: "2026-10-14T10:00:00Z", items },
+      "GET /api/settings/calibrate/3": () => (++sessionReads > 1 ? new Promise<typeof session>((r) => (land = () => r(session))) : session),
       "GET /api/settings/runs": [],
     });
     const { router } = renderApp("/settings/overview", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
@@ -220,6 +249,15 @@ describe("Settings", () => {
     // The list was not refetched by the visit to its session.
     expect(fetched("/api/settings/calibrate")).toBe(listReads);
     expect(fetched("/api/settings/calibrate/3")).toBe(1);
+    // The session again, by its row: a fresh visit shows the cached session at once and refetches behind it.
+    await userEvent.click(screen.getByRole("button", { name: /14 Oct/ }));
+    expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
+    expect(await screen.findByText("Updating…")).toBeInTheDocument();
+    expect(fetched("/api/settings/calibrate/3")).toBe(2);
+    land();
+    await waitFor(() => expect(screen.queryByText("Updating…")).toBeNull());
+    router.history.back();
+    await screen.findByRole("button", { name: /14 Oct/ });
     // /settings opens Overview, by a redirect: a fresh visit all the same, refetched behind the tiles.
     await router.navigate({ to: "/settings" });
     await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Overview"));

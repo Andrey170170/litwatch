@@ -119,13 +119,12 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
 // -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
 
 /** A Settings page's read, under the page's own key, `["settings", <its path under /settings>, name]`: refetched
- * in the background on each visit by a link (`freshVisit`), and still for the visit: nothing moves under the reader
- * while a page is open or on the way back to it, and a page left keeps its rows whatever its siblings or subpages
- * read meanwhile (two pages reading one endpoint each keep their own copy). What a write settles is patched into
- * the cached page (`settle`, `settleFromPaper`); a write that changes a page invalidates its reads
- * (`settingsReads`). */
-const settingsRead = <T,>(page: string, name: string, queryFn: () => Promise<T>) =>
-  queryOptions({ queryKey: ["settings", page, name], queryFn, staleTime: Infinity, refetchOnWindowFocus: false, refetchOnReconnect: false });
+ * in the background on each visit by a link (`freshVisit`), and still for the visit, kept as a list is (`listOptions`:
+ * half an hour after the reader leaves it, so Back after a long read finds it): nothing moves under the reader while a
+ * page is open or on the way back to it, and a page left keeps its rows whatever its siblings or subpages read
+ * meanwhile (two pages reading one endpoint each keep their own copy). What a write settles is patched into the
+ * cached page (`settle`, `settleFromPaper`); a write that changes a page invalidates its reads (`settingsReads`). */
+const settingsRead = <T,>(page: string, name: string, queryFn: () => Promise<T>) => queryOptions({ queryKey: ["settings", page, name], queryFn, ...listOptions });
 
 /** The reads of a Settings page and its subpages (`page` and `page/...`), for a write that changes what they show. */
 export const settingsReads = (page: string) => ({

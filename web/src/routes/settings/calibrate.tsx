@@ -118,14 +118,22 @@ export function SessionPage() {
   const { id } = useParams({ from: "/settings/calibrate/$id" });
   const search = useSearch({ from: "/settings/calibrate/$id" });
   const session = useQuery(sessionQuery(Number(id)));
-  if (!session.data) return <Load q={session} />;
-  const s = session.data;
+  // The session shows on the cached read while a fresh visit refetches it ("Updating…" above).
+  return (
+    <>
+      <Load q={session} />
+      {session.data && <SessionBody s={session.data} id={id} at={search.at} review={search.review} />}
+    </>
+  );
+}
+
+function SessionBody({ s, id, at, review }: { s: Session; id: string; at: number | undefined; review: boolean | undefined }) {
   const unanswered = s.items.find((it) => !it.answered_at);
-  if (search.at == null) {
-    if (!unanswered || search.review) return <Review s={s} />;
+  if (at == null) {
+    if (!unanswered || review) return <Review s={s} />;
     return <Navigate to="/settings/calibrate/$id" params={{ id }} search={{ at: unanswered.position }} replace />;
   }
-  const item = s.items.find((it) => it.position === search.at);
+  const item = s.items.find((it) => it.position === at);
   if (!item) return <p className="empty">There is no such paper in the session.</p>;
   // Keyed by position: each paper starts from its own recorded answer.
   return <Screen key={item.position} s={s} item={item} />;
