@@ -698,3 +698,41 @@ async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client
     assert "eprint = {2610.00002}" in text and "2610.00001" not in text
     outside = {"q": "hidden computation", "source": "outside"}
     assert "@" not in (await client.get("/api/bibtex", params=outside)).text
+
+
+# -- a paper's PDF ---------------------------------------------------------------------------------
+
+
+async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(conn):
+    """The storage policy keeps few PDFs; the others are fetched when the owner opens them.
+    Without an archive, or when it cannot get the PDF in time, arXiv's PDF is the answer."""
+    from litwatch.archive import ArchiveClient
+    from tests.fakes_http import PDF, FakeArchive, mock
+
+    await taxonomy_store.save(conn, TREE)
+    held = P.model_copy(update={"version": 2})
+    await papers_store.upsert(conn, [held])
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    fake = FakeArchive()
+    archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
+    archive.wait_seconds = 0
+    for given in (archive, None):
+        app = create_app(dsn, TOKEN, Config(), archive=given)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
+            page = (await c.get(f"/api/papers/{P.id}")).json()
+            assert page["pdf_url"] == f"/api/papers/{P.id}/pdf"
+            opened = await c.get(page["pdf_url"])
+            unknown = await c.get("/api/papers/2610.09999/pdf")
+            if given is not None:
+                assert opened.status_code == 200 and opened.content == PDF
+                assert opened.headers["content-type"] == "application/pdf"
+                assert [(j["kind"], j["version"], j["priority"]) for j in fake.jobs] == [
+                    ("pdf", 2, 0)
+                ]
+                fake.status = "unavailable"  # arXiv has no PDF for the archive to fetch
+                opened = await c.get(page["pdf_url"])
+            assert opened.status_code == 307
+            assert opened.headers["location"] == f"https://arxiv.org/pdf/{P.id}"
+            assert unknown.status_code == 307
+            assert unknown.headers["location"] == "https://arxiv.org/pdf/2610.09999"

@@ -18,6 +18,50 @@ class CatalogTests(unittest.TestCase):
         self.db.close()
         self.temp.cleanup()
 
+    def test_new_catalog_holds_background_pdfs_until_asked_above_background(self):
+        self.assertEqual(self.db.pdfs(), 'wanted')
+        self.db.upsert_paper('2607.02101', {'title': 'x'}, 1)
+        self.assertEqual(self.db.enqueue('2607.02101', 1, 'source')['status'], 'pending')
+        self.assertEqual(self.db.enqueue('2607.02101', 1, 'pdf')['status'], 'held')
+        self.assertEqual(self.db.claim_job()['kind'], 'source')
+        self.assertIsNone(self.db.claim_job())  # a held job is never claimed
+        self.assertEqual(self.db.enqueue('2607.02101', 1, 'pdf', priority=100)['status'], 'held')
+        wanted = self.db.enqueue('2607.02101', 1, 'pdf', priority=50)
+        self.assertEqual((wanted['status'], wanted['priority']), ('pending', 50))
+        self.assertEqual(self.db.claim_job()['kind'], 'pdf')
+        self.assertEqual(self.db.status()['pdfs'], 'wanted')
+
+    def test_changing_the_pdf_policy_brings_the_queue_in_line(self):
+        self.db.upsert_paper('2607.02101', {'title': 'x'}, 1)
+        self.db.upsert_paper('2607.02102', {'title': 'y'}, 1)
+        self.db.enqueue('2607.02101', 1, 'pdf')
+        self.assertEqual(self.db.set_pdfs('all'), {'pdfs': 'all', 'jobs_changed': 1})
+        self.db.enqueue('2607.02102', 1, 'pdf', priority=0)
+        self.db.enqueue('2607.02102', 1, 'source')
+        self.assertEqual(self.db.enqueue('2607.02101', 1, 'pdf')['status'], 'pending')
+        # Only background PDF jobs are held: the urgent one and the source stay pending.
+        self.assertEqual(self.db.set_pdfs('wanted'), {'pdfs': 'wanted', 'jobs_changed': 1})
+        statuses = dict(((r['paper_id'], r['kind']), r['status']) for r in self.db.db.execute(
+            'SELECT paper_id,kind,status FROM jobs'))
+        self.assertEqual(statuses, {('2607.02101', 'pdf'): 'held', ('2607.02102', 'pdf'): 'pending',
+                                    ('2607.02102', 'source'): 'pending'})
+        with self.assertRaises(ValueError):
+            self.db.set_pdfs('some')
+
+    def test_a_catalog_with_papers_before_the_setting_keeps_every_pdf(self):
+        path = self.root / 'old.sqlite'
+        old = sqlite3.connect(path)
+        old.executescript("CREATE TABLE papers (id TEXT PRIMARY KEY, metadata_json TEXT NOT NULL "
+                          "DEFAULT '{}', latest_version INTEGER, updated_at REAL NOT NULL);"
+                          "INSERT INTO papers VALUES ('2607.02101','{}',1,0);")
+        old.close()
+        catalog = Catalog(path)
+        try:
+            self.assertEqual(catalog.pdfs(), 'all')
+            self.assertEqual(catalog.enqueue('2607.02101', 1, 'pdf')['status'], 'pending')
+        finally:
+            catalog.close()
+
     def test_metadata_revisions_do_not_regress(self):
         self.db.upsert_paper('2607.02101', {'title': 'new'}, 3)
         paper = self.db.upsert_paper('2607.02101', {'title': 'old', 'doi': 'x'}, 1)
@@ -123,7 +167,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_consistent_backup_restores_wal_state(self):
         self.db.upsert_paper('2607.02101', {'title': 'backup'}, 1)
-        self.db.enqueue('2607.02101', 1, 'pdf')
+        self.db.enqueue('2607.02101', 1, 'source')
         target = self.root / 'backup.sqlite'
         self.db.backup(target)
         restored = Catalog(target)

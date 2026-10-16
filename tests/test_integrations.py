@@ -10,18 +10,17 @@ import httpx
 import pytest
 
 from litwatch import events, integrations
-from litwatch.archive import ArchiveClient
+from litwatch.archive import BACKGROUND, WANTED, ArchiveClient
 from litwatch.config import Config
-from litwatch.core import (
-    SearchFilters,
-)
+from litwatch.core import Effective, Fit, Grade, Rarity, SearchFilters, Status
 from litwatch.integrations import IntegrationError
 from litwatch.integrations.archive import Archive
 from litwatch.integrations.webhook import Webhook
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import TREE, deliver, paper, start
+from litwatch.store import word as word_store
+from tests.conftest import INTERP, TREE, deliver, paper, start
 from tests.fakes_http import FakeArchive, mock
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=3)
@@ -156,6 +155,54 @@ async def test_every_new_paper_is_registered_with_its_pdf_and_source(world):
     assert unknown.id in fake.records  # its metadata, and nothing to fetch yet
 
 
+async def _graded(conn, paper_id: str, topic: str, grade: Grade) -> None:
+    """The paper's effective grade on `topic` changes to `grade`, with its event."""
+    fit = Fit.CENTRAL if grade != Grade.NONE else Fit.NONE
+    await word_store.set_effective(
+        conn, paper_id, topic, Effective(fit=fit, grade=grade, rarity=Rarity.RARE)
+    )
+    await events.emit(conn, events.GRADE_CHANGED, paper_id, topic=topic, after=grade.value)
+
+
+async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_papers(world):
+    conn, fake = world, FakeArchive()
+    a = archive(fake)
+    others = [paper(f"2610.0001{i}", version=1) for i in range(5)]
+    await papers_store.upsert(conn, [P, *others])
+    await start(conn, a)
+    relevant, adjacent, saved, gone, paused = others
+    await _graded(conn, P.id, "cot-faithfulness", Grade.MUST_READ)
+    await _graded(conn, relevant.id, "agents", Grade.RELEVANT)
+    await _graded(conn, adjacent.id, "interpretability", Grade.ADJACENT)
+    await word_store.set_saved(conn, saved.id, True)
+    await events.emit(conn, events.PAPER_SAVED, saved.id)
+    # Graded relevant, then down again before the event is handled: nothing is asked for.
+    await _graded(conn, gone.id, "agents", Grade.RELEVANT)
+    await word_store.set_effective(conn, gone.id, "agents", None)
+    # A paused topic makes no new judgements, and keeps no new PDFs.
+    await taxonomy_store.save(
+        conn,
+        TREE.model_copy(
+            update={
+                "topics": [
+                    t if t.slug != INTERP.slug else t.model_copy(update={"status": Status.PAUSED})
+                    for t in TREE.topics
+                ]
+            }
+        ),
+    )
+    await _graded(conn, paused.id, "interpretability", Grade.MUST_READ)
+    await deliver(conn, a)
+
+    asked = [(j["paper_id"], j["version"], j["kind"], j["priority"]) for j in fake.jobs]
+    assert asked == [
+        (P.id, 3, "pdf", WANTED),
+        (relevant.id, 1, "pdf", WANTED),
+        (saved.id, 1, "pdf", WANTED),
+    ]
+    assert WANTED < BACKGROUND  # an archive under `pdfs wanted` holds background PDFs only
+
+
 async def test_an_archive_that_does_not_register_only_answers_searches(world, secrets):
     with pytest.raises(IntegrationError, match="register must be true or false"):
         integrations.load(
@@ -171,6 +218,8 @@ async def test_an_archive_that_does_not_register_only_answers_searches(world, se
     a.register = False
     await start(conn, a)
     await papers_store.upsert(conn, [P])
+    await word_store.set_saved(conn, P.id, True)
+    await events.emit(conn, events.PAPER_SAVED, P.id)
     await deliver(conn, a)
     assert fake.records == {} and fake.jobs == []
     fake.search_items = [{"id": "2401.00001", "title": "First", "authors": "", "published": ""}]

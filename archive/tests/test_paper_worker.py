@@ -39,6 +39,7 @@ class WorkerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         self.store = Store(root / 'work', root / 'archive', guard=False)
+        self.store.catalog.set_pdfs('all')  # these test acquisition, not the PDF policy
     def tearDown(self):
         self.store.close()
         self.temp.cleanup()

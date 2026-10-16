@@ -1,0 +1,19 @@
+# The stack's configuration (docs/specs/v1/data.md, configuration). Anything left out takes its
+# default; `litwatch.toml` options are never secrets, which come from `.env`.
+
+[intake]
+categories = ["cs.CL", "cs.AI", "cs.LG"]
+
+[schedule]
+# The nightly run (intake, classification, analysis, grading, the full-text queue, digests)
+# and its workers. It calls models: set the API keys in `.env` first.
+enabled = true
+nightly = "0 6 * * *"
+
+# The archive is part of the stack: every paper intake stores is registered with it, and it
+# serves texts, PDFs and search. Its URL and token come from the compose file.
+[integrations.archive]
+
+# Deep cards: start the stack with `--profile deep` and uncomment.
+# [integrations.deep]
+# url = "http://deep:8081"

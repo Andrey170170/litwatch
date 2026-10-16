@@ -8,10 +8,7 @@ version = "0.5.1"
 description = "Internal paper catalog, PDF and LaTeX store, and priority acquisition service"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["requests>=2.34,<3"]
-
-[project.optional-dependencies]
-server = ["pyarrow>=25,<26", "zstandard>=0.25,<0.26"]
+dependencies = ["requests>=2.34,<3", "pyarrow>=25,<26", "zstandard>=0.25,<0.26"]
 
 [project.scripts]
 paper-archive-web = "arxiv_archive.web_server:main"

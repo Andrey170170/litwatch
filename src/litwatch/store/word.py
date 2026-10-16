@@ -81,6 +81,25 @@ async def focus_grades(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str
     return {r["topic"]: Grade(r["grade"]) for r in rows}
 
 
+async def keeps_pdf(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Whether the storage policy keeps the paper's PDF (archive.md): it is saved, or graded
+    relevant or above on an active followed topic."""
+    row = await (
+        await conn.execute(
+            """
+            SELECT EXISTS (SELECT 1 FROM library WHERE paper_id = %(p)s AND saved)
+                OR EXISTS (
+                    SELECT 1 FROM effective_grades g
+                    JOIN topics t ON t.class = g.topic AND t.status = 'active'
+                    WHERE g.paper_id = %(p)s AND g.grade IN ('relevant', 'must_read')
+                ) AS keeps
+            """,
+            {"p": paper_id},
+        )
+    ).fetchone()
+    return row["keeps"]
+
+
 async def set_effective(
     conn: psycopg.AsyncConnection, paper_id: str, topic: str, found: Effective | None
 ) -> None:

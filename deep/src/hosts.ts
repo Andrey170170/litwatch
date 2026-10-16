@@ -157,7 +157,7 @@ export function buildHosts(cfg: HostConfig): Record<string, HostFn> {
 
 /** Semantic Scholar paper id syntax for an arXiv id, DOI, or S2 hash; null means "search". */
 export function s2Id(text: string): string | null {
-  const arxiv = /^(?:arxiv:)?(\d{4}\.\d{4,5})(?:v\d+)?$/i.exec(text);
+  const arxiv = /^(?:arxiv:)?(\d{4}\.\d{4,5}|[a-z-]+(?:\.[a-z]{2})?\/\d{7})(?:v\d+)?$/i.exec(text);
   if (arxiv) return `arXiv:${arxiv[1]}`;
   if (/^10\.\d{4,9}\/\S+$/.test(text)) return `DOI:${text}`;
   if (/^[0-9a-f]{40}$/.test(text)) return text;
