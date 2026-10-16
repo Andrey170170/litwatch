@@ -193,15 +193,14 @@ def submit(campaign, catalog, *, limit=None, paper_id=None):
 
 
 def update_job(campaign, catalog, entry, job):
-    """Record what the job says of the candidate; nothing when that is what it says already."""
+    """Record what the job and its artifact say of the candidate; nothing when that is what
+    they say already. The artifact is read every time: `strip-sources` rewrites one without
+    touching its finished job."""
     # Preserve operator intent until the bounded feeder actually resets the job.
     if entry['status'] == 'retry_pending' and job['status'] == 'failed':
         return
     status = {'pending':'queued', 'held':'queued', 'running':'acquiring', 'complete':'available',
               'failed':'failed', 'unavailable':'unavailable'}[job['status']]
-    if (entry['status'], entry['job_id'], entry['error']) == (status, job['id'], job.get('error')) \
-            and (status != 'available' or entry['stored_size'] is not None):
-        return
     sizes = {}
     if status == 'available':
         artifact = catalog.get_artifact(entry['paper_id'], entry['kind'], entry['version'])
@@ -210,6 +209,9 @@ def update_job(campaign, catalog, entry, job):
             job = {**job, 'error':'Completed job has no available artifact'}
         else:
             sizes = {'original_size':artifact['original_size'], 'stored_size':artifact['stored_size']}
+    if (entry['status'], entry['job_id'], entry['error']) == (status, job['id'], job.get('error')) \
+            and all(entry[k] == v for k, v in sizes.items()):
+        return
     campaign.mark(entry['id'], status, job_id=job['id'], error=job.get('error'), **sizes)
 
 

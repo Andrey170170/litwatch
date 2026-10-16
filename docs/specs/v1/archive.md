@@ -51,9 +51,11 @@ job (`pdfs wanted` holds the background ones again). LaTeX is never held. litwat
 
 One search box, one result list, as in the first v1 (decision 6), with these changes:
 
-- **The archive ranks.** A query with no collection-only filter goes to the archive, which holds every paper including
-  the collection's; litwatch keeps the archive's order and adds its own Mark to each hit that is in the collection
-  (rarity, badges, Gist). Relevance is the default order whenever there is a query; date orders stay available.
+- **The archive ranks the papers outside the collection.** A query with no collection-only filter also goes to the
+  archive, which holds every paper including the collection's. Its hits that litwatch has not stored make the band
+  under the collection's shelves ("Outside the collection · from the archive", DESIGN.md), in the archive's order;
+  the papers litwatch holds are found by its own index instead. Relevance is the default order whenever there is a
+  query; date orders stay available.
 - **Collection filters** (topic, saved, rarity) search litwatch's own index of the collection, ranked by relevance
   the same way.
 - **Exact title and phrase first** (N5b; found 2026-10-13, when "attention is all you need" did not return

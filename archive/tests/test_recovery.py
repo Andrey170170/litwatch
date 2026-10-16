@@ -168,3 +168,29 @@ class RecoveryTests(unittest.TestCase):
             self.store.catalog.finish_job(job['id'],job['lease_token'],'unavailable','HTTP 404')
         self.assertEqual(reconcile(self.campaign,self.store.catalog)['states'],{'unavailable':2})
         self.assertEqual(writes(),['UPDATE','UPDATE','COMMIT'])
+
+    def test_reconcile_follows_an_artifact_changed_after_its_job(self):
+        # strip-sources rewrites a source, or finds no text in it, and leaves its job as it was.
+        class Discovery:
+            def fetch_page(self,*args,**kwargs):
+                return Page([record()],None,'2026-09-27T19:01:00Z')
+        prepare(self.campaign,self.store.catalog,Discovery(),self.manifest)
+        submit(self.campaign,self.store.catalog)
+        def artifact(job,size,status='available'):
+            self.store.catalog.put_artifact({'paper_id':job['paper_id'],'version':job['version'],
+                'kind':job['kind'],'location':f"{job['kind']}.zst",'original_size':size,
+                'stored_size':size,'compression':'zstd','media_type':'application/octet-stream',
+                'status':status})
+        jobs=[]
+        for _ in range(2):
+            job=self.store.catalog.claim_job();jobs.append(job)
+            artifact(job,100)
+            self.store.catalog.finish_job(job['id'],job['lease_token'])
+        sizes=lambda:sorted(r['stored_size'] for r in self.campaign.candidates())
+        self.assertEqual(reconcile(self.campaign,self.store.catalog)['states'],{'available':2})
+        self.assertEqual(sizes(),[100,100])
+        artifact(jobs[0],40)
+        artifact(jobs[1],0,'unavailable')
+        result=reconcile(self.campaign,self.store.catalog)
+        self.assertEqual(result['states'],{'available':1,'failed':1})
+        self.assertIn(40,sizes())
