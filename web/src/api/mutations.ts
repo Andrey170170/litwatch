@@ -346,8 +346,11 @@ export function useWriteAgain() {
 export const digestGone = (e: unknown) => e instanceof ApiError && e.status === 409 && said(e).includes("not one to write again");
 
 /** BibTeX for one paper, as text; the API looks the published version up first. */
-export async function bibtexFor(id: string): Promise<string> {
-  return ok(await api.POST("/api/bibtex", { body: { ids: [id] }, parseAs: "text" }));
+/** One paper's BibTeX; a paper litwatch has not fetched is cited from its page, as a search hit is. */
+export async function bibtexFor(paper: Schemas["Paper"]): Promise<string> {
+  const year = paper.published ? Number(paper.published.slice(0, 4)) : null;
+  const body = paper.stored === false ? { cited: [{ id: paper.id, title: paper.title, authors: paper.authors, year }] } : { ids: [paper.id] };
+  return ok(await api.POST("/api/bibtex", { body, parseAs: "text" }));
 }
 
 export async function copyText(text: string, done: string) {

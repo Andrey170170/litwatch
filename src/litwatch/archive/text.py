@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 
 from litwatch.archive.client import (
     URGENT,
@@ -27,10 +28,20 @@ class TextUnavailable(ArchiveError):  # noqa: N818 - an outcome, as ArchiveUnava
     """The archive could get neither the paper's source nor a PDF with text in it."""
 
 
+# Neither PDFium nor MuPDF is thread-safe, even across documents, and reads run in threads.
+_PDF_LOCK = threading.Lock()
+
+
 def pdf_to_markdown(pdf: bytes) -> str | None:
     """The PDF's text, or None when it has none to read. With the `pdf` extra (pymupdf4llm,
     AGPL) installed, as Markdown with its headings and tables; else the plain text of each page
-    by pypdfium2 (Apache/BSD), so a template without the extra still reads PDF-only papers."""
+    by pypdfium2 (Apache/BSD), so a template without the extra still reads PDF-only papers.
+    One PDF is read at a time."""
+    with _PDF_LOCK:
+        return _read_pdf(pdf)
+
+
+def _read_pdf(pdf: bytes) -> str | None:
     try:
         import pymupdf  # noqa: PLC0415 - heavy and optional, only on the fallback path
         import pymupdf4llm  # noqa: PLC0415

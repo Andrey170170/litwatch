@@ -162,6 +162,17 @@ class SearchTests(unittest.TestCase):
         newest = self.search.search(q='attention is all you need', sort='newest')['items']
         self.assertEqual([p['id'][-1] for p in newest], ['6', '5', '4', '3', '2', '1'])
 
+    def test_past_exact_scan_an_exact_title_still_matches_by_its_words(self):
+        # A title repeating the phrase outranks the exact one by BM25; the exact tier keeps it
+        # first even when too many titles start with the phrase to read them all.
+        self.paper(1, 'Deep learning, deep learning, deep learning', published='2026-09-02')
+        self.paper(2, 'Deep Learning?', published='2026-09-01')
+        self.start().step()
+        for scan in (256, 0):
+            with patch('arxiv_archive.search.EXACT_SCAN', scan):
+                self.assertEqual([p['id'][-1] for p in self.search.search(q='Deep  learning')['items']],
+                                 ['2', '1'])
+
     def test_sorting_filters_and_page_boundaries(self):
         for n, title, published in [(1, 'beta', '2026-09-03'),
                                     (2, 'Alpha', '2026-09-02'),

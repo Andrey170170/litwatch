@@ -244,6 +244,25 @@ describe("a paper's page", () => {
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
 
+  it("cites a paper litwatch has not fetched from its page on the phone, with no DOI form", async () => {
+    viewport(false);
+    const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, stored: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": outside,
+      "POST /api/bibtex": () => new Response("@misc{author2026archive}", { headers: { "content-type": "text/plain" } }),
+    });
+    renderApp("/paper/2409.01234");
+    await screen.findByRole("heading", { name: "Archive one" });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const sheet = screen.getByRole("dialog", { name: "The paper" });
+    expect(within(sheet).queryByRole("button", { name: "Paste a DOI" })).toBeNull();
+    await userEvent.click(within(sheet).getByRole("button", { name: /BibTeX/ }));
+    await waitFor(() => expect(calls.some((c) => c.url === "/api/bibtex")).toBe(true));
+    expect(calls.find((c) => c.url === "/api/bibtex")?.body).toEqual({ cited: [{ id: "2409.01234", title: "Archive one", authors: outside.authors, year: 2026 }] });
+  });
+
   it("runs a failed full-text pass again on the paper's PDF", async () => {
     viewport(true);
     const failed = { kind: "fulltext_failed", revision: 1, error: "LaTeX reads badly", pass_id: 7 };

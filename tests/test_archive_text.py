@@ -4,6 +4,8 @@ version it is of, and nothing while the archive is still fetching."""
 from __future__ import annotations
 
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import httpx
@@ -73,6 +75,31 @@ def test_the_pdf_extra_is_preferred_when_installed(monkeypatch):
     monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=lambda **_: Doc()))
     monkeypatch.setitem(sys.modules, "pymupdf4llm", SimpleNamespace(to_markdown=lambda d: "# M"))
     assert text_module.pdf_to_markdown(a_pdf("Plain.")) == "# M"
+
+
+def test_one_pdf_is_read_at_a_time(monkeypatch):
+    # PDFium is not thread-safe, and a batch reads several papers' text in threads at once.
+    reading, most = 0, 0
+
+    class Document:
+        def __init__(self, _pdf):
+            nonlocal reading, most
+            reading += 1
+            most = max(most, reading)
+            time.sleep(0.05)
+
+        def __iter__(self):
+            return iter(())
+
+        def close(self):
+            nonlocal reading
+            reading -= 1
+
+    monkeypatch.setitem(sys.modules, "pymupdf4llm", None)
+    monkeypatch.setitem(sys.modules, "pypdfium2", SimpleNamespace(PdfDocument=Document))
+    with ThreadPoolExecutor(4) as pool:
+        list(pool.map(text_module.pdf_to_markdown, [b"%PDF"] * 4))
+    assert most == 1
 
 
 async def test_latex_text_of_the_papers_version_asked_for_urgently():

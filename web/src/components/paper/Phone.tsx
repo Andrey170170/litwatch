@@ -111,8 +111,12 @@ export function PaperSheet({ paper, asked, onClose }: { paper: Paper; asked: boo
         <div className="vers">
           {paper.versions?.length ? paper.versions.map((v) => <span key={v.version}>v{v.version}</span>) : <span>v{paper.version ?? 1}</span>}
         </div>
-        <span>Published</span>
-        <Published paper={paper} />
+        {paper.stored !== false && (
+          <>
+            <span>Published</span>
+            <Published paper={paper} />
+          </>
+        )}
         {paper.in_collection && (
           <>
             <span>Classes</span>

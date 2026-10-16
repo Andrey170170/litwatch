@@ -200,6 +200,7 @@ def _decode(row: sqlite3.Row) -> dict:
 # How many titles starting with a phrase are read to find the one that is the phrase itself;
 # a phrase starting more titles is matched to a title by its letters alone (`_ranked`).
 EXACT_SCAN = 256
+EXACT_SLACK = 32
 FTS_JOIN = ' JOIN documents_fts ON documents_fts.rowid=d.rowid'
 
 
@@ -233,8 +234,10 @@ class SearchIndex:
 
         A title is the query itself when their words are the same (`words`: case, accents and
         punctuation aside). Reading every title that starts with a common phrase is slow on the
-        full index, so beyond `EXACT_SCAN` of them the exact title is the query's letters,
-        case aside."""
+        full index, so beyond `EXACT_SCAN` of them the candidates are the titles starting with
+        the query's own letters (case aside, off the title index) and at most `EXACT_SLACK`
+        characters longer: a title that differs before its first word or in its accents is then
+        ranked in the phrase tier."""
         phrase = '"' + ' '.join(terms) + '"'
         query = ' '.join(words(q))
         plain, filters = base.replace(FTS_JOIN, ''), clauses[1:]
@@ -245,7 +248,10 @@ class SearchIndex:
             exact = ['d.rowid IN (SELECT value FROM json_each(?))', 'words(d.title)=?']
             exact_params = [json.dumps(starting), query]
         else:
-            exact, exact_params = ['d.title=? COLLATE NOCASE'], [' '.join(q.split())]
+            start = ' '.join(q.split())
+            exact = ['d.rowid IN (SELECT rowid FROM documents WHERE title>=? COLLATE NOCASE '
+                     'AND title<? COLLATE NOCASE AND length(title)<=?)', 'words(d.title)=?']
+            exact_params = [start, start + '\U0010ffff', len(start) + EXACT_SLACK, query]
         where = ' AND '.join(exact + filters)
         rows = db.execute(f'SELECT d.* FROM {plain} WHERE {where} ORDER BY d.published DESC,d.id '
                           'LIMIT ?', [*exact_params, *params[1:], wanted]).fetchall()

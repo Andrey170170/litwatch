@@ -16,9 +16,9 @@ export const CopyMark = () => <Copy size="1em" aria-hidden style={{ verticalAlig
 export function copyId(id: string) {
   return copyText(id, `Copied ${id}`);
 }
-export async function copyBibtex(id: string) {
+export async function copyBibtex(paper: Paper) {
   try {
-    await copyText(await bibtexFor(id), "BibTeX copied");
+    await copyText(await bibtexFor(paper), "BibTeX copied");
   } catch {
     toast("Could not build the BibTeX", "error");
   }
@@ -76,7 +76,7 @@ export function linkCells(paper: Paper, keys: ("arxiv" | "pdf" | "latex" | "code
     latex: ext(paper.source_url, "LaTeX"),
     code: paper.facets?.releases_code ? (card?.code_url ? ext(card.code_url, "Code") : <span title="The abstract announces code; no link is known yet">⟨/⟩ Code</span>) : null,
     weights: paper.facets?.releases_weights ? <span title="The abstract announces weights; no link is known yet">◆ Weights</span> : null,
-    bib: <button onClick={() => void copyBibtex(paper.id)}>BibTeX <CopyMark /></button>,
+    bib: <button onClick={() => void copyBibtex(paper)}>BibTeX <CopyMark /></button>,
     id: <button onClick={() => void copyId(paper.id)}>arXiv id <CopyMark /></button>,
   };
   return keys.map((k) => cells[k] && <Fragment key={k}>{cells[k]}</Fragment>);
