@@ -111,9 +111,15 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
   const live = useRef(opts);
   live.current = opts;
   const pending = useRef<(() => void) | null>(null);
-  // the drawer shut (a link, the shade, a swipe): opened next by its button, it has its entry again
+  /** The one settle in flight, and the way to call it off: nothing it would do is wanted once the shell, or the
+   * drawer it was moving, has gone. */
+  const inFlight = useRef<(() => void) | null>(null);
+  // the drawer shut by other means (a link, the shade) voids a settle still moving it; opened next by its button,
+  // it has its entry again
   useEffect(() => {
-    if (!opts.menu) setDrawerDrag(null);
+    if (opts.menu) return;
+    inFlight.current?.();
+    setDrawerDrag(null);
   }, [opts.menu]);
 
   useEffect(() => {
@@ -123,13 +129,16 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
     let settling = false;
     const done = () => (settling = false);
     let navigations = 0;
-    /** The one settle in flight, called off with the shell: nothing it would do is wanted then. */
-    let cancel: (() => void) | null = null;
     const run = (el: HTMLElement | null, to: Partial<CSSStyleDeclaration>, ms: number, then: () => void) => {
-      cancel = settle(el, to, ms, () => {
-        cancel = null;
+      const stop = settle(el, to, ms, () => {
+        inFlight.current = null;
         then();
       });
+      inFlight.current = () => {
+        stop();
+        inFlight.current = null;
+        done();
+      };
     };
     const width = () => els.root.current?.clientWidth || window.innerWidth;
     const panelWidth = () => els.panel.current?.offsetWidth || Math.min(300, width() * 0.82);
@@ -300,7 +309,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
       document.removeEventListener("pointerdown", down);
       unsubscribe();
       if (active) abort(active);
-      cancel?.();
+      inFlight.current?.();
     };
   }, [router, els.root, els.page, els.main, els.under, els.panel, els.shade]);
 

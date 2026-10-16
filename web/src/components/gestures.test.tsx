@@ -126,6 +126,33 @@ describe("The phone's gestures", () => {
     expect(await screen.findByRole("dialog", { name: "Menu" })).not.toHaveAttribute("data-drag");
   });
 
+  it("voids a drawer's settle when the drawer shuts by other means before it lands", async () => {
+    viewport(false, false);
+    scriptFetch(routes);
+    renderApp("/");
+    await screen.findByText("Today");
+    swipe(screen.getByRole("main"), [10, 300], [[30, 300], [250, 300]]);
+    const drawer = await screen.findByRole("dialog", { name: "Menu" });
+    vi.advanceTimersByTime(400);
+    // swiped shut, then the shade tapped while it still slides: it is gone at once
+    swipe(screen.getByRole("link", { name: "Papers" }), [250, 300], [[240, 300], [40, 300]]);
+    fireEvent.keyDown(drawer, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // opened again by its button before the slide's 200 ms are up, it stays open
+    vi.advanceTimersByTime(100);
+    document.dispatchEvent(new MouseEvent("pointerdown"));
+    fireEvent.click(screen.getByRole("button", { name: "Menu" }));
+    await screen.findByRole("dialog", { name: "Menu" });
+    vi.advanceTimersByTime(300);
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Menu" })).toBeInTheDocument());
+    // and the next edge swipe is taken (the voided settle left nothing behind)
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Menu" }), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    vi.advanceTimersByTime(400);
+    swipe(screen.getByRole("main"), [10, 300], [[30, 300], [250, 300]], { lift: false });
+    expect(await screen.findByRole("dialog", { name: "Menu" })).toHaveAttribute("data-drag", "opening");
+  });
+
   it("calls a release's settle off when the shell goes before it lands", async () => {
     viewport(false, false); // with motion: the settle takes its 200 ms
     scriptFetch({ ...routes, [`GET /api/papers/${paper.id}`]: full(paper.id, {}) });
