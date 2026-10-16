@@ -64,25 +64,25 @@ async def reset(conn: psycopg.AsyncConnection, paper_id: str, step: Step, topic:
     )
 
 
-# A grading failure counts only while its topic is active: one paused, draft or unfollowed
-# grades nothing, so nothing waits on it.
-_ACTIVE = (
-    "(f.topic = '' OR EXISTS (SELECT 1 FROM topics t WHERE t.class = f.topic "
-    "AND t.status = 'active'))"
+# Whether failure `f` of paper `p` waits for the owner's action, whatever its count: it is on
+# the paper's current text, the paper is not dismissed, and a grading failure's topic is active
+# (one paused, draft or unfollowed grades nothing, so nothing waits on it). Every view of the
+# failures (the lists, the counts, a paper's detail) and the guarded actions read this one rule.
+ACTIONABLE = (
+    "(f.paper_revision = p.revision AND p.dismissed_at IS NULL AND (f.topic = '' OR EXISTS "
+    "(SELECT 1 FROM topics t WHERE t.class = f.topic AND t.status = 'active')))"
 )
 
 
 async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[dict[str, Any]]:
-    """Papers `step` failed on for at least `runs` runs in a row on their current text, with the
-    last error (and the topic, for grading: active topics only); dismissed papers left out.
-    Most failed first."""
+    """The failures of `step` that wait for the owner (`ACTIONABLE`) after at least `runs` runs
+    in a row, with the last error (and the topic, for grading). Most failed first."""
     return await (
         await conn.execute(
             "SELECT f.paper_id, f.paper_revision AS revision, p.title, f.failed_runs, "
             "f.last_error, f.failed_at, nullif(f.topic, '') AS topic "
             "FROM step_failures f JOIN papers p ON p.id = f.paper_id "
-            "AND p.revision = f.paper_revision AND p.dismissed_at IS NULL "
-            f"WHERE f.step = %s AND f.failed_runs >= %s AND {_ACTIVE} "
+            f"WHERE f.step = %s AND f.failed_runs >= %s AND {ACTIONABLE} "
             "ORDER BY f.failed_runs DESC, f.paper_id, f.topic",
             (step, runs),
         )
@@ -92,14 +92,14 @@ async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[di
 async def waiting(
     conn: psycopg.AsyncConnection, paper: Paper, step: Step, runs: int, topic: str = ""
 ) -> bool:
-    """Whether `step` failed at least `runs` runs in a row on this revision of the paper, which
-    is not dismissed. Read under the paper's lock (`papers.lock`) to act on it."""
+    """Whether `step` failed at least `runs` runs in a row on this revision of the paper and
+    waits for the owner (`ACTIONABLE`). Read in a change of the paper (`word.change`), under its
+    locks and the taxonomy's, to act on it."""
     row = await (
         await conn.execute(
             "SELECT 1 FROM step_failures f JOIN papers p ON p.id = f.paper_id "
-            "AND p.revision = f.paper_revision AND p.dismissed_at IS NULL "
             "WHERE f.paper_id = %s AND f.step = %s AND f.topic = %s AND f.paper_revision = %s "
-            "AND f.failed_runs >= %s",
+            f"AND f.failed_runs >= %s AND {ACTIONABLE}",
             (paper.id, step, topic, paper.revision, runs),
         )
     ).fetchone()
@@ -110,8 +110,7 @@ async def count_stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> i
     row = await (
         await conn.execute(
             "SELECT count(*) AS n FROM step_failures f JOIN papers p ON p.id = f.paper_id "
-            "AND p.revision = f.paper_revision AND p.dismissed_at IS NULL "
-            f"WHERE f.step = %s AND f.failed_runs >= %s AND {_ACTIVE}",
+            f"WHERE f.step = %s AND f.failed_runs >= %s AND {ACTIONABLE}",
             (step, runs),
         )
     ).fetchone()
