@@ -33,7 +33,8 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
-// Enough of a service worker to be installable; nothing is cached (the PWA proper comes with W4).
+// The service worker makes the app installable and a share target (`public/sw.js`); it caches nothing, the app is
+// always read live. Registered on the built app only: the dev server has no `/sw.js`.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"));
 }

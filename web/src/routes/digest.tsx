@@ -18,6 +18,7 @@ import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, weekRange, type Card, type DigestPaper, type Mark } from "@/lib/digests";
 import { openedFrom } from "@/lib/listContext";
+import { useSteps } from "@/lib/steps";
 import { rowDate } from "@/lib/format";
 import { rc } from "@/lib/rarity";
 import { Failed, Load } from "./settings/parts";
@@ -189,11 +190,20 @@ function State({ q, what }: { q: Pick<UseQueryResult, "isError" | "isPending" | 
   return q.isError && q.data === undefined ? <Failed q={q} what={what} /> : <Load q={q} />;
 }
 
+/** The swipe steps where the arrows do: `prev` is older, `next` newer; a step is a history entry like a tap. */
+function useStepTo(to: "/" | "/week", prev: string | null | undefined, next: string | null | undefined) {
+  const navigate = useNavigate();
+  const param = to === "/" ? "day" : "week";
+  const go = (day: string | null | undefined) => (day ? () => void navigate({ to, search: { [param]: day } }) : null);
+  useSteps({ prev: go(prev), next: go(next) });
+}
+
 export function DigestPage() {
   const search = useSearch({ from: "/" });
   const day = search.day ?? today();
   const q = useQuery(dayQuery(day));
   const desktop = useDesktop();
+  useStepTo("/", q.data?.previous, q.data?.next);
   const stepper = (foot?: boolean) => <Stepper to="/" prev={q.data?.previous} next={q.data?.next} label={dayLabel(day)} small={day === today() ? "Today" : undefined} foot={foot} />;
   return (
     <>
@@ -231,6 +241,7 @@ export function WeekPage() {
   const week = search.week ?? last;
   const q = useQuery(weekQuery(week));
   const desktop = useDesktop();
+  useStepTo("/week", q.data?.previous, q.data?.next);
   const monday = q.data?.monday ?? mondayOf(week);
   const stepper = (foot?: boolean) => <Stepper to="/week" prev={q.data?.previous} next={q.data?.next} label={weekRange(monday)} small={monday === last ? "Last week" : undefined} foot={foot} />;
   return (

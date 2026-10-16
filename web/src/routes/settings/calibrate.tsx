@@ -15,6 +15,7 @@ import { Sheet } from "@/components/Sheet";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { authorsShort, rowDate } from "@/lib/format";
+import { useSteps } from "@/lib/steps";
 import { answerOf, differs, type Edits, type LabelValue, pipelineSide, type Session, type SessionItem, type SessionRow, type Value } from "@/lib/settings";
 import { BriefBody } from "@/components/paper/Ladder";
 import { Failed, FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
@@ -182,6 +183,8 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   const move = (position: number) => leave(false, () => go(position));
   const back = () => i > 0 && move(s.items[i - 1]!.position);
   const last = i + 1 === n;
+  // the phone's swipe walks the session as ‹ Back and Next › do: within it, so Back still leaves the session
+  useSteps({ prev: i > 0 ? back : null, next: last ? null : next });
   return (
     <div className="setpg">
       <Fill name="title">

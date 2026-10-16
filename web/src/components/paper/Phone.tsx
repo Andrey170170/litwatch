@@ -79,8 +79,8 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
   );
 }
 
-export function PaperSheet({ paper, asked, onClose }: { paper: Paper; asked: boolean; onClose: () => void }) {
-  const [miss, setMiss] = useState(false);
+export function PaperSheet({ paper, asked, onClose, missOpen }: { paper: Paper; asked: boolean; onClose: () => void; missOpen?: boolean }) {
+  const [miss, setMiss] = useState(!!missOpen);
   return (
     <Sheet open onClose={onClose} label="The paper">
       {paper.in_collection && paper.topics.length > 0 && (
@@ -131,7 +131,7 @@ export function PaperSheet({ paper, asked, onClose }: { paper: Paper; asked: boo
   );
 }
 
-export function PhoneBar({ paper, under, asked, sheet, setSheet }: { paper: Paper; under: string | undefined; asked: boolean; sheet: "more" | "up" | "down" | null; setSheet: (s: "more" | "up" | "down" | null) => void }) {
+export function PhoneBar({ paper, under, asked, sheet, setSheet, missOpen }: { paper: Paper; under: string | undefined; asked: boolean; sheet: "more" | "up" | "down" | null; setSheet: (s: "more" | "up" | "down" | null) => void; missOpen?: boolean }) {
   const save = useSave(paper.id);
   const deep = useDeepRead(paper.id);
   const listKey = useLocation({ select: (l) => l.state.list });
@@ -171,7 +171,7 @@ export function PhoneBar({ paper, under, asked, sheet, setSheet }: { paper: Pape
         </button>
       </div>
       {(sheet === "up" || sheet === "down") && <ReactSheet paper={paper} value={sheet} under={under} onClose={() => setSheet(null)} />}
-      {sheet === "more" && <PaperSheet paper={paper} asked={asked} onClose={() => setSheet(null)} />}
+      {sheet === "more" && <PaperSheet paper={paper} asked={asked} onClose={() => setSheet(null)} missOpen={missOpen} />}
     </Fill>
   );
 }

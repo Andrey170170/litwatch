@@ -1,11 +1,12 @@
 import { createRootRoute, createRoute, createRouter, type RouterHistory } from "@tanstack/react-router";
 import { Shell } from "@/components/Shell";
 import { isIsoDay } from "@/lib/digests";
-import { listSearch, parseSearch, str, stringifySearch } from "@/lib/search";
+import { flag, listSearch, parseSearch, str, stringifySearch } from "@/lib/search";
 import { DigestOnePage, DigestPage, HistoryPage, WeekPage } from "@/routes/digest";
 import { PaperPage } from "@/routes/paper";
 import { PapersPage } from "@/routes/papers";
 import { SettingsIndex, SettingsPage } from "@/routes/settings";
+import { SharePage } from "@/routes/share";
 import { SessionPage } from "@/routes/settings/calibrate";
 import { EventsPage } from "@/routes/settings/integrations";
 import { JobsPage } from "@/routes/settings/runs";
@@ -61,15 +62,23 @@ export const digestOneRoute = createRoute({ getParentRoute: () => rootRoute, pat
 export const topicsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/topics", component: TopicsPage });
 export const topicRoute = createRoute({ getParentRoute: () => rootRoute, path: "/topics/$slug", validateSearch: listSearch, component: TopicPage });
 export const papersRoute = createRoute({ getParentRoute: () => rootRoute, path: "/papers", validateSearch: listSearch, component: PapersPage });
-// The id is a splat: old arXiv ids carry a slash (`cs/9901001`). `topic` is the topic the paper was opened under.
+// The id is a splat: old arXiv ids carry a slash (`cs/9901001`). `topic` is the topic the paper was opened under;
+// `miss` opens "Report as a miss" at once (the share target).
 export const paperRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/paper/$",
-  validateSearch: (s: Record<string, unknown>): { topic?: string } => {
+  validateSearch: (s: Record<string, unknown>): { topic?: string; miss?: boolean } => {
     const topic = str(s.topic);
-    return topic ? { topic } : {};
+    return { ...(topic ? { topic } : {}), ...(flag(s.miss) ? { miss: true } : {}) };
   },
   component: PaperPage,
+});
+// The share target (`public/manifest.webmanifest`): what Android hands over, as the manifest names it.
+export const shareRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/share",
+  validateSearch: (s: Record<string, unknown>): { url?: string; text?: string; title?: string } => ({ ...(str(s.url) ? { url: s.url as string } : {}), ...(str(s.text) ? { text: s.text as string } : {}), ...(str(s.title) ? { title: s.title as string } : {}) }),
+  component: SharePage,
 });
 // Settings: the index, a page, and the pages inside pages (a topic's editor, a Calibrate session, Jobs, events).
 export const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsIndex });
@@ -89,7 +98,7 @@ export const settingsSessionRoute = createRoute({
 export const settingsJobsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/runs/jobs", component: JobsPage });
 export const settingsEventsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/integrations/$name", component: EventsPage });
 
-const routeTree = rootRoute.addChildren([digestRoute, weekRoute, historyRoute, digestOneRoute, topicsRoute, topicRoute, papersRoute, paperRoute, settingsRoute, settingsPageRoute, settingsTopicRoute, settingsSessionRoute, settingsJobsRoute, settingsEventsRoute]);
+const routeTree = rootRoute.addChildren([digestRoute, weekRoute, historyRoute, digestOneRoute, topicsRoute, topicRoute, papersRoute, paperRoute, shareRoute, settingsRoute, settingsPageRoute, settingsTopicRoute, settingsSessionRoute, settingsJobsRoute, settingsEventsRoute]);
 
 export function createAppRouter(history?: RouterHistory) {
   return createRouter({ routeTree, history, scrollRestoration: true, scrollToTopSelectors: [".main", ".screen"], parseSearch, stringifySearch });

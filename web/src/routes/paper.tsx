@@ -1,11 +1,13 @@
 /** A paper's page (DESIGN.md, "Paper"): the header, its open states, the ladder, and the rail or the phone's bars. */
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useSearch } from "@tanstack/react-router";
+import { useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/api/client";
 import { useDeepRead, useProcess } from "@/api/mutations";
 import { paperQuery } from "@/api/queries";
+import { placeOf } from "@/lib/listContext";
 import { cardAnswered, forgetCard, useCardAsked } from "@/lib/remember";
+import { useSteps } from "@/lib/steps";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { Failed } from "@/routes/settings/parts";
@@ -18,8 +20,8 @@ import { Notes } from "@/components/paper/Notes";
 import { PhoneBar } from "@/components/paper/Phone";
 import { PaperRow, TopicRow } from "@/components/paper/TopicRow";
 
-function Rail({ paper, gistAway, asked }: { paper: Paper; gistAway: boolean; asked: boolean }) {
-  const [miss, setMiss] = useState(false);
+function Rail({ paper, gistAway, asked, missOpen }: { paper: Paper; gistAway: boolean; asked: boolean; missOpen: boolean }) {
+  const [miss, setMiss] = useState(missOpen);
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
   return (
     <aside className="pgrail">
@@ -73,15 +75,27 @@ export function pollEvery(p: Paper | undefined, asked: boolean): number | false 
 
 export function PaperPage() {
   const { _splat: id = "" } = useParams({ from: "/paper/$" });
-  const { topic: under } = useSearch({ from: "/paper/$" });
+  const { topic: under, miss } = useSearch({ from: "/paper/$" });
   // Keyed by the paper: the route is reused from one paper to the next, and no open form, sheet or half-made
   // pick may carry over (a DOI typed on one paper must not be set on another).
-  return <PaperView key={id} id={id} under={under} />;
+  return <PaperView key={id} id={id} under={under} miss={!!miss} />;
 }
 
-function PaperView({ id, under }: { id: string; under: string | undefined }) {
+/** The phone's swipe steps to the previous or next paper of the list this one was opened from (`listContext`),
+ * under the same topic and list, as a history entry. */
+function usePaperSteps(id: string, under: string | undefined) {
+  const navigate = useNavigate();
+  const listKey = useLocation({ select: (l) => l.state.list });
+  const place = placeOf(id, listKey);
+  const go = (to: string | null | undefined) => (to ? () => void navigate({ to: "/paper/$", params: { _splat: to }, search: under ? { topic: under } : {}, state: { list: listKey } }) : null);
+  useSteps(place ? { prev: go(place.prev), next: go(place.next) } : null);
+}
+
+/** `miss`: the page was reached by the share target (`routes/share.tsx`), so "Report as a miss" opens at once. */
+function PaperView({ id, under, miss }: { id: string; under: string | undefined; miss: boolean }) {
   const desktop = useDesktop();
   const process = useProcess();
+  usePaperSteps(id, under);
   // While a card is asked for, the page polls until an integration has written it (the API has no queued state);
   // likewise while a pass is queued or running, so its Brief or card appears once written (`pollEvery`).
   const asked = useCardAsked(id);
@@ -91,7 +105,7 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   });
   const { data: paper, error, isPending } = read;
   const [gistAway, setGistAway] = useState(false);
-  const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
+  const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(miss ? "more" : null);
   // The request is remembered until the page reads its pass back, or a card newer than the one asked over.
   useEffect(() => {
     if (asked && paper && cardAnswered(id, paper.card, paper.card_pass)) forgetCard(id);
@@ -137,9 +151,9 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
       <Notes paper={paper} onLabel={onLabel} />
       <div className="pgcols">
         <Ladder paper={paper} asked={asked} deepRead={deepRead} onGistAway={onGistAway} />
-        {desktop && <Rail paper={paper} gistAway={gistAway} asked={asked} />}
+        {desktop && <Rail paper={paper} gistAway={gistAway} asked={asked} missOpen={miss && !paper.in_collection} />}
       </div>
-      {!desktop && <PhoneBar paper={paper} under={under} asked={asked} sheet={sheet} setSheet={setSheet} />}
+      {!desktop && <PhoneBar paper={paper} under={under} asked={asked} sheet={sheet} setSheet={setSheet} missOpen={miss && !paper.in_collection} />}
     </div>
   );
 }

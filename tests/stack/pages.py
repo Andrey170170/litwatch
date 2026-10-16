@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from datetime import date, timedelta
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -20,16 +21,47 @@ WIDTHS = {"phone": (390, 844), "desktop": (1440, 900)}
 CARD_WAIT_SECONDS = 120
 
 
-def pages(paper: str, topic: str) -> dict[str, str]:
-    """Every page there is, by name. W4 grows this list (milestones.md, N7)."""
+def pages(paper: str, topic: str, day: str, missing: str = "0000.00001") -> dict[str, str]:
+    """Every page there is, by name (web/src/router.tsx): the Digest's views, the lists, a paper
+    in the collection and one neither litwatch nor the archive has, the share target, and every
+    Settings page with the pages inside them. A digest's own page and a Calibrate session need a
+    digest written or a session drawn, which the smoke stack has not; `walk` adds them when the
+    API has one."""
     return {
         "digest": "/",
+        "digest-day": f"/?day={day}",
+        "week": "/week",
+        "history": "/history",
+        "history-calendar": "/history?view=cal",
         "papers": "/papers",
         "search": "/papers?q=language%20model",
         "topics": "/topics",
         "topic": f"/topics/{topic}",
         "paper": f"/paper/{paper}",
+        "paper-outside": f"/paper/{missing}",
+        "share": f"/share?url=https%3A%2F%2Farxiv.org%2Fabs%2F{paper}",
+        "settings": "/settings",
+        "settings-overview": "/settings/overview",
+        "settings-needs": "/settings/needs",
+        "settings-calibrate": "/settings/calibrate",
+        "settings-misses": "/settings/misses",
+        "settings-topics": "/settings/topics",
+        "settings-topic-editor": f"/settings/topics/{topic}",
+        "settings-taxonomy": "/settings/taxonomy",
+        "settings-runs": "/settings/runs",
+        "settings-jobs": "/settings/runs/jobs",
+        "settings-integrations": "/settings/integrations",
+        "settings-integration-events": "/settings/integrations/archive",
+        "settings-configuration": "/settings/configuration",
     }
+
+
+# What a page must show to count as working, beyond text in <main>: the share target lands on
+# the paper with "Report as a miss" open; a paper outside the collection offers Process.
+EXPECT = {
+    "share": ("url", "/paper/"),
+    "paper-outside": ("text", "Process"),
+}
 
 
 def watch(page) -> list[str]:
@@ -47,7 +79,24 @@ def watch(page) -> list[str]:
     return seen
 
 
-def walk(base: str, token: str, paper: str, topic: str, out: Path) -> list[str]:
+def found_pages(context, base: str, day: str) -> dict[str, str]:
+    """The pages that exist only once the data does: the page of a digest written around `day`,
+    the first Calibrate session."""
+    extra: dict[str, str] = {}
+    since = (date.fromisoformat(day) - timedelta(days=30)).isoformat()
+    until = (date.fromisoformat(day) + timedelta(days=7)).isoformat()
+    history = context.request.get(f"{base}/api/digests?since={since}&until={until}")
+    if history.ok:
+        marks = [m for d in history.json()["days"] for m in d["marks"]]
+        if marks:
+            extra["digest-one"] = f"/digests/{marks[0]['id']}"
+    sessions = context.request.get(f"{base}/api/settings/calibrate")
+    if sessions.ok and sessions.json():
+        extra["settings-calibrate-session"] = f"/settings/calibrate/{sessions.json()[0]['id']}"
+    return extra
+
+
+def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> list[str]:
     """Visit every page at each width; return what went wrong."""
     failures: list[str] = []
     with sync_playwright() as p:
@@ -58,7 +107,7 @@ def walk(base: str, token: str, paper: str, topic: str, out: Path) -> list[str]:
             assert signed.ok, f"signing in: HTTP {signed.status}"
             page = context.new_page()
             seen = watch(page)
-            for name, path in pages(paper, topic).items():
+            for name, path in (pages(paper, topic, day) | found_pages(context, base, day)).items():
                 seen.clear()
                 page.goto(base + path, wait_until="networkidle")
                 # Both shells put the page in <main>.
@@ -69,6 +118,11 @@ def walk(base: str, token: str, paper: str, topic: str, out: Path) -> list[str]:
                 elif main.locator(".loadmore", has_text="Could not load").count():
                     # A failed read renders its own line with "Try again": not a page that works.
                     seen.append("failed read: the page says it could not load")
+                kind, want = EXPECT.get(name, (None, None))
+                if kind == "url" and want not in page.url:
+                    seen.append(f"landed on {page.url}, not a page under {want}")
+                elif kind == "text" and want not in text:
+                    seen.append(f"the page does not say {want!r}")
                 page.screenshot(path=out / f"{name}-{width}.png", full_page=True)
                 failures += [f"{name} at {width} ({path}): {s}" for s in seen]
             context.close()
@@ -115,13 +169,14 @@ def topic_lists(base: str, token: str, topic: str, collection: set[str]) -> list
 
 
 def main(base: str, token: str, fixture: str, out: str) -> None:
-    papers = [item["id"] for item in json.loads(Path(fixture).read_text())]
+    items = json.loads(Path(fixture).read_text())
+    papers = [item["id"] for item in items]
     shots = Path(out)
     shots.mkdir(parents=True, exist_ok=True)
     # smoke.sh classified every seeded paper into the seed taxonomy's language-models Field topic.
     failures = card(base, token, papers[0], set(papers))
     failures += topic_lists(base, token, "language-models", set(papers))
-    failures += walk(base, token, papers[0], "language-models", shots)
+    failures += walk(base, token, papers[0], "language-models", items[0]["published"], shots)
     for failure in failures:
         print("FAIL", failure)
     print(f"{len(failures)} failures; screenshots in {shots}")

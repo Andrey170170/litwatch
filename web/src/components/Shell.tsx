@@ -1,16 +1,18 @@
 /**
  * The shell (DESIGN.md, "Shell"): on the desktop a sidebar and the main column; on the phone a header, the page,
- * the page's bottom bar, and the drawer. The main column records how it was reached (go, back, top) so the page
- * can slide in from the right side.
+ * the page's bottom bar, the drawer, and the gestures (`gestures.ts`). The main column records how it was reached
+ * (go, back, top, or stepped to) so the page can slide in from the right side.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
-import { Fragment, memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { freshVisit } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { countRender } from "@/lib/renders";
+import { arrivalCount, takeArrival } from "@/lib/steps";
 import { SettingsSide } from "@/routes/settings";
 import { Badge } from "./Badge";
+import { usePhoneGestures } from "./gestures";
 import { RunStatus } from "./RunStatus";
 import { Sheet } from "./Sheet";
 import { Unavailable, useSummary } from "./Summary";
@@ -45,18 +47,25 @@ export function SideHead() {
   );
 }
 
-type Came = "go" | "back" | "top" | "keep";
+type Came = "go" | "back" | "top" | "keep" | "next" | "prev" | "still";
 
-/** How the current page was reached, from the history index: forward is deeper, backward is back. */
+/** The screen's key: its path, and on the phone the count of screens a gesture brought in, so a step within one
+ * route (a Day to the next) mounts afresh and plays its entry. */
+const screenKey = (pathname: string) => `${pathname}#${arrivalCount()}`;
+
+/** How the current page was reached: by a gesture (stepped next or prev, or already in view after a swipe back),
+ * else from the history index: forward is deeper, backward is back. */
 function useCame(): Came {
   const location = useLocation();
   const last = useRef<{ key: string; index: number } | null>(null);
   const index = (location.state as { __TSR_index?: number }).__TSR_index ?? 0;
-  const key = location.pathname;
+  const key = screenKey(location.pathname);
   if (last.current?.key === key) return "keep";
   const before = last.current;
   last.current = { key, index };
-  if (!before || !isDeeper(key)) return "top";
+  const arrival = takeArrival();
+  if (arrival) return arrival;
+  if (!before || !isDeeper(location.pathname)) return "top";
   return index < before.index ? "back" : "go";
 }
 
@@ -156,37 +165,45 @@ function Phone() {
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [location.pathname]);
   const back = () => (router.history.canGoBack() ? router.history.back() : router.navigate({ to: "/" }));
+  const els = { root: useRef<HTMLElement | null>(null), page: useRef<HTMLElement | null>(null), main: useRef<HTMLElement | null>(null), under: useRef<HTMLElement | null>(null), panel: useRef<HTMLElement | null>(null), shade: useRef<HTMLElement | null>(null) };
+  const { drawerDrag, onRendered } = usePhoneGestures(els, { deeper, menu, setMenu, deeperAt: isDeeper });
+  const key = screenKey(location.pathname);
+  // a screen a swipe back brought in has rendered: the page that followed the finger gives way to it
+  useLayoutEffect(onRendered, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="phone">
-      <header className="pbar">
-        {deeper ? (
-          <>
-            <button className="ib" onClick={back} aria-label="Back">
-              ‹
-            </button>
-            <Slot name="title" className="ttl" />
-          </>
-        ) : (
-          <>
-            <button className="ib" onClick={() => setMenu(true)} aria-label="Menu">
-              ☰
-            </button>
-            <Slot name="bar" className="ttl" />
-          </>
-        )}
-        <span className="sp" />
-        <RunStatus />
-        <Link to="/settings" className="ib" aria-label="Settings">
-          ⚙
-        </Link>
-      </header>
-      <main className="scroll screen" data-came={came} key={location.pathname} data-scroll-restoration-id="screen">
-        <div className="pp">
-          <Outlet />
-        </div>
-      </main>
-      <Slot name="foot" />
-      <Sheet open={menu} onClose={() => setMenu(false)} side="left" label="Menu">
+    <div className="phone" ref={els.root as React.RefObject<HTMLDivElement>}>
+      <div className="under" ref={els.under as React.RefObject<HTMLDivElement>} hidden />
+      <div className="page" ref={els.page as React.RefObject<HTMLDivElement>}>
+        <header className="pbar">
+          {deeper ? (
+            <>
+              <button className="ib" onClick={back} aria-label="Back">
+                ‹
+              </button>
+              <Slot name="title" className="ttl" />
+            </>
+          ) : (
+            <>
+              <button className="ib" onClick={() => setMenu(true)} aria-label="Menu">
+                ☰
+              </button>
+              <Slot name="bar" className="ttl" />
+            </>
+          )}
+          <span className="sp" />
+          <RunStatus />
+          <Link to="/settings" className="ib" aria-label="Settings">
+            ⚙
+          </Link>
+        </header>
+        <main className="scroll screen" ref={els.main} data-came={came} key={key} data-scroll-restoration-id="screen">
+          <div className="pp">
+            <Outlet />
+          </div>
+        </main>
+        <Slot name="foot" />
+      </div>
+      <Sheet open={menu} onClose={() => setMenu(false)} side="left" label="Menu" drag={drawerDrag} panelRef={els.panel} shadeRef={els.shade}>
         <div className="wm">
           <Link to="/" className="mark" onClick={() => setMenu(false)}>
             litwatch
