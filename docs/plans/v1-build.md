@@ -201,8 +201,6 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
 
 ### Deferred to later PRs
 
-- **W2, Needs you's full-text group** (from N5b): Try again and Use the PDF on each pass waiting for the owner,
-  `POST /api/settings/fulltext/{pass_id}/now` and `/pdf`, as the paper page's open state already does.
 - **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
   paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
   the restart's digests.
