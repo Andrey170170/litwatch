@@ -28,8 +28,13 @@ export function forgetCard(id: string) {
   askedCards.delete(id);
   changed();
 }
+export function forgetAllCards() {
+  askedCards.clear();
+  changed();
+}
 /** Whether a card was asked for this paper, live: the page sees a request made by a control that has since closed. */
 export const useCardAsked = (id: string) => useSyncExternalStore(watch, () => askedCards.has(id));
-/** Whether a paper read back answers the request: its pass is open, or its card is newer than the one asked over. */
-export const cardAnswered = (id: string, card: { written_at?: string | null } | null | undefined, pass: unknown) =>
-  !!pass || (!!card && (card.written_at ?? null) !== askedCards.get(id));
+/** Whether a paper read back answers the request: the owner's own pass is open (a request takes an automatic pass
+ * over, so its reason is what tells), or its card is newer than the one asked over. */
+export const cardAnswered = (id: string, card: { written_at?: string | null } | null | undefined, pass: { reason: string } | null | undefined) =>
+  pass?.reason === "request" || (!!card && (card.written_at ?? null) !== askedCards.get(id));

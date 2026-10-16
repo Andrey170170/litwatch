@@ -337,7 +337,7 @@ export function useWriteAgain() {
       const key = ["digest", String(digestId)];
       await qc.cancelQueries({ queryKey: key, exact: true });
       qc.setQueryData(key, r);
-      restripe(qc, r);
+      await restripe(qc, r);
       digestViewsStale(qc);
       refreshSummary(qc);
       return settleNeeds(qc, (q) => (r.state === "failed" ? noted(q, digestId, `Failed again: ${r.error ?? "no text"}. The next run writes it again.`) : settle(q, "digests", { id: digestId }, "Written again; it shows in the Digest.")));
@@ -360,13 +360,16 @@ const digestViewsStale = (qc: QueryClient) => {
   for (const view of ["day", "week", "history"]) void qc.invalidateQueries({ queryKey: ["digest", view] });
 };
 
-/** A digest written again recolours its square in the topics' strips (`/topics` and its topic's page), in place:
- * the lists around it are not reread, so nothing moves. */
-function restripe(qc: QueryClient, d: Schemas["Digest"]) {
+/** A digest written again recolours its square in the topics' strips (`/topics` and its topic's page), in place
+ * (`patchRead`: a read in flight does not land over it): the lists around it are not reread, so nothing moves. */
+export function restripe(qc: QueryClient, d: Pick<Schemas["Digest"], "id" | "state" | "best_rarity" | "topic">) {
   const square = (s: Schemas["StripDigest"]) => (s.id === d.id ? { ...s, state: d.state, best_rarity: d.best_rarity } : s);
-  qc.setQueriesData<Schemas["TopicCard"][]>({ queryKey: ["topics"], exact: true }, (ts) => ts?.map((t) => (t.slug === d.topic.slug && t.strip ? { ...t, strip: t.strip.map(square) } : t)));
+  const card = (t: Schemas["TopicCard"]) => (t.slug === d.topic.slug && t.strip ? { ...t, strip: t.strip.map(square) } : t);
   type Page = { topic: { strip: Schemas["StripDigest"][] } };
-  qc.setQueriesData<{ pages: Page[]; pageParams: unknown[] }>({ queryKey: ["topic", d.topic.slug] }, (q) => q && { ...q, pages: q.pages.map((p) => ({ ...p, topic: { ...p.topic, strip: p.topic.strip.map(square) } })) });
+  return Promise.all([
+    patchRead<Schemas["TopicGroup"][]>(qc, ["topics"], (gs) => gs.map((g) => ({ ...g, topics: g.topics.map(card) }))),
+    ...qc.getQueryCache().findAll({ queryKey: ["topic", d.topic.slug] }).map((q) => patchRead<{ pages: Page[]; pageParams: unknown[] }>(qc, q.queryKey, (r) => ({ ...r, pages: r.pages.map((p) => ({ ...p, topic: { ...p.topic, strip: p.topic.strip.map(square) } })) }))),
+  ]);
 }
 
 /** Whether a write-again's 409 says the digest is no longer one to write (written meanwhile, or its topic paused),

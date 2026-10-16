@@ -512,7 +512,8 @@ export function DigestOnePage({ id }: { id: number }) {
 
 /** The slide-over on the desktop: the digest over the view, closed by the shade, Esc or "‹ Close", which take the
  * search param off (replaced, so Back still leaves the tab). Opening it rereads the digest behind what is cached,
- * as a visit to a page does. The phone has no slide-over: a view's URL naming a digest goes to the digest's page. */
+ * as a visit to a page does. The phone has no slide-over: a view's URL naming a digest goes on to the digest's page,
+ * the view beneath it. */
 function SlideOver({ id }: { id: number | undefined }) {
   const desktop = useDesktop();
   const navigate = useNavigate();
@@ -520,7 +521,10 @@ function SlideOver({ id }: { id: number | undefined }) {
   useEffect(() => {
     if (id === undefined) return;
     if (desktop) void qc.invalidateQueries({ queryKey: ["digest", String(id)] });
-    else void navigate({ to: "/digests/$id", params: { id: String(id) }, replace: true });
+    else {
+      // the view stays under the digest's page, without the param, so Back lands on it and not on this redirect
+      void navigate({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: undefined }), replace: true } as never).then(() => navigate({ to: "/digests/$id", params: { id: String(id) } }));
+    }
   }, [id, desktop, qc, navigate]);
   if (!desktop || id === undefined) return null;
   const close = () => void navigate({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: undefined }), replace: true, resetScroll: false } as never);
