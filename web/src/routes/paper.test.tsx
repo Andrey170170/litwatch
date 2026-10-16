@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
+import type { Paper } from "@/components/paper/Actions";
+import { pollEvery } from "./paper";
 
 const badge = { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" };
 const paper = {
@@ -302,6 +304,21 @@ describe("a paper's page", () => {
     await screen.findByRole("heading", { name: "Archive one" });
     await userEvent.click(screen.getByRole("button", { name: /BibTeX/ }));
     await waitFor(() => expect(calls.find((c) => c.url === "/api/bibtex")?.body).toEqual({ cited: [{ id: "2409.01234", title: "Archive one", authors: outside.authors, year: 2026 }] }));
+  });
+
+  it("polls while a Brief or a Deep card pass is queued or running, not while it waits on the owner", () => {
+    const pass = (state: string) => ({ id: 9, reason: "request", state, queued_at: "2026-10-14T03:00:00Z" });
+    const waits = (kind: string, pass_id: number) => ({ kind, revision: 1, pass_id });
+    const at = (fields: object) => pollEvery({ ...paper, states: [], ...fields } as unknown as Paper, false);
+    expect(at({ card_pass: pass("failed"), states: [waits("card_failed", 9)] })).toBe(false);
+    // Run it now from the card_failed note: the refetched page has the pass queued again, and polls for the card.
+    expect(at({ card_pass: pass("ready") })).toBe(15_000);
+    expect(at({ card_pass: pass("running") })).toBe(15_000);
+    expect(at({ card_pass: pass("awaiting_text") })).toBe(60_000);
+    expect(at({ card_pass: pass("awaiting_text"), states: [waits("awaiting_text", 9)] })).toBe(false);
+    // A Brief waiting on the owner does not stop the poll for a card pass that is not.
+    const brief = { id: 7, kind: "brief", state: "awaiting_text", queued_at: "2026-10-14T03:00:00Z" };
+    expect(at({ text_pass: brief, card_pass: pass("awaiting_text"), states: [waits("awaiting_text", 7)] })).toBe(60_000);
   });
 
   it("runs a failed full-text pass again on the paper's PDF", async () => {
