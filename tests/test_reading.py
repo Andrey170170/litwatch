@@ -937,6 +937,28 @@ async def hang(req: httpx.Request) -> httpx.Response:
     return httpx.Response(504)
 
 
+@pytest.mark.parametrize("trickle", ["headers", "body"])
+async def test_an_archive_paper_page_ends_at_its_deadline_however_the_archive_trickles(
+    conn, monkeypatch, slow_arxiv, trickle
+):
+    """Bytes trickling in keep every socket read short: the page's own deadline ends the read,
+    with the declared 503 (P5)."""
+    from litwatch.api import reading as reading_api
+    from litwatch.archive import ArchiveClient
+
+    slow_arxiv.trickle = trickle  # a local socket that never finishes answering, any path
+    monkeypatch.setattr(reading_api, "ARCHIVE_PAGE_BUDGET", 0.5)
+    await taxonomy_store.save(conn, TREE)
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    archive = ArchiveClient(f"http://127.0.0.1:{slow_arxiv.server_port}", "archive-token")
+    app = create_app(dsn, TOKEN, Config(), archive=archive)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTH
+    ) as c:
+        answer = await asyncio.wait_for(c.get("/api/papers/2610.09999"), 3)
+    assert answer.status_code == 503
+
+
 async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(conn, monkeypatch):
     """The storage policy keeps few PDFs; the others are fetched when the owner opens them.
     Without an archive, or when it cannot get the PDF in time, arXiv's PDF is the answer."""

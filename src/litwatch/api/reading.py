@@ -58,6 +58,8 @@ ARXIV_SILENT = {503: {"description": "arXiv did not answer in time; nothing was 
 ARCHIVE_DOWN = "The archive did not answer"
 # Past the archive's wait for a PDF, the time left to read one that became ready at its end.
 PDF_READ_SLACK = 10.0
+# The archive's record of a paper litwatch lacks, for its page: one bound over the whole read.
+ARCHIVE_PAGE_BUDGET = 10.0
 
 
 def _config(request: Request) -> Any:
@@ -377,11 +379,13 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
 async def _unfetched(request: Request, paper_id: str) -> s.Paper:
     """An archive paper litwatch has not fetched: its metadata, Process, Deep read (which
     fetches it first) and Report as a miss. 404 without an archive or when the archive lacks
-    it; 503 when the archive cannot answer, which says nothing of the paper."""
+    it; 503 when the archive cannot answer within `ARCHIVE_PAGE_BUDGET`, which says nothing of
+    the paper."""
     archive = request.app.state.archive
     try:
-        found = await archive.paper(paper_id) if archive is not None else None
-    except ArchiveError as exc:
+        async with asyncio.timeout(ARCHIVE_PAGE_BUDGET):
+            found = await archive.paper(paper_id) if archive is not None else None
+    except (ArchiveError, TimeoutError) as exc:
         raise HTTPException(status_code=503, detail=ARCHIVE_DOWN) from exc
     if found is None:
         raise HTTPException(status_code=404, detail="no such paper")
