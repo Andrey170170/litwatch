@@ -435,7 +435,9 @@ export function HistoryPage() {
 
 // -- a digest ------------------------------------------------------------------------------------------------------
 
-/** A digest in full: the head, the text, then its papers by role. A failed one offers Write again. */
+/** A digest in full: the head, the text, then its papers by role. A failed one offers Write again; the answer lands
+ * in the digest's cache (`useWriteAgain`). Keyed by id where it is placed, so one digest's pending write is not
+ * another's. */
 export function DigestView({ id }: { id: number }) {
   const q = useQuery(digestQuery(id));
   const write = useWriteAgain();
@@ -463,18 +465,19 @@ export function DigestView({ id }: { id: number }) {
             {d.error && <div className="err">{d.error}</div>}
           </div>
           <div className="acts">
-            <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id, { onSettled: () => void q.refetch() })}>
+            <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id)}>
               {write.isPending ? "Writing…" : "Write again"}
             </button>
           </div>
         </div>
       )}
       {d.state === "nothing_new" && <p className="prose faint">Nothing was due for this topic. The run looked and found nothing new.</p>}
-      {d.text?.split(/\n\s*\n/).map((p, i) => (
-        <p key={i} className="prose">
-          {p}
-        </p>
-      ))}
+      {d.text?.trim() &&
+        d.text.split(/\n\s*\n/).map((p, i) => (
+          <p key={i} className="prose">
+            {p}
+          </p>
+        ))}
       {sections(d.topic.depth, d.period, d.papers).map((s) => (
         <Fragment key={s.name}>
           <div className="cap">{s.name}</div>
@@ -500,7 +503,7 @@ export function DigestOnePage({ id }: { id: number }) {
         <span className="t">{q.data ? `${q.data.topic.name}${q.data.period === "week" ? " · week" : ""}` : "Digest"}</span>
       </Fill>
       <Back />
-      <DigestView id={id} />
+      <DigestView key={id} id={id} />
     </>
   );
 }
@@ -521,7 +524,7 @@ function SlideOver({ id }: { id: number | undefined }) {
           <button className="back" onClick={close}>
             ‹ Close
           </button>
-          <DigestView id={id} />
+          <DigestView key={id} id={id} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

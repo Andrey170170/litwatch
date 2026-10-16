@@ -13,8 +13,6 @@ export type HistoryDay = Schemas["HistoryDay"];
 
 // -- days ------------------------------------------------------------------------------------------------------------
 
-const DAY_MS = 86_400_000;
-
 /** A calendar day as the API writes it, from a local Date. */
 export function isoDay(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -37,12 +35,10 @@ export function mondayOf(iso: string): string {
   return addDays(iso, -((d.getDay() + 6) % 7));
 }
 export const isWeekend = (iso: string) => [0, 6].includes(parseDay(iso).getDay());
-export const daysBetween = (from: string, to: string) => Math.round((parseDay(to).getTime() - parseDay(from).getTime()) / DAY_MS);
 
 const WEEKDAY = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const DAY_MONTH = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
 const MONTH = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" });
-const MONTH_SHORT = new Intl.DateTimeFormat("en-GB", { month: "short" });
 
 /** "Wed 14 Oct" */
 export const dayLabel = (iso: string) => WEEKDAY.format(parseDay(iso));
@@ -54,7 +50,6 @@ export function weekRange(monday: string): string {
 }
 /** "October 2026" */
 export const monthLabel = (iso: string) => MONTH.format(parseDay(iso));
-export const monthShort = (iso: string) => MONTH_SHORT.format(parseDay(iso));
 
 // -- marks -----------------------------------------------------------------------------------------------------------
 

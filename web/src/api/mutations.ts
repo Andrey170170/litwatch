@@ -328,6 +328,9 @@ export function useWriteAgain() {
   return useMutation({
     mutationFn: async (digestId: number) => ok(await api.POST("/api/digests/{digest_id}/write", { params: { path: { digest_id: digestId } } })),
     onSuccess: (r, digestId) => {
+      // The answer is the digest as it now stands: shown at once where it is open, and the Digest's views reread it.
+      qc.setQueryData(["digest", String(digestId)], r);
+      for (const view of ["day", "week", "history"]) void qc.invalidateQueries({ queryKey: ["digest", view] });
       refreshSummary(qc);
       return settleNeeds(qc, (q) => (r.state === "failed" ? noted(q, digestId, `Failed again: ${r.error ?? "no text"}. The next run writes it again.`) : settle(q, "digests", { id: digestId }, "Written again; it shows in the Digest.")));
     },
