@@ -213,6 +213,9 @@ class BackupTests(unittest.TestCase):
             before = {path for kind, path in events[:swap] if kind == 'fsync'}
             written = {generation, *generation.rglob('*')}
             self.assertEqual(written - before, set(), 'not durable before current names it')
+            # The rename that published the generation is an entry of the destination: durable too.
+            tree = max(i for i, (kind, path) in enumerate(events[:swap]) if kind == 'fsync' and path in written)
+            self.assertIn(('fsync', destination), events[tree:swap], 'published name not durable before the swap')
             retired = events.index(('rmtree', predecessor))
             self.assertIn(('fsync', destination), events[swap:retired])
 

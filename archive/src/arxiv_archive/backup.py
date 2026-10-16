@@ -192,6 +192,8 @@ def export(work: Path, repo: Path, destination: Path) -> dict:
             raise
         (published / MARKER).unlink()
         _fsync_tree(published)
+        # The rename into `published` lives in the destination: durable before `current` names it.
+        _fsync_directory(destination)
         swap.symlink_to(published.name, target_is_directory=True)
         os.replace(swap, current)
         _fsync_directory(destination)
