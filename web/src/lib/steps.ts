@@ -35,3 +35,7 @@ export function arrive(how: Arrival) {
  * route (a Day to the next) mounts a fresh screen that plays its entry, and a render can tell whether its screen
  * is the one the gesture brought. */
 export const arrival = () => last;
+
+/** Where a location sits in the session's history: the router's own index, 0 for the first entry. The shell tells
+ * forward from back by it, and the snapshots of screens left behind are kept by it (`lib/snapshots`). */
+export const historyIndex = (location: { state: unknown }) => (location.state as { __TSR_index?: number }).__TSR_index ?? 0;

@@ -9,7 +9,7 @@ import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "re
 import { freshVisit } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { countRender } from "@/lib/renders";
-import { arrival } from "@/lib/steps";
+import { arrival, historyIndex } from "@/lib/steps";
 import { SettingsSide } from "@/routes/settings";
 import { Badge } from "./Badge";
 import { usePhoneGestures } from "./gestures";
@@ -57,7 +57,7 @@ const screenKey = (pathname: string) => `${pathname}#${arrival().n}`;
  * already in view after a swipe back), else from the history index: forward is deeper, backward is back. */
 function useCame(): Came {
   const location = useLocation();
-  const index = (location.state as { __TSR_index?: number }).__TSR_index ?? 0;
+  const index = historyIndex(location);
   const a = arrival();
   const key = screenKey(location.pathname);
   const [seen, setSeen] = useState<{ key: string; n: number; index: number; came: Came }>(() => ({ key, n: a.n, index, came: "top" }));

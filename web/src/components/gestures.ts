@@ -10,7 +10,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { axisOf, backCommits, drawerSettles, EDGE, motionMs, resist, STEP_SLIDE, stepCommits, Tracker, type Axis } from "@/lib/gesture";
 import { keepSnapshot, showSnapshot } from "@/lib/snapshots";
-import { arrive, stepsNow, type Steps } from "@/lib/steps";
+import { arrive, historyIndex, stepsNow, type Steps } from "@/lib/steps";
 
 export const EASE = "cubic-bezier(.2, .85, .25, 1)";
 
@@ -18,8 +18,7 @@ export const EASE = "cubic-bezier(.2, .85, .25, 1)";
 export const sample = (e: PointerEvent) => ({ t: Date.now(), x: e.clientX, y: e.clientY });
 
 /** Follow one pointer from `down` to its release: `move` gets each move, `end` the release (`cancelled` when the
- * browser took the pointer for a scroll). Window listeners, so the finger may leave the element. After a drag,
- * the click the release would make lands on nothing. */
+ * browser took the pointer for a scroll). Window listeners, so the finger may leave the element. */
 export function trackPointer(down: PointerEvent, on: { move: (e: PointerEvent) => void; end: (e: PointerEvent, cancelled: boolean) => void }) {
   const id = down.pointerId;
   const move = (e: PointerEvent) => e.pointerId === id && on.move(e);
@@ -99,8 +98,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
   useEffect(
     () =>
       router.history.subscribe(({ location, action }) => {
-        const index = (location.state as { __TSR_index?: number }).__TSR_index ?? 0;
-        if (action.type === "PUSH" && live.current.deeperAt(location.pathname) && els.page.current) keepSnapshot(index - 1, els.page.current);
+        if (action.type === "PUSH" && live.current.deeperAt(location.pathname) && els.page.current) keepSnapshot(historyIndex(location) - 1, els.page.current);
       }),
     [router, els.page],
   );
@@ -109,7 +107,6 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
     let busy = false;
     const width = () => els.root.current?.clientWidth || window.innerWidth;
     const panelWidth = () => els.panel.current?.offsetWidth || Math.min(300, width() * 0.82);
-    const index = () => (router.state.location.state as { __TSR_index?: number }).__TSR_index ?? 0;
     const back = () => (router.history.canGoBack() ? router.history.back() : void router.navigate({ to: "/" }));
 
     /** The drawer at `x` from open (0 open, -width shut), its shade fading with it. */
@@ -133,7 +130,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
         const under = els.under.current;
         if (under) {
           under.hidden = false;
-          if (!showSnapshot(index() - 1, under)) under.replaceChildren();
+          if (!showSnapshot(historyIndex(router.state.location) - 1, under)) under.replaceChildren();
         }
         if (els.page.current) els.page.current.style.transition = "none";
       } else if (els.main.current) els.main.current.style.transition = "none";
