@@ -397,4 +397,16 @@ describe("Settings", () => {
     await userEvent.click(screen.getByRole("button", { name: /Done|Next/ }));
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: { mi: "none" }, value: "matters", note: null }));
   });
+
+  it("records what was changed before the strip moves to another paper", async () => {
+    viewport(true);
+    const items = [1, 2].map((position) => ({ position, paper_id: `2610.0000${position}`, topic: "mi", why: "above", verdict: "related", answer: null, answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }));
+    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items }, "PUT /api/settings/calibrate/1/items/1": { recorded: true } });
+    renderApp("/settings/calibrate/1?at=1");
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    await userEvent.click(within(screen.getByRole("group", { name: "Fit for Mech interp" })).getByRole("button", { name: "related" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Paper 2" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: { mi: "related" }, value: null, note: null }));
+    expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
+  });
 });

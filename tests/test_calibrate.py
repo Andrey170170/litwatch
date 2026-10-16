@@ -200,6 +200,20 @@ async def test_a_miss_keeps_the_verdict_standing_when_it_joins(db):
     assert item["verdict"] == "related"
 
 
+async def test_an_answer_does_not_renew_a_label_it_leaves_as_it_was(db):
+    """Editing only the appraisal sends the drawn Fit again; the label keeps its time, so a
+    reaction given since still outranks it."""
+    session_id = await calibrate.draw(db, seed=1, size=2)
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    fit = {FAITH.slug: LabelValue.NONE}
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+    at = "SELECT labelled_at FROM labels WHERE paper_id = %s AND topic = %s"
+    before = await (await db.execute(at, (item["paper_id"], FAITH.slug))).fetchone()
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
+    after = await (await db.execute(at, (item["paper_id"], FAITH.slug))).fetchone()
+    assert after["labelled_at"] == before["labelled_at"]
+
+
 async def test_fit_names_only_focus_topics(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]

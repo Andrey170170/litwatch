@@ -197,7 +197,20 @@ async def answer(
     if unknown := sorted(set(given.fit) - focus):
         raise ValueError(f"not Focus topics: {', '.join(unknown)}")
     async with conn.transaction():
+        await word.lock(conn, item["paper_id"])
+        # A firm label already saying this Fit is not written again: writing renews its time,
+        # which would put it above a reaction given since (the newest word wins).
+        firm = {
+            r["topic"]: r["value"]
+            for r in await _all(
+                conn,
+                "SELECT topic, value FROM labels WHERE paper_id = %s AND NOT provisional",
+                (item["paper_id"],),
+            )
+        }
         for topic, fit in given.fit.items():
+            if firm.get(topic) == fit.value:
+                continue
             # The drawn topic's answer is the sample; any other is the owner's own choice.
             drawn = topic == item["topic"] and item["why"] in ("above", "below")
             await word.label(

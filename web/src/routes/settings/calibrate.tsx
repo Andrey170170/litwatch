@@ -160,14 +160,17 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   const go = (position: number) => open(s.id, { at: position }, true);
   const canRecord = !!draft.fit[item.topic];
   const changed = JSON.stringify(draft) !== JSON.stringify(draftOf(item));
-  /** Next records the answer when the drawn topic has its Fit, then moves on; a paper left unanswered stays grey. */
-  const next = () => {
-    const after = i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true }, true);
+  /** Record the answer first when `record`, then move on. */
+  const leave = (record: boolean, after: () => void) => {
     const fit = answerFits(draft.fit, item, focus);
-    if (canRecord && (changed || !item.answered_at)) answer.mutate({ position: item.position, paperId: item.paper_id, answer: { fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
+    if (record) answer.mutate({ position: item.position, paperId: item.paper_id, answer: { fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
     else after();
   };
-  const back = () => i > 0 && go(s.items[i - 1]!.position);
+  /** Next records the answer when the drawn topic has its Fit, then moves on; a paper left unanswered stays grey. */
+  const next = () => leave(canRecord && (changed || !item.answered_at), i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true }, true));
+  /** Back, the strip and the picker keep what was changed on this paper before moving; an untouched one stays as it was. */
+  const move = (position: number) => leave(canRecord && changed, () => go(position));
+  const back = () => i > 0 && move(s.items[i - 1]!.position);
   const last = i + 1 === n;
   return (
     <div className="setpg">
@@ -178,7 +181,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
       </Fill>
       <div className="calprog" role="tablist" aria-label="Papers in the session">
         {s.items.map((it) => (
-          <button key={it.position} className={it.position === item.position ? "cur" : answered.has(it.position) ? "done" : ""} onClick={() => go(it.position)} title={`Paper ${it.position}`} role="tab" aria-selected={it.position === item.position}>
+          <button key={it.position} className={it.position === item.position ? "cur" : answered.has(it.position) ? "done" : ""} onClick={() => move(it.position)} title={`Paper ${it.position}`} role="tab" aria-selected={it.position === item.position}>
             <i />
           </button>
         ))}
@@ -239,7 +242,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
             <div className="cap">Go to a paper</div>
             <div className="cpk">
               {s.items.map((it) => (
-                <button key={it.position} className={it.position === item.position ? "cur" : ""} onClick={() => (setPick(false), go(it.position))}>
+                <button key={it.position} className={it.position === item.position ? "cur" : ""} onClick={() => (setPick(false), move(it.position))}>
                   <span className="n">{it.position}</span>
                   <span className="t">{it.title}</span>
                   <span className="ck">{answered.has(it.position) ? "✓" : ""}</span>
