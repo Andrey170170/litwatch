@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 import pytest
 
-from litwatch import grading, intake
+from litwatch import grading, intake, store
 from litwatch.api import create_app
 from litwatch.archive import ArchiveClient, ArchiveError
 from litwatch.archive.client import listed
@@ -17,6 +17,7 @@ from litwatch.core.grading import FIT_DEFINITIONS
 from litwatch.feedback import misses, word
 from litwatch.intake import atom, oai
 from litwatch.jobs import intake as intake_job
+from litwatch.jobs.context import model_run
 from litwatch.llm import ProviderError
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
@@ -310,6 +311,54 @@ async def test_a_paused_topic_is_not_graded_now_nor_waits_for_the_owner(conn, mo
     (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
     assert failure["failed_runs"] == FAILED_RUNS  # nothing reset, nothing spent
     assert await rows(conn, "SELECT 1 FROM runs WHERE kind = 'grading'") == []
+
+
+async def test_a_failure_on_a_paused_topic_does_not_wait_for_the_owner(conn, models):
+    await stuck(conn, models)
+    paper = await papers_store.get(conn, B.id)
+    assert await failures.waiting(conn, paper, "grading", FAILED_RUNS, FAITH.slug)
+    await word.save_taxonomy(conn, paused())
+    assert not await failures.waiting(conn, paper, "grading", FAILED_RUNS, FAITH.slug)
+
+
+async def test_grading_now_checks_the_topic_under_the_taxonomy_lock(conn, models, monkeypatch):
+    """No topic edit can land between grading now's look at the topic and what it does: when
+    it locks the paper, a pause trying to take the taxonomy lock finds it held."""
+    await stuck(conn, models)
+    landed = []
+    lock = papers_store.lock
+
+    async def pause_meanwhile(c, paper_id):
+        async with await store.sibling(conn) as other, other.transaction():
+            row = await (
+                await other.execute(
+                    "SELECT pg_try_advisory_xact_lock(%s) AS got", (taxonomy_store.TAXONOMY_LOCK,)
+                )
+            ).fetchone()
+            if row["got"]:
+                await word.save_taxonomy(other, paused())
+            landed.append(row["got"])
+        return await lock(c, paper_id)
+
+    monkeypatch.setattr(papers_store, "lock", pause_meanwhile)
+    async with api(conn, models) as client:
+        await client.post(NOW, json={"revision": 1})
+    assert landed == [False]
+
+
+async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(conn, models):
+    paper = await papers_store.get(conn, B.id)
+    due = grading.Due(paper, FAITH, "Chain-of-thought faithfulness")
+    async with (
+        model_run(conn, CONFIG, "grading", gateway=models.gateway) as run,
+        grading.grade([due], run.gateway) as results,
+    ):
+        (graded,) = [g async for g in results]
+    assert graded.verdict is not None
+    await word.save_taxonomy(conn, paused())  # paused while the graders were asked
+    assert await grading.record(conn, graded) is False
+    assert await verdicts(conn, B.id) == []
+    assert await rows(conn, "SELECT 1 FROM outbox WHERE type = 'verdict.recorded'") == []
 
 
 async def test_a_miss_whose_grading_stopped_is_no_longer_a_candidate(conn, models):

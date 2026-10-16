@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from litwatch.core import Depth, Fit, Grade, Label, LabelOrigin, LabelValue, Status, Weight, grade
 from litwatch.feedback import word
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store.analyses import CURRENT_WEIGHT
 
 SESSION = 20
 DRAW_DAYS = 30
@@ -35,11 +36,10 @@ async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[
     the owner said."""
     rows = await _all(
         conn,
-        """
+        f"""
         SELECT paper_id, id AS verdict_id, fit,
-               (SELECT w.weight FROM weights w JOIN papers p ON p.id = w.paper_id
-                AND p.revision = w.paper_revision WHERE w.paper_id = v.paper_id
-                ORDER BY w.pass_id DESC NULLS LAST, w.id DESC LIMIT 1) AS weight
+               (SELECT w.weight FROM papers p JOIN LATERAL ({CURRENT_WEIGHT}) w ON true
+                WHERE p.id = v.paper_id) AS weight
         FROM (
             SELECT DISTINCT ON (paper_id) * FROM verdicts WHERE topic = %s
             ORDER BY paper_id, paper_revision DESC, recorded_at DESC, id DESC
@@ -185,6 +185,10 @@ class Answer(BaseModel):
 async def answer(
     conn: psycopg.AsyncConnection, session_id: int, position: int, given: Answer
 ) -> None:
+    """Store an item's answers as one change of its paper (`word.change`): its labels are
+    written together and settled once, so a Fit moved from one topic to another does not take
+    the paper out of the library and back. LookupError for no such item; ValueError for a
+    missing Fit or one for a topic not at Focus."""
     item = await (
         await conn.execute(
             "SELECT * FROM calibration_items WHERE session_id = %s AND position = %s",
@@ -195,11 +199,10 @@ async def answer(
         raise LookupError("no such item")
     if item["topic"] not in given.fit and item["answered_at"] is None:
         raise ValueError(f"fit for {item['topic']} is required")
-    focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
-    if unknown := sorted(set(given.fit) - focus):
-        raise ValueError(f"not Focus topics: {', '.join(unknown)}")
-    async with conn.transaction():
-        await word.lock(conn, item["paper_id"])
+    async with word.change(conn, item["paper_id"]):
+        focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
+        if unknown := sorted(set(given.fit) - focus):
+            raise ValueError(f"not Focus topics: {', '.join(unknown)}")
         # A firm label already saying this Fit is not written again: writing renews its time,
         # which would put it above a reaction given since (the newest word wins).
         firm = {

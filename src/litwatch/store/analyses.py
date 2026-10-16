@@ -85,6 +85,14 @@ async def add(
 # full-text pass queued last, else the newest from the abstract (pipeline.md, section 6).
 CURRENT_FIRST = "ORDER BY {x}.pass_id DESC NULLS LAST, {x}.id DESC"
 
+# The current Weight of paper `p` (an alias in the query using it): of its current revision,
+# chosen by `CURRENT_FIRST`, with its reason and source. Every read of a paper's Weight joins
+# it, as `LEFT JOIN LATERAL ({CURRENT_WEIGHT}) w ON true`.
+CURRENT_WEIGHT = (
+    "SELECT x.weight, x.reason, x.source FROM weights x WHERE x.paper_id = p.id "
+    "AND x.paper_revision = p.revision " + CURRENT_FIRST.format(x="x") + " LIMIT 1"
+)
+
 
 async def current_weight(conn: psycopg.AsyncConnection, paper_id: str) -> Weight | None:
     """The paper's current Weight for its current revision, or None until the current text is
@@ -97,9 +105,8 @@ async def weight_of(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, A
     """The current Weight's row, `current_weight`'s, with its reason and source."""
     return await (
         await conn.execute(
-            "SELECT w.weight, w.reason, w.source FROM weights w JOIN papers p ON p.id = w.paper_id "
-            "AND p.revision = w.paper_revision WHERE w.paper_id = %s "
-            f"{CURRENT_FIRST.format(x='w')} LIMIT 1",
+            f"SELECT w.weight, w.reason, w.source FROM papers p "
+            f"JOIN LATERAL ({CURRENT_WEIGHT}) w ON true WHERE p.id = %s",
             (paper_id,),
         )
     ).fetchone()

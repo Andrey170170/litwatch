@@ -12,7 +12,7 @@ import psycopg
 from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Paper
 from litwatch.core.classification import Source
 from litwatch.feedback import word
-from litwatch.feedback.word import Settled
+from litwatch.feedback.word import Change
 from litwatch.intake import batch
 from litwatch.intake.search import fetch_by_ids, id_from_url
 from litwatch.store import classifications as classifications_store
@@ -67,21 +67,21 @@ async def keep(
 
 async def report(
     conn: psycopg.AsyncConnection, paper_id: str, topic: str, fit: Fit = Fit.CENTRAL
-) -> tuple[int, Settled, bool]:
+) -> tuple[int, Change, bool]:
     """File the miss and give the owner's word on it: `fit` (central or related) for the topic,
-    a membership of the topic's class with source `miss`, and the owner's newest Save. Returns
-    the miss id, what settled and whether it is new. Reporting again keeps the miss and saves
-    again: the owner's word is given again only where none stands (it was taken back), and
-    never over a label the owner gave since. Raises ValueError for a Fit below related."""
+    a membership of the topic's class with source `miss`, and the owner's newest Save, as a
+    change of the paper (`word.change`). Returns the miss id, the change and whether the miss
+    is new. Reporting again keeps the miss and saves again: the owner's word is given again only
+    where none stands (it was taken back), and never over a label the owner gave since. Raises
+    ValueError for a Fit below related."""
     if fit not in (Fit.CENTRAL, Fit.RELATED):
         raise ValueError("a miss is central or related")
     word_on_it = Label(
         paper_id=paper_id, topic=topic, value=LabelValue(fit.value), origin=LabelOrigin.MISS
     )
-    async with conn.transaction():
-        # The paper's lock first, so looking for a standing label and giving the word again
-        # are one step against any label being written meanwhile.
-        await word.lock(conn, paper_id)
+    # The paper's lock first, so looking for a standing label and giving the word again are one
+    # step against any label being written meanwhile.
+    async with word.change(conn, paper_id) as done:
         row = await (
             await conn.execute(
                 "INSERT INTO misses (paper_id, topic) VALUES (%s, %s) "
@@ -98,7 +98,7 @@ async def report(
                 conn, paper, topic, True, version, source=Source.MISS
             )
         if row is None:
-            existing = await (
+            row = await (
                 await conn.execute(
                     "SELECT id FROM misses WHERE paper_id = %s AND topic = %s",
                     (paper_id, topic),
@@ -109,10 +109,9 @@ async def report(
                     "SELECT 1 FROM labels WHERE paper_id = %s AND topic = %s", (paper_id, topic)
                 )
             ).fetchone()
-            if labelled:
-                settled = await word.settle(conn, paper_id)
-            else:
-                _, settled = await word.label(conn, word_on_it)
-            return existing["id"], settled, False
-        _, settled = await word.label(conn, word_on_it)
-    return row["id"], settled, True
+            new = False
+        else:
+            labelled, new = None, True
+        if not labelled:
+            await word.label(conn, word_on_it)
+    return row["id"], done, new

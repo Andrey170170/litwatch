@@ -22,6 +22,7 @@ from litwatch.core import (
     in_library,
 )
 from litwatch.feedback import word
+from litwatch.intake import batch
 from litwatch.store import analyses as analyses_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -204,17 +205,19 @@ async def test_a_new_order_of_the_topics_breaks_a_tie_for_the_best_topic(db):
 
 async def test_wrong_topic_takes_the_paper_out_and_clearing_the_thumb_brings_it_back(db):
     await graded(db, "central")
-    _, settled = await word.react(db, thumb("wrong_topic"))
+    _, change = await word.react(db, thumb("wrong_topic"))
+    settled = change.settled[P.id]
     assert settled.grades == {FAITH.slug: (Grade.MUST_READ, Grade.NONE)}
     assert (settled.was_saved, settled.saved) == (True, False)
-    settled = await word.unreact(db, P.id, FAITH.slug)
+    settled = (await word.unreact(db, P.id, FAITH.slug)).settled[P.id]
     assert settled.grades == {FAITH.slug: (Grade.NONE, Grade.MUST_READ)}
     assert settled.saved is True
 
 
 async def test_a_great_find_lifts_an_adjacent_verdict_to_related(db):
     await graded(db, "adjacent")
-    _, settled = await word.react(db, thumb("great_find", "up"))
+    _, change = await word.react(db, thumb("great_find", "up"))
+    settled = change.settled[P.id]
     assert settled.grades == {FAITH.slug: (Grade.ADJACENT, Grade.RELEVANT)} and settled.saved
 
 
@@ -226,14 +229,17 @@ async def test_reactions_that_carry_no_word_change_nothing(db):
         thumb("wrong_topic", topic=INTERP.slug),
         thumb(None),
     ):
-        _, settled = await word.react(db, reaction)
+        _, change = await word.react(db, reaction)
+        settled = change.settled[P.id]
         assert settled.grades == {} and settled.saved is True
-    _, settled = await word.react(db, thumb("wrong_topic", topic=None))
+    _, change = await word.react(db, thumb("wrong_topic", topic=None))
+    settled = change.settled[P.id]
     assert settled.grades == {}
 
 
 async def test_a_label_is_the_owners_word_on_any_followed_topic(db):
-    _, settled = await word.label(db, said("related", topic=INTERP.slug))
+    _, change = await word.label(db, said("related", topic=INTERP.slug))
+    settled = change.settled[P.id]
     assert settled.grades == {INTERP.slug: (None, Grade.RELEVANT)}
     assert settled.saved is False  # an Area paper is saved by hand
 
@@ -241,14 +247,16 @@ async def test_a_label_is_the_owners_word_on_any_followed_topic(db):
 async def test_the_owners_related_never_falls_below_relevant(db):
     await weighed(db, Weight.INCREMENTAL)
     await graded(db, "none")
-    _, settled = await word.label(db, said("related"))
+    _, change = await word.label(db, said("related"))
+    settled = change.settled[P.id]
     assert settled.grades == {FAITH.slug: (Grade.NONE, Grade.RELEVANT)} and settled.saved
 
 
 async def test_a_label_after_a_thumb_decides_and_keeps_its_origin(db):
     await graded(db, "related")
     await word.react(db, thumb("wrong_topic"))
-    first, settled = await word.label(db, said("central", origin=LabelOrigin.SAMPLE))
+    first, change = await word.label(db, said("central", origin=LabelOrigin.SAMPLE))
+    settled = change.settled[P.id]
     assert settled.grades == {FAITH.slug: (Grade.NONE, Grade.MUST_READ)} and settled.saved
     changed, _ = await word.label(db, first.model_copy(update={"origin": LabelOrigin.READER}))
     assert changed.origin == LabelOrigin.SAMPLE
@@ -256,17 +264,17 @@ async def test_a_label_after_a_thumb_decides_and_keeps_its_origin(db):
 
 async def test_unsave_holds_against_a_later_regrade_until_saved_again(db):
     await graded(db, "related")
-    settled = await word.toggle(db, P.id, Hand.UNSAVE)
+    settled = (await word.toggle(db, P.id, Hand.UNSAVE)).settled[P.id]
     assert (settled.was_saved, settled.saved) == (True, False)
     await graded(db, "central")
     assert (await word.settle(db, P.id)).saved is False
-    assert (await word.toggle(db, P.id, Hand.SAVE)).saved is True
+    assert (await word.toggle(db, P.id, Hand.SAVE)).settled[P.id].saved is True
     types = [t for t, _ in await outbox(db)]
     assert types.count("paper.saved") == 2 and types.count("paper.unsaved") == 1
 
 
 async def test_a_paper_saved_by_hand_needs_no_topic(db):
-    settled = await word.toggle(db, P.id, Hand.SAVE)
+    settled = (await word.toggle(db, P.id, Hand.SAVE)).settled[P.id]
     assert settled.saved and settled.grades == {}
 
 
@@ -285,12 +293,77 @@ async def test_sync_settles_what_was_written_around_it(db):
 async def test_the_later_word_wins_inside_one_transaction(db):
     async with db.transaction():
         await word.react(db, thumb("wrong_topic"))
-        _, settled = await word.label(db, said("central"))
+        _, change = await word.label(db, said("central"))
+        settled = change.settled[P.id]
     assert settled.saved is True
     async with db.transaction():
         await word.label(db, said("central"))
-        _, settled = await word.react(db, thumb("wrong_topic"))
+        _, change = await word.react(db, thumb("wrong_topic"))
+        settled = change.settled[P.id]
     assert settled.saved is False
+
+
+def central() -> Verdict:
+    return Verdict(
+        paper_id=P.id, topic=FAITH.slug, topic_version="v", fit=Fit.CENTRAL, reason="r",
+        opinions={},
+    )  # fmt: skip
+
+
+async def test_a_change_settles_its_papers_at_its_end_even_after_an_early_return(db):
+    async def leaves_early():
+        async with word.change(db, P.id) as change:
+            await verdicts.add(db, central())  # written, not settled
+            assert await stored(db, "effective_grades") == []
+            return change
+
+    change = await leaves_early()
+    assert change.settled[P.id].grades == {FAITH.slug: (None, Grade.MUST_READ)}
+    assert change.settled[P.id].saved
+
+
+async def test_a_change_that_fails_rolls_back_unsettled(db):
+    with pytest.raises(RuntimeError, match="the action failed"):
+        async with word.change(db, P.id):
+            await verdicts.add(db, central())
+            raise RuntimeError("the action failed")
+    assert await stored(db, "verdicts") == [] and await outbox(db) == []
+
+
+async def test_words_inside_one_change_settle_once_at_its_end(db):
+    """Two words that cancel out leave no trace of the step between them."""
+    await graded(db, "central")
+    before = await outbox(db)
+    async with word.change(db, P.id) as change:
+        _, inner = await word.react(db, thumb("wrong_topic"))  # alone, it would unsave
+        assert inner is change and change.settled == {}
+        await word.label(db, said("central"))
+    assert change.settled[P.id].grades == {} and change.settled[P.id].saved
+    assert await outbox(db) == before
+
+
+async def test_a_rewrite_stored_inside_a_change_is_settled_once_by_it(db):
+    """A paper the owner's action fetches may arrive as a rewrite of one stored meanwhile:
+    intake's writer leaves its settle to the change, so no step between shows."""
+    await weighed(db, Weight.INCREMENTAL)
+    await graded(db, "related")  # related and incremental: adjacent, not saved
+    before = await outbox(db)
+    rewrite = P.model_copy(update={"abstract": "An entirely different abstract."})
+    async with word.change(db, P.id) as change:
+        assert (await batch.store(db, [rewrite], source="arxiv")).rewritten == [P.id]
+        await word.label(db, said("central"))
+    after = [e for e in await outbox(db) if e not in before]
+    changed = [e["after"] for t, e in after if t == "grade.changed"]
+    assert changed == ["must_read"] and [t for t, _ in after].count("paper.saved") == 1
+    assert change.settled[P.id].saved and not change.settled[P.id].was_saved
+
+
+async def test_a_nested_change_names_only_papers_the_outer_one_locked(db):
+    other = paper("2610.00002")
+    async with word.change(db, P.id):
+        with pytest.raises(RuntimeError, match="did not lock"):
+            async with word.change(db, P.id, other.id):
+                pass
 
 
 @pytest.mark.parametrize("unfollow", [False, True])

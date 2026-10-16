@@ -20,7 +20,7 @@ import psycopg
 from litwatch.core import FAILED_RUNS, Depth, Rarity, Taxonomy, Weight
 from litwatch.core.grading import NO_WEIGHT, WEIGHT_FLOORS
 from litwatch.store import failures, fulltext
-from litwatch.store.analyses import CURRENT_FIRST, CURRENT_GIST, CURRENT_GIST_SOURCE
+from litwatch.store.analyses import CURRENT_GIST, CURRENT_GIST_SOURCE, CURRENT_WEIGHT
 
 STALE_AFTER = timedelta(hours=36)
 # A stored JSON null in `authors` reads as no authors.
@@ -42,11 +42,6 @@ FLOOR = (
 # A membership `m` that puts its paper in its class on a page: one that stands (the owner's
 # label on a class outranks every other source for it; core.classification.standing) and is not
 # for grading only.
-# A grading failure waits on the owner only while its topic is active (`store.failures`).
-ACTIVE = (
-    "(f.topic = '' OR EXISTS (SELECT 1 FROM topics t WHERE t.class = f.topic "
-    "AND t.status = 'active'))"
-)
 SHOWN_MEMBER = """
     m.member AND m.source IN ('classifier', 'owner', 'miss')
     AND (m.source = 'owner' OR NOT EXISTS (
@@ -439,9 +434,9 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
                     THEN 'word'
                     WHEN EXISTS (
                         SELECT 1 FROM step_failures f WHERE f.paper_id = p.id
-                        AND f.paper_revision = p.revision AND f.failed_runs >= %(runs)s
+                        AND f.failed_runs >= %(runs)s
                         AND (f.step <> 'grading' OR f.topic = ANY(%(in_view)s))
-                        AND {ACTIVE})
+                        AND {failures.ACTIONABLE})
                       OR {fulltext.STUCK_EXISTS}
                     THEN 'failure' END AS state
         FROM papers p
@@ -532,10 +527,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         FROM papers p
         LEFT JOIN library l ON l.paper_id = p.id
         LEFT JOIN rarities r ON r.paper_id = p.id
-        LEFT JOIN LATERAL (
-            SELECT weight, reason, source FROM weights x WHERE paper_id = p.id
-            AND paper_revision = p.revision {CURRENT_FIRST.format(x="x")} LIMIT 1
-        ) w ON true
+        LEFT JOIN LATERAL ({CURRENT_WEIGHT}) w ON true
         LEFT JOIN LATERAL (
             SELECT contribution, releases_code, releases_weights FROM analyses
             WHERE paper_id = p.id AND paper_revision = p.revision ORDER BY id DESC LIMIT 1
@@ -562,8 +554,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         "WHERE paper_id = %(p)s ORDER BY class, source",
         "failures": "SELECT f.step, nullif(f.topic, '') AS topic, f.failed_runs, f.last_error "
         "FROM step_failures f JOIN papers p ON p.id = f.paper_id "
-        "AND p.revision = f.paper_revision AND p.dismissed_at IS NULL "
-        f"WHERE f.paper_id = %(p)s AND {ACTIVE}",
+        f"WHERE f.paper_id = %(p)s AND {failures.ACTIONABLE}",
         "history": """
             SELECT 'graded' AS what, recorded_at AS at, topic, fit AS value, NULL AS reason,
                    paper_revision AS revision, split, escalated

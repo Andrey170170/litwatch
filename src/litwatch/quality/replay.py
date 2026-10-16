@@ -23,7 +23,6 @@ import hashlib
 import importlib
 import json
 import random
-from contextlib import aclosing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -340,8 +339,7 @@ async def run(
         if r.stale:
             await store.forget(conn, eval_run_id, sorted(r.stale))
         thresholds = config.classification.thresholds
-        found = classification.classify(r.to_classify, tree, mr.gateway, thresholds)
-        async with aclosing(found) as found:
+        async with classification.classify(r.to_classify, tree, mr.gateway, thresholds) as found:
             async for c in found:
                 mr.add("classified" if c.error is None else "classification_failed")
                 for topic in topics_of[c.paper.id]:
@@ -354,7 +352,7 @@ async def run(
             for p, t in r.to_grade
             if t in by_slug
         ]
-        async with aclosing(grading.grade(due, mr.gateway, config.grading)) as found:
+        async with grading.grade(due, mr.gateway, config.grading) as found:
             async for g in found:
                 mr.add("graded" if g.verdict is not None else "grading_failed")
                 v = g.verdict

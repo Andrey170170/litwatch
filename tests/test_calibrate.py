@@ -3,6 +3,7 @@
 import pytest
 
 from litwatch.core import (
+    Depth,
     Fit,
     Label,
     LabelOrigin,
@@ -18,7 +19,7 @@ from litwatch.feedback.calibrate import Answer
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import FAITH, TREE, paper
+from tests.conftest import AGENTS, FAITH, TREE, paper
 
 ABOVE = [paper(f"2610.0010{i}") for i in range(3)]
 BELOW = [paper(f"2610.0020{i}") for i in range(3)]
@@ -100,6 +101,33 @@ async def test_answers_become_labels_and_appraisals(db):
     # It matters but fits no Focus topic: a missing topic or a narrow rubric.
     (listed,) = await calibrate.matters_no_topic(db)
     assert (listed["paper_id"], listed["note"]) == (item["paper_id"], "about steering, not traces")
+
+
+async def test_a_fit_moved_between_topics_keeps_the_paper_in_the_library_throughout(db):
+    """An item's labels are written together and settled once: moving its Fit from one Focus
+    topic to another emits no unsave and save between them."""
+    second = AGENTS.model_copy(update={"depth": Depth.FOCUS, "rubric": "Tool use, end to end."})
+    await word.save_taxonomy(db, TREE.following(second))
+    session_id = await calibrate.draw(db, seed=1, size=4)
+    # Drawn above the line on its Focus topic: graded relevant, so in the library.
+    (item,) = [
+        i for i in await items(db, session_id) if i["topic"] == FAITH.slug and i["why"] == "above"
+    ]
+    before = await library_events(db, item["paper_id"])
+    moved = {FAITH.slug: LabelValue.NONE, AGENTS.slug: LabelValue.RELATED}
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=moved))
+    assert await library_events(db, item["paper_id"]) == before
+
+
+async def library_events(conn, paper_id: str) -> list[str]:
+    rows = await (
+        await conn.execute(
+            "SELECT type FROM outbox WHERE paper_id = %s AND type IN ('paper.saved', "
+            "'paper.unsaved') ORDER BY id",
+            (paper_id,),
+        )
+    ).fetchall()
+    return [r["type"] for r in rows]
 
 
 async def test_precision_judges_the_drawn_verdict_and_ignores_the_unanswered(db):

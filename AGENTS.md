@@ -26,6 +26,9 @@ the results through its own web app. It is single-user and self-hosted. Branch `
 - Evaluation runs are dry runs: they write to the evaluation tables only, never to verdicts or the outbox.
 - A pipeline step writes its event to the outbox in the same transaction as its data. Integrations react to events
   and are off unless configured.
+- A write that can move a paper is a change (`feedback.word.change`): it takes the locks, taxonomy then papers in
+  id order, checks and writes under them, and settles each paper once before commit. Taxonomy edits keep their own
+  flow, with the taxonomy lock taken exclusively.
 
 ## Checks
 

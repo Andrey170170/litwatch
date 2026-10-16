@@ -174,11 +174,13 @@ run record); four remain, found by the same search:
   the transaction, take the locks, write and settle by hand. One transaction-owning flow in `feedback/word.py` takes
   the ordered locks, runs the action's checks and writes, and settles once before commit; Calibrate's labels write
   together inside it, so a moved Fit emits no intermediate unsave and save; digest picks lock in id order.
-  `settle_topic`'s query moves into `store`. Its shape goes to the owner before it is built.
+  `settle_topic`'s query moves into `store`. The owner approved its shape on 2026-10-16, and it is built so:
+  `word.change(conn, *paper_ids)`, a context manager that settles each paper once at its exit, early returns
+  included, and that a nested change joins.
 - **One actionable-failure predicate** in `store/failures.py` (current revision, not dismissed, active topic), used by
   the lists, counts, detail and the guarded retry. It fixes `failures.waiting()`, which skips the active-topic test,
   and `grade_now`, which checks topic status outside the paper lock. `grading.record` checks the topic's status again
-  under its locks (`word.lock` holds the taxonomy lock shared) and drops a grading whose topic was paused during the
+  under its locks (`word.change` holds the taxonomy lock shared) and drops a grading whose topic was paused during the
   call, as it already drops one for a rewritten or dismissed paper.
 - **One bounded-concurrency helper** owning the tasks, completion order, cancel and drain, in place of the copies in
   classification, analysis, grading and the full-text worker; consumers hold its results with `async with`.

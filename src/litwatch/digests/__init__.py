@@ -138,19 +138,15 @@ async def write(
     day: date,
 ) -> DigestState | None:
     """Write and store the digest, unless it is published already (None: a re-run of the same
-    day rewrites nothing), and settle its picks in the same transaction, under their locks: an
-    Area pick's Deep pass is queued with it. Returns the state stored."""
+    day rewrites nothing), as one change of its picks (`word.change`): an Area pick's Deep pass
+    is queued with it. Returns the state stored."""
     if await store_.state_of(conn, topic.slug, period, day) in PUBLISHED:
         return None
     o = await compose(conn, run, tree, topic, period, day)
-    picks = sorted({s.due.paper_id for s in o.papers if s.role == DigestRole.PICK})
-    async with conn.transaction():
-        for paper_id in picks:
-            await word.lock(conn, paper_id)
+    picks = {s.due.paper_id for s in o.papers if s.role == DigestRole.PICK}
+    async with word.change(conn, *picks):  # locked together, in id order
         if await store_.record(conn, o, run.run_id) is None:
             return None
-        for paper_id in picks:
-            await word.settle(conn, paper_id)
     if o.error:
         log.warning("%s digest of %s for %s failed: %s", period, day, topic.slug, o.error)
     run.add(f"digests_{o.state.value}")

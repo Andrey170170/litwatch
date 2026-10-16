@@ -4,14 +4,15 @@ the facets. `analyse` asks and writes nothing; `record` stores what it found."""
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
 import psycopg
 from pydantic import BaseModel, Field, field_validator
 
 from litwatch import events
+from litwatch.concurrency import bounded
 from litwatch.core import Analysis, Contribution, Facets, Paper, TaxonomyClass, Weight
 from litwatch.core.analysis import WEIGHT_DEFINITIONS
 from litwatch.feedback import word
@@ -120,28 +121,13 @@ async def _one(paper: Paper, area: TaxonomyClass, gateway: Gateway) -> Analysed:
     return Analysed(paper, area.slug, answer.value.analysis(), answer.model, answer.usage)
 
 
-async def analyse(
+def analyse(
     papers: list[tuple[Paper, TaxonomyClass]], gateway: Gateway, concurrency: int = 8
-) -> AsyncIterator[Analysed]:
-    """Ask the `analyse` role about each paper, judged in its primary class, and yield results
-    as they arrive. Writes nothing. A failed call is yielded with its error. Close it
-    (`contextlib.aclosing`) when leaving early, so no call goes on behind the caller."""
-    limit = asyncio.Semaphore(concurrency)
-
-    async def bounded(paper: Paper, area: TaxonomyClass) -> Analysed:
-        async with limit:
-            return await _one(paper, area, gateway)
-
-    tasks = [asyncio.create_task(bounded(p, a)) for p, a in papers]
-    try:
-        for done in asyncio.as_completed(tasks):
-            yield await done
-    finally:
-        # Left early (the caller failed or stopped): no call may outlive the run that pays
-        # for it, so every worker is cancelled and awaited before the generator closes.
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+) -> AbstractAsyncContextManager[AsyncIterator[Analysed]]:
+    """Ask the `analyse` role about each paper, judged in its primary class, giving results as
+    they arrive, held with `async with` (`concurrency.bounded`: leaving it stops every call).
+    Writes nothing. A failed call is given with its error."""
+    return bounded(papers, lambda pa: _one(*pa, gateway), concurrency)
 
 
 async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
@@ -149,8 +135,7 @@ async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
     `gist.written` when that Gist is current, and settle the paper (its grades and rarity
     follow the Weight); or record its failure. Returns False when there was nothing to record:
     the paper's text changed meanwhile, or it was dismissed."""
-    async with conn.transaction():
-        await word.lock(conn, a.paper.id)  # before any write, as every write that settles
+    async with word.change(conn, a.paper.id):
         if not await papers_store.still_current(conn, a.paper):
             return False
         if a.analysis is None or a.model is None:
@@ -169,5 +154,4 @@ async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
                 source="abstract",
                 gist_id=gist,
             )
-        await word.settle(conn, a.paper.id)
     return True

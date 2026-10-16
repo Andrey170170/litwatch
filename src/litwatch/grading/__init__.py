@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
 import psycopg
 from pydantic import BaseModel, Field
 
 from litwatch import events
+from litwatch.concurrency import bounded
 from litwatch.config import Grading
 from litwatch.core import Depth, Fit, Opinion, Paper, Status, Taxonomy, Topic, Verdict
 from litwatch.core.grading import FIT_DEFINITIONS, grading_topics
@@ -24,6 +26,7 @@ from litwatch.llm.types import DecisionRequest, Predicate
 from litwatch.store import analyses as analyses_store
 from litwatch.store import failures
 from litwatch.store import papers as papers_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as store
 
 HOLDS = "holds"  # the `area_check` question
@@ -167,29 +170,14 @@ async def _one(d: Due, gateway: Gateway, settings: Grading) -> Graded:
         return Graded(d, error=str(exc), unusable=exc.unusable)
 
 
-async def grade(
+def grade(
     due: list[Due], gateway: Gateway, settings: Grading | None = None, concurrency: int = 8
-) -> AsyncIterator[Graded]:
-    """Grade each paper for its topic and yield results as they arrive. Writes nothing. A
-    grading whose graders fail is yielded with its error and stops nothing else. Close it
-    (`contextlib.aclosing`) when leaving early, so no call goes on behind the caller."""
-    settings = settings or Grading()
-    limit = asyncio.Semaphore(concurrency)
-
-    async def bounded(d: Due) -> Graded:
-        async with limit:
-            return await _one(d, gateway, settings)
-
-    tasks = [asyncio.create_task(bounded(d)) for d in due]
-    try:
-        for done in asyncio.as_completed(tasks):
-            yield await done
-    finally:
-        # Left early (the caller failed or stopped): no call may outlive the run that pays
-        # for it, so every worker is cancelled and awaited before the generator closes.
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+) -> AbstractAsyncContextManager[AsyncIterator[Graded]]:
+    """Grade each paper for its topic, giving results as they arrive, held with `async with`
+    (`concurrency.bounded`: leaving it stops every call). Writes nothing. A grading whose
+    graders fail is given with its error and stops nothing else."""
+    chosen = settings or Grading()
+    return bounded(due, lambda d: _one(d, gateway, chosen), concurrency)
 
 
 async def due(
@@ -227,11 +215,13 @@ async def due(
 async def record(conn: psycopg.AsyncConnection, g: Graded) -> bool:
     """Store one grading with `verdict.recorded` and settle the paper (its effective grade,
     rarity and library state follow); or record its failure. Returns False when there was
-    nothing to record: the paper's text changed meanwhile, or it was dismissed."""
+    nothing to record: the paper's text changed meanwhile, it was dismissed, or the topic is
+    no longer active (paused during the call: a paused topic grades nothing)."""
     paper, slug = g.due.paper, g.due.topic.slug
-    async with conn.transaction():
-        await word.lock(conn, paper.id)
+    async with word.change(conn, paper.id):
         if not await papers_store.still_current(conn, paper):
+            return False
+        if slug not in {t.slug for t in await taxonomy_store.topics(conn, Status.ACTIVE)}:
             return False
         if g.verdict is None:
             error = g.error or "no answer"
@@ -253,5 +243,4 @@ async def record(conn: psycopg.AsyncConnection, g: Graded) -> bool:
             split=stored.split,
             escalated=stored.escalated,
         )
-        await word.settle(conn, paper.id)
     return True
