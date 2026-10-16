@@ -151,6 +151,32 @@ def test_configuration_masks_what_a_url_may_carry():
     assert shown["integrations"]["hook"]["url"] == "https://n8n.test/••••"
     assert _mask({"archive_url": "http://archive:8787"}) == {"archive_url": "http://archive:8787"}
     assert _mask({"url": "https://u:p@dav.test"}) == {"url": "https://dav.test/••••"}
+    # A limit whose name carries a secret word is a number to show, not a credential.
+    limits = {"max_output_tokens": 4096, "max_tokens": 10, "api_key": "k", "token_file": "f"}
+    assert _mask({"judge": limits}) == {
+        "judge": {
+            "max_output_tokens": 4096,
+            "max_tokens": 10,
+            "api_key": "••••",
+            "token_file": "••••",
+        }
+    }
+
+
+def test_the_schema_declares_the_settings_errors_a_page_can_meet():
+    """The client's types come from the schema: every error a Settings action can answer with
+    is declared on its route."""
+    paths = create_app("postgresql://x/y", TOKEN, Config()).openapi()["paths"]
+    declared = {
+        ("/api/settings/topics/{slug}", "put"): {"404"},
+        ("/api/settings/calibrate/{session_id}", "get"): {"404"},
+        ("/api/settings/calibrate/{session_id}/more", "post"): {"404"},
+        ("/api/settings/calibrate/{session_id}/items/{position}", "put"): {"404"},
+        ("/api/settings/integrations/{name}/retry", "post"): {"404", "409"},
+        ("/api/settings/integrations/{name}/skip", "post"): {"404", "409"},
+    }
+    for (path, method), codes in declared.items():
+        assert codes <= set(paths[path][method]["responses"]), (path, method)
 
 
 async def test_bad_input_is_refused_not_crashed(client):

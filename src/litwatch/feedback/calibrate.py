@@ -172,8 +172,10 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
 
 
 class Answer(BaseModel):
-    """One paper's answers. Fit for the topic it was drawn or taken for is required: central,
-    related, adjacent, none or unsure."""
+    """One paper's answers. Fit for the topic it was drawn or taken for (central, related,
+    adjacent, none or unsure) is required on the first answer; an edit after it may leave it
+    out, and the recorded answer stands. A Fit sent is a label; one left out writes none, so
+    editing the appraisal alone recreates no label the owner has since taken back."""
 
     fit: dict[str, LabelValue]
     value: Literal["matters", "fine", "not_for_me"] | None = None
@@ -191,7 +193,7 @@ async def answer(
     ).fetchone()
     if item is None:
         raise LookupError("no such item")
-    if item["topic"] not in given.fit:
+    if item["topic"] not in given.fit and item["answered_at"] is None:
         raise ValueError(f"fit for {item['topic']} is required")
     focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
     if unknown := sorted(set(given.fit) - focus):
@@ -237,10 +239,11 @@ async def answer(
                 "INSERT INTO appraisals (paper_id, value, note) VALUES (%s, %s, %s)",
                 (item["paper_id"], *said),
             )
+        answered = given.fit.get(item["topic"])
         await conn.execute(
-            "UPDATE calibration_items SET answer = %s, answered_at = now() "
+            "UPDATE calibration_items SET answer = coalesce(%s, answer), answered_at = now() "
             "WHERE session_id = %s AND position = %s",
-            (given.fit[item["topic"]].value, session_id, position),
+            (answered.value if answered else None, session_id, position),
         )
 
 

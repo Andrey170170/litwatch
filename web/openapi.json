@@ -1612,6 +1612,9 @@
               }
             }
           },
+          "404": {
+            "description": "No such class"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2102,6 +2105,9 @@
               }
             }
           },
+          "404": {
+            "description": "No such session"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2145,6 +2151,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such session"
           },
           "422": {
             "description": "Validation Error",
@@ -2196,6 +2205,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such session, or no paper at that position in it"
           },
           "422": {
             "description": "Validation Error",
@@ -2315,6 +2327,12 @@
           "204": {
             "description": "Successful Response"
           },
+          "404": {
+            "description": "No such integration is loaded"
+          },
+          "409": {
+            "description": "Nothing is failing"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2370,6 +2388,12 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such integration is loaded"
+          },
+          "409": {
+            "description": "Nothing is failing, or another event than the one named is"
           },
           "422": {
             "description": "Validation Error",
@@ -2673,7 +2697,7 @@
           "fit"
         ],
         "title": "Answer",
-        "description": "One paper's answers. Fit for the topic it was drawn or taken for is required: central,\nrelated, adjacent, none or unsure."
+        "description": "One paper's answers. Fit for the topic it was drawn or taken for (central, related,\nadjacent, none or unsure) is required on the first answer; an edit after it may leave it\nout, and the recorded answer stands. A Fit sent is a label; one left out writes none, so\nediting the appraisal alone recreates no label the owner has since taken back."
       },
       "Awaiting": {
         "properties": {

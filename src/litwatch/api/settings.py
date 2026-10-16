@@ -88,7 +88,7 @@ async def keyword_matches(slug: str, c: Conn) -> dict[str, int]:
     return await quality.keyword_matches(c, topic.keywords)
 
 
-@router.put("/topics/{slug}")
+@router.put("/topics/{slug}", responses={404: {"description": "No such class"}})
 async def save_topic(slug: str, body: dict[str, Any], c: Conn) -> Topic:
     """Follow class `slug`, or edit its topic. The class takes the subject as its description.
     Edits apply forward; a change of depth or content settles the topic's papers again (see
@@ -412,7 +412,12 @@ async def sessions(c: Conn) -> list[dict[str, Any]]:
     return await calibrate.sessions(c)
 
 
-@router.get("/calibrate/{session_id}")
+# What the session endpoints answer besides success, for the API schema.
+NO_SESSION = {404: {"description": "No such session"}}
+NO_ITEM = {404: {"description": "No such session, or no paper at that position in it"}}
+
+
+@router.get("/calibrate/{session_id}", responses=NO_SESSION)
 async def session(session_id: int, c: Conn) -> dict[str, Any]:
     found = await calibrate.session(c, session_id)
     if found is None:
@@ -420,7 +425,7 @@ async def session(session_id: int, c: Conn) -> dict[str, Any]:
     return found
 
 
-@router.post("/calibrate/{session_id}/more")
+@router.post("/calibrate/{session_id}/more", responses=NO_SESSION)
 async def more(session_id: int, c: Conn) -> dict[str, int]:
     """Continue with the papers waiting for a word: splits, misses and thumbed papers."""
     if await calibrate.session(c, session_id) is None:
@@ -428,7 +433,7 @@ async def more(session_id: int, c: Conn) -> dict[str, int]:
     return {"added": await calibrate.more(c, session_id)}
 
 
-@router.put("/calibrate/{session_id}/items/{position}", status_code=204)
+@router.put("/calibrate/{session_id}/items/{position}", status_code=204, responses=NO_ITEM)
 async def answer(session_id: int, position: int, body: calibrate.Answer, c: Conn) -> None:
     try:
         await calibrate.answer(c, session_id, position, body)
@@ -487,11 +492,20 @@ def _mask(value: Any, key: str = "") -> Any:
         return {k: _mask(v, k) for k, v in value.items()}
     if isinstance(value, list):
         return [_mask(v, key) for v in value]
-    if value and any(w in key.lower() for w in SECRET_WORDS):
+    if value and _secret(key):
         return "••••"
     if isinstance(value, str) and (key == "url" or key.endswith("_url")):
         return _mask_url(value)
     return value
+
+
+def _secret(key: str) -> bool:
+    """Whether a setting's key names a credential: one of the secret words in it, unless the
+    key names a limit (`max_output_tokens`, `max_*`), which the Configuration page shows."""
+    k = key.lower()
+    if k.startswith("max_") or k.endswith("_tokens"):
+        return False
+    return any(w in k for w in SECRET_WORDS)
 
 
 def _mask_url(url: str) -> str:

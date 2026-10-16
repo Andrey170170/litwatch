@@ -1000,8 +1000,10 @@ export interface components {
         };
         /**
          * Answer
-         * @description One paper's answers. Fit for the topic it was drawn or taken for is required: central,
-         *     related, adjacent, none or unsure.
+         * @description One paper's answers. Fit for the topic it was drawn or taken for (central, related,
+         *     adjacent, none or unsure) is required on the first answer; an edit after it may leave it
+         *     out, and the recorded answer stands. A Fit sent is a label; one left out writes none, so
+         *     editing the appraisal alone recreates no label the owner has since taken back.
          */
         Answer: {
             /** Fit */
@@ -3523,6 +3525,13 @@ export interface operations {
                     "application/json": components["schemas"]["Topic"];
                 };
             };
+            /** @description No such class */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3971,6 +3980,13 @@ export interface operations {
                     };
                 };
             };
+            /** @description No such session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4004,6 +4020,13 @@ export interface operations {
                     };
                 };
             };
+            /** @description No such session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4033,6 +4056,13 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such session, or no paper at that position in it */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4151,6 +4181,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description No such integration is loaded */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nothing is failing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4183,6 +4227,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Failing"];
                 };
+            };
+            /** @description No such integration is loaded */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nothing is failing, or another event than the one named is */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

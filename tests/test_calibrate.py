@@ -214,6 +214,26 @@ async def test_an_answer_does_not_renew_a_label_it_leaves_as_it_was(db):
     assert after["labelled_at"] == before["labelled_at"]
 
 
+async def test_an_appraisal_edit_after_the_first_answer_writes_no_label(db):
+    """The drawn topic's Fit is required on the first answer only. An edit of the appraisal
+    alone leaves the Fit out, so a label the owner has since taken back is not recreated from
+    the recorded answer; the answer stands as recorded."""
+    session_id = await calibrate.draw(db, seed=1, size=2)
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    with pytest.raises(ValueError, match="required"):
+        await calibrate.answer(db, session_id, item["position"], Answer(fit={}, value="fine"))
+    fit = {FAITH.slug: LabelValue.NONE}
+    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+    await word.unlabel(db, item["paper_id"], FAITH.slug)
+    await calibrate.answer(db, session_id, item["position"], Answer(fit={}, value="matters"))
+    labels = await (
+        await db.execute("SELECT * FROM labels WHERE paper_id = %s", (item["paper_id"],))
+    ).fetchall()
+    assert labels == []
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    assert (item["answer"], item["fit"], item["appraisal"]["value"]) == ("none", {}, "matters")
+
+
 async def test_fit_names_only_focus_topics(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
