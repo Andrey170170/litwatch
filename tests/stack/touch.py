@@ -12,6 +12,7 @@ session) is skipped and said so."""
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 from datetime import date
@@ -26,6 +27,7 @@ from pages import watch  # noqa: E402
 
 PHONE = {"width": 390, "height": 844}
 PAPER_LINK = 'main a[href^="/paper/"]'
+CARD_2 = re.compile(r"Calibrate · 2 of \d+")
 
 
 class Finger:
@@ -73,6 +75,15 @@ def reaches(url: str, where: str) -> bool:
     return parts.path.endswith(urlparse(where).path)
 
 
+def shows(page, where: str, text: str | re.Pattern[str], ms: int = 5000) -> bool:
+    """Whether an element at `where` shows `text` within `ms`."""
+    try:
+        page.locator(where, has_text=text).first.wait_for(timeout=ms)
+    except PlaywrightTimeoutError:
+        return False
+    return True
+
+
 def shelf_links(section) -> list[str]:
     """The papers a shelf lists, by href."""
     return [a.get_attribute("href") or "" for a in section.locator('a[href^="/paper/"]').all()]
@@ -81,11 +92,11 @@ def shelf_links(section) -> list[str]:
 def pair_of(page) -> list[str]:
     """Two papers of one shelf, the step's list: from a shelf already open, else from the folded
     shelves opened in turn, as a fresh stack's papers are common, in the shelf folded by default;
-    none when no shelf lists two. A head shows its count once its shelf has loaded, so an empty
-    head is still loading, and a head whose shelf proves empty goes. An opened shelf shows the one
-    row it had while folded, then its page: its rows are given time to come."""
+    none when no shelf lists two, or a shelf will not open. A head shows its count once its shelf
+    has loaded, so an empty head is still loading, and a head whose shelf proves empty goes. An
+    opened shelf shows the one row it had while folded, then its page: its rows are given time."""
     page.locator("main .shh .k:not(:empty)").first.wait_for()
-    while True:
+    for _ in range(8):
         for section in page.locator("main section").all():
             if len(links := shelf_links(section)) >= 2:
                 return links
@@ -100,6 +111,9 @@ def pair_of(page) -> list[str]:
             page.wait_for_timeout(500)
             if len(shelf_links(section)) >= 2:
                 break
+            if section.locator("button.shh.fold").count():
+                return []
+    return []
 
 
 def gestures(base: str, token: str, out: Path, day: str) -> list[str]:
@@ -155,7 +169,13 @@ def walk(page, base: str, out: Path, day: str, lines: list[str]) -> None:
         page.goto(f"{base}/?day={day}", wait_until="networkidle")
         finger.drag(100, 420, 340, 420)
         settle(page)
-        check("day-steps-older", f"day={previous}" in page.url, page.url)
+        # the stepper's label names the day shown, as the web app formats it (en-GB, short)
+        label = date.fromisoformat(previous).strftime("%a %-d %b")
+        check(
+            "day-steps-older",
+            arrived(page, f"day={previous}") and shows(page, ".stp .lbl", label),
+            page.url,
+        )
     else:
         lines.append("SKIP day-steps-older: no older day")
 
@@ -191,7 +211,9 @@ def walk(page, base: str, out: Path, day: str, lines: list[str]) -> None:
         y = box["y"] + min(40, box["height"] / 2)
         finger.drag(box["x"] + box["width"] - 50, y, box["x"] + 50, y)
         # a card with a standing Fit saves before the step: wait for it, within reason
-        check("calibrate-steps-next", arrived(page, "at=2"), page.url)
+        check(
+            "calibrate-steps-next", arrived(page, "at=2") and shows(page, ".ttl", CARD_2), page.url
+        )
     else:
         lines.append("SKIP calibrate-steps-next: no session of two papers")
 

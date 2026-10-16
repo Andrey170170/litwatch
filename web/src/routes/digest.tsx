@@ -85,7 +85,7 @@ function Stepper({ to, prev, next, label, small, foot }: { to: "/" | "/week"; pr
 function useOpenDigest(): (id: number) => LinkProps {
   const desktop = useDesktop();
   if (!desktop) return (id) => ({ to: "/digests/$id", params: { id: String(id) } });
-  return (id) => ({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: id }), replace: true, resetScroll: false }) as LinkProps;
+  return (id) => ({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: id }), replace: true, state: true, resetScroll: false }) as LinkProps;
 }
 
 // -- the cards -----------------------------------------------------------------------------------------------------
@@ -554,11 +554,11 @@ function SlideOver({ id }: { id: number | undefined }) {
     if (desktop) void qc.invalidateQueries({ queryKey: ["digest", String(id)] });
     else {
       // the view stays under the digest's page, without the param, so Back lands on it and not on this redirect
-      void navigate({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: undefined }), replace: true } as never).then(() => navigate({ to: "/digests/$id", params: { id: String(id) } }));
+      void navigate({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: undefined }), replace: true, state: true } as never).then(() => navigate({ to: "/digests/$id", params: { id: String(id) } }));
     }
   }, [id, desktop, qc, navigate]);
   if (!desktop || id === undefined) return null;
-  const close = () => void navigate({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: undefined }), replace: true, resetScroll: false } as never);
+  const close = () => void navigate({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: undefined }), replace: true, state: true, resetScroll: false } as never);
   return (
     <Sheet open onClose={close} side="right" label="Digest">
       <button className="back" onClick={close}>
