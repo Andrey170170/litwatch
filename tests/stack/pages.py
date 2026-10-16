@@ -32,6 +32,15 @@ def pages(paper: str, topic: str) -> dict[str, str]:
     }
 
 
+def watch(page) -> list[str]:
+    """The page's errors as they happen: console errors, uncaught exceptions, 5xx answers."""
+    seen: list[str] = []
+    page.on("console", lambda m: m.type == "error" and seen.append(f"console error: {m.text}"))
+    page.on("pageerror", lambda e: seen.append(f"uncaught: {e}"))
+    page.on("response", lambda r: r.status >= 500 and seen.append(f"HTTP {r.status} {r.url}"))
+    return seen
+
+
 def walk(base: str, token: str, paper: str, topic: str, out: Path) -> list[str]:
     """Visit every page at each width; return what went wrong."""
     failures: list[str] = []
@@ -42,16 +51,7 @@ def walk(base: str, token: str, paper: str, topic: str, out: Path) -> list[str]:
             signed = context.request.post(f"{base}/api/session", data={"token": token})
             assert signed.ok, f"signing in: HTTP {signed.status}"
             page = context.new_page()
-            seen: list[str] = []
-            page.on(
-                "console",
-                lambda m: seen.append(f"console {m.type}: {m.text}") if m.type == "error" else None,
-            )
-            page.on("pageerror", lambda e: seen.append(f"uncaught: {e}"))
-            page.on(
-                "response",
-                lambda r: seen.append(f"HTTP {r.status} {r.url}") if r.status >= 500 else None,
-            )
+            seen = watch(page)
             for name, path in pages(paper, topic).items():
                 seen.clear()
                 page.goto(base + path, wait_until="networkidle")

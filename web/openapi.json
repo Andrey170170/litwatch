@@ -255,6 +255,45 @@
         }
       }
     },
+    "/api/papers/{paper_id}/pdf": {
+      "get": {
+        "summary": "Pdf",
+        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,\nor when the archive cannot get it in time. The database is read before the wait, which\nholds no connection.",
+        "operationId": "pdf_api_papers__paper_id__pdf_get",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF, from the archive",
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "307": {
+            "description": "arXiv's PDF: no archive, or none it could get in time"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/papers/{paper_id}": {
       "get": {
         "summary": "Paper",
