@@ -12,6 +12,7 @@ import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
 import { countRender } from "@/lib/renders";
 import { GROUPS, isPage, type Page, usd } from "@/lib/settings";
+import { APPEARANCES, setAppearance, useAppearance, type Appearance } from "@/lib/theme";
 import { CalibratePage } from "./settings/calibrate";
 import { ConfigurationPage } from "./settings/configuration";
 import { IntegrationsPage } from "./settings/integrations";
@@ -48,6 +49,22 @@ function hintsOf(h: Schemas["SettingsHints"], failing: string[]): Hints {
   };
 }
 
+const APPEARANCE_NAMES: Record<Appearance, string> = { system: "System", light: "Light", dark: "Dark" };
+
+/** The appearance, kept on the device: System follows the OS (DESIGN.md, "Settings"). */
+function AppearanceControl() {
+  const current = useAppearance();
+  return (
+    <div className="appr" role="group" aria-label="Appearance">
+      {APPEARANCES.map((a) => (
+        <button key={a} type="button" className={current === a ? "on" : undefined} aria-pressed={current === a} onClick={() => setAppearance(a)}>
+          {APPEARANCE_NAMES[a]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** The desktop sidebar while Settings is open: a way back to reading, then the index with its counts. Memoised:
  * the page changing under it re-renders only its active links. */
 export const SettingsSide = memo(function SettingsSide() {
@@ -74,6 +91,10 @@ export const SettingsSide = memo(function SettingsSide() {
           </div>
         ))}
       </nav>
+      <div className="foot">
+        <div className="sec">Appearance</div>
+        <AppearanceControl />
+      </div>
     </aside>
   );
 });
@@ -101,6 +122,10 @@ export function SettingsIndex() {
             ))}
           </div>
         ))}
+        <div>
+          <div className="sec">Appearance</div>
+          <AppearanceControl />
+        </div>
       </div>
     </>
   );

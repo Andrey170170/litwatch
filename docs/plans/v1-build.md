@@ -225,7 +225,8 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   back shows the screen left under the finger for the last eight screens left; past them, the page colour.
   A paper's swipe steps through the rows its list had loaded when it was opened, as its "3/22" counts them;
   stepping past the loaded rows (a shelf's next page, a digest's papers beyond its preview) is the list
-  context's to grow (`web/src/lib/listContext.ts`).
+  context's to grow (`web/src/lib/listContext.ts`). The icon (`web/public/icon.svg` and the PNGs) is still the
+  placeholder serif "L" and needs a design pass later.
 - **API gaps W1 found**, each for the core PR that owns it: a Brief on Paper (N3); a Deep card's queued state and
   "Write again", which POST answers 409 (N3's Deep cards); digests for the topic strips and the sidebar's counts (N4,
   W3); the "Among the

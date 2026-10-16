@@ -10,6 +10,12 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>litwatch</title>
+    <script>
+      try {
+        var a = localStorage.getItem("litwatch.appearance");
+        if (a === "light" || a === "dark") document.documentElement.dataset.theme = a;
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

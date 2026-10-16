@@ -184,7 +184,9 @@ the pages in three groups, Reading (Overview, Needs you, Calibrate, Misses), Fol
 Overview. A page inside a page (a topic's editor, Jobs, an integration's events, a past Calibrate session) has
 "‹ Back"; a paper opened from Settings keeps the Settings sidebar. On the phone the gear opens the list of pages in the
 same groups, each with a line under its name ("6 waiting", "Last session 6 Oct"), and every page is a deeper screen.
-Page heads stack on the phone, and wide tables drop columns rather than scroll sideways.
+Page heads stack on the phone, and wide tables drop columns rather than scroll sideways. Under the pages, in the
+desktop sidebar's foot and at the end of the phone's list, Appearance: System, Light or Dark, System by default. The
+choice is kept on the device and put on the page before its first paint.
 
 **Colours.** An item carries a 3 px left edge: yellow (`--acc`) asks for the owner's word, red (`--sig`) reports a
 failure, cyan (`--cy`) is fine or settled, amber (`--warn`) is a projection over budget or a difference worth a look.
@@ -389,8 +391,9 @@ everywhere.
 how many papers the other filters leave at that level (with a minimum, so every level stays tappable), each showing
 its count and name. A tap filters to that level; several can be on, and the rest dim.
 
-**Shelf head.** A rarity square, the shelf's name and its count; a folded shelf adds "show", an open lower shelf
-"fold".
+**Shelf head.** A band of the rarity's colour, 40 px tall with air above and below, carrying the rarity square, the
+shelf's name and its count: the colour is found before the name is read. A folded shelf adds "show", an open lower
+shelf "fold".
 
 **Digest strip.** Squares of 14 px (11 px on Topics cards), 3 px apart, in the digest's best rarity; nothing new is an
 empty square, a failed digest a red ×. Newest at the right, after the label "Daily digests" or "Weekly digests".
