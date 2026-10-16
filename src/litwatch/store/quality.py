@@ -127,10 +127,12 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
         """
         WITH under AS (SELECT * FROM unnest(%s::text[], %s::text[]) AS under (topic, class))
         SELECT m.id, m.paper_id, m.topic, m.reported_at, p.title,
+               -- the classifier's own: a classification by hand is the owner's, not a stage
                EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = m.paper_id
-                       AND c.paper_revision = p.revision) AS classified,
+                       AND c.paper_revision = p.revision AND c.model <> 'owner') AS classified,
                (SELECT (c.response->'probabilities'->>m.topic)::float FROM classifications c
                 WHERE c.paper_id = m.paper_id AND c.paper_revision = p.revision
+                  AND c.model <> 'owner'
                 ORDER BY c.id DESC LIMIT 1) AS probability,
                -- 'below': a classifier membership in a class under the topic's, not in it
                (SELECT coalesce(array_agg(DISTINCT CASE WHEN x.class = m.topic THEN x.source

@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -488,4 +489,16 @@ def _mask(value: Any, key: str = "") -> Any:
         return [_mask(v, key) for v in value]
     if value and any(w in key.lower() for w in SECRET_WORDS):
         return "••••"
+    if isinstance(value, str) and (key == "url" or key.endswith("_url")):
+        return _mask_url(value)
     return value
+
+
+def _mask_url(url: str) -> str:
+    """A URL as far as its host: a webhook's path, query or user part may carry its token."""
+    parts = urlsplit(url)
+    if not parts.hostname:
+        return "••••"
+    host = parts.hostname + (f":{parts.port}" if parts.port else "")
+    rest = parts.username or parts.password or parts.path.strip("/") or parts.query
+    return f"{parts.scheme}://{host}" + ("/••••" if rest else "")

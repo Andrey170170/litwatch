@@ -144,6 +144,15 @@ async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secret
     assert config["models"]["writer"]["model"] == "claude-opus-5-5"
 
 
+def test_configuration_masks_what_a_url_may_carry():
+    from litwatch.api.settings import _mask
+
+    shown = _mask({"integrations": {"hook": {"url": "https://n8n.test/webhook/s3cret?k=1"}}})
+    assert shown["integrations"]["hook"]["url"] == "https://n8n.test/••••"
+    assert _mask({"archive_url": "http://archive:8787"}) == {"archive_url": "http://archive:8787"}
+    assert _mask({"url": "https://u:p@dav.test"}) == {"url": "https://dav.test/••••"}
+
+
 async def test_bad_input_is_refused_not_crashed(client):
     body = _body(FAITH) | {"keywords": ["["]}
     assert (await client.put(f"/api/settings/topics/{FAITH.slug}", json=body)).status_code == 422
@@ -182,6 +191,12 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     (m,) = (await client.get("/api/settings/misses")).json()
     assert (m["paper_id"], m["topic"], m["trace"]["classified"]) == (Q.id, FAITH.slug, False)
     assert m["trace"]["classifier"] is None and m["trace"]["graded"] is False
+    # Classified by hand from Needs you: the owner's word, not the classifier's; still pending.
+    from litwatch import classification
+
+    assert await classification.by_hand(conn, Q, TREE, [FAITH.slug])
+    (m,) = (await client.get("/api/settings/misses")).json()
+    assert m["trace"]["classified"] is False and m["trace"]["probability"] is None
     # Classified under the Focus threshold, kept in by the band; graded by both labs.
     await _classify(conn, Q, {FAITH.slug: 0.3, "other": 0.9}, "other")
     await verdicts.add(
