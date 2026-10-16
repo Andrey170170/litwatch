@@ -7,10 +7,12 @@
 # Every 10 s it sums `inference_calls.usage->>'cost'` in DB (on the dev Postgres, container
 # litwatch-v1-dev) and sends PID a TERM once the sum reaches CAP; it exits when PID does. PID must
 # be a process run from this checkout, and is signalled only while it is still that process (same
-# start time). Three failed sums in a row stop PID too: unwatched, the step could spend past CAP.
+# start time). Three failed sums in a row stop PID too, after up to two minutes unwatched (each sum
+# times out at 30 s).
 # A watchdog, not an admission check: a call is journalled with its cost when its answer comes, so
 # the overshoot is the calls answered since the last sum and those in flight at the stop, about
-# twice the step's concurrency times its dearest call (8 full-text passes at up to $0.46 each).
+# twice the step's concurrency times its dearest call (8 full-text passes at up to $0.46 each) while
+# the sums succeed.
 set -uo pipefail
 
 db=${1:?usage: $0 DB CAP PID} cap=${2:?usage: $0 DB CAP PID} pid=${3:?usage: $0 DB CAP PID}
