@@ -51,15 +51,14 @@ def settle(page, ms: int = 700) -> None:
 def arrived(page, where: str, ms: int = 5000) -> bool:
     """Whether the page reaches `where` (a path, or a query to find in the URL) within `ms` and
     shows it: a paper's page says its id; a Calibrate card its position."""
+    path = urlparse(where).path
     try:
         page.wait_for_url(lambda url: where in url, timeout=ms)
-        page.wait_for_load_state("networkidle")
+        if path.startswith("/paper/"):
+            page.locator("main", has_text=path.rsplit("/", 1)[1]).first.wait_for(timeout=ms)
     except PlaywrightTimeoutError:
         return False
     settle(page, 300)
-    path = urlparse(where).path
-    if path.startswith("/paper/"):
-        return path.rsplit("/", 1)[1] in page.locator("main").first.inner_text()
     return True
 
 
