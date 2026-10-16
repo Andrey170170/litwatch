@@ -28,19 +28,35 @@ class TextUnavailable(ArchiveError):  # noqa: N818 - an outcome, as ArchiveUnava
 
 
 def pdf_to_markdown(pdf: bytes) -> str | None:
-    """The PDF's text, or None without the `pdf` extra (pymupdf4llm, AGPL)."""
+    """The PDF's text, or None when it has none to read. With the `pdf` extra (pymupdf4llm,
+    AGPL) installed, as Markdown with its headings and tables; else the plain text of each page
+    by pypdfium2 (Apache/BSD), so a template without the extra still reads PDF-only papers."""
     try:
         import pymupdf  # noqa: PLC0415 - heavy and optional, only on the fallback path
         import pymupdf4llm  # noqa: PLC0415
     except ImportError:
-        log.warning("no PDF text without the `pdf` extra (pip install 'litwatch[pdf]')")
-        return None
+        return _pdf_text(pdf)
     try:
         with pymupdf.open(stream=pdf, filetype="pdf") as doc:
             return pymupdf4llm.to_markdown(doc)
     except Exception as exc:  # a broken PDF is no text, not a reason to retry forever
         log.warning("unreadable PDF: %s", type(exc).__name__)
         return None
+
+
+def _pdf_text(pdf: bytes) -> str | None:
+    import pypdfium2  # noqa: PLC0415 - only on the fallback path
+
+    try:
+        doc = pypdfium2.PdfDocument(pdf)
+        try:
+            pages = [page.get_textpage().get_text_bounded() for page in doc]
+        finally:
+            doc.close()
+    except Exception as exc:  # as above: a broken PDF is no text
+        log.warning("unreadable PDF: %s", type(exc).__name__)
+        return None
+    return "\n\n".join(p.replace("\r\n", "\n").strip() for p in pages if p.strip()) or None
 
 
 def _usable(text: PaperText | None) -> PaperText | None:

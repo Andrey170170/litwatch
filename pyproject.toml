@@ -25,6 +25,7 @@ dependencies = [
     "uvicorn>=0.30",
     "croniter>=6.2.4",
     "lxml>=6.1.3",
+    "pypdfium2>=4.30",
 ]
 
 [project.optional-dependencies]
