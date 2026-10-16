@@ -703,6 +703,17 @@ async def test_leases_are_taken_back_after_a_taxonomy_edit_in_flight(conn):
         assert await asyncio.wait_for(taking, 2) == 0
 
 
+def batch_recorded(conn):
+    """Whether a call's row has its batch's id, as a restart needs to attach to the batch: a
+    run killed between submitting and recording pays again, as the spec allows."""
+
+    async def check() -> bool:
+        found = "SELECT 1 FROM inference_calls WHERE batch_id IS NOT NULL"
+        return await (await conn.execute(found)).fetchone() is not None
+
+    return check
+
+
 async def passing(conn):
     """The full-text tests' paper, classified and analysed, graded central: its Brief queued."""
     await taxonomy_store.save(conn, TREE)
@@ -732,7 +743,7 @@ async def test_a_nightly_started_again_takes_back_its_passes_and_pays_for_nothin
             conn, ft.CONFIG, fetch=False, gateway=factory(writer.respond, anthropic), night=night
         )
     )
-    await until(lambda: anthropic.batches)
+    await until(batch_recorded(conn))  # killed only once a restart can attach
     killed.cancel()
     await asyncio.gather(killed, return_exceptions=True)
     (row,) = await ft.passes(conn)
@@ -769,7 +780,7 @@ async def test_a_worker_answers_from_a_dead_nightlys_batch_rather_than_paying_ag
     killed = asyncio.create_task(
         nightly.run(conn, ft.CONFIG, fetch=False, gateway=gateway, night=tonight())
     )
-    await until(lambda: anthropic.batches)
+    await until(batch_recorded(conn))  # killed only once a restart can attach
     killed.cancel()
     await asyncio.gather(killed, return_exceptions=True)
     await conn.execute("UPDATE fulltext_passes SET lease_until = now() - interval '1 second'")
