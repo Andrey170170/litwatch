@@ -240,10 +240,11 @@ text, its source (LaTeX or PDF), a hash of it and the paper's arXiv update it wa
 say which arXiv version its text is, the version is recorded as unknown. When intake knows a paper was updated but not
 to which version, that newer update queues its passes again once, as a new version does (section 8). A pass that finishes after its paper got a new revision stores its result labelled
 with the old revision (section 8), does not replace the current Weight, and a pass for the new revision is queued. A
-pass whose text has the same hash as the text the paper's last finished Brief was written from (the same text, read
-again for a newer version or revision) makes no call: that pass's Brief, Gist and Weight are recorded for it, and it
-is done. A running pass holds a lease (default 30 minutes, and until the deadline in a batching nightly run); when
-the lease runs out, because the worker died, the pass goes back to ready.
+pass that reads the same text for the same revision again (a newer arXiv version whose body did not change) asks the
+identical question, which the gateway answers from its journal at no cost ([models.md](models.md), the gateway). A
+running pass holds a lease (default 30 minutes, and until the deadline in a batching nightly run); when the lease
+runs out, because the worker died, the pass goes back to ready, and a nightly holding the run lock takes back at once
+those a dead nightly held ([models.md](models.md), batches).
 
 **A Deep pass** is one per paper, open until done, and not tied to a revision: it records the revision and text it
 read when it submits, and its card is labelled with them (section 8). The owner's request takes over an automatic pass
@@ -276,8 +277,8 @@ current. A Brief or Deep card made from an older revision is kept and labelled w
 Gist from an older revision's full text is not: the new revision's analysis gives the current Gist.
 
 A new arXiv version that leaves title and abstract close enough does not raise the revision, but its body may have
-changed: a paper that has a Brief or a Weight from the full text gets those passes queued again for the new version, and a
-pass whose text turns out unchanged reuses the last one's result (section 6).
+changed: a paper that has a Brief or a Weight from the full text gets those passes queued again for the new version; one whose
+text turns out unchanged costs nothing (section 6).
 A Deep card is labelled with the version it read and is remade only on request.
 
 ## 9. Failures that need the owner
@@ -340,5 +341,5 @@ papers for $17.06 per 1,000: $2.65 for the pipeline, $13.31 for the full-text pa
 5.5) and $1.09 for the digests. At about 12,700 papers a month that is about $215 a month on Anthropic and $4 on
 OpenRouter, against the owner's caps of about $100 and $20–30 (2026-10-16). The model-spend plan
 ([`docs/plans/model-spend.md`](../../plans/model-spend.md)) brings it under them: `brief` on Sonnet 5.5, full text
-without its bibliography, an unchanged text read once, and the nightly's Anthropic calls batched at half price
+without its bibliography, and the nightly's Anthropic calls batched at half price
 ([models.md](models.md), batches), for a projected $60–90 a month.

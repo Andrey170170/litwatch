@@ -50,22 +50,37 @@ Decisions and Jev bill input tokens only).
 The nightly run's Anthropic calls go through Message Batches, at half the price of normal calls; the run starts at
 02:00 and its results are needed by morning, so latency costs nothing. Batching is inside the gateway: a pipeline step
 asks for one answer and awaits it as before, and neither requests nor passes say whether they may be batched. **The
-job decides**: the nightly run's gateway batches; the app, the service's workers and the CLI's other commands use a
-gateway without batching, so the owner's actions are answered at once.
+job decides**: a nightly run started between the schedule's nightly time and its deadline batches; the app, the
+service's workers, the CLI's other commands and a nightly started outside that window use a gateway without batching.
 
 - **Collecting.** A batching gateway holds each call it cannot reuse and sends the held calls as one batch once none
   has joined for 10 seconds, or once they reach 10,000 requests or 200 MB. Identical calls held together share one
-  request. A step queues all its calls at once in batch mode: the concurrency limits are lifted, so a step is one
-  batch, not many.
-- **Answers.** Open batches are polled every minute. Each answer is validated, journalled with its own usage at half
-  price, and reused like any other call; a refused, truncated or invalid answer is handled as it would be in a normal
-  call, the fallback included. A request the batch could not answer (errored, expired) is sent again as a normal call.
-- **No call is paid twice.** A batched call's journal row is written when it is submitted, with its batch id; its
-  request key is its id in the batch. A run that asks a key already in an open batch waits on that batch, so a run
-  started again after a crash attaches to its batches instead of resubmitting.
-- **The deadline.** The nightly run has one, `[schedule] deadline` (07:30 in the schedule's zone): open batches are
-  cancelled, the answers already in are kept, and the rest are sent as normal calls, as is everything the run asks
-  after it. Other batching jobs have none and wait for their batches, up to the provider's 24 hours.
+  request. A step queues all its calls at once in batch mode, so a step is one batch, not many. Normal calls stay
+  bounded: the gateway keeps a limit of normal calls in flight per provider (what the steps' own limits did), so a
+  step whose calls are not batched, a deadline's leftovers or a burst of fallbacks never go out all at once.
+- **Answers.** Open batches are polled every minute. Every answer of a batch is journalled with its own usage at half
+  price, whether or not a call still awaits it, so a batch is accounted for in full; an awaited answer is validated
+  and handled as in a normal call (a refusal goes to the fallback), and any answer is reused like any other call. A
+  request the batch could not answer (errored, expired, cancelled) is sent again as a normal call when it is asked.
+- **Nothing is paid twice once a batch is recorded.** A batched call's journal row is written before the batch is
+  sent and given the batch id once the provider accepts it; its request key is its id in the batch. A run that asks a
+  key already in an open batch waits on that batch, so a run started again after a crash attaches to its batches
+  instead of resubmitting. A call whose batch was sent but whose id was not recorded (the process died in between) is
+  sent again: that one batch may be paid twice.
+- **The deadline.** `[schedule] deadline` (07:30 in the schedule's zone) is the nightly's: the first after the
+  schedule's nightly time that the run belongs to, kept by a run started again the same night. At the deadline the
+  run cancels its open batches and waits for them to end (cancelling takes minutes; requests in flight may still be
+  answered); the answers are kept, and the cancelled requests are sent as normal calls, as is everything the run asks
+  after the deadline. A batch still cancelling 30 minutes after the deadline has its unanswered requests sent as normal
+  calls all the same, at the risk of paying twice for some. Other batching jobs have no deadline and wait for their
+  batches, up to the provider's 24 hours.
+- **A run started again.** The run lock means no other nightly runs, so a nightly that takes it takes back the leases
+  of the automatic full-text passes a dead run held (pipeline.md, section 6), asks their calls again (which attach to
+  the open batches), and waits, before the digests, for the passes queued since the night's first run started.
+- **The owner's actions during a nightly.** While a nightly holds the run lock, the service's full-text worker leaves
+  automatic passes to it and works only the passes the owner asked for ("run it now", "Use the PDF"), with its gateway
+  without batching; the nightly does not claim those. A pass the owner's word queues meanwhile (a label that makes a
+  paper central) is automatic: the nightly takes it, batched.
 - **Providers.** Batching is a provider capability (submit, poll, cancel, results with usage per call). `anthropic`
   has it; a role on a provider without it is sent as normal calls in any job. OpenRouter's calls are not batched: its
   batch API has no Decisions endpoint and reports cost per batch, not per call.

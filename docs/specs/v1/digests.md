@@ -68,7 +68,7 @@ its Gist, grade, Fit reason and Brief where one exists, and for a weekly digest 
 objective and does not address the reader: no "for you", "for X builders", "required reading". Grades, model names,
 splits and other pipeline terms do not appear in digest text.
 
-Topics' digests are written concurrently, each topic's in its own order (its failed digests tried again, the day's
+Topics' digests are written concurrently, each topic on its own database connection and in its own order (its failed digests tried again, the day's
 digest, Monday's weekly), so the nightly run's writer calls go out in a few batches ([models.md](models.md), batches)
 rather than one after another.
 

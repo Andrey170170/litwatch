@@ -17,7 +17,7 @@ Opus 5.5 ($0.208 a pass, about 48k input tokens each; the Area Weight re-checks 
 The approach, in two PRs:
 
 1. **PR 1 (P2):** the `brief` role moves to Sonnet 5.5, with a model on OpenRouter for its refusals; full-text input
-   loses its bibliography; a new revision whose text is unchanged reuses its pass; budgets and the 02:00 nightly.
+   loses its bibliography; budgets and the 02:00 nightly.
    Projected: about $120–145 a month.
 2. **PR 2 (P3):** every Anthropic call of the nightly run goes through Message Batches at half price, collected inside
    the gateway so the pipeline barely changes, with a 07:30 deadline that finishes what is left as normal calls.
@@ -29,25 +29,37 @@ Results are needed by 09:00 (the owner wakes then); the nightly starts at 02:00,
 
 - **Nightly at 02:00** (`[schedule] nightly = "0 2 * * *"`) in the owner's zone: the deploy configuration sets
   `[schedule] timezone = "America/Denver"`, which follows daylight saving.
-- **The nightly's deadline is 07:30**, `[schedule] deadline = "07:30"`, a time of day in the schedule's zone, the first
-  one after the run starts. At the deadline open batches are cancelled, answers already in are kept, and the rest go
-  as normal calls at full price. The digests' bounded wait ends at the deadline rather than after `wait_minutes`. Jobs
-  other than the nightly have no deadline and wait up to a batch's 24 hours.
+- **The nightly's deadline is 07:30**, `[schedule] deadline = "07:30"`, a time of day in the schedule's zone: the
+  first after the nightly time the run belongs to, so a run started again the same night keeps it. A nightly started
+  outside that window (by hand in the day, or again after 07:30) does not batch. At the deadline open batches are
+  cancelled and waited for until they end (minutes; at most 30, after which their unanswered requests go anyway); the
+  answers are kept and the cancelled requests go as normal calls at full price. The digests' bounded wait ends at the
+  deadline rather than after `wait_minutes`. Jobs other than the nightly have no deadline and wait up to a batch's 24
+  hours.
 - **A batched call is journalled like any other call, at half its price.** The price table gets a batch factor of 0.5;
   Anthropic reports usage per request in a batch, so every call keeps its own cost.
-- **Restarts resubmit nothing.** A batched call's journal row stores its batch id, and the request key the gateway
-  already computes (sha256, 64 hex characters) is the request's `custom_id`. A process that asks a key sitting in an
-  open batch waits on that batch.
-- **Batch mode lifts the concurrency limits** (`concurrency.bounded`'s limit, the full-text worker's claim of 4), so a
-  step's whole set goes in one batch. A pass's lease is extended to cover the deadline.
+- **Restarts resubmit nothing once a batch is recorded.** A batched call's journal row is written before the batch is
+  sent and given its batch id when the provider accepts it; the request key the gateway already computes (sha256, 64
+  hex characters) is the request's `custom_id`. A process that asks a key sitting in an open batch waits on that batch.
+  A crash between the provider accepting a batch and its id being recorded resends that batch, the one case paid
+  twice. The poller journals every answer of a batch, awaited or not, so a batch is accounted for in full.
+- **A nightly started again takes back the dead run's passes.** Holding the run lock, it takes back the leases of the
+  automatic passes a dead nightly held, asks their calls again (they attach to the open batches), and its digest wait
+  covers the passes queued since the night's first run started.
+- **Batch mode lifts the steps' concurrency limits** (`concurrency.bounded`'s limit, the full-text worker's claim of
+  4), so a step's whole set goes in one batch. Normal calls stay bounded by a limit per provider in the gateway, so
+  unbatched roles, a deadline's leftovers and fallbacks never go out all at once; archive reads keep their own limit.
+  A pass's lease is extended to cover the deadline.
 - **A batch goes out** once no new call has joined it for 10 s, or once it holds 10,000 requests or 200 MB
   (Anthropic's limits are 100,000 and 256 MB; a pass's request is up to about 200 kB). Open batches are polled every
   60 s. Identical calls in one collection window share one request.
 - **Batch or normal call is decided by the job, never by the caller.** Neither requests nor passes carry a flag. The
   nightly run's gateway batches. The app, the service's full-text worker and the CLI's other commands use a gateway
-  without batching, so the owner's actions ("run it now", Use the PDF, a label that queues a pass) go at once. While a
-  nightly run holds the run lock, the service's full-text worker sits out: passes queued or awaiting text then are the
-  nightly's, and it works them through its batches.
+  without batching, so the owner's actions go at once. While a nightly holds the run lock, the service's full-text
+  worker works only the passes the owner asked for ("run it now", Use the PDF), which the nightly does not claim; the
+  automatic passes, including one the owner's word queues meanwhile (a label that makes a paper central), are the
+  nightly's, worked through its batches. "Run it now" on a text pass marks it the owner's request, as it already does
+  a Deep pass.
 - **Batching is a provider capability behind one interface** (submit, poll, cancel, results with usage per call).
   Anthropic implements it now. A role whose provider has none is sent as normal calls; OpenRouter's Batch API
   (`POST /api/v1/batches`, live since 2026-09-22) can be plugged in later, once it reports cost per call.
@@ -56,9 +68,10 @@ Results are needed by 09:00 (the owner wakes then); the nightly starts at 02:00,
 - **Text trimming.** The bibliography is cut from LaTeX text (the `thebibliography` block the archive inlines). From
   PDF text, the last "References" heading is cut up to the next heading or the end. The appendix is cut only if P1
   shows the Briefs no worse without it.
-- **An unchanged text makes no call.** When a pass reads text whose hash (of the text as read, before trimming)
-  matches that of the paper's last finished pass that wrote a Brief, that pass's Brief, Gist and Weight are recorded
-  for the new pass, at no cost.
+- **An unchanged text costs nothing already.** A pass that reads the same text for the same revision again asks the
+  identical question (title, abstract, area, text), which the gateway's journal answers at no cost, across runs. The
+  hash reuse the owner approved would duplicate that, and a hash of the body alone would reuse a judgement whose
+  abstract or area changed; so no new mechanism: PR 1 shows the journal's reuse with a test (V4).
 - **Budgets** are `anthropic_monthly = 100` and `openrouter_monthly = 25`, as the configuration's defaults.
 - **Unchanged:** `judge` stays on Opus 5.5 and the Haiku roles keep their models. Classification, the Area check, the
   second-lab check and the fallback stay normal calls on OpenRouter. Deep cards stay on the `deep` service's
@@ -113,7 +126,7 @@ does not know.
   before 09:00.
 - **R3. The process dies mid-night.** Batch ids are persisted, so the next run attaches to open batches instead of
   paying again. If it dies late, the morning has no digests until a run is started by hand; resuming on start-up is out
-  of scope.
+  of scope. A restart takes back the dead run's passes and keeps the night's deadline (choices above).
 - **R4. A step's calls trickle out over several batches.** Concurrency is lifted so a step queues all its calls at
   once; P3's night counts rounds and times. Passes whose text arrives late form one more batch, overlapping the rest.
 - **R5. Cutting the appendix drops results only it has.** Only the bibliography is cut unless P1's side-by-side shows
@@ -121,7 +134,8 @@ does not know.
 - **R6. Batched costs land in the journal wrong**, so budgets read wrong. A test prices a fake batch result; P3's night
   is checked against Anthropic's usage for the same window.
 - **R7. The nightly holds the run lock for hours, not under one.** A job started by hand at night (`litwatch digests
-  write`, a CLI re-run) waits for it. The app's actions do not take the run lock and still go at once.
+  write`, a CLI re-run) refuses with the lock busy, as it does now. The app's actions do not take the run lock and
+  still go at once.
 
 ## Stages
 
@@ -130,7 +144,7 @@ All work is in a worktree off `v1`; each PR follows [`docs/agents/workflow.md`](
 | Stage | What | Shows before the next starts |
 | --- | --- | --- |
 | P1 | **Sonnet replay.** 40 of N6's passes (the 3 refused, 12 Focus Briefs, 25 re-checks) replayed on the `n6_restart` database as an evaluation (evaluation tables only). Sonnet at high and at medium; three text variants at high (as now, bibliography cut, appendix also cut). The fallback candidates on every refusal. About $8–10; the owner confirms before it passes $5. | A report in `evals/`: refusals by category; agreement with Opus on Weight and on the overstatement line, per effort; output tokens and cost per effort; tokens per text variant; each fallback candidate's answers. About 8 Opus/Sonnet pairs for the owner to read. **The owner's read decides Sonnet.** |
-| P2 | **PR 1.** `brief` on Sonnet with the fallback, trimming as P1 settled it, the hash reuse, budgets, 02:00 and the deadline setting's zone. | Checks green. A full-text pass end to end on a scratch database. A refusal reaches the fallback (shown with a fake). The pass's cost lower in the journal. |
+| P2 | **PR 1.** `brief` on Sonnet with the fallback, trimming as P1 settled it, budgets, 02:00 and the schedule's zone. | Checks green. A full-text pass end to end on a scratch database. A refusal reaches the fallback (shown with a fake). The pass's cost lower in the journal. |
 | P3 | **PR 2.** The batch path in the gateway (collector, poller, the Anthropic batch provider, batch ids by a migration, the deadline), lifted concurrency and pass claims in batch mode, the worker's sit-out, the digest wait ending at the deadline, topics' digests written in parallel. | Tests with a fake batch provider. One real batch per call shape. A night on a scratch database through batches: rounds, times, cost against the projection, the journal against Anthropic's usage, a killed and restarted run that submits nothing twice. |
 
 ## Verification
@@ -142,18 +156,18 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V1 | Sonnet's Briefs and Weights are good enough | P1's report (refusals, agreement with Opus per effort, tokens) and the owner's read of the pairs |
 | V2 | A refusal falls back to OpenRouter, once | pytest with a scripted refusal: one fallback call, journalled under its own provider; P1's fallback answers |
 | V3 | Trimming cuts the bibliography and nothing else | unit tests on real LaTeX and PDF texts from N6; P1's token counts |
-| V4 | An unchanged text reuses its pass at no cost | pytest on PostgreSQL: a pass whose text hash matches records the earlier result and makes no call; a changed one calls |
+| V4 | An unchanged text costs nothing | pytest on PostgreSQL: a pass queued again for a newer version with the same text and revision is answered from the journal (no provider call, cost 0); a changed text calls |
 | V5 | Batched steps leave the same records as normal calls | pytest with a fake batch provider across analysis, grading and passes: same records, reuse, refusal, truncation and an expired batch handled as today |
-| V6 | A restart submits nothing twice | pytest: stop after submit, run again, the fake sees one submission; repeated on the scratch night |
-| V7 | The deadline finishes the night | pytest with a fake clock: cancel, finished answers kept, the rest sent as normal calls, the digests written |
-| V8 | The owner's actions do not wait on a batch | pytest: an app action calls at once during an open batch; the service worker leaves the queue alone while a nightly holds the run lock |
+| V6 | A restart submits nothing twice once a batch is recorded | pytest: a nightly killed with batches open and passes leased, run again: the fake sees one submission, the passes are taken back and answered from the open batches; repeated on the scratch night |
+| V7 | The deadline finishes the night | pytest with a fake clock: cancel, wait for the batch to end, finished answers kept, cancelled ones sent as normal calls, the digests written; a run started again after 07:30 does not batch |
+| V8 | The owner's actions do not wait on a batch | pytest through the API: "run it now" and Use the PDF during a nightly are worked by the service worker with normal calls; the worker leaves automatic passes alone while a nightly holds the run lock, and the nightly leaves the owner's |
 | V9 | A night costs what is projected and is done in time | P3's scratch night: cost per role at half price, matched to Anthropic's usage; digests written well before the deadline |
 | V10 | The migration is safe | pytest migrating a fresh schema; `db migrate` on a fresh scratch database, counts before and after |
 | V11 | Parallel digests write what sequential ones did | pytest: a Monday's dailies and weeklies written in parallel through a fake batch equal the sequential result; each topic's order kept |
 
 ## Scope
 
-In: `brief` on Sonnet with the OpenRouter fallback; text trimming; the hash reuse; batches for every nightly Anthropic
+In: `brief` on Sonnet with the OpenRouter fallback; text trimming; batches for every nightly Anthropic
 call, the writer included, with the deadline and resume; the 02:00 nightly; budgets; the spec amendments.
 
 Out:
