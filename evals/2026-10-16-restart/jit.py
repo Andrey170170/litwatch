@@ -1,6 +1,6 @@
 """PostgreSQL's JIT on the reading API's lists, timed in pairs (N6; the build plan's N6 entry).
 
-    uv run python evals/2026-10-16-restart/jit.py [--repeats 5] [--out DIR]
+    uv run python evals/2026-10-16-restart/jit.py --out DIR [--repeats 5]
 
 Against $LITWATCH_DATABASE_URL (the restart's database). The statements are the ones the API
 issues: the store's list functions run through a connection that records each statement and its
@@ -9,7 +9,7 @@ Each statement is then run under `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` with 
 back to back, the order alternating between repeats so neither setting always runs on the warmer
 cache. Prints, per list, the median execution time of its statements summed, with JIT on and off,
 the median JIT time and how many of its statements JIT compiled; writes every plan to
-`DIR/plans.jsonl.gz`.
+`DIR/plans.jsonl.gz`, and refuses a DIR that already has one: this directory's are the restart's.
 """
 
 from __future__ import annotations
@@ -71,6 +71,8 @@ async def explain(conn: Any, query: str, params: Any, jit: bool) -> dict[str, An
 
 
 async def main(repeats: int, out: Path) -> None:
+    if (out / "plans.jsonl.gz").exists():
+        raise SystemExit(f"{out / 'plans.jsonl.gz'} exists; give --out a new directory")
     out.mkdir(parents=True, exist_ok=True)
     async with await store.connect(configuration.database_url()) as conn:
         lists = await statements(conn)
@@ -105,6 +107,6 @@ async def main(repeats: int, out: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repeats", type=int, default=5)
-    parser.add_argument("--out", type=Path, default=Path(__file__).parent)
+    parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     asyncio.run(main(args.repeats, args.out))
