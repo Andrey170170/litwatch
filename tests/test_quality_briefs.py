@@ -94,8 +94,10 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
     def refuse(role, request):
         return Reply("", Stop.REFUSED, Usage(model=role.model, cost=0.05), refusal="cyber")
 
+    charge = [0.02]
+
     def answer(role, request):
-        return Reply(json.dumps(ANSWER), Stop.COMPLETE, Usage(model=role.model, cost=0.02))
+        return Reply(json.dumps(ANSWER), Stop.COMPLETE, Usage(model=role.model, cost=charge[0]))
 
     models = Models(
         brief=ROLE.model_copy(update={"fallback": "brief_fallback"}), brief_fallback=OTHER
@@ -108,6 +110,12 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
     pair = [(P, entries()[0])]
     (result,) = await briefs.run(Gateway(models, providers), seeds.taxonomy(), pair, archive, out)
     assert result.output is not None and result.cost == pytest.approx(0.07)
+    # A charge the provider did not report leaves the paper's cost unknown, not a subtotal.
+    charge[0] = None
+    (unknown,) = await briefs.run(
+        Gateway(models, providers), seeds.taxonomy(), pair, archive, tmp_path / "unknown.jsonl"
+    )
+    assert unknown.output is not None and unknown.cost is None
     # Another fallback is another configuration: the run is not resumed into the same file.
     other = Models(
         brief=models.brief, brief_fallback=OTHER.model_copy(update={"model": "lab/another"})

@@ -121,11 +121,12 @@ def fingerprint(gateway: Gateway, text: str = "pass") -> str:
 
 class _Spent:
     """A journal that only adds up each paper's charges, so a refusal the fallback answered
-    counts in what its paper cost. Nothing is reused: an evaluation asks afresh."""
+    counts in what its paper cost; one unknown charge makes the total unknown. Nothing is
+    reused: an evaluation asks afresh."""
 
     def __init__(self) -> None:
         self.papers: dict[int, str | None] = {}
-        self.cost: dict[str | None, float] = {}
+        self.cost: dict[str | None, float | None] = {}
 
     async def cached(self, key: str) -> None:
         return None
@@ -136,7 +137,8 @@ class _Spent:
 
     async def record(self, call_id: int, usage: Usage) -> None:
         paper = self.papers[call_id]
-        self.cost[paper] = self.cost.get(paper, 0.0) + (usage.cost or 0.0)
+        known = self.cost.get(paper, 0.0)
+        self.cost[paper] = None if known is None or usage.cost is None else known + usage.cost
 
     async def accept(self, call_id: int, output: dict) -> None:
         return None
