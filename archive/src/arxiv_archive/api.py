@@ -430,8 +430,10 @@ class PaperHandler(BaseHTTPRequestHandler):
                         result['jobs'] = [dict(row) for row in store.catalog.db.execute(
                             'SELECT kind,version,status,error FROM jobs WHERE paper_id=? ORDER BY version DESC,kind LIMIT 50',
                             (paper_id,))]
-                    from .search import normalize_paper
+                    from .search import listing_item, normalize_paper
                     result['display'] = normalize_paper(result)
+                    # The record as `/v1/papers` lists it, for a client's page of the paper.
+                    result['item'] = listing_item(paper_id, result.get('metadata') or {})
                     result['display']['has_pdf'] = any(a['kind'] == 'pdf' and a['status'] == 'available'
                                                        for a in result['artifacts'])
                     result['display']['has_source'] = result['has_historical_source'] or any(

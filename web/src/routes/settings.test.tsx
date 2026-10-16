@@ -388,6 +388,19 @@ describe("Settings", () => {
     expect(within(item as HTMLElement).queryByRole("button", { name: "Run it now" })).toBeNull();
   });
 
+  it("runs a waiting full-text pass on the paper's PDF, settling it in place", async () => {
+    viewport(true);
+    const calls = scriptFetch({ ...common, "POST /api/settings/fulltext/7/pdf": () => new Response(null, { status: 204 }) });
+    renderApp("/settings/needs");
+    expect(await screen.findByText("Full text · 1")).toBeInTheDocument();
+    const item = screen.getByRole("link", { name: "A textless paper" }).closest(".need")! as HTMLElement;
+    await userEvent.click(within(item).getByRole("button", { name: "Use the PDF" }));
+    await waitFor(() => expect(item).toHaveClass("settled"));
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/settings/fulltext/7/pdf"]);
+    expect(item).toHaveTextContent("Running now, on the PDF, first in line, with three more runs.");
+    expect(within(item).queryByRole("button", { name: "Use the PDF" })).toBeNull();
+  });
+
   it("follows a class with its generated defaults once a Focus topic has a rubric", async () => {
     viewport(true);
     scriptFetch({ ...common, "GET /api/settings/taxonomy": { ...tree, topics: [] } });

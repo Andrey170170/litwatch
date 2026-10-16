@@ -82,13 +82,14 @@ def archive_for(config: Config) -> ArchiveClient | None:
 
 
 async def read(archive: ArchiveClient, c: Claimed) -> Attempt:
-    """Read the claimed pass's text from the archive at urgent priority."""
+    """Read the claimed pass's text from the archive at urgent priority: its PDF alone when the
+    owner said "Use the PDF"."""
     a = Attempt(c)
     try:
         if c.retry_text:  # tried again: what the archive gave up on is tried again too
-            await retry_downloads(archive, c.paper, URGENT)
+            await retry_downloads(archive, c.paper, URGENT, pdf=c.use_pdf)
             a.retry_asked = True
-        a.text = await read_text(archive, c.paper, URGENT)
+        a.text = await read_text(archive, c.paper, URGENT, pdf=c.use_pdf)
     except ArchiveUnavailable as exc:
         a.waiting, a.error = True, f"the archive: {exc}"
     except ArchiveError as exc:  # TextUnavailable included: no text to be had

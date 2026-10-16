@@ -3,6 +3,7 @@ paper's page, and the owner's word (docs/specs/v1/DESIGN.md, Shell, Pages and In
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from typing import Annotated, Any
 
@@ -38,6 +39,7 @@ from litwatch.core.digests import DAILY, DigestPeriod
 from litwatch.core.rules import FAILED_RUNS, REACTION_WORDS
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
+from litwatch.intake.search import NoAnswerError
 from litwatch.jobs import publications as lookups
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
@@ -51,6 +53,13 @@ from litwatch.store import word as word_store
 router = APIRouter(prefix="/api")
 
 NOT_FOUND = {404: {"description": "No such paper or topic"}}
+# An owner action that fetches a paper from arXiv, when arXiv does not answer in time.
+ARXIV_SILENT = {503: {"description": "arXiv did not answer in time; nothing was stored"}}
+ARCHIVE_DOWN = "The archive did not answer"
+# Past the archive's wait for a PDF, the time left to read one that became ready at its end.
+PDF_READ_SLACK = 10.0
+# The archive's record of a paper litwatch lacks, for its page: one bound over the whole read.
+ARCHIVE_PAGE_BUDGET = 10.0
 
 
 def _config(request: Request) -> Any:
@@ -216,9 +225,16 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
         answer.rows = [_row(tree, looks, r, s.Row) for r in listed.rows]
         answer.total, answer.counts = listed.total, s.RarityCounts(**listed.rarities)
     if params.q and params.offset == 0 and _shows_outside(params):
-        filters = SearchFilters(since=params.since, until=params.until, limit=params.limit)
+        # The providers rank by relevance whatever the collection's sort; a date sort asks them
+        # for their newest.
+        filters = SearchFilters(
+            since=params.since,
+            until=params.until,
+            limit=params.limit,
+            sort="newest" if params.sort == "newest" else "relevance",
+        )
         answer.outside, answer.left_out = await integrations_api.search_outside(
-            request, c, params.q, filters, params.sort
+            request, c, params.q, filters
         )
     return answer
 
@@ -235,16 +251,20 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
 async def pdf(paper_id: str, request: Request) -> Response:
     """The paper's PDF as the owner opens it: from the archive, which is asked for it urgently
     (the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on
-    for its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,
-    or when the archive cannot get it in time. The database is read before the wait, which
-    holds no connection."""
+    for its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record
+    of it. arXiv's PDF without an archive, for a paper neither holds, or when the archive
+    cannot get it in time. The database is read before the wait, which holds no connection."""
     archive = request.app.state.archive
     async with await store.connect(request.app.state.dsn) as c:
         held = await papers_store.get(c, paper_id)
-    if archive is not None and held is not None:
+    body = None
+    if archive is not None:
         try:
-            body = await archive.pdf(held)
-        except ArchiveError:  # unreachable, no known version, a broken file: arXiv has it
+            # One bound over every archive call: the record, the request, the wait, the file.
+            async with asyncio.timeout(archive.wait_seconds + PDF_READ_SLACK):
+                known = held if held is not None else await archive.paper(paper_id)
+                body = await archive.pdf(known) if known is not None else None
+        except (ArchiveError, TimeoutError):  # unreachable, slow, no known version, a broken file
             body = None
         if body is not None:
             name = paper_id.replace("/", "_")
@@ -256,11 +276,18 @@ async def pdf(paper_id: str, request: Request) -> Response:
     return RedirectResponse(f"https://arxiv.org/pdf/{paper_id}", status_code=307)
 
 
-@router.get("/papers/{paper_id:path}", responses=NOT_FOUND)
+@router.get(
+    "/papers/{paper_id:path}",
+    responses={
+        **NOT_FOUND,
+        503: {"description": "The archive, asked for a paper litwatch lacks, did not answer"},
+    },
+)
 async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
+    """The paper's page; for a paper litwatch has not fetched, the archive's record of it."""
     found = await reading.paper(c, paper_id)
     if found is None:
-        raise HTTPException(status_code=404, detail="no such paper")
+        return await _unfetched(request, paper_id)
     tree = await taxonomy_store.load(c)
     looks = _looks(tree)
     weight = Weight(found["weight"]) if found["weight"] else None
@@ -322,6 +349,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         pdf_url=f"/api/papers/{paper_id}/pdf",
         source_url=f"https://arxiv.org/e-print/{paper_id}",
         in_collection=found["in_collection"],
+        next_run=found["next_run"],
         rarity=found["rarity"],
         badges=_badges(looks, standings),
         gist=s.Gist(text=found["gist"], source=found["gist_source"]) if found["gist"] else None,
@@ -345,6 +373,37 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         card=card,
         card_pass=card_pass,
         card_requestable=card_requestable,
+    )
+
+
+async def _unfetched(request: Request, paper_id: str) -> s.Paper:
+    """An archive paper litwatch has not fetched: its metadata, Process, Deep read (which
+    fetches it first) and Report as a miss. 404 without an archive or when the archive lacks
+    it; 503 when the archive cannot answer within `ARCHIVE_PAGE_BUDGET`, which says nothing of
+    the paper."""
+    archive = request.app.state.archive
+    try:
+        async with asyncio.timeout(ARCHIVE_PAGE_BUDGET):
+            found = await archive.paper(paper_id) if archive is not None else None
+    except (ArchiveError, TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail=ARCHIVE_DOWN) from exc
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such paper")
+    return s.Paper(
+        **found.model_dump(include={"id", "title", "authors", "abstract", "published", "updated"}),
+        version=found.version,
+        versions=[
+            s.Version(version=v["version"], date=v.get("date"))
+            for v in found.version_history
+            if v.get("version")
+        ],
+        arxiv_url=f"https://arxiv.org/abs/{found.id}",
+        pdf_url=f"/api/papers/{found.id}/pdf",
+        source_url=f"https://arxiv.org/e-print/{found.id}",
+        in_collection=False,
+        stored=False,
+        topics=[],
+        card_requestable=integrations_api.answers_card_requests(integrations_api.loaded(request)),
     )
 
 
@@ -560,13 +619,15 @@ async def bibtex_filter(c: Conn, params: Annotated[s.PaperQuery, Query()]) -> st
     return await _bibtex(c, await _matching(c, params))
 
 
-@router.post("/lookup")
+@router.post("/lookup", responses={**NOT_FOUND, **ARXIV_SILENT})
 async def lookup(body: s.LookupIn, c: Conn) -> s.Lookup:
     """Find a paper by arXiv id or link, fetching it when the collection lacks it."""
     try:
         found, fetched = await misses.lookup(c, body.q)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NoAnswerError as exc:
+        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
     tree = await taxonomy_store.load(c)
     listed = await reading.papers(c, tree, reading.Query(ids=[found.id]), limit=1)
     return s.Lookup(row=_row(tree, _looks(tree), listed.rows[0], s.Row), fetched=fetched)
@@ -730,16 +791,26 @@ async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
     return _ack(await word.unlabel(c, paper_id, topic))
 
 
-@router.post("/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}})
+@router.post(
+    "/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}, **ARXIV_SILENT}
+)
 async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
-    """File a miss for a Focus topic: the owner's word, at once, and the paper saved."""
+    """File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
+    litwatch lacks is fetched first, as Process fetches it, with no transaction open, and
+    stored in the report's own, so a refused report stores nothing."""
+    try:
+        paper_id, fetched = await misses.resolve(c, body.paper_id)
+    except misses.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="no such paper") from exc
+    except NoAnswerError as exc:
+        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
     async with c.transaction():
-        await word.lock(c, body.paper_id)
         name, topic = await _topic(c, body.topic)
         if topic.depth != Depth.FOCUS:
             raise HTTPException(status_code=409, detail="not a Focus topic")
-        await _known(c, body.paper_id)
-        _, settled, new = await misses.report(c, body.paper_id, body.topic, body.fit)
+        found, _ = await misses.keep(c, paper_id, fetched)
+        await word.lock(c, found.id)
+        _, settled, new = await misses.report(c, found.id, body.topic, body.fit)
     if not new:
         return _ack(settled, f"Already reported as missed for {name}")
     return _ack(settled, f"Reported as missed for {name}")

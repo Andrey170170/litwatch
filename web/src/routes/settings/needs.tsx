@@ -207,7 +207,8 @@ function Ungraded({ s, badge }: { s: Stuck; badge: React.ReactNode }) {
   );
 }
 
-/** A full-text pass that failed three runs or waits for its text over a week; Run it now puts it first in line. */
+/** A full-text pass that failed three runs or waits for its text over a week; Run it now puts it first in line, Use
+ * the PDF does so reading the paper's PDF from then on, for LaTeX that reads badly. */
 function TextPass({ s }: { s: TextPassStuck }) {
   const run = useRunPassNow(s.paper_id);
   const what = { brief: "Brief", weight: "Weight re-check", deep: "Deep card" }[s.kind];
@@ -227,6 +228,9 @@ function TextPass({ s }: { s: TextPassStuck }) {
         <div className="nact">
           <button className="btn" disabled={run.isPending} onClick={() => run.mutate({ id: s.id, state: s.state })}>
             {run.isPending ? "Starting…" : "Run it now"}
+          </button>
+          <button className="btn" disabled={run.isPending} onClick={() => run.mutate({ id: s.id, state: s.state, pdf: true })}>
+            Use the PDF
           </button>
         </div>
       )}

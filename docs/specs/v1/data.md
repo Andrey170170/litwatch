@@ -67,7 +67,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   as the current Gist.
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
   done | failed, priority, queued at, tried at, text arrived at, arXiv version read, text source latex | pdf, text
-  hash, paper's update read for, lease until, failed runs, retry text, last error): one Brief or Weight re-check open per paper revision, and one
+  hash, paper's update read for, lease until, failed runs, retry text, use the PDF (the owner's, for LaTeX that reads
+  badly), last error): one Brief or Weight re-check open per paper revision, and one
   Deep pass open per paper (reason request | focus | pick; its revision is the one it read); a worker takes the least recently
   tried first. `weights` and `gists` name the pass a full-text row came from.
 - What a digest still has to cover is not stored: a paper is due for a topic while it is eligible there, was announced

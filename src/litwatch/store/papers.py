@@ -83,7 +83,9 @@ async def upsert(
     (`core.rewritten`); only then is the paper judged again. Atom metadata can insert a paper
     but never replace canonical metadata. The archive's metadata is canonical (it came from
     OAI) and, like OAI's, dated by day, but it replaces stored metadata only when it is known
-    to be newer: a higher version, or the same version on a later day.
+    to be newer: a higher version, or the same version on a later day. Whatever the source, a
+    record definitely older than the stored one (by its `updated`) replaces nothing when either
+    version is unknown.
 
     A paper's listing day (`announced`) comes from its first version's submission time
     (`core.digests.announced`) in canonical metadata; until that arrives, from `listed`, the
@@ -152,6 +154,14 @@ async def upsert(
                            OR EXCLUDED.version >= papers.version)
                       AND (NOT %(by_day)s OR papers.updated IS NULL
                            OR EXCLUDED.updated::date >= papers.updated::date)
+                      -- Without two versions to compare, a record definitely older than the
+                      -- stored one changes nothing, whatever its source: from an earlier day,
+                      -- or an earlier time where both carry one.
+                      AND ((papers.version IS NOT NULL AND EXCLUDED.version IS NOT NULL)
+                           OR papers.updated IS NULL OR EXCLUDED.updated IS NULL
+                           OR NOT (EXCLUDED.updated::date < papers.updated::date
+                                   OR (EXCLUDED.updated < papers.updated AND NOT %(by_day)s
+                                       AND papers.metadata_source <> ALL(%(by_day_sources)s))))
                       -- The archive replaces only what it is known to be newer than.
                       AND (%(source)s <> 'archive' OR EXCLUDED.version > papers.version
                            OR (papers.version IS NULL AND EXCLUDED.version IS NOT NULL)
@@ -166,6 +176,7 @@ async def upsert(
                         "announced": announced(p) or (listed or {}).get(p.id),
                         "source": source,
                         "by_day": source in _BY_DAY,
+                        "by_day_sources": list(_BY_DAY),
                     },
                 )
                 row = await cur.fetchone()

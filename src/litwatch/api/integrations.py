@@ -18,9 +18,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from litwatch import events
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn
+from litwatch.archive import ArchiveError
 from litwatch.core import SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
+from litwatch.feedback import misses
 from litwatch.fulltext import deep as deep_passes
+from litwatch.intake.search import NoAnswerError
+from litwatch.integrations.archive import Archive
 from litwatch.integrations.deep import Deep
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
@@ -171,6 +175,7 @@ async def changes(
 CARD_REFUSED = {
     404: {"description": "No such paper"},
     409: {"description": "No card provider is configured, or the paper is dismissed"},
+    503: {"description": "arXiv did not answer in time; nothing was stored"},
 }
 
 
@@ -179,14 +184,21 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
     """Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
     when it has one: the request goes through the full-text queue, first in line, and the card
     shows on the paper once it is written. Asking again while one is queued or being written
-    changes nothing."""
-    if await papers_store.get(c, paper_id) is None:
-        raise HTTPException(status_code=404, detail="no such paper")
+    changes nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no
+    transaction open, and stored in the request's own."""
     if not answers_card_requests(loaded(request)):
         raise HTTPException(status_code=409, detail="no card provider is configured")
-    pass_id = await deep_passes.request(c, paper_id)
-    if pass_id is None:
-        raise HTTPException(status_code=409, detail="the paper is dismissed")
+    try:
+        paper_id, fetched = await misses.resolve(c, paper_id)
+    except misses.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="no such paper") from exc
+    except NoAnswerError as exc:
+        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
+    async with c.transaction():
+        found, _ = await misses.keep(c, paper_id, fetched)
+        pass_id = await deep_passes.request(c, found.id)
+        if pass_id is None:
+            raise HTTPException(status_code=409, detail="the paper is dismissed")
     request.app.state.deep_wake.set()
     return s.CardRequested(pass_id=pass_id)
 
@@ -250,15 +262,28 @@ async def _ask(
     return await asyncio.wait_for(running, timeout)
 
 
+@router.get("/search/scope")
+async def search_scope(request: Request) -> s.SearchScope:
+    """The search box's scope beyond the collection (its placeholder names the archive's size)."""
+    archive = next((p for p in providers(request) if isinstance(p, Archive)), None)
+    if archive is None:
+        return s.SearchScope()
+    try:
+        count = await asyncio.wait_for(archive.archive.indexed(), request.app.state.search_timeout)
+    except (ArchiveError, TimeoutError):
+        count = None
+    return s.SearchScope(archive_papers=count)
+
+
 async def search_outside(
-    request: Request, c: Any, query: str, filters: SearchFilters, sort: str | None
+    request: Request, c: Any, query: str, filters: SearchFilters
 ) -> tuple[list[s.OutsideRow], list[str]]:
     """Ask every search provider at once, each with a short timeout. Returns the hits the
     collection lacks, merged by arXiv id (the first provider to name a paper keeps it), and
     the names of the providers left out because they failed or were too slow.
 
-    The band sorts by published date, newest first; with `sort=best`, by the providers'
-    scores when every hit carries one."""
+    The band keeps each provider's order, the providers in turn (archive.md, Search: the
+    archive ranks); asked for the newest (`filters.sort`), it is newest first across them."""
     asked = providers(request)
     if not asked:
         return [], []
@@ -295,15 +320,11 @@ async def search_outside(
             authors=hit.authors,
             published=_aware(hit.published),
             source=name,
-            score=hit.score,
         )
         for name, hit in hits.values()
     ]
-    if sort == "best" and rows and all(r.score is not None for r in rows):
-        # Scores mean something only within one provider.
-        order = {p.name: i for i, p in enumerate(asked)}
-        rows.sort(key=lambda r: (order[r.source], -r.score))
-    else:
+    # `hits` holds each provider's hits in its order, the providers in turn.
+    if filters.sort == "newest":
         rows.sort(key=lambda r: r.published or datetime.min.replace(tzinfo=UTC), reverse=True)
     return rows, left_out
 

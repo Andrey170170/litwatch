@@ -8,8 +8,9 @@ from pathlib import Path
 import shutil
 import sqlite3
 import time
+from typing import Callable
 
-from .search import SCHEMA, SearchIndex, normalize
+from .search import SCHEMA, SearchIndex, normalize, title_key
 from .storage import WORK, mount_guard
 
 # Correlated lookups use the catalog's existing paper_id-leading primary indexes.
@@ -66,8 +67,10 @@ class Indexer:
                 self.db.execute("INSERT INTO documents_fts(documents_fts,rank) VALUES('rank','bm25(12.0,8.0,1.0,3.0,4.0,1.0)')")
                 if self._get('baseline_high_water') is None:
                     high_water = self.catalog.execute('SELECT coalesce(max(rowid),0) FROM papers').fetchone()[0]
+                    # A new index keys every title as it is written: nothing to backfill.
                     for key, value in [('baseline_high_water', high_water), ('baseline_rowid', 0),
-                                       ('baseline_complete', False), ('indexed_papers', 0)]:
+                                       ('baseline_complete', False), ('indexed_papers', 0),
+                                       ('titles_keyed', True)]:
                         self._set(key, value)
         except BaseException:
             self.close()
@@ -121,6 +124,7 @@ class Indexer:
                 if row is None:
                     if old:
                         self.db.execute('DELETE FROM documents WHERE rowid=?', (old['rowid'],))
+                        self.db.execute('DELETE FROM title_keys WHERE docid=?', (old['rowid'],))
                         count -= 1
                     continue
                 item = normalize(row)
@@ -135,6 +139,8 @@ class Indexer:
                 if not old:
                     count += 1
                 docid = old['rowid'] if old else self.db.execute('SELECT rowid FROM documents WHERE id=?', (paper_id,)).fetchone()[0]
+                self.db.execute('INSERT INTO title_keys VALUES(?,?) ON CONFLICT(docid) '
+                                'DO UPDATE SET key=excluded.key', (docid, title_key(item['title'])))
                 self.db.execute('DELETE FROM categories WHERE docid=?', (docid,))
                 self.db.executemany('INSERT INTO categories VALUES(?,?,?,?)',
                                     [(cat, docid, item['published'], paper_id) for cat in json.loads(item['categories'])])
@@ -172,6 +178,57 @@ class Indexer:
         return {'baseline_rows': len(baseline), 'changes': len(dirty),
                 'baseline_complete': complete, 'indexed_papers': self._get('indexed_papers'),
                 'elapsed_ms': round((time.monotonic() - started) * 1000, 1)}
+
+
+def index_titles(path: str | Path, batch: int = 5000,
+                 progress: Callable[[dict], None] | None = None) -> dict:
+    """Key every indexed title for the exact-title lookup (`title_key`), then mark the keys
+    complete. Resumable and idempotent, and safe beside the running indexer, which keys every
+    title it writes: each batch is read and keyed under one write lock."""
+    if not Path(path).is_file():
+        raise RuntimeError(f'No search index at {path}: the indexer builds it, keyed.')
+    db = sqlite3.connect(str(path), timeout=30)
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute('PRAGMA journal_mode=WAL')
+        db.execute('PRAGMA synchronous=FULL')
+        db.executescript(SCHEMA)
+
+        def state(key: str):
+            row = db.execute('SELECT value FROM state WHERE key=?', (key,)).fetchone()
+            return json.loads(row[0]) if row else None
+
+        def save(key: str, value) -> None:
+            db.execute('INSERT INTO state VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       (key, json.dumps(value)))
+
+        last, count = state('titles_keyed_rowid') or 0, 0
+        while True:
+            # Write-lock before reading, so the indexer cannot change a title between this
+            # read and the key derived from it.
+            db.execute('BEGIN IMMEDIATE')
+            try:
+                rows = db.execute('SELECT rowid,title FROM documents WHERE rowid>? ORDER BY rowid LIMIT ?',
+                                  (last, batch)).fetchall()
+                db.executemany('INSERT INTO title_keys VALUES(?,?) ON CONFLICT(docid) DO UPDATE SET key=excluded.key',
+                               [(row['rowid'], title_key(row['title'])) for row in rows])
+                if rows:
+                    last, count = rows[-1]['rowid'], count + len(rows)
+                    save('titles_keyed_rowid', last)
+                else:
+                    save('titles_keyed', True)
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
+            if not rows:
+                break
+            if progress:
+                progress({'titles': count, 'rowid': last})
+        keyed = db.execute('SELECT count(*) FROM title_keys').fetchone()[0]
+        return {'titles': count, 'keyed': keyed}
+    finally:
+        db.close()
 
 
 def main() -> None:

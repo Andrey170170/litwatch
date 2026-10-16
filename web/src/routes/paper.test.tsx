@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
+import type { Paper } from "@/components/paper/Actions";
+import { pollEvery } from "./paper";
 
 const badge = { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" };
 const paper = {
@@ -201,6 +203,23 @@ describe("a paper's page", () => {
     expect(await screen.findByText("9999.99999 is not in the collection.")).toBeInTheDocument();
   });
 
+  it("says the archive did not answer, not that the paper is missing, and tries again", async () => {
+    viewport(true);
+    let down = true;
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => (down ? json({ detail: "The archive did not answer" }, 503) : paper),
+    });
+    renderApp("/paper/2610.00002");
+    const said = await screen.findByText(/The archive did not answer/);
+    expect(screen.queryByText(/not in the collection/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Process" })).not.toBeInTheDocument();
+    down = false;
+    await userEvent.click(within(said).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Epic one" })).toBeInTheDocument();
+  });
+
   it("fetches a paper it does not hold from its own page, then shows it", async () => {
     viewport(true);
     let held = true;
@@ -218,6 +237,107 @@ describe("a paper's page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Process" }));
     expect(await screen.findByRole("heading", { name: "Fetched one" })).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ q: "2409.01234" });
+  });
+
+  it("shows an archive paper litwatch has not fetched, and the paper fetched once Process brings it in", async () => {
+    viewport(true);
+    let stored = false;
+    const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": () => ({ ...outside, stored, next_run: stored }),
+      "POST /api/lookup": () => {
+        stored = true;
+        return { fetched: true };
+      },
+    });
+    renderApp("/paper/2409.01234");
+    expect(await screen.findByRole("heading", { name: "Archive one" })).toBeInTheDocument();
+    expect(screen.getByText("We study things.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Paste a DOI" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Process" }));
+    expect(await screen.findByRole("button", { name: "Fetched · next run" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Paste a DOI" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Process" })).toBeNull();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("says a fetched paper no run will process is fetched, without promising the next run", async () => {
+    viewport(true);
+    const dismissed = { ...paper, id: "2409.01234", title: "Dismissed one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": dismissed });
+    renderApp("/paper/2409.01234");
+    expect(await screen.findByRole("button", { name: "Fetched" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /next run/ })).toBeNull();
+  });
+
+  it("cites a paper litwatch has not fetched from its page on the phone, with no DOI form", async () => {
+    viewport(false);
+    const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, stored: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": outside,
+      "POST /api/bibtex": () => new Response("@misc{author2026archive}", { headers: { "content-type": "text/plain" } }),
+    });
+    renderApp("/paper/2409.01234");
+    await screen.findByRole("heading", { name: "Archive one" });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const sheet = screen.getByRole("dialog", { name: "The paper" });
+    expect(within(sheet).queryByRole("button", { name: "Paste a DOI" })).toBeNull();
+    await userEvent.click(within(sheet).getByRole("button", { name: /BibTeX/ }));
+    await waitFor(() => expect(calls.some((c) => c.url === "/api/bibtex")).toBe(true));
+    expect(calls.find((c) => c.url === "/api/bibtex")?.body).toEqual({ cited: [{ id: "2409.01234", title: "Archive one", authors: outside.authors, year: 2026 }] });
+  });
+
+  it("cites a paper litwatch has not fetched from its rail on the desktop", async () => {
+    viewport(true);
+    const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, stored: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": outside,
+      "POST /api/bibtex": () => new Response("@misc{author2026archive}", { headers: { "content-type": "text/plain" } }),
+    });
+    renderApp("/paper/2409.01234");
+    await screen.findByRole("heading", { name: "Archive one" });
+    await userEvent.click(screen.getByRole("button", { name: /BibTeX/ }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/bibtex")?.body).toEqual({ cited: [{ id: "2409.01234", title: "Archive one", authors: outside.authors, year: 2026 }] }));
+  });
+
+  it("polls while a Brief or a Deep card pass is queued or running, not while it waits on the owner", () => {
+    const pass = (state: string) => ({ id: 9, reason: "request", state, queued_at: "2026-10-14T03:00:00Z" });
+    const waits = (kind: string, pass_id: number) => ({ kind, revision: 1, pass_id });
+    const at = (fields: object) => pollEvery({ ...paper, states: [], ...fields } as unknown as Paper, false);
+    expect(at({ card_pass: pass("failed"), states: [waits("card_failed", 9)] })).toBe(false);
+    // Run it now from the card_failed note: the refetched page has the pass queued again, and polls for the card.
+    expect(at({ card_pass: pass("ready") })).toBe(15_000);
+    expect(at({ card_pass: pass("running") })).toBe(15_000);
+    expect(at({ card_pass: pass("awaiting_text") })).toBe(60_000);
+    expect(at({ card_pass: pass("awaiting_text"), states: [waits("awaiting_text", 9)] })).toBe(false);
+    // A Brief waiting on the owner does not stop the poll for a card pass that is not.
+    const brief = { id: 7, kind: "brief", state: "awaiting_text", queued_at: "2026-10-14T03:00:00Z" };
+    expect(at({ text_pass: brief, card_pass: pass("awaiting_text"), states: [waits("awaiting_text", 7)] })).toBe(60_000);
+  });
+
+  it("runs a failed full-text pass again on the paper's PDF", async () => {
+    viewport(true);
+    const failed = { kind: "fulltext_failed", revision: 1, error: "LaTeX reads badly", pass_id: 7 };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => ({ ...paper, states: calls.some((c) => c.method === "POST") ? [] : [failed] }),
+      "POST /api/settings/fulltext/7/pdf": () => new Response(null, { status: 204 }),
+    });
+    renderApp("/paper/2610.00002");
+    expect(await screen.findByText("Full text failed three runs in a row.")).toBeInTheDocument();
+    expect(screen.getByText("LaTeX reads badly")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run it now" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Use the PDF" }));
+    await waitFor(() => expect(screen.queryByText("Full text failed three runs in a row.")).toBeNull());
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/settings/fulltext/7/pdf"]);
+    expect(await screen.findByText("Running the pass now, on the PDF; its result shows here once written")).toBeInTheDocument();
   });
 
   it("lights the phone's thumbs for the topic the paper was opened under, the one its sheet opens on", async () => {

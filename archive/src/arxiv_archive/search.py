@@ -10,6 +10,7 @@ import re
 import sqlite3
 import time
 from typing import Any
+import unicodedata
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS documents (
@@ -49,11 +50,27 @@ CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
  VALUES(new.rowid,new.id,new.title,new.abstract,new.authors,new.doi,new.journal_ref);
 END;
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS title_keys (docid INTEGER PRIMARY KEY, key TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS title_keys_key ON title_keys(key);
 '''
 
 
 def _text(value: Any) -> str:
     return ' '.join(str(value).split()) if value is not None else ''
+
+
+def words(text: str) -> list[str]:
+    """A text's words as the index's tokenizer sees them (unicode61, diacritics removed):
+    case-folded letters and digits, split on everything else."""
+    plain = ''.join(c for c in unicodedata.normalize('NFKD', text.casefold())
+                    if not unicodedata.combining(c))
+    return re.findall(r'[^\W_]+', plain, re.UNICODE)
+
+
+def title_key(text: str) -> str:
+    """A title as the exact-title lookup compares it, and a query the same way: case-folded,
+    accents stripped, punctuation turned to spaces and whitespace collapsed (`words`)."""
+    return ' '.join(words(text))
 
 
 def _date(value: Any) -> str:
@@ -188,6 +205,9 @@ def _decode(row: sqlite3.Row) -> dict:
     return item
 
 
+FTS_JOIN = ' JOIN documents_fts ON documents_fts.rowid=d.rowid'
+
+
 class SearchIndex:
     """Open read-only connections per request; API threads share no SQLite state."""
 
@@ -203,6 +223,48 @@ class SearchIndex:
         db.execute('PRAGMA cache_size=-8192')
         db.execute('PRAGMA temp_store=MEMORY')
         return db
+
+    @staticmethod
+    def _ranked(db: sqlite3.Connection, base: str, clauses: list[str], params: list,
+                terms: list[str], q: str, wanted: int) -> list[sqlite3.Row]:
+        """The first `wanted` hits of a search by relevance: a title that is the query itself
+        first (`title_key`: case, accents and punctuation aside, an indexed lookup), then titles
+        holding the query as a phrase, then abstracts holding the phrase, then the rest by BM25
+        (which weighs the title over the abstract, `search_indexer`). `base`, `clauses` and
+        `params` are the search's own, its match the first clause and parameter. Each tier is
+        its own query, ordered and cut short by FTS5, and the tiers stop once the page is full,
+        so a broad phrase costs one ranked tier and no query sorts every match by hand. The
+        tiers read one snapshot, so an indexer commit between them cannot repeat or drop a hit."""
+        db.execute('BEGIN')
+        try:
+            return SearchIndex._tiers(db, base, clauses, params, terms, q, wanted)
+        finally:
+            db.rollback()
+
+    @staticmethod
+    def _tiers(db: sqlite3.Connection, base: str, clauses: list[str], params: list,
+               terms: list[str], q: str, wanted: int) -> list[sqlite3.Row]:
+        phrase = '"' + ' '.join(terms) + '"'
+        rows: list[sqlite3.Row] = []
+        # An index the indexer has not opened since `title_keys` was added has no table yet.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='title_keys'").fetchone():
+            plain = base.replace(FTS_JOIN, '')
+            where = ' AND '.join(['d.rowid IN (SELECT docid FROM title_keys WHERE key=?)', *clauses[1:]])
+            rows = db.execute(f'SELECT d.* FROM {plain} WHERE {where} ORDER BY d.published DESC,d.id '
+                              'LIMIT ?', [title_key(q), *params[1:], wanted]).fetchall()
+        seen = {row['id'] for row in rows}
+        ranked = f"SELECT d.* FROM {base} WHERE {' AND '.join(clauses)} ORDER BY documents_fts.rank LIMIT ?"
+        expression = params[0]
+        for match in (f'title : {phrase}', f'abstract : {phrase} NOT title : {phrase}',
+                      f'({expression}) NOT title : {phrase} NOT abstract : {phrase}'):
+            if len(rows) >= wanted:
+                break
+            # An exact title is also a title phrase: asked for again, and left out here.
+            for row in db.execute(ranked, [match, *params[1:], wanted]):
+                if row['id'] not in seen:
+                    seen.add(row['id'])
+                    rows.append(row)
+        return rows[:wanted]
 
     def status(self) -> dict:
         if not self.path.is_file():
@@ -261,7 +323,16 @@ class SearchIndex:
         exact = q.strip().removeprefix('arXiv:').strip()
         exact = re.sub(r'v\d+$', '', exact)
         is_id = bool(re.fullmatch(r'(?:\d{4}\.\d{4,5}|[A-Za-z][A-Za-z0-9.-]*/\d{7})', exact))
-        expression = ' AND '.join('"' + t + '"' for t in terms)
+        # Words in double quotes are a phrase, as PostgreSQL's websearch_to_tsquery reads them
+        # (an unclosed quote runs to the end); every other word stands alone.
+        matched = []
+        for quoted, part in enumerate(q.split('"')):
+            found = re.findall(r'[^\W_]+', part, re.UNICODE)
+            if quoted % 2 and found:
+                matched.append('"' + ' '.join(found) + '"')
+            else:
+                matched.extend('"' + t + '"' for t in found)
+        expression = ' AND '.join(matched)
         clauses, params = [], []
         ordered_scan = not is_id and sort.startswith('title_')
         if terms and not is_id and sort != 'relevance':
@@ -286,7 +357,7 @@ class SearchIndex:
             if ordered_scan:
                 clauses.append('d.rowid IN (SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?)')
             else:
-                base += ' JOIN documents_fts ON documents_fts.rowid=d.rowid'
+                base += FTS_JOIN
                 clauses.append('documents_fts MATCH ?')
             params.append(expression)
             if sort == 'relevance':
@@ -321,11 +392,15 @@ class SearchIndex:
             # the page's wide metadata rows. Avoid sorting thousands of abstracts.
             sql = (f'WITH page AS MATERIALIZED ({sql}) SELECT d.* FROM page '
                    f'JOIN documents d ON d.rowid=page.rowid ORDER BY {ordering}')
-        params += [limit + 1, offset]
+        # Words by relevance: the exact title and the phrase first (`_ranked`).
+        tiered = sort == 'relevance' and bool(terms) and not is_id
         db = self._connect()
         try:
             db.set_progress_handler(lambda: time.monotonic() - started >= self.query_timeout, 1000)
-            rows = db.execute(sql, params).fetchall()
+            if tiered:
+                rows = self._ranked(db, base, clauses, params, terms, q, offset + limit + 1)[offset:]
+            else:
+                rows = db.execute(sql, [*params, limit + 1, offset]).fetchall()
         except sqlite3.OperationalError as error:
             if 'interrupt' in str(error).lower():
                 raise RuntimeError('This search is too broad. Add more specific search words or an arXiv ID; filters alone may not reduce ranking time.') from None

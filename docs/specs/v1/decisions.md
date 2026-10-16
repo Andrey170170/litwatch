@@ -11,7 +11,7 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 | 3 | Radar picks are not saved automatically | kept, for Area picks |
 | 4 | Reporting a miss from the phone; PWA share target | kept; the topic is asked at once (decision 44) |
 | 5 | The PI's Notion view carries Watch topics only | kept, as Focus topics |
-| 6 | One search box across litwatch and the archive | changed by decision 45 |
+| 6 | One search box across litwatch and the archive | changed by decisions 45 and 59 |
 | 7 | Topic edits apply forward; re-runs are explicit and scoped | kept, and applies to taxonomy edits |
 | 8 | The web app is a reading surface, not a console | kept as a principle; grades now show as colour (decision 35) |
 | 9 | Issues, not day pages | superseded by decisions 39–41 |
@@ -85,6 +85,7 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 45. **The archive ranks searches.** One box; unfiltered queries are ranked by the archive and decorated by litwatch;
     collection filters search litwatch's index; relevance is the default with a query. The archive's exact-title
     ranking and litwatch's re-sorting are fixed before the switch.
+    Superseded 2026-10-15 by decision 59.
 46. **The archive is part of the stack.** It ships with litwatch, starts empty, is the only downloader, keeps LaTeX
     text for all intake and PDFs for followed, saved or opened papers (configurable; the owner's instance too).
 47. **The collection is the processed papers.** litwatch keeps only papers it processed, with the text as judged;
@@ -127,6 +128,14 @@ The build plan is [`docs/plans/v1-build.md`](../../plans/v1-build.md).
     (`analyse`, Haiku 5.5), which the N2 Gist evaluation checks.
 58. **Deep card cost is observed, not budgeted.** Cards run on the `deep` service's own subscription; litwatch records
     each card's usage and shows the month's estimate beside gateway spend.
+
+## Decided 2026-10-15, building N5b
+
+59. **litwatch finds its own papers; the archive finds the rest.** Supersedes decision 45, as the archive contract
+    ([archive.md](archive.md), Search) has it: a query searches litwatch's index for the papers it stores, and the
+    archive's hits litwatch has not stored make their own band below them, in the archive's order. Collection
+    filters search litwatch's index only. Relevance is the default with a query; the newest-first order asks each
+    provider for its newest, and litwatch no longer re-sorts their hits.
 
 ## Open
 

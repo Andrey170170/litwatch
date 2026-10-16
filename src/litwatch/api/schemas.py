@@ -142,7 +142,6 @@ class OutsideRow(BaseModel):
     authors: list[str] = Field(default_factory=list)
     published: datetime | None = None
     source: str  # the provider
-    score: float | None = None  # the provider's, for its "best match" order
 
 
 class RarityCounts(BaseModel):
@@ -174,7 +173,8 @@ class ListQuery(BaseModel):
     """A list's filters, as query parameters. Rarity and grade are the levels: several may be
     given, and the counts in the answer leave them out. A grade on Papers is a badge's; on a
     topic page the page's own. `rarest` sorts by rarity, then newest first; `best` by search
-    rank while `q` is given, else as `rarest`."""
+    rank while `q` is given, else as `rarest`. Omitted, the sort is `best` while `q` is given,
+    else `rarest`."""
 
     q: str | None = None
     rarity: list[Rarity] = Field(default_factory=list)
@@ -184,7 +184,16 @@ class ListQuery(BaseModel):
     weight: list[Weight] = Field(default_factory=list)
     since: date | None = None  # published on or after (UTC)
     until: date | None = None  # published on or before (UTC)
-    sort: Sort = "rarest"
+    sort: Sort | None = Field(
+        default=None,
+        description="Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+    )
+
+    @model_validator(mode="after")
+    def _sort_by_default(self) -> ListQuery:
+        if self.sort is None:
+            self.sort = "best" if self.q else "rarest"
+        return self
 
 
 class PaperQuery(ListQuery):
@@ -473,7 +482,8 @@ class CardPass(BaseModel):
 class Paper(BaseModel):
     """A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)
     and the rail, its open states and its history. Outside the collection (never classified)
-    it has no rarity."""
+    it has no rarity; an archive paper litwatch has not fetched is not `stored` either, and has
+    only the archive's metadata."""
 
     id: str
     title: str
@@ -488,6 +498,8 @@ class Paper(BaseModel):
     pdf_url: str  # litwatch's own: the archive's copy, else arXiv's (GET /api/papers/{id}/pdf)
     source_url: str  # the LaTeX source
     in_collection: bool
+    stored: bool = True  # litwatch holds it: fetched
+    next_run: bool = False  # the next run classifies it: not dismissed, its text not yet classified
     rarity: Rarity | None = None
     badges: list[GradedBadge] = Field(default_factory=list)
     gist: Gist | None = None
@@ -737,6 +749,13 @@ class IntegrationCard(BaseModel):
     skipped: int = 0
     answers_card_requests: bool = False
     search: SearchStats | None = None  # for a search provider
+
+
+class SearchScope(BaseModel):
+    """What the search box reaches beyond the collection: the papers the archive's search index
+    holds, None without an archive or when it does not answer in time."""
+
+    archive_papers: int | None = None
 
 
 class CardRequested(BaseModel):

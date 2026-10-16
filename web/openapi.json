@@ -175,9 +175,18 @@
             "in": "query",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/Sort",
-              "default": "rarest"
-            }
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
           },
           {
             "name": "topic",
@@ -258,7 +267,7 @@
     "/api/papers/{paper_id}/pdf": {
       "get": {
         "summary": "Pdf",
-        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,\nor when the archive cannot get it in time. The database is read before the wait, which\nholds no connection.",
+        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record\nof it. arXiv's PDF without an archive, for a paper neither holds, or when the archive\ncannot get it in time. The database is read before the wait, which holds no connection.",
         "operationId": "pdf_api_papers__paper_id__pdf_get",
         "parameters": [
           {
@@ -297,6 +306,7 @@
     "/api/papers/{paper_id}": {
       "get": {
         "summary": "Paper",
+        "description": "The paper's page; for a paper litwatch has not fetched, the archive's record of it.",
         "operationId": "paper_api_papers__paper_id__get",
         "parameters": [
           {
@@ -322,6 +332,9 @@
           },
           "404": {
             "description": "No such paper or topic"
+          },
+          "503": {
+            "description": "The archive, asked for a paper litwatch lacks, did not answer"
           },
           "422": {
             "description": "Validation Error",
@@ -591,9 +604,18 @@
             "in": "query",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/Sort",
-              "default": "rarest"
-            }
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
           },
           {
             "name": "topic",
@@ -693,6 +715,12 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
           },
           "422": {
             "description": "Validation Error",
@@ -891,9 +919,18 @@
             "in": "query",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/Sort",
-              "default": "rarest"
-            }
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
           }
         ],
         "responses": {
@@ -1195,7 +1232,7 @@
     "/api/misses": {
       "post": {
         "summary": "Report Miss",
-        "description": "File a miss for a Focus topic: the owner's word, at once, and the paper saved.",
+        "description": "File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper\nlitwatch lacks is fetched first, as Process fetches it, with no transaction open, and\nstored in the report's own, so a refused report stores nothing.",
         "operationId": "report_miss_api_misses_post",
         "requestBody": {
           "content": {
@@ -1223,6 +1260,9 @@
           },
           "409": {
             "description": "Not a Focus topic"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
           },
           "422": {
             "description": "Validation Error",
@@ -2013,6 +2053,45 @@
         }
       }
     },
+    "/api/settings/fulltext/{pass_id}/pdf": {
+      "post": {
+        "summary": "Use Pdf",
+        "description": "\"Use the PDF\", for a paper whose LaTeX reads badly: run the pass now, as above, reading\nthe paper's PDF from then on instead of its LaTeX.",
+        "operationId": "use_pdf_api_settings_fulltext__pass_id__pdf_post",
+        "parameters": [
+          {
+            "name": "pass_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Pass Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such full-text pass"
+          },
+          "409": {
+            "description": "The pass no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/calibrate": {
       "get": {
         "summary": "Sessions",
@@ -2464,7 +2543,7 @@
     "/api/papers/{paper_id}/card": {
       "post": {
         "summary": "Request Card",
-        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing.",
+        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no\ntransaction open, and stored in the request's own.",
         "operationId": "request_card_api_papers__paper_id__card_post",
         "parameters": [
           {
@@ -2494,12 +2573,34 @@
           "409": {
             "description": "No card provider is configured, or the paper is dismissed"
           },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search/scope": {
+      "get": {
+        "summary": "Search Scope",
+        "description": "The search box's scope beyond the collection (its placeholder names the archive's size).",
+        "operationId": "search_scope_api_search_scope_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchScope"
                 }
               }
             }
@@ -4799,17 +4900,6 @@
           "source": {
             "type": "string",
             "title": "Source"
-          },
-          "score": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Score"
           }
         },
         "type": "object",
@@ -4904,6 +4994,16 @@
           "in_collection": {
             "type": "boolean",
             "title": "In Collection"
+          },
+          "stored": {
+            "type": "boolean",
+            "title": "Stored",
+            "default": true
+          },
+          "next_run": {
+            "type": "boolean",
+            "title": "Next Run",
+            "default": false
           },
           "rarity": {
             "anyOf": [
@@ -5082,7 +5182,7 @@
           "topics"
         ],
         "title": "Paper",
-        "description": "A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)\nand the rail, its open states and its history. Outside the collection (never classified)\nit has no rarity."
+        "description": "A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)\nand the rail, its open states and its history. Outside the collection (never classified)\nit has no rarity; an archive paper litwatch has not fetched is not `stored` either, and has\nonly the archive's metadata."
       },
       "PaperClass": {
         "properties": {
@@ -5205,8 +5305,15 @@
             "title": "Until"
           },
           "sort": {
-            "$ref": "#/components/schemas/Sort",
-            "default": "rarest"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
           },
           "topic": {
             "items": {
@@ -5963,6 +6070,24 @@
         ],
         "title": "ScheduleOut",
         "description": "The schedule as the Runs page shows it: whether it is on, the zone the cron times are\nread in, and when each job next fires (or would, if it were on)."
+      },
+      "SearchScope": {
+        "properties": {
+          "archive_papers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Papers"
+          }
+        },
+        "type": "object",
+        "title": "SearchScope",
+        "description": "What the search box reaches beyond the collection: the papers the archive's search index\nholds, None without an archive or when it does not answer in time."
       },
       "SearchStats": {
         "properties": {

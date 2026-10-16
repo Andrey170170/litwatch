@@ -4,14 +4,14 @@
  */
 import { useState } from "react";
 import { useLocation } from "@tanstack/react-router";
-import { useDeepRead, useProcess, useSave } from "@/api/mutations";
+import { useDeepRead, useSave } from "@/api/mutations";
 import { Badge } from "@/components/Badge";
 import { Sheet } from "@/components/Sheet";
 import { Fill } from "@/components/slots";
 import { placeOf } from "@/lib/listContext";
 import { gradeLine, rc } from "@/lib/rarity";
 import type { ReactionValue } from "@/lib/reactions";
-import { DeepReadCell, linkCells, MissPicker, type Paper } from "./Actions";
+import { DeepReadCell, linkCells, MissPicker, ProcessCell, type Paper } from "./Actions";
 import { Classes, Published } from "./Ladder";
 import { FitControl, Reasons, whoseFit, type PaperTopic } from "./TopicRow";
 
@@ -111,8 +111,12 @@ export function PaperSheet({ paper, asked, onClose }: { paper: Paper; asked: boo
         <div className="vers">
           {paper.versions?.length ? paper.versions.map((v) => <span key={v.version}>v{v.version}</span>) : <span>v{paper.version ?? 1}</span>}
         </div>
-        <span>Published</span>
-        <Published paper={paper} />
+        {paper.stored !== false && (
+          <>
+            <span>Published</span>
+            <Published paper={paper} />
+          </>
+        )}
         {paper.in_collection && (
           <>
             <span>Classes</span>
@@ -129,7 +133,6 @@ export function PaperSheet({ paper, asked, onClose }: { paper: Paper; asked: boo
 
 export function PhoneBar({ paper, under, asked, sheet, setSheet }: { paper: Paper; under: string | undefined; asked: boolean; sheet: "more" | "up" | "down" | null; setSheet: (s: "more" | "up" | "down" | null) => void }) {
   const save = useSave(paper.id);
-  const process = useProcess();
   const deep = useDeepRead(paper.id);
   const listKey = useLocation({ select: (l) => l.state.list });
   const place = placeOf(paper.id, listKey);
@@ -154,9 +157,7 @@ export function PhoneBar({ paper, under, asked, sheet, setSheet }: { paper: Pape
           </>
         ) : (
           <>
-            <button className="on" onClick={() => process.mutate(paper.id)} disabled={process.isPending}>
-              <small>Process</small>
-            </button>
+            <ProcessCell paper={paper} phone />
             {paper.card_requestable && !paper.card && (
               <button onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked}>
                 <small>{asked ? "Queued" : "Deep read"}</small>

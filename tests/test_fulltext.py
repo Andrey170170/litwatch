@@ -35,7 +35,7 @@ from litwatch.core.fulltext import (
     to_relabel,
     wanted,
 )
-from litwatch.feedback import word
+from litwatch.feedback import misses, word
 from litwatch.fulltext import brief
 from litwatch.jobs import nightly
 from litwatch.llm import Gateway, ProviderError
@@ -420,6 +420,32 @@ async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_n
     assert (await passes(db))[0]["state"] == "done"
 
 
+async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(db, monkeypatch):
+    # DESIGN.md, Needs you: "Try again, Use the PDF" on a full-text failure.
+    monkeypatch.setattr("litwatch.archive.text.pdf_to_markdown", lambda pdf: "From the PDF. " * 40)
+    await graded(db, "central")
+    fake, writer = FakeArchive(status="failed"), Writer()
+    await work(db, fake, writer)
+    await db.execute("UPDATE fulltext_passes SET failed_runs = %s", (FAILED_RUNS,))
+    (row,) = await passes(db)
+    app, http = client(db)
+    async with http:
+        used = await http.post(f"/api/settings/fulltext/{row['id']}/pdf")
+        again = await http.post(f"/api/settings/fulltext/{row['id']}/pdf")
+        missing = await http.post("/api/settings/fulltext/999999/pdf")
+    assert used.status_code == 204 and app.state.fulltext_wake.is_set()
+    assert (again.status_code, missing.status_code) == (409, 404)
+    (row,) = await passes(db)
+    assert (row["state"], row["failed_runs"], row["use_pdf"]) == ("ready", 0, True)
+    fake = ready(FakeArchive())  # the LaTeX reads now, but the owner asked for the PDF
+    assert await work(db, fake, writer) == {"briefs_written": 1}
+    assert {j["kind"] for j in fake.jobs} == {"pdf"}  # its source never asked for
+    (row,) = await passes(db)
+    assert (row["state"], row["text_source"]) == ("done", "pdf")
+    brief = await fulltext_store.brief_for(db, P.id)
+    assert brief["source"] == "pdf"
+
+
 async def test_a_pass_awaiting_text_over_a_week_waits_for_the_owner(db):
     await graded(db, "central")
     assert await fulltext_store.count_stuck(db, FAILED_RUNS) == 0
@@ -727,6 +753,17 @@ async def test_a_rewrite_whose_settle_was_cut_short_is_settled_by_the_nightly_sw
     await word.settle_all(db, await fulltext_store.outdated(db))
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
     assert await fulltext_store.outdated(db) == []
+
+
+async def test_an_owners_fetch_over_an_older_version_settles_its_rewrite(db):
+    # Process or a miss fetched a newer version than litwatch holds (it stored the paper
+    # meanwhile): stored as intake stores it, and its rewrite settled with it (L5-2, #66).
+    await graded(db, "central")
+    rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
+    stored, inserted = await misses.keep(db, P.id, rewrite)
+    assert (stored.version, stored.title, inserted) == (2, rewrite.title, False)
+    assert await fulltext_store.outdated(db) == []
+    assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
 
 
 async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(db):

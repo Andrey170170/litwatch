@@ -145,7 +145,8 @@ collection" in place of a rarity.
 - One row per topic the paper is in: badge, name, grade ("must read · landmark") and the verdict ("Fit central ·
   Weight landmark", or "your label: related"), the two thumbs, and Label, which opens the **Fit control**.
 - The quick actions as a 2×2 grid: Save, BibTeX ⧉, arXiv ↗, PDF ↗, with Deep read across the full width while the
-  paper has no card. For a paper outside the collection: Process, Deep read, Report as a miss.
+  paper has no card. For a paper outside the collection: Process, BibTeX, Deep read, Report as a miss. Once
+  fetched, Process reads "Fetched", and "Fetched · next run" while the next run will process it (not dismissed).
 
 **On the phone** the page is one column: the header and the ladder without its last rung. The bottom bar: ☆ Save, 👍,
 the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet: a label per topic (the topic's name, its

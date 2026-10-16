@@ -54,6 +54,9 @@ class SearchServiceTests(unittest.TestCase):
         status, _, body = self.request('/v1/papers/1706.03762')
         self.assertEqual(status, 200, body)
         self.assertEqual(json.loads(body)['display']['published'], '2017-06-12')
+        item = json.loads(body)['item']
+        self.assertEqual((item['id'], item['authors'], item['published'], item['categories']),
+                         ('1706.03762', ['Ashish Vaswani'], '2017-06-12', ['cs.CL', 'cs.LG']))
         self.assertNotIn(self.token.encode(), body)
         for method in ('POST', 'PUT', 'DELETE', 'PATCH'):
             self.assertEqual(self.request('/v1/papers/1706.03762', method, '{}')[0], 405)

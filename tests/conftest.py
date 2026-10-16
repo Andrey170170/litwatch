@@ -1,9 +1,13 @@
-"""Shared fixtures: a migrated database in a throwaway schema, and a few topics and papers."""
+"""Shared fixtures: a migrated database in a throwaway schema, a few topics and papers, and an
+arXiv that stays slow."""
 
 import asyncio
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 
+import arxiv
 import pytest
 
 from litwatch import store
@@ -107,3 +111,52 @@ async def deliver(conn, integration, now=None) -> int:
     """`dispatch.deliver`, once the events written so far are settled."""
     await settled(conn)
     return await dispatch.deliver(conn, integration, now)
+
+
+def answering(answer):
+    """A fake arXiv lookup (`search.fetch_by_ids`) that answers `answer(ids)` at once."""
+
+    async def fetch_by_ids(ids):
+        return answer(ids)
+
+    return fetch_by_ids
+
+
+@pytest.fixture
+def slow_arxiv(monkeypatch):
+    """arXiv's API on a local socket that never finishes answering: it trickles a byte every
+    50 ms, so no socket read ever times out. With `trickle = "body"` (the default) it sends its
+    status and headers, then the body; with `"headers"`, the headers themselves."""
+    stop = threading.Event()
+
+    class Trickle(BaseHTTPRequestHandler):
+        def do_GET(self):
+            try:
+                if server.trickle == "headers":
+                    self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+                    while not stop.wait(0.05):
+                        self.wfile.write(b"X")
+                        self.wfile.flush()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/atom+xml")
+                self.send_header("Content-Length", "1000000")
+                self.end_headers()
+                while not stop.wait(0.05):
+                    self.wfile.write(b" ")
+                    self.wfile.flush()
+            except OSError:
+                pass  # the client hung up
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Trickle)
+    server.trickle = "body"
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}/api/query?{{}}"
+    monkeypatch.setattr(arxiv.Client, "query_url_format", url)
+    yield server
+    stop.set()
+    server.shutdown()
+    server.server_close()

@@ -3,6 +3,14 @@
 
 Payloads stay on HDD. Each database uses SQLite's online backup API; catalog,
 acquisition and campaign snapshots are individually consistent, not one transaction.
+
+The export is one directory, `export-<time>`, named by the symlink `current` in the
+destination. A new export is written beside it, made durable, and `current` is swapped to
+it in one rename, so a failure part-way leaves the previous export whole and current. An
+export deletes only what it can prove an export wrote: a staging directory holding the
+marker written when it was made, and an earlier generation holding its export.json.
+Anything else in the destination stays, whatever its name: the flat layout an export wrote
+before `current` is removed by its owner (README.md, Backups).
 """
 from __future__ import annotations
 
@@ -12,10 +20,12 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 
 ARCHIVE = Path('/srv/arxiv-archive')
@@ -92,78 +102,165 @@ def database_storage_size(source: Path) -> int:
     return size
 
 
+CURRENT = 'current'
+LOCK = '.export.lock'
+STAGING = '.arxiv-export-'
+# Written in a staging directory as soon as it exists: the proof an export made it.
+MARKER = '.arxiv-export-staging'
+
+
+def exported(report: Path) -> bool:
+    """Whether `report` is the export.json an export writes: the marker of an export's files."""
+    if report.is_symlink() or not report.is_file():
+        return False
+    try:
+        written = json.loads(report.read_text())
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    return isinstance(written, dict) and {'created_at', 'databases', 'restore'} <= written.keys()
+
+
+def generation(entry: Path) -> bool:
+    """Whether `entry` is a generation an export wrote: a real directory `export-<n>` holding
+    its export.json."""
+    return (re.fullmatch(r'export-\d+', entry.name) is not None and entry.is_dir()
+            and not entry.is_symlink() and exported(entry / 'export.json'))
+
+
+def owned(entry: Path) -> bool:
+    """Whether an export provably wrote this entry, so an export may delete it: a generation
+    holding its export.json, or a staging directory holding the marker."""
+    if entry.is_symlink() or not entry.is_dir():
+        return False
+    if re.fullmatch(r'export-\d+', entry.name):
+        return generation(entry)
+    if entry.name.startswith(STAGING):
+        marker = entry / MARKER
+        return marker.is_file() and not marker.is_symlink()
+    return False
+
+
+def link(path: Path) -> str | None:
+    """The generation the symlink `path` names, or None when there is no `path`. Anything but
+    an export's own symlink, naming a generation in its directory directly, is refused."""
+    if not path.is_symlink():
+        if path.exists():
+            raise RuntimeError(f'Refusing to export: {path} is not the symlink an export writes')
+        return None
+    target = os.readlink(path)
+    if '/' in target or not generation(path.parent / target):
+        raise RuntimeError(f'Refusing to export: {path} names {target!r}, not a generation an '
+                           'export wrote beside it')
+    return target
+
+
+def retire(destination: Path, keep: str | None) -> None:
+    """Delete the generations and staging an export wrote, except the generation `keep`."""
+    for entry in destination.iterdir():
+        if entry.name != keep and owned(entry):
+            shutil.rmtree(entry)
+
+
 def export(work: Path, repo: Path, destination: Path) -> dict:
-    """Prepare snapshots before refreshing stable exported paths under a lock."""
+    """Write a complete export beside the current one, make it durable, then swap `current`
+    to it under the lock; the generation it replaces goes only after the swap is durable."""
     if destination.is_symlink():
         raise RuntimeError(f'Unsafe backup destination: {destination}')
     destination.mkdir(parents=True, exist_ok=True)
-    with (destination / '.export.lock').open('a') as lock:
+    with (destination / LOCK).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        # A killed export (SIGTERM skips TemporaryDirectory cleanup) leaves staging.
-        for stale in destination.glob('.arxiv-export-*'):
-            shutil.rmtree(stale)
+        current, swap = destination / CURRENT, destination / '.current-new'
+        kept = link(current)
+        # A killed export leaves its swap, naming a generation never made current.
+        if link(swap) is not None:
+            swap.unlink()
+        # A killed export (SIGTERM skips cleanup) leaves staging, or a generation never current;
+        # one killed after its swap leaves its predecessor, and `current` durable only once synced.
+        _fsync_directory(destination)
+        retire(destination, kept)
         # Staging shares the destination dataset so the final renames stay atomic.
         # Both backups exclude it and only read while holding this lock shared.
-        with tempfile.TemporaryDirectory(prefix='.arxiv-export-', dir=destination) as temporary:
-            staging = Path(temporary)
-            sources = {'catalog.sqlite': work / 'catalog/catalog.sqlite',
-                       'progress.sqlite': work / 'state/progress.sqlite'}
-            campaigns = campaign_sources(work)
-            campaign_databases = [files['manifest.sqlite'] for files in campaigns.values()]
-            metadata_files = [source for files in campaigns.values()
-                              for name, source in files.items() if name != 'manifest.sqlite']
-            metadata_files.extend(p for p in (repo / 'manifests').rglob('*') if p.is_file())
-            required = (sum(database_storage_size(p) for p in [*sources.values(), *campaign_databases])
-                        + sum(p.stat().st_size for p in metadata_files) + 256 * 1024**2)
-            if shutil.disk_usage(destination).free < required:
-                raise RuntimeError('Insufficient backup storage for fresh database snapshots')
-            for name, source in sources.items():
-                snapshot_database(source, staging / name)
-            # Always refresh this directory so removed campaigns do not linger
-            # in later exports as apparently current recovery state.
-            (staging / 'campaigns').mkdir()
-            for name, files in campaigns.items():
-                target = staging / 'campaigns' / name
-                target.mkdir()
-                snapshot_database(files['manifest.sqlite'], target / 'manifest.sqlite')
-                for filename, source in files.items():
-                    if filename != 'manifest.sqlite':
-                        shutil.copy2(source, target / filename)
-            shutil.copytree(repo / 'manifests', staging / 'manifests')
-            for pattern in ('*.md', 'SHA256SUMS*', 'requirements.lock', 'pyproject.toml'):
-                for source in repo.glob(pattern):
-                    if source.is_file() and not source.is_symlink():
-                        shutil.copy2(source, staging / source.name)
-            receipt = work / 'state/job.json'
-            if receipt.is_file():
-                shutil.copy2(receipt, staging / 'acquisition-job.json')
-            report = {'created_at': datetime.now(timezone.utc).isoformat(),
-                      'databases': {name: str(path) for name, path in sources.items()},
-                      'campaigns': {
-                          name: {'source': str(work / 'campaigns' / name),
-                                 'files': [str(Path('campaigns') / name / filename) for filename in files]}
-                          for name, files in campaigns.items()},
-                      'restore': 'Stop the paper service and campaign runners; restore catalog.sqlite to catalog/catalog.sqlite and progress.sqlite to state/progress.sqlite. Restore campaigns/ to the work directory campaigns/ before resuming a campaign. Restore source and HF payload directories from the selective snapshot. Bulk PDFs are intentionally absent.'}
-            (staging / 'export.json').write_text(json.dumps(report, indent=2) + '\n')
-            # Stable paths let Restic reuse unchanged files. The backup invocation
-            # holds the same lock while reading so it never sees partial refresh.
-            for source in staging.iterdir():
-                target = destination / source.name
-                if source.is_dir():
-                    if target.exists():
-                        shutil.rmtree(target)
-                    shutil.move(str(source), target)
-                else:
-                    os.replace(source, target)
-                    if target.suffix == '.sqlite':
-                        for side in ('-wal', '-shm'):
-                            Path(f'{target}{side}').unlink(missing_ok=True)
-            descriptor = os.open(destination, os.O_DIRECTORY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-            return report
+        staging = Path(tempfile.mkdtemp(prefix=STAGING, dir=destination))
+        try:
+            (staging / MARKER).touch()
+            report = _write(work, repo, staging)
+            published = destination / f'export-{time.time_ns()}'
+            # rename() would replace an empty directory; the lock keeps other exports out.
+            if published.exists() or published.is_symlink():
+                raise RuntimeError(f'Refusing to export: {published} already exists')
+            os.rename(staging, published)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        (published / MARKER).unlink()
+        _fsync_tree(published)
+        # The rename into `published` lives in the destination: durable before `current` names it.
+        _fsync_directory(destination)
+        swap.symlink_to(published.name, target_is_directory=True)
+        os.replace(swap, current)
+        _fsync_directory(destination)
+        retire(destination, published.name)
+        _fsync_directory(destination)
+        return report
+
+
+def _fsync_tree(root: Path) -> None:
+    """Make every file and directory under `root` durable, children before their parents."""
+    for directory, _, files in os.walk(root, topdown=False):
+        for name in files:
+            with open(os.path.join(directory, name), 'rb') as written:
+                os.fsync(written.fileno())
+        _fsync_directory(Path(directory))
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _write(work: Path, repo: Path, staging: Path) -> dict:
+    """The export's files, written into `staging`; returns its report."""
+    sources = {'catalog.sqlite': work / 'catalog/catalog.sqlite',
+               'progress.sqlite': work / 'state/progress.sqlite'}
+    campaigns = campaign_sources(work)
+    campaign_databases = [files['manifest.sqlite'] for files in campaigns.values()]
+    metadata_files = [source for files in campaigns.values()
+                      for name, source in files.items() if name != 'manifest.sqlite']
+    metadata_files.extend(p for p in (repo / 'manifests').rglob('*') if p.is_file())
+    required = (sum(database_storage_size(p) for p in [*sources.values(), *campaign_databases])
+                + sum(p.stat().st_size for p in metadata_files) + 256 * 1024**2)
+    if shutil.disk_usage(staging).free < required:
+        raise RuntimeError('Insufficient backup storage for fresh database snapshots')
+    for name, source in sources.items():
+        snapshot_database(source, staging / name)
+    (staging / 'campaigns').mkdir()
+    for name, files in campaigns.items():
+        target = staging / 'campaigns' / name
+        target.mkdir()
+        snapshot_database(files['manifest.sqlite'], target / 'manifest.sqlite')
+        for filename, source in files.items():
+            if filename != 'manifest.sqlite':
+                shutil.copy2(source, target / filename)
+    shutil.copytree(repo / 'manifests', staging / 'manifests')
+    for pattern in ('*.md', 'SHA256SUMS*', 'requirements.lock', 'pyproject.toml'):
+        for source in repo.glob(pattern):
+            if source.is_file() and not source.is_symlink():
+                shutil.copy2(source, staging / source.name)
+    receipt = work / 'state/job.json'
+    if receipt.is_file():
+        shutil.copy2(receipt, staging / 'acquisition-job.json')
+    report = {'created_at': datetime.now(timezone.utc).isoformat(),
+              'databases': {name: str(path) for name, path in sources.items()},
+              'campaigns': {
+                  name: {'source': str(work / 'campaigns' / name),
+                         'files': [str(Path('campaigns') / name / filename) for filename in files]}
+                  for name, files in campaigns.items()},
+              'restore': f'Restore from the export `{CURRENT}` names. Stop the paper service and campaign runners; restore catalog.sqlite to catalog/catalog.sqlite and progress.sqlite to state/progress.sqlite. Restore campaigns/ to the work directory campaigns/ before resuming a campaign. Restore source and HF payload directories from the selective snapshot. Bulk PDFs are intentionally absent.'}
+    (staging / 'export.json').write_text(json.dumps(report, indent=2) + '\n')
+    return report
 
 
 def main() -> None:

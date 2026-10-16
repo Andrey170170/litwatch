@@ -55,9 +55,9 @@ export interface paths {
          * Pdf
          * @description The paper's PDF as the owner opens it: from the archive, which is asked for it urgently
          *     (the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on
-         *     for its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,
-         *     or when the archive cannot get it in time. The database is read before the wait, which
-         *     holds no connection.
+         *     for its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record
+         *     of it. arXiv's PDF without an archive, for a paper neither holds, or when the archive
+         *     cannot get it in time. The database is read before the wait, which holds no connection.
          */
         get: operations["pdf_api_papers__paper_id__pdf_get"];
         put?: never;
@@ -75,7 +75,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Paper */
+        /**
+         * Paper
+         * @description The paper's page; for a paper litwatch has not fetched, the archive's record of it.
+         */
         get: operations["paper_api_papers__paper_id__get"];
         put?: never;
         post?: never;
@@ -279,7 +282,9 @@ export interface paths {
         put?: never;
         /**
          * Report Miss
-         * @description File a miss for a Focus topic: the owner's word, at once, and the paper saved.
+         * @description File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
+         *     litwatch lacks is fetched first, as Process fetches it, with no transaction open, and
+         *     stored in the report's own, so a refused report stores nothing.
          */
         post: operations["report_miss_api_misses_post"];
         delete?: never;
@@ -679,6 +684,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/fulltext/{pass_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Use Pdf
+         * @description "Use the PDF", for a paper whose LaTeX reads badly: run the pass now, as above, reading
+         *     the paper's PDF from then on instead of its LaTeX.
+         */
+        post: operations["use_pdf_api_settings_fulltext__pass_id__pdf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/calibrate": {
         parameters: {
             query?: never;
@@ -908,9 +934,30 @@ export interface paths {
          * @description Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
          *     when it has one: the request goes through the full-text queue, first in line, and the card
          *     shows on the paper once it is written. Asking again while one is queued or being written
-         *     changes nothing.
+         *     changes nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no
+         *     transaction open, and stored in the request's own.
          */
         post: operations["request_card_api_papers__paper_id__card_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Scope
+         * @description The search box's scope beyond the collection (its placeholder names the archive's size).
+         */
+        get: operations["search_scope_api_search_scope_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1874,14 +1921,13 @@ export interface components {
             published?: string | null;
             /** Source */
             source: string;
-            /** Score */
-            score?: number | null;
         };
         /**
          * Paper
          * @description A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)
          *     and the rail, its open states and its history. Outside the collection (never classified)
-         *     it has no rarity.
+         *     it has no rarity; an archive paper litwatch has not fetched is not `stored` either, and has
+         *     only the archive's metadata.
          */
         Paper: {
             /** Id */
@@ -1913,6 +1959,16 @@ export interface components {
             source_url: string;
             /** In Collection */
             in_collection: boolean;
+            /**
+             * Stored
+             * @default true
+             */
+            stored: boolean;
+            /**
+             * Next Run
+             * @default false
+             */
+            next_run: boolean;
             rarity?: components["schemas"]["Rarity"] | null;
             /** Badges */
             badges?: components["schemas"]["GradedBadge"][];
@@ -1989,8 +2045,8 @@ export interface components {
             since?: string | null;
             /** Until */
             until?: string | null;
-            /** @default rarest */
-            sort: components["schemas"]["Sort"];
+            /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
+            sort?: components["schemas"]["Sort"] | null;
             /** Topic */
             topic?: string[];
             depth?: components["schemas"]["Depth"] | null;
@@ -2262,6 +2318,15 @@ export interface components {
             zone: string;
             /** Jobs */
             jobs: components["schemas"]["NextFire"][];
+        };
+        /**
+         * SearchScope
+         * @description What the search box reaches beyond the collection: the papers the archive's search index
+         *     holds, None without an archive or when it does not answer in time.
+         */
+        SearchScope: {
+            /** Archive Papers */
+            archive_papers?: number | null;
         };
         /**
          * SearchStats
@@ -2638,7 +2703,8 @@ export interface operations {
                 weight?: components["schemas"]["Weight"][];
                 since?: string | null;
                 until?: string | null;
-                sort?: components["schemas"]["Sort"];
+                /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
+                sort?: components["schemas"]["Sort"] | null;
                 topic?: string[];
                 depth?: components["schemas"]["Depth"] | null;
                 source?: ("collection" | "outside") | null;
@@ -2750,6 +2816,13 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The archive, asked for a paper litwatch lacks, did not answer */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     set_publication_api_papers__paper_id__publication_put: {
@@ -2827,7 +2900,8 @@ export interface operations {
                 weight?: components["schemas"]["Weight"][];
                 since?: string | null;
                 until?: string | null;
-                sort?: components["schemas"]["Sort"];
+                /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
+                sort?: components["schemas"]["Sort"] | null;
                 topic?: string[];
                 depth?: components["schemas"]["Depth"] | null;
                 source?: ("collection" | "outside") | null;
@@ -2913,6 +2987,13 @@ export interface operations {
                     "application/json": components["schemas"]["Lookup"];
                 };
             };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2921,6 +3002,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description arXiv did not answer in time; nothing was stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2957,7 +3045,8 @@ export interface operations {
                 weight?: components["schemas"]["Weight"][];
                 since?: string | null;
                 until?: string | null;
-                sort?: components["schemas"]["Sort"];
+                /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
+                sort?: components["schemas"]["Sort"] | null;
             };
             header?: never;
             path: {
@@ -3230,6 +3319,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description arXiv did not answer in time; nothing was stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3919,6 +4015,49 @@ export interface operations {
             };
         };
     };
+    use_pdf_api_settings_fulltext__pass_id__pdf_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pass_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such full-text pass */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The pass no longer waits for the owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     sessions_api_settings_calibrate_get: {
         parameters: {
             query?: never;
@@ -4344,6 +4483,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description arXiv did not answer in time; nothing was stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    search_scope_api_search_scope_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchScope"];
                 };
             };
         };

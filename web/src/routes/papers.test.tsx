@@ -72,6 +72,18 @@ describe("Papers", () => {
     expect(screen.queryByRole("region", { name: "Epic and legendary" })).toBeNull();
   });
 
+  it("names the archive's size in the search box", async () => {
+    viewport(true);
+    scriptFetch({
+      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
+      "GET /api/topics": [],
+      "GET /api/papers": json({ rows: [], total: 0, counts }),
+      "GET /api/search/scope": { archive_papers: 3_141_592 },
+    });
+    renderApp("/papers");
+    expect(await screen.findByPlaceholderText("Search the collection and the archive (3.1M papers)")).toBeInTheDocument();
+  });
+
   it("keeps the rows on screen while a changed filter's rows load", async () => {
     viewport(true);
     let release!: () => void;

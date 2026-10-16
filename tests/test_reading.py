@@ -19,7 +19,7 @@ from litwatch.store import failures, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, answering, paper
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -206,10 +206,20 @@ async def test_a_keyword_or_band_membership_shows_a_paper_only_once_graded(clien
 
 
 async def test_search_reads_title_abstract_and_authors_best_match_first(client, conn):
-    hidden = paper("2610.00007", title="Other things", abstract="Traces hide steps, briefly.")
+    # Newer than P: rarest (then newest) would put it first, the best match puts P first.
+    hidden = paper(
+        "2610.00007",
+        title="Other things",
+        abstract="Traces hide steps, briefly.",
+        published="2026-10-14T00:00:00+00:00",
+    )
     await papers_store.upsert(conn, [hidden])
     assert set(await ids(client, q="Alice Smith")) == {P.id, Q.id, hidden.id}
+    assert await ids(client, q="hide steps", sort="rarest") == [hidden.id, P.id]
+    # A search without a sort is best match first; an explicit sort wins (L5-4).
+    assert await ids(client, q="hide steps") == [P.id, hidden.id]
     assert await ids(client, q="hide steps", sort="best") == [P.id, hidden.id]
+    assert await ids(client) == [hidden.id, P.id, Q.id]  # no search: rarest, newest first
     assert await ids(client, q="sparse") == [Q.id]
     rows = (await client.get("/api/papers", params={"q": "hidden computation"})).json()["rows"]
     assert [r["id"] for r in rows] == [P.id]
@@ -565,6 +575,137 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
     assert (await client.post("/api/misses", json=body)).status_code == 409  # not Focus
 
 
+async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, monkeypatch):
+    # archive.md: reporting a paper outside the collection brings it in, the owner's word first.
+    import psycopg
+
+    from litwatch.feedback import misses
+    from litwatch.store.taxonomy import TAXONOMY_LOCK
+
+    fetched = []
+
+    async def fetch(ids):
+        # arXiv may keep the fetch waiting for its budget: no transaction holds the taxonomy then.
+        async with await psycopg.AsyncConnection.connect(conn.test_dsn, autocommit=True) as other:
+            lock = await other.execute("SELECT pg_try_advisory_lock(%s)", (TAXONOMY_LOCK,))
+            free = (await lock.fetchone())[0]
+            await other.execute("SELECT pg_advisory_unlock_all()")
+        assert free, "a taxonomy edit would wait on the fetch"
+        fetched.append(ids)
+        return [paper(i) for i in ids]
+
+    monkeypatch.setattr(misses, "fetch_by_ids", fetch)
+    wrong = await client.post("/api/misses", json={"paper_id": "2610.09999", "topic": INTERP.slug})
+    assert wrong.status_code == 409  # a refused report stores nothing
+    assert await papers_store.get(conn, "2610.09999") is None
+    body = {"paper_id": "2610.09999v2", "topic": FAITH.slug}
+    assert (await client.post("/api/misses", json=body)).json()["saved"] is True
+    assert fetched == [["2610.09999"], ["2610.09999"]]
+    (miss,) = await (await conn.execute("SELECT paper_id FROM misses")).fetchall()
+    assert miss["paper_id"] == "2610.09999"
+    # A report refused after the fetch stores nothing of it.
+    from fastapi import HTTPException
+
+    async def refused(*_):
+        raise HTTPException(status_code=409, detail="refused")
+
+    with monkeypatch.context() as m:
+        m.setattr(misses, "report", refused)
+        body = {"paper_id": "2610.08888", "topic": FAITH.slug}
+        assert (await client.post("/api/misses", json=body)).status_code == 409
+    assert await papers_store.get(conn, "2610.08888") is None
+    monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: []))  # arXiv lacks it too
+    body = {"paper_id": "2601.99999", "topic": FAITH.slug}
+    assert (await client.post("/api/misses", json=body)).status_code == 404
+
+
+@pytest.mark.parametrize("second_caller", ["owner", "nightly"])
+async def test_two_requests_storing_the_same_fetched_paper_both_get_it(conn, second_caller):
+    """An owner request and another owner request, or the nightly intake, that fetched the same
+    unfetched paper store it once: the second waits on the first's settle lock, then stores
+    over it as intake would, and there is one `paper.added` (L5-2)."""
+    from litwatch import store
+    from litwatch.feedback import misses
+    from litwatch.intake import batch
+
+    fetched = paper("2610.06666")
+    async with await store.connect(conn.test_dsn, conn.test_schema) as other:
+        async with other.transaction():
+            first = await misses.keep(other, fetched.id, fetched)
+            # The second runs into the first's settle lock, and waits on it.
+            second = asyncio.create_task(
+                misses.keep(conn, fetched.id, fetched)
+                if second_caller == "owner"
+                else batch.store(conn, [fetched], source="arxiv")
+            )
+            for _ in range(100):
+                waiting = await (
+                    await other.execute(
+                        "SELECT count(*) AS n FROM pg_stat_activity "
+                        "WHERE pid = %s AND wait_event_type = 'Lock'",
+                        (conn.info.backend_pid,),
+                    )
+                ).fetchone()
+                if waiting["n"]:
+                    break
+                await asyncio.sleep(0.02)
+            assert waiting["n"], "the second did not wait on the first"
+        second = await asyncio.wait_for(second, 5)
+    assert first[1] is True
+    if second_caller == "owner":
+        assert second == (first[0], False)
+    else:
+        assert second.inserted == 0 and second.rewritten == []
+    added = await (
+        await conn.execute(
+            "SELECT count(*) AS n FROM outbox WHERE type = 'paper.added' AND paper_id = %s",
+            (fetched.id,),
+        )
+    ).fetchone()
+    assert added["n"] == 1
+
+
+async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn, monkeypatch):
+    """The owner's request resolves a paper from arXiv; before it is kept, the nightly intake
+    stores newer metadata without a version (OAI's); the owner's older record then changes
+    nothing, though its version cannot be compared (L6-3)."""
+    from litwatch.feedback import misses
+    from litwatch.intake import batch
+
+    pid = "2610.04444"
+    older = paper(pid, title="As first submitted", version=1, updated="2026-10-01T10:00:00Z")
+    monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: [older]))
+    _, fetched = await misses.resolve(conn, pid)
+    newer = paper(pid, title="As revised since", updated="2026-10-05T00:00:00Z")
+    await batch.store(conn, [newer], source="oai")
+    stored, inserted = await misses.keep(conn, pid, fetched)
+    assert (stored.title, stored.version, inserted) == ("As revised since", None, False)
+    assert stored.updated.startswith("2026-10-05")
+    revised = await (
+        await conn.execute("SELECT count(*) AS n FROM outbox WHERE type = 'paper.revised'")
+    ).fetchone()
+    assert revised["n"] == 0
+
+
+async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monkeypatch, slow_arxiv):
+    """Process and Report as a miss on a paper litwatch lacks wait on arXiv for its budget at
+    most (P5), however slowly arXiv trickles its answer in: then a 503 that says so, and
+    nothing stored."""
+    from litwatch.feedback import misses
+    from litwatch.intake import search
+
+    monkeypatch.setattr(search, "LOOKUP_BUDGET", 0.3)
+    monkeypatch.delenv("ARXIV_PACING_DIR", raising=False)
+    for path, body in [
+        ("/api/lookup", {"q": "2610.07777"}),
+        ("/api/misses", {"paper_id": "2610.07777", "topic": FAITH.slug}),
+    ]:
+        answer = await asyncio.wait_for(client.post(path, json=body), 5)
+        assert answer.status_code == 503, path
+        assert answer.json()["detail"] == misses.SILENT
+    assert await papers_store.get(conn, "2610.07777") is None
+
+
 async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     """Taking a miss back withdraws the owner's word; reporting again gives it back, keeping
     the miss, and never over a correction the owner made since."""
@@ -700,10 +841,125 @@ async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client
     assert "@" not in (await client.get("/api/bibtex", params=outside)).text
 
 
+# -- a paper outside the collection ----------------------------------------------------------------
+
+
+async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_after(
+    conn, monkeypatch
+):
+    """Before Process, the archive's record makes the page (DESIGN.md: title, authors,
+    abstract, links; no rarity); after it, the page says the paper is fetched and waits for
+    the next run (#56). Neither the archive nor litwatch holding it, nor an archive that cannot
+    answer, is a 404."""
+    from litwatch.archive import ArchiveClient
+    from litwatch.feedback import misses
+    from tests.fakes_http import FakeArchive, mock
+
+    await taxonomy_store.save(conn, TREE)
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    fake = FakeArchive()
+    pid = "2610.09999"
+    item = {
+        "id": pid,
+        "title": "Unfetched",
+        "abstract": "Only in the archive.",
+        "authors": ["Ada Lovelace"],
+        "categories": ["cs.CL"],
+        "published": "2026-10-01",
+        "updated": "2026-10-03",
+        "version": 2,
+        "version_history": [
+            {"version": 1, "date": "2026-10-01"},
+            {"version": 2, "date": "2026-10-03"},
+        ],
+    }
+    fake.records[pid] = {"id": pid, "latest_version": 2, "metadata": {}, "item": item}
+    fetched = []
+    monkeypatch.setattr(
+        misses,
+        "fetch_by_ids",
+        answering(lambda ids: fetched.append(ids) or [paper(pid, title="Unfetched")]),
+    )
+    down = ArchiveClient(
+        "http://archive.test", "archive-token", http=mock(lambda _: httpx.Response(503))
+    )
+    archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
+    app = create_app(dsn, TOKEN, Config(), archive=archive)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTH
+    ) as c:
+        page = (await c.get(f"/api/papers/{pid}")).json()
+        assert (page["title"], page["authors"], page["abstract"]) == (
+            "Unfetched",
+            ["Ada Lovelace"],
+            "Only in the archive.",
+        )
+        assert (page["stored"], page["in_collection"], page["rarity"], page["topics"]) == (
+            False,
+            False,
+            None,
+            [],
+        )
+        assert page["version"] == 2 and [v["version"] for v in page["versions"]] == [1, 2]
+        assert page["published"].startswith("2026-10-01")
+        assert page["pdf_url"] == f"/api/papers/{pid}/pdf" and not page["card_requestable"]
+        assert (await c.get("/api/papers/2610.08888")).status_code == 404
+        assert fetched == [] and await papers_store.get(conn, pid) is None
+
+        assert (await c.post("/api/lookup", json={"q": pid})).json()["fetched"]
+        page = (await c.get(f"/api/papers/{pid}")).json()
+        assert (page["stored"], page["in_collection"], page["next_run"]) == (True, False, True)
+        assert fetched == [[pid]]
+        # Dismissed, it stays fetched and no run processes it (L6-7).
+        assert await papers_store.dismiss(conn, pid)
+        page = (await c.get(f"/api/papers/{pid}")).json()
+        assert (page["stored"], page["next_run"]) == (True, False)
+    for given in (None, down):
+        app = create_app(dsn, TOKEN, Config(), archive=given)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
+            # No archive: the paper is unknown. An archive that cannot answer says nothing of
+            # the paper: a 503, never the missing paper's 404 (L5-8).
+            unknown = await c.get("/api/papers/2610.07777")
+            if given is None:
+                assert unknown.status_code == 404
+            else:
+                assert unknown.status_code == 503
+                assert unknown.json()["detail"] == "The archive did not answer"
+            assert (await c.get(f"/api/papers/{pid}")).json()["stored"]
+
+
 # -- a paper's PDF ---------------------------------------------------------------------------------
 
 
-async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(conn):
+async def hang(req: httpx.Request) -> httpx.Response:
+    await asyncio.sleep(30)
+    return httpx.Response(504)
+
+
+@pytest.mark.parametrize("trickle", ["headers", "body"])
+async def test_an_archive_paper_page_ends_at_its_deadline_however_the_archive_trickles(
+    conn, monkeypatch, slow_arxiv, trickle
+):
+    """Bytes trickling in keep every socket read short: the page's own deadline ends the read,
+    with the declared 503 (P5)."""
+    from litwatch.api import reading as reading_api
+    from litwatch.archive import ArchiveClient
+
+    slow_arxiv.trickle = trickle  # a local socket that never finishes answering, any path
+    monkeypatch.setattr(reading_api, "ARCHIVE_PAGE_BUDGET", 0.5)
+    await taxonomy_store.save(conn, TREE)
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    archive = ArchiveClient(f"http://127.0.0.1:{slow_arxiv.server_port}", "archive-token")
+    app = create_app(dsn, TOKEN, Config(), archive=archive)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTH
+    ) as c:
+        answer = await asyncio.wait_for(c.get("/api/papers/2610.09999"), 3)
+    assert answer.status_code == 503
+
+
+async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(conn, monkeypatch):
     """The storage policy keeps few PDFs; the others are fetched when the owner opens them.
     Without an archive, or when it cannot get the PDF in time, arXiv's PDF is the answer."""
     from litwatch.archive import ArchiveClient
@@ -714,6 +970,9 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
     await papers_store.upsert(conn, [held])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     fake = FakeArchive()
+    only = paper("2610.05555", title="Only in the archive", version=3)
+    item = {**only.model_dump(mode="json"), "version_history": [{"version": 3}]}
+    fake.records[only.id] = {"id": only.id, "latest_version": 3, "metadata": {}, "item": item}
     archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
     archive.wait_seconds = 0
     for given in (archive, None):
@@ -727,12 +986,28 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
             if given is not None:
                 assert opened.status_code == 200 and opened.content == PDF
                 assert opened.headers["content-type"] == "application/pdf"
+                # A paper only the archive holds: its record names the version (L5-7).
+                only = await c.get("/api/papers/2610.05555/pdf")
+                assert only.status_code == 200 and only.content == PDF
                 assert [(j["kind"], j["version"], j["priority"]) for j in fake.jobs] == [
-                    ("pdf", 2, 0)
+                    ("pdf", 2, 0),
+                    ("pdf", 3, 0),
                 ]
+                assert [j["paper_id"] for j in fake.jobs][1] == "2610.05555"
                 fake.status = "unavailable"  # arXiv has no PDF for the archive to fetch
                 opened = await c.get(page["pdf_url"])
             assert opened.status_code == 307
             assert opened.headers["location"] == f"https://arxiv.org/pdf/{P.id}"
             assert unknown.status_code == 307
             assert unknown.headers["location"] == "https://arxiv.org/pdf/2610.09999"
+    # An archive that hangs costs the owner its wait at most, whichever call hangs (P5).
+    hung_archive = ArchiveClient(
+        "http://archive.test", "archive-token", http=mock(hang), wait_seconds=0.2
+    )
+    app = create_app(dsn, TOKEN, Config(), archive=hung_archive)
+    transport = httpx.ASGITransport(app=app)
+    monkeypatch.setattr("litwatch.api.reading.PDF_READ_SLACK", 0.3)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
+        for pid in (P.id, "2610.05555"):  # held, then known only by the archive's record
+            hung = await asyncio.wait_for(c.get(f"/api/papers/{pid}/pdf"), 3)
+            assert hung.status_code == 307, pid

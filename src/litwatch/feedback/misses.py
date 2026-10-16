@@ -7,8 +7,6 @@ says), and the owner's newest Save (feedback.md, misses).
 
 from __future__ import annotations
 
-import asyncio
-
 import psycopg
 
 from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Paper
@@ -27,20 +25,44 @@ class NotFoundError(LookupError):
     """The text names no arXiv paper, or arXiv does not know it."""
 
 
+SILENT = "arXiv did not answer in time, and nothing was stored; try again in a minute"
+
+
 async def lookup(conn: psycopg.AsyncConnection, text: str) -> tuple[Paper, bool]:
     """The paper an arXiv id or link names, fetched and stored when the collection lacks it.
     Returns the paper and whether it was fetched just now."""
+    return await keep(conn, *await resolve(conn, text))
+
+
+async def resolve(conn: psycopg.AsyncConnection, text: str) -> tuple[str, Paper | None]:
+    """The arXiv id `text` names, and arXiv's record of the paper when litwatch lacks it. Call
+    it outside a transaction: arXiv may keep it waiting for `search.LOOKUP_BUDGET`. NotFoundError
+    when the text names no paper or arXiv does not know it; NoAnswerError when arXiv gives no
+    answer in that time."""
     try:
         paper_id = id_from_url(text)
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
-    if stored := await papers_store.get(conn, paper_id):
-        return stored, False
-    fetched = await asyncio.to_thread(fetch_by_ids, [paper_id])
+    if await papers_store.get(conn, paper_id):
+        return paper_id, None
+    fetched = await fetch_by_ids([paper_id])
     if not fetched:
         raise NotFoundError(f"arXiv has no paper {paper_id}")
-    await batch.store(conn, fetched, source="arxiv")
-    return await papers_store.get(conn, paper_id), True
+    return paper_id, fetched[0]
+
+
+async def keep(
+    conn: psycopg.AsyncConnection, paper_id: str, fetched: Paper | None
+) -> tuple[Paper, bool]:
+    """Store the record `resolve` fetched, through intake's writer (`batch.store`): the paper's
+    settle lock first, so a request or an intake storing it meanwhile goes first and this one
+    stores over it as intake would, settling a rewrite. Returns the paper and whether it was
+    inserted just now."""
+    if fetched is not None:
+        stored = await batch.store(conn, [fetched], source="arxiv")
+    paper = await papers_store.get(conn, paper_id)
+    assert paper is not None  # stored now, or held when resolve looked
+    return paper, fetched is not None and stored.inserted > 0
 
 
 async def report(

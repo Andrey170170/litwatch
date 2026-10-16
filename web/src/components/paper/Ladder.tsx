@@ -88,8 +88,13 @@ export function ThePaper({ paper }: { paper: Paper }) {
             <span className="faint">v{paper.version ?? 1}</span>
           )}
         </div>
-        <span>Published</span>
-        <Published paper={paper} />
+        {/* A paper litwatch has not fetched has no publication lookup, and a DOI cannot be set on it yet. */}
+        {paper.stored !== false && (
+          <>
+            <span>Published</span>
+            <Published paper={paper} />
+          </>
+        )}
         {paper.in_collection && (
           <>
             <span>Classes</span>

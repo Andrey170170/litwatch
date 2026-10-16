@@ -8,9 +8,10 @@ import { paperQuery } from "@/api/queries";
 import { forgetCard, useCardAsked } from "@/lib/remember";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
+import { Failed } from "@/routes/settings/parts";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rc } from "@/lib/rarity";
-import { DeepReadCell, linkCells, MissPicker, SaveCell, type Paper } from "@/components/paper/Actions";
+import { DeepReadCell, linkCells, MissPicker, ProcessCell, SaveCell, type Paper } from "@/components/paper/Actions";
 import { Header } from "@/components/paper/Header";
 import { Ladder } from "@/components/paper/Ladder";
 import { Notes } from "@/components/paper/Notes";
@@ -19,7 +20,6 @@ import { PaperRow, TopicRow } from "@/components/paper/TopicRow";
 
 function Rail({ paper, gistAway, asked }: { paper: Paper; gistAway: boolean; asked: boolean }) {
   const [miss, setMiss] = useState(false);
-  const process = useProcess();
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
   return (
     <aside className="pgrail">
@@ -48,10 +48,9 @@ function Rail({ paper, gistAway, asked }: { paper: Paper; gistAway: boolean; ask
       ) : (
         <>
           <div className="agrid">
-            <button className="pri" onClick={() => process.mutate(paper.id)} disabled={process.isPending}>
-              Process
-            </button>
-            <DeepReadCell paper={paper} asked={asked} />
+            <ProcessCell paper={paper} />
+            {linkCells(paper, ["bib"])}
+            <DeepReadCell paper={paper} asked={asked} wide />
             <button className="wide" onClick={() => setMiss((m) => !m)}>
               Report as a miss
             </button>
@@ -61,6 +60,15 @@ function Rail({ paper, gistAway, asked }: { paper: Paper; gistAway: boolean; ask
       )}
     </aside>
   );
+}
+
+/** How often the page polls: while a card is asked for, or the Brief's or the Deep card's pass is queued or running,
+ * and more slowly while one awaits its text. A pass waiting on the owner (an open state names it) is not polled for. */
+export function pollEvery(p: Paper | undefined, asked: boolean): number | false {
+  const owner = new Set((p?.states ?? []).map((s) => s.pass_id));
+  const passes = [p?.text_pass, p?.card_pass].filter((x): x is NonNullable<typeof x> => x != null && !owner.has(x.id));
+  if (asked || passes.some((x) => x.state === "ready" || x.state === "running")) return 15_000;
+  return passes.some((x) => x.state === "awaiting_text") ? 60_000 : false;
 }
 
 export function PaperPage() {
@@ -75,18 +83,13 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   const desktop = useDesktop();
   const process = useProcess();
   // While a card is asked for, the page polls until an integration has written it (the API has no queued state);
-  // likewise while a full-text pass is queued or running, and more slowly while it awaits its text, so the Brief
-  // appears once written. A pass waiting on the owner (its note above) is not polled for.
+  // likewise while a pass is queued or running, so its Brief or card appears once written (`pollEvery`).
   const asked = useCardAsked(id);
-  const { data: paper, error, isPending } = useQuery({
+  const read = useQuery({
     ...paperQuery(id),
-    refetchInterval: (q) => {
-      const p = q.state.data;
-      const stuck = (p?.states ?? []).some((s) => s.kind === "fulltext_failed" || s.kind === "awaiting_text");
-      if (asked || p?.text_pass?.state === "ready" || p?.text_pass?.state === "running") return 15_000;
-      return p?.text_pass?.state === "awaiting_text" && !stuck ? 60_000 : false;
-    },
+    refetchInterval: (q) => pollEvery(q.state.data, asked),
   });
+  const { data: paper, error, isPending } = read;
   const [gistAway, setGistAway] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(null);
   useEffect(() => {
@@ -99,20 +102,26 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   };
   if (isPending) return <div className="loadmore">Loading…</div>;
   // A failed poll while a card is awaited keeps the page: only a paper that never loaded shows the error.
-  // An archive paper litwatch has not fetched has no page yet (that is N5's); Process brings it in.
+  // A paper neither litwatch nor the archive has (or no archive is configured): Process asks arXiv for it.
+  // Anything else (the archive did not answer, a 503) says nothing of the paper: try again.
   if (!paper) {
     const unheld = error instanceof ApiError && error.status === 404;
+    if (!unheld)
+      return (
+        <>
+          <Back />
+          <Failed q={read} what="the paper" says={error instanceof ApiError && error.status === 503 ? error.message : undefined} />
+        </>
+      );
     return (
       <>
         <Back />
-        <div className="empty">{unheld ? `${id} is not in the collection.` : "Could not load the paper."}</div>
-        {unheld && (
-          <div className="agrid" style={{ maxWidth: 320 }}>
-            <button className="pri" onClick={() => process.mutate(id)} disabled={process.isPending}>
-              Process
-            </button>
-          </div>
-        )}
+        <div className="empty">{`${id} is not in the collection.`}</div>
+        <div className="agrid" style={{ maxWidth: 320 }}>
+          <button className="pri" onClick={() => process.mutate(id)} disabled={process.isPending}>
+            Process
+          </button>
+        </div>
       </>
     );
   }

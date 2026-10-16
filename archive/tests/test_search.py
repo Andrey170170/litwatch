@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from arxiv_archive.catalog import Catalog
 from arxiv_archive.search import SearchIndex, normalize_paper
-from arxiv_archive.search_indexer import Indexer
+from arxiv_archive.search_indexer import Indexer, index_titles
 
 
 class SearchTests(unittest.TestCase):
@@ -122,6 +122,142 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(len(self.search.search(limit=2, offset=2)['items']), 1)
         plan = [r[3] for r in self.indexer.db.execute("EXPLAIN QUERY PLAN SELECT d.id FROM documents d JOIN documents_fts ON documents_fts.rowid=d.rowid WHERE documents_fts MATCH 'neural' ORDER BY documents_fts.rank LIMIT 20")]
         self.assertFalse(any('TEMP B-TREE' in line for line in plan), plan)
+
+    def test_exact_title_then_phrase_then_title_over_abstract(self):
+        # The live index's case (archive.md, Search): titles repeating the query's words outrank
+        # the paper whose whole title it is, unless exact titles and phrases come first.
+        for n, title, abstract in [
+                (1, "Attention Is All You Need But You Don't Need All Of It", ''),
+                (2, 'Not All Attention Is All You Need', ''),
+                (3, 'Is attention all you need? You need all of it', ''),
+                (4, 'Attention Is All You Need', 'The Transformer, attention only.'),
+                (5, 'Attention Is All You Need In Speech Separation', ''),
+                (6, 'Speech separation', 'We show attention is all you need here.'),
+                (7, 'Neural circuits', ''),
+                (8, 'A study', 'Neural circuits, circuits and more neural circuits.'),
+                (9, 'Re-thinking pré-training', 'Rethinking.')]:
+            self.paper(n, title, abstract=abstract, published=f'2026-09-{n:02}')
+        self.start().step()
+        ids = [p['id'][-1] for p in self.search.search(q='attention is all you need')['items']]
+        # The exact title; titles holding the phrase; the phrase in an abstract; the words apart.
+        self.assertEqual(ids[0], '4')
+        self.assertEqual(sorted(ids[1:4]), ['1', '2', '5'])
+        self.assertEqual(ids[4:], ['6', '3'])
+        # Case, punctuation and diacritics do not keep an exact title from matching.
+        self.assertEqual(self.search.search(q='ATTENTION is all-you-need')['items'][0]['id'][-1], '4')
+        self.assertEqual(self.search.search(q='re thinking PRE-training')['items'][0]['id'][-1], '9')
+        # Pages run on across the tiers; filters hold in every tier.
+        paged = [p['id'][-1] for o in (0, 2, 4)
+                 for p in self.search.search(q='attention is all you need', limit=2, offset=o)['items']]
+        self.assertEqual(paged, ids)
+        later = self.search.search(q='attention is all you need', date_from='2026-09-05')['items']
+        self.assertEqual([p['id'][-1] for p in later], ['5', '6'])
+        # One word: the title weighs more than an abstract that repeats it.
+        self.assertEqual(self.search.search(q='circuits')['items'][0]['id'][-1], '7')
+        # Date orders stay available and take no tiers.
+        newest = self.search.search(q='attention is all you need', sort='newest')['items']
+        self.assertEqual([p['id'][-1] for p in newest], ['6', '5', '4', '3', '2', '1'])
+
+    def test_the_tiers_read_one_snapshot_of_the_index(self):
+        # A page joined from tiers read across an indexer commit could repeat or skip a paper.
+        for n, title in [(1, 'Neural circuits'), (2, 'Neural circuits in mice'), (3, 'A neural study')]:
+            self.paper(n, title, abstract='Of neural circuits.', published=f'2026-09-{n:02}')
+        self.start().step()
+        connect, seen = self.search._connect, []
+
+        def traced():
+            db = connect()
+            db.set_trace_callback(lambda sql: seen.append((sql.split()[0], db.in_transaction)))
+            return db
+
+        with patch.object(self.search, '_connect', traced):
+            self.assertEqual(len(self.search.search(q='neural circuits')['items']), 3)
+        reads = [inside for verb, inside in seen if verb in ('SELECT', 'WITH')]
+        self.assertGreater(len(reads), 2)
+        self.assertTrue(all(reads), seen)
+
+    def test_a_quoted_phrase_stays_a_phrase_in_every_tier_and_order(self):
+        # As websearch_to_tsquery reads a query in litwatch's own collection: "neural circuits"
+        # is the phrase, never the two words apart, whichever tier or order finds the paper.
+        self.paper(1, 'Neural circuits in mice', published='2026-09-01')
+        self.paper(2, 'Neural study of circuits', published='2026-09-02')
+        self.paper(3, 'A survey', abstract='Of neural circuits.', published='2026-09-03')
+        self.paper(4, 'Pruning neural nets', abstract='Circuits matter.', published='2026-09-04')
+        self.start().step()
+        for q, wanted in [('"neural circuits"', {'1', '3'}), ('"neural circuits" mice', {'1'}),
+                          ('pruning "neural nets"', {'4'}), ('"neural circuits', {'1', '3'}),
+                          ('neural circuits', {'1', '2', '3', '4'})]:
+            for sort in ('relevance', 'newest', 'title_asc'):
+                with self.subTest(q=q, sort=sort):
+                    found = {p['id'][-1] for p in self.search.search(q=q, sort=sort)['items']}
+                    self.assertEqual(found, wanted)
+
+    def test_an_exact_title_comes_first_whatever_its_case_punctuation_or_accents(self):
+        # The exact title is an indexed lookup of the title's key (`title_key`), so no number of
+        # titles starting with the same words hides it, and one word is a query like any other.
+        self.paper(1, 'Circuits circuits circuits circuits', published='2026-09-03')
+        self.paper(2, 'Circuits', published='2026-09-01')
+        self.paper(3, 'Deep-Learning?', published='2026-09-01')
+        self.paper(4, 'Réseaux de neurones', published='2026-09-01')
+        for n in range(5, 305):
+            self.paper(n, f'Deep learning for task {n}', published='2026-09-02')
+            self.paper(n + 300, f'Reseaux de neurones et tache {n}', published='2026-09-02')
+        self.paper(700, 'Deep learning, deep learning, deep learning', published='2026-09-02')
+        self.paper(701, 'Réseaux de neurones, réseaux de neurones', published='2026-09-02')
+        self.start().step(5000)
+        for q, exact in [('circuits', 2), ('CIRCUITS', 2),
+                         ('deep learning', 3), ('Deep  Learning', 3), ('"deep learning"', 3),
+                         ('deep-learning!', 3),
+                         ('reseaux de neurones', 4), ('RÉSEAUX DE NEURONES', 4)]:
+            with self.subTest(q=q):
+                self.assertEqual(self.search.search(q=q)['items'][0]['id'], f'2609.{exact:05}')
+        # The rest follow in their tiers: titles holding the phrase, ranked.
+        rest = [p['id'] for p in self.search.search(q='deep learning', limit=50)['items'][1:]]
+        self.assertEqual(len(rest), 50 - 1)
+        self.assertNotIn('2609.00003', rest)
+        # An ID asks for that paper alone, as before: no title lookup.
+        self.paper(800, '2609.00001', published='2026-09-04')
+        self.indexer.step(5000)
+        self.assertEqual([p['id'] for p in self.search.search(q='2609.00001')['items']], ['2609.00001'])
+        self.assertEqual([p['id'] for p in self.search.search(q='arXiv:2609.00002v3')['items']], ['2609.00002'])
+
+    def test_the_indexer_keys_titles_it_writes_and_index_titles_keys_the_rest(self):
+        a = self.paper(1, 'Old title')
+        b = self.paper(2, 'To delete')
+        self.paper(3, 'Kept')
+        worker = self.start()
+        worker.step(10)
+        key = lambda docid: worker.db.execute('SELECT key FROM title_keys WHERE docid=?', (docid,)).fetchone()
+        rowid = lambda pid: worker.db.execute('SELECT rowid FROM documents WHERE id=?', (pid,)).fetchone()[0]
+        self.assertEqual(key(rowid(a))[0], 'old title')
+        doomed = rowid(b)
+        self.catalog.upsert_paper(a, {'title': 'Nouveau Titre!'}, 2)
+        with self.catalog.db:
+            self.catalog.db.execute('DELETE FROM papers WHERE id=?', (b,))
+        worker.step(10)
+        self.assertEqual(key(rowid(a))[0], 'nouveau titre')
+        self.assertIsNone(key(doomed))
+        self.assertTrue(self.search.status()['titles_keyed'])
+        # An index built before the keys: none, until index_titles has keyed them, in batches
+        # it resumes after a stop.
+        with worker.db:
+            worker.db.execute('DELETE FROM title_keys')
+            worker.db.execute("DELETE FROM state WHERE key='titles_keyed'")
+        self.assertEqual(self.search.search(q='kept')['items'][0]['id'], '2609.00003')  # by its tiers
+
+        def stop(done):
+            raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            index_titles(self.path, batch=1, progress=stop)
+        self.assertEqual(worker.db.execute('SELECT count(*) FROM title_keys').fetchone()[0], 1)
+        self.assertNotIn('titles_keyed', self.search.status())
+        done = []
+        self.assertEqual(index_titles(self.path, batch=1, progress=done.append), {'titles': 1, 'keyed': 2})
+        self.assertEqual(done, [{'titles': 1, 'rowid': rowid('2609.00003')}])
+        self.assertTrue(self.search.status()['titles_keyed'])
+        self.assertEqual(index_titles(self.path), {'titles': 0, 'keyed': 2})
+        self.assertEqual(self.search.search(q='nouveau titre')['items'][0]['id'], a)
 
     def test_sorting_filters_and_page_boundaries(self):
         for n, title, published in [(1, 'beta', '2026-09-03'),
