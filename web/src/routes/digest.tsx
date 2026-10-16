@@ -5,7 +5,7 @@
  * the view's controls sit in the bottom bar, and a digest is a page of its own (`/digests/<id>`).
  */
 import { useInfiniteQuery, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { Link, useNavigate, useSearch, type LinkProps } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useSearch, type LinkProps } from "@tanstack/react-router";
 import { Fragment, useEffect, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain } from "@/api/mutations";
@@ -57,9 +57,10 @@ function Views({ view, children }: { view: View; children?: ReactNode }) {
  * days stepped through. */
 function Stepper({ to, prev, next, label, small, foot }: { to: "/" | "/week"; prev: string | null | undefined; next: string | null | undefined; label: string; small?: string; foot?: boolean }) {
   const param = to === "/" ? "day" : "week";
+  const page = useOnPage();
   const arrow = (day: string | null | undefined, glyph: string, name: string) =>
     day ? (
-      <Link to={to} search={{ [param]: day }} className="ib" aria-label={name}>
+      <Link to={to} search={{ [param]: day }} state={{ page }} className="ib" aria-label={name}>
         {glyph}
       </Link>
     ) : (
@@ -194,9 +195,14 @@ function State({ q, what }: { q: Pick<UseQueryResult, "isError" | "isPending" | 
 function useStepTo(to: "/" | "/week", prev: string | null | undefined, next: string | null | undefined) {
   const navigate = useNavigate();
   const param = to === "/" ? "day" : "week";
-  const go = (day: string | null | undefined) => (day ? () => void navigate({ to, search: { [param]: day } }) : null);
+  const page = useOnPage();
+  const go = (day: string | null | undefined) => (day ? () => void navigate({ to, search: { [param]: day }, state: { page } }) : null);
   useSteps({ prev: go(prev), next: go(next) });
 }
+
+/** Whether the Day or Week is open as a page, from History (DESIGN.md): its steps keep it one, and on the phone it
+ * has ‹ back and its label for a title. */
+const useOnPage = () => !!useLocation().state.page;
 
 export function DigestPage() {
   const search = useSearch({ from: "/" });
@@ -204,11 +210,12 @@ export function DigestPage() {
   const q = useQuery(dayQuery(day));
   const desktop = useDesktop();
   useStepTo("/", q.data?.previous, q.data?.next);
+  const page = useOnPage();
   const stepper = (foot?: boolean) => <Stepper to="/" prev={q.data?.previous} next={q.data?.next} label={dayLabel(day)} small={day === today() ? "Today" : undefined} foot={foot} />;
   return (
     <>
-      <Fill name="bar">
-        <span className="t">Digest</span>
+      <Fill name={page ? "title" : "bar"}>
+        <span className="t">{page ? dayLabel(day) : "Digest"}</span>
       </Fill>
       <Fill name="foot">
         <div className="pfoot">{stepper(true)}</div>
@@ -220,7 +227,7 @@ export function DigestPage() {
         </>
       )}
       {q.data?.weekly && (
-        <Link to="/week" search={{ week: q.data.weekly }} className="wkline">
+        <Link to="/week" search={{ week: q.data.weekly }} state={{ page }} className="wkline">
           Weekly digests for {weekRange(q.data.weekly)} are out <span className="ml-auto">›</span>
         </Link>
       )}
@@ -242,12 +249,13 @@ export function WeekPage() {
   const q = useQuery(weekQuery(week));
   const desktop = useDesktop();
   useStepTo("/week", q.data?.previous, q.data?.next);
+  const page = useOnPage();
   const monday = q.data?.monday ?? mondayOf(week);
   const stepper = (foot?: boolean) => <Stepper to="/week" prev={q.data?.previous} next={q.data?.next} label={weekRange(monday)} small={monday === last ? "Last week" : undefined} foot={foot} />;
   return (
     <>
-      <Fill name="bar">
-        <span className="t">Digest · Week</span>
+      <Fill name={page ? "title" : "bar"}>
+        <span className="t">{page ? `Week ${weekRange(monday)}` : "Digest · Week"}</span>
       </Fill>
       <Fill name="foot">
         <div className="pfoot">{stepper(true)}</div>
@@ -285,6 +293,9 @@ function Modes({ cal, foot }: { cal: boolean; foot?: boolean }) {
 }
 
 /** A group's head in the list: the label opens its Day or Week. */
+// a Day or Week opened from History is a page (`useOnPage`)
+const PAGE = { page: true };
+
 function Group({ to, label, sub, pin }: { to?: LinkProps; label: string; sub?: string; pin?: boolean }) {
   return (
     <div className={`grp${pin ? " pin" : ""}`}>
@@ -306,14 +317,14 @@ function HistoryList({ pages }: { pages: Schemas["History"][] }) {
       case "pin":
         return (
           <Fragment key="pin">
-            <Group to={{ to: "/week", search: { week: r.monday } }} label="This week" sub={`weekly digests · ${weekRange(r.monday)}`} pin />
+            <Group to={{ to: "/week", search: { week: r.monday }, state: PAGE }} label="This week" sub={`weekly digests · ${weekRange(r.monday)}`} pin />
             <Marks marks={r.marks} />
           </Fragment>
         );
       case "week":
         return (
           <Fragment key={`w${r.monday}`}>
-            <Group to={{ to: "/week", search: { week: r.monday } }} label={`Week ${weekRange(r.monday)}`} sub="weekly digests" pin />
+            <Group to={{ to: "/week", search: { week: r.monday }, state: PAGE }} label={`Week ${weekRange(r.monday)}`} sub="weekly digests" pin />
             <Marks marks={r.marks} />
           </Fragment>
         );
@@ -322,7 +333,7 @@ function HistoryList({ pages }: { pages: Schemas["History"][] }) {
       case "day":
         return (
           <Fragment key={r.day}>
-            <Group to={{ to: "/", search: { day: r.day } }} label={dayLabel(r.day)} sub={r.today ? "today" : undefined} />
+            <Group to={{ to: "/", search: { day: r.day }, state: PAGE }} label={dayLabel(r.day)} sub={r.today ? "today" : undefined} />
             {r.marks.length ? <Marks marks={r.marks} /> : <div className="none">No digests.</div>}
           </Fragment>
         );
@@ -370,13 +381,13 @@ function Calendar({ pages }: { pages: Schemas["History"][] }) {
           </div>
         ))}
         {mo.weeks.map((w, wi) => {
-          const weekTo: LinkProps = { to: "/week", search: { week: w.monday } };
+          const weekTo: LinkProps = { to: "/week", search: { week: w.monday }, state: PAGE };
           return (
             <Fragment key={w.monday}>
               {w.days.map((d, i) => {
                 const day = addDays(w.monday, i);
                 if (!d) return <div key={day} className="mday empty" />;
-                const dayTo: LinkProps = { to: "/", search: { day } };
+                const dayTo: LinkProps = { to: "/", search: { day }, state: PAGE };
                 const num = Number(day.slice(8));
                 return (
                   <div key={day} className={`mday${day === now ? " today" : ""}${d.released || d.marks.length ? "" : " off"}`} {...cell(dayTo)}>

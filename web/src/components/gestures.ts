@@ -13,6 +13,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { axisOf, backCommits, drawerSettles, EDGE, motionMs, resist, STEP_SLIDE, stepCommits, Tracker, type Axis } from "@/lib/gesture";
 import { keepSnapshot, showSnapshot } from "@/lib/snapshots";
 import { arrive, historyIndex, stepsNow, type Steps } from "@/lib/steps";
+import type { Where } from "./Shell";
 
 export const EASE = "cubic-bezier(.2, .85, .25, 1)";
 
@@ -83,7 +84,7 @@ export function clearDrag(...els: (HTMLElement | null)[]) {
 }
 
 type Els = { root: RefObject<HTMLElement | null>; page: RefObject<HTMLElement | null>; main: RefObject<HTMLElement | null>; under: RefObject<HTMLElement | null>; panel: RefObject<HTMLElement | null>; shade: RefObject<HTMLElement | null> };
-type Opts = { deeper: boolean; menu: boolean; setMenu: (open: boolean) => void; deeperAt: (pathname: string) => boolean };
+type Opts = { deeper: boolean; menu: boolean; setMenu: (open: boolean) => void; deeperAt: (where: Where) => boolean };
 type Kind = "drawer" | "back" | "step";
 /** The drawer under a gesture: `opening` and `shutting` while the finger holds it, `open` once a gesture has left it
  * open (its entry stays off: it is already there), null when it is shut or came by its button. */
@@ -328,7 +329,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
     document.addEventListener("pointerdown", down);
     // As the phone goes deeper, the screen left is kept for the way back; any navigation ends a drag in progress.
     const unsubscribe = router.history.subscribe(({ location, action }) => {
-      if (action.type === "PUSH" && live.current.deeperAt(location.pathname) && els.page.current) keepSnapshot(historyIndex(location) - 1, els.page.current);
+      if (action.type === "PUSH" && live.current.deeperAt(location) && els.page.current) keepSnapshot(historyIndex(location) - 1, els.page.current);
       navigations++;
       if (active) abort(active);
     });

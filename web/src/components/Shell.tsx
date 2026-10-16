@@ -25,9 +25,13 @@ const TABS = [
   { to: "/papers", name: "Papers" },
 ] as const;
 
-/** A deeper screen has "‹ Back" (desktop) or "‹" and its title (phone); a top-level one the tabs' chrome. */
-export function isDeeper(pathname: string): boolean {
-  return !["/", "/week", "/history", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
+/** Where the app is: its path, and the history state the way there left. */
+export type Where = { pathname: string; state: { page?: boolean } };
+
+/** A deeper screen has "‹ Back" (desktop) or "‹" and its title (phone); a top-level one the tabs' chrome. A Day or
+ * Week opened from History is a page, by the state its link set, and its steps keep. */
+export function isDeeper({ pathname, state }: Where): boolean {
+  return !!state.page || !["/", "/week", "/history", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
 }
 
 /** Settings owns the sidebar on its pages, and on a paper opened from one of them. */
@@ -62,7 +66,7 @@ function useCame(): Came {
   const key = screenKey(location.pathname);
   const [seen, setSeen] = useState<{ key: string; n: number; index: number; came: Came }>(() => ({ key, n: a.n, index, came: "top" }));
   if (seen.key === key) return seen.came;
-  const came: Came = a.n !== seen.n && a.how ? a.how : !isDeeper(location.pathname) ? "top" : index < seen.index ? "back" : "go";
+  const came: Came = a.n !== seen.n && a.how ? a.how : !isDeeper(location) ? "top" : index < seen.index ? "back" : "go";
   setSeen({ key, n: a.n, index, came });
   return came;
 }
@@ -160,7 +164,7 @@ function Phone() {
   const location = useLocation();
   const router = useRouter();
   const came = useCame();
-  const deeper = isDeeper(location.pathname);
+  const deeper = isDeeper(location);
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [location.pathname]);
   const back = () => (router.history.canGoBack() ? router.history.back() : router.navigate({ to: "/" }));

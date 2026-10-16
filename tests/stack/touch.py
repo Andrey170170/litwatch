@@ -78,24 +78,26 @@ def shelf_links(section) -> list[str]:
     return [a.get_attribute("href") or "" for a in section.locator('a[href^="/paper/"]').all()]
 
 
-def unfold(page) -> None:
-    """Open a list's folded shelves that hold papers: a fresh stack's papers are common, in the
-    shelf folded by default. A head shows its count once its shelf has loaded; an empty one is
-    still loading, and a head whose shelf proves empty goes."""
+def pair_of(page) -> list[str]:
+    """Two papers of one shelf, the step's list: from a shelf already open, else from the folded
+    shelves opened in turn, as a fresh stack's papers are common, in the shelf folded by default;
+    none when no shelf lists two. A head shows its count once its shelf has loaded, so an empty
+    head is still loading, and a head whose shelf proves empty goes. An opened shelf shows the one
+    row it had while folded, then its page: its rows are given time to come."""
     page.locator("main .shh .k:not(:empty)").first.wait_for()
-    folded = page.locator("main button.shh.fold:has(.k:not(:empty))")
-    while folded.count():
-        folded.first.click()
-        page.wait_for_load_state("networkidle")
-    # an opened shelf shows the one row it had while folded, then its page: wait for the rows to
-    # stop coming
-    links = page.locator(PAPER_LINK)
-    links.first.wait_for()
-    for _ in range(20):
-        before = links.count()
-        page.wait_for_timeout(500)
-        if links.count() == before:
-            break
+    while True:
+        for section in page.locator("main section").all():
+            if len(links := shelf_links(section)) >= 2:
+                return links
+        folded = page.locator("main button.shh.fold:has(.k:not(:empty))").first
+        if not folded.count():
+            return []
+        section = folded.locator("xpath=ancestor::section[1]")
+        folded.click()
+        for _ in range(20):
+            page.wait_for_timeout(500)
+            if len(shelf_links(section)) >= 2:
+                break
 
 
 def gestures(base: str, token: str, out: Path, day: str) -> list[str]:
@@ -158,10 +160,8 @@ def walk(page, base: str, out: Path, day: str, lines: list[str]) -> None:
     # a paper, stepped to the next in its list, which is its shelf's: two papers of one shelf;
     # then the edge swipe back, which returns to the first paper, as a step is a history entry
     page.goto(f"{base}/papers", wait_until="networkidle")
-    unfold(page)
+    pair = pair_of(page)
     hrefs = [a.get_attribute("href") or "" for a in page.locator(PAPER_LINK).all()]
-    shelves = (shelf_links(s) for s in page.locator("main section").all())
-    pair = next((links for links in shelves if len(links) >= 2), [])
     if pair:
         first, second = pair[0], pair[1]
         page.locator(f'main a[href="{first}"]').first.click()
@@ -182,7 +182,12 @@ def walk(page, base: str, out: Path, day: str, lines: list[str]) -> None:
     session = next((r for r in sessions.json() if r["papers"] >= 2), None)
     if session:
         page.goto(f"{base}/settings/calibrate/{session['id']}?at=1", wait_until="networkidle")
-        finger.drag(300, 500, 60, 500)
+        # from the paper's own text, which takes no finger of its own: the Note field below may
+        # sit anywhere, by the paper's length
+        box = page.locator("main .calp").first.bounding_box()
+        assert box, "the card shows no paper"
+        y = box["y"] + min(40, box["height"] / 2)
+        finger.drag(box["x"] + box["width"] - 50, y, box["x"] + 50, y)
         # a card with a standing Fit saves before the step: wait for it, within reason
         check("calibrate-steps-next", arrived(page, "at=2"), page.url)
     else:

@@ -20,6 +20,8 @@ declare module "@tanstack/react-router" {
     list?: string;
     /** The paper was opened from Settings, so it keeps the Settings sidebar. */
     settings?: boolean;
+    /** A Day or Week opened from History: a page with ‹ back on the phone, not the tab's view (DESIGN.md, "History"). */
+    page?: boolean;
   }
 }
 

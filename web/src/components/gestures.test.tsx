@@ -237,6 +237,24 @@ describe("The phone's gestures", () => {
     expect(document.querySelector("main")?.dataset.came).toBe("still");
   });
 
+  it("has a Day opened from History as a page: ‹ back, its steps keep it one, and the edge swipe returns to History", async () => {
+    const history = { days: [{ day: "2026-10-14", released: true, marks: [card] }, { day: "2026-10-13", released: true, marks: [{ ...card, id: 8, day: "2026-10-13" }] }], weeks: [{ monday: "2026-10-12", marks: [] }], start: "2026-10-13" };
+    scriptFetch({ ...routes, "GET /api/digests": history });
+    const { router } = renderApp("/history");
+    fireEvent.click(await screen.findByText("Wed 14 Oct"));
+    await screen.findByRole("button", { name: "Back" });
+    expect(router.state.location.pathname).toBe("/");
+    expect(screen.getByRole("button", { name: "Back" }).parentElement).toHaveTextContent("Wed 14 Oct");
+    // a step keeps the page: still ‹ back, one more entry
+    fireEvent.click(screen.getByRole("link", { name: "Older" }));
+    await waitFor(() => expect(router.state.location.search).toEqual({ day: "2026-10-13" }));
+    expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
+    swipe(screen.getByRole("main"), [8, 300], [[30, 300], [70, 300]], { ms: 20 });
+    await waitFor(() => expect(router.state.location.search).toEqual({ day: "2026-10-14" }));
+    swipe(screen.getByRole("main"), [8, 300], [[30, 300], [70, 300]], { ms: 20 });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/history"));
+  });
+
   it("leaves a drag that starts on a control taking the finger itself, the reorder grip, to that control", async () => {
     scriptFetch({ ...routes, "GET /api/papers/2610.00001": full("2610.00001", { in_collection: true }) });
     const { router } = renderApp("/");
