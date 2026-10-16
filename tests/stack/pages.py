@@ -57,7 +57,8 @@ def pages(paper: str, topic: str, day: str, missing: str = "0000.00001") -> dict
 
 
 # What a page must show to count as working, beyond text in <main>: the share target lands on
-# the paper with "Report as a miss" open; a paper outside the collection offers Process.
+# the paper with "Report as a miss" open; a paper outside the collection offers Process. The text
+# is compared without case: `inner_text` renders a button's CSS `text-transform`.
 EXPECT = {
     "share": ("url", "/paper/"),
     "paper-outside": ("text", "Process"),
@@ -66,9 +67,17 @@ EXPECT = {
 
 def watch(page) -> list[str]:
     """The page's errors as they happen: console errors, uncaught exceptions, 5xx answers, and
-    401 or 403 ones (a lost session shows the token prompt, which has text of its own)."""
+    401 or 403 ones (a lost session shows the token prompt, which has text of its own). The
+    browser's own note of a 404 answer is not one: a paper outside the collection reads as one."""
     seen: list[str] = []
-    page.on("console", lambda m: m.type == "error" and seen.append(f"console error: {m.text}"))
+    page.on(
+        "console",
+        lambda m: (
+            m.type == "error"
+            and "status of 404" not in m.text
+            and seen.append(f"console error: {m.text}")
+        ),
+    )
     page.on("pageerror", lambda e: seen.append(f"uncaught: {e}"))
     page.on(
         "response",
@@ -121,7 +130,7 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
                 kind, want = EXPECT.get(name, (None, None))
                 if kind == "url" and want not in page.url:
                     seen.append(f"landed on {page.url}, not a page under {want}")
-                elif kind == "text" and want not in text:
+                elif kind == "text" and want.lower() not in text.lower():
                     seen.append(f"the page does not say {want!r}")
                 page.screenshot(path=out / f"{name}-{width}.png", full_page=True)
                 failures += [f"{name} at {width} ({path}): {s}" for s in seen]

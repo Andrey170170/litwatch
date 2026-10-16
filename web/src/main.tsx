@@ -2,12 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { onUnauthorised } from "./api/client";
+import { ApiError, onUnauthorised } from "./api/client";
 import { TokenPrompt } from "./components/TokenPrompt";
 import { router } from "./router";
 import "./styles.css";
 
-const client = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 10_000 } } });
+// One retry, except that a 404 is an answer (a paper outside litwatch and the archive), not a failure.
+const retry = (failures: number, error: unknown) => failures < 1 && !(error instanceof ApiError && error.status === 404);
+const client = new QueryClient({ defaultOptions: { queries: { retry, staleTime: 10_000 } } });
 
 function App() {
   const [gate, setGate] = useState(false);
