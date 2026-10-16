@@ -451,7 +451,10 @@ export function useReorderTopics() {
     mutationKey: REORDER,
     scope: { id: "topics-order" },
     mutationFn: async (slugs: string[]) => ok(await api.PUT("/api/settings/topics-order", { body: { slugs } })),
-    onSuccess: () =>
+    onError: (e) => toast(said(e, "Could not save the order"), "error"),
+    // When the last save settles, whichever way, everything showing the order is reread (the page's own back to the
+    // order saved): an earlier save in the queue may have gone through even when the last did not.
+    onSettled: () =>
       last() &&
       Promise.all([
         qc.invalidateQueries({ queryKey: ["taxonomy"] }),
@@ -461,10 +464,6 @@ export function useReorderTopics() {
         qc.invalidateQueries(settingsReads("topics")),
         qc.invalidateQueries(settingsReads("taxonomy")),
       ]),
-    onError: (e) => {
-      toast(said(e, "Could not save the order"), "error");
-      return last() && qc.invalidateQueries(settingsReads("topics")); // the page's order back to the saved one
-    },
   });
 }
 
