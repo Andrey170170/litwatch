@@ -108,7 +108,8 @@ describe("The phone's gestures", () => {
     // the drawer (300 wide in this viewport) has come in by the finger's 190 px
     expect(drawer.style.transform).toBe("translateX(-110px)");
     fireEvent.pointerUp(window, { clientX: 200, clientY: 300, pointerId: 1, isPrimary: true });
-    await waitFor(() => expect(drawer).not.toHaveAttribute("data-drag"));
+    // left open by the swipe: its entry stays off (it would replay from the left)
+    await waitFor(() => expect(drawer).toHaveAttribute("data-drag", "open"));
     expect(screen.getByRole("link", { name: "Papers" })).toBeInTheDocument();
     // what the drag wrote is gone; what Radix keeps inline (the dialog takes pointer events while the body does not) stays
     expect(drawer.style.transform).toBe("");
@@ -119,6 +120,21 @@ describe("The phone's gestures", () => {
     // let go a few px in: it shuts again
     swipe(screen.getByRole("main"), [10, 300], [[30, 300], [60, 300]]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // opened by its button after that, it has its entry
+    vi.advanceTimersByTime(400);
+    fireEvent.click(screen.getByRole("button", { name: "Menu" }));
+    expect(await screen.findByRole("dialog", { name: "Menu" })).not.toHaveAttribute("data-drag");
+  });
+
+  it("calls a release's settle off when the shell goes before it lands", async () => {
+    viewport(false, false); // with motion: the settle takes its 200 ms
+    scriptFetch({ ...routes, [`GET /api/papers/${paper.id}`]: full(paper.id, {}) });
+    const { unmount, router } = renderApp(`/paper/${paper.id}`);
+    await screen.findByRole("heading", { name: "Faithful traces" });
+    swipe(screen.getByRole("main"), [10, 300], [[30, 300], [250, 300]]);
+    unmount();
+    vi.advanceTimersByTime(400);
+    expect(router.state.location.pathname).toBe(`/paper/${paper.id}`);
   });
 
   it("goes back from the left edge on a deeper screen, past a third of the width, and stays on a short drag", async () => {

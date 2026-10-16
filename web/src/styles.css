@@ -223,7 +223,7 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 @keyframes lw-step-prev { from { transform: translateX(-40px); opacity: 0; } }
 /* the drawer, from the left */
 .shade { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.45); animation: lw-fade 0.2s ease-out; }
-/* held by a finger: no entry of its own; opening, it starts shut and follows */
+/* held by a finger, or left open by one: no entry of its own; opening, it starts shut and follows */
 :is(.shade, .drawer, .sheet)[data-drag] { animation: none; }
 .shade[data-drag="opening"] { opacity: 0; }
 .drawer[data-drag="opening"] { transform: translateX(-100%); }
@@ -885,7 +885,8 @@ button.car:hover { color: var(--fg); background: var(--line2); }
   .tf { min-width: 40px; }
   /* a truncating link clips a hit area drawn around it: this one is 40px tall itself */
   .tcard .t2 { min-height: 40px; display: flex; align-items: center; }
+  a.nt { min-height: 40px; align-content: center; }
   /* inline controls keep their size in the text and take a 40px hit area around it, as .hit does */
-  :is(.cp, .pghead .au .more, .inl, .st, a.nt, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n) { position: relative; }
-  :is(.cp, .pghead .au .more, .inl, .st, a.nt, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
+  :is(.cp, .pghead .au .more, .inl, .st, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n) { position: relative; }
+  :is(.cp, .pghead .au .more, .inl, .st, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
 }

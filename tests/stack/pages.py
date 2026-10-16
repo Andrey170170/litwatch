@@ -19,9 +19,11 @@ from playwright.sync_api import sync_playwright
 
 WIDTHS = {"phone": (390, 844), "desktop": (1440, 900)}
 CARD_WAIT_SECONDS = 120
+# A paper neither litwatch nor the archive has: the one 404 the walk expects.
+MISSING_ID = "0000.00001"
 
 
-def pages(paper: str, topic: str, day: str, missing: str = "0000.00001") -> dict[str, str]:
+def pages(paper: str, topic: str, day: str, missing: str = MISSING_ID) -> dict[str, str]:
     """Every page there is, by name (web/src/router.tsx): the Digest's views, the lists, a paper
     in the collection and one neither litwatch nor the archive has, the share target with each,
     and every Settings page with the pages inside them. A digest's own page and a Calibrate
@@ -67,16 +69,17 @@ MAY_MISS = {"paper-outside", "share-outside"}
 def expect(paper: str, width: str) -> dict[str, tuple[str, str]]:
     """What a page must show to count as working, beyond text in <main> that says nothing is
     missing (`MISSING`): a word of its own where one holds whatever the data (a Settings page's
-    title, the paper's id, Process for a paper outside the collection), the paper's sheet open on
-    the share target's landing on the phone (`.sheet`; the desktop's rail is open already), or
-    "Report as a miss" when the shared paper is one neither litwatch nor the archive has. The lists
-    and the Digest's views have no such word: their text is their data, or an empty state. Text is
-    compared without case: `inner_text` renders a button's CSS `text-transform`."""
+    title, the paper's id, Process for a paper outside the collection), or an element: the share
+    target's landing has the paper's sheet open on its labels on the phone (the desktop's rail is
+    open already), and the picker of Report as a miss open when the shared paper is one neither
+    litwatch nor the archive has. The lists and the Digest's views have no such word: their text is
+    their data, or an empty state. Text is compared without case: `inner_text` renders a button's
+    CSS `text-transform`."""
     return {
         "paper": ("text", paper),
         "paper-outside": ("text", "Process"),
-        "share": ("sheet", ".sheet") if width == "phone" else ("text", paper),
-        "share-outside": ("text", "Report as a miss"),
+        "share": ("locator", ".sheet .slab") if width == "phone" else ("text", paper),
+        "share-outside": ("locator", '[role="group"][aria-label="Report as a miss"]'),
         "settings": ("text", "Overview"),
         "settings-overview": ("text", "Overview"),
         "settings-needs": ("text", "Needs you"),
@@ -95,15 +98,17 @@ def expect(paper: str, width: str) -> dict[str, tuple[str, str]]:
 
 
 def watch(page) -> list[str]:
-    """The page's errors as they happen: console errors, uncaught exceptions, 5xx answers, and
-    401 or 403 ones (a lost session shows the token prompt, which has text of its own). The
-    browser's own note of a 404 answer is not one: a paper outside the collection reads as one."""
+    """The page's errors as they happen: console errors, uncaught exceptions, 5xx answers, 401 or
+    403 ones (a lost session shows the token prompt, which has text of its own), and 404s, which a
+    missing asset or a wrong API path make. The read of `MISSING_ID`, which the walk asks for, is
+    the one 404 expected, and the browser's console note of it goes with it."""
     seen: list[str] = []
+    expected = lambda url: MISSING_ID in url  # noqa: E731
     page.on(
         "console",
         lambda m: (
             m.type == "error"
-            and "status of 404" not in m.text
+            and not expected(m.location.get("url", ""))
             and seen.append(f"console error: {m.text}")
         ),
     )
@@ -111,7 +116,8 @@ def watch(page) -> list[str]:
     page.on(
         "response",
         lambda r: (
-            (r.status >= 500 or r.status in (401, 403)) and seen.append(f"HTTP {r.status} {r.url}")
+            (r.status >= 500 or r.status in (401, 403) or (r.status == 404 and not expected(r.url)))
+            and seen.append(f"HTTP {r.status} {r.url}")
         ),
     )
     return seen
@@ -165,8 +171,8 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
                 kind, want = expect(paper, width).get(name, (None, ""))
                 if kind == "text" and want.lower() not in text.lower():
                     seen.append(f"the page does not say {want!r}")
-                elif kind == "sheet" and not page.locator(want).count():
-                    seen.append(f"no {want} is open")
+                elif kind == "locator" and not page.locator(want).count():
+                    seen.append(f"nothing matches {want}")
                 page.screenshot(path=out / f"{name}-{width}.png", full_page=True)
                 failures += [f"{name} at {width} ({path}): {s}" for s in seen]
             context.close()

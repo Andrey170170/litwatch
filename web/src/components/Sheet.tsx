@@ -1,7 +1,7 @@
 import { Dialog } from "radix-ui";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { axisOf, motionMs, sheetCloses, Tracker } from "@/lib/gesture";
-import { clearDrag, EASE, sample, settle, swallowNextClick, trackPointer } from "./gestures";
+import { clearDrag, EASE, finishEntry, sample, settle, swallowNextClick, trackPointer, type DrawerDrag } from "./gestures";
 
 const CLASS = { bottom: "sheet", left: "drawer", right: "over" };
 
@@ -11,8 +11,9 @@ type Props = {
   side?: keyof typeof CLASS;
   label: string;
   children: ReactNode;
-  /** The drawer while the shell's edge swipe holds it (`usePhoneGestures`): it mounts shut, without its entry. */
-  drag?: "opening" | "shutting" | null;
+  /** The drawer under the shell's edge swipe (`usePhoneGestures`): it mounts shut, without its entry, and keeps
+   * that entry off once the swipe has left it open. */
+  drag?: DrawerDrag;
   panelRef?: RefObject<HTMLElement | null>;
   shadeRef?: RefObject<HTMLElement | null>;
 };
@@ -55,7 +56,8 @@ export function Sheet({ open, onClose, side = "bottom", label, children, drag, p
 }
 
 /** Drag a sheet down to close it: from its handle, or from its body while that is scrolled to the top. It follows
- * the finger and its shade fades; past a third of its height, or flicked, it goes, else it springs back. */
+ * the finger and its shade fades; past a third of its height, or flicked, it goes, else it springs back. A release
+ * still settling when the sheet closes by other means is called off. */
 function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObject<HTMLElement | null>, onClose: () => void) {
   const close = useRef(onClose);
   close.current = onClose;
@@ -64,6 +66,7 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
     // one pointer at a time, let go of when the sheet goes; nothing new while a release settles
     let stop: (() => void) | null = null;
     let settling = false;
+    let pending: (() => void) | null = null;
     const down = (e: PointerEvent) => {
       const el = panel.current;
       if (stop || settling || !el || e.button !== 0 || !e.isPrimary || e.pointerType === "mouse" || !el.contains(e.target as Node)) return;
@@ -81,6 +84,7 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
             axis = axisOf(m.clientX - e.clientX, dy);
             if (!axis) return;
             if (axis === "x" || dy < 0) return (axis = "x");
+            finishEntry(el, shade.current);
             el.style.transition = "none";
           }
           if (axis !== "y") return;
@@ -100,7 +104,8 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
             shade.current.style.transition = `opacity ${ms}ms ${EASE}`;
             shade.current.style.opacity = goes ? "0" : "1";
           }
-          settle(el, { transform: goes ? "translateY(100%)" : "translateY(0)" }, ms, () => {
+          pending = settle(el, { transform: goes ? "translateY(100%)" : "translateY(0)" }, ms, () => {
+            pending = null;
             settling = false;
             if (goes) close.current();
             else clearDrag(el, shade.current);
@@ -112,6 +117,7 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
     return () => {
       document.removeEventListener("pointerdown", down);
       stop?.();
+      pending?.();
     };
   }, [panel, shade]);
 }

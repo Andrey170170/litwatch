@@ -60,13 +60,21 @@ export function swallowNextClick() {
   document.addEventListener("pointerdown", disarm, true);
 }
 
-/** Move an element to its rest over `ms` (at once under reduced motion), then call `then`. */
-export function settle(el: HTMLElement | null, to: Partial<CSSStyleDeclaration>, ms: number, then?: () => void) {
+/** Move an element to its rest over `ms` (at once under reduced motion), then call `then`. Returns a way to call
+ * `then` off, for when what it would act on has gone: the sheet closed, the shell unmounted. */
+export function settle(el: HTMLElement | null, to: Partial<CSSStyleDeclaration>, ms: number, then?: () => void): () => void {
   if (el) {
     el.style.transition = ms ? `transform ${ms}ms ${EASE}, opacity ${ms}ms ${EASE}` : "";
     Object.assign(el.style, to);
   }
-  setTimeout(() => then?.(), ms);
+  const id = setTimeout(() => then?.(), ms);
+  return () => clearTimeout(id);
+}
+
+/** End an element's entry (a screen sliding in, a sheet rising, the drawer coming from the left) where it stands:
+ * a running animation's transform would win over the finger's. One that loops is left alone. */
+export function finishEntry(...els: (HTMLElement | null)[]) {
+  for (const el of els) for (const a of el?.getAnimations?.() ?? []) if (Number.isFinite(a.effect?.getComputedTiming().endTime)) a.finish();
 }
 
 /** Take back what a drag wrote on an element, and nothing else: Radix keeps `pointer-events` inline on a dialog. */
@@ -77,6 +85,9 @@ export function clearDrag(...els: (HTMLElement | null)[]) {
 type Els = { root: RefObject<HTMLElement | null>; page: RefObject<HTMLElement | null>; main: RefObject<HTMLElement | null>; under: RefObject<HTMLElement | null>; panel: RefObject<HTMLElement | null>; shade: RefObject<HTMLElement | null> };
 type Opts = { deeper: boolean; menu: boolean; setMenu: (open: boolean) => void; deeperAt: (pathname: string) => boolean };
 type Kind = "drawer" | "back" | "step";
+/** The drawer under a gesture: `opening` and `shutting` while the finger holds it, `open` once a gesture has left it
+ * open (its entry stays off: it is already there), null when it is shut or came by its button. */
+export type DrawerDrag = "opening" | "shutting" | "open" | null;
 type Drag = { kind: Kind; x0: number; y0: number; axis: Axis; tracker: Tracker; steps: Steps | null; wasOpen: boolean; stop: () => void };
 
 /** A horizontal drag on an element that scrolls sideways (a strip) is that element's. */
@@ -94,12 +105,16 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * without its entry animation while the finger holds it), and `onRendered`, which the shell calls once a screen a
  * gesture brought in has rendered, so the page that followed the finger can give way to it.
  */
-export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" | "shutting" | null; onRendered: () => void } {
+export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag; onRendered: () => void } {
   const router = useRouter();
-  const [drawerDrag, setDrawerDrag] = useState<"opening" | "shutting" | null>(null);
+  const [drawerDrag, setDrawerDrag] = useState<DrawerDrag>(null);
   const live = useRef(opts);
   live.current = opts;
   const pending = useRef<(() => void) | null>(null);
+  // the drawer shut (a link, the shade, a swipe): opened next by its button, it has its entry again
+  useEffect(() => {
+    if (!opts.menu) setDrawerDrag(null);
+  }, [opts.menu]);
 
   useEffect(() => {
     /** The pointer followed since it landed, recognised as a drag or not yet; whether one just released is still
@@ -108,6 +123,14 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
     let settling = false;
     const done = () => (settling = false);
     let navigations = 0;
+    /** The one settle in flight, called off with the shell: nothing it would do is wanted then. */
+    let cancel: (() => void) | null = null;
+    const run = (el: HTMLElement | null, to: Partial<CSSStyleDeclaration>, ms: number, then: () => void) => {
+      cancel = settle(el, to, ms, () => {
+        cancel = null;
+        then();
+      });
+    };
     const width = () => els.root.current?.clientWidth || window.innerWidth;
     const panelWidth = () => els.panel.current?.offsetWidth || Math.min(300, width() * 0.82);
     const back = () => (router.history.canGoBack() ? router.history.back() : void router.navigate({ to: "/" }));
@@ -131,9 +154,13 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
 
     const begin = (d: Drag) => {
       if (d.kind === "drawer") {
+        finishEntry(els.panel.current, els.shade.current);
         setDrawerDrag(d.wasOpen ? "shutting" : "opening");
         if (!d.wasOpen) live.current.setMenu(true);
-      } else if (d.kind === "back") {
+        return;
+      }
+      finishEntry(els.main.current);
+      if (d.kind === "back") {
         const under = els.under.current;
         if (under) {
           under.hidden = false;
@@ -176,9 +203,9 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
       if (d.kind === "drawer") {
         const w = panelWidth();
         const where = cancelled ? (d.wasOpen ? "open" : "shut") : drawerSettles(drawerX(d, dx, w), vx, w);
-        settle(els.panel.current, { transform: where === "open" ? "translateX(0)" : `translateX(${-w}px)` }, motionMs(200), () => {
+        run(els.panel.current, { transform: where === "open" ? "translateX(0)" : `translateX(${-w}px)` }, motionMs(200), () => {
           if (where === "shut") live.current.setMenu(false);
-          setDrawerDrag(null);
+          setDrawerDrag(where === "open" ? "open" : null);
           clearDrag(els.panel.current, els.shade.current);
           done();
         });
@@ -190,7 +217,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
         const go = !cancelled && dx > 0 && backCommits(dx, vx, W);
         if (go) {
           els.under.current?.style.setProperty("--f", "1");
-          settle(els.page.current, { transform: `translateX(${W}px)` }, motionMs(200), () => {
+          run(els.page.current, { transform: `translateX(${W}px)` }, motionMs(200), () => {
             if (at !== navigations) return (clearDrag(els.page.current), hideUnder(), done());
             // the page waits off screen until the screen under it has rendered for real (`onRendered`)
             pending.current = () => {
@@ -202,7 +229,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
             back();
           });
         } else
-          settle(els.page.current, { transform: "translateX(0)" }, motionMs(200), () => {
+          run(els.page.current, { transform: "translateX(0)" }, motionMs(200), () => {
             clearDrag(els.page.current);
             hideUnder();
             done();
@@ -210,9 +237,9 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
       } else {
         const dir = cancelled ? 0 : stepCommits(dx, vx, W);
         const to = dir === 1 ? d.steps?.next : dir === -1 ? d.steps?.prev : null;
-        const stay = () => settle(els.main.current, { transform: "translateX(0)", opacity: "1" }, motionMs(200), () => (clearDrag(els.main.current), done()));
+        const stay = () => run(els.main.current, { transform: "translateX(0)", opacity: "1" }, motionMs(200), () => (clearDrag(els.main.current), done()));
         if (to && dir) {
-          settle(els.main.current, { transform: `translateX(${dx - dir * STEP_SLIDE}px)`, opacity: "0" }, motionMs(200), () => {
+          run(els.main.current, { transform: `translateX(${dx - dir * STEP_SLIDE}px)`, opacity: "0" }, motionMs(200), () => {
             if (at !== navigations) return (clearDrag(els.main.current), done());
             const undo = arrive(dir === 1 ? "next" : "prev");
             // a page may refuse the step (Calibrate, while a save is in flight): the content comes back
@@ -273,6 +300,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
       document.removeEventListener("pointerdown", down);
       unsubscribe();
       if (active) abort(active);
+      cancel?.();
     };
   }, [router, els.root, els.page, els.main, els.under, els.panel, els.shade]);
 
