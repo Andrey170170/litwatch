@@ -123,6 +123,45 @@ class SearchTests(unittest.TestCase):
         plan = [r[3] for r in self.indexer.db.execute("EXPLAIN QUERY PLAN SELECT d.id FROM documents d JOIN documents_fts ON documents_fts.rowid=d.rowid WHERE documents_fts MATCH 'neural' ORDER BY documents_fts.rank LIMIT 20")]
         self.assertFalse(any('TEMP B-TREE' in line for line in plan), plan)
 
+    def test_exact_title_then_phrase_then_title_over_abstract(self):
+        # The live index's case (archive.md, Search): titles repeating the query's words outrank
+        # the paper whose whole title it is, unless exact titles and phrases come first.
+        for n, title, abstract in [
+                (1, "Attention Is All You Need But You Don't Need All Of It", ''),
+                (2, 'Not All Attention Is All You Need', ''),
+                (3, 'Is attention all you need? You need all of it', ''),
+                (4, 'Attention Is All You Need', 'The Transformer, attention only.'),
+                (5, 'Attention Is All You Need In Speech Separation', ''),
+                (6, 'Speech separation', 'We show attention is all you need here.'),
+                (7, 'Neural circuits', ''),
+                (8, 'A study', 'Neural circuits, circuits and more neural circuits.'),
+                (9, 'Re-thinking pré-training', 'Rethinking.')]:
+            self.paper(n, title, abstract=abstract, published=f'2026-09-{n:02}')
+        self.start().step()
+        ids = [p['id'][-1] for p in self.search.search(q='attention is all you need')['items']]
+        # The exact title; titles holding the phrase; the phrase in an abstract; the words apart.
+        self.assertEqual(ids[0], '4')
+        self.assertEqual(sorted(ids[1:4]), ['1', '2', '5'])
+        self.assertEqual(ids[4:], ['6', '3'])
+        # Case, punctuation and diacritics do not keep an exact title from matching.
+        self.assertEqual(self.search.search(q='ATTENTION is all-you-need')['items'][0]['id'][-1], '4')
+        self.assertEqual(self.search.search(q='re thinking PRE-training')['items'][0]['id'][-1], '9')
+        # Pages run on across the tiers; filters hold in every tier.
+        paged = [p['id'][-1] for o in (0, 2, 4)
+                 for p in self.search.search(q='attention is all you need', limit=2, offset=o)['items']]
+        self.assertEqual(paged, ids)
+        later = self.search.search(q='attention is all you need', date_from='2026-09-05')['items']
+        self.assertEqual([p['id'][-1] for p in later], ['5', '6'])
+        # Past EXACT_SCAN titles starting with the phrase, the exact title is matched by its
+        # letters, case aside.
+        with patch('arxiv_archive.search.EXACT_SCAN', 0):
+            self.assertEqual(self.search.search(q='attention is all you need')['items'][0]['id'][-1], '4')
+        # One word: the title weighs more than an abstract that repeats it.
+        self.assertEqual(self.search.search(q='circuits')['items'][0]['id'][-1], '7')
+        # Date orders stay available and take no tiers.
+        newest = self.search.search(q='attention is all you need', sort='newest')['items']
+        self.assertEqual([p['id'][-1] for p in newest], ['6', '5', '4', '3', '2', '1'])
+
     def test_sorting_filters_and_page_boundaries(self):
         for n, title, published in [(1, 'beta', '2026-09-03'),
                                     (2, 'Alpha', '2026-09-02'),
