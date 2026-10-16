@@ -179,6 +179,9 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   endpoint yet (#59); it belongs with the archive's text assembly and its PDF fallback, and the paper page takes it
   once merged. (N5a's stack smoke test shows a Deep card with live "Among the collection" rows, from a fake deep
   service reaching litwatch with `LITWATCH_URL` and `LITWATCH_TOKEN`.)
+  Also N5b (the owner, 2026-10-15): the PDF fallback (`pdf_to_markdown` in `archive/text.py`) uses `pypdfium2`
+  (Apache/BSD) by default, so the MIT template still reads PDF-only papers; `pymupdf4llm` (AGPL) stays the opt-in
+  `pdf` extra and is preferred when installed.
 - **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
   paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
   the restart's digests.
@@ -200,6 +203,8 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   its paper) and links on prior work's arXiv ids; the card's label (revision, arXiv version, source, written); the
   `card_failed` open state; Quality's `deep` usage (attempts, list cost shown as "at least", unknown);
   `CardRequested.pass_id` in place of `event_id`. The pass reason `pick` (N4b, Area picks) beside `focus` and `request`.
+  With it (the owner, 2026-10-15): the phone layout's page wrapper becomes `<main>`, as on the desktop, and the stack
+  smoke test checks `<main>` again instead of `.screen`.
 
 ## Decisions
 
