@@ -30,7 +30,8 @@ async def store(
     its own: the page's settle locks first (`word.lock_many`), then the papers, then a settle
     of each one rewritten. A rewrite's Weight went with the old text, so its grades fall back
     to solid until the new text is analysed, and a new arXiv version queues the passes that
-    read the text again."""
+    read the text again. Call it outside a transaction: inside one, the pages are savepoints
+    that commit, and release their locks, only with it."""
     total = papers_store.Upserted()
     for start in range(0, len(papers), PAGE):
         page = papers[start : start + PAGE]
