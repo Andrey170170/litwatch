@@ -301,7 +301,7 @@ export function useRunPassNow(paperId: string) {
       return ok(await (v.pdf ? api.POST("/api/settings/fulltext/{pass_id}/pdf", params) : api.POST("/api/settings/fulltext/{pass_id}/now", params)));
     },
     (qc, id, _r, v) => {
-      toast(v.pdf ? "Running the pass now, on the PDF; its result shows here once written" : "Running the pass now; its Brief shows here once written");
+      toast(`Running the pass now${v.pdf ? ", on the PDF" : ""}; its result shows here once written`);
       const what =
         v.state === "failed"
           ? `Running now${v.pdf ? ", on the PDF" : ""}, first in line, with three more runs.`
