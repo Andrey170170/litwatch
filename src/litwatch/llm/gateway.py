@@ -132,8 +132,8 @@ class Gateway:
 
     async def recover(self) -> None:
         """Watch the batches a dead run left open, so each is accounted for in full whether or
-        not its calls are asked again."""
-        if not self.journal or not self.batching:
+        not its calls are asked again (past the deadline, cancelled first)."""
+        if not self.journal or not self.batchers:
             return
         for row in await self.journal.open_batches():
             batcher = self.batchers.get(self.models.role(row["role"]).provider)
@@ -328,11 +328,10 @@ class Gateway:
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None,
     ) -> tuple[int | None, Reply | None]:
         """The call's journal row, and its reply when a batch gave one (None: send it as a
-        normal call). A key a dead run left in an open batch waits on that batch, on its row."""
+        normal call). A key a dead run left in an open batch waits on that batch, on its row,
+        past the deadline too (the batch is cancelled then)."""
         journal = self.journal
         batcher = self.batchers.get(role.provider) if send is None else None
-        if batcher is not None and not batcher.open():
-            batcher = None
         if batcher and journal and (row := await journal.in_batch(key)):
             if reply := await batcher.attach(row["batch_id"], key):
                 if reply.usage.reused:  # shared with a call on that row: a row of its own
@@ -340,7 +339,7 @@ class Gateway:
                 return row["id"], _of_role(reply, role)
             await journal.reject(row["id"], "provider: the batch did not answer it")
         call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None
-        if batcher is None:
+        if batcher is None or not batcher.open():
             return call_id, None
         reply = await batcher.ask(key, role, request, call_id)
         return call_id, _of_role(reply, role) if reply else None

@@ -202,11 +202,11 @@ class Batcher:
 
     async def _check(self, batch_id: str, batch: _Open, now: datetime) -> None:
         try:
-            if now >= self.deadline and not batch.cancelled:
-                await self.provider.cancel(batch_id)
-                batch.cancelled = True
-                log.info("batch %s cancelled at the deadline", batch_id)
             if await self.provider.status(batch_id) != "ended":
+                if now >= self.deadline and not batch.cancelled:
+                    await self.provider.cancel(batch_id)
+                    batch.cancelled = True
+                    log.info("batch %s cancelled at the deadline", batch_id)
                 return
             replies = await self.provider.results(batch_id)
         except Exception:

@@ -171,6 +171,17 @@ async def test_at_the_deadline_a_batch_is_cancelled_its_answers_kept_and_the_res
     await gw.close()
 
 
+async def test_calls_held_but_not_sent_at_the_deadline_go_as_normal_calls():
+    gw, anthropic, _, clock = batching()
+    gw.batchers["anthropic"].quiet = 0.5
+    asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await asyncio.sleep(0.05)  # held, the batch not yet sent
+    clock.now = DEADLINE
+    await asked
+    assert (anthropic.batches, len(anthropic.calls)) == ({}, 1)
+    await gw.close()
+
+
 async def test_a_batch_still_cancelling_after_the_drain_has_its_requests_sent_normally():
     gw, anthropic, _, clock = batching(hold=True)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
@@ -305,6 +316,37 @@ async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_agai
 
     await until(charged)
     assert [c["answered"] for c in await calls(conn)] == [False, False]
+    await gw.close()
+
+
+async def test_a_run_past_the_deadline_cancels_a_dead_runs_batch_and_keeps_its_answers(conn):
+    dead = await runs.start(conn, "nightly")
+    gw, anthropic, _, clock = batching(CallJournal(conn, dead), hold=True)
+    asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
+
+    async def recorded():
+        return all(c["batch_id"] for c in await calls(conn)) and len(await calls(conn)) == 2
+
+    await until(recorded)
+    for t in asked:
+        t.cancel()
+    await asyncio.gather(*asked, return_exceptions=True)
+    await gw.close()
+
+    # Started after the deadline, the run sends no batch; the dead run's is cancelled at once.
+    clock.now = DEADLINE + timedelta(hours=1)
+    again = await runs.start(conn, "nightly")
+    gw, _, _, _ = batching(CallJournal(conn, again), provider=anthropic, clock=clock)
+    gw.batch_until(clock.now)
+    await gw.recover()
+    await until(lambda: anthropic.cancelled == ["msgbatch_1"])
+    first = asyncio.create_task(gw.ask("brief", ask(0)))
+    await asyncio.sleep(0.05)
+    anthropic.end("msgbatch_1", answered={gw.request_key(BRIEF, ask(0))})
+    assert (await first).usage.service_tier == "batch"  # the answer it had is kept
+    await gw.ask("brief", ask(1))  # cancelled before it was answered: a normal call
+    assert (len(anthropic.batches), len(anthropic.calls)) == (1, 1)
+    assert anthropic.cancelled == ["msgbatch_1"]  # an ended batch is not cancelled again
     await gw.close()
 
 

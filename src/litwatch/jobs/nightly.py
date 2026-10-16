@@ -220,9 +220,10 @@ async def _steps(
     night: tuple[datetime, datetime] | None,
 ) -> None:
     since = until
-    if night:
-        run.gateway.batch_until(night[1])
-        await run.gateway.recover()
+    # Outside the night's window the deadline is now: no batch is sent, and those a dead run
+    # left open are cancelled and settled as at a deadline.
+    run.gateway.batch_until(night[1] if night else datetime.now(UTC))
+    await run.gateway.recover()
     if not run.gateway.batching:
         night = None  # nothing to batch on: the run goes as an unbatched one
     if night:
