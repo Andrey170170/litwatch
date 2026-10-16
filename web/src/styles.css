@@ -612,13 +612,13 @@ a.nt:hover { text-decoration: underline; }
 .cpk button .ck { color: var(--cy); }
 .cpk button.cur { background: var(--sel); box-shadow: inset 3px 0 0 var(--acc); }
 /* a past session's rows, and the list of past sessions */
-.sess { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto auto auto auto; gap: 14px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line2); font-size: 13px; box-shadow: inset 3px 0 0 var(--cy); text-align: left; }
+.sess { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) 22px 84px 112px 64px; gap: 14px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line2); font-size: 13px; box-shadow: inset 3px 0 0 var(--cy); text-align: left; }
 .sess:first-child { border-top: 0; }
 .sess:hover { background: var(--hover); }
 .sess.off { box-shadow: inset 3px 0 0 var(--warn); }
 .sess.blank { box-shadow: inset 3px 0 0 var(--line); }
 .sess .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.sess .fa { font-size: 12px; white-space: nowrap; }
+.sess .fa { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sess.off .fa b { color: var(--warn); }
 .sess .fv { font-size: 12px; white-space: nowrap; }
 .sess[data-sub] { grid-template-columns: 80px minmax(0, 1fr) auto 14px; box-shadow: none; }

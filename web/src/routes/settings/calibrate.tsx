@@ -283,7 +283,7 @@ function Review({ s }: { s: Session }) {
               <span className="fa">
                 <span className="faint">you</span> <b>{it.answer ?? "–"}</b>
               </span>
-              <span className="fa">
+              <span className="fa" title={it.verdict ?? pipelineSide(it) ?? it.why ?? undefined}>
                 <span className="faint">pipeline</span> {it.verdict ?? pipelineSide(it) ?? it.why}
               </span>
               <span className="fv faint">{it.appraisal?.value?.replace("_", " ") ?? ""}</span>
