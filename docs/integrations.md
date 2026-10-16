@@ -200,13 +200,15 @@ class SearchProvider(Protocol):
 - `search` is **synchronous**: litwatch runs it in a thread beside its own search, with a timeout
   of a few seconds. A provider that raises or does not answer in time is left out of that
   response, named in its `left_out`, and counted on its card under Settings.
-- `SearchFilters` has `since` and `until` (published on or after, on or before, when set) and `limit`.
-- `SearchHit` has `id` (the version-stripped arXiv id), `title`, `authors` (list of names),
-  `published` (aware datetime or None) and an optional `score` (higher is better; compared only
-  within one provider, for the "best match" sort).
-- Hits are merged by arXiv id. Papers the collection holds are shown from the collection; the
-  rest form a second band under the collection's results, each row naming the provider that
-  found it. Topic and saved filters apply to the collection only, so with either set no
+- `SearchFilters` has `since` and `until` (published on or after, on or before, when set), `limit`
+  and `sort`: `relevance` (the default) or `newest`. A provider returns its hits in that order,
+  best match first by its own ranking, or newest first.
+- `SearchHit` has `id` (the version-stripped arXiv id), `title`, `authors` (list of names) and
+  `published` (aware datetime or None).
+- Hits are merged by arXiv id. Papers litwatch holds are shown from the collection; the rest
+  form a second band under the collection's results, each row naming the provider that found it.
+  The band keeps each provider's order, the providers in turn; asked for the newest, it is newest
+  first across them. Topic and saved filters apply to the collection only, so with either set no
   provider is asked.
 
 The built-in `archive` integration is a search provider.

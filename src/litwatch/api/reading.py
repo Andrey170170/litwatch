@@ -770,16 +770,17 @@ async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
 @router.post("/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}})
 async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
     """File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
-    litwatch lacks is fetched in the same transaction, as Process fetches it, so a refused
-    report stores nothing."""
+    litwatch lacks is fetched first, as Process fetches it, with no transaction open, and
+    stored in the report's own, so a refused report stores nothing."""
+    try:
+        paper_id, fetched = await misses.resolve(c, body.paper_id)
+    except misses.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="no such paper") from exc
     async with c.transaction():
         name, topic = await _topic(c, body.topic)
         if topic.depth != Depth.FOCUS:
             raise HTTPException(status_code=409, detail="not a Focus topic")
-        try:
-            found, _ = await misses.lookup(c, body.paper_id)
-        except misses.NotFoundError as exc:
-            raise HTTPException(status_code=404, detail="no such paper") from exc
+        found, _ = await misses.keep(c, paper_id, fetched)
         await word.lock(c, found.id)
         _, settled, new = await misses.report(c, found.id, body.topic, body.fit)
     if not new:

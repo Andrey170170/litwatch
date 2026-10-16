@@ -283,8 +283,8 @@ export interface paths {
         /**
          * Report Miss
          * @description File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
-         *     litwatch lacks is fetched in the same transaction, as Process fetches it, so a refused
-         *     report stores nothing.
+         *     litwatch lacks is fetched first, as Process fetches it, with no transaction open, and
+         *     stored in the report's own, so a refused report stores nothing.
          */
         post: operations["report_miss_api_misses_post"];
         delete?: never;
@@ -934,8 +934,8 @@ export interface paths {
          * @description Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
          *     when it has one: the request goes through the full-text queue, first in line, and the card
          *     shows on the paper once it is written. Asking again while one is queued or being written
-         *     changes nothing. A paper litwatch lacks is fetched first, as Process fetches it, in the
-         *     same transaction as the request.
+         *     changes nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no
+         *     transaction open, and stored in the request's own.
          */
         post: operations["request_card_api_papers__paper_id__card_post"];
         delete?: never;

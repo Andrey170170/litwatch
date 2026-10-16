@@ -567,17 +567,29 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
 
 async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, monkeypatch):
     # archive.md: reporting a paper outside the collection brings it in, the owner's word first.
+    import psycopg
+
     from litwatch.feedback import misses
+    from litwatch.store.taxonomy import TAXONOMY_LOCK
 
     fetched = []
-    monkeypatch.setattr(
-        misses, "fetch_by_ids", lambda ids: fetched.append(ids) or [paper(i) for i in ids]
-    )
+
+    def fetch(ids):
+        # arXiv may keep the fetch waiting for minutes: no transaction holds the taxonomy then.
+        with psycopg.connect(conn.test_dsn, autocommit=True) as other:
+            free = other.execute("SELECT pg_try_advisory_lock(%s)", (TAXONOMY_LOCK,)).fetchone()[0]
+            other.execute("SELECT pg_advisory_unlock_all()")
+        assert free, "a taxonomy edit would wait on the fetch"
+        fetched.append(ids)
+        return [paper(i) for i in ids]
+
+    monkeypatch.setattr(misses, "fetch_by_ids", fetch)
     wrong = await client.post("/api/misses", json={"paper_id": "2610.09999", "topic": INTERP.slug})
-    assert wrong.status_code == 409 and fetched == []  # a refused report fetches nothing
+    assert wrong.status_code == 409  # a refused report stores nothing
+    assert await papers_store.get(conn, "2610.09999") is None
     body = {"paper_id": "2610.09999v2", "topic": FAITH.slug}
     assert (await client.post("/api/misses", json=body)).json()["saved"] is True
-    assert fetched == [["2610.09999"]]
+    assert fetched == [["2610.09999"], ["2610.09999"]]
     (miss,) = await (await conn.execute("SELECT paper_id FROM misses")).fetchall()
     assert miss["paper_id"] == "2610.09999"
     # A report refused after the fetch stores nothing of it.

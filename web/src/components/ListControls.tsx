@@ -96,7 +96,7 @@ export function ListControls({ search, onChange, counts, total, topic, topics }:
   const set = (patch: Partial<ListSearch>) => onChange({ ...search, ...patch });
   const q = search.q ?? "";
   const { data: scope } = useQuery({ ...searchScopeQuery, enabled: desktop && !topic });
-  const size = scope?.archive_papers ? ` (${compact(scope.archive_papers)} papers)` : "";
+  const size = scope?.archive_papers != null ? ` (${compact(scope.archive_papers)} papers)` : "";
   const placeholder = topic ? `Search in ${topic.name}` : desktop ? `Search the collection and the archive${size}` : "Search papers";
   const chips = (
     <>

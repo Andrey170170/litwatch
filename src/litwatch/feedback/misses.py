@@ -30,17 +30,34 @@ class NotFoundError(LookupError):
 async def lookup(conn: psycopg.AsyncConnection, text: str) -> tuple[Paper, bool]:
     """The paper an arXiv id or link names, fetched and stored when the collection lacks it.
     Returns the paper and whether it was fetched just now."""
+    return await keep(conn, *await resolve(conn, text))
+
+
+async def resolve(conn: psycopg.AsyncConnection, text: str) -> tuple[str, Paper | None]:
+    """The arXiv id `text` names, and arXiv's record of the paper when litwatch lacks it. Call
+    it outside a transaction: arXiv may keep it waiting for minutes. NotFoundError when the text
+    names no paper or arXiv does not know it."""
     try:
         paper_id = id_from_url(text)
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
-    if stored := await papers_store.get(conn, paper_id):
-        return stored, False
+    if await papers_store.get(conn, paper_id):
+        return paper_id, None
     fetched = await asyncio.to_thread(fetch_by_ids, [paper_id])
     if not fetched:
         raise NotFoundError(f"arXiv has no paper {paper_id}")
-    await batch.store(conn, fetched, source="arxiv")
-    return await papers_store.get(conn, paper_id), True
+    return paper_id, fetched[0]
+
+
+async def keep(
+    conn: psycopg.AsyncConnection, paper_id: str, fetched: Paper | None
+) -> tuple[Paper, bool]:
+    """Store the record `resolve` fetched, unless litwatch holds the paper by now. Returns the
+    paper and whether it was stored just now."""
+    if fetched is not None and await papers_store.get(conn, paper_id) is None:
+        await batch.store(conn, [fetched], source="arxiv")
+        return await papers_store.get(conn, paper_id), True
+    return await papers_store.get(conn, paper_id), False
 
 
 async def report(

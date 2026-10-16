@@ -345,8 +345,8 @@ export function useWriteAgain() {
  * rather than that a job holds the run lock. */
 export const digestGone = (e: unknown) => e instanceof ApiError && e.status === 409 && said(e).includes("not one to write again");
 
-/** BibTeX for one paper, as text; the API looks the published version up first. */
-/** One paper's BibTeX; a paper litwatch has not fetched is cited from its page, as a search hit is. */
+/** One paper's BibTeX, as text: the API looks the published version up first; a paper litwatch has not fetched is
+ * cited from its page, as a search hit is. */
 export async function bibtexFor(paper: Schemas["Paper"]): Promise<string> {
   const year = paper.published ? Number(paper.published.slice(0, 4)) : null;
   const body = paper.stored === false ? { cited: [{ id: paper.id, title: paper.title, authors: paper.authors, year }] } : { ids: [paper.id] };
