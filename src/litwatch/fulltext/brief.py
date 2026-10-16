@@ -4,11 +4,14 @@ Weight. It asks and writes nothing."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import BaseModel, Field, field_validator
 
 from litwatch.analysis import GIST_WORDS
 from litwatch.core import Paper, TaxonomyClass, Weight
 from litwatch.core.analysis import WEIGHT_DEFINITIONS
+from litwatch.fulltext import trim
 from litwatch.llm import Request
 
 ROLE = "brief"
@@ -95,9 +98,18 @@ class Output(BaseModel):
         return _words(gist, GIST_WORDS, "Gist")
 
 
-def request(paper: Paper, area: TaxonomyClass | None, text: str, source: str) -> Request:
+def request(
+    paper: Paper,
+    area: TaxonomyClass | None,
+    text: str,
+    source: str,
+    *,
+    prepare: Callable[[str, str], str] = trim.without_references,
+) -> Request:
     """The instructions repeat across papers, so they are cached; the area, the abstract and the
-    full text (cut at `MAX_TEXT_CHARS`) go with the paper."""
+    full text go with the paper: the text as `prepare` leaves it (without its bibliography; the
+    Brief harness compares others), cut at `MAX_TEXT_CHARS`."""
+    text = prepare(text, source)
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS] + CUT
     where = f"{area.name}: {area.description}" if area else "not known; judge it in its field"

@@ -25,8 +25,8 @@ from litwatch.archive import (
     read_text,
 )
 from litwatch.core import Paper, Taxonomy
-from litwatch.fulltext import brief
-from litwatch.llm import CallError, Gateway
+from litwatch.fulltext import brief, trim
+from litwatch.llm import CallError, Gateway, Usage
 
 # The Brief asked for, and the Gist's hard limit (`brief.SYSTEM`, `brief.Output`).
 ASKED_BRIEF_WORDS = (120, 200)
@@ -67,6 +67,8 @@ class Result(BaseModel):
     output: brief.Output | None = None
     model: str | None = None
     cost: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None  # thinking included
     seconds: float | None = None
     error: str | None = None
     request: str  # `fingerprint`: answers to another request are not mixed into one run
@@ -99,10 +101,29 @@ def inputs(paper: Paper, entry: Entry) -> str:
     return hashlib.sha256(asked.encode()).hexdigest()[:12]
 
 
-def fingerprint(gateway: Gateway) -> str:
-    """The role's configuration and its instructions, hashed."""
+# What the model is sent of a paper's text: as passes send it, as read, or also without the
+# appendix (docs/plans/model-spend.md, P1).
+TEXTS: dict[str, Callable[[str, str], str]] = {
+    "pass": trim.without_references,
+    "as-read": lambda text, _source: text,
+    "no-appendix": trim.without_appendix,
+}
+
+
+def fingerprint(gateway: Gateway, text: str = "pass") -> str:
+    """The role's configuration, its instructions and the text variant, hashed."""
     role = gateway.models.role(brief.ROLE).model_dump_json()
-    return hashlib.sha256(f"{role}\n{brief.SYSTEM}".encode()).hexdigest()[:12]
+    return hashlib.sha256(f"{role}\n{brief.SYSTEM}\n{text}".encode()).hexdigest()[:12]
+
+
+def _usage(usage: Usage | None) -> dict:
+    if usage is None:
+        return {}
+    return {
+        "cost": usage.cost,
+        "input_tokens": usage.prompt_tokens,
+        "output_tokens": usage.completion_tokens,
+    }
 
 
 async def _text(
@@ -132,15 +153,17 @@ async def run(
     out: Path,
     *,
     concurrency: int = 4,
+    text: str = "pass",
     wait_seconds: float = 20 * 60,
     poll: float = 20.0,
     progress: Callable[[Result], None] | None = None,
 ) -> list[Result]:
     """Write the Brief of every paper not yet answered in `out`, appending each answer as it
     arrives; a paper whose text could not be had is left to the next run. Refuses to resume a
-    run made with another configuration of the role; a paper whose title, abstract, version, update
-    or area changed since its answer is written again."""
-    asked = fingerprint(gateway)
+    run made with another configuration of the role or text variant (`TEXTS`); a paper whose
+    title, abstract, version, update or area changed since its answer is written again."""
+    asked = fingerprint(gateway, text)
+    prepare = TEXTS[text]
     now = {p.id: inputs(p, e) for p, e in papers}
     done = {pid for pid, r in results(out).items() if r.output and r.inputs == now.get(pid)}
     if other := {r.request for r in results(out).values()} - {asked}:
@@ -152,24 +175,23 @@ async def run(
 
     async def one(paper: Paper, entry: Entry) -> None:
         area = tree.get(entry.area) if entry.area else None
-        text = await _text(archive, paper, wait_seconds, poll)
-        if isinstance(text, str):
-            result = Result(paper_id=paper.id, error=text, request=asked, inputs=now[paper.id])
+        read = await _text(archive, paper, wait_seconds, poll)
+        if isinstance(read, str):
+            result = Result(paper_id=paper.id, error=read, request=asked, inputs=now[paper.id])
         else:
             async with gate:
                 started = time.monotonic()
                 try:
                     answer = await gateway.ask(
                         brief.ROLE,
-                        brief.request(paper, area, text.body, text.source),
+                        brief.request(paper, area, read.body, read.source, prepare=prepare),
                         paper_id=paper.id,
                     )
                 except CallError as exc:
-                    cost = exc.usage.cost if exc.usage else None
                     result = Result(
                         paper_id=paper.id,
                         error=str(exc),
-                        cost=cost,
+                        **_usage(exc.usage),
                         request=asked,
                         inputs=now[paper.id],
                     )
@@ -178,12 +200,13 @@ async def run(
                         paper_id=paper.id,
                         output=answer.value,
                         model=answer.model,
-                        cost=answer.usage.cost,
+                        **_usage(answer.usage),
                         request=asked,
                         inputs=now[paper.id],
                     )
                 result.seconds = round(time.monotonic() - started, 2)
-            result.version, result.source, result.chars = text.version, text.source, len(text.body)
+            result.version, result.source = read.version, read.source
+            result.chars = len(prepare(read.body, read.source))
         with out.open("a", encoding="utf-8") as f:
             f.write(result.model_dump_json() + "\n")
         found.append(result)

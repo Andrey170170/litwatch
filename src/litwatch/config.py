@@ -25,6 +25,7 @@ ROLES = (
     "area_check",
     "field_grade",
     "brief",
+    "brief_fallback",
     "writer",
 )
 
@@ -47,6 +48,8 @@ class RoleConfig(_Section):
     # The model is served by OpenRouter's Decisions endpoint (Luna Decisions, Jev). A decision
     # role without it asks a chat model, with a strict schema.
     decisions: bool = False
+    # Another role, from another lab, asked once when this role's model refuses (models.md).
+    fallback: str | None = None
 
     @model_validator(mode="after")
     def _decisions_on_openrouter(self) -> RoleConfig:
@@ -81,8 +84,14 @@ class Models(_Section):
         provider="openrouter", model="typesafe/jev-1.13", decisions=True
     )
     field_grade: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5")
-    # Briefs, Weight and Gists from the full text (pipeline.md, section 6).
-    brief: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
+    # Briefs, Weight and Gists from the full text (pipeline.md, section 6), and who answers
+    # when Sonnet refuses: chosen in the model-spend plan's replay (docs/plans/model-spend.md).
+    brief: RoleConfig = RoleConfig(
+        provider="anthropic", model="claude-sonnet-5-5", effort="high", fallback="brief_fallback"
+    )
+    brief_fallback: RoleConfig = RoleConfig(
+        provider="openrouter", model="google/gemini-4-argon", effort="high"
+    )
     writer: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 
     @model_validator(mode="after")
@@ -91,6 +100,24 @@ class Models(_Section):
             raise ValueError(
                 f"judge and check must come from different labs; both are {self.judge.lab!r}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _fallbacks(self) -> Models:
+        # Refusals follow a lab's policy, so a fallback from the same lab would refuse alike.
+        for name in ROLES:
+            role = self.role(name)
+            if role.fallback is None:
+                continue
+            if role.fallback not in ROLES or role.fallback == name:
+                raise ValueError(f"{name}: fallback {role.fallback!r} is not another role")
+            other = self.role(role.fallback)
+            if other.fallback is not None:
+                raise ValueError(
+                    f"{name}: its fallback {role.fallback!r} has a fallback of its own"
+                )
+            if other.lab == role.lab:
+                raise ValueError(f"{name} and its fallback must come from different labs")
         return self
 
     def role(self, name: str) -> RoleConfig:
@@ -144,8 +171,9 @@ class Budget(_Section):
     """A monthly budget per provider account, in USD (models.md, budgets). Projected spend over
     it turns the status line amber; nothing is downgraded or stopped. None is no budget."""
 
-    anthropic_monthly: float | None = Field(default=200, gt=0)
-    openrouter_monthly: float | None = Field(default=30, gt=0)
+    # The owner's caps since 2026-10-16.
+    anthropic_monthly: float | None = Field(default=100, gt=0)
+    openrouter_monthly: float | None = Field(default=25, gt=0)
 
     @property
     def by_provider(self) -> dict[str, float]:
@@ -177,7 +205,8 @@ def system_zone() -> tzinfo:
 class Schedule(_Section):
     # Off until cutover: jobs run by hand before then (spec decision 22).
     enabled: bool = False
-    nightly: str = "0 6 * * *"
+    # Results are read at 09:00 (docs/plans/model-spend.md).
+    nightly: str = "0 2 * * *"
     # Publication lookup for library papers: new saves, and monthly re-checks (spec section 3).
     publications: str = "30 9 * * *"
     # The zone the cron times are read in. None is the server's own zone.

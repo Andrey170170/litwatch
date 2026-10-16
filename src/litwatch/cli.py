@@ -473,6 +473,12 @@ def eval_briefs(
     config: Annotated[Path | None, typer.Option(help="Default: ./litwatch.toml.")] = None,
     wait_minutes: Annotated[float, typer.Option(help="How long to wait for a text.")] = 20,
     concurrency: int = 4,
+    text: Annotated[
+        str,
+        typer.Option(
+            help="What is sent of the text: pass (as passes send it), as-read, no-appendix."
+        ),
+    ] = "pass",
 ) -> None:
     """Write the Brief of each paper of the preference set with the configured `brief` role,
     reading its text from the archive as a full-text pass does. A dry run: it reads the papers
@@ -485,6 +491,8 @@ def eval_briefs(
     archive = archive_for(cfg)
     if archive is None:
         raise SystemExit("no archive: configure one, or set $LITWATCH_ARCHIVE_URL")
+    if text not in briefs.TEXTS:
+        raise SystemExit(f"--text is one of {', '.join(briefs.TEXTS)}")
     entries = briefs.load(preferences)
     found = _run(lambda conn: papers_store.get_many(conn, [e.id for e in entries]), migrate=False)
     by_id = {p.id: p for p in found}
@@ -499,7 +507,8 @@ def eval_briefs(
             return await briefs.run(
                 build(cfg.models), seeds.taxonomy(),
                 [(by_id[e.id], e) for e in entries if e.id in by_id], archive, out,
-                concurrency=concurrency, wait_seconds=wait_minutes * 60, progress=progress,
+                concurrency=concurrency, text=text, wait_seconds=wait_minutes * 60,
+                progress=progress,
             )  # fmt: skip
         finally:
             await archive.aclose()

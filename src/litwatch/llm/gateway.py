@@ -180,11 +180,29 @@ class Gateway:
         paper_id: str | None = None,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
     ) -> Answer[T]:
-        """A validated answer, reusing an identical earlier call. Raises `CallError`.
+        """A validated answer, reusing an identical earlier call. Raises `CallError`. A refusal
+        is asked once of the role's fallback, another lab's model, journalled as its own call.
 
         The reply is recorded before it is validated, so a rejected one still has its charge;
         only validated outputs are reusable. The reply's text is kept only in debug mode.
         """
+        try:
+            return await self._ask(role_name, request, paper_id=paper_id, send=send)
+        except CallError as exc:
+            fallback = self.models.role(role_name).fallback
+            if exc.kind != "refused" or fallback is None:
+                raise
+        log.info("role=%s paper=%s refused: asking %s", role_name, paper_id, fallback)
+        return await self._ask(fallback, request, paper_id=paper_id, send=send)
+
+    async def _ask[T: BaseModel](
+        self,
+        role_name: str,
+        request: Request,
+        *,
+        paper_id: str | None = None,
+        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
+    ) -> Answer[T]:
         role = self.models.role(role_name)
         key = self.request_key(role, request)
         journal = self.journal
