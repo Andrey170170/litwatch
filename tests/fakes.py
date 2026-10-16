@@ -103,4 +103,61 @@ class ScriptedProvider:
         return Reply(answer, Stop.COMPLETE, usage)
 
 
-__all__ = ["ProviderError", "ScriptedProvider", "SdkClient"]
+class BatchingProvider(ScriptedProvider):
+    """A scripted provider with Message Batches (`llm.batches.BatchProvider`). A batch's
+    replies are computed when it is sent, at half of `ScriptedProvider`'s price, and given once
+    it ends: at once, unless `hold` is set, when the test ends it (`end`). A cancelled batch
+    answers only the keys `end` names; `unanswered(request)` picks requests it never answers.
+    Normal calls are `calls`; batched ones `batched`."""
+
+    def __init__(self, name: str, respond, *, hold: bool = False) -> None:
+        super().__init__(name, respond)
+        self.hold = hold
+        self.unanswered = lambda request: False
+        self.batches: dict[str, dict[str, Any]] = {}
+        self.batched: list[tuple[RoleConfig, Request]] = []
+        self.cancelled: list[str] = []
+
+    @property
+    def submitted(self) -> list[list[str]]:
+        """Each batch's keys, in the order sent."""
+        return [[key for key, _, _ in b["requests"]] for b in self.batches.values()]
+
+    async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str:
+        batch_id = f"msgbatch_{len(self.batches) + 1}"
+        replies = {}
+        for key, role, request in requests:
+            if self.unanswered(request):
+                continue
+            self.batched.append((role, request))
+            answer = self.respond(role, request)
+            if not isinstance(answer, Reply):
+                usage = Usage(model=role.model, via=self.name, cost=0.0005, service_tier="batch")
+                answer = Reply(answer, Stop.COMPLETE, usage)
+            replies[key] = answer
+        status = "in_progress" if self.hold else "ended"
+        self.batches[batch_id] = {"requests": requests, "replies": replies, "status": status}
+        return batch_id
+
+    def end(self, batch_id: str, answered: set[str] | None = None) -> None:
+        """End the batch; a cancelled one keeps the replies of `answered` only."""
+        b = self.batches[batch_id]
+        if batch_id in self.cancelled:
+            b["replies"] = {k: r for k, r in b["replies"].items() if k in (answered or set())}
+        b["status"] = "ended"
+
+    async def status(self, batch_id: str) -> str:
+        return self.batches[batch_id]["status"] if batch_id in self.batches else "gone"
+
+    async def cancel(self, batch_id: str) -> None:
+        self.cancelled.append(batch_id)
+        if self.batches[batch_id]["status"] == "in_progress":
+            self.batches[batch_id]["status"] = "canceling"
+
+    async def results(self, batch_id: str) -> dict[str, Reply | None]:
+        b = self.batches[batch_id]
+        assert b["status"] == "ended", "results are read only once a batch has ended"
+        return {key: b["replies"].get(key) for key, _, _ in b["requests"]}
+
+
+__all__ = ["BatchingProvider", "ProviderError", "ScriptedProvider", "SdkClient"]

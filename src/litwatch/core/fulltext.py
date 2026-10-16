@@ -30,6 +30,9 @@ LEASE = timedelta(minutes=30)
 # Text passes go first in the queue (lower is sooner); the archive is asked for their text at
 # its urgent priority whatever this is.
 TEXT_PRIORITY = 0
+# A text pass the owner ran now ("run it now", "Use the PDF") goes before them, and is the
+# service worker's while a nightly batches the others (models.md, batches).
+TEXT_REQUEST_PRIORITY = -1
 # Deep passes are worked by their own worker, one at a time: the owner's requests first.
 REQUEST_PRIORITY = 0
 AUTOMATIC_PRIORITY = 1

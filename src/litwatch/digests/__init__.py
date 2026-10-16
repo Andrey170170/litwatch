@@ -11,12 +11,14 @@ pick gets its Deep card (`feedback.word.settle`)."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from datetime import date, timedelta
 
 import psycopg
 
+from litwatch import store
 from litwatch.core import FAILED_RUNS, Depth, Rarity, Status, Taxonomy, Topic
 from litwatch.core.digests import DAILY, PUBLISHED, DigestPeriod, DigestRole, DigestState
 from litwatch.digests import writer
@@ -190,8 +192,22 @@ async def nightly(
     conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, today: date
 ) -> None:
     """The night's digests: the failed ones again, today's daily digests, and on a Monday the
-    weekly digests of the week before."""
-    await retry_failed(conn, run, tree)
-    await write_day(conn, run, tree, today)
-    if today.weekday() == 0:
-        await write_week(conn, run, tree, today - timedelta(days=7))
+    weekly digests of the week before. Each topic's are written in that order, the topics
+    concurrently, each on a connection of its own, so a batching run's writer calls go out
+    together (digests.md, writing)."""
+    failed = await store_.failed(conn)
+    released = await store_.released(conn, today)
+
+    async def topic_night(topic: Topic) -> None:
+        async with await store.sibling(conn) as c:
+            for row in failed:
+                if row["topic"] == topic.slug:
+                    await write(c, run, tree, topic, DigestPeriod(row["period"]), row["day"])
+            if released and topic.depth in DAILY:
+                await write(c, run, tree, topic, DigestPeriod.DAY, today)
+            if today.weekday() == 0:
+                await write(c, run, tree, topic, DigestPeriod.WEEK, today - timedelta(days=7))
+
+    async with asyncio.TaskGroup() as group:
+        for topic in _active(tree):
+            group.create_task(topic_night(topic))

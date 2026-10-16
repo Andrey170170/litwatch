@@ -514,8 +514,8 @@ async def test_a_paper_dismissed_after_its_pass_is_claimed_spends_nothing(db, mo
     await graded(db, "central")
     claim = fulltext_store.claim
 
-    async def claim_then_dismiss(conn, *args):
-        claimed = await claim(conn, *args)
+    async def claim_then_dismiss(conn, *args, **kwargs):
+        claimed = await claim(conn, *args, **kwargs)
         await papers_store.dismiss(conn, P.id)
         return claimed
 
@@ -532,8 +532,8 @@ async def test_a_pass_whose_paper_was_rewritten_after_its_claim_is_dropped_unrea
     claim = fulltext_store.claim
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
 
-    async def claim_then_rewrite(conn, *args):
-        claimed = await claim(conn, *args)
+    async def claim_then_rewrite(conn, *args, **kwargs):
+        claimed = await claim(conn, *args, **kwargs)
         await word.settle_all(conn, (await papers_store.upsert(conn, [rewrite])).rewritten)
         return claimed
 

@@ -39,20 +39,25 @@ def messages_request(role: RoleConfig, request: Request) -> dict[str, Any]:
     }
 
 
-def reply_of(message: Any, role: RoleConfig) -> Reply:
+def reply_of(message: Any, role: RoleConfig | None, *, batch: bool = False) -> Reply:
+    """The reply of a message, priced at the batch rate for an answer from a batch. Without the
+    role (an answer of a batch no call awaits) the model is the message's and the effort unknown."""
+    model = role.model if role else message.model
     u = message.usage
     cache_read = u.cache_read_input_tokens or 0
     cache_write = u.cache_creation_input_tokens or 0
     usage = Usage(
-        model=role.model,
+        model=model,
         via="anthropic",
-        effort=role.effort,
+        effort=role.effort if role else None,
         prompt_tokens=u.input_tokens + cache_read + cache_write,
         completion_tokens=u.output_tokens,
-        cost=anthropic_cost(role.model, u.input_tokens, cache_read, cache_write, u.output_tokens),
+        cost=anthropic_cost(
+            model, u.input_tokens, cache_read, cache_write, u.output_tokens, batch=batch
+        ),
         generation_id=message.id,
         provider="anthropic",
-        service_tier=getattr(u, "service_tier", None),
+        service_tier="batch" if batch else getattr(u, "service_tier", None),
         cached_tokens=cache_read,
         cache_write_tokens=cache_write,
     )
@@ -92,3 +97,35 @@ class AnthropicProvider:
         except anthropic.APIError as exc:
             raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
         return reply_of(message, role)
+
+    # Message Batches (models.md, batches): `custom_id` is the gateway's request key.
+
+    async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str:
+        batch = await self.client.messages.batches.create(
+            requests=[
+                {"custom_id": key, "params": messages_request(role, request)}
+                for key, role, request in requests
+            ]
+        )
+        return batch.id
+
+    async def status(self, batch_id: str) -> str:
+        """`in_progress`, `canceling` or `ended`; `gone` when the API no longer has it (deleted,
+        or the key is another workspace's)."""
+        try:
+            return (await self.client.messages.batches.retrieve(batch_id)).processing_status
+        except anthropic.NotFoundError:
+            return "gone"
+
+    async def cancel(self, batch_id: str) -> None:
+        await self.client.messages.batches.cancel(batch_id)
+
+    async def results(self, batch_id: str) -> dict[str, Reply | None]:
+        """Each request's reply, by its key; None for one the batch did not answer (errored,
+        cancelled, expired), which is asked again as a normal call."""
+        found: dict[str, Reply | None] = {}
+        async for line in await self.client.messages.batches.results(batch_id):
+            result = line.result
+            ok = result.type == "succeeded"
+            found[line.custom_id] = reply_of(result.message, None, batch=True) if ok else None
+        return found

@@ -67,6 +67,8 @@ service's workers, the CLI's other commands and a nightly started outside that w
   no call awaits has its usage on its journal row; the answer itself stays in the batch, which a run started again
   reads when it asks for it (below). A role's timeout bounds each request to the provider, not the wait for a batch. A
   request the batch could not answer (errored, expired, cancelled) is sent again as a normal call when it is asked.
+  A batch the provider no longer has (deleted, or the key is another workspace's) never answers: its calls are
+  settled as unanswered, and those still asked go as normal calls.
 - **Nothing is paid twice once a batch is recorded.** A batched call's journal row is written before the batch is
   sent and given the batch id once the provider accepts it; its request key is its id in the batch. A run that asks a
   key already in an open batch waits on that batch, so a run started again after a crash attaches to its batches

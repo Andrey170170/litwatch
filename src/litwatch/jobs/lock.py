@@ -26,3 +26,17 @@ async def run_lock(conn: psycopg.AsyncConnection) -> AsyncIterator[None]:
         yield
     finally:
         await conn.execute("SELECT pg_advisory_unlock(%s)", (RUN_LOCK,))
+
+
+async def held_elsewhere(conn: psycopg.AsyncConnection) -> bool:
+    """Whether another session holds the run lock: a job is running."""
+    row = await (
+        await conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_database d ON d.oid = l.database "
+            "WHERE d.datname = current_database() AND l.locktype = 'advisory' AND l.granted "
+            "AND l.classid = 0 AND l.objid = %s AND l.objsubid = 1 "
+            "AND l.pid <> pg_backend_pid()) AS held",
+            (RUN_LOCK,),
+        )
+    ).fetchone()
+    return row["held"]

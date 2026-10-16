@@ -119,7 +119,7 @@ def classify(
     """Ask the `classify` role about each paper, giving results as they arrive, held with
     `async with` (`concurrency.bounded`: leaving it stops every call). Writes nothing. A paper
     whose call fails is given with its error and stops nothing else."""
-    return bounded(papers, lambda p: _one(p, tree, gateway, thresholds), concurrency)
+    return bounded(papers, lambda p: _one(p, tree, gateway, thresholds), gateway.width(concurrency))
 
 
 async def _announce(

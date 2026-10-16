@@ -18,6 +18,8 @@ from litwatch.core.fulltext import (
     AWAITING_TOO_LONG,
     REQUEST_PRIORITY,
     REQUESTED,
+    TEXT_PRIORITY,
+    TEXT_REQUEST_PRIORITY,
     UNSTARTED,
     DeepPass,
     PassKind,
@@ -257,6 +259,7 @@ async def claim(
     *,
     deep: bool = False,
     automatic: bool = True,
+    owners: bool | None = None,
 ) -> list[Claimed]:
     """Take up to `limit` text passes to try, least recently tried first, `besides` those
     already tried: passes awaiting text, those to be tried again, and running ones whose lease
@@ -265,13 +268,16 @@ async def claim(
     With `deep`, Deep passes instead, the owner's requests first, of any revision (a Deep pass
     reads the text the paper has when it runs), and the automatic ones only when `automatic`;
     one whose job was submitted is taken whatever the cap or a dismissal says, as following its
-    job spends nothing new and ends its attempt."""
+    job spends nothing new and ends its attempt. Text passes the owner ran now only when
+    `owners` is True, none of them when it is False."""
     which = (
         f"f.kind = 'deep' AND ({STARTED} OR (p.dismissed_at IS NULL "
         "AND (%(automatic)s OR f.reason = 'request')))"
         if deep
         else "f.kind <> 'deep' AND f.paper_revision = p.revision AND p.dismissed_at IS NULL"
     )
+    if not deep and owners is not None:
+        which += f" AND f.priority {'<' if owners else '>='} {TEXT_PRIORITY}"
     rows = await (
         await conn.execute(
             f"""
@@ -321,6 +327,20 @@ async def claim(
         )
         for r in rows
     ]
+
+
+async def take_back(conn: psycopg.AsyncConnection, lease: timedelta) -> int:
+    """End the leases on text passes taken for longer than `lease`: a batching nightly's, which a
+    nightly holding the run lock calls, so the run that held them is dead. Returns how many. The
+    taxonomy lock is taken shared first, as in `retry_failed`."""
+    async with conn.transaction():
+        await lock_shared(conn)
+        cur = await conn.execute(
+            "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' "
+            "WHERE kind <> 'deep' AND state = 'running' AND lease_until - tried_at > %s",
+            (lease,),
+        )
+    return cur.rowcount
 
 
 async def held(conn: psycopg.AsyncConnection, c: Claimed) -> bool:
@@ -702,16 +722,23 @@ async def run_now(
     conn: psycopg.AsyncConnection, pass_id: int, runs: int, *, pdf: bool = False
 ) -> bool:
     """The owner's "run it now" on a pass waiting for them: three more runs, and first in line.
-    A Deep pass becomes the owner's request, ahead of the automatic ones and past the daily cap.
+    A Deep pass becomes the owner's request, ahead of the automatic ones and past the daily cap;
+    a text pass too, ahead of them and the service worker's while a nightly runs.
     With `pdf` ("Use the PDF"), it reads the paper's PDF from then on, not its LaTeX. Returns
     False when it does not wait for the owner."""
     cur = await conn.execute(
         "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, tried_at = NULL, "
         "queued_at = now(), retry_text = true, use_pdf = f.use_pdf OR %(pdf)s, "
         "reason = CASE WHEN f.kind = 'deep' THEN %(requested)s ELSE f.reason END, "
-        "priority = CASE WHEN f.kind = 'deep' THEN %(first)s ELSE f.priority END FROM papers p "
-        f"WHERE f.id = %(id)s AND p.id = f.paper_id AND {STUCK}",
-        {"id": pass_id, "requested": REQUESTED, "first": REQUEST_PRIORITY, "pdf": pdf}
+        "priority = CASE WHEN f.kind = 'deep' THEN %(first)s ELSE %(text_first)s END "
+        f"FROM papers p WHERE f.id = %(id)s AND p.id = f.paper_id AND {STUCK}",
+        {
+            "id": pass_id,
+            "requested": REQUESTED,
+            "first": REQUEST_PRIORITY,
+            "text_first": TEXT_REQUEST_PRIORITY,
+            "pdf": pdf,
+        }
         | stuck_params(runs),
     )
     return cur.rowcount == 1

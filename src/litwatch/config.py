@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import os
 import tomllib
-from datetime import datetime, tzinfo
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -211,6 +211,9 @@ class Schedule(_Section):
     nightly: str = "0 2 * * *"
     # Publication lookup for library papers: new saves, and monthly re-checks (spec section 3).
     publications: str = "30 9 * * *"
+    # The nightly's deadline, a time of day (docs/specs/v1/models.md, batches): its batches
+    # are cancelled then and what is left goes as normal calls.
+    deadline: time = time(7, 30)
     # The zone the cron times are read in. None is the server's own zone.
     timezone: str | None = None
 
@@ -236,6 +239,17 @@ class Schedule(_Section):
     @property
     def zone(self) -> tzinfo:
         return ZoneInfo(self.timezone) if self.timezone else system_zone()
+
+    def night(self, now: datetime) -> tuple[datetime, datetime] | None:
+        """The night a nightly started at `now` (aware) belongs to: the nightly time that last
+        fired and the first deadline after it, when `now` is before that deadline; else None,
+        and the run does not batch. A run started again the same night keeps its deadline."""
+        local = (now.astimezone(UTC) + timedelta(microseconds=1)).astimezone(self.zone)
+        fired = croniter(self.nightly, local).get_prev(datetime)
+        deadline = datetime.combine(fired.date(), self.deadline, self.zone)
+        if deadline <= fired:
+            deadline = datetime.combine(fired.date() + timedelta(days=1), self.deadline, self.zone)
+        return (fired, deadline) if now < deadline else None
 
 
 class Config(_Section):
