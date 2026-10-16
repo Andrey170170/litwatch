@@ -211,7 +211,7 @@ async def test_a_batch_given_up_on_is_left_open_on_its_row_for_a_later_run_to_ac
         CallJournal(conn, await runs.start(conn, "nightly")), provider=anthropic
     )
     await later.recover()
-    anthropic.end("msgbatch_1")
+    anthropic.end("msgbatch_1", answered={gw.request_key(BRIEF, ask(0))})  # cancelled, late
     await later.settle()
     assert [(c["batch_id"], c["answered"], c["cost"]) for c in await calls(conn)] == [
         ("msgbatch_1", False, 0.0005),
@@ -398,6 +398,25 @@ async def test_a_run_past_the_deadline_cancels_a_dead_runs_batch_and_keeps_its_a
     await gw.close()
 
 
+async def test_a_run_past_the_drain_reads_a_dead_runs_ended_batch_before_giving_up(conn):
+    dead = await runs.start(conn, "nightly")
+    gw, anthropic, _, clock = batching(CallJournal(conn, dead))
+    await asyncio.gather(*(gw.ask("brief", ask(n)) for n in range(2)))
+    await conn.execute("UPDATE inference_calls SET output = NULL, usage = '{}'")  # died unread
+    await gw.close()
+
+    clock.now = DEADLINE + DRAIN + timedelta(hours=1)
+    again = await runs.start(conn, "nightly")
+    gw, _, _, _ = batching(CallJournal(conn, again), provider=anthropic, clock=clock)
+    gw.batch_until(clock.now - DRAIN - timedelta(minutes=1))  # the drain passed already
+    await gw.recover()
+    await gw.settle()
+    assert [c["cost"] for c in await calls(conn)] == [0.0005, 0.0005]
+    assert (await gw.ask("brief", ask(0))).usage.service_tier == "batch"
+    assert anthropic.calls == []  # nothing paid twice
+    await gw.close()
+
+
 async def test_a_call_whose_batch_did_not_answer_it_is_settled_and_asked_again(conn):
     dead = await runs.start(conn, "nightly")
     gw, anthropic, _, clock = batching(CallJournal(conn, dead), hold=True)
@@ -493,6 +512,26 @@ async def test_a_batched_night_records_what_an_unbatched_one_does(conn, night):
         assert [len(keys) for keys in anthropic.submitted][:1] == [2]  # both papers' analyses
     else:
         assert anthropic.batches == {} and len(anthropic.calls) == len(plain.calls)
+
+
+async def test_a_run_whose_deadline_passes_before_its_steps_waits_for_the_nights_passes(
+    conn, monkeypatch
+):
+    """A run started in the window whose deadline passed by its steps does not batch, and its
+    digests still wait for the passes queued since the night's first run."""
+    night = tonight(late=True)
+    first = await runs.start(conn, "nightly")
+    waited = []
+
+    async def wait_for_texts(conn, config, run, since, deadline, limit=None):
+        waited.append(since)
+
+    monkeypatch.setattr(nightly, "wait_for_texts", wait_for_texts)
+    anthropic = BatchingProvider("anthropic", respond)
+    gateway = factory(respond, anthropic)
+    await nightly.run(conn, steps.CONFIG, fetch=False, gateway=gateway, night=night)
+    started = (await runs.get(conn, first))["started_at"]
+    assert waited == [started] and anthropic.batches == {}
 
 
 async def passing(conn):

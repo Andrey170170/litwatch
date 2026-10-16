@@ -233,7 +233,9 @@ class Batcher:
     async def _poll(self) -> None:
         while self._open:
             now = self.now()
-            if now >= self.deadline + self.drain:
+            for batch_id, batch in list(self._open.items()):
+                await self._check(batch_id, batch, now)
+            if self._open and now >= self.deadline + self.drain:  # each looked at once first
                 log.warning("%d batches still open after the deadline's drain", len(self._open))
                 for batch_id in list(self._open):
                     batch = self._open.pop(batch_id)
@@ -241,8 +243,6 @@ class Batcher:
                     for key in batch.waiting:
                         self._resolve(key, None)
                 return
-            for batch_id, batch in list(self._open.items()):
-                await self._check(batch_id, batch, now)
             if self._open:
                 await asyncio.sleep(self.poll)
 

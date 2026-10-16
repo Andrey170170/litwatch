@@ -221,14 +221,16 @@ async def _steps(
     night: tuple[datetime, datetime] | None,
 ) -> None:
     since = until
+    if night:  # a run started in the night's window waits for the passes since its first run
+        since = await runs.first_since(conn, "nightly", night[0]) or until
     # Outside the night's window the deadline is now: no batch is sent, and those a dead run
     # left open are cancelled and settled as at a deadline.
     run.gateway.batch_until(night[1] if night else datetime.now(UTC))
     await run.gateway.recover()
     if not run.gateway.batching:
-        night = None  # nothing to batch on: the run goes as an unbatched one
-    if night:
-        since = await runs.first_since(conn, "nightly", night[0]) or until
+        # Nothing to batch on, or the deadline passed meanwhile: the passes go as normal calls,
+        # and the digests wait for them as an unbatched run's do.
+        night = None
     await classify(conn, config, run, limit)
     await analyse(conn, run, limit)
     await grade(conn, config, run, limit)
