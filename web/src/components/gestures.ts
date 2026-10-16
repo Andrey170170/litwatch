@@ -193,12 +193,14 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
       d.stop();
       active = null;
       if (d.axis !== "x") return;
-      clearDrag(els.page.current, els.main.current, els.panel.current, els.shade.current);
+      clearDrag(els.page.current, els.main.current);
       hideUnder();
-      if (d.kind === "drawer") {
-        setDrawerDrag(null);
-        if (!d.wasOpen) live.current.setMenu(false);
-      }
+      if (d.kind !== "drawer") return;
+      // the drawer being opened goes with the screen, its drag state still on it (as in `finish`); one being shut stays
+      if (d.wasOpen) {
+        clearDrag(els.panel.current, els.shade.current);
+        setDrawerDrag("open");
+      } else live.current.setMenu(false);
     };
 
     const finish = (d: Drag, e: PointerEvent, cancelled: boolean) => {
@@ -213,9 +215,13 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
         const w = panelWidth();
         const where = cancelled ? (d.wasOpen ? "open" : "shut") : drawerSettles(drawerX(d, dx, w), vx, w);
         run(els.panel.current, { transform: where === "open" ? "translateX(0)" : `translateX(${-w}px)` }, motionMs(200), () => {
+          // shut, the drawer goes with its drag state still on it: with that gone, Radix would keep it for the entry
+          // animation it restores, which would play the drawer back in before it went (the menu effect resets the state)
           if (where === "shut") live.current.setMenu(false);
-          setDrawerDrag(where === "open" ? "open" : null);
-          clearDrag(els.panel.current, els.shade.current);
+          else {
+            setDrawerDrag("open");
+            clearDrag(els.panel.current, els.shade.current);
+          }
           done();
         });
         if (els.shade.current) {

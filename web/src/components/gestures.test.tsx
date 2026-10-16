@@ -114,9 +114,11 @@ describe("The phone's gestures", () => {
     // what the drag wrote is gone; what Radix keeps inline (the dialog takes pointer events while the body does not) stays
     expect(drawer.style.transform).toBe("");
     expect(drawer.style.pointerEvents).toBe("auto");
-    // dragged shut from the open drawer, past half its width
+    // dragged shut from the open drawer, past half its width: it goes with its drag state still on it (Radix would
+    // otherwise keep it for the entry animation that state held off, and play it back in)
     swipe(screen.getByRole("link", { name: "Papers" }), [250, 300], [[240, 300], [40, 300]]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(drawer).toHaveAttribute("data-drag", "shutting");
     // let go a few px in: it shuts again
     swipe(screen.getByRole("main"), [10, 300], [[30, 300], [60, 300]]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

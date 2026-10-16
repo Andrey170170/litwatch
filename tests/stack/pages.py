@@ -66,24 +66,41 @@ MISSING = ("There is no such page", "No such digest", "is not in the collection"
 MAY_MISS = {"paper-outside", "share-outside"}
 
 
-def expect(paper: str, width: str) -> dict[str, tuple[str, str]]:
+def expect(paper: str, day: str, width: str) -> dict[str, tuple[str, str]]:
     """What a page must show to count as working, beyond text in <main> that says nothing is
-    missing (`MISSING`): a word of its own where one holds whatever the data (a Settings page's
-    title, the paper's id, Process for a paper outside the collection), or an element: the share
-    target's landing has the paper's sheet open on its labels on the phone (the desktop's rail is
-    open already), and the picker of Report as a miss open when the shared paper is one neither
-    litwatch nor the archive has. The lists and the Digest's views have no such word: their text is
-    their data, or an empty state. Text is compared without case: `inner_text` renders a button's
-    CSS `text-transform`."""
+    missing (`MISSING`): an element of its own, or a word. The Digest's views show their place
+    (Today in the Day's stepper, the day asked for, the Week in the phone's bar or the desktop's
+    view tabs, History's active form); the lists show their data (a paper link, an archive
+    search's heading, a topic card, the topic's heading); a paper shows its id, or Process when
+    outside the collection; the share target's landing has the paper's sheet open on its labels on
+    the phone (the desktop's rail is open already), or the picker of Report as a miss open when the
+    shared paper is one neither litwatch nor the archive has; the Settings pages their titles. A
+    `locator` is looked for in the whole page (a phone's bar and foot lie outside <main>); `text`
+    in <main>, without case (`inner_text` renders a button's CSS `text-transform`)."""
+    d = date.fromisoformat(day)
+    phone = width == "phone"
     return {
+        "digest": ("locator", '.stp .lbl small:has-text("Today")'),
+        "digest-day": ("locator", f'.stp .lbl:has-text("{d:%a} {d.day}")'),
+        "week": (
+            "locator",
+            '.ttl:has-text("Digest · Week")' if phone else '.vseg .on:has-text("Week")',
+        ),
+        "history": ("locator", '[aria-label="History as"] .on[aria-label="List"]'),
+        "history-calendar": ("locator", '[aria-label="History as"] .on[aria-label="Calendar"]'),
+        "papers": ("locator", 'main a[href^="/paper/"]'),
+        "search": ("locator", ".outh"),
+        "topics": ("locator", ".tcard"),
+        "topic": ("locator", ".thead .h1"),
         "paper": ("text", paper),
         "paper-outside": ("text", "Process"),
-        "share": ("locator", ".sheet .slab") if width == "phone" else ("text", paper),
+        "share": ("locator", ".sheet .slab") if phone else ("text", paper),
         "share-outside": ("locator", '[role="group"][aria-label="Report as a miss"]'),
         "settings": ("text", "Overview"),
         "settings-overview": ("text", "Overview"),
         "settings-needs": ("text", "Needs you"),
         "settings-calibrate": ("text", "Calibrate"),
+        "settings-calibrate-session": ("locator", '[aria-label="Papers in the session"]'),
         "settings-misses": ("text", "Misses"),
         "settings-topics": ("text", "Topics"),
         "settings-topic-editor": ("text", "follows"),
@@ -93,7 +110,7 @@ def expect(paper: str, width: str) -> dict[str, tuple[str, str]]:
         "settings-integrations": ("text", "Integrations"),
         "settings-integration-events": ("text", "events"),
         "settings-configuration": ("text", "Configuration"),
-        "digest-one": ("text", "digest"),
+        "digest-one": ("locator", ".dgfull .dghead .h1 a"),
     }
 
 
@@ -168,7 +185,7 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
                 for line in MISSING:
                     if line in text and (name not in MAY_MISS or line == NOT_A_PAGE):
                         seen.append(f"the page says {line!r}")
-                kind, want = expect(paper, width).get(name, (None, ""))
+                kind, want = expect(paper, day, width)[name]
                 if kind == "text" and want.lower() not in text.lower():
                     seen.append(f"the page does not say {want!r}")
                 elif kind == "locator" and not page.locator(want).count():
