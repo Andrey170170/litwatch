@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
@@ -402,16 +402,17 @@ describe("Settings", () => {
     expect(reads()).toBe(2);
   });
 
-  it("keeps a label given since the session when only the appraisal is edited", async () => {
+  it("keeps a label given since the session when only the appraisal is edited: the control shows it, the answer sends no Fit", async () => {
     viewport(true);
     const item = { position: 1, paper_id: "2610.00001", topic: "mi", why: "above", verdict: "related", answer: "related", answered_at: "2026-10-14T10:00:00Z", title: "Drawn 1", abstract: "A.", authors: ["A"], published: "2026-10-13", fit: { mi: "none" }, appraisal: null };
-    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items: [item] }, "PUT /api/settings/calibrate/1/items/1": { recorded: true } });
+    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items: [item] }, "PUT /api/settings/calibrate/1/items/1": () => new Response(null, { status: 204 }) });
     renderApp("/settings/calibrate/1?at=1");
     expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
-    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    const fit = await screen.findByRole("group", { name: "Fit for Mech interp" });
+    expect(within(fit).getByRole("button", { name: "none" })).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(screen.getByRole("button", { name: "matters" }));
     await userEvent.click(screen.getByRole("button", { name: /Done|Next/ }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: { mi: "none" }, value: "matters", note: null }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: {}, value: "matters", note: null }));
   });
 
   it("records what was changed before the strip moves to another paper", async () => {
@@ -424,5 +425,316 @@ describe("Settings", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Paper 2" }));
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: { mi: "related" }, value: null, note: null }));
     expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
+  });
+
+  // -- Calibrate's draft: the item as last read, plus what was changed on it ---------------------------------------
+
+  const drawnItem = (position: number, more: object = {}) => ({ position, paper_id: `2610.0000${position}`, topic: "mi", why: "above", verdict: "related", answer: null, answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null, ...more });
+  const fitGroup = () => screen.getByRole("group", { name: "Fit for Mech interp" });
+  const fitButton = (name: string) => within(fitGroup()).getByRole("button", { name });
+
+  it("follows a refreshed label behind an untouched Fit, keeps an edited one, and sends no Fit for an appraisal edit", async () => {
+    viewport(true);
+    // Both papers answered related before; a read since finds the owner's newer word, none, on each.
+    const before = [drawnItem(1, { answer: "related", answered_at: "2026-10-14T10:00:00Z", fit: { mi: "related" } }), drawnItem(2, { answer: "related", answered_at: "2026-10-14T10:00:00Z", fit: { mi: "related" } })];
+    const after = before.map((it) => ({ ...it, fit: { mi: "none" } }));
+    let reads = 0;
+    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": () => ({ id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items: ++reads > 1 ? after : before }), "PUT /api/settings/calibrate/1/items/1": () => new Response(null, { status: 204 }), "PUT /api/settings/calibrate/1/items/2": () => new Response(null, { status: 204 }) });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderApp("/settings/calibrate/1?at=1", client);
+    expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    expect(fitButton("related")).toHaveAttribute("aria-pressed", "true");
+    // The refresh a fresh visit makes: the untouched control follows the newer label.
+    await client.invalidateQueries({ queryKey: ["settings", "calibrate/1"] });
+    await waitFor(() => expect(fitButton("none")).toHaveAttribute("aria-pressed", "true"));
+    await userEvent.click(screen.getByRole("button", { name: "matters" }));
+    await userEvent.click(screen.getByRole("button", { name: "Next ›" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/settings/calibrate/1/items/1")?.body).toEqual({ fit: {}, value: "matters", note: null }));
+    // On the next paper, a Fit edited before the refresh lands stands over it; the answer sends that Fit.
+    expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
+    await waitFor(() => expect(fitButton("none")).toHaveAttribute("aria-pressed", "true"));
+    await userEvent.click(fitButton("central"));
+    await client.invalidateQueries({ queryKey: ["settings", "calibrate/1"] });
+    await waitFor(() => expect(reads).toBeGreaterThan(3));
+    expect(fitButton("central")).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/settings/calibrate/1/items/2")?.body).toEqual({ fit: { mi: "central" }, value: null, note: null }));
+  });
+
+  it("shows a recorded answer faint where its label was taken back, and writes it again only when chosen again", async () => {
+    viewport(true);
+    const items = [drawnItem(1, { answer: "related", answered_at: "2026-10-14T10:00:00Z" }), drawnItem(2, { answer: "related", answered_at: "2026-10-14T10:00:00Z" })];
+    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items }, "PUT /api/settings/calibrate/1/items/1": () => new Response(null, { status: 204 }), "PUT /api/settings/calibrate/1/items/2": () => new Response(null, { status: 204 }) });
+    renderApp("/settings/calibrate/1?at=1");
+    expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    expect(fitButton("related")).toHaveClass("auto");
+    expect(fitButton("related")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText(/answered related before, no label stands/)).toBeInTheDocument();
+    // Chosen, then tapped again: the edit is taken back and the answer stays history.
+    await userEvent.click(fitButton("related"));
+    expect(fitButton("related")).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(fitButton("related"));
+    expect(fitButton("related")).toHaveAttribute("aria-pressed", "false");
+    await userEvent.type(screen.getByRole("textbox", { name: "Note" }), "a note");
+    await userEvent.click(screen.getByRole("button", { name: "Next ›" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/settings/calibrate/1/items/1")?.body).toEqual({ fit: {}, value: null, note: "a note" }));
+    // Chosen again on the next paper, it is a label once more.
+    expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
+    await userEvent.click(fitButton("related"));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/settings/calibrate/1/items/2")?.body).toEqual({ fit: { mi: "related" }, value: null, note: null }));
+  });
+
+  it("locks the editor and its navigation while an answer is saved, so nothing typed meanwhile is lost", async () => {
+    viewport(true);
+    let release!: () => void;
+    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items: [drawnItem(1), drawnItem(2)] }, "PUT /api/settings/calibrate/1/items/2": () => new Promise<Response>((r) => (release = () => r(new Response(null, { status: 204 })))) });
+    const { router } = renderApp("/settings/calibrate/1?at=2");
+    expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    await userEvent.click(fitButton("related"));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "‹ Back" })).toBeDisabled();
+    expect(fitButton("central")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "matters" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeDisabled();
+    expect(screen.getByRole("tab", { name: "Paper 1" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("tab", { name: "Paper 1" }));
+    expect(screen.getByText("Drawn 2")).toBeInTheDocument();
+    release();
+    await waitFor(() => expect(router.state.location.href).toMatch(/review=/));
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(1);
+  });
+
+  it("gives the phone's controls back with the draft kept when a save fails", async () => {
+    viewport(false);
+    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items: [drawnItem(1), drawnItem(2)] }, "PUT /api/settings/calibrate/1/items/1": () => json({ detail: "the database is away" }, 500) });
+    const { router } = renderApp("/settings/calibrate/1?at=1");
+    expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    await userEvent.click(fitButton("related"));
+    await userEvent.type(screen.getByRole("textbox", { name: "Note" }), "kept");
+    await userEvent.click(screen.getByRole("button", { name: "Next ›" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next ›" })).toBeEnabled());
+    expect(router.state.location.href).toBe("/settings/calibrate/1?at=1");
+    expect(fitButton("related")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("textbox", { name: "Note" })).toHaveValue("kept");
+    expect(screen.getByRole("button", { name: "Go to a paper" })).toBeEnabled();
+  });
+
+  it("asks for the drawn topic's Fit before moving on with edits, and still skips an untouched paper", async () => {
+    viewport(true);
+    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items: [drawnItem(1), drawnItem(2)] }, "PUT /api/settings/calibrate/1/items/1": () => new Response(null, { status: 204 }) });
+    const { router } = renderApp("/settings/calibrate/1?at=1");
+    expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    await userEvent.click(screen.getByRole("button", { name: "matters" }));
+    await userEvent.click(screen.getByRole("button", { name: "Next ›" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose the Fit for Mech interp to record this paper");
+    expect(calls.filter((c) => c.method === "PUT")).toEqual([]);
+    expect(screen.getByText("Drawn 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "matters" })).toHaveAttribute("aria-pressed", "true");
+    // The strip asks too: the edits would be lost otherwise.
+    await userEvent.click(screen.getByRole("tab", { name: "Paper 2" }));
+    expect(screen.getByText("Drawn 1")).toBeInTheDocument();
+    await userEvent.click(fitButton("related"));
+    expect(screen.queryByRole("alert")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Next ›" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: { mi: "related" }, value: "matters", note: null }));
+    // An untouched paper is left as it was: Done moves to the review with no write.
+    expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(router.state.location.href).toMatch(/review=/));
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(1);
+  });
+
+  // -- settlement from the mutation, whatever page is shown when the write returns ----------------------------------
+
+  it("settles rows whose writes return after Needs you was left, and does not pull the reader back", async () => {
+    viewport(true);
+    let writeDigest!: () => void;
+    let retryAnalysis!: () => void;
+    const written = { id: 3, topic: badge, period: "day", day: "2026-10-08", state: "written", counts: {}, gist: "g", text: "t", error: null, written_at: "2026-10-15T10:00:00Z", papers: [] };
+    scriptFetch({
+      ...common,
+      "GET /api/settings/config": {},
+      "POST /api/digests/3/write": () => new Promise<Response>((r) => (writeDigest = () => r(json(written)))),
+      // The stuck paper was never read: nothing cached to reconcile from, the row settles by name all the same.
+      "POST /api/settings/analysis/2610.00002/retry": () => new Promise<Response>((r) => (retryAnalysis = () => r(new Response(null, { status: 204 })))),
+    });
+    const { router } = renderApp("/settings/needs", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    const digestRow = (await screen.findByText("Daily digest · 8 Oct")).closest(".need") as HTMLElement;
+    await userEvent.click(within(digestRow).getByRole("button", { name: "Write it again" }));
+    const stuckRow = screen.getByRole("link", { name: "A stuck paper" }).closest(".need") as HTMLElement;
+    await userEvent.click(within(stuckRow).getByRole("button", { name: "Try again" }));
+    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
+    writeDigest();
+    retryAnalysis();
+    await waitFor(() => expect(within(screen.getByRole("link", { name: /Needs you/ })).getByText("4")).toBeInTheDocument());
+    // Still on Configuration: the writes landed, nobody was moved.
+    expect(document.querySelector("main .h1")).toHaveTextContent("Configuration");
+    router.history.back();
+    const again = (await screen.findByText("Daily digest · 8 Oct")).closest(".need")!;
+    await waitFor(() => expect(again).toHaveClass("settled"));
+    expect(again).toHaveTextContent("Written again; it shows in the Digest.");
+    const stuckAgain = screen.getByRole("link", { name: "A stuck paper" }).closest(".need")!;
+    expect(stuckAgain).toHaveClass("settled");
+    expect(stuckAgain).toHaveTextContent("Analysis gets three more runs, from the next one.");
+    expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+  });
+
+  it("settles an ungraded paper whose grading failed again, as it no longer waits on the owner", async () => {
+    viewport(true);
+    const ungraded = { ...stuck, paper_id: "2610.00005", title: "An ungraded paper", topic: "mi" };
+    scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night: { ...quality.night, ungraded: [ungraded] } }, "POST /api/settings/grading/mi/2610.00005/now": { graded: false, fit: null, error: "no verdict came back" } });
+    renderApp("/settings/needs");
+    const item = (await screen.findByRole("link", { name: "An ungraded paper" })).closest(".need") as HTMLElement;
+    await userEvent.click(within(item).getByRole("button", { name: "Grade it now" }));
+    await waitFor(() => expect(item).toHaveClass("settled"));
+    expect(item).toHaveTextContent("Grading failed again: no verdict came back. The nightly runs try twice more.");
+    expect(screen.getByText("4 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+  });
+
+  it("keeps a settlement when an older read of the page lands after it, rows where they were", async () => {
+    viewport(true);
+    let reads = 0;
+    let land!: () => void;
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/config": {},
+      // The fresh visit's read is held; it carries the split still unlabelled, as read before the write.
+      "GET /api/settings/quality": () => (++reads > 1 ? new Promise<typeof quality>((r) => (land = () => r(quality))) : quality),
+      "PUT /api/labels/mi/2610.00001": { saved: false },
+      "DELETE /api/labels/mi/2610.00001": { saved: false },
+    });
+    renderApp("/settings/needs", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    await screen.findByText("A split paper");
+    // Away and back by the link: a fresh visit, its read held behind the cached rows.
+    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
+    await userEvent.click(screen.getByRole("link", { name: /Needs you/ }));
+    await screen.findByText("Updating…");
+    const item = (await screen.findByText("A split paper")).closest(".need") as HTMLElement;
+    await userEvent.click(within(item).getByRole("button", { name: "related" }));
+    await waitFor(() => expect(item).toHaveClass("settled"));
+    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    // The old read lands: nothing moves, the settlement stands, the count stays, and the page stops updating.
+    land();
+    await waitFor(() => expect(screen.queryByText("Updating…")).toBeNull());
+    expect((screen.getByText("A split paper").closest(".need") as HTMLElement)).toHaveClass("settled");
+    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /paper$/ }).map((l) => l.textContent)).toEqual(["A split paper", "A stuck paper", "A textless paper"]);
+    expect(calls.filter((c) => c.url === "/api/settings/quality").length).toBe(2);
+    // Taken back from the mutation too: the split waits again.
+    await userEvent.click(within(item).getByRole("button", { name: "related" }));
+    await waitFor(() => expect(item).not.toHaveClass("settled"));
+    expect(screen.getByText("4 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+  });
+
+  it("patches the session's row in the past-session lists, Calibrate's and Overview's, from answers and More", async () => {
+    viewport(true);
+    const items = [drawnItem(1)];
+    const sessionNow = () => ({ id: 3, seed: 7, drawn_at: "2026-10-14T10:00:00Z", items });
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/runs": [],
+      "GET /api/settings/calibrate": [{ id: 3, seed: 7, drawn_at: "2026-10-14T10:00:00Z", papers: 1, answered: 0, differ: 0 }],
+      "GET /api/settings/calibrate/3": sessionNow,
+      "PUT /api/settings/calibrate/3/items/1": () => {
+        items[0] = drawnItem(1, { answer: "none", answered_at: "2026-10-15T10:00:00Z", fit: { mi: "none" } });
+        return new Response(null, { status: 204 });
+      },
+      "POST /api/settings/calibrate/3/more": () => {
+        items.push(drawnItem(items.length + 1, { why: "split" }));
+        return { added: 1 };
+      },
+    });
+    const { router } = renderApp("/settings/overview", new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    expect(await screen.findByText("Last Calibrate session · 0 of 1 answered")).toBeInTheDocument();
+    await userEvent.click(within(document.querySelector("aside.side")!).getByRole("link", { name: /Calibrate/ }));
+    const row = await screen.findByRole("button", { name: /14 Oct/ });
+    expect(row).toHaveTextContent("0 of 1 answered · 0 differ · seed 7unfinished");
+    const listReads = calls.filter((c) => c.url === "/api/settings/calibrate").length;
+    await userEvent.click(row);
+    // A past session opens on its review; Continue goes to its first unanswered paper.
+    await userEvent.click(await screen.findByRole("button", { name: "Continue · 1 left" }));
+    await screen.findByText("Drawn 1");
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    await userEvent.click(fitButton("none"));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(router.state.location.href).toMatch(/review=/));
+    const more = await screen.findByRole("button", { name: "Add the papers waiting for a word" });
+    await userEvent.click(more);
+    await waitFor(() => expect(screen.getAllByRole("link", { name: /^Drawn/ }).length).toBe(2));
+    await userEvent.click(more);
+    await waitFor(() => expect(screen.getAllByRole("link", { name: /^Drawn/ }).length).toBe(3));
+    // Back to the review Continue left, then to the list: the row reads the counts as they are now, not refetched.
+    router.history.back();
+    await waitFor(() => expect(router.state.location.href).toBe("/settings/calibrate/3?review=1"));
+    router.history.back();
+    const back = await screen.findByRole("button", { name: /14 Oct/ });
+    expect(back).toHaveTextContent("1 of 3 answered · 1 differ · seed 7unfinished");
+    expect(calls.filter((c) => c.url === "/api/settings/calibrate").length).toBe(listReads);
+    router.history.back();
+    expect(await screen.findByText("Last Calibrate session · 1 of 3 answered")).toBeInTheDocument();
+    expect(calls.filter((c) => c.url === "/api/settings/calibrate").length).toBe(listReads);
+  });
+
+  // -- Overview, Topics -----------------------------------------------------------------------------------------------
+
+  it("marks last night red when some of its steps failed, as Runs and cost does", async () => {
+    viewport(true);
+    const night = { id: 6, kind: "nightly", started_at: "2026-10-14T03:00:00Z", finished_at: "2026-10-14T04:00:00Z", cost: 0.2, error: null, counts: { classified: 40, graded: 12, grading_failed: 20 }, fetched: 0, inserted: 0, updated: 0 };
+    scriptFetch({ ...common, "GET /api/settings/runs": [night] });
+    renderApp("/settings/overview");
+    const tile = (await screen.findByText(/Last night · 40 classified/)).closest(".tile")!;
+    expect(tile).toHaveClass("fail");
+  });
+
+  it("saves a second move from the first's order, after it, so neither undoes the other", async () => {
+    viewport(true);
+    const topicOf = (slug: string, depth: string) => ({ ...topic, class: slug, depth, monogram: slug.toUpperCase() });
+    const classOf = (slug: string) => ({ ...cls, slug, name: slug.toUpperCase() });
+    const four = { classes: ["a", "b", "c", "d"].map(classOf), topics: [topicOf("a", "focus"), topicOf("b", "focus"), topicOf("c", "area"), topicOf("d", "area")] };
+    let releaseFirst!: () => void;
+    const calls = scriptFetch({ ...common, "GET /api/settings/taxonomy": four, "PUT /api/settings/topics-order": () => (calls.filter((c) => c.method === "PUT").length === 1 ? new Promise<Response>((r) => (releaseFirst = () => r(new Response(null, { status: 204 })))) : new Response(null, { status: 204 })) });
+    renderApp("/settings/topics");
+    await screen.findByRole("button", { name: "Move A" });
+    // jsdom has no hit-testing or pointer capture: the drag lands on the row named.
+    Element.prototype.setPointerCapture = () => {};
+    const drag = (from: string, over: string) => {
+      document.elementFromPoint = () => document.querySelector(`[data-slug="${over}"]`);
+      const grip = screen.getByRole("button", { name: `Move ${from}` });
+      fireEvent.pointerDown(grip, { pointerId: 1 });
+      fireEvent.pointerMove(grip, { pointerId: 1, clientX: 1, clientY: 1 });
+      fireEvent.pointerUp(grip, { pointerId: 1 });
+    };
+    drag("A", "B");
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
+    drag("C", "D");
+    // The second save waits for the first, and starts from its order.
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Move/ }).map((b) => b.getAttribute("aria-label"))).toEqual(["Move B", "Move A", "Move D", "Move C"]));
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(1);
+    releaseFirst();
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").map((c) => c.body)).toEqual([{ slugs: ["b", "a", "c", "d"] }, { slugs: ["b", "a", "d", "c"] }]));
+  });
+
+  it("shows a draft topic as one, activated only by an explicit choice", async () => {
+    viewport(true);
+    const calls = scriptFetch({ ...common, "GET /api/settings/taxonomy": { ...tree, topics: [{ ...topic, status: "draft" }] }, "GET /api/settings/topics/mi/keywords": {}, "PUT /api/settings/topics/mi": { ...topic, status: "active" } });
+    renderApp("/settings/topics/mi");
+    const status = await screen.findByRole("group", { name: "Status" });
+    expect(within(status).getByRole("button", { name: "draft" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(status).getByRole("button", { name: "active" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await userEvent.click(within(status).getByRole("button", { name: "active" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({ status: "active" }));
   });
 });

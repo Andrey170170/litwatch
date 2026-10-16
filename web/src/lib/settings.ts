@@ -82,7 +82,17 @@ export type TextPassStuck = {
 
 /** A digest whose writer call failed (`store.digests.failed`): the next run writes it again, or the owner now. A
  * weekly digest's `day` is its Monday. */
-export type FailedDigest = { id: number; topic: string; period: "day" | "week"; day: string; error: string | null; written_at: string; settled?: string };
+export type FailedDigest = {
+  id: number;
+  topic: string;
+  period: "day" | "week";
+  day: string;
+  error: string | null;
+  written_at: string;
+  settled?: string;
+  /** What the last write-again from this visit said while the digest is still to be written (client-side). */
+  note?: string;
+};
 
 export type Spend = { provider: string; spent: number; projected: number; budget: number | null; over: boolean };
 
@@ -127,6 +137,20 @@ export function digests(r: Run): number | null {
   return c.digests_written ?? (c.digests_empty != null || c.digests_failed != null ? 0 : null);
 }
 
+/** What a run left undone, for its red-edged cell on Runs and cost and Overview's tile: its error, or the steps
+ * that failed on some papers ("20 grading, 1 digest failed"); "" for a clean run. */
+export function runFailed(r: Run): string {
+  if (r.error) return r.error;
+  const c = r.counts ?? {};
+  const parts = [
+    c.classification_failed ? `${c.classification_failed} classification` : "",
+    c.analysis_failed ? `${c.analysis_failed} analysis` : "",
+    c.grading_failed ? `${c.grading_failed} grading` : "",
+    c.digests_failed ? `${c.digests_failed} digest${c.digests_failed > 1 ? "s" : ""}` : "",
+  ].filter(Boolean);
+  return parts.length ? `${parts.join(", ")} failed` : "";
+}
+
 export type SessionRow = { id: number; seed: number; drawn_at: string; papers: number; answered: number; differ: number };
 
 export type SessionItem = {
@@ -149,6 +173,8 @@ export type SessionItem = {
 
 export type Session = { id: number; seed: number; drawn_at: string; items: SessionItem[] };
 
+export type Value = NonNullable<Schemas["Answer"]["value"]>;
+
 // -- rules ---------------------------------------------------------------------------------------------------------
 
 export type Waiting = "splits" | "awaiting_classification" | "analysis_failed" | "ungraded" | "fulltext" | "digests";
@@ -161,20 +187,41 @@ export function waiting(q: Quality): number {
   return open(n.splits.filter((s) => !s.label)) + open(n.awaiting_classification) + open(n.analysis_failed) + open(n.ungraded) + open(n.fulltext) + open(n.digests);
 }
 
-/** Which item settled: its paper, and its topic or pass where a paper can have several; a digest by its id alone. */
-export type Settled = { paper_id?: string; topic?: string | null; id?: number };
+/** Which item settled: its paper, and its topic, revision or pass where a paper can have several; a digest by its
+ * id alone. A revision names the text the action was for: a row for an older one is not the item settled. */
+export type Settled = { paper_id?: string; topic?: string | null; revision?: number; id?: number };
 
-/** The quality page with one item marked settled, in place: the page and the sidebar read the same copy. `what`
- * undefined unsettles it (a label taken back). */
-export function settle(q: Quality, list: Waiting, item: Settled, what: string | undefined): Quality {
-  const same = (x: Settled) => (item.paper_id == null || x.paper_id === item.paper_id) && (item.topic == null || x.topic === item.topic) && (item.id == null || x.id === item.id);
-  const mark = <T extends Settled>(xs: T[]): T[] => xs.map((x) => (same(x) ? { ...x, settled: what } : x));
+/** The quality page with one item marked settled, in place: the page and the sidebar read the same copy. A row
+ * settled already keeps its word (the paper's page may have settled it first, a 409 come after). */
+export function settle(q: Quality, list: Waiting, item: Settled, what: string): Quality {
+  const same = (x: Settled) =>
+    (item.paper_id == null || x.paper_id === item.paper_id) && (item.topic == null || x.topic === item.topic) && (item.revision == null || x.revision === item.revision) && (item.id == null || x.id === item.id);
+  const mark = <T extends Settled & { settled?: string }>(xs: T[]): T[] => xs.map((x) => (same(x) && !x.settled ? { ...x, settled: what } : x));
   const night = { ...q.night };
   if (list === "splits") night.splits = mark(night.splits);
   else if (list === "fulltext") night.fulltext = mark(night.fulltext);
   else if (list === "digests") night.digests = mark(night.digests);
   else night[list] = mark(night[list]);
   return { ...q, night };
+}
+
+/** The quality page after a label written on a split, or taken back, wherever it was sent from: labelled, a row
+ * the visit lists (fetched unlabelled, or settled on it) settles with the label, a changed one replacing it, and
+ * a row fetched labelled stays off the list; taken back, the split waits again, its label gone whether the visit
+ * fetched it labelled or settled it. */
+export function labelled(q: Quality, paper_id: string, topic: string, value: LabelValue | null): Quality {
+  const splits = q.night.splits.map((s) => {
+    if (s.paper_id !== paper_id || s.topic !== topic) return s;
+    if (!value) return { ...s, settled: undefined, label: null };
+    return !s.label || s.settled ? { ...s, settled: value } : s;
+  });
+  return { ...q, night: { ...q.night, splits } };
+}
+
+/** The quality page with what a digest's write-again said while it is still to be written (it failed again, or a
+ * job holds the run lock): kept with the row, as a settlement is, for the page shown now or returned to. */
+export function noted(q: Quality, id: number, note: string): Quality {
+  return { ...q, night: { ...q.night, digests: q.night.digests.map((d) => (d.id === id ? { ...d, note } : d)) } };
 }
 
 /** Last night's splits and escalations still waiting for a label, or settled on this visit, in their two groups.
@@ -218,10 +265,32 @@ export function settleFromPaper(q: Quality, paper: Schemas["Paper"]): Quality {
   return { ...q, night };
 }
 
-/** The Fits an answer sends: the drawn topic's, and any Focus topic's the owner changed on this screen. A label
- * left as it was is not written again (writing renews its time, and the newest word wins). */
-export function answerFits(draft: Record<string, LabelValue>, item: SessionItem, focus: Set<string>): Record<string, LabelValue> {
-  return Object.fromEntries(Object.entries(draft).filter(([slug, fit]) => slug === item.topic || (focus.has(slug) && fit !== item.fit[slug])));
+/** What the owner changed on a Calibrate screen, over the item as last read: a Fit per topic, the value, the note.
+ * The item refreshes under the edits; a field edited stands over what the refresh brought, one untouched follows
+ * it. */
+export type Edits = { fit: Record<string, LabelValue>; value?: Value | null; note?: string };
+
+/** The answer a Calibrate screen sends for the item as it stands and the edits on it. `fit` holds the Fits changed
+ * here on Focus topics or the drawn one (a label left as it was is not written again: writing renews its time,
+ * and the newest word wins) and, on a first answer, the drawn topic's Fit as shown; `value` and `note` are the
+ * appraisal as shown. `edited`: something was changed. `complete`: a first answer has the drawn topic's Fit, which
+ * it needs; after it the recorded answer stands, so an edit of the appraisal alone writes no label. The recorded
+ * answer is history, not a label: a label taken back since is not written again from it. */
+export function answerOf(item: SessionItem, edits: Edits, focus: Set<string>): { answer: Schemas["Answer"]; edited: boolean; complete: boolean } {
+  const fit = Object.fromEntries(Object.entries(edits.fit).filter(([slug, f]) => (slug === item.topic || focus.has(slug)) && f !== item.fit[slug]));
+  const value = edits.value === undefined ? (item.appraisal?.value ?? null) : edits.value;
+  const note = (edits.note ?? item.appraisal?.note ?? "") || null;
+  const edited = Object.keys(fit).length > 0 || value !== (item.appraisal?.value ?? null) || note !== (item.appraisal?.note || null);
+  const first = !item.answered_at;
+  const drawn = fit[item.topic] ?? item.fit[item.topic];
+  if (first && drawn) fit[item.topic] = drawn;
+  return { answer: { fit, value, note }, edited, complete: !first || !!drawn };
+}
+
+/** A session's row in the past-sessions lists as the refreshed session reads: its papers, how many are answered
+ * and how many answers differ (`differs`, the API's rule). The row keeps its place. */
+export function sessionRow(row: SessionRow, s: Session): SessionRow {
+  return { ...row, papers: s.items.length, answered: s.items.filter((it) => it.answered_at).length, differ: s.items.filter(differs).length };
 }
 
 export type Level = "ok" | "warn" | "bad";

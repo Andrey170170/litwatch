@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { dateTime, rowDate } from "@/lib/format";
-import { digests, type Run, spendBar, type Spend, took, usd } from "@/lib/settings";
+import { digests, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
 import { Later, Load, PageHead } from "./parts";
 
 function SpendRow({ s }: { s: Spend }) {
@@ -26,20 +26,6 @@ function SpendRow({ s }: { s: Spend }) {
     </div>
   );
 }
-
-/** What a night left undone, for its red-edged cell. */
-function failed(r: Run): string {
-  if (r.error) return r.error;
-  const c = r.counts ?? {};
-  const parts = [
-    c.classification_failed ? `${c.classification_failed} classification` : "",
-    c.analysis_failed ? `${c.analysis_failed} analysis` : "",
-    c.grading_failed ? `${c.grading_failed} grading` : "",
-    c.digests_failed ? `${c.digests_failed} digest${c.digests_failed > 1 ? "s" : ""}` : "",
-  ].filter(Boolean);
-  return parts.length ? `${parts.join(", ")} failed` : "";
-}
-
 
 export function RunsPage() {
   const quality = useQuery(qualityQuery("runs"));
@@ -76,7 +62,7 @@ export function RunsPage() {
             <span />
           </div>
           {runs.data.map((r) => {
-            const bad = failed(r);
+            const bad = runFailed(r);
             return (
               <div className={`mr${bad ? " bad" : ""}`} key={r.id}>
                 <span title={dateTime(r.started_at)}>

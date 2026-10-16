@@ -21,6 +21,8 @@ type Class = Schemas["TaxonomyClass"];
 
 const DEPTHS: Depth[] = ["focus", "area", "field"];
 const STATUSES: Schemas["Status"][] = ["active", "paused"];
+/** A topic loaded as a draft (imported or created through the API) shows so; it is activated by an explicit choice. */
+const DRAFT_STATUSES: Schemas["Status"][] = ["draft", "active", "paused"];
 export const SWATCH = ["#c026d3", "#e11d48", "#ea580c", "#ca8a04", "#65a30d", "#0d9488", "#0891b2", "#0284c7", "#4f46e5"];
 
 /** "Interpretability › Chain-of-thought faithfulness": the class and its ancestors, top first. */
@@ -266,7 +268,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
           </div>
         </Field>
         <Field label="Status" hint="a paused topic keeps its papers and gets no new ones">
-          <Seg values={STATUSES} value={form.status === "draft" ? "active" : form.status} onPick={(status) => status && set({ status })} label="Status" />
+          <Seg values={base.status === "draft" ? DRAFT_STATUSES : STATUSES} value={form.status} onPick={(status) => status && set({ status })} label="Status" />
         </Field>
       </div>
       <div className="mt-4">

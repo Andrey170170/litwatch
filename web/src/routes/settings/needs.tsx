@@ -1,23 +1,17 @@
 /**
  * Needs you (DESIGN.md, "Needs you"): only what waits on the owner, grouped by kind. A settled item turns cyan,
- * keeps its result in place and fades; nothing moves until the page is left. The mark is written into the cached
- * quality page, so the sidebar's count follows and the next visit fetches afresh.
+ * keeps its result in place and fades; nothing moves until the page is left. Each action's mutation writes the
+ * mark into the cached quality page (`settleNeeds` in mutations.ts), so the row settles even when the page was left
+ * before the write returned, the sidebar's count follows and the next fresh visit fetches afresh.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ApiError } from "@/api/client";
-import { digestGone, said, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
+import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
 import { paperQuery, qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
-import { type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, settle, type Settled, type Split, type Stuck, type TextPassStuck, type Waiting, waiting } from "@/lib/settings";
+import { type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, type Split, type Stuck, type TextPassStuck, waiting } from "@/lib/settings";
 import { FitSeg, Load, PageHead, PaperLink, useTopicCards } from "./parts";
-
-type Settle = (what: string | undefined) => void;
-
-/** A 409 says the item no longer waits on the owner (it ran, the text changed, another action took it): it settles
- * with the API's reason, so the row stays where it is and the count follows. */
-const gone = (settle: Settle) => (e: unknown) => e instanceof ApiError && e.status === 409 && settle(`No longer waits on the owner: ${said(e)}.`);
 
 /** The groups: their name, the line under it, and for a stuck step the name of what failed. */
 const KIND = {
@@ -45,7 +39,7 @@ function Group<T>({ kind, items, children }: { kind: keyof typeof KIND; items: T
 
 /** A split or escalation: the opinions, the standing Fit underlined, and the Fit control until labelled. Tapping the
  * label's segment again takes the label back, and the item waits once more. */
-function SplitItem({ s, badge, settle }: { s: Split; badge: React.ReactNode; settle: Settle }) {
+function SplitItem({ s, badge }: { s: Split; badge: React.ReactNode }) {
   const label = useLabel(s.paper_id);
   const unlabel = useUnlabel(s.paper_id);
   // The graders' opinions, judge first; the standing Fit after them.
@@ -71,7 +65,7 @@ function SplitItem({ s, badge, settle }: { s: Split; badge: React.ReactNode; set
         {said}
         <span className="faint">{value ? <>labelled <b>{value}</b></> : <>{s.fit} stands</>}</span>
       </div>
-      <FitSeg value={value} auto={s.fit} label={`Fit on ${s.topic}`} disabled={label.isPending} clear onPick={(f) => (f ? label.mutate({ topic: s.topic, value: f }, { onSuccess: () => settle(f) }) : unlabel.mutate(s.topic, { onSuccess: () => settle(undefined) }))} />
+      <FitSeg value={value} auto={s.fit} label={`Fit on ${s.topic}`} disabled={label.isPending} clear onPick={(f) => (f ? label.mutate({ topic: s.topic, value: f }) : unlabel.mutate(s.topic))} />
     </div>
   );
 }
@@ -94,7 +88,7 @@ function Stuck({ s, kind, badge, children }: { s: Stuck; kind: "awaiting" | "ung
   );
 }
 
-function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
+function Awaiting({ s }: { s: Stuck }) {
   const dismiss = useDismiss(s.paper_id);
   const classify = useClassifyByHand(s.paper_id);
   const fix = useFixText(s.paper_id);
@@ -128,7 +122,7 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
             ))}
           </div>
           <div className="nact">
-            <button className="btn pri" disabled={!chosen.length || classify.isPending} onClick={() => classify.mutate({ revision: s.revision, classes: chosen }, { onSuccess: () => settle("Classified by hand; grading follows tonight."), onError: gone(settle) })}>
+            <button className="btn pri" disabled={!chosen.length || classify.isPending} onClick={() => classify.mutate({ revision: s.revision, classes: chosen })}>
               Save
             </button>
             <button className="btn" onClick={() => setForm(null)}>
@@ -141,7 +135,7 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
           <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Title" />
           <textarea className="field" rows={5} value={abstract} onChange={(e) => setAbstract(e.target.value)} aria-label="Abstract" placeholder="The abstract, as it should read" />
           <div className="nact">
-            <button className="btn pri" disabled={fix.isPending || !changed || !(title.trim() || abstract.trim())} onClick={() => fix.mutate({ revision: s.revision, title, abstract }, { onSuccess: () => settle("Text fixed; the next run classifies it again."), onError: gone(settle) })}>
+            <button className="btn pri" disabled={fix.isPending || !changed || !(title.trim() || abstract.trim())} onClick={() => fix.mutate({ revision: s.revision, title, abstract })}>
               Save the text
             </button>
             <button className="btn" onClick={() => setForm(null)}>
@@ -151,7 +145,7 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
         </div>
       ) : (
         <div className="nact">
-          <button className="btn" disabled={dismiss.isPending} onClick={() => dismiss.mutate(s.revision, { onSuccess: () => settle("Dismissed; it stays searchable in the archive."), onError: gone(settle) })}>
+          <button className="btn" disabled={dismiss.isPending} onClick={() => dismiss.mutate(s.revision)}>
             Dismiss
           </button>
           <button className="btn" onClick={() => setForm("classes")}>
@@ -168,12 +162,12 @@ function Awaiting({ s, settle }: { s: Stuck; settle: Settle }) {
 
 /** Grade it now counts as the first of three more runs: a run that fails again settles the item too, since the
  * nightly runs take it from here and it no longer waits on the owner. */
-function Ungraded({ s, badge, settle }: { s: Stuck; badge: React.ReactNode; settle: Settle }) {
+function Ungraded({ s, badge }: { s: Stuck; badge: React.ReactNode }) {
   const grade = useGradeNow(s.paper_id);
   return (
     <Stuck s={s} kind="ungraded" badge={badge}>
       <div className="nact">
-        <button className="btn" disabled={grade.isPending} onClick={() => grade.mutate({ topic: s.topic!, revision: s.revision }, { onSuccess: (r) => settle(r.graded ? `Graded again: ${r.fit}. The result shows on its topic.` : `Grading failed again: ${r.error ?? "no verdict"}. The nightly runs try twice more.`), onError: gone(settle) })}>
+        <button className="btn" disabled={grade.isPending} onClick={() => grade.mutate({ topic: s.topic!, revision: s.revision })}>
           {grade.isPending ? "Grading…" : "Grade it now"}
         </button>
       </div>
@@ -182,7 +176,7 @@ function Ungraded({ s, badge, settle }: { s: Stuck; badge: React.ReactNode; sett
 }
 
 /** A full-text pass that failed three runs or waits for its text over a week; Run it now puts it first in line. */
-function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
+function TextPass({ s }: { s: TextPassStuck }) {
   const run = useRunPassNow(s.paper_id);
   const what = { brief: "Brief", weight: "Weight re-check", deep: "Deep card" }[s.kind];
   return (
@@ -199,7 +193,7 @@ function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
         <div className="nres">{s.settled}</div>
       ) : (
         <div className="nact">
-          <button className="btn" disabled={run.isPending} onClick={() => run.mutate(s.id, { onSuccess: () => settle(s.state === "failed" ? "Running now, first in line, with three more runs." : "Asked for the text again, at urgent priority; the pass runs once it arrives."), onError: gone(settle) })}>
+          <button className="btn" disabled={run.isPending} onClick={() => run.mutate({ id: s.id, state: s.state })}>
             {run.isPending ? "Starting…" : "Run it now"}
           </button>
         </div>
@@ -209,14 +203,12 @@ function TextPass({ s, settle }: { s: TextPassStuck; settle: Settle }) {
 }
 
 /** A failed digest: which one and why; Write it again runs the writer now. A digest still failed after it (the
- * writer failed again, or a job holds the run lock) stays on the page with the reason, still to be written, as the
- * server still counts it; one the API says is no longer one to write again (written meanwhile, its topic paused)
- * settles with that reason, as the server no longer counts it. */
-function FailedDigest({ d, badge, settle }: { d: FailedDigestRow; badge: React.ReactNode; settle: Settle }) {
+ * writer failed again, or a job holds the run lock) stays on the page with the reason (`note`), still to be
+ * written, as the server still counts it; one the API says is no longer one to write again (written meanwhile, its
+ * topic paused) settles with that reason, as the server no longer counts it. */
+function FailedDigest({ d, badge }: { d: FailedDigestRow; badge: React.ReactNode }) {
   const write = useWriteAgain();
-  const [note, setNote] = useState<string | null>(null);
   const when = d.period === "day" ? `Daily digest · ${rowDate(d.day)}` : `Weekly digest · the week of ${rowDate(d.day)}`;
-  const onDone = (r: { state: string; error?: string | null }) => (r.state === "failed" ? setNote(`Failed again: ${r.error ?? "no text"}. The next run writes it again.`) : settle("Written again; it shows in the Digest."));
   return (
     <div className={`need fail${d.settled ? " settled" : ""}`}>
       <div className="nh">
@@ -224,12 +216,12 @@ function FailedDigest({ d, badge, settle }: { d: FailedDigestRow; badge: React.R
         <span className="nt">{when}</span>
       </div>
       <div className="nb">{d.error ? `Could not be written: ${d.error}` : "Could not be written."}</div>
-      {note && <div className="nb">{note}</div>}
+      {d.note && !d.settled && <div className="nb">{d.note}</div>}
       {d.settled ? (
         <div className="nres">{d.settled}</div>
       ) : (
         <div className="nact">
-          <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id, { onSuccess: onDone, onError: (e) => (digestGone(e) ? settle(`No longer to be written: ${said(e)}.`) : setNote(`Not written now: ${said(e)}.`)) })}>
+          <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id)}>
             {write.isPending ? "Writing…" : "Write it again"}
           </button>
         </div>
@@ -238,12 +230,12 @@ function FailedDigest({ d, badge, settle }: { d: FailedDigestRow; badge: React.R
   );
 }
 
-function Analysis({ s, settle }: { s: Stuck; settle: Settle }) {
+function Analysis({ s }: { s: Stuck }) {
   const retry = useRetryAnalysis(s.paper_id);
   return (
     <Stuck s={s} kind="analysis">
       <div className="nact">
-        <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate(s.revision, { onSuccess: () => settle("Analysis gets three more runs, from the next one."), onError: gone(settle) })}>
+        <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate(s.revision)}>
           Try again
         </button>
       </div>
@@ -253,12 +245,9 @@ function Analysis({ s, settle }: { s: Stuck; settle: Settle }) {
 
 export function NeedsPage() {
   const quality = useQuery(qualityQuery("needs"));
-  const qc = useQueryClient();
   const cards = useTopicCards();
   const q = quality.data;
   const badge = (slug: string | null | undefined) => (slug && cards[slug] ? <Badge topic={cards[slug]} /> : null);
-  // Marks the item settled in the cached page: it stays where it is, and the counts follow.
-  const settler = (list: Waiting, s: Settled) => (what: string | undefined) => qc.setQueryData(qualityQuery("needs").queryKey, (old: Quality | undefined) => old && settle(old, list, s, what));
   const open = q ? waiting(q) : 0;
   // A split labelled before this visit no longer waits; one labelled on it stays, settled.
   const { splits, escalations } = openSplits(q?.night.splits ?? []);
@@ -271,23 +260,23 @@ export function NeedsPage() {
         <>
           {(["split", "escalated"] as const).map((kind) => (
             <Group key={kind} kind={kind} items={kind === "split" ? splits : escalations}>
-              {(s) => <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} settle={settler("splits", { paper_id: s.paper_id, topic: s.topic })} />}
+              {(s) => <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} />}
             </Group>
           ))}
           <Group kind="awaiting" items={q.night.awaiting_classification}>
-            {(s) => <Awaiting key={s.paper_id} s={s} settle={settler("awaiting_classification", { paper_id: s.paper_id })} />}
+            {(s) => <Awaiting key={s.paper_id} s={s} />}
           </Group>
           <Group kind="ungraded" items={q.night.ungraded}>
-            {(s) => <Ungraded key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} settle={settler("ungraded", { paper_id: s.paper_id, topic: s.topic })} />}
+            {(s) => <Ungraded key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} />}
           </Group>
           <Group kind="analysis" items={q.night.analysis_failed}>
-            {(s) => <Analysis key={s.paper_id} s={s} settle={settler("analysis_failed", { paper_id: s.paper_id })} />}
+            {(s) => <Analysis key={s.paper_id} s={s} />}
           </Group>
           <Group kind="fulltext" items={q.night.fulltext}>
-            {(s) => <TextPass key={s.id} s={s} settle={settler("fulltext", { paper_id: s.paper_id, id: s.id })} />}
+            {(s) => <TextPass key={s.id} s={s} />}
           </Group>
           <Group kind="digests" items={q.night.digests}>
-            {(d) => <FailedDigest key={d.id} d={d} badge={badge(d.topic)} settle={settler("digests", { id: d.id })} />}
+            {(d) => <FailedDigest key={d.id} d={d} badge={badge(d.topic)} />}
           </Group>
         </>
       )}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { answerFits, differs, level, openSplits, savedLine, settle, settleFromPaper, spendBar, spendTotals, toToml, took, waiting, type Quality, type SessionItem } from "./settings";
+import { answerOf, differs, labelled, level, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toToml, took, waiting, type Quality, type Session, type SessionItem } from "./settings";
 
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
@@ -84,10 +84,82 @@ describe("openSplits", () => {
   });
 });
 
-describe("answerFits", () => {
-  const item = { position: 1, paper_id: "1", topic: "a", why: "above", verdict: "related", answer: null, answered_at: null, title: "", abstract: "", authors: [], published: null, fit: { b: "none", c: "related" }, appraisal: null } as SessionItem;
-  it("sends the drawn topic and the Focus labels changed here, not the ones left as they were", () => {
-    expect(answerFits({ a: "central", b: "none", c: "adjacent", d: "none" }, item, new Set(["a", "b", "c"]))).toEqual({ a: "central", c: "adjacent" });
+describe("answerOf", () => {
+  const focus = new Set(["a", "b", "c"]);
+  const fresh = { position: 1, paper_id: "1", topic: "a", why: "above", verdict: "related", answer: null, answered_at: null, title: "", abstract: "", authors: [], published: null, fit: { b: "none", c: "related" }, appraisal: null } as SessionItem;
+  const done: SessionItem = { ...fresh, answer: "related", answered_at: "2026-10-14", fit: { a: "related", b: "none" }, appraisal: { value: "fine", note: "n" } };
+  it("sends the Focus labels changed here and, on a first answer, the drawn topic's Fit; not labels left as they were", () => {
+    const { answer, edited, complete } = answerOf(fresh, { fit: { a: "central", b: "none", c: "adjacent", d: "none" } }, focus);
+    expect(answer).toEqual({ fit: { a: "central", c: "adjacent" }, value: null, note: null });
+    expect([edited, complete]).toEqual([true, true]);
+    // A first answer with the drawn topic's label standing and nothing edited: the label as shown, which the server leaves as it is.
+    expect(answerOf({ ...fresh, fit: { a: "none" } }, { fit: {} }, focus)).toEqual({ answer: { fit: { a: "none" }, value: null, note: null }, edited: false, complete: true });
+  });
+  it("needs the drawn topic's Fit on a first answer only, and never writes a label from an appraisal edit", () => {
+    expect(answerOf(fresh, { fit: {}, value: "matters" }, focus)).toMatchObject({ edited: true, complete: false });
+    expect(answerOf(fresh, { fit: {} }, focus)).toMatchObject({ edited: false, complete: false });
+    // Answered before, the label since taken back: the recorded answer is history, a note edit sends no Fit.
+    const taken: SessionItem = { ...done, fit: { b: "none" } };
+    expect(answerOf(taken, { fit: {}, note: "newer" }, focus)).toEqual({ answer: { fit: {}, value: "fine", note: "newer" }, edited: true, complete: true });
+    // Chosen again, explicitly, it is a label.
+    expect(answerOf(taken, { fit: { a: "related" } }, focus).answer.fit).toEqual({ a: "related" });
+  });
+  it("follows the refreshed item where nothing was edited, and reads an edit back to the baseline as no edit", () => {
+    const refreshed: SessionItem = { ...done, fit: { a: "none", b: "none" }, appraisal: { value: "matters", note: null } };
+    const { answer, edited } = answerOf(refreshed, { fit: {}, note: "" }, focus);
+    expect([answer.fit, answer.value, answer.note, edited]).toEqual([{}, "matters", null, false]);
+    expect(answerOf(refreshed, { fit: { a: "none" }, value: "matters" }, focus).edited).toBe(false);
+    expect(answerOf(refreshed, { fit: { a: "central" } }, focus).answer.fit).toEqual({ a: "central" });
+    // Cleared: the value null is an edit against a value standing.
+    expect(answerOf(refreshed, { fit: {}, value: null }, focus)).toMatchObject({ answer: { value: null }, edited: true });
+  });
+});
+
+describe("sessionRow", () => {
+  const row = { id: 3, seed: 7, drawn_at: "2026-10-14", papers: 1, answered: 0, differ: 0 };
+  const item = (position: number, answer: SessionItem["answer"] = null): SessionItem => ({ position, paper_id: String(position), topic: "a", why: "above", verdict: "related", answer, answered_at: answer ? "2026-10-15" : null, title: "", abstract: "", authors: [], published: null, fit: {}, appraisal: null });
+  const session = (...items: SessionItem[]): Session => ({ id: 3, seed: 7, drawn_at: "2026-10-14", items });
+  it("reads the counts from the session as it is: an answer, a change of it, unsure and papers added count once", () => {
+    expect(sessionRow(row, session(item(1, "none"), item(2)))).toEqual({ ...row, papers: 2, answered: 1, differ: 1 });
+    expect(sessionRow(sessionRow(row, session(item(1, "none"))), session(item(1, "related")))).toEqual({ ...row, papers: 1, answered: 1, differ: 0 });
+    expect(sessionRow(row, session(item(1, "unsure"), item(2, "central"), item(3)))).toEqual({ ...row, papers: 3, answered: 2, differ: 1 });
+  });
+});
+
+describe("labelled and noted", () => {
+  const q = { night: { ...night, splits: [split, { ...split, topic: "b" }], digests: [{ id: 4, topic: "a", period: "day", day: "2026-10-08", error: "x", written_at: "" }] } } as Quality;
+  it("settles the split with its label, replaces it with a changed one, and lets a split taken back wait again, fetched labelled or not", () => {
+    const one = labelled(q, "1", "a", "related");
+    expect(one.night.splits.map((s) => s.settled)).toEqual(["related", undefined]);
+    expect(labelled(one, "1", "a", "central").night.splits[0]!.settled).toBe("central");
+    const back = labelled(one, "1", "a", null);
+    expect([back.night.splits[0]!.settled, back.night.splits[0]!.label, waiting(back)]).toEqual([undefined, null, 3]);
+    const fetchedLabelled = { night: { ...night, splits: [{ ...split, label: { value: "none" } }] } } as Quality;
+    expect(labelled(fetchedLabelled, "1", "a", null).night.splits[0]!.label).toBeNull();
+    // A row fetched labelled is off the visit's list; labelled again elsewhere, it stays off.
+    expect(labelled(fetchedLabelled, "1", "a", "central")).toEqual(fetchedLabelled);
+    expect(labelled(q, "9", "a", "none")).toEqual(q);
+  });
+  it("keeps what a write-again said on the digest's row, which still waits", () => {
+    const after = noted(q, 4, "Failed again: x.");
+    expect(after.night.digests[0]!.note).toBe("Failed again: x.");
+    expect(waiting(after)).toBe(3);
+  });
+  it("keeps a settlement's first word", () => {
+    const first = settle(q, "splits", { paper_id: "1", topic: "a" }, "first");
+    expect(settle(first, "splits", { paper_id: "1", topic: "a" }, "second").night.splits[0]!.settled).toBe("first");
+    // A revision names the text the action was for: a row for another revision is not the one settled.
+    const stuckQ = { night: { ...night, analysis_failed: [stuck, { ...stuck, revision: 2 }] } } as Quality;
+    expect(settle(stuckQ, "analysis_failed", { paper_id: "1", revision: 2 }, "done").night.analysis_failed.map((s) => s.settled)).toEqual([undefined, "done"]);
+  });
+});
+
+describe("runFailed", () => {
+  const run = { id: 1, kind: "nightly", started_at: "", finished_at: "", cost: 0, error: null, counts: null, fetched: 0, inserted: 0, updated: 0 };
+  it("names the error, else the steps that failed on some papers, else nothing", () => {
+    expect(runFailed({ ...run, error: "boom" })).toBe("boom");
+    expect(runFailed({ ...run, counts: { grading_failed: 20, digests_failed: 2 } })).toBe("20 grading, 2 digests failed");
+    expect(runFailed({ ...run, counts: { classified: 3 } })).toBe("");
   });
 });
 

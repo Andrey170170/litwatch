@@ -6,7 +6,7 @@ import { Badge } from "@/components/Badge";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
 import { type ReactionReason, reasonLabel } from "@/lib/reactions";
-import { digests, type Quality, spendTotals, usd, waiting } from "@/lib/settings";
+import { digests, type Quality, runFailed, spendTotals, usd, waiting } from "@/lib/settings";
 import { Later, Load, PageHead, PaperLink, Share, useTopicCards } from "./parts";
 
 type Tone = "ask" | "fail" | "warn" | "ok" | "";
@@ -58,6 +58,8 @@ export function OverviewPage() {
   const q = quality.data;
   // Last night is the run the quality read names; its counts come from the runs list, which may no longer hold it.
   const night = q?.night.run != null ? runs.data?.find((r) => r.id === q.night.run) : undefined;
+  // Red as Runs and cost marks it: the run failed, or some of its papers' steps or digests did.
+  const nightFailed = !!q?.night.error || (night ? !!runFailed(night) : false);
   const last = sessions.data?.[0];
   const cards = useTopicCards();
   const name = (slug: string) => {
@@ -82,7 +84,7 @@ export function OverviewPage() {
           <Tile to="needs" tone={open ? "ask" : "ok"} big={open ? String(open) : "✓"}>
             {open ? `${open === 1 ? "thing needs" : "things need"} you` : "Nothing needs you"}
           </Tile>
-          <Tile to="runs" tone={q?.night.run == null ? "" : q.night.error ? "fail" : "ok"} big={night ? rowDate(night.started_at) : "–"}>
+          <Tile to="runs" tone={q?.night.run == null ? "" : nightFailed ? "fail" : "ok"} big={night ? rowDate(night.started_at) : "–"}>
             {night
               ? `Last night · ${night.counts?.classified ?? 0} classified · ${night.counts?.graded ?? 0} graded${digests(night) === null ? "" : ` · ${digests(night)} digests`} · ${usd(night.cost)}`
               : q?.night.run == null

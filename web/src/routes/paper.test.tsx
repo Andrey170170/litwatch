@@ -90,13 +90,15 @@ describe("a paper's page", () => {
     const [failed] = screen.getAllByRole("button", { name: "Run it now" });
     await userEvent.click(failed!);
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url === "/api/settings/fulltext/7/now")).toBe(true));
-    // The page is refetched: the pass that ran is gone from the notes, the other's note stays.
+    // The page is refetched: the pass that ran is gone from the notes, the other's note stays. The row on Needs you
+    // settles from the write itself, with what happened, as it would have from that page.
     await waitFor(() => expect(screen.queryByText(/Full text failed three runs in a row/)).toBeNull());
-    expect(settledRows()).toEqual(["Settled on the paper's page.", undefined]);
+    expect(settledRows()).toEqual(["Running now, first in line, with three more runs.", undefined]);
     await userEvent.click(screen.getByRole("button", { name: "Run it now" }));
     expect(await screen.findByText("the pass is not waiting for the owner")).toBeInTheDocument();
-    // The 409 refetch finds the pass gone too: settled on Needs you as well, not left waiting there.
-    await waitFor(() => expect(settledRows()).toEqual(["Settled on the paper's page.", "Settled on the paper's page."]));
+    // The 409 settles the row on Needs you with its reason, and the refetch finds the pass gone from the page too.
+    await waitFor(() => expect(settledRows()).toEqual(["Running now, first in line, with three more runs.", "No longer waits on the owner: the pass is not waiting for the owner."]));
+    await waitFor(() => expect(screen.queryByText(/Awaiting the full text for over a week/)).toBeNull());
   });
 
   it("records a thumb only once a reason is picked, on the topic's row", async () => {

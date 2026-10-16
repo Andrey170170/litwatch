@@ -15,11 +15,10 @@ import { Sheet } from "@/components/Sheet";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { authorsShort, rowDate } from "@/lib/format";
-import { answerFits, differs, type LabelValue, pipelineSide, type Session, type SessionItem, type SessionRow } from "@/lib/settings";
+import { answerOf, differs, type Edits, type LabelValue, pipelineSide, type Session, type SessionItem, type SessionRow, type Value } from "@/lib/settings";
 import { BriefBody } from "@/components/paper/Ladder";
 import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
-type Value = NonNullable<Schemas["Answer"]["value"]>;
 const VALUES: Value[] = ["matters", "fine", "not_for_me"];
 
 /** The way to a session: its first unanswered paper, a paper by position, or its review. Moves within a session
@@ -68,16 +67,6 @@ function PastSessionRow({ s }: { s: SessionRow }) {
 }
 
 // -- a session ------------------------------------------------------------------------------------------------------
-
-type Draft = { fit: Record<string, LabelValue>; value: Value | null; note: string };
-
-/** The current labels, the drawn topic's recorded answer only where no label stands since (a later word on the
- * paper's page is the newest and is not undone by editing the appraisal here), and the appraisal. */
-function draftOf(item: SessionItem): Draft {
-  const fit = { ...item.fit };
-  if (item.answer && !fit[item.topic]) fit[item.topic] = item.answer;
-  return { fit, value: item.appraisal?.value ?? null, note: item.appraisal?.note ?? "" };
-}
 
 /** The paper, blind: title, authors, id, date, Gist, Brief or abstract, and classes; no grade, rarity or topic marks. */
 function BlindPaper({ item }: { item: SessionItem }) {
@@ -141,12 +130,19 @@ function SessionBody({ s, id, at, review }: { s: Session; id: string; at: number
   return <Screen key={item.position} s={s} item={item} />;
 }
 
+/** One paper's screen. The draft is the item as last read (the baseline, refreshed under the screen by the
+ * session's reads) plus what the owner changed on it (`Edits`): a changed field stands over a refresh, an untouched
+ * one follows it, and `answerOf` sends only what was changed. The drawn topic's recorded answer shows faint where
+ * no label stands now: history, not a label to write again. The whole editor and its navigation wait while an
+ * answer is saved, so nothing typed meanwhile is lost and no two saves overlap. */
 function Screen({ s, item }: { s: Session; item: SessionItem }) {
   const open = useOpenSession();
   const desktop = useDesktop();
   const tree = useQuery(taxonomyQuery);
   const answer = useAnswer(s.id);
-  const [draft, setDraft] = useState<Draft>(() => draftOf(item));
+  const [edits, setEdits] = useState<Edits>({ fit: {} });
+  // Next or a move found edits but no Fit for the drawn topic, which a first answer needs: the screen asks for it.
+  const [missing, setMissing] = useState(false);
   const [pick, setPick] = useState(false);
   const name = (slug: string) => tree.data?.classes.find((c) => c.slug === slug)?.name ?? slug;
   // The drawn topic first, paused or not, then every other active Focus topic; the answer takes Focus topics only.
@@ -157,19 +153,31 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   const answered = new Set(s.items.filter((it) => it.answered_at).map((it) => it.position));
   const n = s.items.length;
   const i = s.items.findIndex((it) => it.position === item.position);
+  const saving = answer.isPending;
   const go = (position: number) => open(s.id, { at: position }, true);
-  const canRecord = !!draft.fit[item.topic];
-  const changed = JSON.stringify(draft) !== JSON.stringify(draftOf(item));
-  /** Record the answer first when `record`, then move on. */
-  const leave = (record: boolean, after: () => void) => {
-    const fit = answerFits(draft.fit, item, focus);
-    if (record) answer.mutate({ position: item.position, paperId: item.paper_id, answer: { fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
-    else after();
+  const shown = { fit: (slug: string) => edits.fit[slug] ?? item.fit[slug] ?? null, value: edits.value === undefined ? (item.appraisal?.value ?? null) : edits.value, note: edits.note ?? item.appraisal?.note ?? "" };
+  const { answer: body, edited, complete } = answerOf(item, edits, focus);
+  /** A Fit chosen is an edit; the chosen one tapped again takes the edit back. */
+  const setFit = (slug: string, f: LabelValue | null) =>
+    setEdits((d) => {
+      const fit = { ...d.fit };
+      if (f) fit[slug] = f;
+      else delete fit[slug];
+      return { ...d, fit };
+    });
+  /** Record the answer, then move on: what was edited, and on Next a first answer with the drawn topic's Fit as it
+   * stands (`wanted`). Edits without that Fit stay on the screen and ask for it; an untouched paper is left as it
+   * was. Nothing moves while a save is in flight. */
+  const leave = (wanted: boolean, after: () => void) => {
+    if (saving) return;
+    if (!complete) return edited ? setMissing(true) : after();
+    if (!edited && !wanted) return after();
+    answer.mutate({ position: item.position, paperId: item.paper_id, answer: body }, { onSuccess: after });
   };
-  /** Next records the answer when the drawn topic has its Fit, then moves on; a paper left unanswered stays grey. */
-  const next = () => leave(canRecord && (changed || !item.answered_at), i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true }, true));
+  /** Next records a first answer when the drawn topic has its Fit, and any edit; a paper left untouched stays grey. */
+  const next = () => leave(!item.answered_at, i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true }, true));
   /** Back, the strip and the picker keep what was changed on this paper before moving; an untouched one stays as it was. */
-  const move = (position: number) => leave(canRecord && changed, () => go(position));
+  const move = (position: number) => leave(false, () => go(position));
   const back = () => i > 0 && move(s.items[i - 1]!.position);
   const last = i + 1 === n;
   return (
@@ -181,7 +189,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
       </Fill>
       <div className="calprog" role="tablist" aria-label="Papers in the session">
         {s.items.map((it) => (
-          <button key={it.position} className={it.position === item.position ? "cur" : answered.has(it.position) ? "done" : ""} onClick={() => move(it.position)} title={`Paper ${it.position}`} role="tab" aria-selected={it.position === item.position}>
+          <button key={it.position} className={it.position === item.position ? "cur" : answered.has(it.position) ? "done" : ""} disabled={saving} onClick={() => move(it.position)} title={`Paper ${it.position}`} role="tab" aria-selected={it.position === item.position}>
             <i />
           </button>
         ))}
@@ -197,52 +205,58 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
                 <span className="nm">
                   {name(t.class)}
                   {t.class === item.topic && <span className="faint"> · drawn for</span>}
+                  {t.class === item.topic && item.answer && !item.fit[item.topic] && <span className="faint"> · answered {item.answer} before, no label stands</span>}
                 </span>
-                <FitSeg value={draft.fit[t.class] ?? null} label={`Fit for ${name(t.class)}`} onPick={(f) => f && setDraft((d) => ({ ...d, fit: { ...d.fit, [t.class]: f } }))} />
+                <FitSeg value={shown.fit(t.class)} auto={t.class === item.topic && !item.fit[item.topic] ? item.answer : null} label={`Fit for ${name(t.class)}`} disabled={saving} clear={t.class in edits.fit} onPick={(f) => setFit(t.class, f)} />
               </div>
             ))}
+            {missing && !complete && (
+              <div className="nb warnt" role="alert">
+                Choose the Fit for {name(item.topic)} to record this paper; it is the one it was drawn for.
+              </div>
+            )}
           </div>
         </div>
         <div className="calq">
           <div className="cql">Value, whatever the topic</div>
-          <Seg values={VALUES} value={draft.value} clear label="Value" onPick={(value) => setDraft((d) => ({ ...d, value }))} />
+          <Seg values={VALUES} value={shown.value} clear disabled={saving} label="Value" onPick={(value) => setEdits((d) => ({ ...d, value }))} />
         </div>
         <div className="calq">
           <div className="cql">Note</div>
-          <textarea className="tin" rows={2} value={draft.note} placeholder="Optional" aria-label="Note" onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
+          <textarea className="tin" rows={2} value={shown.note} disabled={saving} placeholder="Optional" aria-label="Note" onChange={(e) => setEdits((d) => ({ ...d, note: e.target.value }))} />
         </div>
         <Later>"Classes right?" and "Gist and Brief" come with their fields on the answer.</Later>
       </div>
       {desktop ? (
         <div className="calnav">
-          <button className="btn" onClick={back} style={{ visibility: i ? "visible" : "hidden" }}>
+          <button className="btn" disabled={saving} onClick={back} style={{ visibility: i ? "visible" : "hidden" }}>
             ‹ Back
           </button>
           <span className="mono faint">
             {item.position} of {n}
           </span>
-          <button className="btn pri" disabled={answer.isPending} onClick={next}>
-            {last ? "Done" : "Next ›"}
+          <button className="btn pri" disabled={saving} onClick={next}>
+            {saving ? "Saving…" : last ? "Done" : "Next ›"}
           </button>
         </div>
       ) : (
         <Fill name="foot">
           <div className="pfoot pgf calf">
-            <button className={i ? "" : "dim"} disabled={!i} onClick={back}>
+            <button className={i ? "" : "dim"} disabled={!i || saving} onClick={back}>
               <small>‹ Back</small>
             </button>
-            <button className="lbl" onClick={() => setPick(true)} aria-label="Go to a paper">
+            <button className="lbl" disabled={saving} onClick={() => setPick(true)} aria-label="Go to a paper">
               {item.position}/{n} ▴
             </button>
-            <button className="on" disabled={answer.isPending} onClick={next}>
-              <small>{last ? "Done" : "Next ›"}</small>
+            <button className="on" disabled={saving} onClick={next}>
+              <small>{saving ? "Saving…" : last ? "Done" : "Next ›"}</small>
             </button>
           </div>
           <Sheet open={pick} onClose={() => setPick(false)} label="Go to a paper">
             <div className="cap">Go to a paper</div>
             <div className="cpk">
               {s.items.map((it) => (
-                <button key={it.position} className={it.position === item.position ? "cur" : ""} onClick={() => (setPick(false), move(it.position))}>
+                <button key={it.position} className={it.position === item.position ? "cur" : ""} disabled={saving} onClick={() => (setPick(false), move(it.position))}>
                   <span className="n">{it.position}</span>
                   <span className="t">{it.title}</span>
                   <span className="ck">{answered.has(it.position) ? "✓" : ""}</span>

@@ -134,7 +134,7 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
             {state.error && <div className="err">{state.error}</div>}
           </div>
           <div className="acts">
-            <button className="btn" disabled={runPass.isPending} onClick={() => runPass.mutate(state.pass_id!)}>
+            <button className="btn" disabled={runPass.isPending} onClick={() => runPass.mutate({ id: state.pass_id!, state: state.kind === "awaiting_text" ? "awaiting_text" : "failed" })}>
               {runPass.isPending ? "Starting…" : "Run it now"}
             </button>
           </div>
