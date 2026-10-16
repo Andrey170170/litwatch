@@ -20,7 +20,7 @@ import psycopg
 from litwatch.core import FAILED_RUNS, Depth, Rarity, Taxonomy, Weight
 from litwatch.core.grading import NO_WEIGHT, WEIGHT_FLOORS
 from litwatch.store import failures, fulltext
-from litwatch.store.analyses import CURRENT_FIRST, CURRENT_GIST, CURRENT_GIST_SOURCE
+from litwatch.store.analyses import CURRENT_GIST, CURRENT_GIST_SOURCE, CURRENT_WEIGHT
 
 STALE_AFTER = timedelta(hours=36)
 # A stored JSON null in `authors` reads as no authors.
@@ -527,10 +527,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         FROM papers p
         LEFT JOIN library l ON l.paper_id = p.id
         LEFT JOIN rarities r ON r.paper_id = p.id
-        LEFT JOIN LATERAL (
-            SELECT weight, reason, source FROM weights x WHERE paper_id = p.id
-            AND paper_revision = p.revision {CURRENT_FIRST.format(x="x")} LIMIT 1
-        ) w ON true
+        LEFT JOIN LATERAL ({CURRENT_WEIGHT}) w ON true
         LEFT JOIN LATERAL (
             SELECT contribution, releases_code, releases_weights FROM analyses
             WHERE paper_id = p.id AND paper_revision = p.revision ORDER BY id DESC LIMIT 1

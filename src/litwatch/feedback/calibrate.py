@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from litwatch.core import Depth, Fit, Grade, Label, LabelOrigin, LabelValue, Status, Weight, grade
 from litwatch.feedback import word
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store.analyses import CURRENT_WEIGHT
 
 SESSION = 20
 DRAW_DAYS = 30
@@ -35,11 +36,10 @@ async def _pool(conn: psycopg.AsyncConnection, topic: str, above: bool) -> list[
     the owner said."""
     rows = await _all(
         conn,
-        """
+        f"""
         SELECT paper_id, id AS verdict_id, fit,
-               (SELECT w.weight FROM weights w JOIN papers p ON p.id = w.paper_id
-                AND p.revision = w.paper_revision WHERE w.paper_id = v.paper_id
-                ORDER BY w.pass_id DESC NULLS LAST, w.id DESC LIMIT 1) AS weight
+               (SELECT w.weight FROM papers p JOIN LATERAL ({CURRENT_WEIGHT}) w ON true
+                WHERE p.id = v.paper_id) AS weight
         FROM (
             SELECT DISTINCT ON (paper_id) * FROM verdicts WHERE topic = %s
             ORDER BY paper_id, paper_revision DESC, recorded_at DESC, id DESC
