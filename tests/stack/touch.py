@@ -52,7 +52,15 @@ def unfold(page) -> None:
     while folded.count():
         folded.first.click()
         page.wait_for_load_state("networkidle")
-    page.locator(PAPER_LINK).first.wait_for()
+    # an opened shelf shows the one row it had while folded, then its page: wait for the rows to
+    # stop coming
+    links = page.locator(PAPER_LINK)
+    links.first.wait_for()
+    for _ in range(20):
+        before = links.count()
+        page.wait_for_timeout(500)
+        if links.count() == before:
+            break
 
 
 def gestures(base: str, token: str, out: Path) -> list[str]:
