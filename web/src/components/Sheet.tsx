@@ -24,7 +24,8 @@ export function Sheet({ open, onClose, side = "bottom", label, children, drag, p
   const opener = useRef<HTMLElement | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
   const shade = useRef<HTMLDivElement | null>(null);
-  useSheetDrag(side === "bottom" ? panel : null, shade, onClose);
+  // the drag listens only while open: a sheet kept mounted and closed (Filters) lets go of a pointer it followed
+  useSheetDrag(open && side === "bottom" ? panel : null, shade, onClose);
   const set = <T extends HTMLElement>(own: RefObject<T | null>, out?: RefObject<HTMLElement | null>) => (el: T | null) => {
     own.current = el;
     if (out) out.current = el;

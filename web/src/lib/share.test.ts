@@ -10,6 +10,7 @@ describe("An arXiv id in a share", () => {
   });
   it("is an old-style id only under one of arXiv's archives", () => {
     expect(arxivIdIn("https://arxiv.org/abs/math.GT/0309136v2")).toBe("math.GT/0309136");
+    expect(arxivIdIn("https://arxiv.org/abs/cmp-lg/9404002")).toBe("cmp-lg/9404002");
     expect(arxivIdIn("https://example.org/reports/1234567")).toBeNull();
   });
   it("is the link's, whatever its style, before one the text mentions", () => {

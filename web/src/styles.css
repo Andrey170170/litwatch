@@ -883,7 +883,9 @@ button.car:hover { color: var(--fg); background: var(--line2); }
   .tin.sm { min-height: 40px; }
   .rseg { min-width: 40px; }
   .tf { min-width: 40px; }
+  /* a truncating link clips a hit area drawn around it: this one is 40px tall itself */
+  .tcard .t2 { min-height: 40px; display: flex; align-items: center; }
   /* inline controls keep their size in the text and take a 40px hit area around it, as .hit does */
-  :is(.cp, .pghead .au .more, .inl, .st, a.nt, a.t, .lnk, .mnum, .kw .x, .tcard .n, .tcard .t2, .dblock .n) { position: relative; }
-  :is(.cp, .pghead .au .more, .inl, .st, a.nt, a.t, .lnk, .mnum, .kw .x, .tcard .n, .tcard .t2, .dblock .n)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
+  :is(.cp, .pghead .au .more, .inl, .st, a.nt, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n) { position: relative; }
+  :is(.cp, .pghead .au .more, .inl, .st, a.nt, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
 }

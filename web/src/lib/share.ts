@@ -6,7 +6,10 @@
 // A new-style id (2401.12345, with or without a version), then an old one (hep-th/9901001, math.GT/0309136): one
 // of arXiv's archives, so that any path with seven digits (example.org/reports/1234567) is not a paper.
 const NEW = /(?<!\d)(\d{4}\.\d{4,5})(?:v\d+)?(?!\d)/;
-const ARCHIVES = "astro-ph|cond-mat|gr-qc|hep-ex|hep-lat|hep-ph|hep-th|math-ph|nlin|nucl-ex|nucl-th|physics|quant-ph|math|cs|q-bio|q-fin|stat|eess|econ";
+const ARCHIVES =
+  "astro-ph|cond-mat|gr-qc|hep-ex|hep-lat|hep-ph|hep-th|math-ph|nlin|nucl-ex|nucl-th|physics|quant-ph|math|cs|q-bio|q-fin|stat|eess|econ" +
+  // the archives arXiv has since folded into those, whose ids still resolve
+  "|acc-phys|adap-org|alg-geom|ao-sci|atom-ph|bayes-an|chao-dyn|chem-ph|cmp-lg|comp-gas|dg-ga|funct-an|mtrl-th|patt-sol|plasm-ph|q-alg|solv-int|supr-con";
 const OLD = new RegExp(`(?<![\\w-])((?:${ARCHIVES})(?:\\.[A-Z]{2})?\\/\\d{7})(?:v\\d+)?(?!\\d)`);
 
 /** The arXiv id in the texts given, the first text with one deciding (the link before the text that mentions
