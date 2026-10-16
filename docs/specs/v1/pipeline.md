@@ -212,7 +212,9 @@ unread, and the nightly run settles every paper with a pass open or that may qua
 costs at most a night. It is **awaiting text** until the archive has the paper's text, then runs at
 once, not at the next night: the service's full-text worker, which runs with the schedule, looks at the queue every
 half minute (`litwatch fulltext` works it by hand). Text comes from the archive: the LaTeX source's text first, the PDF's text when the paper
-has no source (see [archive.md](archive.md)). For a pass queued by the nightly run, litwatch asks the archive to fetch
+has no source (see [archive.md](archive.md)), or when the owner chose "Use the PDF" on a pass waiting for them, for
+LaTeX that reads badly. The PDF's text is read with `pypdfium2`; `pymupdf4llm` (AGPL, the opt-in `pdf` extra) is
+used instead when it is installed. For a pass queued by the nightly run, litwatch asks the archive to fetch
 the source at **urgent** priority, so the papers that matter arrive within minutes rather than behind a night's
 background downloads.
 

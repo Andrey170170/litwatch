@@ -56,10 +56,11 @@ One search box, one result list, as in the first v1 (decision 6), with these cha
   (rarity, badges, Gist). Relevance is the default order whenever there is a query; date orders stay available.
 - **Collection filters** (topic, saved, rarity) search litwatch's own index of the collection, ranked by relevance
   the same way.
-- **Two fixes before the switch**, found 2026-10-13: the archive's relevance ranking does not put an exact title
-  first ("attention is all you need" does not return 1706.03762 at the top; adding "Vaswani" does), so exact title
-  and phrase matches must rank first and title must weigh more than abstract; and litwatch currently re-sorts the
-  archive's hits by date, which discards the ranking.
+- **Exact title and phrase first** (N5b; found 2026-10-13, when "attention is all you need" did not return
+  1706.03762 at the top). For a query of two or more words the archive ranks in tiers: a title equal to the query
+  (case, punctuation and accents aside), then titles holding the phrase, then abstracts holding it, then the other
+  matches; within a tier by bm25, where the title weighs eight times the abstract. litwatch shows each provider's
+  hits in its order, no longer re-sorted by date; the newest-first order asks the providers for their newest.
 
 ## Papers outside the collection
 
@@ -68,6 +69,10 @@ shows its title, authors, abstract, links, BibTeX and no rarity. Two actions bri
 processed like any new paper: **Process** (classification, analysis, grading where it lands) and **Deep read** (the
 same, then a Deep card). Reporting it as a miss does the same with the owner's word first
 ([feedback.md](feedback.md)).
+
+A paper litwatch has not fetched gets its page from the archive's record (N5b); Process and Deep read fetch it from
+arXiv first, and from then on its page says it is fetched and waits for the next run, which processes it. The search
+box names how many papers the archive's search index holds ("Search the collection and the archive (3.1M papers)").
 
 litwatch keeps only the papers it processed, each with the text exactly as it was judged. That copy is a record of
 what was judged, not a second source of truth: the archive holds the current paper.
@@ -85,11 +90,11 @@ litwatch's Papers tab and paper pages cover search and paper pages, keeping its 
 
 ## Deferred to N5
 
-Found in review when the code moved in (PR #41), left as they were in the old repository. N5a derived
-`__version__` from the package metadata and made `pyarrow` and `zstandard` base dependencies for the image; the
-other two are N5b's:
+Found in review when the code moved in (PR #41), left as they were in the old repository; all done. N5a derived
+`__version__` from the package metadata and made `pyarrow` and `zstandard` base dependencies for the image. N5b:
 
-- `backup.py` refreshes the stable export path one entry at a time, so a failure part-way leaves new database files
-  beside old directories; swap the whole export at once.
-- `recovery.py`'s reconcile marks every submitted candidate in its own fsynced transaction on each feed cycle; batch
-  the writes and skip unchanged ones.
+- `backup.py` refreshed the stable export path one entry at a time, so a failure part-way left new database files
+  beside old directories. The export is now a directory `export-<time>` named by the symlink `current`, swapped in
+  one rename; earlier exports go once the new one is current. A restore reads `current/`.
+- `recovery.py`'s reconcile marked every submitted candidate in its own fsynced transaction on each feed cycle. It
+  now writes a cycle's changes in one transaction and skips the entries that did not change.

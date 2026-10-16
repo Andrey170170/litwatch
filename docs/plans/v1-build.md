@@ -156,6 +156,9 @@ source package's documents by heuristic, so it keeps only the shallowest of inde
 (a root-level `cover.tex` beside `paper/main.tex` keeps the cover; the depth rule is there so standalone figure files
 in subfolders stay out) and drops inputs nested deeper than eight levels. If Briefs show it matters, read arXiv's
 `00README` directives, which name the top-level files, and take the PDF's text when a package stays ambiguous.
+N5b found no sign of it: the ten Briefs of `evals/2026-10-15-briefs.md` all read their LaTeX (54,246 to 441,596
+characters) and follow their papers. Look again at N6's Briefs; meanwhile "Use the PDF" reads a paper whose LaTeX
+reads badly from its PDF.
 
 **N5c · Shared flows**, after N5b and W2 merge (it changes their files) and before N6, so the restart runs on it.
 #66 gave three steps every call site repeated one place each (`.env` at CLI entry, intake's settle in its batch, the
@@ -193,16 +196,8 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
 
 ### Deferred to later PRs
 
-- **N5b:** after Process fetches a paper outside the collection, `/api/lookup` stores only its metadata and
-  `in_collection` stays false until it is classified, so the paper page offers Process again and a second tap only
-  says "Already in the collection" (#56, Codex). N5b's page for papers outside the collection shows the fetched
-  state, read from the API. Also N5b: DESIGN.md's "Use the PDF", for a paper whose LaTeX reads badly, has no
-  endpoint yet (#59); it belongs with the archive's text assembly and its PDF fallback, and the paper page takes it
-  once merged. (N5a's stack smoke test shows a Deep card with live "Among the collection" rows, from a fake deep
-  service reaching litwatch with `LITWATCH_URL` and `LITWATCH_TOKEN`.)
-  Also N5b (the owner, 2026-10-15): the PDF fallback (`pdf_to_markdown` in `archive/text.py`) uses `pypdfium2`
-  (Apache/BSD) by default, so the MIT template still reads PDF-only papers; `pymupdf4llm` (AGPL) stays the opt-in
-  `pdf` extra and is preferred when installed.
+- **W2, Needs you's full-text group** (from N5b): Try again and Use the PDF on each pass waiting for the owner,
+  `POST /api/settings/fulltext/{pass_id}/now` and `/pdf`, as the paper page's open state already does.
 - **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
   paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
   the restart's digests.
@@ -215,7 +210,7 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   incremental cell stays: two papers are not enough to move it. The Field offset is 2 (`evals/2026-10-15-tuning.md`).
 - **API gaps W1 found**, each for the core PR that owns it: a Brief on Paper (N3); a Deep card's queued state and
   "Write again", which POST answers 409 (N3's Deep cards); digests for the topic strips and the sidebar's counts (N4,
-  W3); a page for an archive paper not yet fetched and the archive's size for the search box (N5b); the "Among the
+  W3); the "Among the
   collection" rows; rung ✓/✗ ratings; code and weights URLs on the facets; listing unclassified papers; splits and
   escalations on the status line; which source set the owner's word.
 - **API gaps W2 found**, for the core PRs that own them: a jobs API (the editor's re-run offer, the Jobs page, a
