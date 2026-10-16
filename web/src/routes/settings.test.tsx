@@ -940,4 +940,18 @@ describe("Settings", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({ status: "active" }));
   });
+
+  it("shows Deep cards' month to date at list prices, at least while an attempt's usage is unknown", async () => {
+    viewport(true);
+    const night = { id: 6, kind: "nightly", started_at: "2026-10-14T03:00:00Z", finished_at: "2026-10-14T03:30:00Z", cost: 1.2, error: null, counts: {}, fetched: 0, inserted: 0, updated: 0 };
+    scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, deep: { attempts: 4, list_cost: 2.5, unknown: 1 } }, "GET /api/settings/runs": [night] });
+    const { unmount } = renderApp("/settings/runs");
+    expect(await screen.findByText(/at least \$2\.50 at list prices · 4 attempts/)).toBeInTheDocument();
+    expect(screen.getByText(/1 with usage unknown/)).toBeInTheDocument();
+    unmount();
+    scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, deep: { attempts: 0, list_cost: 0, unknown: 0 } }, "GET /api/settings/runs": [night] });
+    renderApp("/settings/runs");
+    expect(await screen.findByText(/^\$0\.00 at list prices · 0 attempts/)).toBeInTheDocument();
+    expect(screen.queryByText(/at least/)).toBeNull();
+  });
 });

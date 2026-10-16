@@ -175,7 +175,7 @@ export function useDeepRead(paperId: string) {
     },
     // remembered here, not by the page, which may have gone by the time the request returns
     (qc, id) => {
-      rememberCard(id);
+      rememberCard(id, qc.getQueryData<Schemas["Paper"]>(["paper", id])?.card?.written_at ?? null);
       toast("Deep card requested");
       return settled(qc, id); // a paper litwatch lacked is fetched first: the page shows it fetched
     },
