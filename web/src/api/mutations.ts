@@ -125,16 +125,20 @@ export function useLabel(paperId: string) {
     paperId,
     async (id, v: { topic: string; value: Schemas["LabelValue"]; revision: number }) =>
       ok(await api.PUT("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } }, body: { value: v.value } })),
-    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, v.value, v.revision)), acked(qc, id, ack)]),
+    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, v.value, v.revision)), acked(qc, id, ack), digestsStale(qc)]),
   );
 }
+
+/** A label moves a paper's set-aside mark, the one live element of the digests it is in (digests.md): the Digest's
+ * cached reads are reread when next shown, kept on screen meanwhile. */
+const digestsStale = (qc: QueryClient) => qc.invalidateQueries({ queryKey: ["digest"], refetchType: "none" });
 
 /** A label taken back: the split waits again on Needs you, where it was. */
 export function useUnlabel(paperId: string) {
   return usePaperMutation(
     paperId,
     async (id, v: { topic: string; revision: number }) => ok(await api.DELETE("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } } })),
-    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, null, v.revision)), acked(qc, id, ack)]),
+    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, null, v.revision)), acked(qc, id, ack), digestsStale(qc)]),
   );
 }
 
@@ -327,21 +331,42 @@ export function useWriteAgain() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (digestId: number) => ok(await api.POST("/api/digests/{digest_id}/write", { params: { path: { digest_id: digestId } } })),
-    onSuccess: (r, digestId) => {
-      // The answer is the digest as it now stands: shown at once where it is open, and the Digest's views reread it.
-      qc.setQueryData(["digest", String(digestId)], r);
-      for (const view of ["day", "week", "history"]) void qc.invalidateQueries({ queryKey: ["digest", view] });
+    onSuccess: async (r, digestId) => {
+      // The answer is the digest as it now stands: shown at once where it is open (a read in flight is dropped, so it
+      // cannot land over the answer), its squares in the topics' strips recoloured, and the Digest's views reread.
+      const key = ["digest", String(digestId)];
+      await qc.cancelQueries({ queryKey: key, exact: true });
+      qc.setQueryData(key, r);
+      restripe(qc, r);
+      digestViewsStale(qc);
       refreshSummary(qc);
       return settleNeeds(qc, (q) => (r.state === "failed" ? noted(q, digestId, `Failed again: ${r.error ?? "no text"}. The next run writes it again.`) : settle(q, "digests", { id: digestId }, "Written again; it shows in the Digest.")));
     },
     onError: (e, digestId) => {
       toast(said(e), "error");
       if (!(e instanceof ApiError && e.status === 409)) return;
-      // A 409 says the server's view moved (written meanwhile, its topic paused, a job running): the counts follow.
+      // A 409 says the server's view moved (written meanwhile, its topic paused, a job running): the digest, its
+      // views and the counts follow.
+      void qc.invalidateQueries({ queryKey: ["digest", String(digestId)] });
+      digestViewsStale(qc);
       refreshSummary(qc);
       return settleNeeds(qc, (q) => (digestGone(e) ? settle(q, "digests", { id: digestId }, `No longer to be written: ${said(e)}.`) : noted(q, digestId, `Not written now: ${said(e)}.`)));
     },
   });
+}
+
+/** The Digest's views reread when next shown (a view on screen rereads now), their rows kept meanwhile. */
+const digestViewsStale = (qc: QueryClient) => {
+  for (const view of ["day", "week", "history"]) void qc.invalidateQueries({ queryKey: ["digest", view] });
+};
+
+/** A digest written again recolours its square in the topics' strips (`/topics` and its topic's page), in place:
+ * the lists around it are not reread, so nothing moves. */
+function restripe(qc: QueryClient, d: Schemas["Digest"]) {
+  const square = (s: Schemas["StripDigest"]) => (s.id === d.id ? { ...s, state: d.state, best_rarity: d.best_rarity } : s);
+  qc.setQueriesData<Schemas["TopicCard"][]>({ queryKey: ["topics"], exact: true }, (ts) => ts?.map((t) => (t.slug === d.topic.slug && t.strip ? { ...t, strip: t.strip.map(square) } : t)));
+  type Page = { topic: { strip: Schemas["StripDigest"][] } };
+  qc.setQueriesData<{ pages: Page[]; pageParams: unknown[] }>({ queryKey: ["topic", d.topic.slug] }, (q) => q && { ...q, pages: q.pages.map((p) => ({ ...p, topic: { ...p.topic, strip: p.topic.strip.map(square) } })) });
 }
 
 /** Whether a write-again's 409 says the digest is no longer one to write (written meanwhile, or its topic paused),

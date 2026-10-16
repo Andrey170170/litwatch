@@ -4,14 +4,14 @@
  * so Esc, the shade and Close put the view back as it was); on the phone they are the drawer's items under Digest,
  * the view's controls sit in the bottom bar, and a digest is a page of its own (`/digests/<id>`).
  */
-import { useInfiniteQuery, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch, type LinkProps } from "@tanstack/react-router";
-import { Dialog } from "radix-ui";
-import { Fragment, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain } from "@/api/mutations";
 import { dayQuery, digestQuery, historyQuery, weekQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
+import { Sheet } from "@/components/Sheet";
 import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
@@ -37,13 +37,13 @@ const VIEWS: { view: View; to: "/" | "/week" | "/history"; name: string }[] = [
 function Views({ view, children }: { view: View; children?: ReactNode }) {
   return (
     <div className="segbar">
-      <div className="vseg" role="tablist" aria-label="Digest views">
+      <nav className="vseg" aria-label="Digest views">
         {VIEWS.map((v) => (
-          <Link key={v.view} to={v.to} className={`vs${v.view === view ? " on" : ""}`} role="tab" aria-selected={v.view === view}>
+          <Link key={v.view} to={v.to} className={`vs${v.view === view ? " on" : ""}`} aria-current={v.view === view ? "page" : undefined}>
             {v.name}
           </Link>
         ))}
-      </div>
+      </nav>
       <span className="sp" />
       {children}
     </div>
@@ -78,11 +78,11 @@ function Stepper({ to, prev, next, label, small, foot }: { to: "/" | "/week"; pr
 }
 
 /** Where a digest opens from a view: the slide-over on the desktop (a search param on the view, replaced so the
- * view's Back is kept), the digest's page on the phone. */
+ * view's Back is kept, and the view keeps its scroll under the slide-over), the digest's page on the phone. */
 function useOpenDigest(): (id: number) => LinkProps {
   const desktop = useDesktop();
   if (!desktop) return (id) => ({ to: "/digests/$id", params: { id: String(id) } });
-  return (id) => ({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: id }), replace: true }) as LinkProps;
+  return (id) => ({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: id }), replace: true, resetScroll: false }) as LinkProps;
 }
 
 // -- the cards -----------------------------------------------------------------------------------------------------
@@ -255,14 +255,14 @@ export function WeekPage() {
 /** History's two forms; on the phone in the bottom bar, with their names. */
 function Modes({ cal, foot }: { cal: boolean; foot?: boolean }) {
   return (
-    <div className={`modes${foot ? " foot" : ""}`} role="tablist" aria-label="History as">
-      <Link to="/history" search={{}} replace className={cal ? "" : "on"} role="tab" aria-selected={!cal} aria-label="List">
+    <nav className={`modes${foot ? " foot" : ""}`} aria-label="History as">
+      <Link to="/history" search={{}} replace className={cal ? "" : "on"} aria-current={cal ? undefined : "page"} aria-label="List">
         ☰{foot && <span>List</span>}
       </Link>
-      <Link to="/history" search={{ view: "cal" }} replace className={cal ? "on" : ""} role="tab" aria-selected={cal} aria-label="Calendar">
+      <Link to="/history" search={{ view: "cal" }} replace className={cal ? "on" : ""} aria-current={cal ? "page" : undefined} aria-label="Calendar">
         ▦{foot && <span>Calendar</span>}
       </Link>
-    </div>
+    </nav>
   );
 }
 
@@ -333,8 +333,9 @@ function Calendar({ pages }: { pages: Schemas["History"][] }) {
   const desktop = useDesktop();
   const navigate = useNavigate();
   const now = today();
-  // On the phone the bars are too thin to tap: the cell opens its Day or Week.
-  const cell = (to: LinkProps) => (desktop ? {} : { onClick: () => void navigate(to), role: "link" as const, tabIndex: 0 });
+  // On the phone the bars are too thin to tap: a tap anywhere in the cell opens its Day or Week (the date is the link
+  // the keyboard reaches).
+  const cell = (to: LinkProps) => (desktop ? {} : { onClick: () => void navigate(to) });
   return calendarMonths(pages).map((mo) => (
     <section key={mo.month} className="calmonth" aria-label={monthLabel(`${mo.month}-01`)}>
       <div className="sec">{monthLabel(`${mo.month}-01`)}</div>
@@ -445,6 +446,7 @@ export function DigestView({ id }: { id: number }) {
   if (!d) return q.isError ? q.error instanceof ApiError && q.error.status === 404 ? <div className="empty">No such digest.</div> : <Failed q={q} what="the digest" /> : <Load q={q} />;
   return (
     <div className="dgfull" style={rarityStyle(d.best_rarity)}>
+      <State q={q} what="the digest" />
       <div className="dghead">
         <Badge topic={d.topic} size="lg" />
         <div>
@@ -509,24 +511,25 @@ export function DigestOnePage({ id }: { id: number }) {
 }
 
 /** The slide-over on the desktop: the digest over the view, closed by the shade, Esc or "‹ Close", which take the
- * search param off (replaced, so Back still leaves the tab). The phone has no slide-over. */
+ * search param off (replaced, so Back still leaves the tab). Opening it rereads the digest behind what is cached,
+ * as a visit to a page does. The phone has no slide-over: a view's URL naming a digest goes to the digest's page. */
 function SlideOver({ id }: { id: number | undefined }) {
   const desktop = useDesktop();
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (id === undefined) return;
+    if (desktop) void qc.invalidateQueries({ queryKey: ["digest", String(id)] });
+    else void navigate({ to: "/digests/$id", params: { id: String(id) }, replace: true });
+  }, [id, desktop, qc, navigate]);
   if (!desktop || id === undefined) return null;
-  const close = () => void navigate({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: undefined }), replace: true } as never);
+  const close = () => void navigate({ to: ".", search: (s: Record<string, unknown>) => ({ ...s, digest: undefined }), replace: true, resetScroll: false } as never);
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && close()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="shade" />
-        <Dialog.Content className="over" aria-describedby={undefined}>
-          <Dialog.Title className="sr-only">Digest</Dialog.Title>
-          <button className="back" onClick={close}>
-            ‹ Close
-          </button>
-          <DigestView key={id} id={id} />
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <Sheet open onClose={close} side="right" label="Digest">
+      <button className="back" onClick={close}>
+        ‹ Close
+      </button>
+      <DigestView key={id} id={id} />
+    </Sheet>
   );
 }

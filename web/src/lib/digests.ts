@@ -17,7 +17,8 @@ export type HistoryDay = Schemas["HistoryDay"];
 export function isoDay(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-export const isIsoDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(parseDay(s).getTime());
+/** A date that exists: Date would read 2026-02-31 as a day in March. */
+export const isIsoDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && isoDay(parseDay(s)) === s;
 
 /** A date-only string as a local day (UTC midnight would print as the day before west of Greenwich). */
 export function parseDay(iso: string): Date {
@@ -133,9 +134,8 @@ export function listRows(pages: HistoryPage[], today: string): ListRow[] {
         rows.push({ kind: "quiet", from: sat.day, to: d.day });
         i++;
       } else rows.push({ kind: "quiet", from: d.day, to: d.day });
-      continue;
-    }
-    rows.push({ kind: "day", day: d.day, marks: d.marks, today: d.day === today });
+    } else rows.push({ kind: "day", day: d.day, marks: d.marks, today: d.day === today });
+    // A Monday closes the week before with its weeklies, whether or not the Monday itself released anything.
     const covered = addDays(d.day, -7);
     const marks = parseDay(d.day).getDay() === 1 && covered !== pinned ? weeks.get(covered) : undefined;
     if (marks?.length) rows.push({ kind: "week", monday: covered, marks });
@@ -147,15 +147,16 @@ export type CalWeek = { monday: string; days: (HistoryDay | null)[]; weekly: Mar
 export type CalMonth = { month: string; weeks: CalWeek[] };
 
 /** History as a calendar: months, newest first, each its weeks top to bottom (a week belongs to the month of its
- * Monday); a week row holds Monday to Friday (null before the oldest digest or outside the pages read) and the
- * week's weekly digests. */
+ * Monday); a week row holds Monday to Friday (null before the oldest digest) and the week's weekly digests. Only the
+ * weeks read so far are laid out: the calendar grows as pages arrive, down to the archive's start. */
 export function calendarMonths(pages: HistoryPage[]): CalMonth[] {
   const start = pages[0]?.start ?? null;
-  if (!start) return [];
+  const oldest = pages.at(-1)?.days.at(-1)?.day;
+  if (!start || !oldest) return [];
   const weeks = new Map(pages.flatMap((p) => p.weeks).map((w) => [w.monday, w.marks]));
   const days = new Map(pages.flatMap((p) => p.days).map((d) => [d.day, d]));
   const months: CalMonth[] = [];
-  const first = mondayOf(start);
+  const first = mondayOf(oldest > start ? oldest : start);
   const newest = pages[0]?.days[0]?.day;
   for (let monday = newest ? mondayOf(newest) : first; monday >= first; monday = addDays(monday, -7)) {
     const month = monday.slice(0, 7);

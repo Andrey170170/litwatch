@@ -177,7 +177,7 @@ describe("a paper's page", () => {
       "GET /api/papers/2610.00002": paper,
       "POST /api/papers/2610.00002/card": async () => {
         await held;
-        return { message: "queued" };
+        return { pass_id: 73 };
       },
     });
     renderApp("/paper/2610.00002");
@@ -385,7 +385,7 @@ describe("a paper's page", () => {
         { id: "2501.00001", title: "An outside paper", relation: "contradicts", note: "Finds the opposite.", rarity: null, in_collection: false },
       ],
     };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card }, "POST /api/papers/2610.00002/card": { message: "queued" } });
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card }, "POST /api/papers/2610.00002/card": { pass_id: 73 } });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     const among = screen.getByText("Among the collection").closest(".rung")!;
@@ -405,13 +405,14 @@ describe("a paper's page", () => {
     scriptFetch({
       "GET /api/status": status,
       "GET /api/topics": [],
-      "GET /api/papers/2610.00002": { ...paper, card_requestable: false, card_pass: pass },
+      "GET /api/papers/2610.00002": { ...paper, card_pass: pass },
       "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", card_requestable: false, card_pass: { ...pass, reason: "request", state: "failed", failed_runs: 3, error: "timed out" } },
     });
     const { unmount } = renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByText("Automatic for an Area pick · being written")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Deep read · queued" })).toBeDisabled();
+    // An automatic pass is the owner's to take over: Deep read stays live.
+    expect(screen.getByRole("button", { name: "Deep read" })).toBeEnabled();
     unmount();
     renderApp("/paper/2610.00003");
     await screen.findByRole("heading", { name: "Epic one" });

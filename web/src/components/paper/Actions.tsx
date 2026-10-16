@@ -33,12 +33,13 @@ export function SaveCell({ paper }: { paper: Paper }) {
   );
 }
 
-/** Deep read asks for a card, Write again a new one over the paper's own; while the request is in, or a pass is
- * open, the cell says so (the hook remembers a request for the page until the pass is read back). */
+/** Deep read asks for a card, Write again a new one over the paper's own; while the request is in, or the owner's
+ * own pass is open, the cell says so (the hook remembers a request for the page until the pass is read back). An
+ * automatic pass leaves the cell live: the owner's request takes it over (`card_requestable`). */
 export function DeepReadCell({ paper, asked, wide }: { paper: Paper; asked: boolean; wide?: boolean }) {
   const deep = useDeepRead(paper.id);
   if (!paper.card_requestable && !paper.card_pass) return null;
-  const busy = asked || !!paper.card_pass;
+  const busy = asked || !paper.card_requestable;
   const what = paper.card ? "Write again" : "Deep read";
   return (
     <button className={wide ? "wide" : ""} onClick={() => deep.mutate(undefined)} disabled={deep.isPending || busy}>

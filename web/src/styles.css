@@ -461,9 +461,10 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .strip { display: flex; align-items: center; gap: 8px; min-width: 0; font: 500 11px var(--font-mono); color: var(--fg3); text-transform: uppercase; letter-spacing: 0.08em; }
 .thead ~ .strip { margin: -4px 0 14px; }
 .strip > span:first-child { flex: none; }
-.strip .sq { display: flex; flex-direction: row-reverse; gap: 3px; overflow: hidden; min-width: 0; }
-.strip .sq a { flex: none; width: 14px; height: 14px; background: var(--rc); position: relative; }
-.strip.sm .sq a { width: 11px; height: 11px; }
+/* squares that do not fit wrap to a second line the strip's height hides: the oldest drop out whole */
+.strip .sq { --sq: 14px; display: flex; flex-direction: row-reverse; flex-wrap: wrap; align-content: flex-start; gap: 3px; height: var(--sq); overflow: hidden; min-width: 0; }
+.strip .sq a { flex: none; width: var(--sq); height: var(--sq); background: var(--rc); position: relative; }
+.strip.sm .sq { --sq: 11px; }
 .strip .sq a.h { background: none; box-shadow: inset 0 0 0 1px var(--line); }
 .strip .sq a.x { background: none; box-shadow: inset 0 0 0 1px var(--sig); }
 .strip .sq a.x::after { content: "×"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--sig); font-size: 11px; line-height: 1; }

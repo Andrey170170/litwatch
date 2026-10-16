@@ -66,8 +66,8 @@ def walk(base: str, token: str, paper: str, topic: str, out: Path) -> list[str]:
                 text = main.inner_text().strip() if main.count() else ""
                 if not text:
                     seen.append("empty page: no text in the page's content")
-                elif "Could not load" in text:
-                    # A failed read renders its own text; it is not a page that works.
+                elif main.locator(".loadmore", has_text="Could not load").count():
+                    # A failed read renders its own line with "Try again": not a page that works.
                     seen.append("failed read: the page says it could not load")
                 page.screenshot(path=out / f"{name}-{width}.png", full_page=True)
                 failures += [f"{name} at {width} ({path}): {s}" for s in seen]

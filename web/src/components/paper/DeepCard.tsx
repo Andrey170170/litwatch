@@ -192,21 +192,18 @@ export function DeepCard({ paper, asked, deepRead }: { paper: Paper; asked: bool
         </Rung>
       ) : null}
       <Rung name="" className="sub end">
-        {asked || paper.card_pass ? (
-          <CardStatus pass={paper.card_pass} asked={asked} again />
-        ) : (
-          <div className="cfoot">
-            {label(paper.card)}
-            {paper.card_requestable && (
-              <>
-                {" · "}
-                <button className="inl" onClick={() => again.mutate(undefined)} disabled={again.isPending}>
-                  Write again
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        <div className="cfoot">
+          {label(paper.card)}
+          {paper.card_requestable && !asked && (
+            <>
+              {" · "}
+              <button className="inl" onClick={() => again.mutate(undefined)} disabled={again.isPending}>
+                Write again
+              </button>
+            </>
+          )}
+        </div>
+        {(asked || paper.card_pass) && <CardStatus pass={paper.card_pass} asked={asked} again />}
       </Rung>
     </>
   );

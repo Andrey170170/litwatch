@@ -100,7 +100,7 @@ describe("the Digest", () => {
     expect(screen.getByText("today")).toBeInTheDocument();
     expect(screen.getByText("The archive starts on Mon 5 Oct.")).toBeInTheDocument();
     // The calendar: a row per week, the week's weeklies in the W cell, today's cell marked.
-    await userEvent.click(screen.getByRole("tab", { name: "Calendar" }));
+    await userEvent.click(screen.getByRole("link", { name: "Calendar" }));
     expect(await screen.findByText("W 5–11 Oct")).toBeInTheDocument();
     expect(document.querySelector(".mday.today .mnum")).toHaveTextContent("14");
     expect(document.querySelectorAll(".mday.empty").length).toBeGreaterThan(0);

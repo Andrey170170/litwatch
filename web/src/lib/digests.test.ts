@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarMonths, listRows, markLine, mondayOf, nextSpan, sections, weekRange, type HistoryPage, type Mark } from "./digests";
+import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, weekRange, type HistoryPage, type Mark } from "./digests";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" } as const;
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" } as const;
@@ -15,6 +15,13 @@ describe("a Mark's count line", () => {
     expect(markLine(mark({ period: "week", topic: area, counts: { ...counts, papers: 64, picks: 5 } }))).toBe("Week · 5 picks");
     expect(markLine(mark({ state: "nothing_new" }))).toBe("Nothing new");
     expect(markLine(mark({ state: "failed" }))).toBe("Could not be written");
+  });
+});
+
+describe("days", () => {
+  it("takes only dates that exist", () => {
+    expect(isIsoDay("2028-02-29")).toBe(true);
+    expect(["2026-02-31", "2026-13-01", "2026-2-1", "today", 7].map(isIsoDay)).toEqual([false, false, false, false, false]);
   });
 });
 
@@ -77,6 +84,15 @@ describe("History as a list", () => {
     expect(rows[monday + 1]).toMatchObject({ kind: "week", monday: "2026-10-05" });
     expect(rows[0]?.kind).toBe("day");
   });
+  it("closes the week even after a Monday that released nothing", () => {
+    const p = page();
+    const monday = p.days.find((d) => d.day === "2026-10-12")!;
+    monday.released = false;
+    monday.marks = [];
+    const rows = listRows([p], "2026-10-22");
+    const quiet = rows.findIndex((r) => r.kind === "quiet" && r.from === "2026-10-12");
+    expect(rows[quiet + 1]).toMatchObject({ kind: "week", monday: "2026-10-05" });
+  });
 });
 
 describe("History as a calendar", () => {
@@ -88,6 +104,11 @@ describe("History as a calendar", () => {
     expect(first.weekly.map((m) => m.id)).toEqual([50]);
     expect(months[0]!.weeks[1]!.days[3]?.day).toBe("2026-10-15");
     expect(months[0]!.weeks[1]!.days[4]).toBeNull();
+  });
+  it("lays out only the weeks read so far, not the archive back to its start", () => {
+    // the page's oldest day is Thu 1 Oct: its week, Monday 28 Sept, is the last laid out
+    const months = calendarMonths([{ ...page(), start: "2024-01-01" }]);
+    expect(months.map((m) => [m.month, m.weeks.map((w) => w.monday)])).toEqual([["2026-10", ["2026-10-05", "2026-10-12"]], ["2026-09", ["2026-09-28"]]]);
   });
   it("reads the next page back only until the oldest digest", () => {
     expect(nextSpan([page()])).toBeUndefined();
