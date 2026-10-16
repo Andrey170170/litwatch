@@ -934,7 +934,8 @@ export interface paths {
          * @description Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
          *     when it has one: the request goes through the full-text queue, first in line, and the card
          *     shows on the paper once it is written. Asking again while one is queued or being written
-         *     changes nothing. A paper litwatch lacks is fetched first, as Process fetches it.
+         *     changes nothing. A paper litwatch lacks is fetched first, as Process fetches it, in the
+         *     same transaction as the request.
          */
         post: operations["request_card_api_papers__paper_id__card_post"];
         delete?: never;

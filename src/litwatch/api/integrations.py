@@ -182,16 +182,18 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
     """Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
     when it has one: the request goes through the full-text queue, first in line, and the card
     shows on the paper once it is written. Asking again while one is queued or being written
-    changes nothing. A paper litwatch lacks is fetched first, as Process fetches it."""
+    changes nothing. A paper litwatch lacks is fetched first, as Process fetches it, in the
+    same transaction as the request."""
     if not answers_card_requests(loaded(request)):
         raise HTTPException(status_code=409, detail="no card provider is configured")
-    try:
-        found, _ = await misses.lookup(c, paper_id)
-    except misses.NotFoundError as exc:
-        raise HTTPException(status_code=404, detail="no such paper") from exc
-    pass_id = await deep_passes.request(c, found.id)
-    if pass_id is None:
-        raise HTTPException(status_code=409, detail="the paper is dismissed")
+    async with c.transaction():
+        try:
+            found, _ = await misses.lookup(c, paper_id)
+        except misses.NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="no such paper") from exc
+        pass_id = await deep_passes.request(c, found.id)
+        if pass_id is None:
+            raise HTTPException(status_code=409, detail="the paper is dismissed")
     request.app.state.deep_wake.set()
     return s.CardRequested(pass_id=pass_id)
 

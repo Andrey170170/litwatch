@@ -2504,7 +2504,7 @@
     "/api/papers/{paper_id}/card": {
       "post": {
         "summary": "Request Card",
-        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing. A paper litwatch lacks is fetched first, as Process fetches it.",
+        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing. A paper litwatch lacks is fetched first, as Process fetches it, in the\nsame transaction as the request.",
         "operationId": "request_card_api_papers__paper_id__card_post",
         "parameters": [
           {
