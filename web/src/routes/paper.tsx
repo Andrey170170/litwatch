@@ -106,6 +106,9 @@ function PaperView({ id, under, miss }: { id: string; under: string | undefined;
   const { data: paper, error, isPending } = read;
   const [gistAway, setGistAway] = useState(false);
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(miss ? "more" : null);
+  // Report as a miss for a paper neither litwatch nor the archive has (the report fetches it), open at once
+  // from the share target
+  const [missPick, setMissPick] = useState(miss);
   // The request is remembered until the page reads its pass back, or a card newer than the one asked over.
   useEffect(() => {
     if (asked && paper && cardAnswered(id, paper.card, paper.card_pass)) forgetCard(id);
@@ -136,7 +139,11 @@ function PaperView({ id, under, miss }: { id: string; under: string | undefined;
           <button className="pri" onClick={() => process.mutate(id)} disabled={process.isPending}>
             Process
           </button>
+          <button onClick={() => setMissPick(!missPick)} aria-pressed={missPick}>
+            Report as a miss
+          </button>
         </div>
+        {missPick && <MissPicker paper={{ id }} onDone={() => setMissPick(false)} />}
       </>
     );
   }

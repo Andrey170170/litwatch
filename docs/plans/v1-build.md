@@ -216,6 +216,11 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   Interpretability) and the full-text cost it brings (about $9 per 1,000 papers) are accepted for the restart.
   Reassess them after one to two weeks of running, together with the cost, and tune then. The Focus related ×
   incremental cell stays: two papers are not enough to move it. The Field offset is 2 (`evals/2026-10-15-tuning.md`).
+- **W4 found**, for the smoke stack (`tests/stack`): a digest's own page and a Calibrate session's are walked
+  only when the stack has one, and the fresh stack has neither. Give `smoke.sh` a written digest (a fake writer,
+  as `fake_deep.py` fakes the deep service) and a drawn session, so `pages.py` walks them every run. A topic's
+  digest strip keeps its 11 px squares on the phone (DESIGN.md asks 40 px of every control): a 40 px square per
+  digest does not fit the card; the strip is a second way to the digests, which History lists at full size.
 - **API gaps W1 found**, each for the core PR that owns it: a Brief on Paper (N3); a Deep card's queued state and
   "Write again", which POST answers 409 (N3's Deep cards); digests for the topic strips and the sidebar's counts (N4,
   W3); the "Among the

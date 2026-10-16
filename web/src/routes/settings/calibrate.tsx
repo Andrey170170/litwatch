@@ -170,12 +170,14 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
     });
   /** Record the answer, then move on: what was edited, and on Next a first answer with the drawn topic's Fit as it
    * stands (`wanted`). Edits without that Fit stay on the screen and ask for it; an untouched paper is left as it
-   * was. Nothing moves while a save is in flight. */
-  const leave = (wanted: boolean, after: () => void) => {
-    if (saving) return;
-    if (!complete) return edited ? setMissing(true) : after();
-    if (!edited && !wanted) return after();
+   * was. Nothing moves while a save is in flight. Says whether the page left at once (the phone's swipe puts the
+   * content back when it did not; a save that then succeeds moves on by itself). */
+  const leave = (wanted: boolean, after: () => void): boolean => {
+    if (saving) return false;
+    if (!complete) return edited ? (setMissing(true), false) : (after(), true);
+    if (!edited && !wanted) return (after(), true);
     answer.mutate({ sessionId: s.id, position: item.position, answer: body }, { onSuccess: after });
+    return false;
   };
   /** Next records a first answer when the drawn topic has its Fit, and any edit; a paper left untouched stays grey. */
   const next = () => leave(!item.answered_at, i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true }, true));

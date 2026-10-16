@@ -22,6 +22,13 @@ describe("The release velocity", () => {
     t.push({ t: 880, x: 150, y: 0 });
     expect(t.velocity().vx).toBeCloseTo(110 / 80);
   });
+  it("is zero when the finger held still before letting go, however fast it got there", () => {
+    const t = new Tracker();
+    t.push({ t: 0, x: 0, y: 0 });
+    t.push({ t: 40, x: 60, y: 0 });
+    t.push({ t: 1000, x: 60, y: 0 });
+    expect(t.velocity().vx).toBe(0);
+  });
   it("is zero with one sample or no time between them", () => {
     const t = new Tracker();
     t.push({ t: 10, x: 0, y: 0 });

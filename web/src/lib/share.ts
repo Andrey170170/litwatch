@@ -7,10 +7,11 @@
 const NEW = /(?<!\d)(\d{4}\.\d{4,5})(?:v\d+)?(?!\d)/;
 const OLD = /(?<!\w)([a-z-]+(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?(?!\d)/;
 
-/** The arXiv id in the texts given, the first found; null when none. */
+/** The arXiv id in the texts given, the first text with one deciding (the link before the text that mentions
+ * it); null when none. */
 export function arxivIdIn(...texts: (string | null | undefined)[]): string | null {
-  for (const re of [NEW, OLD]) for (const t of texts) if (t) {
-      const m = re.exec(t);
+  for (const t of texts) for (const re of [NEW, OLD]) {
+      const m = t && re.exec(t);
       if (m) return m[1]!;
     }
   return null;

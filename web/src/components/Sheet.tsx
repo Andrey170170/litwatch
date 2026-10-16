@@ -79,12 +79,14 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
             if (axis === "x" || dy < 0) return (axis = "x");
             el.style.transition = "none";
           }
+          if (axis !== "y") return;
           el.style.transform = `translateY(${Math.max(0, dy)}px)`;
           if (shade.current) shade.current.style.opacity = String(1 - Math.max(0, dy) / height());
         },
         end: (u, cancelled) => {
           if (axis !== "y") return;
           swallowNextClick();
+          tracker.push(sample(u));
           const dy = Math.max(0, u.clientY - e.clientY);
           const goes = !cancelled && sheetCloses(dy, tracker.velocity().vy, height());
           const ms = motionMs(goes ? 160 : 200);

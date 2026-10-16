@@ -23,10 +23,10 @@ CARD_WAIT_SECONDS = 120
 
 def pages(paper: str, topic: str, day: str, missing: str = "0000.00001") -> dict[str, str]:
     """Every page there is, by name (web/src/router.tsx): the Digest's views, the lists, a paper
-    in the collection and one neither litwatch nor the archive has, the share target, and every
-    Settings page with the pages inside them. A digest's own page and a Calibrate session need a
-    digest written or a session drawn, which the smoke stack has not; `walk` adds them when the
-    API has one."""
+    in the collection and one neither litwatch nor the archive has, the share target with each,
+    and every Settings page with the pages inside them. A digest's own page and a Calibrate
+    session need a digest written or a session drawn, which the smoke stack has not; `walk` adds
+    them when the API has one."""
     return {
         "digest": "/",
         "digest-day": f"/?day={day}",
@@ -40,6 +40,7 @@ def pages(paper: str, topic: str, day: str, missing: str = "0000.00001") -> dict
         "paper": f"/paper/{paper}",
         "paper-outside": f"/paper/{missing}",
         "share": f"/share?url=https%3A%2F%2Farxiv.org%2Fabs%2F{paper}",
+        "share-outside": f"/share?text=see%20arxiv.org%2Fabs%2F{missing}",
         "settings": "/settings",
         "settings-overview": "/settings/overview",
         "settings-needs": "/settings/needs",
@@ -56,13 +57,37 @@ def pages(paper: str, topic: str, day: str, missing: str = "0000.00001") -> dict
     }
 
 
-# What a page must show to count as working, beyond text in <main>: the share target lands on
-# the paper with "Report as a miss" open; a paper outside the collection offers Process. The text
-# is compared without case: `inner_text` renders a button's CSS `text-transform`.
-EXPECT = {
-    "share": ("url", "/paper/"),
-    "paper-outside": ("text", "Process"),
-}
+NOT_A_PAGE = "There is no such page"
+
+
+def expect(paper: str, width: str) -> dict[str, tuple[str, str]]:
+    """What a page must show to count as working, beyond text in <main> that is not the shell's
+    "There is no such page": a word of its own where one holds whatever the data (a Settings page's
+    title, the paper's id, Process for a paper outside the collection), the paper's sheet open on
+    the share target's landing on the phone (`.sheet`; the desktop's rail is open already), or
+    "Report as a miss" when the shared paper is one neither litwatch nor the archive has. The lists
+    and the Digest's views have no such word: their text is their data, or an empty state. Text is
+    compared without case: `inner_text` renders a button's CSS `text-transform`."""
+    return {
+        "paper": ("text", paper),
+        "paper-outside": ("text", "Process"),
+        "share": ("sheet", ".sheet") if width == "phone" else ("text", paper),
+        "share-outside": ("text", "Report as a miss"),
+        "settings": ("text", "Overview"),
+        "settings-overview": ("text", "Overview"),
+        "settings-needs": ("text", "Needs you"),
+        "settings-calibrate": ("text", "Calibrate"),
+        "settings-misses": ("text", "Misses"),
+        "settings-topics": ("text", "Topics"),
+        "settings-topic-editor": ("text", "follows"),
+        "settings-taxonomy": ("text", "Taxonomy"),
+        "settings-runs": ("text", "Runs and cost"),
+        "settings-jobs": ("text", "Jobs"),
+        "settings-integrations": ("text", "Integrations"),
+        "settings-integration-events": ("text", "events"),
+        "settings-configuration": ("text", "Configuration"),
+        "digest-one": ("text", "digest"),
+    }
 
 
 def watch(page) -> list[str]:
@@ -89,18 +114,21 @@ def watch(page) -> list[str]:
 
 
 def found_pages(context, base: str, day: str) -> dict[str, str]:
-    """The pages that exist only once the data does: the page of a digest written around `day`,
-    the first Calibrate session."""
+    """The pages that exist only once the data does: the page of a digest written around `day`
+    (a day's or a week's), the first Calibrate session. A read that fails is an error, not an
+    absence."""
     extra: dict[str, str] = {}
     since = (date.fromisoformat(day) - timedelta(days=30)).isoformat()
     until = (date.fromisoformat(day) + timedelta(days=7)).isoformat()
     history = context.request.get(f"{base}/api/digests?since={since}&until={until}")
-    if history.ok:
-        marks = [m for d in history.json()["days"] for m in d["marks"]]
-        if marks:
-            extra["digest-one"] = f"/digests/{marks[0]['id']}"
+    assert history.ok, f"reading the digest history: HTTP {history.status}"
+    found = history.json()
+    marks = [m for d in found["days"] + found["weeks"] for m in d["marks"]]
+    if marks:
+        extra["digest-one"] = f"/digests/{marks[0]['id']}"
     sessions = context.request.get(f"{base}/api/settings/calibrate")
-    if sessions.ok and sessions.json():
+    assert sessions.ok, f"reading the Calibrate sessions: HTTP {sessions.status}"
+    if sessions.json():
         extra["settings-calibrate-session"] = f"/settings/calibrate/{sessions.json()[0]['id']}"
     return extra
 
@@ -127,11 +155,13 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
                 elif main.locator(".loadmore", has_text="Could not load").count():
                     # A failed read renders its own line with "Try again": not a page that works.
                     seen.append("failed read: the page says it could not load")
-                kind, want = EXPECT.get(name, (None, None))
-                if kind == "url" and want not in page.url:
-                    seen.append(f"landed on {page.url}, not a page under {want}")
-                elif kind == "text" and want.lower() not in text.lower():
+                if NOT_A_PAGE in text:
+                    seen.append(f"the shell says {NOT_A_PAGE!r}")
+                kind, want = expect(paper, width).get(name, (None, ""))
+                if kind == "text" and want.lower() not in text.lower():
                     seen.append(f"the page does not say {want!r}")
+                elif kind == "sheet" and not page.locator(want).count():
+                    seen.append(f"no {want} is open")
                 page.screenshot(path=out / f"{name}-{width}.png", full_page=True)
                 failures += [f"{name} at {width} ({path}): {s}" for s in seen]
             context.close()

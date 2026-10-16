@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp, scriptFetch, viewport } from "@/test/harness";
 
@@ -90,6 +90,8 @@ describe("The phone's gestures", () => {
     const { router } = renderApp("/");
     await screen.findByText("Today");
     swipe(screen.getByText("One paper."), [100, 300], [[104, 312], [200, 420]]);
+    // the finger went on sideways after the page took the drag: the content stayed where it was
+    expect(document.querySelector("main")?.style.transform).toBe("");
     swipe(screen.getByText("One paper."), [100, 300], [[160, 300]]);
     await Promise.resolve();
     expect(router.state.location.search).toEqual({});
@@ -126,15 +128,78 @@ describe("The phone's gestures", () => {
     fireEvent.click(screen.getByText("Faithful traces"));
     await screen.findByRole("button", { name: "Back" });
     const length = router.history.length;
-    swipe(screen.getByRole("main"), [8, 300], [[30, 300], [80, 300]]);
+    swipe(screen.getByRole("main"), [8, 300], [[30, 300], [80, 300]], { lift: false });
+    const under = document.querySelector<HTMLElement>(".under")!;
+    expect(under.hidden).toBe(false);
+    fireEvent.pointerUp(window, { clientX: 80, clientY: 300, pointerId: 1, isPrimary: true });
     await waitFor(() => expect(document.querySelector(".page")?.getAttribute("style") ?? "").toBe(""));
     expect(router.state.location.pathname).toBe("/paper/2610.00001");
+    // the copy of the screen under is gone with the drag: the router must find the live screen to restore its scroll
+    expect(under.hidden).toBe(true);
+    expect(under.childElementCount).toBe(0);
     // a flick from the edge goes back even from a short way in
     swipe(screen.getByRole("main"), [8, 300], [[30, 300], [70, 300]], { ms: 20 });
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
     expect(router.history.length).toBe(length);
     await screen.findByText("Today");
     expect(document.querySelector("main")?.dataset.came).toBe("still");
+  });
+
+  it("ends a drag when the screen changes under the finger, and keeps a stepped-away screen's copy at rest", async () => {
+    const second = { ...paper, id: "2610.00002", title: "Second traces" };
+    scriptFetch({
+      ...routes,
+      "GET /api/digests/days/2026-10-14": { ...day("2026-10-14", "2026-10-13", null), digests: [{ ...card, papers: [paper, second] }] },
+      "GET /api/papers": papers,
+      "GET /api/papers/2610.00001": full("2610.00001", { in_collection: true }),
+      "GET /api/papers/2610.00002": full("2610.00002", { in_collection: true, title: "Second traces" }),
+    });
+    const { router } = renderApp("/");
+    await screen.findByText("Today");
+    // a step drag in progress when a navigation comes: what it wrote is taken back, and its release does nothing
+    swipe(screen.getByText("One paper."), [100, 300], [[110, 300], [220, 300]], { lift: false });
+    expect(document.querySelector("main")?.style.transform).toBe("translateX(120px)");
+    await router.navigate({ to: "/papers" });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/papers"));
+    expect(document.querySelector("main")?.style.transform).toBe("");
+    fireEvent.pointerUp(window, { clientX: 220, clientY: 300, pointerId: 1, isPrimary: true });
+    await Promise.resolve();
+    expect(router.state.location.pathname).toBe("/papers");
+    // a paper stepped away from is copied for the way back as it was, not as it left (faded, slid)
+    await router.navigate({ to: "/" });
+    await screen.findByText("Today");
+    fireEvent.click(screen.getByText("Faithful traces"));
+    await screen.findByRole("button", { name: "Back" });
+    swipe(screen.getByRole("main"), [300, 300], [[290, 300], [150, 300]]);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/paper/2610.00002"));
+    await screen.findByRole("heading", { name: "Second traces" });
+    swipe(screen.getByRole("main"), [8, 300], [[30, 300], [80, 300]], { lift: false });
+    const copy = document.querySelector<HTMLElement>(".under .screen")!;
+    expect(copy.style.opacity).toBe("");
+    expect(copy.style.transform).toBe("");
+    expect(copy.hasAttribute("data-scroll-restoration-id")).toBe(false);
+    fireEvent.pointerUp(window, { clientX: 80, clientY: 300, pointerId: 1, isPrimary: true });
+  });
+
+  it("puts the content back when the page refuses the step: Calibrate, while a save is in flight", async () => {
+    const item = (position: number) => ({ position, paper_id: `2610.0000${position}`, topic: "cotf", why: "above", verdict: "related", answer: null, answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null });
+    let release!: () => void;
+    const calls = scriptFetch({
+      ...routes,
+      "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items: [item(1), item(2)] },
+      "PUT /api/settings/calibrate/1/items/1": () => new Promise<Response>((r) => (release = () => r(new Response(null, { status: 204 })))),
+    });
+    const { router } = renderApp("/settings/calibrate/1?at=1");
+    await screen.findByText("Drawn 1");
+    fireEvent.click(within(await screen.findByRole("group", { name: "Fit for cotf" })).getByRole("button", { name: "related" }));
+    // the swipe to the next paper records the answer first; nothing moves while that save is in flight
+    swipe(screen.getByText("Drawn 1"), [300, 300], [[290, 300], [150, 300]]);
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
+    await waitFor(() => expect(document.querySelector("main")?.style.opacity).toBe(""));
+    expect(screen.getByText("Drawn 1")).toBeInTheDocument();
+    expect(router.state.location.href).toBe("/settings/calibrate/1?at=1");
+    release();
+    await waitFor(() => expect(router.state.location.href).toBe("/settings/calibrate/1?at=2"));
   });
 });
 

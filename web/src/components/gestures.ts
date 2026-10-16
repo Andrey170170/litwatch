@@ -4,7 +4,8 @@
  * returns to under it; a horizontal drag away from the edge steps the page's sequence (`lib/steps`); a drag that
  * starts vertical is left to the page, which scrolls. The sheets drag down by their handle (`Sheet.tsx`). Decisions
  * come from `lib/gesture`; this file applies them to the elements, and mostly by writing styles, so a moving finger
- * re-renders nothing.
+ * re-renders nothing. A navigation from elsewhere (the system's Back, a tap) ends a drag in progress and voids the
+ * settle of one just released: the screen it would have moved is gone.
  */
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -18,20 +19,25 @@ export const EASE = "cubic-bezier(.2, .85, .25, 1)";
 export const sample = (e: PointerEvent) => ({ t: Date.now(), x: e.clientX, y: e.clientY });
 
 /** Follow one pointer from `down` to its release: `move` gets each move, `end` the release (`cancelled` when the
- * browser took the pointer for a scroll). Window listeners, so the finger may leave the element. */
-export function trackPointer(down: PointerEvent, on: { move: (e: PointerEvent) => void; end: (e: PointerEvent, cancelled: boolean) => void }) {
+ * browser took the pointer for a scroll). Window listeners, so the finger may leave the element. Returns a way to
+ * stop following, after which neither is called. */
+export function trackPointer(down: PointerEvent, on: { move: (e: PointerEvent) => void; end: (e: PointerEvent, cancelled: boolean) => void }): () => void {
   const id = down.pointerId;
   const move = (e: PointerEvent) => e.pointerId === id && on.move(e);
-  const end = (e: PointerEvent) => {
-    if (e.pointerId !== id) return;
+  const stop = () => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", end);
     window.removeEventListener("pointercancel", end);
+  };
+  const end = (e: PointerEvent) => {
+    if (e.pointerId !== id) return;
+    stop();
     on.end(e, e.type === "pointercancel");
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", end);
   window.addEventListener("pointercancel", end);
+  return stop;
 }
 
 let swallowUntil = 0;
@@ -70,7 +76,7 @@ export function clearDrag(...els: (HTMLElement | null)[]) {
 type Els = { root: RefObject<HTMLElement | null>; page: RefObject<HTMLElement | null>; main: RefObject<HTMLElement | null>; under: RefObject<HTMLElement | null>; panel: RefObject<HTMLElement | null>; shade: RefObject<HTMLElement | null> };
 type Opts = { deeper: boolean; menu: boolean; setMenu: (open: boolean) => void; deeperAt: (pathname: string) => boolean };
 type Kind = "drawer" | "back" | "step";
-type Drag = { kind: Kind; x0: number; y0: number; axis: Axis; tracker: Tracker; steps: Steps | null; wasOpen: boolean };
+type Drag = { kind: Kind; x0: number; y0: number; axis: Axis; tracker: Tracker; steps: Steps | null; wasOpen: boolean; stop: () => void };
 
 /** A horizontal drag on an element that scrolls sideways (a strip) is that element's. */
 function scrollsSideways(from: Element, upTo: Element): boolean {
@@ -94,20 +100,21 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
   live.current = opts;
   const pending = useRef<(() => void) | null>(null);
 
-  // As the phone goes deeper, the screen left is kept for the way back.
-  useEffect(
-    () =>
-      router.history.subscribe(({ location, action }) => {
-        if (action.type === "PUSH" && live.current.deeperAt(location.pathname) && els.page.current) keepSnapshot(historyIndex(location) - 1, els.page.current);
-      }),
-    [router, els.page],
-  );
-
   useEffect(() => {
-    let busy = false;
+    /** The drag the finger holds, if any; whether one just released is still settling (no new one until it has);
+     * and the count of navigations, which a settle checks before acting. */
+    let active: Drag | null = null;
+    let settling = false;
+    const done = () => (settling = false);
+    let navigations = 0;
     const width = () => els.root.current?.clientWidth || window.innerWidth;
     const panelWidth = () => els.panel.current?.offsetWidth || Math.min(300, width() * 0.82);
     const back = () => (router.history.canGoBack() ? router.history.back() : void router.navigate({ to: "/" }));
+    const hideUnder = () => {
+      if (!els.under.current) return;
+      els.under.current.hidden = true;
+      els.under.current.replaceChildren();
+    };
 
     /** The drawer at `x` from open (0 open, -width shut), its shade fading with it. */
     const drawerAt = (x: number, w: number) => {
@@ -122,7 +129,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
     };
 
     const begin = (d: Drag) => {
-      busy = true;
+      active = d;
       if (d.kind === "drawer") {
         setDrawerDrag(d.wasOpen ? "shutting" : "opening");
         if (!d.wasOpen) live.current.setMenu(true);
@@ -145,11 +152,26 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
       }
     };
 
+    /** The screen changed under the finger: the drag is over, and what it wrote is taken back. */
+    const abort = (d: Drag) => {
+      d.stop();
+      active = null;
+      clearDrag(els.page.current, els.main.current, els.panel.current, els.shade.current);
+      hideUnder();
+      if (d.kind === "drawer") {
+        setDrawerDrag(null);
+        if (!d.wasOpen) live.current.setMenu(false);
+      }
+    };
+
     const finish = (d: Drag, e: PointerEvent, cancelled: boolean) => {
+      active = null;
+      settling = true;
+      d.tracker.push(sample(e));
       const dx = e.clientX - d.x0;
       const { vx } = d.tracker.velocity();
       const W = width();
-      const done = () => (busy = false);
+      const at = navigations;
       if (d.kind === "drawer") {
         const w = panelWidth();
         const where = cancelled ? (d.wasOpen ? "open" : "shut") : drawerSettles(drawerX(d, dx, w), vx, w);
@@ -168,13 +190,11 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
         if (go) {
           els.under.current?.style.setProperty("--f", "1");
           settle(els.page.current, { transform: `translateX(${W}px)` }, motionMs(200), () => {
+            if (at !== navigations) return (clearDrag(els.page.current), hideUnder(), done());
             // the page waits off screen until the screen under it has rendered for real (`onRendered`)
             pending.current = () => {
               clearDrag(els.page.current);
-              if (els.under.current) {
-                els.under.current.hidden = true;
-                els.under.current.replaceChildren();
-              }
+              hideUnder();
               done();
             };
             arrive("still");
@@ -183,28 +203,29 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
         } else
           settle(els.page.current, { transform: "translateX(0)" }, motionMs(200), () => {
             clearDrag(els.page.current);
-            if (els.under.current) els.under.current.hidden = true;
+            hideUnder();
             done();
           });
       } else {
         const dir = cancelled ? 0 : stepCommits(dx, vx, W);
         const to = dir === 1 ? d.steps?.next : dir === -1 ? d.steps?.prev : null;
+        const stay = () => settle(els.main.current, { transform: "translateX(0)", opacity: "1" }, motionMs(200), () => (clearDrag(els.main.current), done()));
         if (to && dir) {
           settle(els.main.current, { transform: `translateX(${dx - dir * STEP_SLIDE}px)`, opacity: "0" }, motionMs(200), () => {
-            arrive(dir === 1 ? "next" : "prev");
-            to();
-            done();
+            if (at !== navigations) return (clearDrag(els.main.current), done());
+            const undo = arrive(dir === 1 ? "next" : "prev");
+            // a page may refuse the step (Calibrate, while a save is in flight): the content comes back
+            if (to() === false) {
+              undo();
+              stay();
+            } else done();
           });
-        } else
-          settle(els.main.current, { transform: "translateX(0)" }, motionMs(200), () => {
-            clearDrag(els.main.current);
-            done();
-          });
+        } else stay();
       }
     };
 
     const down = (e: PointerEvent) => {
-      if (busy || e.button !== 0 || !e.isPrimary) return;
+      if (active || settling || e.button !== 0 || !e.isPrimary) return;
       const { deeper, menu } = live.current;
       const t = e.target as Element;
       const root = els.root.current;
@@ -215,9 +236,9 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
       else if (e.clientX <= EDGE) kind = deeper ? "back" : "drawer";
       else if (stepsNow() && els.main.current?.contains(t) && !scrollsSideways(t, els.main.current)) kind = "step";
       if (!kind) return;
-      const d: Drag = { kind, x0: e.clientX, y0: e.clientY, axis: null, tracker: new Tracker(), steps: kind === "step" ? stepsNow() : null, wasOpen: menu };
+      const d: Drag = { kind, x0: e.clientX, y0: e.clientY, axis: null, tracker: new Tracker(), steps: kind === "step" ? stepsNow() : null, wasOpen: menu, stop: () => {} };
       d.tracker.push(sample(e));
-      trackPointer(e, {
+      d.stop = trackPointer(e, {
         move: (m) => {
           d.tracker.push(sample(m));
           const dx = m.clientX - d.x0;
@@ -228,7 +249,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
             if ((d.kind === "back" || (d.kind === "drawer" && !d.wasOpen)) && dx < 0) return (d.axis = "y");
             begin(d);
           }
-          follow(d, dx);
+          if (d.axis === "x") follow(d, dx);
         },
         end: (u, cancelled) => {
           if (d.axis !== "x") return;
@@ -238,7 +259,16 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
       });
     };
     document.addEventListener("pointerdown", down);
-    return () => document.removeEventListener("pointerdown", down);
+    // As the phone goes deeper, the screen left is kept for the way back; any navigation ends a drag in progress.
+    const unsubscribe = router.history.subscribe(({ location, action }) => {
+      if (action.type === "PUSH" && live.current.deeperAt(location.pathname) && els.page.current) keepSnapshot(historyIndex(location) - 1, els.page.current);
+      navigations++;
+      if (active) abort(active);
+    });
+    return () => {
+      document.removeEventListener("pointerdown", down);
+      unsubscribe();
+    };
   }, [router, els.root, els.page, els.main, els.under, els.panel, els.shade]);
 
   return {

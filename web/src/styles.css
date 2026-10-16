@@ -243,7 +243,7 @@ html[data-theme="dark"] .drawer { box-shadow: inset -1px 0 0 var(--acc); }
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; max-height: 86dvh; overflow-y: auto; background: var(--surface); border-top: 1px solid var(--line);
   padding: 10px 12px calc(14px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; animation: lw-up 0.24s var(--ease);
 }
-/* the handle: a 40 px band across the top to drag the sheet down by, the bar drawn in its middle */
+/* the handle: a band across the top to drag the sheet down by, the bar drawn in its middle; the sheet's body drags too while scrolled to its top */
 .sheet .hdl { align-self: stretch; height: 24px; margin: -10px 0 -12px; flex: none; display: flex; align-items: center; justify-content: center; touch-action: none; cursor: grab; }
 .sheet .hdl::before { content: ""; width: 36px; height: 4px; border-radius: 2px; background: var(--fg3); }
 .sheet { touch-action: pan-y; }
@@ -882,7 +882,8 @@ button.car:hover { color: var(--fg); background: var(--line2); }
   .trow .grip, .crow .car { width: 40px; }
   .tin.sm { min-height: 40px; }
   .rseg { min-width: 40px; }
+  .tf { min-width: 40px; }
   /* inline controls keep their size in the text and take a 40px hit area around it, as .hit does */
-  :is(.cp, .pghead .au .more, .inl, .st, a.nt) { position: relative; }
-  :is(.cp, .pghead .au .more, .inl, .st, a.nt)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
+  :is(.cp, .pghead .au .more, .inl, .st, a.nt, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n) { position: relative; }
+  :is(.cp, .pghead .au .more, .inl, .st, a.nt, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
 }

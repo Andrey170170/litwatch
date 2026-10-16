@@ -6,7 +6,9 @@
  */
 import { useEffect } from "react";
 
-export type Steps = { prev: (() => void) | null; next: (() => void) | null };
+/** A step says whether the screen leaves: `false` when it stays (Calibrate refuses while a save is in flight, or
+ * while an edit lacks its Fit), anything else when it goes. */
+export type Steps = { prev: (() => boolean | void) | null; next: (() => boolean | void) | null };
 /** How the screen now rendering got here, when a gesture brought it: stepped to the next or the previous, or
  * already in view after a swipe back. */
 export type Arrival = "next" | "prev" | "still";
@@ -27,9 +29,12 @@ export function useSteps(steps: Steps | null) {
 
 export const stepsNow = (): Steps | null => current;
 
-/** Say how the screen about to render arrives. Called right before the navigation that brings it. */
-export function arrive(how: Arrival) {
+/** Say how the screen about to render arrives. Called right before the navigation that brings it; returns the
+ * way to take it back when the navigation did not happen. */
+export function arrive(how: Arrival): () => void {
+  const before = last;
   last = { n: last.n + 1, how };
+  return () => (last = before);
 }
 /** The latest arrival by gesture: how, and its number, which the shell keys the screen by, so a step within one
  * route (a Day to the next) mounts a fresh screen that plays its entry, and a render can tell whether its screen
