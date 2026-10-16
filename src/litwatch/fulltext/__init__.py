@@ -70,7 +70,11 @@ class Attempt:
 
 
 def archive_for(config: Config) -> ArchiveClient | None:
-    """A client for reading texts, when an archive is configured (`integrations.archive`)."""
+    """A client for reading texts and serving PDFs: the enabled archive section's, else one from
+    $LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN alone (the dev host's way); None when
+    neither is set, or when an archive section says `enabled = false`, which wins."""
+    if archive_integration.switched_off(config):
+        return None
     try:
         return archive_integration.source(config)
     except IntegrationError:

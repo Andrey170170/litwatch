@@ -33,11 +33,17 @@ def pages(paper: str, topic: str) -> dict[str, str]:
 
 
 def watch(page) -> list[str]:
-    """The page's errors as they happen: console errors, uncaught exceptions, 5xx answers."""
+    """The page's errors as they happen: console errors, uncaught exceptions, 5xx answers, and
+    401 or 403 ones (a lost session shows the token prompt, which has text of its own)."""
     seen: list[str] = []
     page.on("console", lambda m: m.type == "error" and seen.append(f"console error: {m.text}"))
     page.on("pageerror", lambda e: seen.append(f"uncaught: {e}"))
-    page.on("response", lambda r: r.status >= 500 and seen.append(f"HTTP {r.status} {r.url}"))
+    page.on(
+        "response",
+        lambda r: (
+            (r.status >= 500 or r.status in (401, 403)) and seen.append(f"HTTP {r.status} {r.url}")
+        ),
+    )
     return seen
 
 
@@ -72,10 +78,10 @@ def card(base: str, token: str, paper: str, collection: set[str]) -> list[str]:
     from urllib.request import Request, urlopen  # noqa: PLC0415
 
     auth = {"Authorization": f"Bearer {token}"}
-    urlopen(Request(f"{base}/api/papers/{paper}/card", method="POST", headers=auth))
+    urlopen(Request(f"{base}/api/papers/{paper}/card", method="POST", headers=auth), timeout=30)
     deadline = time.monotonic() + CARD_WAIT_SECONDS
     while time.monotonic() < deadline:
-        with urlopen(Request(f"{base}/api/papers/{paper}", headers=auth)) as response:
+        with urlopen(Request(f"{base}/api/papers/{paper}", headers=auth), timeout=30) as response:
             found = json.load(response)
         if found["card"]:
             among = found["card"]["among"]
@@ -100,7 +106,7 @@ def topic_lists(base: str, token: str, topic: str, collection: set[str]) -> list
     from urllib.request import Request, urlopen  # noqa: PLC0415
 
     auth = {"Authorization": f"Bearer {token}"}
-    with urlopen(Request(f"{base}/api/topics/{topic}", headers=auth)) as response:
+    with urlopen(Request(f"{base}/api/topics/{topic}", headers=auth), timeout=30) as response:
         rows = {r["id"] for r in json.load(response)["rows"]}
     return [] if rows & collection else [f"the {topic} page lists none of the seeded papers"]
 

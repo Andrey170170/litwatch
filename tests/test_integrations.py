@@ -116,6 +116,17 @@ def test_an_archive_section_with_its_settings_in_the_environment_still_serves_pd
     assert webdav.archive is not None and webdav.archive.base_url == "http://archive:8787"
 
 
+def test_an_archive_switched_off_is_not_read_from_the_environment(secrets, monkeypatch):
+    """`enabled = false` wins over $LITWATCH_ARCHIVE_URL: no texts read, no PDFs served from it.
+    With no section at all, the environment alone still reads (the dev host's way)."""
+    from litwatch import fulltext
+
+    monkeypatch.setenv("LITWATCH_ARCHIVE_URL", "http://archive:8787")
+    off = Config(integrations={"archive": {"enabled": False}})
+    assert fulltext.archive_for(off) is None
+    assert fulltext.archive_for(Config()).base_url == "http://archive:8787"
+
+
 def test_the_archive_gives_up_on_a_search_before_search_gives_up_on_it(secrets):
     with pytest.raises(IntegrationError, match="below 5"):
         integrations.load(

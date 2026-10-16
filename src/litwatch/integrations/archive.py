@@ -88,6 +88,12 @@ def reader(config: Config) -> ArchiveClient | None:
     return client(section) if section is not None else None
 
 
+def switched_off(config: Config) -> bool:
+    """An archive section is there and says `enabled = false`, and none is enabled."""
+    sections = [o for n, o in config.integrations.items() if o.get("use", n) == "archive"]
+    return bool(sections) and not any(o.get("enabled", True) for o in sections)
+
+
 def source(config: Config) -> ArchiveClient:
     """A client for reading papers from the archive: the enabled archive section's, else one
     from $LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN alone."""
