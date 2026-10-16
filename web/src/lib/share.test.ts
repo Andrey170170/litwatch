@@ -25,6 +25,8 @@ describe("An arXiv id in a share", () => {
     expect(arxivIdIn("https://arxiv.org/abs/2412.12345")).toBe("2412.12345");
     expect(arxivIdIn("https://arxiv.org/abs/2024.12345")).toBeNull();
     expect(arxivIdIn("ticket 2400.1234 and 2413.12345")).toBeNull();
+    expect(arxivIdIn("hep-th/9913001 and math.GT/0300136")).toBeNull();
+    expect(arxivIdIn("hep-th/9912001")).toBe("hep-th/9912001");
   });
 });
 

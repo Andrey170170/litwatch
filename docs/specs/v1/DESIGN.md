@@ -43,7 +43,8 @@ with "‹ Back" at its top.
   the finger let go and how fast, and a drag on it or on its shade shuts it; a drag that starts vertical scrolls
   instead.
 - On a deeper screen the same edge swipe goes back, iOS style: the page follows the finger with the previous one
-  under it. Every step is a history entry, so the system back gesture walks the same steps.
+  under it. Every step is a history entry, so the system back gesture walks the same steps; a Calibrate session's
+  cards are the one exception, as its arrows are: the session is one entry, and Back leaves it.
 - A horizontal swipe away from the edge steps the page where there is a sequence: a Day or Week to the older or newer
   one, a paper to the previous or next in the list it was opened from. The content follows the finger; past a quarter
   of the width, or flicked, the next one comes in; where nothing lies the drag resists.

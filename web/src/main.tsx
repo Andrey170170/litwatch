@@ -4,8 +4,12 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ApiError, onUnauthorised } from "./api/client";
 import { TokenPrompt } from "./components/TokenPrompt";
+import { applyAppearance, readAppearance } from "./lib/theme";
 import { router } from "./router";
 import "./styles.css";
+
+// index.html put the forced side on the document before paint; the bar colour follows it here
+applyAppearance(readAppearance());
 
 // One retry, except that a 404 is an answer (a paper outside litwatch and the archive), not a failure.
 const retry = (failures: number, error: unknown) => failures < 1 && !(error instanceof ApiError && error.status === 404);

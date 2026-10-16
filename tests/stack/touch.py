@@ -43,6 +43,14 @@ def settle(page, ms: int = 700) -> None:
     page.wait_for_timeout(ms)
 
 
+def unfold(page) -> None:
+    """Open a list's folded shelves: a fresh stack's papers are common, in the shelf folded by
+    default."""
+    for head in page.locator("main button.shh.fold").all():
+        head.click()
+    page.wait_for_load_state("networkidle")
+
+
 def gestures(base: str, token: str, out: Path) -> list[str]:
     """Every gesture, each a line when it fails or is skipped."""
     lines: list[str] = []
@@ -85,6 +93,7 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
         # a paper, stepped to the next in its list; then the edge swipe back, which returns to the
         # first paper, as a step is a history entry
         page.goto(f"{base}/papers", wait_until="networkidle")
+        unfold(page)
         links = page.locator(PAPER_LINK)
         if links.count() >= 2:
             first = links.nth(0).get_attribute("href") or ""
@@ -124,12 +133,19 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
         settle(page)
         check("sheet-body-drags-shut", page.locator(".sheet").count() == 0)
 
-        # a vertical finger scrolls the page as the browser does
-        page.goto(f"{base}/papers", wait_until="networkidle")
-        finger.drag(200, 700, 200, 250)
-        settle(page, 400)
-        scrolled = page.evaluate("document.querySelector('.phone .scroll')?.scrollTop ?? -1")
-        check("vertical-scrolls", scrolled > 0, f"scrollTop {scrolled}")
+        # a vertical finger scrolls the page as the browser does: a paper's page, which is long
+        if links.count():
+            page.goto(f"{base}{links.nth(0).get_attribute('href')}", wait_until="networkidle")
+            screen = "document.querySelector('.phone .scroll')"
+            if page.evaluate(f"{screen}.scrollHeight > {screen}.clientHeight"):
+                finger.drag(200, 700, 200, 250)
+                settle(page, 400)
+                scrolled = page.evaluate(f"{screen}.scrollTop")
+                check("vertical-scrolls", scrolled > 0, f"scrollTop {scrolled}")
+            else:
+                lines.append("SKIP vertical-scrolls: the paper's page does not overflow")
+        else:
+            lines.append("SKIP vertical-scrolls: no paper listed")
 
         browser.close()
     return lines

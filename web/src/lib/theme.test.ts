@@ -1,15 +1,25 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { applyAppearance, KEY, readAppearance, setAppearance } from "./theme";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { applyAppearance, KEY, readAppearance, readStored, setAppearance } from "./theme";
 
 describe("the appearance", () => {
   afterEach(() => setAppearance("system"));
 
   it("reads System for nothing kept or anything but a side", () => {
-    expect(readAppearance()).toBe("system");
+    expect(readStored()).toBe("system");
     localStorage.setItem(KEY, "sepia");
-    expect(readAppearance()).toBe("system");
+    expect(readStored()).toBe("system");
     localStorage.setItem(KEY, "light");
-    expect(readAppearance()).toBe("light");
+    expect(readStored()).toBe("light");
+  });
+
+  it("holds the choice for the page when the device keeps nothing", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    setAppearance("dark");
+    expect(readAppearance()).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    setItem.mockRestore();
   });
 
   it("forces a side on the document and the PWA's bar colour, and lets both follow the OS again", () => {

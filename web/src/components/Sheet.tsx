@@ -55,6 +55,15 @@ export function Sheet({ open, onClose, side = "bottom", label, children, drag, p
   );
 }
 
+/** Whether the sheet, or a list of its own inside it (Calibrate's picker), is scrolled down under the finger. */
+function scrolled(from: Element, sheet: Element): boolean {
+  for (let el: Element | null = from; el; el = el.parentElement) {
+    if (el.scrollTop > 0) return true;
+    if (el === sheet) return false;
+  }
+  return false;
+}
+
 /** Drag a sheet down to close it: from its handle, or from its body while that is scrolled to the top. It follows
  * the finger and its shade fades; past a third of its height, or flicked, it goes, else it springs back. A release
  * still settling when the sheet closes by other means is called off. The body keeps `touch-action: pan-y` for its
@@ -73,7 +82,7 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
       const el = panel.current;
       if (stop || settling || !el || e.button !== 0 || !e.isPrimary || e.pointerType === "mouse" || !el.contains(e.target as Node)) return;
       const fromHandle = (e.target as Element).closest(".hdl");
-      if (!fromHandle && el.scrollTop > 0) return;
+      if (!fromHandle && scrolled(e.target as Element, el)) return;
       const tracker = new Tracker();
       tracker.push(sample(e));
       let axis: ReturnType<typeof axisOf> = null;

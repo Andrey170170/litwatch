@@ -114,10 +114,13 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
   /** The one settle in flight, and the way to call it off: nothing it would do is wanted once the shell, or the
    * drawer it was moving, has gone. */
   const inFlight = useRef<(() => void) | null>(null);
-  // the drawer shut by other means (a link, the shade) voids a settle still moving it; opened next by its button,
-  // it has its entry again
+  /** Let go of a finger still holding the open drawer: nothing its release would do is wanted once the drawer has gone. */
+  const letGoOfDrawer = useRef<() => void>(() => {});
+  // the drawer shut by other means (a link, the shade, Esc) voids a settle still moving it and the drag still holding
+  // it; opened next by its button, it has its entry again
   useEffect(() => {
     if (opts.menu) return;
+    letGoOfDrawer.current();
     inFlight.current?.();
     setDrawerDrag(null);
   }, [opts.menu]);
@@ -189,6 +192,11 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: DrawerDrag
     };
 
     /** The screen changed under the finger: the pointer is let go of, and what a drag wrote is taken back. */
+    letGoOfDrawer.current = () => {
+      if (active?.kind !== "drawer" || !active.wasOpen) return;
+      active.stop();
+      active = null;
+    };
     const abort = (d: Drag) => {
       d.stop();
       active = null;

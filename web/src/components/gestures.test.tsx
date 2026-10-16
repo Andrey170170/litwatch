@@ -167,6 +167,25 @@ describe("The phone's gestures", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("lets go of a finger holding the drawer when the drawer shuts by other means", async () => {
+    scriptFetch(routes);
+    renderApp("/");
+    await screen.findByText("Today");
+    fireEvent.click(screen.getByRole("button", { name: "Menu" }));
+    const drawer = await screen.findByRole("dialog", { name: "Menu" });
+    vi.advanceTimersByTime(400);
+    // held a short way shut, then Esc: the release does nothing, and the next opening by button has its entry
+    swipe(screen.getByRole("link", { name: "Papers" }), [250, 300], [[240, 300], [200, 300]], { lift: false });
+    expect(drawer).toHaveAttribute("data-drag", "shutting");
+    fireEvent.keyDown(drawer, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.pointerUp(window, { clientX: 200, clientY: 300, pointerId: 1, isPrimary: true });
+    vi.advanceTimersByTime(400);
+    document.dispatchEvent(new MouseEvent("pointerdown"));
+    fireEvent.click(screen.getByRole("button", { name: "Menu" }));
+    expect(await screen.findByRole("dialog", { name: "Menu" })).not.toHaveAttribute("data-drag");
+  });
+
   it("calls a release's settle off when the shell goes before it lands", async () => {
     viewport(false, false); // with motion: the settle takes its 200 ms
     scriptFetch({ ...routes, [`GET /api/papers/${paper.id}`]: full(paper.id, {}) });

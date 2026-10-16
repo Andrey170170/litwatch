@@ -1,7 +1,7 @@
 /**
  * The appearance, kept on the device: System follows the OS; Light and Dark are forced through `<html data-theme>`,
  * which the stylesheet keys on and which index.html sets from the same key before first paint (DESIGN.md,
- * "Settings"). The PWA's bar colour follows the forced side too.
+ * "Settings"). The PWA's bar colour follows the forced side too; main.tsx applies it at start.
  */
 import { useSyncExternalStore } from "react";
 
@@ -16,8 +16,8 @@ const watch = (w: () => void) => {
   return () => void watchers.delete(w);
 };
 
-/** The choice kept on the device; System for none, or anything but a side. */
-export function readAppearance(): Appearance {
+/** The choice kept on the device: System for none, or anything but a side. */
+export function readStored(): Appearance {
   try {
     const v = localStorage.getItem(KEY);
     return v === "light" || v === "dark" ? v : "system";
@@ -25,6 +25,10 @@ export function readAppearance(): Appearance {
     return "system";
   }
 }
+
+// the choice in force, read once from the device: a device that keeps nothing still holds it for the page
+let current: Appearance | null = null;
+export const readAppearance = (): Appearance => (current ??= readStored());
 
 /** Put the appearance on the document: the forced side, or none to follow the OS. */
 export function applyAppearance(a: Appearance) {
@@ -37,11 +41,12 @@ export function applyAppearance(a: Appearance) {
 }
 
 export function setAppearance(a: Appearance) {
+  current = a;
   try {
     if (a === "system") localStorage.removeItem(KEY);
     else localStorage.setItem(KEY, a);
   } catch {
-    // a device that keeps nothing: the choice holds for the page
+    // kept for the page only
   }
   applyAppearance(a);
   watchers.forEach((w) => w());
