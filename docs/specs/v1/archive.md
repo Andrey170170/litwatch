@@ -61,8 +61,8 @@ One search box, one result list, as in the first v1 (decision 6), with these cha
 - **Exact title and phrase first** (N5b; found 2026-10-13, when "attention is all you need" did not return
   1706.03762 at the top). For any query of words, ranked by relevance, the archive ranks in tiers: a title equal to
   the query (case, accents and punctuation aside, an indexed lookup of each title's normalized key), then titles
-  holding the query as a phrase, then abstracts holding it, then the other matches; within a tier by bm25, where the
-  title weighs eight times the abstract. An arXiv ID asks for that paper alone; date and title orders take no tiers. Words in double quotes are a
+  holding the query as a phrase, then abstracts holding it, then the other matches. Exact titles come newest first,
+  then by id; the other tiers by bm25, where the title weighs eight times the abstract. An arXiv ID asks for that paper alone; date and title orders take no tiers. Words in double quotes are a
   phrase in every tier and order, as PostgreSQL's `websearch_to_tsquery` reads them in litwatch's own index (an
   unclosed quote runs to the end). litwatch shows each provider's hits in its order, no longer re-sorted by date;
   the newest-first order asks the providers for their newest.

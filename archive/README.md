@@ -73,7 +73,9 @@ server:
    ```
 
 It works in batches, resumes after a stop and can run again; on the owner's index (3.17M papers) it took about two
-minutes and adds about 0.6 GB. Until it has run, searches skip the exact-title lookup and rank by their other tiers.
+minutes and adds about 0.6 GB. Until it completes, the exact-title lookup covers only the titles keyed so far: those
+the indexer has written since its restart and the batches `index-titles` has done. A title not yet keyed is still
+found by the other tiers.
 
 ## Backups
 
