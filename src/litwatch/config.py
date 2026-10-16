@@ -85,12 +85,12 @@ class Models(_Section):
     )
     field_grade: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5")
     # Briefs, Weight and Gists from the full text (pipeline.md, section 6), and who answers
-    # when Sonnet refuses: chosen in the model-spend plan's replay (docs/plans/model-spend.md).
+    # when Sonnet refuses: chosen in the Sonnet replay (evals/2026-10-16-sonnet-briefs.md).
     brief: RoleConfig = RoleConfig(
         provider="anthropic", model="claude-sonnet-5-5", effort="high", fallback="brief_fallback"
     )
     brief_fallback: RoleConfig = RoleConfig(
-        provider="openrouter", model="google/gemini-4-argon", effort="high"
+        provider="openrouter", model="openai/gpt-6.1-sol", effort="high"
     )
     writer: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 

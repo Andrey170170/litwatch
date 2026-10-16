@@ -1,0 +1,5 @@
+# P1 (docs/plans/model-spend.md): N6's three refused passes, for the fallback candidates.
+papers:
+  - {id: "2610.13116", area: safety-evaluations, note: refused}
+  - {id: "2610.17907", area: jailbreaks, note: refused}
+  - {id: "2610.21200", area: model-security, note: refused}
