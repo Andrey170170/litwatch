@@ -369,9 +369,14 @@ async def settle_ties(conn: psycopg.AsyncConnection) -> int:
 
 
 async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
-    """Settle each paper in turn (`settle`)."""
+    """Settle each paper in turn (`settle`), but one a change open on the connection holds: that
+    change settles it at its exit, once (a paper an owner's action fetched and stored inside
+    its change, say)."""
+    outer = _open.get(conn)
+    held = set(outer.paper_ids) if outer else set()
     for paper_id in paper_ids:
-        await settle(conn, paper_id)
+        if paper_id not in held:
+            await settle(conn, paper_id)
 
 
 async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:

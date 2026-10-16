@@ -22,6 +22,7 @@ from litwatch.core import (
     in_library,
 )
 from litwatch.feedback import word
+from litwatch.intake import batch
 from litwatch.store import analyses as analyses_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -339,6 +340,22 @@ async def test_words_inside_one_change_settle_once_at_its_end(db):
         await word.label(db, said("central"))
     assert change.settled[P.id].grades == {} and change.settled[P.id].saved
     assert await outbox(db) == before
+
+
+async def test_a_rewrite_stored_inside_a_change_is_settled_once_by_it(db):
+    """A paper the owner's action fetches may arrive as a rewrite of one stored meanwhile:
+    intake's writer leaves its settle to the change, so no step between shows."""
+    await weighed(db, Weight.INCREMENTAL)
+    await graded(db, "related")  # related and incremental: adjacent, not saved
+    before = await outbox(db)
+    rewrite = P.model_copy(update={"abstract": "An entirely different abstract."})
+    async with word.change(db, P.id) as change:
+        assert (await batch.store(db, [rewrite], source="arxiv")).rewritten == [P.id]
+        await word.label(db, said("central"))
+    after = [e for e in await outbox(db) if e not in before]
+    changed = [e["after"] for t, e in after if t == "grade.changed"]
+    assert changed == ["must_read"] and [t for t, _ in after].count("paper.saved") == 1
+    assert change.settled[P.id].saved and not change.settled[P.id].was_saved
 
 
 async def test_a_nested_change_names_only_papers_the_outer_one_locked(db):
