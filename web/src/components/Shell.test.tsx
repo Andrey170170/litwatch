@@ -39,6 +39,23 @@ describe("The shell's sidebar", () => {
     expect(renders).toEqual(after);
   });
 
+  it("mounts the desktop's column anew on each navigation, so its arrival plays again from the same side", async () => {
+    viewport(true);
+    scriptFetch({
+      "GET /api/summary": summary,
+      "GET /api/status": status,
+      "GET /api/topics": [{ depth: "focus", topics: [] }],
+      "GET /api/papers": { rows: [], total: 0, counts, grades, outside: [] },
+      "GET /api/topics/mi": { topic, rows: [], total: 0, counts, grades },
+    });
+    renderApp("/papers");
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Papers"));
+    const column = document.querySelector("main > .inner");
+    await userEvent.click(await screen.findByRole("link", { name: /Mech interp/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Mech interp"));
+    expect(document.querySelector("main > .inner")).not.toBe(column);
+  });
+
   it("says the status and the topics are unavailable when the summary's first read fails, until Try again", async () => {
     viewport(true);
     let down = true;

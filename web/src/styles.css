@@ -214,6 +214,8 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 /* the screen scrolls and zooms, and a horizontal finger in it is the shell's (a scroll container resolves its own
    touch-action, so `.phone`'s would not reach it); Chrome's own swipe navigation keeps off the edge */
 .scroll { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y pinch-zoom; overscroll-behavior-x: none; }
+/* a list scrolling on its own inside a screen (a class picker) is a scroll container too, and says the same */
+.phone .overflow-y-auto { touch-action: pan-y pinch-zoom; }
 .pp { padding: 12px; }
 .pfoot { flex: none; border-top: 1px solid var(--line); background: var(--surface); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
 .screen[data-came="go"] { animation: lw-in-go 0.24s var(--ease); }

@@ -146,7 +146,8 @@ function Desktop() {
     <div className="app">
       {inSettings(location) ? <SettingsSide /> : <ReadingSide />}
       <main className="main" data-came={came} data-scroll-restoration-id="main">
-        <div className="inner">
+        {/* keyed by screen: a navigation mounts the column anew, so its arrival plays again even from the same side */}
+        <div className="inner" key={screenKey(location.pathname)}>
           <Outlet />
         </div>
       </main>

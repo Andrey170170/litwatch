@@ -14,8 +14,13 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).parent))
+from pages import watch  # noqa: E402
 
 PHONE = {"width": 390, "height": 844}
 PAPER_LINK = 'main a[href^="/paper/"]'
@@ -41,6 +46,21 @@ class Finger:
 
 def settle(page, ms: int = 700) -> None:
     page.wait_for_timeout(ms)
+
+
+def arrived(page, where: str, ms: int = 5000) -> bool:
+    """Whether the page reaches `where` (a path, or a query to find in the URL) within `ms` and
+    shows it: a paper's page says its id; a Calibrate card its position."""
+    try:
+        page.wait_for_url(lambda url: where in url, timeout=ms)
+        page.wait_for_load_state("networkidle")
+    except PlaywrightTimeoutError:
+        return False
+    settle(page, 300)
+    path = urlparse(where).path
+    if path.startswith("/paper/"):
+        return path.rsplit("/", 1)[1] in page.locator("main").first.inner_text()
+    return True
 
 
 def unfold(page) -> None:
@@ -71,6 +91,7 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
         context = browser.new_context(viewport=PHONE, has_touch=True, is_mobile=True)
         assert context.request.post(f"{base}/api/session", data={"token": token}).ok, "signing in"
         page = context.new_page()
+        errors = watch(page)
         finger = Finger(page)
         shot = lambda name: page.screenshot(path=out / f"touch-{name}.png")  # noqa: E731
 
@@ -93,7 +114,8 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
         # the Day, stepped to the older one: a swipe to the right, past the edge zone
         today = date.today().isoformat()
         day = context.request.get(f"{base}/api/digests/days/{today}")
-        previous = day.json().get("previous") if day.ok else None
+        assert day.ok, f"reading the Day: HTTP {day.status}"
+        previous = day.json().get("previous")
         if previous:
             page.goto(f"{base}/", wait_until="networkidle")
             finger.drag(100, 420, 340, 420)
@@ -109,29 +131,27 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
         links = page.locator(PAPER_LINK)
         hrefs = [a.get_attribute("href") or "" for a in links.all()]
         if len(hrefs) >= 2:
-            first = hrefs[0]
+            first, second = hrefs[0], hrefs[1]
             links.nth(0).click()
             page.wait_for_url("**/paper/**")
             settle(page, 500)
             finger.drag(300, 420, 60, 420)
-            settle(page)
-            stepped = "/paper/" in page.url and not page.url.endswith(first)
-            if check("paper-steps-next", stepped, page.url):
+            if check("paper-steps-next", arrived(page, second), page.url):
                 finger.drag(36, 420, 330, 420)
-                settle(page)
-                check("edge-swipe-goes-back", page.url.endswith(first), page.url)
+                check("edge-swipe-goes-back", arrived(page, first), page.url)
         else:
             # the stack seeds its papers: fewer than two listed is the list's failure, not a skip
             lines.append(f"FAIL paper-steps-next, edge-swipe-goes-back: {len(hrefs)} papers listed")
 
         # a Calibrate session's cards
         sessions = context.request.get(f"{base}/api/settings/calibrate")
-        rows = sessions.json() if sessions.ok else []
+        assert sessions.ok, f"reading the Calibrate sessions: HTTP {sessions.status}"
+        rows = sessions.json()
         if rows and rows[0]["papers"] >= 2:
             page.goto(f"{base}/settings/calibrate/{rows[0]['id']}?at=1", wait_until="networkidle")
             finger.drag(300, 500, 60, 500)
-            settle(page)
-            check("calibrate-steps-next", "at=2" in page.url, page.url)
+            # a card with a standing Fit saves before the step: wait for it, within reason
+            check("calibrate-steps-next", arrived(page, "at=2"), page.url)
         else:
             lines.append("SKIP calibrate-steps-next: no session of two papers")
 
@@ -150,6 +170,7 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
         # a vertical finger scrolls the page as the browser does: a paper's page, which is long
         if hrefs:
             page.goto(f"{base}{hrefs[0]}", wait_until="networkidle")
+            assert arrived(page, hrefs[0]), f"the paper's page did not show: {page.url}"
             screen = "document.querySelector('.phone .scroll')"
             if page.evaluate(f"{screen}.scrollHeight > {screen}.clientHeight"):
                 finger.drag(200, 700, 200, 250)
@@ -162,7 +183,7 @@ def gestures(base: str, token: str, out: Path) -> list[str]:
             lines.append("FAIL vertical-scrolls: no paper listed")
 
         browser.close()
-    return lines
+    return lines + [f"FAIL the browser saw: {e}" for e in errors]
 
 
 def main(base: str, token: str, out: str) -> None:
