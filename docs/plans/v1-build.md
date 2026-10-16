@@ -197,6 +197,12 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   W3); a page for an archive paper not yet fetched and the archive's size for the search box (N5b); the "Among the
   collection" rows; rung ✓/✗ ratings; code and weights URLs on the facets; listing unclassified papers; splits and
   escalations on the status line; which source set the owner's word.
+- **API gaps W2 found**, for the core PRs that own them: a jobs API (the editor's re-run offer, the Jobs page, a
+  run's replay); a taxonomy write API (moving a topic to another class, the class editor, Import YAML); an outbox
+  events endpoint (an integration's events page); Calibrate's class and Gist questions, and what an answer on a
+  drawn topic that left Focus mid-session does (today a 422); "Resolved" on a miss, and the miss record keeping each
+  stage's cells at the report (the trace is computed live meanwhile); typed response models for `/quality`, `/runs`
+  and `/calibrate`; the Deep card's usage estimate on Runs and cost; ✓/✗ on a Gist and a Brief.
 - **W2 or W3, the Deep card's web parts** (from N3's Deep cards): "Asked for" and the pulsing status line from
   `card_pass`; Write again on a paper that has a card (`card_requestable` is now true there; the phone layout and
   Actions still hide it); the "Among the collection" rows from `card.among` (rarity, relation, note, each linking to
