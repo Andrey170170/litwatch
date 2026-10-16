@@ -40,9 +40,9 @@ How it is kept (N5a). The archive holds the setting, `paper-archive pdfs all|wan
 background priority waits as `held`; asking for it above background releases it, and `pdfs all` releases every held
 job (`pdfs wanted` holds the background ones again). LaTeX is never held. litwatch asks above background for:
 
-- a paper graded relevant or must read on an active topic, or saved: the archive integration reacts to
-  `grade.changed` and `paper.saved` and asks at the time it handles the event, so a grade already taken back asks
-  for nothing;
+- a paper graded relevant or must read on a followed topic (a paused one too: it keeps its grades), or saved: the
+  archive integration reacts to `grade.changed` and `paper.saved`, and to a revision of such a paper, and asks when
+  it handles the event, so a grade already taken back asks for nothing;
 - a PDF opened: `GET /api/papers/{id}/pdf` asks urgently and waits up to the client's `wait_seconds`, then sends
   the reader to arXiv;
 - a full-text pass with no LaTeX source: the queue already asks urgently for the PDF (N3).

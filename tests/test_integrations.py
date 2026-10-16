@@ -179,7 +179,7 @@ async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_paper
     # Graded relevant, then down again before the event is handled: nothing is asked for.
     await _graded(conn, gone.id, "agents", Grade.RELEVANT)
     await word_store.set_effective(conn, gone.id, "agents", None)
-    # A paused topic makes no new judgements, and keeps no new PDFs.
+    # A paused topic makes no new judgements but keeps its grades, and their PDFs.
     await taxonomy_store.save(
         conn,
         TREE.model_copy(
@@ -199,6 +199,7 @@ async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_paper
         (P.id, 3, "pdf", WANTED),
         (relevant.id, 1, "pdf", WANTED),
         (saved.id, 1, "pdf", WANTED),
+        (paused.id, 1, "pdf", WANTED),
     ]
     assert WANTED < BACKGROUND  # an archive under `pdfs wanted` holds background PDFs only
 
@@ -218,6 +219,28 @@ async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(wor
     assert [(j["paper_id"], j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [
         (P.id, 3, "pdf", WANTED),
         (P.id, 3, "source", BACKGROUND),
+    ]
+
+
+async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world):
+    conn, fake = world, FakeArchive()
+    a = archive(fake)
+    await start(conn, a)
+    await papers_store.upsert(conn, [paper(P.id, version=2)])
+    await _graded(conn, P.id, INTERP.slug, Grade.RELEVANT)
+    await deliver(conn, a)
+    fake.jobs.clear()
+    paused = [
+        t.model_copy(update={"status": Status.PAUSED}) if t == INTERP else t for t in TREE.topics
+    ]
+    await taxonomy_store.save(conn, TREE.model_copy(update={"topics": paused}))
+    # Revised while paused: resuming emits nothing, so the revision asks for the PDF now.
+    await papers_store.upsert(conn, [P])
+    await deliver(conn, a)
+
+    assert [(j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [
+        (3, "pdf", WANTED),
+        (3, "source", BACKGROUND),
     ]
 
 
