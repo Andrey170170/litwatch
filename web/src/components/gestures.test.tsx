@@ -165,6 +165,16 @@ describe("The phone's gestures", () => {
     fireEvent.pointerUp(window, { clientX: 220, clientY: 300, pointerId: 1, isPrimary: true });
     await Promise.resolve();
     expect(router.state.location.pathname).toBe("/papers");
+    // a finger that landed but had not moved far enough to mean a drag is let go of too
+    await router.navigate({ to: "/" });
+    await screen.findByText("Today");
+    fireEvent.pointerDown(screen.getByText("One paper."), { clientX: 100, clientY: 300, pointerId: 1, pointerType: "touch", isPrimary: true, button: 0 });
+    await router.navigate({ to: "/papers" });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/papers"));
+    swipe(document.body, [100, 300], [[110, 300], [220, 300]]);
+    await Promise.resolve();
+    expect(router.state.location.pathname).toBe("/papers");
+    expect(document.querySelector("main")?.style.transform).toBe("");
     // a paper stepped away from is copied for the way back as it was, not as it left (faded, slid)
     await router.navigate({ to: "/" });
     await screen.findByText("Today");

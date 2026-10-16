@@ -101,8 +101,8 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
   const pending = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    /** The drag the finger holds, if any; whether one just released is still settling (no new one until it has);
-     * and the count of navigations, which a settle checks before acting. */
+    /** The pointer followed since it landed, recognised as a drag or not yet; whether one just released is still
+     * settling (no new one until it has); and the count of navigations, which a settle checks before acting. */
     let active: Drag | null = null;
     let settling = false;
     const done = () => (settling = false);
@@ -129,7 +129,6 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
     };
 
     const begin = (d: Drag) => {
-      active = d;
       if (d.kind === "drawer") {
         setDrawerDrag(d.wasOpen ? "shutting" : "opening");
         if (!d.wasOpen) live.current.setMenu(true);
@@ -152,10 +151,11 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
       }
     };
 
-    /** The screen changed under the finger: the drag is over, and what it wrote is taken back. */
+    /** The screen changed under the finger: the pointer is let go of, and what a drag wrote is taken back. */
     const abort = (d: Drag) => {
       d.stop();
       active = null;
+      if (d.axis !== "x") return;
       clearDrag(els.page.current, els.main.current, els.panel.current, els.shade.current);
       hideUnder();
       if (d.kind === "drawer") {
@@ -238,6 +238,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
       if (!kind) return;
       const d: Drag = { kind, x0: e.clientX, y0: e.clientY, axis: null, tracker: new Tracker(), steps: kind === "step" ? stepsNow() : null, wasOpen: menu, stop: () => {} };
       d.tracker.push(sample(e));
+      active = d;
       d.stop = trackPointer(e, {
         move: (m) => {
           d.tracker.push(sample(m));
@@ -252,6 +253,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
           if (d.axis === "x") follow(d, dx);
         },
         end: (u, cancelled) => {
+          active = null;
           if (d.axis !== "x") return;
           swallowNextClick();
           finish(d, u, cancelled);
@@ -268,6 +270,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
     return () => {
       document.removeEventListener("pointerdown", down);
       unsubscribe();
+      if (active) abort(active);
     };
   }, [router, els.root, els.page, els.main, els.under, els.panel, els.shade]);
 
