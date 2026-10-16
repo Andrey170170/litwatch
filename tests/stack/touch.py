@@ -14,7 +14,7 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -49,17 +49,26 @@ def settle(page, ms: int = 700) -> None:
 
 
 def arrived(page, where: str, ms: int = 5000) -> bool:
-    """Whether the page reaches `where` (a path, or a query to find in the URL) within `ms` and
-    shows it: a paper's page says its id; a Calibrate card its position."""
+    """Whether the page reaches `where` within `ms` and shows it: a path, which a paper's page
+    shows by its id, or a query parameter (`at=2`) held exactly."""
     path = urlparse(where).path
     try:
-        page.wait_for_url(lambda url: where in url, timeout=ms)
+        page.wait_for_url(lambda url: reaches(url, where), timeout=ms)
         if path.startswith("/paper/"):
             page.locator("main", has_text=path.rsplit("/", 1)[1]).first.wait_for(timeout=ms)
     except PlaywrightTimeoutError:
         return False
     settle(page, 300)
     return True
+
+
+def reaches(url: str, where: str) -> bool:
+    """Whether `url` is at `where`: a path it ends with, or a query parameter it holds exactly."""
+    parts = urlparse(url)
+    if "=" in where and "/" not in where:
+        name, value = where.split("=", 1)
+        return parse_qs(parts.query).get(name) == [value]
+    return parts.path.endswith(urlparse(where).path)
 
 
 def unfold(page) -> None:
