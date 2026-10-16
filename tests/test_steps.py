@@ -18,11 +18,13 @@ from litwatch.api import settings as settings_api
 from litwatch.config import Classification, Config, Models, RoleConfig
 from litwatch.core import FAILED_RUNS, Paper
 from litwatch.jobs import nightly
-from litwatch.llm import Gateway, ProviderError
+from litwatch.jobs.context import model_run, run_record
+from litwatch.llm import Gateway, ProviderError, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store.calls import CallJournal
 from tests.conftest import TREE, paper
 from tests.fakes import ScriptedProvider
 
@@ -342,6 +344,41 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(conn, mod
     assert cancelled == [B.id]
     (run,) = await rows(conn, "SELECT error, finished_at FROM runs")
     assert run["finished_at"] and "the database went away" in run["error"]
+
+
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("the journal's connection went away"), asyncio.CancelledError()]
+)
+async def test_a_journal_that_fails_after_the_job_keeps_the_jobs_error_and_its_cost(
+    conn, monkeypatch, failure
+):
+    async def lost(self):
+        raise failure
+
+    monkeypatch.setattr(CallJournal, "by_role", lost)
+    with pytest.raises(ValueError, match="the job's own"):
+        async with model_run(conn, CONFIG, "nightly", gateway=lambda config, journal: None) as run:
+            call = await run.journal.start("judge", "m", "key", None)
+            await run.journal.record(call, Usage(model="m", cost=0.25))
+            raise ValueError("the job's own")
+    (run,) = await rows(conn, "SELECT error, cost, finished_at FROM runs")
+    assert run["finished_at"] and run["error"] == "ValueError: the job's own"
+    assert float(run["cost"]) == 0.25  # read before the count by role that failed
+
+
+async def test_a_run_that_cannot_close_after_the_job_failed_raises_the_jobs_error(
+    conn, monkeypatch
+):
+    async def unclosable(*args, **kwargs):
+        raise RuntimeError("could not close")
+
+    monkeypatch.setattr(runs, "finish", unclosable)
+    with pytest.raises(ValueError, match="the job's own"):
+        async with run_record(conn, "intake"):
+            raise ValueError("the job's own")
+    with pytest.raises(RuntimeError, match="could not close"):  # nothing else to report
+        async with run_record(conn, "intake"):
+            pass
 
 
 # -- the owner's three actions on a paper awaiting classification --------------------------------

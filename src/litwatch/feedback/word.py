@@ -68,10 +68,6 @@ class Settled:
     saved: bool = False
 
 
-# Advisory lock namespace for settling one paper; the second key is the paper id's hash.
-SETTLE_LOCK = 7213912
-
-
 async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     """Hold the paper's settle lock to the end of the transaction. Every write that ends in a
     settle takes it first, so no two transactions wait on each other's rows.
@@ -80,8 +76,14 @@ async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     paper, so locks are always taken taxonomy first, and a settle never reads a depth that an
     edit in flight is about to change.
     """
+    await lock_many(conn, [paper_id])
+
+
+async def lock_many(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
+    """`lock` for several papers, taken in id order so that two transactions locking papers in
+    common never wait on each other."""
     await taxonomy_store.lock_shared(conn)
-    await conn.execute("SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (SETTLE_LOCK, paper_id))
+    await word_store.lock_settles(conn, sorted(set(paper_ids)))
 
 
 def _value(e: Effective | None) -> dict[str, str | None]:
@@ -323,9 +325,7 @@ async def settle_ties(conn: psycopg.AsyncConnection) -> int:
 
 
 async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
-    """Settle each paper, as after storing revised papers: a rewrite's Weight went with the old
-    text, so its grades fall back to solid until the new text is analysed, and a new arXiv
-    version queues the passes that read the text again."""
+    """Settle each paper in turn (`settle`)."""
     for paper_id in paper_ids:
         await settle(conn, paper_id)
 

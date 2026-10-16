@@ -46,6 +46,14 @@ app.add_typer(intake_app, name="intake")
 app.add_typer(digests_app, name="digests")
 console = Console()
 
+
+@app.callback()
+def _dotenv() -> None:
+    # Before any command, in a group or not, reads its configuration: a variable kept in .env
+    # (LITWATCH_DEBUG, the database, the archive) counts for all of them.
+    configuration.load_dotenv()
+
+
 ConfigPath = Annotated[
     Path | None, typer.Option("--config", help="litwatch.toml; default $LITWATCH_CONFIG or ./")
 ]
@@ -53,15 +61,8 @@ Since = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The first d
 Until = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The last day.")]
 
 
-def _config(path: Path | None) -> configuration.Config:
-    """The configuration, read after .env so a variable there (LITWATCH_DEBUG) counts."""
-    configuration.load_dotenv()
-    return configuration.load(path)
-
-
 def _run[T](work: Callable[[psycopg.AsyncConnection], Awaitable[T]], *, migrate: bool = True) -> T:
     """Run `work` on a connection to the configured database, migrated first."""
-    configuration.load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -93,7 +94,7 @@ def intake(
     """Fetch new and revised papers for the configured categories from arXiv."""
     if ctx.invoked_subcommand is not None:
         return
-    cfg = _config(config)
+    cfg = configuration.load(config)
 
     async def work(conn: psycopg.AsyncConnection) -> Any:
         async with run_lock(conn):
@@ -119,7 +120,7 @@ def intake_archive(
     archive ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration)."""
     if (since is None) == (days is None) or (days is not None and days < 1):
         raise typer.BadParameter("give --since or a positive --days")
-    cfg = _config(config)
+    cfg = configuration.load(config)
     last = until.date() if until else datetime.now(UTC).date()
     first = since.date() if since else last - timedelta(days=days - 1)
     if first > last:
@@ -154,7 +155,7 @@ def nightly(
     config: ConfigPath = None,
 ) -> None:
     """The nightly run as the scheduler runs it: intake, classification, analysis, grading."""
-    cfg = _config(config)
+    cfg = configuration.load(config)
     run_id = _run(lambda conn: nightly_job.run(conn, cfg, fetch=fetch, days=days, limit=limit))
     run = _run(lambda conn: runs.get(conn, run_id))
     console.print(f"run {run_id}: cost ${run['cost']}")
@@ -171,7 +172,7 @@ def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None
     (the restart, a missed night). Published digests stay as they are."""
     from litwatch.jobs import digests as digests_job  # noqa: PLC0415
 
-    cfg = _config(config)
+    cfg = configuration.load(config)
     run_id = _run(lambda conn: digests_job.window(conn, cfg, since.date(), until.date()))
     run = _run(lambda conn: runs.get(conn, run_id))
     console.print(f"run {run_id}: cost ${run['cost']}")
@@ -337,7 +338,7 @@ def eval_replay(
     Shows what it would cost and asks first; a run cut short goes on with --resume."""
     from litwatch.quality import replay  # noqa: PLC0415
 
-    cfg = _config(config)
+    cfg = configuration.load(config)
     sample = _counts(negatives or [], "--negatives")
     if unknown := (set(cohort or []) | set(sample)) - set(replay.COHORTS):
         raise typer.BadParameter(f"no cohort {', '.join(sorted(unknown))}")
@@ -468,7 +469,7 @@ def eval_briefs(
     from litwatch.llm.gateway import build  # noqa: PLC0415
     from litwatch.quality import briefs  # noqa: PLC0415
 
-    cfg = _config(config)
+    cfg = configuration.load(config)
     archive = archive_for(cfg)
     if archive is None:
         raise SystemExit("no archive: configure one, or set $LITWATCH_ARCHIVE_URL")
@@ -567,13 +568,12 @@ def serve(
 
     from litwatch.api import create_app  # noqa: PLC0415
 
-    configuration.load_dotenv()
     token = configuration.secret("LITWATCH_API_TOKEN")
     if not token:
         raise SystemExit("LITWATCH_API_TOKEN (or LITWATCH_API_TOKEN_FILE) is not set")
     from litwatch import integrations  # noqa: PLC0415
 
-    cfg = _config(config)
+    cfg = configuration.load(config)
     try:
         loaded = integrations.load(cfg)
     except integrations.IntegrationError as exc:
@@ -626,7 +626,7 @@ def fulltext_queue(
     from litwatch.integrations import deep as deep_integration  # noqa: PLC0415
     from litwatch.integrations import enabled_using  # noqa: PLC0415
 
-    cfg = _config(config)
+    cfg = configuration.load(config)
     archive = fulltext.archive_for(cfg)
     if archive is None:
         raise SystemExit("no archive configured")
@@ -683,7 +683,7 @@ def ping(
     class Sum(BaseModel):
         total: int
 
-    cfg = _config(config)
+    cfg = configuration.load(config)
     request = llm.Request(
         system="You answer arithmetic questions with the structured output only.",
         user="What is 17 + 25?",

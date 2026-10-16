@@ -106,7 +106,7 @@ async def test_category_failure_does_not_discard_successful_category(conn, monke
     assert checkpoints == {"cs.AI": None, "cs.CL": NOW.date()}
 
 
-async def test_checkpoint_failure_rolls_back_category_papers_but_keeps_archive(conn, monkeypatch):
+async def test_a_checkpoint_failure_keeps_the_category_open_to_be_read_again(conn, monkeypatch):
     monkeypatch.setattr(atom, "fetch_category", lambda *args: snapshot(entry()))
     monkeypatch.setattr(
         oai,
@@ -118,9 +118,16 @@ async def test_checkpoint_failure_rolls_back_category_papers_but_keeps_archive(c
     )
     with pytest.raises(Exception, match="reject_advance"):
         await collect(conn)
-    assert await rows(conn, "papers") == []
+    # The papers commit before the checkpoint, which stays where it was.
+    assert len(await rows(conn, "papers")) == 1
     assert (await rows(conn, "intake_checkpoints"))[0]["checkpoint"] is None
     assert len(await rows(conn, "intake_snapshots")) == 1
+
+    await conn.execute("ALTER TABLE intake_checkpoints DROP CONSTRAINT reject_advance")
+    _, again = await collect(conn)  # reading the category again stores nothing new
+    assert again.inserted == 0 and again.rewritten == []
+    assert (await rows(conn, "intake_checkpoints"))[0]["checkpoint"] == NOW.date()
+    assert [e["type"] for e in await rows(conn, "outbox")] == ["paper.added"]
 
 
 async def test_paper_failure_rolls_back_other_papers_and_checkpoint(conn, monkeypatch):

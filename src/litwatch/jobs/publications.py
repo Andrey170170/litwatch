@@ -11,10 +11,10 @@ import psycopg
 
 from litwatch import events
 from litwatch.core import Publication
+from litwatch.jobs.context import run_record
 from litwatch.publications.dblp import PublicationSource, SourceError
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
-from litwatch.store import runs
 
 log = logging.getLogger(__name__)
 
@@ -94,27 +94,23 @@ async def run(
     conn: psycopg.AsyncConnection, source: PublicationSource, limit: int = LIMIT
 ) -> dict[str, int]:
     """Look up the library papers that are due, as a `publications` run."""
-    run_id = await runs.start(conn, "publications")
-    counts = {"looked_up": 0, "found": 0, "failed": 0}
-    failures, error = 0, None
-    try:
+    async with run_record(conn, "publications") as record:
+        record.fields["cost"] = 0
+        counts = record.counts
+        counts |= {"looked_up": 0, "found": 0, "failed": 0}
+        failures = 0
         for paper_id in await store.due(conn, limit):
             try:
-                record = await look_up(conn, source, paper_id)
+                found = await look_up(conn, source, paper_id)
             except SourceError as exc:
                 counts["failed"] += 1
                 failures += 1
                 log.warning("publication lookup for %s failed: %s", paper_id, exc)
                 if failures >= GIVE_UP_AFTER:
-                    error = f"stopped after {failures} failures in a row: {exc}"
+                    record.fields["error"] = f"stopped after {failures} failures in a row: {exc}"
                     break
                 continue
             failures = 0
             counts["looked_up"] += 1
-            counts["found"] += record is not None
-    except BaseException as exc:
-        error = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
-        await runs.finish(conn, run_id, cost=0, counts=counts, error=error)
+            counts["found"] += found is not None
     return counts

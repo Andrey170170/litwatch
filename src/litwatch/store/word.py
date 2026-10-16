@@ -12,6 +12,19 @@ from psycopg.types.json import Jsonb
 from litwatch.core import Effective, Grade, Hand, Rarity, Reaction, Weight
 from litwatch.core.grading import DEPTH_OFFSETS
 
+# Advisory lock namespace for settling one paper; the second key is the paper id's hash.
+SETTLE_LOCK = 7213912
+
+
+async def lock_settles(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
+    """Take the papers' settle locks, in the order given, to the end of the transaction."""
+    async with conn.cursor() as cur:
+        await cur.executemany(
+            "SELECT pg_advisory_xact_lock(%s, hashtext(%s))",
+            [(SETTLE_LOCK, paper_id) for paper_id in paper_ids],
+        )
+
+
 # -- reactions -------------------------------------------------------------------------------------
 
 

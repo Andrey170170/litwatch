@@ -180,7 +180,6 @@ async def run(
     ):
         if fetch:
             result = await intake.collect(conn, config.intake.categories, since, run.run_id)
-            await word.settle_all(conn, result.rewritten)  # the old text's Weight went with it
             await runs.update(
                 conn,
                 run.run_id,
