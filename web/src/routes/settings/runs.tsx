@@ -45,7 +45,7 @@ export function RunsPage() {
       {quality.data && <Later>Deep cards' month to date as a subscription estimate comes with the usage columns on card attempts.</Later>}
       {schedule.data && (
         <div className="nsub mt-3">
-          {schedule.data.enabled ? (next ? `Next run ${dateTime(next.next)} (${schedule.data.zone}).` : "The schedule is on.") : "The schedule is off; runs start from the command line."}
+          {schedule.data.enabled ? (next ? `Next run ${dateTime(next.next, schedule.data.zone)} (${schedule.data.zone}).` : "The schedule is on.") : "The schedule is off; runs start from the command line."}
         </div>
       )}
       <Failed q={schedule} what="the schedule" />

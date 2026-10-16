@@ -2,7 +2,8 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
+import { qualityQuery } from "@/api/queries";
+import { freshClient, json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const status = { state: "quiet", papers: 2, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
 const cls = { slug: "mi", name: "Mech interp", description: "Circuits and features.", parent: null, threshold: null };
@@ -11,6 +12,7 @@ const tree = { classes: [cls], topics: [topic] };
 const stats = { members: { mi: 3 }, thresholds: { mi: 0.5 }, topic_revisions: { mi: 2 } };
 const split = {
   paper_id: "2610.00001",
+  revision: 1,
   topic: "mi",
   depth: "focus",
   fit: "adjacent",
@@ -319,6 +321,59 @@ describe("Settings", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ revision: 1, title: "A garbled title", abstract: "The abstract as stored." });
   });
 
+  it("says when the paper's text could not be read, with the way to try again, and opens no form on it", async () => {
+    viewport(true);
+    const garbled = { ...stuck, paper_id: "2610.00009", title: "A garbld title" };
+    let down = true;
+    scriptFetch({
+      ...common,
+      "GET /api/settings/quality": { ...quality, night: { ...quality.night, awaiting_classification: [garbled] } },
+      "GET /api/papers/2610.00009": () => (down ? json({ detail: "down" }, 500) : { id: "2610.00009", revision: 1, title: "A garbld title", abstract: "The abstract as stored." }),
+    });
+    renderApp("/settings/needs");
+    const item = (await screen.findByRole("link", { name: "A garbld title" })).closest(".need") as HTMLElement;
+    await userEvent.click(within(item).getByRole("button", { name: "Fix the text" }));
+    expect(await within(item).findByText(/Could not load the paper's text/)).toBeInTheDocument();
+    expect(within(item).queryByRole("textbox", { name: "Abstract" })).toBeNull();
+    down = false;
+    await userEvent.click(within(item).getByRole("button", { name: "Try again" }));
+    expect(await within(item).findByRole("textbox", { name: "Abstract" })).toHaveValue("The abstract as stored.");
+    expect(within(item).queryByText(/Could not load/)).toBeNull();
+  });
+
+  it("holds a Fix-the-text draft to the revision it was opened on: a rewrite meanwhile is said, and the text reloaded", async () => {
+    viewport(true);
+    const garbled = { ...stuck, paper_id: "2610.00009", title: "A garbld title" };
+    let revision = 1;
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/quality": () => ({ ...quality, night: { ...quality.night, awaiting_classification: [{ ...garbled, revision }] } }),
+      "GET /api/papers/2610.00009": () => ({ id: "2610.00009", revision, title: "A garbld title", abstract: revision === 1 ? "The abstract as stored." : "The abstract, rewritten." }),
+      "POST /api/settings/classification/2610.00009/correction": () => new Response(null, { status: 204 }),
+    });
+    const client = freshClient();
+    renderApp("/settings/needs", client);
+    const item = (await screen.findByRole("link", { name: "A garbld title" })).closest(".need") as HTMLElement;
+    await userEvent.click(within(item).getByRole("button", { name: "Fix the text" }));
+    expect(await within(item).findByRole("textbox", { name: "Abstract" })).toHaveValue("The abstract as stored.");
+    const title = within(item).getByRole("textbox", { name: "Title" });
+    await userEvent.clear(title);
+    await userEvent.type(title, "A garbled title");
+    // A refresh of the page brings the row on revision 2: the draft is for revision 1, and is not saved as 2.
+    revision = 2;
+    await client.invalidateQueries({ queryKey: qualityQuery("needs").queryKey });
+    const notice = await within(item).findByRole("alert");
+    expect(notice).toHaveTextContent("The paper's text changed meanwhile (revision 2; this draft is for revision 1).");
+    expect(within(item).getByRole("button", { name: "Save the text" })).toBeDisabled();
+    await userEvent.click(within(notice).getByRole("button", { name: "Reload the text" }));
+    await waitFor(() => expect(within(item).queryByRole("alert")).toBeNull());
+    expect(within(item).getByRole("textbox", { name: "Abstract" })).toHaveValue("The abstract, rewritten.");
+    await userEvent.clear(within(item).getByRole("textbox", { name: "Title" }));
+    await userEvent.type(within(item).getByRole("textbox", { name: "Title" }), "A garbled title");
+    await userEvent.click(within(item).getByRole("button", { name: "Save the text" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ revision: 2, title: "A garbled title", abstract: "The abstract, rewritten." }));
+  });
+
   it("lists a full-text pass that failed three runs and runs it now, settling it in place", async () => {
     viewport(true);
     const calls = scriptFetch({ ...common, "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }) });
@@ -338,6 +393,17 @@ describe("Settings", () => {
     scriptFetch({ ...common, "GET /api/settings/taxonomy": { ...tree, topics: [] } });
     renderApp("/settings/topics/mi");
     expect(await screen.findByRole("button", { name: "Follow" })).toBeEnabled();
+  });
+
+  it("offers Follow only once the subject would pass: a short generated one is not followed as it is", async () => {
+    viewport(true);
+    scriptFetch({ ...common, "GET /api/settings/taxonomy": { classes: [{ ...cls, description: "Circuits." }], topics: [] } });
+    renderApp("/settings/topics/mi");
+    const follow = await screen.findByRole("button", { name: "Follow" });
+    expect(follow).toBeDisabled();
+    expect(follow).toHaveAttribute("title", expect.stringContaining("20 characters"));
+    await userEvent.type(screen.getByLabelText(/Subject/), " Circuits and features in transformers.");
+    expect(follow).toBeEnabled();
   });
 
   it("names a stuck Deep pass as a Deep card", async () => {
@@ -735,6 +801,83 @@ describe("Settings", () => {
     await waitFor(() => expect(puts()).toEqual([{ slugs: ["b", "a", "c", "d"] }, { slugs: ["b", "a", "d", "c"] }]));
     // The first save landed reads the tree again only once no other waits: the server's order of this moment would
     // put C back under the reader until the second landed.
+    expect(reads()).toBe(before);
+    expect(rows()).toEqual(["Move B", "Move A", "Move D", "Move C"]);
+    release[1]!();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    await waitFor(() => expect(rows()).toEqual(["Move B", "Move A", "Move D", "Move C"]));
+  });
+
+  // The four-topic tree the reorder tests drag in, with a server whose order follows each save as it lands and
+  // saves that wait to land, or to fail, until told to.
+  const reorderable = () => {
+    const topicOf = (slug: string, depth: string) => ({ ...topic, class: slug, depth, monogram: slug.toUpperCase() });
+    const classOf = (slug: string) => ({ ...cls, slug, name: slug.toUpperCase() });
+    const four = { classes: ["a", "b", "c", "d"].map(classOf), topics: [topicOf("a", "focus"), topicOf("b", "focus"), topicOf("c", "area"), topicOf("d", "area")] };
+    let server = ["a", "b", "c", "d"];
+    const release: ((ok?: boolean) => void)[] = [];
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/config": {},
+      "GET /api/settings/taxonomy": () => ({ ...four, topics: server.map((slug) => four.topics.find((t) => t.class === slug)!) }),
+      "PUT /api/settings/topics-order": (c) =>
+        new Promise<Response>((r) =>
+          release.push((ok = true) => {
+            if (ok) server = (c.body as { slugs: string[] }).slugs;
+            r(ok ? new Response(null, { status: 204 }) : json({ detail: "nope" }, 500));
+          }),
+        ),
+    });
+    const rows = () => screen.getAllByRole("button", { name: /^Move/ }).map((b) => b.getAttribute("aria-label"));
+    const reads = () => calls.filter((c) => c.method === "GET" && c.url === "/api/settings/taxonomy").length;
+    const puts = () => calls.filter((c) => c.method === "PUT").map((c) => c.body);
+    // jsdom has no hit-testing or pointer capture: the drag lands on the row named.
+    Element.prototype.setPointerCapture = () => {};
+    const drag = (from: string, over: string) => {
+      document.elementFromPoint = () => document.querySelector(`[data-slug="${over}"]`);
+      const grip = screen.getByRole("button", { name: `Move ${from}` });
+      fireEvent.pointerDown(grip, { pointerId: 1 });
+      fireEvent.pointerMove(grip, { pointerId: 1, clientX: 1, clientY: 1 });
+      fireEvent.pointerUp(grip, { pointerId: 1 });
+    };
+    return { release, rows, reads, puts, drag };
+  };
+
+  it("keeps a moved row where it was dropped over a fresh visit's read, until the save has landed", async () => {
+    viewport(true);
+    const { release, rows, reads, puts, drag } = reorderable();
+    renderApp("/settings/topics");
+    await screen.findByRole("button", { name: "Move A" });
+    drag("A", "B");
+    await waitFor(() => expect(puts().length).toBe(1));
+    expect(rows()).toEqual(["Move B", "Move A", "Move C", "Move D"]);
+    // Away and back while the save is in flight: the fresh visit reads the tree, in the server's order of now.
+    const before = reads();
+    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
+    await userEvent.click(screen.getByRole("link", { name: /Topics/ }));
+    await screen.findByRole("button", { name: "Move A" });
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    expect(rows()).toEqual(["Move B", "Move A", "Move C", "Move D"]);
+    release[0]!();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before + 1));
+    expect(rows()).toEqual(["Move B", "Move A", "Move C", "Move D"]);
+  });
+
+  it("neither rolls back nor reads the tree when a save fails while a later one waits its turn", async () => {
+    viewport(true);
+    const { release, rows, reads, puts, drag } = reorderable();
+    renderApp("/settings/topics");
+    await screen.findByRole("button", { name: "Move A" });
+    drag("A", "B");
+    await waitFor(() => expect(puts().length).toBe(1));
+    drag("C", "D");
+    await waitFor(() => expect(rows()).toEqual(["Move B", "Move A", "Move D", "Move C"]));
+    const before = reads();
+    release[0]!(false);
+    await screen.findByText("nope");
+    await waitFor(() => expect(puts().length).toBe(2));
+    // The failure is said; the page's order stands while the second save, which carries both moves, is in flight.
     expect(reads()).toBe(before);
     expect(rows()).toEqual(["Move B", "Move A", "Move D", "Move C"]);
     release[1]!();

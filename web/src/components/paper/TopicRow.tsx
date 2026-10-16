@@ -14,11 +14,11 @@ import { REASONS, type ReactionValue, reasonLabel, speaks } from "@/lib/reaction
 export type PaperTopic = Schemas["PaperTopic"];
 /** The Fit control: five equal segments; the owner's label filled, the verdict's underlined while unlabelled.
  * Tapping the filled segment removes the label. */
-export function FitControl({ paperId, t }: { paperId: string; t: PaperTopic }) {
+export function FitControl({ paperId, t, revision }: { paperId: string; t: PaperTopic; revision: number }) {
   const label = useLabel(paperId);
   const unlabel = useUnlabel(paperId);
   const on = t.label?.value ?? null;
-  return <Seg values={FITS} value={on} auto={t.verdict?.fit} clear disabled={label.isPending || unlabel.isPending} label={`Fit for ${t.topic.name}`} onPick={(f) => (f ? label.mutate({ topic: t.topic.slug, value: f }) : unlabel.mutate(t.topic.slug))} />;
+  return <Seg values={FITS} value={on} auto={t.verdict?.fit} clear disabled={label.isPending || unlabel.isPending} label={`Fit for ${t.topic.name}`} onPick={(f) => (f ? label.mutate({ topic: t.topic.slug, value: f, revision }) : unlabel.mutate({ topic: t.topic.slug, revision }))} />;
 }
 
 /** The reasons for a thumb as chips, and Clear when the thumb is lit; nothing is recorded until a reason is picked. */
@@ -149,7 +149,7 @@ export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t:
       {pick && <Reasons paperId={paperId} topic={t.topic.slug} value={pick} current={t.reaction} onDone={() => setPick(null)} />}
       {(labelOpen || asks) && (
         <div className={`why${asks ? " ask" : ""}`}>
-          <FitControl paperId={paperId} t={t} />
+          <FitControl paperId={paperId} t={t} revision={revision} />
         </div>
       )}
     </>

@@ -6,7 +6,7 @@
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
-import { qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads, settingsTaxonomyQuery } from "./queries";
+import { patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
 import { rememberCard } from "@/lib/remember";
 import { labelled, noted, type Quality, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
 import { plural } from "@/lib/format";
@@ -26,14 +26,12 @@ function patchSaved(qc: QueryClient, paperId: string, saved: boolean) {
     );
 }
 
-/** The one place the cached Needs you page is patched with what a write settled (DESIGN.md: a settled item keeps
- * its result in place, and the sidebar's count follows). It is called from the write's own mutation, so the row
- * settles whether or not the page is still shown when the write returns. A read of the page in flight is cancelled
- * first: begun before the write, it would land the row open again and the count with it; the page's read stays
- * stale for its next fresh visit, and the rows stay as left. */
-export async function settleNeeds(qc: QueryClient, patch: (q: Quality) => Quality) {
-  await qc.cancelQueries({ queryKey: qualityQuery("needs").queryKey });
-  qc.setQueryData<Quality>(qualityQuery("needs").queryKey, (old) => old && patch(old));
+/** The one place the cached Needs you page is patched with what a write settled, or unsettled (DESIGN.md: a settled
+ * item keeps its result in place, and the sidebar's count follows). It is called from the write's own mutation,
+ * with the identity the write took when it was sent, so the row settles whether or not the page is still shown
+ * when the write returns; `patchRead` keeps a read in flight from landing over it. */
+export function settleNeeds(qc: QueryClient, patch: (q: Quality) => Quality) {
+  return patchRead<Quality>(qc, qualityQuery("needs").queryKey, patch);
 }
 
 /** After a write on a paper: refetch its page and patch its star in lists; the lists change no further until the
@@ -120,14 +118,14 @@ export function useUnreact(paperId: string) {
   );
 }
 
-/** A label, from the paper's page or a split on Needs you: the split's row settles with it (`labelled`), and the
- * paper is settled as after any write. */
+/** A label, from the paper's page or a split on Needs you, named with the paper revision the page showed: the
+ * split's row for that revision settles with it (`labelled`), and the paper is settled as after any write. */
 export function useLabel(paperId: string) {
   return usePaperMutation(
     paperId,
-    async (id, v: { topic: string; value: Schemas["LabelValue"] }) =>
+    async (id, v: { topic: string; value: Schemas["LabelValue"]; revision: number }) =>
       ok(await api.PUT("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } }, body: { value: v.value } })),
-    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, v.value)), acked(qc, id, ack)]),
+    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, v.value, v.revision)), acked(qc, id, ack)]),
   );
 }
 
@@ -135,8 +133,8 @@ export function useLabel(paperId: string) {
 export function useUnlabel(paperId: string) {
   return usePaperMutation(
     paperId,
-    async (id, topic: string) => ok(await api.DELETE("/api/labels/{topic}/{paper_id}", { params: { path: { topic, paper_id: id } } })),
-    (qc, id, ack, topic) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, topic, null)), acked(qc, id, ack)]),
+    async (id, v: { topic: string; revision: number }) => ok(await api.DELETE("/api/labels/{topic}/{paper_id}", { params: { path: { topic: v.topic, paper_id: id } } })),
+    (qc, id, ack, v) => Promise.all([settleNeeds(qc, (q) => labelled(q, id, v.topic, null, v.revision)), acked(qc, id, ack)]),
   );
 }
 
@@ -370,24 +368,32 @@ export function useSaveTopic() {
   });
 }
 
-/** The owner's order of the topics, which the sidebar and the Digest follow. The page's tree takes the order at
- * once, so a second move while one is being saved starts from the first's order, not the one the page loaded;
- * and the saves go one at a time (`scope`), in the order they were made, whatever page is shown meanwhile. Only
- * the last save in line refreshes the reads: an earlier one's refetch would land the server's order of that
- * moment over the page's, undoing the later move under the reader until its own save returned. */
+const REORDER = ["topics-order"];
+
+/** The order the latest reorder still being saved put the topics in, if any. The Topics page lays its rows in it
+ * over whatever its read holds, so no read landing meanwhile (one begun before the move, a fresh visit's during
+ * it) puts a moved row back; it lasts until the last save in line has refreshed the reads, which is when the
+ * mutation leaves its pending state. */
+export function usePendingOrder(): string[] | undefined {
+  const orders = useMutationState({ filters: { mutationKey: REORDER, status: "pending" }, select: (m) => m.state.variables as string[] });
+  return orders.at(-1);
+}
+
+/** The owner's order of the topics, which the sidebar and the Digest follow. The saves go one at a time (`scope`),
+ * in the order they were made, whatever page is shown meanwhile, each from the order the page showed when the row
+ * was dropped (`usePendingOrder`). Only the last save in line refreshes the reads, or on failure lets the page's
+ * read be refetched: an earlier one's refetch would land the server's order of that moment, and a failed one's
+ * rollback would undo the moves still in line. */
 export function useReorderTopics() {
   const qc = useQueryClient();
+  // A save counts as pending until its callbacks are done: more than one pending means another waits its turn.
+  const last = () => qc.isMutating({ mutationKey: REORDER }) <= 1;
   return useMutation({
-    mutationKey: ["topics-order"],
+    mutationKey: REORDER,
     scope: { id: "topics-order" },
     mutationFn: async (slugs: string[]) => ok(await api.PUT("/api/settings/topics-order", { body: { slugs } })),
-    onMutate: (slugs) => {
-      const at = new Map(slugs.map((s, i) => [s, i]));
-      qc.setQueryData<Schemas["Taxonomy"]>(settingsTaxonomyQuery("topics").queryKey, (old) => old && { ...old, topics: [...(old.topics ?? [])].sort((a, b) => (at.get(a.class) ?? 0) - (at.get(b.class) ?? 0)) });
-    },
     onSuccess: () =>
-      // This save counts as pending until its callbacks are done: more than one means another waits its turn.
-      qc.isMutating({ mutationKey: ["topics-order"] }) > 1 ||
+      last() &&
       Promise.all([
         qc.invalidateQueries({ queryKey: ["taxonomy"] }),
         qc.invalidateQueries({ queryKey: ["topics"] }),
@@ -397,7 +403,7 @@ export function useReorderTopics() {
       ]),
     onError: (e) => {
       toast(said(e, "Could not save the order"), "error");
-      return qc.invalidateQueries(settingsReads("topics")); // the page's order back to the saved one
+      return last() && qc.invalidateQueries(settingsReads("topics")); // the page's order back to the saved one
     },
   });
 }
@@ -418,25 +424,27 @@ export function useDrawSession() {
 }
 
 /** After a write on a session: the session is refetched (shown or not) so the strip and the review follow, and
- * its row in the past-session lists is patched from it, in place, so Back finds the counts as they are now. */
+ * its row in the past-session lists is patched from it, in place (`patchRead`: a list read in flight does not
+ * land over it), so Back finds the counts as they are now. */
 async function sessionChanged(qc: QueryClient, sessionId: number) {
   const key = sessionQuery(sessionId).queryKey;
   await qc.invalidateQueries({ queryKey: key, refetchType: "all" });
   if (qc.getQueryState(key)?.status === "error") return;
   const s = qc.getQueryData<Session>(key);
-  if (s) for (const page of SESSION_LISTS) qc.setQueryData<SessionRow[]>(sessionsQuery(page).queryKey, (old) => old?.map((r) => (r.id === sessionId ? sessionRow(r, s) : r)));
+  if (s) for (const page of SESSION_LISTS) await patchRead<SessionRow[]>(qc, sessionsQuery(page).queryKey, (rows) => rows.map((r) => (r.id === sessionId ? sessionRow(r, s) : r)));
 }
 
-/** One paper's answers in a session, and the paper settled as after any write on it: its page and the status line
- * refetched, a split the labels settled marked so on Needs you. */
-export function useAnswer(sessionId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ position, answer }: { position: number; paperId: string; answer: Schemas["Answer"] }) =>
-      ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: sessionId, position } }, body: answer })),
-    onSuccess: (_, { paperId }) => Promise.all([sessionChanged(qc, sessionId), settled(qc, paperId)]),
-    onError: (e) => toast(said(e, "The answer did not go through"), "error"),
-  });
+/** One paper's answers in a session: a write on the paper like its others, one at a time with them (a Calibrate
+ * screen or a label control opened while one is in flight waits for it), named by the session and position it was
+ * sent for. The session is refetched so the strip and the review follow, its row in the past-session lists is
+ * patched, and the paper is settled as after any write on it. */
+export function useAnswer(paperId: string) {
+  return usePaperMutation(
+    paperId,
+    async (_id, v: { sessionId: number; position: number; answer: Schemas["Answer"] }) =>
+      ok(await api.PUT("/api/settings/calibrate/{session_id}/items/{position}", { params: { path: { session_id: v.sessionId, position: v.position } }, body: v.answer })),
+    (qc, id, _r, v) => Promise.all([sessionChanged(qc, v.sessionId), settled(qc, id)]),
+  );
 }
 
 /** Add the papers waiting for a word to a session. */

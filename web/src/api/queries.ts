@@ -1,5 +1,5 @@
 /** TanStack Query options over the typed client: one per endpoint, and one per shelf of a list. */
-import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { api, ok } from "./client";
 import type { Shelf } from "@/lib/rarity";
 import type { Quality, Run, Session, SessionRow } from "@/lib/settings";
@@ -130,6 +130,19 @@ const settingsRead = <T,>(page: string, name: string, queryFn: () => Promise<T>)
 export const settingsReads = (page: string) => ({
   predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "settings" && typeof q.queryKey[1] === "string" && (q.queryKey[1] === page || q.queryKey[1].startsWith(`${page}/`)),
 });
+
+/** The one way a cached read is patched with what a write settled, whatever read of it is in flight. Three cases:
+ * a snapshot exists, and is patched in place (the patch matches rows by their identity) after the read in flight
+ * is cancelled, since begun before the write it would land over the patch; the read is the initial one, which the
+ * cancel interrupted, and is started again rather than left pending with nothing shown; the read was never asked
+ * for (the page not visited), and nothing is fetched for a page nobody shows. */
+export async function patchRead<T>(qc: QueryClient, key: QueryKey, patch: (old: T) => T) {
+  if (!qc.getQueryState(key)) return;
+  await qc.cancelQueries({ queryKey: key, exact: true });
+  const old = qc.getQueryData<T>(key);
+  if (old !== undefined) qc.setQueryData<T>(key, patch(old));
+  else void qc.invalidateQueries({ queryKey: key, exact: true });
+}
 
 export const qualityQuery = (page: "needs" | "overview" | "runs") => settingsRead(page, "quality", async () => ok(await api.GET("/api/settings/quality")) as unknown as Quality);
 

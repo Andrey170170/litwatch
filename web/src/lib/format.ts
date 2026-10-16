@@ -3,6 +3,8 @@
 const ROW = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
 const ROW_YEAR = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const TIME = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+// The same, in a named zone (the scheduler's), one formatter per zone.
+const TIME_IN = new Map<string, Intl.DateTimeFormat>();
 
 /** A date-only string is a calendar day, not UTC midnight: parse it as a local day so it prints as itself. */
 function parse(iso: string): Date {
@@ -20,9 +22,14 @@ export function rowDate(iso: string | null | undefined, now = new Date()): strin
 export function fullDate(iso: string | null | undefined): string {
   return iso ? ROW_YEAR.format(parse(iso)) : "";
 }
-/** "13 Oct, 09:12" */
-export function dateTime(iso: string | null | undefined): string {
-  return iso ? TIME.format(new Date(iso)) : "";
+/** "13 Oct, 09:12", in the browser's zone, or in `zone` where the page names one (a time labelled with the
+ * scheduler's zone reads in it, wherever the browser is). */
+export function dateTime(iso: string | null | undefined, zone?: string): string {
+  if (!iso) return "";
+  if (!zone) return TIME.format(new Date(iso));
+  let f = TIME_IN.get(zone);
+  if (!f) TIME_IN.set(zone, (f = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: zone })));
+  return f.format(new Date(iso));
 }
 
 /** The first three authors and "+N" (DESIGN.md, the paper header). */

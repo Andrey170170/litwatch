@@ -141,7 +141,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   const open = useOpenSession();
   const desktop = useDesktop();
   const tree = useQuery(taxonomyQuery);
-  const answer = useAnswer(s.id);
+  const answer = useAnswer(item.paper_id);
   const [edits, setEdits] = useState<Edits>({ fit: {} });
   // Next or a move found edits but no Fit for the drawn topic, which a first answer needs: the screen asks for it.
   const [missing, setMissing] = useState(false);
@@ -174,7 +174,7 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
     if (saving) return;
     if (!complete) return edited ? setMissing(true) : after();
     if (!edited && !wanted) return after();
-    answer.mutate({ position: item.position, paperId: item.paper_id, answer: body }, { onSuccess: after });
+    answer.mutate({ sessionId: s.id, position: item.position, answer: body }, { onSuccess: after });
   };
   /** Next records a first answer when the drawn topic has its Fit, and any edit; a paper left untouched stays grey. */
   const next = () => leave(!item.answered_at, i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true }, true));

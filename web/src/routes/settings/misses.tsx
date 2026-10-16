@@ -11,29 +11,41 @@ import { Later, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 type Miss = Schemas["Miss"];
 type Cell = { name: string; value: string; tone: "ok" | "bad" | "off" };
 
-/** The five cells of a trace: what each stage concluded for the topic. Cyan where the stage would have admitted
- * the paper, red where it let it go, grey while the stage has not run on this text. The classifier's cell reads
- * its probability against the threshold; a paper admitted through a class under the topic says so. */
+/** The graders' roles as the page names them. */
+const ROLE: Record<string, string> = { judge: "Judge", check: "Check", area_check: "Area check", field_grade: "Field grade" };
+
+/** The cells of a trace: what each stage concluded for the topic, the classification's three and one per grader
+ * the verdict holds (as the topic's depth asks them: a Focus pair, Area's judge with its check, Field's one). Cyan
+ * where the stage would have admitted the paper, red where it let it go, grey while the stage has not run on this
+ * text. The classifier's cell reads its probability against the threshold; a paper admitted through a class under
+ * the topic says so; the Area check says whether the judge's Fit held. */
 export function cells(t: Miss["trace"]): Cell[] {
   const pending: Cell["tone"] = "off";
   const p = t.probability;
   const read = p == null ? "no answer" : `${p.toFixed(2)} ${p >= t.threshold ? "over" : "under"} ${t.threshold.toFixed(2)}`;
   const under = t.below ? " · in a class under it" : "";
+  const graders: Cell[] = !t.graded
+    ? [{ name: "Grading", value: "pending", tone: pending }]
+    : t.graders.map((g) => ({
+        name: ROLE[g.role] ?? g.role,
+        value: g.fit ?? (g.holds == null ? "–" : g.holds ? "holds" : "doubts"),
+        tone: g.fit ? (admits(g.fit) ? "ok" : "bad") : "off",
+      }));
   return [
     { name: "Classifier", value: !t.classified ? "pending" : read + under, tone: !t.classified ? pending : t.classifier ? "ok" : "bad" },
     { name: "Uncertain band", value: !t.classified ? "pending" : t.uncertain ? "member" : t.classifier ? "–" : "under", tone: !t.classified ? pending : t.uncertain ? "ok" : t.classifier ? "off" : "bad" },
     { name: "Keywords", value: !t.classified ? "pending" : t.keyword ? "match" : "no match", tone: !t.classified ? pending : t.keyword ? "ok" : "bad" },
-    { name: "Judge", value: !t.graded ? "pending" : (t.judge ?? "–"), tone: !t.graded ? pending : admits(t.judge) ? "ok" : "bad" },
-    { name: "Check", value: !t.graded ? "pending" : (t.check ?? "not asked"), tone: !t.graded || !t.check ? pending : admits(t.check) ? "ok" : "bad" },
+    ...graders,
   ];
 }
 
-/** Where the pipeline let the paper go: the first stage whose cells all read red. */
+/** Where the pipeline let the paper go: classification when nothing admitted it, grading when the Fit that stands
+ * (by the rule of the depth it was graded at, which the API applies) admits nothing. */
 export function missedAt(t: Miss["trace"]): string {
   if (!t.classified) return "not classified yet";
   if (!t.classifier && !t.uncertain && !t.keyword) return "classification";
   if (!t.graded) return "not graded yet";
-  if (!admits(t.judge) && !(t.check && admits(t.check))) return "grading";
+  if (!admits(t.fit)) return "grading";
   return "nowhere: the trace admits it";
 }
 

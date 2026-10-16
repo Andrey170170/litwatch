@@ -5,7 +5,7 @@ import { answerOf, differs, labelled, level, noted, openSplits, runFailed, saved
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
 const stuck = { paper_id: "1", revision: 1, title: "t", failed_runs: 3, last_error: null, failed_at: "2026-10-15" };
-const split = { paper_id: "1", topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
+const split = { paper_id: "1", revision: 1, topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
 
 describe("waiting", () => {
   const digest = { id: 4, topic: "a", period: "day", day: "2026-10-08", error: "timed out", written_at: "" } as const;
@@ -29,7 +29,7 @@ describe("waiting", () => {
 describe("settleFromPaper", () => {
   const q = { night: { ...night, splits: [split, { ...split, topic: "b" }], ungraded: [{ ...stuck, topic: "a" }], analysis_failed: [stuck], fulltext: [pass] } } as Quality;
   const topic = (slug: string, label?: string) => ({ topic: { slug, name: slug, depth: "focus", monogram: "A", colour: "#fff" }, fit: "related", label: label ? { value: label } : undefined });
-  const paper = (id: string, states: object[], topics: object[] = []) => ({ id, states, topics }) as unknown as Schemas["Paper"];
+  const paper = (id: string, states: object[], topics: object[] = [], revision = 1) => ({ id, revision, states, topics }) as unknown as Schemas["Paper"];
   it("settles the items whose open state the paper's page no longer carries, a split with its label", () => {
     // Labelled on topic a; still split on b; the ungraded grading done; analysis and the pass still open.
     const after = settleFromPaper(q, paper("1", [{ kind: "split", topic: "b" }, { kind: "analysis_stopped" }], [topic("a", "central"), topic("b")]));
@@ -38,6 +38,11 @@ describe("settleFromPaper", () => {
     expect(after.night.analysis_failed[0]!.settled).toBeUndefined();
     expect(after.night.fulltext[0]!.settled).toBeUndefined();
     expect(waiting(after)).toBe(3);
+  });
+  it("leaves the rows for another revision of the paper as they are", () => {
+    // The page acted on revision 2 (a rewrite since the night); the rows are the night's, on revision 1: not these.
+    const after = settleFromPaper(q, paper("1", [], [topic("a", "central")], 2));
+    expect(after).toEqual(q);
   });
   it("keeps a failed Deep pass open while the paper's page carries it as card_failed", () => {
     const deep = { night: { ...night, fulltext: [{ ...pass, kind: "deep" as const }] } } as Quality;
@@ -129,16 +134,19 @@ describe("sessionRow", () => {
 describe("labelled and noted", () => {
   const q = { night: { ...night, splits: [split, { ...split, topic: "b" }], digests: [{ id: 4, topic: "a", period: "day", day: "2026-10-08", error: "x", written_at: "" }] } } as Quality;
   it("settles the split with its label, replaces it with a changed one, and lets a split taken back wait again, fetched labelled or not", () => {
-    const one = labelled(q, "1", "a", "related");
+    const one = labelled(q, "1", "a", "related", 1);
     expect(one.night.splits.map((s) => s.settled)).toEqual(["related", undefined]);
-    expect(labelled(one, "1", "a", "central").night.splits[0]!.settled).toBe("central");
-    const back = labelled(one, "1", "a", null);
+    expect(labelled(one, "1", "a", "central", 1).night.splits[0]!.settled).toBe("central");
+    const back = labelled(one, "1", "a", null, 1);
     expect([back.night.splits[0]!.settled, back.night.splits[0]!.label, waiting(back)]).toEqual([undefined, null, 3]);
     const fetchedLabelled = { night: { ...night, splits: [{ ...split, label: { value: "none" } }] } } as Quality;
-    expect(labelled(fetchedLabelled, "1", "a", null).night.splits[0]!.label).toBeNull();
+    expect(labelled(fetchedLabelled, "1", "a", null, 1).night.splits[0]!.label).toBeNull();
     // A row fetched labelled is off the visit's list; labelled again elsewhere, it stays off.
-    expect(labelled(fetchedLabelled, "1", "a", "central")).toEqual(fetchedLabelled);
-    expect(labelled(q, "9", "a", "none")).toEqual(q);
+    expect(labelled(fetchedLabelled, "1", "a", "central", 1)).toEqual(fetchedLabelled);
+    expect(labelled(q, "9", "a", "none", 1)).toEqual(q);
+  });
+  it("settles only the row for the revision the label was given on", () => {
+    expect(labelled(q, "1", "a", "central", 2)).toEqual(q);
   });
   it("keeps what a write-again said on the digest's row, which still waits", () => {
     const after = noted(q, 4, "Failed again: x.");

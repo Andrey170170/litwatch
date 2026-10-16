@@ -2,11 +2,11 @@
  * Settings, behind the gear (DESIGN.md, "Settings"): the desktop's sidebar with the pages in three groups, the
  * phone's list of them with a line under each, and the page itself by its name.
  */
-import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useParams } from "@tanstack/react-router";
 import { memo } from "react";
-import { summaryQuery } from "@/api/queries";
+import type { Schemas } from "@/api/client";
 import { SideHead } from "@/components/Shell";
+import { Unavailable, useSummary } from "@/components/Summary";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
@@ -22,12 +22,19 @@ import { RunsPage } from "./settings/runs";
 import { TaxonomyPage } from "./settings/taxonomy";
 import { TopicsPage } from "./settings/topics";
 
+type Hints = Record<Page, { hint: string; count?: number; tone?: "ask" | "hot" }>;
+
 /** What each page's hint says, and the count beside it in the sidebar (Needs you asks, yellow; a failed integration,
- * red), from the shell's summary: the pages' own reads never feed the sidebar. Empty before the first read. */
-function useHints(): Record<Page, { hint: string; count?: number; tone?: "ask" | "hot" }> {
-  const { data: h } = useQuery({ ...summaryQuery, select: (s) => s.settings });
+ * red), from the shell's summary: the pages' own reads never feed the sidebar. Empty before the first read, and
+ * `unavailable` when that read failed, for the index to say so. */
+function useHints(): { hints: Hints; unavailable: boolean; retry: () => void } {
+  const { data: h, unavailable, retry } = useSummary((s) => s.settings);
   const failing = h?.failing ?? [];
-  if (!h) return Object.fromEntries(GROUPS.flatMap((g) => g.pages).map((p) => [p.id, { hint: "" }])) as Record<Page, { hint: string }>;
+  const empty = () => Object.fromEntries(GROUPS.flatMap((g) => g.pages).map((p) => [p.id, { hint: "" }])) as Hints;
+  return { hints: h ? hintsOf(h, failing) : empty(), unavailable, retry };
+}
+
+function hintsOf(h: Schemas["SettingsHints"], failing: string[]): Hints {
   return {
     overview: { hint: "Recall, precision, reactions" },
     needs: { hint: h.waiting ? `${h.waiting} waiting` : "All settled", count: h.waiting || undefined, tone: "ask" },
@@ -44,7 +51,7 @@ function useHints(): Record<Page, { hint: string; count?: number; tone?: "ask" |
 /** The desktop sidebar while Settings is open: a way back to reading, then the index with its counts. Memoised:
  * the page changing under it re-renders only its active links. */
 export const SettingsSide = memo(function SettingsSide() {
-  const hints = useHints();
+  const { hints, unavailable, retry } = useHints();
   countRender("settings-side");
   return (
     <aside className="side">
@@ -54,6 +61,7 @@ export const SettingsSide = memo(function SettingsSide() {
           ‹ Back to reading
         </Link>
         <div className="sec setttl">⚙ Settings</div>
+        {unavailable && <Unavailable what="counts" retry={retry} />}
         {GROUPS.map((g) => (
           <div key={g.name}>
             <div className="sec">{g.name}</div>
@@ -73,7 +81,7 @@ export const SettingsSide = memo(function SettingsSide() {
 /** The gear's landing: the phone's list of pages; the desktop goes straight to Overview. */
 export function SettingsIndex() {
   const desktop = useDesktop();
-  const hints = useHints();
+  const { hints, unavailable, retry } = useHints();
   if (desktop) return <Navigate to="/settings/$page" params={{ page: "overview" }} replace />;
   return (
     <>
@@ -81,6 +89,7 @@ export function SettingsIndex() {
         <span className="t">Settings</span>
       </Fill>
       <div className="setlist">
+        {unavailable && <Unavailable what="counts" retry={retry} />}
         {GROUPS.map((g) => (
           <div key={g.name}>
             <div className="sec">{g.name}</div>

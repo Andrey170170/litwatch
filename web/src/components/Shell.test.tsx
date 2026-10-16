@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { renderApp, scriptFetch, viewport } from "@/test/harness";
+import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const badge = { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" };
 const status = { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
@@ -37,6 +37,33 @@ describe("The shell's sidebar", () => {
     expect(screen.getByRole("link", { name: /Mech interp/ })).toBe(following);
     expect(screen.getByRole("link", { name: "212" })).toBe(line);
     expect(renders).toEqual(after);
+  });
+
+  it("says the status and the topics are unavailable when the summary's first read fails, until Try again", async () => {
+    viewport(true);
+    let down = true;
+    scriptFetch({
+      "GET /api/summary": () => (down ? json({ detail: "down" }, 500) : summary),
+      "GET /api/status": status,
+      "GET /api/topics": [{ depth: "focus", topics: [] }],
+      "GET /api/papers": { rows: [], total: 0, counts, grades, outside: [] },
+    });
+    renderApp("/papers");
+    expect(await screen.findByText(/status unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/topics unavailable/)).toBeInTheDocument();
+    down = false;
+    await userEvent.click(screen.getAllByRole("button", { name: "Try again" })[0]!);
+    expect(await screen.findByRole("link", { name: "212" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Mech interp/ })).toBeInTheDocument();
+    expect(screen.queryByText(/unavailable/)).toBeNull();
+  });
+
+  it("says the Settings counts are unavailable when the summary's first read fails", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/summary": () => json({ detail: "down" }, 500), "GET /api/status": status, "GET /api/topics": [], "GET /api/settings/config": {} });
+    renderApp("/settings/configuration");
+    expect(await screen.findByText(/counts unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Needs you/ })).toBeInTheDocument();
   });
 
   it("updates a changed count in place when the summary comes back different", async () => {

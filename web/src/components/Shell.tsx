@@ -3,16 +3,17 @@
  * the page's bottom bar, and the drawer. The main column records how it was reached (go, back, top) so the page
  * can slide in from the right side.
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
 import { memo, useEffect, useRef, useState } from "react";
-import { freshVisit, summaryQuery } from "@/api/queries";
+import { freshVisit } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { countRender } from "@/lib/renders";
 import { SettingsSide } from "@/routes/settings";
 import { Badge } from "./Badge";
 import { RunStatus } from "./RunStatus";
 import { Sheet } from "./Sheet";
+import { Unavailable, useSummary } from "./Summary";
 import { Slot } from "./slots";
 import { Toaster } from "./Toaster";
 
@@ -59,10 +60,18 @@ function useCame(): Came {
   return index < before.index ? "back" : "go";
 }
 
-/** The followed topics, from the shell's summary: the list re-renders only when the topics themselves change. */
+/** The followed topics, from the shell's summary: the list re-renders only when the topics themselves change. A
+ * summary never read leaves the section with that word, not empty. */
 const Following = memo(function Following({ onPick }: { onPick?: () => void }) {
-  const { data: topics } = useQuery({ ...summaryQuery, select: (s) => s.topics });
+  const { data: topics, unavailable, retry } = useSummary((s) => s.topics);
   countRender("following");
+  if (unavailable)
+    return (
+      <>
+        <div className="sec">Following</div>
+        <Unavailable what="topics" retry={retry} />
+      </>
+    );
   if (!topics?.length) return null;
   return (
     <>

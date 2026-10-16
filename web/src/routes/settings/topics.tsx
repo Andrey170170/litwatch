@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Schemas } from "@/api/client";
-import { useReorderTopics, useSaveTopic } from "@/api/mutations";
+import { usePendingOrder, useReorderTopics, useSaveTopic } from "@/api/mutations";
 import { keywordsQuery, settingsTaxonomyQuery, taxonomyStatsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { Seg } from "@/components/Seg";
@@ -94,12 +94,20 @@ function DepthList({ depth, topics, tree, revisions, onOrder }: { depth: Depth; 
   );
 }
 
+/** `topics` in `order` (slugs first to last; one not named keeps to the end), for a move still being saved. */
+export function inOrder<T extends { class: string }>(topics: T[], order: string[] | undefined): T[] {
+  if (!order) return topics;
+  const at = new Map(order.map((s, i) => [s, i]));
+  return [...topics].sort((a, b) => (at.get(a.class) ?? order.length) - (at.get(b.class) ?? order.length));
+}
+
 export function TopicsPage() {
   const tree = useQuery(settingsTaxonomyQuery("topics"));
   const stats = useQuery(taxonomyStatsQuery("topics"));
   const reorder = useReorderTopics();
   const t = tree.data;
-  const topics = t?.topics ?? [];
+  // A move being saved shows at once and stays shown over any read until its save has refreshed the tree.
+  const topics = inOrder(t?.topics ?? [], usePendingOrder());
   const byDepth = (d: Depth) => topics.filter((t) => t.depth === d);
   // The new order of one depth, spliced into the whole: the API takes every topic once.
   const onOrder = (depth: Depth, slugs: string[]) => reorder.mutate(DEPTHS.flatMap((d) => (d === depth ? slugs : byDepth(d).map((t) => t.class))));
@@ -165,8 +173,10 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
   const matches = useQuery(keywordsQuery(cls.slug, !!current));
   const path = classPath(tree, cls.slug);
   const dirty = JSON.stringify(form) !== JSON.stringify(base);
-  // A class not followed yet can be followed with its generated defaults as they are.
-  const savable = dirty || !current;
+  // What the API would refuse (a subject under 20 characters, no monogram) is not offered to save; a class not
+  // followed yet can be followed with its generated defaults once they pass.
+  const valid = form.subject.trim().length >= 20 && form.monogram.trim().length > 0;
+  const savable = valid && (dirty || !current);
   // The taxonomy refreshed behind a pristine form (edited elsewhere meanwhile): the form follows it, so a save sends
   // the current fields, not the ones loaded before. An edited form keeps its edits.
   const loaded = JSON.stringify(asForm(current ?? fresh(cls)));
@@ -216,7 +226,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
         <Field label="Depth" hint="Focus is graded by two labs, Area checked, Field graded once">
           <Seg values={DEPTHS} value={form.depth} onPick={(depth) => depth && set({ depth })} label="Depth" />
         </Field>
-        <Field label="Subject" hint="what the topic is about; the graders read it">
+        <Field label="Subject" hint="what the topic is about; the graders read it; at least 20 characters">
           <textarea className="tin" rows={3} value={form.subject} onChange={(e) => set({ subject: e.target.value })} aria-label="Subject" />
         </Field>
         {form.depth === "focus" && (
@@ -299,7 +309,7 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
           </div>
         ) : (
           <div className="nact">
-            <button className="btn pri" disabled={!savable || save.isPending} title={savable ? undefined : "Nothing changed"} onClick={onSave}>
+            <button className="btn pri" disabled={!savable || save.isPending} title={savable ? undefined : !valid ? "The subject needs at least 20 characters, and the badge a monogram" : "Nothing changed"} onClick={onSave}>
               {current ? "Save" : "Follow"}
             </button>
             <button className="btn" onClick={() => void navigate({ to: "/settings/$page", params: { page: "topics" } })}>

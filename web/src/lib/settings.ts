@@ -49,6 +49,8 @@ export type Opinion = Schemas["Opinion"];
 export type Split = {
   paper_id: string;
   topic: string;
+  /** The paper revision the verdict is on (the current one: `splits_since` lists no older text's). */
+  revision: number;
   depth: Schemas["Depth"];
   fit: Fit;
   reason: string;
@@ -205,13 +207,14 @@ export function settle(q: Quality, list: Waiting, item: Settled, what: string): 
   return { ...q, night };
 }
 
-/** The quality page after a label written on a split, or taken back, wherever it was sent from: labelled, a row
- * the visit lists (fetched unlabelled, or settled on it) settles with the label, a changed one replacing it, and
- * a row fetched labelled stays off the list; taken back, the split waits again, its label gone whether the visit
- * fetched it labelled or settled it. */
-export function labelled(q: Quality, paper_id: string, topic: string, value: LabelValue | null): Quality {
+/** The quality page after a label written on a split, or taken back, wherever it was sent from, for the paper
+ * revision the sender showed (a row for another text is not this one): labelled, a row the visit lists (fetched
+ * unlabelled, or settled on it) settles with the label, a changed one replacing it, and a row fetched labelled
+ * stays off the list; taken back, the split waits again, its label gone whether the visit fetched it labelled or
+ * settled it. */
+export function labelled(q: Quality, paper_id: string, topic: string, value: LabelValue | null, revision: number): Quality {
   const splits = q.night.splits.map((s) => {
-    if (s.paper_id !== paper_id || s.topic !== topic) return s;
+    if (s.paper_id !== paper_id || s.topic !== topic || s.revision !== revision) return s;
     if (!value) return { ...s, settled: undefined, label: null };
     return !s.label || s.settled ? { ...s, settled: value } : s;
   });
@@ -234,16 +237,18 @@ export function openSplits(splits: Split[]): { splits: Split[]; escalations: Spl
 
 /** The quality page reconciled with the paper's own page after a write there: an item whose open state the
  * refetched paper no longer carries is marked settled in place (a split with the label it got), and one whose
- * state is back (a label taken back) waits again. The sidebar's count follows, and the way back to Needs you finds
- * the row where it was. */
+ * state is back (a label taken back) waits again. Only the rows for the paper's current revision: a row for an
+ * older text was not what the page acted on, and its state's absence says nothing about it. The sidebar's count
+ * follows, and the way back to Needs you finds the row where it was. */
 export function settleFromPaper(q: Quality, paper: Schemas["Paper"]): Quality {
   const states = paper.states ?? [];
   const has = (kind: Schemas["OpenState"]["kind"], topic?: string | null, id?: number) => states.some((s) => s.kind === kind && (topic == null || s.topic === topic) && (id == null || s.pass_id === id));
   const labelOf = (topic: string) => paper.topics.find((t) => t.topic.slug === topic)?.label?.value;
   const done = "Settled on the paper's page.";
+  const mine = (x: { paper_id: string; revision: number }) => x.paper_id === paper.id && x.revision === paper.revision;
   // The item as the paper's page leaves it: settled with `what` while its state is gone, open while it is back.
-  const read = <T extends { paper_id: string; settled?: string }>(x: T, open: boolean, what: string | undefined): T => {
-    if (x.paper_id !== paper.id) return x;
+  const read = <T extends { paper_id: string; revision: number; settled?: string }>(x: T, open: boolean, what: string | undefined): T => {
+    if (!mine(x)) return x;
     if (open) return x.settled ? { ...x, settled: undefined } : x;
     return x.settled || !what ? x : { ...x, settled: what };
   };
@@ -251,7 +256,7 @@ export function settleFromPaper(q: Quality, paper: Schemas["Paper"]): Quality {
   // A split waits again when its state is back (the label taken back, whenever it was given); labelled, it shows
   // the label the page now carries, a changed one included, where the visit lists it.
   night.splits = night.splits.map((s) => {
-    if (s.paper_id !== paper.id) return s;
+    if (!mine(s)) return s;
     if (has(s.escalated ? "escalated" : "split", s.topic)) return s.settled || s.label ? { ...s, settled: undefined, label: null } : s;
     const label = labelOf(s.topic);
     return label && (!s.label || s.settled) && s.settled !== label ? { ...s, settled: label } : s;
