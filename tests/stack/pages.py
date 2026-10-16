@@ -81,7 +81,11 @@ def card(base: str, token: str, paper: str, collection: set[str]) -> list[str]:
             among = found["card"]["among"]
             if not among:
                 return ["the card has no Among the collection rows"]
-            strays = [a["id"] for a in among if a["id"] not in collection or a["id"] == paper]
+            strays = [
+                a["id"]
+                for a in among
+                if not a["in_collection"] or a["id"] not in collection or a["id"] == paper
+            ]
             print(f"card: {len(among)} among rows: {[a['id'] for a in among]}")
             return [f"among rows outside the collection: {strays}"] if strays else []
         state = found["card_pass"] or {}
@@ -91,12 +95,23 @@ def card(base: str, token: str, paper: str, collection: set[str]) -> list[str]:
     return [f"no card within {CARD_WAIT_SECONDS}s: {found['card_pass']}"]
 
 
+def topic_lists(base: str, token: str, topic: str, collection: set[str]) -> list[str]:
+    """The topic's page must list the seeded papers classified into it."""
+    from urllib.request import Request, urlopen  # noqa: PLC0415
+
+    auth = {"Authorization": f"Bearer {token}"}
+    with urlopen(Request(f"{base}/api/topics/{topic}", headers=auth)) as response:
+        rows = {r["id"] for r in json.load(response)["rows"]}
+    return [] if rows & collection else [f"the {topic} page lists none of the seeded papers"]
+
+
 def main(base: str, token: str, fixture: str, out: str) -> None:
     papers = [item["id"] for item in json.loads(Path(fixture).read_text())]
     shots = Path(out)
     shots.mkdir(parents=True, exist_ok=True)
+    # smoke.sh classified every seeded paper into the seed taxonomy's language-models Field topic.
     failures = card(base, token, papers[0], set(papers))
-    # The topics come from the seed taxonomy; the first Field topic shows a page of papers.
+    failures += topic_lists(base, token, "language-models", set(papers))
     failures += walk(base, token, papers[0], "language-models", shots)
     for failure in failures:
         print("FAIL", failure)

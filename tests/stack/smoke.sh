@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The stack smoke test (docs/agents/verification.md): a fresh stack from deploy/compose.yaml with
 # its own volumes, an empty archive seeded with real papers (papers.json) and their text, the
-# day's papers read into litwatch from the archive, then pages.py: every page at both widths, and
-# a Deep card from a fake deep service that searched litwatch with the read token.
+# day's papers read into litwatch from the archive and classified by hand into the collection,
+# then pages.py: every page at both widths, and a Deep card from a fake deep service that
+# searched litwatch with the read token.
 #
 #   tests/stack/smoke.sh [OUT]    OUT keeps the screenshots and the stack's logs (./smoke-out)
 #
@@ -54,5 +55,6 @@ dc exec -T litwatch python /smoke/seed.py /smoke/papers.json
 day=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["published"])' \
     "$here/papers.json")
 dc exec -T litwatch litwatch intake archive --since "$day" --until "$day"
+dc exec -T litwatch python /smoke/classify.py /smoke/papers.json language-models
 uv run --no-project --with playwright==1.64.0 python "$here/pages.py" \
     "http://127.0.0.1:$port" "$api_token" "$here/papers.json" "$out"
