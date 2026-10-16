@@ -282,7 +282,8 @@ export interface paths {
         put?: never;
         /**
          * Report Miss
-         * @description File a miss for a Focus topic: the owner's word, at once, and the paper saved.
+         * @description File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
+         *     litwatch lacks is fetched first, as Process fetches it; a refused report fetches nothing.
          */
         post: operations["report_miss_api_misses_post"];
         delete?: never;

@@ -565,6 +565,26 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
     assert (await client.post("/api/misses", json=body)).status_code == 409  # not Focus
 
 
+async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, monkeypatch):
+    # archive.md: reporting a paper outside the collection brings it in, the owner's word first.
+    from litwatch.feedback import misses
+
+    fetched = []
+    monkeypatch.setattr(
+        misses, "fetch_by_ids", lambda ids: fetched.append(ids) or [paper(i) for i in ids]
+    )
+    wrong = await client.post("/api/misses", json={"paper_id": "2610.09999", "topic": INTERP.slug})
+    assert wrong.status_code == 409 and fetched == []  # a refused report fetches nothing
+    body = {"paper_id": "2610.09999v2", "topic": FAITH.slug}
+    assert (await client.post("/api/misses", json=body)).json()["saved"] is True
+    assert fetched == [["2610.09999"]]
+    (miss,) = await (await conn.execute("SELECT paper_id FROM misses")).fetchall()
+    assert miss["paper_id"] == "2610.09999"
+    monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [])  # arXiv lacks it too
+    body = {"paper_id": "2601.99999", "topic": FAITH.slug}
+    assert (await client.post("/api/misses", json=body)).status_code == 404
+
+
 async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     """Taking a miss back withdraws the owner's word; reporting again gives it back, keeping
     the miss, and never over a correction the owner made since."""

@@ -767,16 +767,27 @@ async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
     return _ack(await word.unlabel(c, paper_id, topic))
 
 
+async def _focus(c: psycopg.AsyncConnection, slug: str) -> str:
+    """The name of the shown Focus topic on class `slug`; 404 or 409 for any other."""
+    name, topic = await _topic(c, slug)
+    if topic.depth != Depth.FOCUS:
+        raise HTTPException(status_code=409, detail="not a Focus topic")
+    return name
+
+
 @router.post("/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}})
 async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
-    """File a miss for a Focus topic: the owner's word, at once, and the paper saved."""
+    """File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
+    litwatch lacks is fetched first, as Process fetches it; a refused report fetches nothing."""
+    await _focus(c, body.topic)
+    try:
+        found, _ = await misses.lookup(c, body.paper_id)
+    except misses.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="no such paper") from exc
     async with c.transaction():
-        await word.lock(c, body.paper_id)
-        name, topic = await _topic(c, body.topic)
-        if topic.depth != Depth.FOCUS:
-            raise HTTPException(status_code=409, detail="not a Focus topic")
-        await _known(c, body.paper_id)
-        _, settled, new = await misses.report(c, body.paper_id, body.topic, body.fit)
+        await word.lock(c, found.id)
+        name = await _focus(c, body.topic)
+        _, settled, new = await misses.report(c, found.id, body.topic, body.fit)
     if not new:
         return _ack(settled, f"Already reported as missed for {name}")
     return _ack(settled, f"Reported as missed for {name}")
