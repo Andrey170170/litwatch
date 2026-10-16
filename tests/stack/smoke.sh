@@ -29,7 +29,11 @@ LITWATCH_PORT=$port
 LITWATCH_TOML=../tests/stack/litwatch.toml
 LITWATCH_TAG=${LITWATCH_TAG:-local}
 EOF
-api_token=$(sed -n 's/^LITWATCH_API_TOKEN=//p' "$env_file")
+# Compose prefers the shell's variables to --env-file: export these over any already set.
+set -a
+. "$env_file"
+set +a
+api_token=$LITWATCH_API_TOKEN
 dc() {
     docker compose -p "$project" -f "$root/deploy/compose.yaml" -f "$here/compose.smoke.yaml" \
         --env-file "$env_file" "$@"
