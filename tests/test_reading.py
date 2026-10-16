@@ -907,6 +907,9 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
     await papers_store.upsert(conn, [held])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     fake = FakeArchive()
+    only = paper("2610.05555", title="Only in the archive", version=3)
+    item = {**only.model_dump(mode="json"), "version_history": [{"version": 3}]}
+    fake.records[only.id] = {"id": only.id, "latest_version": 3, "metadata": {}, "item": item}
     archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
     archive.wait_seconds = 0
     for given in (archive, None):
@@ -920,9 +923,14 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
             if given is not None:
                 assert opened.status_code == 200 and opened.content == PDF
                 assert opened.headers["content-type"] == "application/pdf"
+                # A paper only the archive holds: its record names the version (L5-7).
+                only = await c.get("/api/papers/2610.05555/pdf")
+                assert only.status_code == 200 and only.content == PDF
                 assert [(j["kind"], j["version"], j["priority"]) for j in fake.jobs] == [
-                    ("pdf", 2, 0)
+                    ("pdf", 2, 0),
+                    ("pdf", 3, 0),
                 ]
+                assert [j["paper_id"] for j in fake.jobs][1] == "2610.05555"
                 fake.status = "unavailable"  # arXiv has no PDF for the archive to fetch
                 opened = await c.get(page["pdf_url"])
             assert opened.status_code == 307

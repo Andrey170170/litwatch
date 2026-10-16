@@ -245,15 +245,17 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
 async def pdf(paper_id: str, request: Request) -> Response:
     """The paper's PDF as the owner opens it: from the archive, which is asked for it urgently
     (the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on
-    for its `wait_seconds`. arXiv's PDF without an archive, for a paper litwatch does not hold,
-    or when the archive cannot get it in time. The database is read before the wait, which
-    holds no connection."""
+    for its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record
+    of it. arXiv's PDF without an archive, for a paper neither holds, or when the archive
+    cannot get it in time. The database is read before the wait, which holds no connection."""
     archive = request.app.state.archive
     async with await store.connect(request.app.state.dsn) as c:
         held = await papers_store.get(c, paper_id)
-    if archive is not None and held is not None:
+    body = None
+    if archive is not None:
         try:
-            body = await archive.pdf(held)
+            known = held or await archive.paper(paper_id)
+            body = await archive.pdf(known) if known is not None else None
         except ArchiveError:  # unreachable, no known version, a broken file: arXiv has it
             body = None
         if body is not None:
