@@ -9,7 +9,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, ValidationError
@@ -121,11 +121,13 @@ class Gateway:
         self.batchers: dict[str, Batcher] = {}
         self._gates = {name: asyncio.Semaphore(normal_calls) for name in providers}
 
-    def batch_until(self, deadline: datetime) -> None:
+    def batch_until(self, deadline: datetime, *, drain: timedelta | None = None) -> None:
         """Send each call on a provider that batches in its batches until `deadline` (aware),
-        and as a normal call after it."""
+        and as a normal call after it; batches open then are waited on for `drain` (by default
+        the batcher's)."""
+        options = self.batch_options | ({} if drain is None else {"drain": drain})
         self.batchers = {
-            name: Batcher(provider, self.journal, deadline, **self.batch_options)
+            name: Batcher(provider, self.journal, deadline, **options)
             for name, provider in self.providers.items()
             if isinstance(provider, BatchProvider)
         }

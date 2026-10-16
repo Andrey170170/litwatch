@@ -11,6 +11,7 @@ from psycopg.types.json import Jsonb
 from litwatch.llm.types import Usage
 
 RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
+RETALLY_LOCK = 7213912  # advisory lock namespace, beside jobs.lock.RUN_LOCK
 
 
 class CallJournal:
@@ -112,6 +113,17 @@ class CallJournal:
         and calls by role, as its own run's close would have put it."""
         if row is None or row["run_id"] == self.run_id:
             return
+        # One retally of a run at a time, each reading the calls once it holds the lock, so a
+        # concurrent one cannot write a total older than its own.
+        await self.conn.execute("SELECT pg_advisory_lock(%s, %s)", (RETALLY_LOCK, row["run_id"]))
+        try:
+            await self._retally_now(row["run_id"])
+        finally:
+            await self.conn.execute(
+                "SELECT pg_advisory_unlock(%s, %s)", (RETALLY_LOCK, row["run_id"])
+            )
+
+    async def _retally_now(self, run_id: int) -> None:
         await self.conn.execute(
             "UPDATE runs SET cost = t.cost, counts = jsonb_set(counts, '{calls}', t.calls) "
             "FROM (SELECT round(coalesce(sum(cost), 0)::numeric, 4) AS cost, "
@@ -119,7 +131,7 @@ class CallJournal:
             "'cost', cost)), '{}') AS calls FROM (SELECT operation, count(*) AS calls, "
             "coalesce(sum((usage->>'cost')::numeric), 0)::float AS cost FROM inference_calls "
             "WHERE run_id = %(run)s GROUP BY operation) roles) t WHERE runs.id = %(run)s",
-            {"run": row["run_id"]},
+            {"run": run_id},
         )
 
     async def accept(self, call_id: int, output: dict[str, Any]) -> None:

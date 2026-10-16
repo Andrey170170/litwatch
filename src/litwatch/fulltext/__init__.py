@@ -21,7 +21,7 @@ import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 
@@ -130,13 +130,14 @@ def _write(
 
 
 def _attaching(factory: GatewayFactory) -> GatewayFactory:
-    """`factory`'s gateways, sending no batch but waiting on a call a dead run left in an open
-    batch rather than paying for it again. The batch is past that run's deadline: it is
-    cancelled at once, and its answers kept."""
+    """`factory`'s gateways, sending no batch but answering a call a dead run left in a batch
+    that has ended from that batch rather than paying for it again. A batch still running is
+    past that run's deadline: it is cancelled and given up at once (no drain), so a pass never
+    waits on it beyond its lease."""
 
     def gateway(config: Config, journal: CallJournal) -> Gateway:
         found = factory(config, journal)
-        found.batch_until(datetime.now(UTC))
+        found.batch_until(datetime.now(UTC), drain=timedelta(0))
         return found
 
     return gateway
@@ -319,11 +320,16 @@ async def work(
             if run
             else model_run(conn, config, "fulltext", gateway=factory)
         )
-        async with opened as r, _write(texts, r.gateway) as answered:
-            async for a in answered:
-                if await record(conn, a):
-                    counts[_outcome(a)] += 1
-                    r.add(_outcome(a))
+        async with opened as r:
+            try:
+                async with _write(texts, r.gateway) as answered:
+                    async for a in answered:
+                        if await record(conn, a):
+                            counts[_outcome(a)] += 1
+                            r.add(_outcome(a))
+            finally:
+                if run is None:  # the gateway this wave opened, its batch polling included
+                    await r.gateway.close()
     return counts
 
 

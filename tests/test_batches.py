@@ -617,9 +617,13 @@ async def test_a_nightly_started_again_takes_back_its_passes_and_pays_for_nothin
     assert (await ft.passes(conn))[0]["state"] == "done"
 
 
-async def test_a_worker_waits_on_a_dead_nightlys_batch_rather_than_paying_again(conn, monkeypatch):
+@pytest.mark.parametrize("still_running", [False, True])
+async def test_a_worker_answers_from_a_dead_nightlys_batch_rather_than_paying_again(
+    conn, monkeypatch, still_running
+):
     """A nightly dies with its pass's call in a batch and is not started again; once the lease
-    runs out the service's worker takes the pass and is answered from that batch."""
+    runs out the service's worker takes the pass and is answered from that batch if it ended,
+    without waiting on it if not."""
     await passing(conn)
     fake = ft.ready(FakeArchive())
     monkeypatch.setattr(fulltext, "archive_for", lambda config: ft.archive(fake))
@@ -632,12 +636,16 @@ async def test_a_worker_waits_on_a_dead_nightlys_batch_rather_than_paying_again(
     await until(lambda: anthropic.batches)
     killed.cancel()
     await asyncio.gather(killed, return_exceptions=True)
-    anthropic.end("msgbatch_1")
     await conn.execute("UPDATE fulltext_passes SET lease_until = now() - interval '1 second'")
-
-    found = await fulltext.work(conn, ft.CONFIG, ft.archive(fake), gateway=gateway)
-    assert found == {"briefs_written": 1}
-    assert (len(anthropic.batches), anthropic.calls) == (1, [])
+    worked = fulltext.work(conn, ft.CONFIG, ft.archive(fake), gateway=gateway)
+    if still_running:  # cancelled and given up at once: a normal call, well within the lease
+        found = await asyncio.wait_for(worked, 5)
+        assert (anthropic.cancelled, len(anthropic.calls)) == (["msgbatch_1"], 1)
+    else:
+        anthropic.end("msgbatch_1")
+        found = await worked
+        assert anthropic.calls == []
+    assert found == {"briefs_written": 1} and len(anthropic.batches) == 1
 
 
 @asynccontextmanager
