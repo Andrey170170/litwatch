@@ -778,6 +778,8 @@ def test_the_voice_check_names_each_rule_broken_and_spares_titles():
     assert voice_problems(text, ["Attention Is All You Need"]) == []
     shortened = "Passing the Test You Trained On finds rankings transfer poorly."
     assert voice_problems(shortened, ["Passing the Test You Trained On: Detector Rankings"]) == []
+    question = "Do You Need a Bigger Probe? asks whether width or depth carries the signal."
+    assert voice_problems(question, ["Do You Need a Bigger Probe? Width Versus Depth"]) == []
 
 
 # -- the Digest tab --------------------------------------------------------------------------------
