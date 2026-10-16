@@ -875,7 +875,9 @@ button.car:hover { color: var(--fg); background: var(--line2); }
 
 /* the phone, last so these win over the base rules: every control is at least 40px tall (DESIGN.md, "Every control has a hit area of at least 40 px") */
 @media (max-width: 55.99rem) {
-  :is(button.shh, .btn, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input, .trow .grip, .crow .car, .crow .nm, .cpk button, .kw, .sess, .tile, .setlist .it, .calprog button) { min-height: 40px; }
+  :is(button.shh, .btn, .agrid > *, .fchip, .sortseg button, .tf, .rseg, .fitseg .seg, .why button, .sheet .srow button, .sheet .srow input, .trow .grip, .crow .car, .crow .nm, .cpk button, .kw, .sess, .tile, .setlist .it, .calprog button, .drawer .nav .it) { min-height: 40px; }
+  /* a digest's one-line paper or Mark row: 40px tall, its line centred; a two-line one keeps its height */
+  :is(.row.dpr, .row.drow) { min-height: 40px; align-content: center; }
   .sws button { width: 40px; height: 40px; }
   .trow .grip, .crow .car { width: 40px; }
   .tin.sm { min-height: 40px; }

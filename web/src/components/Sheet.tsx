@@ -1,7 +1,7 @@
 import { Dialog } from "radix-ui";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { axisOf, motionMs, sheetCloses, Tracker } from "@/lib/gesture";
-import { EASE, sample, settle, swallowNextClick, trackPointer } from "./gestures";
+import { clearDrag, EASE, sample, settle, swallowNextClick, trackPointer } from "./gestures";
 
 const CLASS = { bottom: "sheet", left: "drawer", right: "over" };
 
@@ -94,10 +94,7 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
           }
           settle(el, { transform: goes ? "translateY(100%)" : "translateY(0)" }, ms, () => {
             if (goes) close.current();
-            else {
-              el.style.cssText = "";
-              if (shade.current) shade.current.style.cssText = "";
-            }
+            else clearDrag(el, shade.current);
           });
         },
       });

@@ -54,13 +54,18 @@ export function swallowNextClick() {
   document.addEventListener("pointerdown", disarm, true);
 }
 
-/** Move an element to its rest, over `ms`, then clear what the drag set; at once under reduced motion. */
+/** Move an element to its rest over `ms` (at once under reduced motion), then call `then`. */
 export function settle(el: HTMLElement | null, to: Partial<CSSStyleDeclaration>, ms: number, then?: () => void) {
   if (el) {
     el.style.transition = ms ? `transform ${ms}ms ${EASE}, opacity ${ms}ms ${EASE}` : "";
     Object.assign(el.style, to);
   }
   setTimeout(() => then?.(), ms);
+}
+
+/** Take back what a drag wrote on an element, and nothing else: Radix keeps `pointer-events` inline on a dialog. */
+export function clearDrag(...els: (HTMLElement | null)[]) {
+  for (const el of els) for (const prop of ["transform", "transition", "opacity"]) el?.style.removeProperty(prop);
 }
 
 type Els = { root: RefObject<HTMLElement | null>; page: RefObject<HTMLElement | null>; main: RefObject<HTMLElement | null>; under: RefObject<HTMLElement | null>; panel: RefObject<HTMLElement | null>; shade: RefObject<HTMLElement | null> };
@@ -154,8 +159,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
         settle(els.panel.current, { transform: where === "open" ? "translateX(0)" : `translateX(${-w}px)` }, motionMs(200), () => {
           if (where === "shut") live.current.setMenu(false);
           setDrawerDrag(null);
-          if (els.panel.current) els.panel.current.style.cssText = "";
-          if (els.shade.current) els.shade.current.style.cssText = "";
+          clearDrag(els.panel.current, els.shade.current);
           done();
         });
         if (els.shade.current) {
@@ -169,7 +173,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
           settle(els.page.current, { transform: `translateX(${W}px)` }, motionMs(200), () => {
             // the page waits off screen until the screen under it has rendered for real (`onRendered`)
             pending.current = () => {
-              if (els.page.current) els.page.current.style.cssText = "";
+              clearDrag(els.page.current);
               if (els.under.current) {
                 els.under.current.hidden = true;
                 els.under.current.replaceChildren();
@@ -181,7 +185,7 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
           });
         } else
           settle(els.page.current, { transform: "translateX(0)" }, motionMs(200), () => {
-            if (els.page.current) els.page.current.style.cssText = "";
+            clearDrag(els.page.current);
             if (els.under.current) els.under.current.hidden = true;
             done();
           });
@@ -194,8 +198,9 @@ export function usePhoneGestures(els: Els, opts: Opts): { drawerDrag: "opening" 
             to();
             done();
           });
-        } else settle(els.main.current, { transform: "translateX(0)" }, motionMs(200), () => {
-            if (els.main.current) els.main.current.style.cssText = "";
+        } else
+          settle(els.main.current, { transform: "translateX(0)" }, motionMs(200), () => {
+            clearDrag(els.main.current);
             done();
           });
       }

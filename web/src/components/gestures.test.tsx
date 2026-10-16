@@ -108,6 +108,9 @@ describe("The phone's gestures", () => {
     fireEvent.pointerUp(window, { clientX: 200, clientY: 300, pointerId: 1, isPrimary: true });
     await waitFor(() => expect(drawer).not.toHaveAttribute("data-drag"));
     expect(screen.getByRole("link", { name: "Papers" })).toBeInTheDocument();
+    // what the drag wrote is gone; what Radix keeps inline (the dialog takes pointer events while the body does not) stays
+    expect(drawer.style.transform).toBe("");
+    expect(drawer.style.pointerEvents).toBe("auto");
     // dragged shut from the open drawer, past half its width
     swipe(screen.getByRole("link", { name: "Papers" }), [250, 300], [[240, 300], [40, 300]]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -151,6 +154,7 @@ describe("A sheet", () => {
     swipe(handle, [195, 500], [[195, 512], [195, 560]]);
     await waitFor(() => expect(sheet.style.transform).toBe(""));
     expect(screen.getByRole("dialog", { name: "Filters" })).toBeInTheDocument();
+    expect(sheet.style.pointerEvents).toBe("auto");
     swipe(handle, [195, 500], [[195, 512], [195, 620]]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // a short flick down closes it too (the tap comes after the drag's release has had its 350 ms)

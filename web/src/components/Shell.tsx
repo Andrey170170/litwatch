@@ -9,7 +9,7 @@ import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "re
 import { freshVisit } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { countRender } from "@/lib/renders";
-import { arrivalCount, takeArrival } from "@/lib/steps";
+import { arrival } from "@/lib/steps";
 import { SettingsSide } from "@/routes/settings";
 import { Badge } from "./Badge";
 import { usePhoneGestures } from "./gestures";
@@ -49,24 +49,22 @@ export function SideHead() {
 
 type Came = "go" | "back" | "top" | "keep" | "next" | "prev" | "still";
 
-/** The screen's key: its path, and on the phone the count of screens a gesture brought in, so a step within one
+/** The screen's key: its path, and on the phone the number of the last arrival by gesture, so a step within one
  * route (a Day to the next) mounts afresh and plays its entry. */
-const screenKey = (pathname: string) => `${pathname}#${arrivalCount()}`;
+const screenKey = (pathname: string) => `${pathname}#${arrival().n}`;
 
-/** How the current page was reached: by a gesture (stepped next or prev, or already in view after a swipe back),
- * else from the history index: forward is deeper, backward is back. */
+/** How the current screen was reached, kept until the screen changes: by a gesture (stepped next or prev, or
+ * already in view after a swipe back), else from the history index: forward is deeper, backward is back. */
 function useCame(): Came {
   const location = useLocation();
-  const last = useRef<{ key: string; index: number } | null>(null);
   const index = (location.state as { __TSR_index?: number }).__TSR_index ?? 0;
+  const a = arrival();
   const key = screenKey(location.pathname);
-  if (last.current?.key === key) return "keep";
-  const before = last.current;
-  last.current = { key, index };
-  const arrival = takeArrival();
-  if (arrival) return arrival;
-  if (!before || !isDeeper(location.pathname)) return "top";
-  return index < before.index ? "back" : "go";
+  const [seen, setSeen] = useState<{ key: string; n: number; index: number; came: Came }>(() => ({ key, n: a.n, index, came: "top" }));
+  if (seen.key === key) return seen.came;
+  const came: Came = a.n !== seen.n && a.how ? a.how : !isDeeper(location.pathname) ? "top" : index < seen.index ? "back" : "go";
+  setSeen({ key, n: a.n, index, came });
+  return came;
 }
 
 /** The followed topics, from the shell's summary: the list re-renders only when the topics themselves change. A

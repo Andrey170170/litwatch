@@ -12,8 +12,7 @@ export type Steps = { prev: (() => void) | null; next: (() => void) | null };
 export type Arrival = "next" | "prev" | "still";
 
 let current: Steps | null = null;
-let arrival: Arrival | null = null;
-let arrivals = 0;
+let last: { n: number; how: Arrival | null } = { n: 0, how: null };
 
 /** Register the page's neighbours; null for a page that does not step. Re-registers every render, so the
  * callbacks see the page's latest state. */
@@ -30,15 +29,9 @@ export const stepsNow = (): Steps | null => current;
 
 /** Say how the screen about to render arrives. Called right before the navigation that brings it. */
 export function arrive(how: Arrival) {
-  arrival = how;
-  arrivals++;
+  last = { n: last.n + 1, how };
 }
-/** The arrival the current render owes to a gesture, once. */
-export function takeArrival(): Arrival | null {
-  const a = arrival;
-  arrival = null;
-  return a;
-}
-/** How many screens arrived by gesture so far: part of the screen's key, so a step within one route (a Day to the
- * next) mounts a fresh screen that plays its entry. */
-export const arrivalCount = () => arrivals;
+/** The latest arrival by gesture: how, and its number, which the shell keys the screen by, so a step within one
+ * route (a Day to the next) mounts a fresh screen that plays its entry, and a render can tell whether its screen
+ * is the one the gesture brought. */
+export const arrival = () => last;
