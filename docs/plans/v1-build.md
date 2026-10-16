@@ -166,9 +166,6 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   (#59); it belongs with the archive's text assembly and its PDF fallback, and the paper page takes it once merged.
   Also N5: the stack smoke test shows a Deep card with live "Among the collection" rows, the deep service reaching
   litwatch with `LITWATCH_URL` and `LITWATCH_TOKEN`; #61 wrote a real card only without them.
-- **N4b, after N3's Deep cards (#61):** Deep passes for Area picks. N3 queues them for saved Focus must reads and the
-  owner's requests; N4 merged (#60) before them. A pick's pass checks at claim that its digest is published
-  (integrations.md).
 - **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
   paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
   the restart's digests.
@@ -189,7 +186,7 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
   Actions still hide it); the "Among the collection" rows from `card.among` (rarity, relation, note, each linking to
   its paper) and links on prior work's arXiv ids; the card's label (revision, arXiv version, source, written); the
   `card_failed` open state; Quality's `deep` usage (attempts, list cost shown as "at least", unknown);
-  `CardRequested.pass_id` in place of `event_id`.
+  `CardRequested.pass_id` in place of `event_id`. The pass reason `pick` (N4b, Area picks) beside `focus` and `request`.
 
 ## Decisions
 
