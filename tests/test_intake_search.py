@@ -159,7 +159,7 @@ def test_budget_counts_request_time(transport, monkeypatch):
     responses, calls, sleeps = transport
     responses.append((429, b"", {}))
     times = iter([0, 2380])
-    monkeypatch.setattr(arxiv_source.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(arxiv_source.time, "monotonic", lambda: next(times, 2380))
     with pytest.raises(arxiv.HTTPError):
         fetch()
     assert len(calls) == 1
@@ -173,3 +173,28 @@ def test_interrupted_response_recovers(transport):
     )
     assert len(fetch()) == 1
     assert 60 in sleeps
+
+
+def test_an_owner_lookup_waits_on_arxiv_within_its_budget_and_nightly_keeps_its_own(transport):
+    # Process, Deep read and Report as a miss wait on arXiv for LOOKUP_BUDGET at most; a
+    # throttled or silent arXiv is NoAnswerError at once, not 40 minutes of backoff.
+    responses, calls, sleeps = transport
+    responses.extend([(429, b"", {})] * 6)
+    with pytest.raises(arxiv_source.NoAnswerError):
+        arxiv_source.fetch_by_ids(["2609.10001"])
+    assert len(calls) == 1 and not sleeps
+    connect, read = calls[0][1]["timeout"]
+    assert connect <= 10 and read <= arxiv_source.LOOKUP_BUDGET
+    responses.clear()
+    responses.append(requests.ReadTimeout("silent"))
+    with pytest.raises(arxiv_source.NoAnswerError):
+        arxiv_source.fetch_by_ids(["2609.10001"])
+    # The nightly intake keeps 40 minutes per page and its full backoff.
+    assert arxiv_source._ArxivClient().budget == 40 * 60
+    calls.clear()
+    responses.clear()
+    responses.extend([(429, b"", {})] * 6)
+    with pytest.raises(arxiv.HTTPError):
+        fetch()
+    assert [s for s in sleeps if s >= 60] == [60, 120, 240, 480, 900]
+    assert all(kwargs["timeout"] == (10, 60) for _, kwargs in calls)

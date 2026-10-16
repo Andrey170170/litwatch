@@ -608,6 +608,30 @@ async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, m
     assert (await client.post("/api/misses", json=body)).status_code == 404
 
 
+async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monkeypatch):
+    """Process and Report as a miss on a paper litwatch lacks wait on arXiv for its budget at
+    most (P5): then a 503 that says so, and nothing stored."""
+    import threading
+
+    from litwatch.feedback import misses
+
+    release = threading.Event()
+    monkeypatch.setattr(misses, "LOOKUP_BUDGET", 0.2)
+    monkeypatch.setattr(misses, "_GRACE", 0.1)
+    monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: release.wait(30) and [])
+    try:
+        for path, body in [
+            ("/api/lookup", {"q": "2610.07777"}),
+            ("/api/misses", {"paper_id": "2610.07777", "topic": FAITH.slug}),
+        ]:
+            answer = await asyncio.wait_for(client.post(path, json=body), 5)
+            assert answer.status_code == 503, path
+            assert answer.json()["detail"] == misses.SILENT
+    finally:
+        release.set()
+    assert await papers_store.get(conn, "2610.07777") is None
+
+
 async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     """Taking a miss back withdraws the owner's word; reporting again gives it back, keeping
     the miss, and never over a correction the owner made since."""

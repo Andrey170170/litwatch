@@ -695,6 +695,12 @@
               }
             }
           },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1224,6 +1230,9 @@
           },
           "409": {
             "description": "Not a Focus topic"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
           },
           "422": {
             "description": "Validation Error",
@@ -2533,6 +2542,9 @@
           },
           "409": {
             "description": "No card provider is configured, or the paper is dismissed"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
           },
           "422": {
             "description": "Validation Error",

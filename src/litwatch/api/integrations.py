@@ -23,6 +23,7 @@ from litwatch.core import SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
 from litwatch.feedback import misses
 from litwatch.fulltext import deep as deep_passes
+from litwatch.intake.search import NoAnswerError
 from litwatch.integrations.archive import Archive
 from litwatch.integrations.deep import Deep
 from litwatch.store import fulltext as fulltext_store
@@ -174,6 +175,7 @@ async def changes(
 CARD_REFUSED = {
     404: {"description": "No such paper"},
     409: {"description": "No card provider is configured, or the paper is dismissed"},
+    503: {"description": "arXiv did not answer in time; nothing was stored"},
 }
 
 
@@ -190,6 +192,8 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
         paper_id, fetched = await misses.resolve(c, paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
+    except NoAnswerError as exc:
+        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
     async with c.transaction():
         found, _ = await misses.keep(c, paper_id, fetched)
         pass_id = await deep_passes.request(c, found.id)

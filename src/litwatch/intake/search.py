@@ -13,14 +13,21 @@ import arxiv
 import requests
 
 from litwatch.core import Paper
-from litwatch.intake.pacing import shared_pacer
+from litwatch.intake.pacing import PacingError, shared_pacer
 
 _VERSION_RE = re.compile(r"v\d+$")
 
 
 log = logging.getLogger(__name__)
 _BACKOFF = (60, 120, 240, 480, 900)
-_RETRY_BUDGET = 40 * 60
+_RETRY_BUDGET = 40 * 60  # the nightly intake's wait on one page, retries included
+# An owner's request (Process, Deep read, Report as a miss) waits this long on arXiv at most,
+# socket waits and the shared pacer's slot included; no backoff fits in it, so it is one try.
+LOOKUP_BUDGET = 45.0
+
+
+class NoAnswerError(RuntimeError):
+    """arXiv gave no usable answer within the budget: it failed, refused or was too slow."""
 
 
 def _retry_after(value: str) -> float:
@@ -41,7 +48,12 @@ class _ArxivSession(requests.Session):
 
     def get(self, url, **kwargs):
         self.retry_after = 0
-        kwargs.setdefault("timeout", (10, 60))
+        deadline = getattr(self, "deadline", time.monotonic() + _RETRY_BUDGET)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise requests.Timeout("arXiv's deadline passed")
+        # Socket waits never run past the page's deadline.
+        kwargs.setdefault("timeout", (min(10, remaining), min(60, remaining)))
         pacer = shared_pacer()
         if pacer is None:
             response = super().get(url, **kwargs)
@@ -51,7 +63,6 @@ class _ArxivSession(requests.Session):
             # following one without provider pacing.
             kwargs["allow_redirects"] = False
             kwargs["stream"] = True
-            deadline = getattr(self, "pacing_deadline", time.monotonic() + _RETRY_BUDGET)
             with pacer.slot(timeout=max(0, deadline - time.monotonic())):
                 response = super().get(url, **kwargs)
                 try:
@@ -82,16 +93,17 @@ class _IncompleteFeedError(ValueError):
 class _ArxivClient(arxiv.Client):
     """Retry one page at a time; successful pages are never replayed."""
 
-    def __init__(self, page_size: int = 100):
+    def __init__(self, page_size: int = 100, *, budget: float = _RETRY_BUDGET):
         # One retry owner: disable the library's rapid recursive retry loop.
         super().__init__(page_size=page_size, delay_seconds=3, num_retries=0)
         self._session.close()
         self._session = _ArxivSession()
+        self.budget = budget  # seconds per page, retries included
 
     def _parse_feed(self, url: str, first_page: bool = True, _try_index: int = 0):
         # arxiv has no public transport/parser seam; real-parser tests cover this override.
-        deadline = time.monotonic() + _RETRY_BUDGET
-        self._session.pacing_deadline = deadline
+        deadline = time.monotonic() + self.budget
+        self._session.deadline = deadline
         for attempt in range(len(_BACKOFF) + 1):
             try:
                 feed = super()._parse_feed(url, first_page, _try_index=0)
@@ -165,8 +177,13 @@ def to_paper(result: arxiv.Result) -> Paper:
 
 
 def fetch_by_ids(ids: list[str], client: arxiv.Client | None = None) -> list[Paper]:
-    client = client or _ArxivClient()
-    return [to_paper(r) for r in client.results(arxiv.Search(id_list=ids))]
+    """The papers arXiv has of `ids`, for an owner's request: within `LOOKUP_BUDGET`, else
+    NoAnswerError."""
+    client = client or _ArxivClient(budget=LOOKUP_BUDGET)
+    try:
+        return [to_paper(r) for r in client.results(arxiv.Search(id_list=ids))]
+    except (requests.RequestException, arxiv.ArxivError, _IncompleteFeedError, PacingError) as exc:
+        raise NoAnswerError(f"{type(exc).__name__}: {exc}"[:300]) from exc
 
 
 def search(query: str, max_results: int, client: arxiv.Client | None = None) -> list[Paper]:

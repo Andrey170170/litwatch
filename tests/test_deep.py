@@ -5,6 +5,7 @@ shows."""
 
 import asyncio
 import contextlib
+import threading
 
 import httpx
 import pytest
@@ -716,6 +717,17 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [])  # arXiv lacks it too
     async with http:
         missing = await http.post("/api/papers/2601.99999/card")
+        # arXiv silent: the request ends within its budget, with a 503 (P5).
+        release = threading.Event()
+        with monkeypatch.context() as m:
+            m.setattr(misses, "LOOKUP_BUDGET", 0.2)
+            m.setattr(misses, "_GRACE", 0.1)
+            m.setattr(misses, "fetch_by_ids", lambda ids: release.wait(30) and [])
+            try:
+                silent = await asyncio.wait_for(http.post("/api/papers/2601.99998/card"), 5)
+            finally:
+                release.set()
+        assert silent.status_code == 503 and silent.json()["detail"] == misses.SILENT
         asked = await http.post(f"/api/papers/{P.id}/card")
         queued = (await http.get(f"/api/papers/{P.id}")).json()
         await work(db, with_text(P), d)

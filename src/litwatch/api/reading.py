@@ -38,6 +38,7 @@ from litwatch.core.digests import DAILY, DigestPeriod
 from litwatch.core.rules import FAILED_RUNS, REACTION_WORDS
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
+from litwatch.intake.search import NoAnswerError
 from litwatch.jobs import publications as lookups
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
@@ -51,6 +52,8 @@ from litwatch.store import word as word_store
 router = APIRouter(prefix="/api")
 
 NOT_FOUND = {404: {"description": "No such paper or topic"}}
+# An owner action that fetches a paper from arXiv, when arXiv does not answer in time.
+ARXIV_SILENT = {503: {"description": "arXiv did not answer in time; nothing was stored"}}
 
 
 def _config(request: Request) -> Any:
@@ -597,13 +600,15 @@ async def bibtex_filter(c: Conn, params: Annotated[s.PaperQuery, Query()]) -> st
     return await _bibtex(c, await _matching(c, params))
 
 
-@router.post("/lookup")
+@router.post("/lookup", responses={**NOT_FOUND, **ARXIV_SILENT})
 async def lookup(body: s.LookupIn, c: Conn) -> s.Lookup:
     """Find a paper by arXiv id or link, fetching it when the collection lacks it."""
     try:
         found, fetched = await misses.lookup(c, body.q)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NoAnswerError as exc:
+        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
     tree = await taxonomy_store.load(c)
     listed = await reading.papers(c, tree, reading.Query(ids=[found.id]), limit=1)
     return s.Lookup(row=_row(tree, _looks(tree), listed.rows[0], s.Row), fetched=fetched)
@@ -767,7 +772,9 @@ async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
     return _ack(await word.unlabel(c, paper_id, topic))
 
 
-@router.post("/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}})
+@router.post(
+    "/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}, **ARXIV_SILENT}
+)
 async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
     """File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
     litwatch lacks is fetched first, as Process fetches it, with no transaction open, and
@@ -776,6 +783,8 @@ async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
         paper_id, fetched = await misses.resolve(c, body.paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
+    except NoAnswerError as exc:
+        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
     async with c.transaction():
         name, topic = await _topic(c, body.topic)
         if topic.depth != Depth.FOCUS:
