@@ -264,6 +264,10 @@ async def test_a_refusal_is_asked_once_of_the_roles_fallback_from_another_lab(co
         ("brief", "refused: cyber"),
         ("brief_fallback", None),
     ]
+    # Asked again unchanged, the fallback's answer is reused without asking the role's model.
+    again = await gateway(models, refused, answering, journal).ask("brief", REQUEST, paper_id="p")
+    assert again.value.yes and again.usage.cost == 0 and again.model == MUSE.label
+    assert (len(refused.sent), len(answering.sent)) == (1, 1)
     # The fallback refusing too is the call's refusal; it is not asked again, nor is it asked
     # for anything but a refusal.
     refusing = SdkClient(openrouter_completion("", refusal="I cannot"))
