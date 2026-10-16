@@ -12,10 +12,9 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Paper
-from litwatch.intake import atom, oai
+from litwatch.intake import atom, batch, oai
 from litwatch.intake.http import SourceError, XmlClient
 from litwatch.intake.source import PaperSource
-from litwatch.store import papers as papers_store
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ class IntakeResult:
     fetched: int = 0
     inserted: int = 0
     updated: int = 0
-    # Stored papers whose title or abstract a revision rewrote.
+    # Stored papers whose title or abstract a revision rewrote, settled as they were stored.
     rewritten: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
 
@@ -74,7 +73,9 @@ async def collect(
     run_id: int,
     source: PaperSource = oai,
 ) -> IntakeResult:
-    """Commit each complete category and checkpoint together; keep failed categories open.
+    """Store each complete category, then move its checkpoint; keep failed categories open.
+    A category's papers commit a page at a time (`batch.store`) and its checkpoint only after
+    the last, so an interrupted category is read again, and storing it again changes nothing.
 
     Feeds are archived before OAI harvesting so today's announcements survive even
     an interrupted harvest. Only new/cross announcements insert fallback candidates.
@@ -116,7 +117,7 @@ async def collect(
         for category in states:
             info = result.details["categories"][category]
             try:
-                batch = await asyncio.to_thread(
+                harvest = await asyncio.to_thread(
                     source.fetch_category,
                     category,
                     date.fromisoformat(info["from"]),
@@ -124,25 +125,24 @@ async def collect(
                     # Records name the paper version, and v1 is the true first posting.
                     include_versions=True,
                 )
-                if batch.checkpoint.date() < date.fromisoformat(info["from"]):
+                if harvest.checkpoint.date() < date.fromisoformat(info["from"]):
                     raise SourceError("OAI response predates the requested coverage")
-                if batch.checkpoint > datetime.now(UTC) + timedelta(minutes=5):
+                if harvest.checkpoint > datetime.now(UTC) + timedelta(minutes=5):
                     raise SourceError("OAI response timestamp is in the future")
             except SourceError as exc:
                 info["errors"].append(f"OAI: {exc}")
                 log.warning("%s OAI unavailable: %s", category, exc)
                 continue
-            papers = batch.papers
+            papers = harvest.papers
             unique = [p for p in papers if p.id not in seen_oai]
-            async with conn.transaction():
-                stored = await papers_store.upsert(conn, unique, source="oai")
-                await conn.execute(
-                    "UPDATE intake_checkpoints SET checkpoint=greatest(checkpoint,%s), "
-                    "checked_at=now(),run_id=%s WHERE category=%s",
-                    (batch.checkpoint.date(), run_id, category),
-                )
-            if batch.versions_error:
-                info["versions_error"] = batch.versions_error
+            stored = await batch.store(conn, unique, source="oai")
+            await conn.execute(
+                "UPDATE intake_checkpoints SET checkpoint=greatest(checkpoint,%s), "
+                "checked_at=now(),run_id=%s WHERE category=%s",
+                (harvest.checkpoint.date(), run_id, category),
+            )
+            if harvest.versions_error:
+                info["versions_error"] = harvest.versions_error
             result.inserted += stored.inserted
             result.updated += stored.updated
             result.rewritten += stored.rewritten
@@ -150,9 +150,9 @@ async def collect(
             seen.update(p.id for p in papers)
             info.update(
                 complete=True,
-                through=batch.checkpoint.isoformat(),
+                through=harvest.checkpoint.isoformat(),
                 source="oai",
-                records=len(batch.papers),
+                records=len(harvest.papers),
                 admitted=len(papers),
             )
 
@@ -161,12 +161,12 @@ async def collect(
         listed: dict[str, date] = {}
         for category, batches in feeds.items():
             info = result.details["categories"][category]
-            for batch in batches:
-                for p in batch.papers:
-                    if batch.announcements[p.id] in ("new", "cross"):
+            for snapshot in batches:
+                for p in snapshot.papers:
+                    if snapshot.announcements[p.id] in ("new", "cross"):
                         fallback[p.id] = p
-                        if p.id in batch.listed:
-                            listed[p.id] = batch.listed[p.id]
+                        if p.id in snapshot.listed:
+                            listed[p.id] = snapshot.listed[p.id]
             if not info["complete"]:
                 info["source"] = (
                     "atom"
@@ -174,11 +174,9 @@ async def collect(
                     else ("atom-cache" if batches else "unavailable")
                 )
                 info["cached_feed_dates"] = sorted(
-                    {d.isoformat() for batch in batches for d in batch.announcement_dates}
+                    {d.isoformat() for snapshot in batches for d in snapshot.announcement_dates}
                 )
-        stored = await papers_store.upsert(
-            conn, list(fallback.values()), source="atom", listed=listed
-        )
+        stored = await batch.store(conn, list(fallback.values()), source="atom", listed=listed)
         result.inserted += stored.inserted
         seen.update(fallback)
     result.fetched = len(seen)

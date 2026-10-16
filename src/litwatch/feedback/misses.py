@@ -15,6 +15,7 @@ from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Paper
 from litwatch.core.classification import Source
 from litwatch.feedback import word
 from litwatch.feedback.word import Settled
+from litwatch.intake import batch
 from litwatch.intake.search import fetch_by_ids, id_from_url
 from litwatch.store import classifications as classifications_store
 from litwatch.store import papers as papers_store
@@ -38,7 +39,7 @@ async def lookup(conn: psycopg.AsyncConnection, text: str) -> tuple[Paper, bool]
     fetched = await asyncio.to_thread(fetch_by_ids, [paper_id])
     if not fetched:
         raise NotFoundError(f"arXiv has no paper {paper_id}")
-    await papers_store.upsert(conn, fetched)
+    await batch.store(conn, fetched, source="arxiv")
     return await papers_store.get(conn, paper_id), True
 
 

@@ -3,26 +3,29 @@ verdict records with its event, failures, and grading a stuck paper now. Models 
 through the real Gateway, as in test_steps."""
 
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
 
-from litwatch import grading
+from litwatch import grading, intake
 from litwatch.api import create_app
-from litwatch.archive import ArchiveClient
+from litwatch.archive import ArchiveClient, ArchiveError
+from litwatch.archive.client import listed
 from litwatch.core import FAILED_RUNS, Fit, Status
 from litwatch.core.grading import FIT_DEFINITIONS
 from litwatch.feedback import misses, word
+from litwatch.intake import atom, oai
 from litwatch.jobs import intake as intake_job
 from litwatch.llm import ProviderError
 from litwatch.store import classifications as classifications_store
-from litwatch.store import failures
+from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests.conftest import FAITH, INTERP, TREE
 from tests.fakes_http import FakeArchive, mock
+from tests.test_intake import unavailable
 from tests.test_steps import ANALYSIS, CONFIG, A, B, Scripted, decision, night, rows
 
 TOKEN = "s3cret"
@@ -318,33 +321,68 @@ async def test_a_miss_whose_grading_stopped_is_no_longer_a_candidate(conn, model
     assert await verdicts_store.candidates(conn, FAILED_RUNS) == []
 
 
-async def test_a_rewrite_read_in_settles_the_paper_on_solid(conn, models):
-    models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
-    await night(conn, models)  # related and incremental: adjacent, not saved
-    fake = FakeArchive()
-    fake.listing = [
-        {
-            "id": B.id,
-            "version": 2,
-            "title": B.title,
-            "abstract": "An entirely different abstract about robots.",
-            "authors": ["Alice Smith"],
-            "categories": ["cs.CL"],
-            "primary_category": None,
-            "published": "2026-10-02",
-            "updated": "2026-10-10",
-            "version_history": [],
-            "doi": None,
-            "journal_ref": None,
-            "license": None,
-        }
-    ]
-    client = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
-    result = await intake_job.from_archive(
-        conn, CONFIG, client, date(2026, 10, 1), date(2026, 10, 14)
-    )
-    assert result.rewritten == [B.id]
+# B's second version as the archive lists it: a new abstract, so a rewrite.
+B_REWRITTEN = {
+    "id": B.id,
+    "version": 2,
+    "title": B.title,
+    "abstract": "An entirely different abstract about robots.",
+    "authors": ["Alice Smith"],
+    "categories": ["cs.CL"],
+    "primary_category": None,
+    "published": "2026-10-02",
+    "updated": "2026-10-10",
+    "version_history": [],
+    "doi": None,
+    "journal_ref": None,
+    "license": None,
+}
+WINDOW = (date(2026, 10, 1), date(2026, 10, 14))
+
+
+async def assert_settled_on_solid(conn) -> None:
     (g,) = await rows(conn, "SELECT * FROM effective_grades WHERE paper_id = %s", B.id)
     assert g["grade"] == "relevant"  # the new text has no Weight yet: solid
     (saved,) = await rows(conn, "SELECT saved FROM library WHERE paper_id = %s", B.id)
     assert saved["saved"] is True
+
+
+async def test_a_rewrite_read_in_settles_the_paper_on_solid(conn, models):
+    models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
+    await night(conn, models)  # related and incremental: adjacent, not saved
+    fake = FakeArchive()
+    fake.listing = [B_REWRITTEN]
+    client = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
+    result = await intake_job.from_archive(conn, CONFIG, client, *WINDOW)
+    assert result.rewritten == [B.id]
+    await assert_settled_on_solid(conn)
+
+
+class FailingLater:
+    """An archive client whose listing fails after its first page."""
+
+    async def papers(self, since, until, categories):
+        yield [listed(B_REWRITTEN)]
+        raise ArchiveError("the archive went away")
+
+
+async def test_a_rewrite_settles_with_its_page_when_a_later_page_fails(conn, models):
+    models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
+    await night(conn, models)
+    with pytest.raises(ArchiveError):
+        await intake_job.from_archive(conn, CONFIG, FailingLater(), *WINDOW)
+    assert (await papers_store.get(conn, B.id)).version == 2  # the first page is stored
+    await assert_settled_on_solid(conn)
+
+
+async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(conn, models, monkeypatch):
+    models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
+    await night(conn, models)
+    now = datetime.now(UTC) - timedelta(minutes=1)
+    rewrite = B.model_copy(update={"abstract": B_REWRITTEN["abstract"], "updated": now.isoformat()})
+    monkeypatch.setattr(atom, "fetch_category", unavailable)
+    monkeypatch.setattr(oai, "fetch_category", lambda *a, **k: oai.OaiBatch([rewrite], now))
+    run_id = await runs.start(conn, "intake")
+    result = await intake.collect(conn, ("cs.CL",), now - timedelta(days=3), run_id)
+    assert result.rewritten == [B.id]
+    await assert_settled_on_solid(conn)

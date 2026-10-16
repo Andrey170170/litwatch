@@ -11,7 +11,6 @@ import psycopg
 from litwatch import intake
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
-from litwatch.feedback import word
 from litwatch.intake import archive as archive_intake
 from litwatch.jobs.context import RunRecord, run_record
 
@@ -37,7 +36,6 @@ async def run(
     since = until - timedelta(days=days or config.intake.window_days)
     async with run_record(conn, "intake", window=(since, until)) as record:
         result = await intake.collect(conn, config.intake.categories, since, record.run_id)
-        await word.settle_all(conn, result.rewritten)
         _record(record, result)
     log.info(
         "run %s intake %s: %s papers (%s new, %s updated)",
@@ -65,7 +63,6 @@ async def from_archive(
     )
     async with run_record(conn, "intake", window=window) as record:
         result = await archive_intake.collect(conn, client, config.intake.categories, since, until)
-        await word.settle_all(conn, result.rewritten)
         _record(record, result)
     log.info(
         "run %s intake from the archive: %s papers (%s new, %s updated)",
