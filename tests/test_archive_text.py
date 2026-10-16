@@ -154,3 +154,27 @@ async def test_text_of_another_version_than_asked_is_refused():
 
     with pytest.raises(ArchiveError, match="another version"):
         await ArchiveClient("http://a.test", "t", http=mock(wrong)).latex("2610.00001", 2)
+
+
+async def test_use_the_pdf_reads_the_pdf_alone(monkeypatch):
+    # DESIGN.md, Needs you: "Use the PDF", for a paper whose LaTeX reads badly.
+    fake = FakeArchive()
+    fake.texts["2610.00001"] = (1, BODY)  # a source that reads, badly
+    monkeypatch.setattr(text_module, "pdf_to_markdown", lambda pdf: "From the PDF.")
+    found = await read_text(client(fake), paper("2610.00001", version=1), pdf=True)
+    assert found == PaperText("From the PDF.", 1, "pdf")
+    assert [j["kind"] for j in fake.jobs] == ["pdf"]
+    fake.statuses["pdf"] = "unavailable"
+    with pytest.raises(TextUnavailable, match="source not read .Use the PDF.; PDF unavailable"):
+        await read_text(client(fake), paper("2610.00001", version=1), pdf=True)
+    fake.texts["2610.00002"] = (None, BODY)
+    with pytest.raises(TextUnavailable, match="no arXiv version known, so no PDF"):
+        await read_text(client(fake), paper("2610.00002"), pdf=True)
+
+
+async def test_use_the_pdf_has_the_archive_retry_the_pdf_alone():
+    fake = FakeArchive(status="failed")
+    one = paper("2610.00001", version=1)
+    asked = await text_module.retry_downloads(client(fake), one, pdf=True)
+    assert asked == 1
+    assert [fake.jobs[i - 1]["kind"] for i in fake.retried] == ["pdf"]

@@ -223,6 +223,7 @@ class Claimed:
     area: TaxonomyClass | None
     lease_until: datetime
     retry_text: bool = False  # the archive is to retry the downloads it gave up on
+    use_pdf: bool = False  # the owner's "Use the PDF": read its PDF, not its LaTeX
 
 
 # Held by the worker that works the Deep passes, so the service's and a terminal's never run
@@ -286,10 +287,11 @@ async def claim(
                                              lease_until = now() + %(lease)s
                 FROM taken WHERE f.id = taken.id
                 RETURNING f.id, f.kind, f.reason, f.paper_revision, f.lease_until, f.paper_id,
-                          f.retry_text
+                          f.retry_text, f.use_pdf
             )
             SELECT {COLUMNS}, x.id AS pass_id, x.kind, x.reason, x.paper_revision AS pass_revision,
-                   x.lease_until, x.retry_text, k.slug, k.name, k.description, k.parent, k.threshold
+                   x.lease_until, x.retry_text, x.use_pdf,
+                   k.slug, k.name, k.description, k.parent, k.threshold
             FROM claimed x JOIN papers p ON p.id = x.paper_id
             LEFT JOIN LATERAL (SELECT primary_class FROM classifications
                                WHERE paper_id = p.id
@@ -315,6 +317,7 @@ async def claim(
             area=row_to_class(r) if r["slug"] else None,
             lease_until=r["lease_until"],
             retry_text=r["retry_text"],
+            use_pdf=r["use_pdf"],
         )
         for r in rows
     ]
@@ -695,17 +698,21 @@ async def paper_of(conn: psycopg.AsyncConnection, pass_id: int) -> str | None:
     return row["paper_id"] if row else None
 
 
-async def run_now(conn: psycopg.AsyncConnection, pass_id: int, runs: int) -> bool:
+async def run_now(
+    conn: psycopg.AsyncConnection, pass_id: int, runs: int, *, pdf: bool = False
+) -> bool:
     """The owner's "run it now" on a pass waiting for them: three more runs, and first in line.
     A Deep pass becomes the owner's request, ahead of the automatic ones and past the daily cap.
-    Returns False when it does not wait for the owner."""
+    With `pdf` ("Use the PDF"), it reads the paper's PDF from then on, not its LaTeX. Returns
+    False when it does not wait for the owner."""
     cur = await conn.execute(
         "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, tried_at = NULL, "
-        "queued_at = now(), retry_text = true, "
+        "queued_at = now(), retry_text = true, use_pdf = f.use_pdf OR %(pdf)s, "
         "reason = CASE WHEN f.kind = 'deep' THEN %(requested)s ELSE f.reason END, "
         "priority = CASE WHEN f.kind = 'deep' THEN %(first)s ELSE f.priority END FROM papers p "
         f"WHERE f.id = %(id)s AND p.id = f.paper_id AND {STUCK}",
-        {"id": pass_id, "requested": REQUESTED, "first": REQUEST_PRIORITY} | stuck_params(runs),
+        {"id": pass_id, "requested": REQUESTED, "first": REQUEST_PRIORITY, "pdf": pdf}
+        | stuck_params(runs),
     )
     return cur.rowcount == 1
 

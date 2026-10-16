@@ -420,6 +420,32 @@ async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_n
     assert (await passes(db))[0]["state"] == "done"
 
 
+async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(db, monkeypatch):
+    # DESIGN.md, Needs you: "Try again, Use the PDF" on a full-text failure.
+    monkeypatch.setattr("litwatch.archive.text.pdf_to_markdown", lambda pdf: "From the PDF. " * 40)
+    await graded(db, "central")
+    fake, writer = FakeArchive(status="failed"), Writer()
+    await work(db, fake, writer)
+    await db.execute("UPDATE fulltext_passes SET failed_runs = %s", (FAILED_RUNS,))
+    (row,) = await passes(db)
+    app, http = client(db)
+    async with http:
+        used = await http.post(f"/api/settings/fulltext/{row['id']}/pdf")
+        again = await http.post(f"/api/settings/fulltext/{row['id']}/pdf")
+        missing = await http.post("/api/settings/fulltext/999999/pdf")
+    assert used.status_code == 204 and app.state.fulltext_wake.is_set()
+    assert (again.status_code, missing.status_code) == (409, 404)
+    (row,) = await passes(db)
+    assert (row["state"], row["failed_runs"], row["use_pdf"]) == ("ready", 0, True)
+    fake = ready(FakeArchive())  # the LaTeX reads now, but the owner asked for the PDF
+    assert await work(db, fake, writer) == {"briefs_written": 1}
+    assert {j["kind"] for j in fake.jobs} == {"pdf"}  # its source never asked for
+    (row,) = await passes(db)
+    assert (row["state"], row["text_source"]) == ("done", "pdf")
+    brief = await fulltext_store.brief_for(db, P.id)
+    assert brief["source"] == "pdf"
+
+
 async def test_a_pass_awaiting_text_over_a_week_waits_for_the_owner(db):
     await graded(db, "central")
     assert await fulltext_store.count_stuck(db, FAILED_RUNS) == 0

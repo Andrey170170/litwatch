@@ -405,12 +405,23 @@ async def run_pass_now(pass_id: int, request: Request, c: Conn) -> None:
     over a week: run it now. It is first in line for its worker, with three more runs; its text
     is asked for again at urgent priority. 409 when it no longer waits for the owner (it ran,
     the paper's text changed, it was dropped)."""
+    await _run_now(pass_id, request, c, pdf=False)
+
+
+@router.post("/fulltext/{pass_id}/pdf", status_code=204, responses=PASS_WAITING)
+async def use_pdf(pass_id: int, request: Request, c: Conn) -> None:
+    """ "Use the PDF", for a paper whose LaTeX reads badly: run the pass now, as above, reading
+    the paper's PDF from then on instead of its LaTeX."""
+    await _run_now(pass_id, request, c, pdf=True)
+
+
+async def _run_now(pass_id: int, request: Request, c: Any, *, pdf: bool) -> None:
     async with c.transaction():
         paper_id = await fulltext_store.paper_of(c, pass_id)
         if paper_id is None:
             raise HTTPException(status_code=404, detail="no such full-text pass")
         await word.lock(c, paper_id)  # as every write to a paper's passes
-        if not await fulltext_store.run_now(c, pass_id, FAILED_RUNS):
+        if not await fulltext_store.run_now(c, pass_id, FAILED_RUNS, pdf=pdf):
             raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
     request.app.state.fulltext_wake.set()
     request.app.state.deep_wake.set()
