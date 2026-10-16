@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const status = { state: "quiet", papers: 2, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
@@ -220,6 +220,26 @@ describe("Settings", () => {
     renderApp("/settings/integrations");
     await userEvent.click(await screen.findByRole("button", { name: "Skip this event" }));
     expect(await screen.findByText("Event skipped · 2 events waiting")).toBeInTheDocument();
+  });
+
+  it("reads the cards again after a retry until the dispatcher has sent the event", async () => {
+    viewport(true);
+    const failing = { event_id: 41, type: "paper.graded", paper_id: "2610.00001", failures: 3, retry_at: null, error: "502" };
+    const card = (f: typeof failing | null) => ({ name: "zotero", description: "The library", enabled: true, lag: 0, failing: f, last_error: f?.error ?? null, skipped: 0 });
+    let reads = 0;
+    // The first read after the retry still fails: the dispatcher has not run yet.
+    scriptFetch({ ...common, "GET /api/settings/integrations": () => [card(++reads > 2 ? null : failing)], "POST /api/settings/integrations/zotero/retry": () => new Response(null, { status: 204 }) });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderApp("/settings/integrations");
+      await userEvent.click(await screen.findByRole("button", { name: "Retry now" }));
+      await waitFor(() => expect(reads).toBe(2));
+      expect(screen.getByRole("button", { name: "Retry now" })).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(3_000);
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Retry now" })).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps a list as left on the way back from its subpage, and opens Overview afresh from /settings", async () => {

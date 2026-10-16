@@ -186,6 +186,20 @@ async def test_more_takes_in_an_unmarked_miss_for_a_focus_topic_only(db):
     assert (elsewhere.id, "miss") not in taken  # no label can be given for an Area topic
 
 
+async def test_a_miss_keeps_the_verdict_standing_when_it_joins(db):
+    """A past review shows what the pipeline said when the paper joined the session, not a
+    later regrade."""
+    missed = ABOVE[0]
+    await db.execute(
+        "INSERT INTO misses (paper_id, topic) VALUES (%s, %s)", (missed.id, FAITH.slug)
+    )
+    session_id = await calibrate.draw(db, seed=5, size=0)
+    await calibrate.more(db, session_id)
+    await verdicts.add(db, verdict(missed.id, Fit.CENTRAL))  # regraded after the session
+    (item,) = [i for i in await items(db, session_id) if i["why"] == "miss"]
+    assert item["verdict"] == "related"
+
+
 async def test_fit_names_only_focus_topics(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]

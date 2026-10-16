@@ -127,12 +127,17 @@ async def more(conn: psycopg.AsyncConnection, session_id: int) -> int:
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = s.paper_id
                           AND l.topic = s.topic AND NOT l.provisional)
         UNION ALL
-        SELECT m.paper_id, m.topic, 'miss', NULL FROM misses m
+        -- a miss or a reaction keeps the verdict standing when it joins, as a draw does
+        SELECT m.paper_id, m.topic, 'miss', (SELECT v.id FROM verdicts v
+            WHERE v.paper_id = m.paper_id AND v.topic = m.topic
+            ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) FROM misses m
         JOIN topics t ON t.class = m.topic AND t.depth = 'focus'
         WHERE NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = m.paper_id
                           AND l.topic = m.topic AND NOT l.provisional)
         UNION ALL
-        SELECT r.paper_id, r.topic, 'reaction', NULL FROM reactions r
+        SELECT r.paper_id, r.topic, 'reaction', (SELECT v.id FROM verdicts v
+            WHERE v.paper_id = r.paper_id AND v.topic = r.topic
+            ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) FROM reactions r
         JOIN topics t ON t.class = r.topic AND t.depth = 'focus'
         WHERE r.reason IN ('wrong_topic', 'great_find')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = r.paper_id
