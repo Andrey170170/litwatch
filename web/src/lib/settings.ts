@@ -212,7 +212,9 @@ export function settleFromPaper(q: Quality, paper: Schemas["Paper"]): Quality {
   night.awaiting_classification = night.awaiting_classification.map((s) => read(s, has("awaiting_classification"), done));
   night.analysis_failed = night.analysis_failed.map((s) => read(s, has("analysis_stopped"), done));
   night.ungraded = night.ungraded.map((s) => read(s, has("ungraded", s.topic), done));
-  night.fulltext = night.fulltext.map((s) => read(s, has(s.state === "failed" ? "fulltext_failed" : "awaiting_text", null, s.id), done));
+  // A failed Deep pass is the page's `card_failed`, any other failed pass its `fulltext_failed`.
+  const passState = (s: TextPassStuck) => (s.state !== "failed" ? "awaiting_text" : s.kind === "deep" ? "card_failed" : "fulltext_failed");
+  night.fulltext = night.fulltext.map((s) => read(s, has(passState(s), null, s.id), done));
   return { ...q, night };
 }
 

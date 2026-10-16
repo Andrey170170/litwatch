@@ -39,6 +39,11 @@ describe("settleFromPaper", () => {
     expect(after.night.fulltext[0]!.settled).toBeUndefined();
     expect(waiting(after)).toBe(3);
   });
+  it("keeps a failed Deep pass open while the paper's page carries it as card_failed", () => {
+    const deep = { night: { ...night, fulltext: [{ ...pass, kind: "deep" as const }] } } as Quality;
+    const after = settleFromPaper(deep, paper("3", [{ kind: "card_failed", pass_id: 7 }]));
+    expect(after.night.fulltext[0]!.settled).toBeUndefined();
+  });
   it("leaves other papers, settled items and a split gone without a label alone", () => {
     const after = settleFromPaper(settle(q, "ungraded", { paper_id: "1", topic: "a" }, "Graded"), paper("1", [], [topic("a"), topic("b")]));
     expect(after.night.splits.map((s) => s.settled)).toEqual([undefined, undefined]);
