@@ -52,13 +52,13 @@ function Views({ view, children }: { view: View; children?: ReactNode }) {
 }
 
 /** ‹ label ›: `prev` is older, `next` newer; none disables its arrow. On the desktop a strip above the cards; on
- * the phone the bottom bar, with large arrows (`foot`). A step replaces the entry: Back leaves the tab, not a trail
- * of days. */
+ * the phone the bottom bar, with large arrows (`foot`). Every step is a history entry (DESIGN.md), so Back walks the
+ * days stepped through. */
 function Stepper({ to, prev, next, label, small, foot }: { to: "/" | "/week"; prev: string | null | undefined; next: string | null | undefined; label: string; small?: string; foot?: boolean }) {
   const param = to === "/" ? "day" : "week";
   const arrow = (day: string | null | undefined, glyph: string, name: string) =>
     day ? (
-      <Link to={to} search={{ [param]: day }} replace className="ib" aria-label={name}>
+      <Link to={to} search={{ [param]: day }} className="ib" aria-label={name}>
         {glyph}
       </Link>
     ) : (
@@ -247,7 +247,6 @@ export function WeekPage() {
           {stepper()}
         </>
       )}
-      {q.data?.digests.length ? <div className="weeksub">Written {dayLabel(addDays(monday, 7))}</div> : null}
       <State q={q} what="the week" />
       {q.data && !q.data.digests.length && <div className="none">No weekly digests for this week.</div>}
       {q.data?.digests.map((c) => (
