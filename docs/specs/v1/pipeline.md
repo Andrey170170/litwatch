@@ -218,8 +218,10 @@ used instead when it is installed. For a pass queued by the nightly run, litwatc
 the source at **urgent** priority, so the papers that matter arrive within minutes rather than behind a night's
 background downloads.
 
-**What the model reads.** The text without its bibliography: the `thebibliography` block of LaTeX text, and from PDF
-text the last "References" heading up to the next heading or the end. References carry nothing a Brief uses. The rest is sent as read, cut at its first 160,000 characters.
+**What the model reads.** LaTeX text without its bibliography (the `thebibliography` block; references carry nothing
+a Brief uses), and PDF text as read, as its headings mark the references too unevenly to cut them. Either is cut at its
+first 160,000 characters. The appendix stays: it carries numbers and limits a Brief uses
+([`evals/2026-10-16-sonnet-briefs.md`](../../../evals/2026-10-16-sonnet-briefs.md)).
 
 **The Brief** is one paragraph (about 120–200 words): what was done, the main result with its numbers, and the main
 limit. When the full text does not support the abstract's claim, the Brief opens with one line saying so, for example

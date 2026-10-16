@@ -67,7 +67,8 @@ Results are needed by 09:00 (the owner wakes then); the nightly starts at 02:00,
   refusal is asked once more of the role's fallback, a model on OpenRouter from another lab (D5), as a normal call.
 - **Text trimming.** The bibliography is cut from LaTeX text (the `thebibliography` block the archive inlines). From
   PDF text, the last "References" heading is cut up to the next heading or the end. The appendix is cut only if P1
-  shows the Briefs no worse without it.
+  shows the Briefs no worse without it. **Built:** PDF text is sent as read, its headings marking the references too
+  unevenly to cut; P1 kept the appendix (R5).
 - **An unchanged text costs nothing already.** A pass that reads the same text for the same revision again asks the
   identical question (title, abstract, area, text), which the gateway's journal answers at no cost, across runs. The
   hash reuse the owner approved would duplicate that, and a hash of the body alone would reuse a judgement whose
@@ -111,9 +112,11 @@ does not know.
   at high, MiMo-V2.6-Pro 46. Argon and Sol cost $2/$10 per million tokens (about $0.13 a pass), MiMo $0.435/$0.87.
   Price barely matters at a few calls a week; quality and not refusing the same papers do. P1 asks both of every
   refusal; the first that answers them all wins, a tie going to the higher index. If both refuse some, MiMo is tried.
+  **Settled in P1: Sol**, which answered all three; Argon returned no answer for one.
 - **D6. Sonnet runs `brief` at high effort; P1 checks medium too.** Sonnet 5.5 scores 41 at medium, 47 at high and 52
   at xhigh. A Brief is careful reading and a Weight judgement, which may need less than the index measures. If medium
   agrees with Opus as well as high does on P1's papers, medium is taken (about $60 a month against $75).
+  **Settled in P1: high**; medium agreed with Opus on the overstatement line for 8 fewer papers.
 
 ## Risks
 
@@ -131,7 +134,7 @@ does not know.
 - **R4. A step's calls trickle out over several batches.** Concurrency is lifted so a step queues all its calls at
   once; P3's night counts rounds and times. Passes whose text arrives late form one more batch, overlapping the rest.
 - **R5. Cutting the appendix drops results only it has.** Only the bibliography is cut unless P1's side-by-side shows
-  no Brief losing a number or a limit.
+  no Brief losing a number or a limit. **In P1, 8 of 40 Briefs lost one, so the appendix stays.**
 - **R6. Batched costs land in the journal wrong**, so budgets read wrong. A test prices a fake batch result; P3's night
   is checked against Anthropic's usage for the same window.
 - **R7. The nightly holds the run lock for hours, not under one.** A job started by hand at night (`litwatch digests

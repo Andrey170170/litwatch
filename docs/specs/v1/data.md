@@ -163,7 +163,8 @@ fallback = "brief_fallback" # asked once when brief refuses (models.md, roles)
 
 [models.brief_fallback]    # another lab, chosen by the model-spend plan's replay
 provider = "openrouter"
-model = "google/gemini-4-argon"
+model = "openai/gpt-6.1-sol"
+effort = "high"
 
 [models.writer]
 provider = "anthropic"
