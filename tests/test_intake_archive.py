@@ -1,6 +1,7 @@
 """Intake from the archive: the client's window listing, the source that stores what it lists,
 and the job's run. The archive is an in-memory fake; the database tests need PostgreSQL."""
 
+import asyncio
 from datetime import UTC, date, datetime, timedelta
 
 import httpx
@@ -149,6 +150,31 @@ async def test_the_job_records_its_run_and_arxiv_intake_does_not_go_on_from_it(c
     since = datetime.now(UTC).date() - timedelta(days=3)
     run_id = await runs.start(conn, "intake")
     assert (await _state(conn, "cs.CL", since, run_id))["discovery_from"] == since
+
+
+class Stalling:
+    """An archive client that lists a page, then waits on the next one until cancelled."""
+
+    def __init__(self, page: list) -> None:
+        self.page, self.listed = page, asyncio.Event()
+
+    async def papers(self, since, until, categories):
+        yield self.page
+        self.listed.set()
+        await asyncio.Event().wait()
+
+
+async def test_a_cancelled_intake_records_its_run_as_finished(conn):
+    archive = Stalling([paper("2610.00001")])
+    config = Config(intake=Intake(categories=("cs.CL",)))
+    job = asyncio.create_task(intake_job.from_archive(conn, config, archive, SINCE, UNTIL))
+    await archive.listed.wait()
+    job.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await job
+    run = await (await conn.execute("SELECT * FROM runs")).fetchone()
+    assert run["finished_at"] is not None and run["error"].startswith("CancelledError")
+    assert await papers.get(conn, "2610.00001")  # the page read before it stays stored
 
 
 def test_the_archive_integration_skips_papers_read_from_it():

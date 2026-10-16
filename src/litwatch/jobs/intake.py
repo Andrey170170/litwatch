@@ -13,9 +13,19 @@ from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.feedback import word
 from litwatch.intake import archive as archive_intake
-from litwatch.store import runs
+from litwatch.jobs.context import RunRecord, run_record
 
 log = logging.getLogger(__name__)
+
+
+def _record(run: RunRecord, result: intake.IntakeResult) -> None:
+    run.fields.update(
+        fetched=result.fetched,
+        inserted=result.inserted,
+        updated=result.updated,
+        intake=result.details,
+    )
+    run.counts["rewritten"] = len(result.rewritten)
 
 
 async def run(
@@ -25,25 +35,13 @@ async def run(
     error: the gap stays open in the checkpoints and the next run retries it."""
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
-    run_id = await runs.start(conn, "intake", since, until)
-    try:
-        result = await intake.collect(conn, config.intake.categories, since, run_id)
+    async with run_record(conn, "intake", window=(since, until)) as record:
+        result = await intake.collect(conn, config.intake.categories, since, record.run_id)
         await word.settle_all(conn, result.rewritten)
-    except Exception as exc:
-        await runs.finish(conn, run_id, error=f"{type(exc).__name__}: {exc}")
-        raise
-    await runs.finish(
-        conn,
-        run_id,
-        fetched=result.fetched,
-        inserted=result.inserted,
-        updated=result.updated,
-        intake=result.details,
-        counts={"rewritten": len(result.rewritten)},
-    )
+        _record(record, result)
     log.info(
         "run %s intake %s: %s papers (%s new, %s updated)",
-        run_id,
+        record.run_id,
         result.details["status"],
         result.fetched,
         result.inserted,
@@ -65,25 +63,13 @@ async def from_archive(
         datetime.combine(since, time.min, UTC),
         datetime.combine(until + timedelta(days=1), time.min, UTC),
     )
-    run_id = await runs.start(conn, "intake", *window)
-    try:
+    async with run_record(conn, "intake", window=window) as record:
         result = await archive_intake.collect(conn, client, config.intake.categories, since, until)
         await word.settle_all(conn, result.rewritten)
-    except Exception as exc:
-        await runs.finish(conn, run_id, error=f"{type(exc).__name__}: {exc}")
-        raise
-    await runs.finish(
-        conn,
-        run_id,
-        fetched=result.fetched,
-        inserted=result.inserted,
-        updated=result.updated,
-        intake=result.details,
-        counts={"rewritten": len(result.rewritten)},
-    )
+        _record(record, result)
     log.info(
         "run %s intake from the archive: %s papers (%s new, %s updated)",
-        run_id,
+        record.run_id,
         result.fetched,
         result.inserted,
         result.updated,
