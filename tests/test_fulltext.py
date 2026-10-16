@@ -857,7 +857,7 @@ Lemma 1 holds."""
 
 def test_a_pass_sends_latex_without_its_bibliography_and_pdf_text_as_read():
     sent = trim.without_references(LATEX, "latex")
-    assert "0.98 AUROC" in sent and "Lemma 1 holds." in sent and "A~Author" not in sent
+    assert "0.98 AUROC" in sent and "Lemma 1 holds." in sent and r"\bibitem" not in sent
     assert brief.request(P, None, LATEX, "latex").user.endswith(sent)
     pdf = "Probes reach 0.98 AUROC.\nReferences\n[1] A. Author.\nAdditional Experiments\nMore."
     assert trim.without_references(pdf, "pdf") == pdf
