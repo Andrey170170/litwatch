@@ -127,6 +127,12 @@ class Batcher:
         )
         return dataclasses.replace(reply, usage=usage)
 
+    def watch(self, batch_id: str) -> None:
+        """Read batch `batch_id` once it ends, so the charges of its answers no call awaits are
+        journalled (a dead run's batch)."""
+        self._open.setdefault(batch_id, _Open())
+        self._start_polling()
+
     async def close(self) -> None:
         """Stop collecting and polling; whatever still waits is sent as normal calls."""
         for task in (self._flusher, self._poller):
@@ -169,7 +175,8 @@ class Batcher:
             return
         log.info("batch %s sent with %d calls", batch_id, len(held))
         if self.journal:
-            await self.journal.batched([h.call_id for h in held if h.call_id], batch_id)
+            ids = [h.call_id for h in held if h.call_id is not None]
+            await self.journal.batched(ids, batch_id)
         self._open[batch_id] = _Open({h.key: self._futures[h.key] for h in held})
         self._start_polling()
 

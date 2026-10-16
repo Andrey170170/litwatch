@@ -77,6 +77,7 @@ class Journal(Protocol):
     async def accept(self, call_id: int, output: dict[str, Any]) -> None: ...
     async def reject(self, call_id: int, error: str, reply: str | None = None) -> None: ...
     async def in_batch(self, key: str) -> dict[str, Any] | None: ...
+    async def open_batches(self) -> list[dict[str, Any]]: ...
     async def batched(self, call_ids: list[int], batch_id: str) -> None: ...
     async def answered(self, batch_id: str, key: str, usage: Usage) -> None: ...
 
@@ -128,6 +129,16 @@ class Gateway:
             for name, provider in self.providers.items()
             if isinstance(provider, BatchProvider)
         }
+
+    async def recover(self) -> None:
+        """Watch the batches a dead run left open, so each is accounted for in full whether or
+        not its calls are asked again."""
+        if not self.journal or not self.batching:
+            return
+        for row in await self.journal.open_batches():
+            batcher = self.batchers.get(self.models.role(row["role"]).provider)
+            if batcher is not None:
+                batcher.watch(row["batch_id"])
 
     @property
     def batching(self) -> bool:
@@ -324,6 +335,8 @@ class Gateway:
             batcher = None
         if batcher and journal and (row := await journal.in_batch(key)):
             if reply := await batcher.attach(row["batch_id"], key):
+                if reply.usage.reused:  # shared with a call on that row: a row of its own
+                    return await journal.start(role_name, role.model, key, paper_id), reply
                 return row["id"], _of_role(reply, role)
             await journal.reject(row["id"], "provider: the batch did not answer it")
         call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None

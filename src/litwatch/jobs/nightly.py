@@ -222,6 +222,7 @@ async def _steps(
     since = until
     if night:
         run.gateway.batch_until(night[1])
+        await run.gateway.recover()
     if not run.gateway.batching:
         night = None  # nothing to batch on: the run goes as an unbatched one
     if night:

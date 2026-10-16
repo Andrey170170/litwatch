@@ -281,6 +281,33 @@ async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn):
     await gw.close()
 
 
+async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_again(conn):
+    dead = await runs.start(conn, "nightly")
+    gw, anthropic, _, clock = batching(CallJournal(conn, dead), hold=True)
+    asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
+
+    async def recorded():
+        return all(c["batch_id"] for c in await calls(conn)) and len(await calls(conn)) == 2
+
+    await until(recorded)
+    for t in asked:
+        t.cancel()
+    await asyncio.gather(*asked, return_exceptions=True)
+    await gw.close()
+
+    again = await runs.start(conn, "nightly")
+    gw, _, _, _ = batching(CallJournal(conn, again), provider=anthropic, clock=clock)
+    await gw.recover()
+    anthropic.end("msgbatch_1")
+
+    async def charged():
+        return all(c["cost"] == 0.0005 for c in await calls(conn))
+
+    await until(charged)
+    assert [c["answered"] for c in await calls(conn)] == [False, False]
+    await gw.close()
+
+
 async def test_a_call_whose_batch_did_not_answer_it_is_settled_and_asked_again(conn):
     dead = await runs.start(conn, "nightly")
     gw, anthropic, _, clock = batching(CallJournal(conn, dead), hold=True)

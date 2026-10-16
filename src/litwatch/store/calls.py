@@ -63,6 +63,18 @@ class CallJournal:
             )
         ).fetchone()
 
+    async def open_batches(self) -> list[dict[str, Any]]:
+        """The batches of the last day with calls not yet answered or charged, with a role
+        that asked in each: a dead run's, whose charges are read when they end."""
+        return await (
+            await self.conn.execute(
+                "SELECT batch_id, min(operation) AS role FROM inference_calls "
+                "WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
+                "AND usage->>'cost' IS NULL AND started_at > now() - interval '1 day' "
+                "GROUP BY batch_id ORDER BY batch_id"
+            )
+        ).fetchall()
+
     async def answered(self, batch_id: str, key: str, usage: Usage) -> None:
         """An answer of batch `batch_id` that no call awaited: its charge, on the calls that
         asked for it and have none yet, so the batch is accounted for in full."""
