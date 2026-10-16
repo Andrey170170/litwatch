@@ -220,6 +220,47 @@ describe("a paper's page", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ q: "2409.01234" });
   });
 
+  it("shows an archive paper litwatch has not fetched, and the paper fetched once Process brings it in", async () => {
+    viewport(true);
+    let stored = false;
+    const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": () => ({ ...outside, stored }),
+      "POST /api/lookup": () => {
+        stored = true;
+        return { fetched: true };
+      },
+    });
+    renderApp("/paper/2409.01234");
+    expect(await screen.findByRole("heading", { name: "Archive one" })).toBeInTheDocument();
+    expect(screen.getByText("We study things.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Process" }));
+    expect(await screen.findByRole("button", { name: "Fetched · next run" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Process" })).toBeNull();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("runs a failed full-text pass again on the paper's PDF", async () => {
+    viewport(true);
+    const failed = { kind: "fulltext_failed", revision: 1, error: "LaTeX reads badly", pass_id: 7 };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => ({ ...paper, states: calls.some((c) => c.method === "POST") ? [] : [failed] }),
+      "POST /api/settings/fulltext/7/pdf": () => new Response(null, { status: 204 }),
+    });
+    renderApp("/paper/2610.00002");
+    expect(await screen.findByText("Full text failed three runs in a row.")).toBeInTheDocument();
+    expect(screen.getByText("LaTeX reads badly")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run it now" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Use the PDF" }));
+    await waitFor(() => expect(screen.queryByText("Full text failed three runs in a row.")).toBeNull());
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/settings/fulltext/7/pdf"]);
+    expect(await screen.findByText("Running the pass now, on the PDF; its result shows here once written")).toBeInTheDocument();
+  });
+
   it("lights the phone's thumbs for the topic the paper was opened under, the one its sheet opens on", async () => {
     viewport(false);
     const other = { slug: "al", name: "Alignment", depth: "focus", monogram: "AL", colour: "#ff3b4e" };

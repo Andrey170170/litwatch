@@ -116,13 +116,18 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
         </div>
       );
     case "fulltext_failed":
+    case "card_failed":
     case "awaiting_text": {
       // An older revision's Brief is kept until the new one is written; without one the abstract stands in.
       const meanwhile = paper.brief ? `the Brief from revision ${paper.brief.revision} stands meanwhile` : "the abstract stands in for the Brief";
+      // Use the PDF: the pass runs as Run it now does, reading the paper's PDF from then on, for LaTeX that reads badly.
+      const run = (pdf: boolean) => runPass.mutate({ id: state.pass_id!, state: state.kind === "awaiting_text" ? "awaiting_text" : "failed", pdf });
       return (
         <div className="note fail">
           <div>
-            {state.kind === "fulltext_failed" ? (
+            {state.kind === "card_failed" ? (
+              <b>The Deep card failed three runs in a row.</b>
+            ) : state.kind === "fulltext_failed" ? (
               <>
                 <b>Full text failed three runs in a row.</b> Until a pass succeeds, {meanwhile}.
               </>
@@ -134,8 +139,11 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
             {state.error && <div className="err">{state.error}</div>}
           </div>
           <div className="acts">
-            <button className="btn" disabled={runPass.isPending} onClick={() => runPass.mutate({ id: state.pass_id!, state: state.kind === "awaiting_text" ? "awaiting_text" : "failed" })}>
+            <button className="btn" disabled={runPass.isPending} onClick={() => run(false)}>
               {runPass.isPending ? "Starting…" : "Run it now"}
+            </button>
+            <button className="btn" disabled={runPass.isPending} onClick={() => run(true)}>
+              Use the PDF
             </button>
           </div>
         </div>

@@ -33,6 +33,13 @@ export const paperQuery = (id: string) =>
     queryFn: async () => ok(await api.GET("/api/papers/{paper_id}", { params: { path: { paper_id: id } } })),
   });
 
+/** The search box's reach beyond the collection: the archive's size, which changes slowly. */
+export const searchScopeQuery = queryOptions({
+  queryKey: ["search-scope"],
+  queryFn: async () => ok(await api.GET("/api/search/scope")),
+  staleTime: 60 * 60_000,
+});
+
 /** The class tree, for classifying a paper by hand. */
 export const taxonomyQuery = queryOptions({
   queryKey: ["taxonomy"],

@@ -3,9 +3,12 @@
  * the rarity bar, the count and the sort. On the desktop in rows above the shelves; on the phone the search box and
  * a filter button in the bottom bar, the rest in a sheet.
  */
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { Schemas } from "@/api/client";
+import { searchScopeQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
+import { compact } from "@/lib/format";
 import { RARITIES, RARITY_NAME, rc, segmentFlex, type Rarity } from "@/lib/rarity";
 import { activeFilters, sortOf, toggled, type ListSearch, type Sort } from "@/lib/search";
 import { Badge } from "./Badge";
@@ -92,7 +95,9 @@ export function ListControls({ search, onChange, counts, total, topic, topics }:
   const [sheet, setSheet] = useState(false);
   const set = (patch: Partial<ListSearch>) => onChange({ ...search, ...patch });
   const q = search.q ?? "";
-  const placeholder = topic ? `Search in ${topic.name}` : desktop ? "Search the collection and the archive" : "Search papers";
+  const { data: scope } = useQuery({ ...searchScopeQuery, enabled: desktop && !topic });
+  const size = scope?.archive_papers ? ` (${compact(scope.archive_papers)} papers)` : "";
+  const placeholder = topic ? `Search in ${topic.name}` : desktop ? `Search the collection and the archive${size}` : "Search papers";
   const chips = (
     <>
       <button className={`fchip${search.saved ? " on" : ""}`} onClick={() => set({ saved: search.saved ? undefined : true })} aria-pressed={!!search.saved}>

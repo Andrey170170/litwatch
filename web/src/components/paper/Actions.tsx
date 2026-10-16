@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { Fragment, useState } from "react";
 import type { Schemas } from "@/api/client";
-import { bibtexFor, copyText, useDeepRead, useMiss, usePublication, useSave } from "@/api/mutations";
+import { bibtexFor, copyText, useDeepRead, useMiss, useProcess, usePublication, useSave } from "@/api/mutations";
 import { topicsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { toast } from "@/lib/toast";
@@ -40,6 +40,23 @@ export function DeepReadCell({ paper, asked, wide }: { paper: Paper; asked: bool
   return (
     <button className={wide ? "wide" : ""} onClick={() => deep.mutate(undefined)} disabled={deep.isPending || asked}>
       {asked ? "Deep read · queued" : "Deep read"}
+    </button>
+  );
+}
+
+/** Process, for a paper litwatch has not fetched; once fetched it waits for the next run, which processes it. */
+export function ProcessCell({ paper, phone }: { paper: Paper; phone?: boolean }) {
+  const process = useProcess();
+  const fetched = paper.stored !== false;
+  const label = fetched ? (phone ? "Fetched" : "Fetched · next run") : "Process";
+  return (
+    <button
+      className={phone ? (fetched ? "" : "on") : "pri"}
+      onClick={() => process.mutate(paper.id)}
+      disabled={fetched || process.isPending}
+      title={fetched ? "Fetched; it is processed on the next run" : undefined}
+    >
+      {phone ? <small>{label}</small> : label}
     </button>
   );
 }

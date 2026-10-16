@@ -41,3 +41,10 @@ export function authorsShort(authors: readonly string[], max = 3): { shown: stri
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
+
+const COMPACT = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+/** "3.1M", "850K", "12": a count at a glance. */
+export function compact(n: number): string {
+  return COMPACT.format(n);
+}

@@ -10,7 +10,7 @@ import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rc } from "@/lib/rarity";
-import { DeepReadCell, linkCells, MissPicker, SaveCell, type Paper } from "@/components/paper/Actions";
+import { DeepReadCell, linkCells, MissPicker, ProcessCell, SaveCell, type Paper } from "@/components/paper/Actions";
 import { Header } from "@/components/paper/Header";
 import { Ladder } from "@/components/paper/Ladder";
 import { Notes } from "@/components/paper/Notes";
@@ -19,7 +19,6 @@ import { PaperRow, TopicRow } from "@/components/paper/TopicRow";
 
 function Rail({ paper, gistAway, asked }: { paper: Paper; gistAway: boolean; asked: boolean }) {
   const [miss, setMiss] = useState(false);
-  const process = useProcess();
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
   return (
     <aside className="pgrail">
@@ -48,9 +47,7 @@ function Rail({ paper, gistAway, asked }: { paper: Paper; gistAway: boolean; ask
       ) : (
         <>
           <div className="agrid">
-            <button className="pri" onClick={() => process.mutate(paper.id)} disabled={process.isPending}>
-              Process
-            </button>
+            <ProcessCell paper={paper} />
             <DeepReadCell paper={paper} asked={asked} />
             <button className="wide" onClick={() => setMiss((m) => !m)}>
               Report as a miss
@@ -99,7 +96,7 @@ function PaperView({ id, under }: { id: string; under: string | undefined }) {
   };
   if (isPending) return <div className="loadmore">Loading…</div>;
   // A failed poll while a card is awaited keeps the page: only a paper that never loaded shows the error.
-  // An archive paper litwatch has not fetched has no page yet (that is N5's); Process brings it in.
+  // A paper neither litwatch nor the archive has (or no archive is configured): Process asks arXiv for it.
   if (!paper) {
     const unheld = error instanceof ApiError && error.status === 404;
     return (

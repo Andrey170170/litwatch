@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authorsShort, dateTime, rowDate } from "./format";
+import { authorsShort, compact, dateTime, rowDate } from "./format";
 
 describe("format", () => {
   it("prints a calendar day as itself whatever the zone, with the year only when not this year", () => {
@@ -14,5 +14,8 @@ describe("format", () => {
   it("shows three authors and +N, but all four when there are four", () => {
     expect(authorsShort(["a", "b", "c", "d"])).toEqual({ shown: ["a", "b", "c", "d"], more: 0 });
     expect(authorsShort(["a", "b", "c", "d", "e"])).toEqual({ shown: ["a", "b", "c"], more: 2 });
+  });
+  it("prints a count at a glance", () => {
+    expect([3_141_592, 850_000, 12].map(compact)).toEqual(["3.1M", "850K", "12"]);
   });
 });

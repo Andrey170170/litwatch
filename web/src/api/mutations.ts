@@ -174,9 +174,10 @@ export function useDeepRead(paperId: string) {
       }
     },
     // remembered here, not by the page, which may have gone by the time the request returns
-    (_, id) => {
+    (qc, id) => {
       rememberCard(id);
       toast("Deep card requested");
+      return settled(qc, id); // a paper litwatch lacked is fetched first: the page shows it fetched
     },
   );
 }
@@ -287,16 +288,26 @@ export function useGradeNow(paperId: string) {
 }
 
 /** Run a full-text pass that waits on the owner now: failed three runs (`state` failed), or awaiting its text over
- * a week. A 409 means the page is behind (it ran, or the text changed): the pass's row settles with the reason,
- * and the paper is refetched and the cached Needs you page reconciled from it, as after a write. */
+ * a week; with `pdf` ("Use the PDF", for LaTeX that reads badly), on the paper's PDF from then on. A 409 means the
+ * page is behind (it ran, or the text changed): the pass's row settles with the reason, and the paper is refetched
+ * and the cached Needs you page reconciled from it, as after a write. */
 export function useRunPassNow(paperId: string) {
-  const on = settling<{ id: number; state: "failed" | "awaiting_text" }>("fulltext", (v) => ({ id: v.id }));
+  type Run = { id: number; state: "failed" | "awaiting_text"; pdf?: boolean };
+  const on = settling<Run>("fulltext", (v) => ({ id: v.id }));
   return usePaperMutation(
     paperId,
-    async (id, v: { id: number; state: "failed" | "awaiting_text" }) => ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: v.id } } })),
+    async (id, v: Run) => {
+      const params = { params: { path: { pass_id: v.id } } };
+      return ok(await (v.pdf ? api.POST("/api/settings/fulltext/{pass_id}/pdf", params) : api.POST("/api/settings/fulltext/{pass_id}/now", params)));
+    },
     (qc, id, _r, v) => {
-      toast("Running the pass now; its Brief shows here once written");
-      const what = v.state === "failed" ? "Running now, first in line, with three more runs." : "Asked for the text again, at urgent priority; the pass runs once it arrives.";
+      toast(v.pdf ? "Running the pass now, on the PDF; its result shows here once written" : "Running the pass now; its Brief shows here once written");
+      const what =
+        v.state === "failed"
+          ? `Running now${v.pdf ? ", on the PDF" : ""}, first in line, with three more runs.`
+          : v.pdf
+            ? "Asked for the PDF, at urgent priority; the pass runs on it once it arrives."
+            : "Asked for the text again, at urgent priority; the pass runs once it arrives.";
       return Promise.all([on.done(qc, id, v, what), settled(qc, id)]);
     },
     async (qc, id, v, e) => {

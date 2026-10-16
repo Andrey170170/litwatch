@@ -297,6 +297,7 @@
     "/api/papers/{paper_id}": {
       "get": {
         "summary": "Paper",
+        "description": "The paper's page; for a paper litwatch has not fetched, the archive's record of it.",
         "operationId": "paper_api_papers__paper_id__get",
         "parameters": [
           {
@@ -2013,6 +2014,45 @@
         }
       }
     },
+    "/api/settings/fulltext/{pass_id}/pdf": {
+      "post": {
+        "summary": "Use Pdf",
+        "description": "\"Use the PDF\", for a paper whose LaTeX reads badly: run the pass now, as above, reading\nthe paper's PDF from then on instead of its LaTeX.",
+        "operationId": "use_pdf_api_settings_fulltext__pass_id__pdf_post",
+        "parameters": [
+          {
+            "name": "pass_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Pass Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such full-text pass"
+          },
+          "409": {
+            "description": "The pass no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/calibrate": {
       "get": {
         "summary": "Sessions",
@@ -2464,7 +2504,7 @@
     "/api/papers/{paper_id}/card": {
       "post": {
         "summary": "Request Card",
-        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing.",
+        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing. A paper litwatch lacks is fetched first, as Process fetches it.",
         "operationId": "request_card_api_papers__paper_id__card_post",
         "parameters": [
           {
@@ -2500,6 +2540,25 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search/scope": {
+      "get": {
+        "summary": "Search Scope",
+        "description": "The search box's scope beyond the collection (its placeholder names the archive's size).",
+        "operationId": "search_scope_api_search_scope_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchScope"
                 }
               }
             }
@@ -4799,17 +4858,6 @@
           "source": {
             "type": "string",
             "title": "Source"
-          },
-          "score": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Score"
           }
         },
         "type": "object",
@@ -4904,6 +4952,11 @@
           "in_collection": {
             "type": "boolean",
             "title": "In Collection"
+          },
+          "stored": {
+            "type": "boolean",
+            "title": "Stored",
+            "default": true
           },
           "rarity": {
             "anyOf": [
@@ -5082,7 +5135,7 @@
           "topics"
         ],
         "title": "Paper",
-        "description": "A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)\nand the rail, its open states and its history. Outside the collection (never classified)\nit has no rarity."
+        "description": "A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)\nand the rail, its open states and its history. Outside the collection (never classified)\nit has no rarity; an archive paper litwatch has not fetched is not `stored` either, and has\nonly the archive's metadata."
       },
       "PaperClass": {
         "properties": {
@@ -5963,6 +6016,24 @@
         ],
         "title": "ScheduleOut",
         "description": "The schedule as the Runs page shows it: whether it is on, the zone the cron times are\nread in, and when each job next fires (or would, if it were on)."
+      },
+      "SearchScope": {
+        "properties": {
+          "archive_papers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Papers"
+          }
+        },
+        "type": "object",
+        "title": "SearchScope",
+        "description": "What the search box reaches beyond the collection: the papers the archive's search index\nholds, None without an archive or when it does not answer in time."
       },
       "SearchStats": {
         "properties": {
