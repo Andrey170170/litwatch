@@ -248,6 +248,7 @@ html[data-theme="dark"] .drawer { box-shadow: inset -1px 0 0 var(--acc); }
 /* the handle: a band across the top to drag the sheet down by, the bar drawn in its middle; the sheet's body drags too while scrolled to its top */
 .sheet .hdl { align-self: stretch; height: 24px; margin: -10px 0 -12px; flex: none; display: flex; align-items: center; justify-content: center; touch-action: none; cursor: grab; }
 .sheet .hdl::before { content: ""; width: 36px; height: 4px; border-radius: 2px; background: var(--fg3); }
+/* the body scrolls; a finger moving down from its top is the sheet's (Sheet.tsx tells the browser's pan no) */
 .sheet { touch-action: pan-y; }
 @keyframes lw-up { from { transform: translateY(40px); opacity: 0; } }
 .sheet .cap { font: 700 11px var(--font-name); letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg3); }

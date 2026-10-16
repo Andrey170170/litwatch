@@ -57,7 +57,9 @@ export function Sheet({ open, onClose, side = "bottom", label, children, drag, p
 
 /** Drag a sheet down to close it: from its handle, or from its body while that is scrolled to the top. It follows
  * the finger and its shade fades; past a third of its height, or flicked, it goes, else it springs back. A release
- * still settling when the sheet closes by other means is called off. */
+ * still settling when the sheet closes by other means is called off. The body keeps `touch-action: pan-y` for its
+ * scrolling, so the browser would take a finger moving down from the top for a pan and end the pointer: the touch
+ * events under the drag are told no from the first move down, and the pointer stream goes on. */
 function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObject<HTMLElement | null>, onClose: () => void) {
   const close = useRef(onClose);
   close.current = onClose;
@@ -76,7 +78,18 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
       tracker.push(sample(e));
       let axis: ReturnType<typeof axisOf> = null;
       const height = () => el.offsetHeight || 300;
-      stop = trackPointer(e, {
+      // down from the top, or once the drag is the sheet's: not the browser's pan; up, sideways, or once it is the
+      // page's: the body scrolls
+      const claim = (t: TouchEvent) => {
+        const touch = t.touches[0];
+        if (!touch || axis === "x") return;
+        const tx = touch.clientX - e.clientX;
+        const ty = touch.clientY - e.clientY;
+        if (axis === "y" || (ty > 0 && ty >= Math.abs(tx))) t.preventDefault();
+      };
+      el.addEventListener("touchmove", claim, { passive: false });
+      const letGo = () => el.removeEventListener("touchmove", claim);
+      const track = trackPointer(e, {
         move: (m) => {
           tracker.push(sample(m));
           const dy = m.clientY - e.clientY;
@@ -93,6 +106,7 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
         },
         end: (u, cancelled) => {
           stop = null;
+          letGo();
           if (axis !== "y") return;
           settling = true;
           swallowNextClick();
@@ -112,6 +126,10 @@ function useSheetDrag(panel: RefObject<HTMLElement | null> | null, shade: RefObj
           });
         },
       });
+      stop = () => {
+        track();
+        letGo();
+      };
     };
     document.addEventListener("pointerdown", down);
     return () => {

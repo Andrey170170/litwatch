@@ -21,6 +21,11 @@ describe("An arXiv id in a share", () => {
     expect(arxivIdIn("order 12401.12345 shipped", "1 2401.1234567")).toBeNull();
     expect(arxivIdIn(null, undefined, "")).toBeNull();
   });
+  it("has a month in its first four digits", () => {
+    expect(arxivIdIn("https://arxiv.org/abs/2412.12345")).toBe("2412.12345");
+    expect(arxivIdIn("https://arxiv.org/abs/2024.12345")).toBeNull();
+    expect(arxivIdIn("ticket 2400.1234 and 2413.12345")).toBeNull();
+  });
 });
 
 describe("Where a share lands", () => {

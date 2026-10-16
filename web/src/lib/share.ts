@@ -3,9 +3,10 @@
  * An arXiv id found in any of them lands on the paper with "Report as a miss" open; anything else is searched.
  */
 
-// A new-style id (2401.12345, with or without a version), then an old one (hep-th/9901001, math.GT/0309136): one
-// of arXiv's archives, so that any path with seven digits (example.org/reports/1234567) is not a paper.
-const NEW = /(?<!\d)(\d{4}\.\d{4,5})(?:v\d+)?(?!\d)/;
+// A new-style id (2401.12345, with or without a version): year and month, so that 2024.12345 is a number, not a
+// paper. Then an old one (hep-th/9901001, math.GT/0309136): one of arXiv's archives, so that any path with seven
+// digits (example.org/reports/1234567) is not a paper either.
+const NEW = /(?<!\d)(\d{2}(?:0[1-9]|1[0-2])\.\d{4,5})(?:v\d+)?(?!\d)/;
 const ARCHIVES =
   "astro-ph|cond-mat|gr-qc|hep-ex|hep-lat|hep-ph|hep-th|math-ph|nlin|nucl-ex|nucl-th|physics|quant-ph|math|cs|q-bio|q-fin|stat|eess|econ" +
   // the archives arXiv has since folded into those, whose ids still resolve
