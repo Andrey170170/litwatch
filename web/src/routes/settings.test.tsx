@@ -375,6 +375,7 @@ describe("Settings", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: { mi: "related" }, value: "matters", note: null }));
     expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
     expect(router.state.location.href).toBe("/settings/calibrate/1?at=2");
+    expect(router.history.length).toBe(1); // a move within the session replaces the entry: Back leaves the session
     // The move to the next paper is no visit: away and back, the session is not read again (the write read it).
     const reads = () => calls.filter((c) => c.url === "/api/settings/calibrate/1").length;
     await waitFor(() => expect(reads()).toBe(2));
@@ -383,5 +384,17 @@ describe("Settings", () => {
     router.history.back();
     expect(await screen.findByText("Drawn 2")).toBeInTheDocument();
     expect(reads()).toBe(2);
+  });
+
+  it("keeps a label given since the session when only the appraisal is edited", async () => {
+    viewport(true);
+    const item = { position: 1, paper_id: "2610.00001", topic: "mi", why: "above", verdict: "related", answer: "related", answered_at: "2026-10-14T10:00:00Z", title: "Drawn 1", abstract: "A.", authors: ["A"], published: "2026-10-13", fit: { mi: "none" }, appraisal: null };
+    const calls = scriptFetch({ ...common, "GET /api/settings/calibrate/1": { id: 1, seed: 7, drawn_at: "2026-10-15T10:00:00Z", items: [item] }, "PUT /api/settings/calibrate/1/items/1": { recorded: true } });
+    renderApp("/settings/calibrate/1?at=1");
+    expect(await screen.findByText("Drawn 1")).toBeInTheDocument();
+    await screen.findByRole("group", { name: "Fit for Mech interp" });
+    await userEvent.click(screen.getByRole("button", { name: "matters" }));
+    await userEvent.click(screen.getByRole("button", { name: /Done|Next/ }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ fit: { mi: "none" }, value: "matters", note: null }));
   });
 });

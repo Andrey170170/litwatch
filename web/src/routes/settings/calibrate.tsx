@@ -22,10 +22,11 @@ import { FitSeg, Later, Load, PageHead, PaperLink, useTopicCards } from "./parts
 type Value = NonNullable<Schemas["Answer"]["value"]>;
 const VALUES: Value[] = ["matters", "fine", "not_for_me"];
 
-/** The way to a session: its first unanswered paper, a paper by position, or its review. */
+/** The way to a session: its first unanswered paper, a paper by position, or its review. Moves within a session
+ * pass `replace`, so Back leaves the session rather than walking through its papers. */
 function useOpenSession() {
   const navigate = useNavigate();
-  return (id: number, search: { at?: number; review?: boolean } = {}) => void navigate({ to: "/settings/calibrate/$id", params: { id: String(id) }, search });
+  return (id: number, search: { at?: number; review?: boolean } = {}, replace = false) => void navigate({ to: "/settings/calibrate/$id", params: { id: String(id) }, search, replace });
 }
 
 export function CalibratePage() {
@@ -70,10 +71,11 @@ function PastSessionRow({ s }: { s: SessionRow }) {
 
 type Draft = { fit: Record<string, LabelValue>; value: Value | null; note: string };
 
-/** The paper's recorded answer on the drawn topic, the current labels on the others, and its appraisal. */
+/** The current labels, the drawn topic's recorded answer only where no label stands since (a later word on the
+ * paper's page is the newest and is not undone by editing the appraisal here), and the appraisal. */
 function draftOf(item: SessionItem): Draft {
   const fit = { ...item.fit };
-  if (item.answer) fit[item.topic] = item.answer;
+  if (item.answer && !fit[item.topic]) fit[item.topic] = item.answer;
   return { fit, value: item.appraisal?.value ?? null, note: item.appraisal?.note ?? "" };
 }
 
@@ -155,12 +157,12 @@ function Screen({ s, item }: { s: Session; item: SessionItem }) {
   const answered = new Set(s.items.filter((it) => it.answered_at).map((it) => it.position));
   const n = s.items.length;
   const i = s.items.findIndex((it) => it.position === item.position);
-  const go = (position: number) => open(s.id, { at: position });
+  const go = (position: number) => open(s.id, { at: position }, true);
   const canRecord = !!draft.fit[item.topic];
   const changed = JSON.stringify(draft) !== JSON.stringify(draftOf(item));
   /** Next records the answer when the drawn topic has its Fit, then moves on; a paper left unanswered stays grey. */
   const next = () => {
-    const after = i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true });
+    const after = i + 1 < n ? () => go(s.items[i + 1]!.position) : () => open(s.id, { review: true }, true);
     const fit = answerFits(draft.fit, item, focus);
     if (canRecord && (changed || !item.answered_at)) answer.mutate({ position: item.position, paperId: item.paper_id, answer: { fit, value: draft.value, note: draft.note || null } }, { onSuccess: after });
     else after();
