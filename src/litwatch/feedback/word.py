@@ -36,9 +36,11 @@ from litwatch.core import (
 )
 from litwatch.core.fulltext import (
     TEXT_PRIORITY,
+    PassKind,
     PassState,
     deep_to_drop,
     deep_to_queue,
+    deep_to_relabel,
     deep_wanted,
     to_drop,
     to_queue,
@@ -160,7 +162,7 @@ async def settle(
                 conn, events.PAPER_SAVED if result.saved else events.PAPER_UNSAVED, paper_id
             )
         await _text_pass(conn, paper_id, topics, after, claimed)
-        await _deep_pass(conn, paper_id, topics, after, result.saved, claimed)
+        await _deep_pass(conn, paper_id, topics, after, hand == Hand.UNSAVE, claimed)
     return result
 
 
@@ -218,28 +220,31 @@ async def _deep_pass(
     paper_id: str,
     topics: dict,
     after: dict[str, Effective],
-    saved: bool,
+    unsaved: bool,
     claimed: int | None,
 ) -> None:
-    """Queue the paper's automatic Deep card when an active Focus topic grades it must read, it
-    is saved and it has no card; drop an automatic one not started that it no longer wants (an
-    Unsave, a paused topic). The owner's request is left alone."""
+    """Queue the paper's automatic Deep card when an active Focus topic grades it must read, or
+    a published digest of an active Area topic picked it, it is not unsaved and it has no card;
+    relabel one not started that it wants for the other reason now, and drop one it no longer
+    wants (an Unsave, a paused topic). The owner's request is left alone."""
     found = await fulltext_store.deep_facts(conn, paper_id)
     if found is None or found.dismissed:
         return
     open_pass = found.open_pass
-    if open_pass is not None and open_pass.id == claimed and open_pass.state == PassState.RUNNING:
+    ours = open_pass is not None and open_pass.id == claimed
+    if ours and open_pass.state == PassState.RUNNING:
         open_pass = replace(open_pass, state=PassState.READY)
+    active = [t for t in topics.values() if t.status == Status.ACTIVE]
     focus_must_read = any(
-        t.depth == Depth.FOCUS
-        and t.status == Status.ACTIVE
-        and t.slug in after
-        and after[t.slug].grade == Grade.MUST_READ
-        for t in topics.values()
+        t.depth == Depth.FOCUS and t.slug in after and after[t.slug].grade == Grade.MUST_READ
+        for t in active
     )
-    want = deep_wanted(focus_must_read, saved, found.has_card)
+    picked = any(t.depth == Depth.AREA and t.slug in found.picked_by for t in active)
+    want = deep_wanted(focus_must_read, picked, unsaved, found.has_card)
     if deep_to_drop(want, open_pass):
-        await fulltext_store.drop(conn, open_pass.id, claimed=open_pass.id == claimed)
+        await fulltext_store.drop(conn, open_pass.id, claimed=ours)
+    elif want is not None and deep_to_relabel(want, open_pass):
+        await fulltext_store.relabel(conn, open_pass.id, PassKind.DEEP, want, claimed=ours)
     elif want is not None and deep_to_queue(want, open_pass):
         await fulltext_store.queue_deep(conn, paper_id, found.revision, want)
 

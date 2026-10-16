@@ -959,8 +959,8 @@ export interface components {
         /**
          * CardPass
          * @description The paper's Deep card in the full-text queue: the owner's request or automatic (a Focus
-         *     must read), and where it is (awaiting the paper's text, ready, being written, or failed this
-         *     run and to be tried again; `failed_runs` says how often).
+         *     must read, or an Area pick), and where it is (awaiting the paper's text, ready, being
+         *     written, or failed this run and to be tried again; `failed_runs` says how often).
          */
         CardPass: {
             /** Id */
@@ -969,7 +969,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "request" | "focus";
+            reason: "request" | "focus" | "pick";
             /**
              * State
              * @enum {string}

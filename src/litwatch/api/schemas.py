@@ -434,11 +434,11 @@ class DeepCard(BaseModel):
 
 class CardPass(BaseModel):
     """The paper's Deep card in the full-text queue: the owner's request or automatic (a Focus
-    must read), and where it is (awaiting the paper's text, ready, being written, or failed this
-    run and to be tried again; `failed_runs` says how often)."""
+    must read, or an Area pick), and where it is (awaiting the paper's text, ready, being
+    written, or failed this run and to be tried again; `failed_runs` says how often)."""
 
     id: int
-    reason: Literal["request", "focus"]
+    reason: Literal["request", "focus", "pick"]
     state: Literal["awaiting_text", "ready", "running", "failed"]
     queued_at: datetime
     failed_runs: int = 0

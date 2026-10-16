@@ -2656,7 +2656,8 @@
             "type": "string",
             "enum": [
               "request",
-              "focus"
+              "focus",
+              "pick"
             ],
             "title": "Reason"
           },
@@ -2700,7 +2701,7 @@
           "queued_at"
         ],
         "title": "CardPass",
-        "description": "The paper's Deep card in the full-text queue: the owner's request or automatic (a Focus\nmust read), and where it is (awaiting the paper's text, ready, being written, or failed this\nrun and to be tried again; `failed_runs` says how often)."
+        "description": "The paper's Deep card in the full-text queue: the owner's request or automatic (a Focus\nmust read, or an Area pick), and where it is (awaiting the paper's text, ready, being\nwritten, or failed this run and to be tried again; `failed_runs` says how often)."
       },
       "CardRequested": {
         "properties": {

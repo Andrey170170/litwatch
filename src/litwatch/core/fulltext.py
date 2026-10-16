@@ -33,10 +33,11 @@ TEXT_PRIORITY = 0
 # Deep passes are worked by their own worker, one at a time: the owner's requests first.
 REQUEST_PRIORITY = 0
 AUTOMATIC_PRIORITY = 1
-# Why a Deep pass runs: the owner asked (never dropped by a settle), or a Focus topic grades the
-# paper must read. N4 adds Area picks.
+# Why a Deep pass runs: the owner asked (never dropped by a settle), a Focus topic grades the
+# paper must read, or a published Area digest picked it.
 REQUESTED = "request"
 FOCUS = "focus"
+PICK = "pick"
 # A pass awaiting text this long is listed for the owner.
 AWAITING_TOO_LONG = timedelta(days=7)
 # The nightly reconcile also looks at verdicts and labels this recent, whose settle may have
@@ -125,11 +126,17 @@ class DeepPass:
     state: PassState
 
 
-def deep_wanted(focus_must_read: bool, saved: bool, has_card: bool) -> str | None:
+def deep_wanted(focus_must_read: bool, picked: bool, unsaved: bool, has_card: bool) -> str | None:
     """Why the paper wants an automatic Deep card, or None: an active Focus topic grades it must
-    read, it is not unsaved, and it has no card yet. A card is remade only on request
-    (section 8), and an Unsave cancels automatic cards not started (integrations.md)."""
-    return FOCUS if focus_must_read and saved and not has_card else None
+    read, else a published digest of an active Area topic picked its current revision; it is not
+    unsaved, and it has no card yet. Picks are not saved (decision 3) and still get cards. A card
+    is remade only on request (section 8), and an Unsave cancels automatic cards not started
+    (integrations.md)."""
+    if unsaved or has_card:
+        return None
+    if focus_must_read:
+        return FOCUS
+    return PICK if picked else None
 
 
 def deep_to_queue(want: str | None, open_pass: DeepPass | None) -> bool:
@@ -143,5 +150,16 @@ def deep_to_drop(want: str | None, open_pass: DeepPass | None) -> bool:
         want is None
         and open_pass is not None
         and open_pass.reason != REQUESTED
+        and open_pass.state in UNSTARTED
+    )
+
+
+def deep_to_relabel(want: str | None, open_pass: DeepPass | None) -> bool:
+    """Whether an automatic Deep pass not started is wanted for another reason now (its Focus
+    topic paused while an Area picked it): it is relabelled, so it says why it runs."""
+    return (
+        want is not None
+        and open_pass is not None
+        and open_pass.reason not in (REQUESTED, want)
         and open_pass.state in UNSTARTED
     )

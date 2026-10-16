@@ -1,6 +1,7 @@
-"""Deep card passes: which papers get one and when (the owner's request and Unsave included),
-working one against the archive and a fake deep service, the usage each attempt records, the
-lease and a worker that dies mid-job, the daily cap, revisions, and what the API shows."""
+"""Deep card passes: which papers get one and when (the owner's request, Unsave and Area picks
+included), working one against the archive and a fake deep service, the usage each attempt
+records, the lease and a worker that dies mid-job, the daily cap, revisions, and what the API
+shows."""
 
 import asyncio
 import contextlib
@@ -15,25 +16,32 @@ from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Fit, Hand, Label, LabelOrigin, LabelValue, Status, Verdict
 from litwatch.core.fulltext import (
     FOCUS,
+    PICK,
     RECONCILE_LOOKBACK,
     REQUESTED,
     DeepPass,
     PassState,
     deep_to_drop,
     deep_to_queue,
+    deep_to_relabel,
     deep_wanted,
 )
 from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.integrations.deep import Deep, DeepClient
+from litwatch.jobs import nightly
+from litwatch.jobs.context import model_run
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import FAITH, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
 from tests.fakes_http import FakeArchive, FakeDeep, mock
+from tests.test_digests import MON, TUE, Writer, area, day, listed, week
+from tests.test_reading import analyse, classify
+from tests.test_reading import grade as verdict
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=2)
 Q = paper("2610.00002", title="Probes for hidden steps", abstract="Linear probes.", version=1)
@@ -115,14 +123,22 @@ async def outbox_of(conn, kind: str) -> list[dict]:
     return [{"paper": r["paper_id"], **r["payload"]} for r in rows]
 
 
-def test_an_automatic_card_needs_a_saved_must_read_without_a_card_and_a_request_stays():
-    assert deep_wanted(True, True, False) == FOCUS
-    assert deep_wanted(True, False, False) is None  # unsaved
-    assert deep_wanted(True, True, True) is None  # remade only on request
+def test_an_automatic_card_needs_a_must_read_or_a_pick_not_unsaved_and_a_request_stays():
+    # deep_wanted(focus_must_read, picked, unsaved, has_card)
+    assert deep_wanted(True, False, False, False) == FOCUS
+    assert deep_wanted(False, True, False, False) == PICK
+    assert deep_wanted(True, True, False, False) == FOCUS
+    assert deep_wanted(False, False, False, False) is None
+    assert deep_wanted(True, True, True, False) is None  # unsaved
+    assert deep_wanted(True, True, False, True) is None  # remade only on request
     automatic = DeepPass(1, FOCUS, PassState.AWAITING_TEXT)
     assert deep_to_drop(None, automatic) and not deep_to_queue(FOCUS, automatic)
     assert not deep_to_drop(None, DeepPass(1, REQUESTED, PassState.FAILED))
     assert not deep_to_drop(None, DeepPass(1, FOCUS, PassState.RUNNING))  # started
+    # One wanted for the other automatic reason now says so; a request or a started one stays.
+    assert deep_to_relabel(PICK, automatic) and not deep_to_relabel(FOCUS, automatic)
+    assert not deep_to_relabel(PICK, DeepPass(1, REQUESTED, PassState.READY))
+    assert not deep_to_relabel(PICK, DeepPass(1, FOCUS, PassState.RUNNING))
 
 
 # -- which papers get one --------------------------------------------------------------------------
@@ -467,6 +483,159 @@ async def test_a_card_says_the_revision_it_read_and_is_remade_only_on_request(db
     assert await work(db, with_text(rewrite), d) == {"cards_written": 1}
     stored = await cards.card(db, P.id)
     assert (stored["revision"], stored["arxiv_version"]) == (2, 3)
+
+
+# -- Area picks ------------------------------------------------------------------------------------
+
+R = paper("2610.00003", title="Tools that plan", abstract="Agents.", version=1)
+
+
+async def must_read_in_the_area(conn, p=P) -> None:
+    """Graded must read in the Area from its abstract, its Weight re-check done: a pick
+    candidate."""
+    await area(conn, p, "central")
+    await conn.execute(
+        "UPDATE fulltext_passes SET state = 'done', arxiv_version = %s "
+        "WHERE paper_id = %s AND kind = 'weight'",
+        (p.version, p.id),
+    )
+
+
+async def picked(conn) -> None:
+    """P picked in the Area's published daily digest of Tuesday."""
+    await must_read_in_the_area(conn)
+    await listed(conn, TUE, P)
+    await day(conn, Writer(), TUE)
+
+
+async def roles(conn, topic: str, period: str) -> dict[str, str]:
+    rows = await (
+        await conn.execute(
+            "SELECT dp.paper_id, dp.role FROM digest_papers dp "
+            "JOIN digests d ON d.id = dp.digest_id WHERE d.topic = %s AND d.period = %s",
+            (topic, period),
+        )
+    ).fetchall()
+    return {r["paper_id"]: r["role"] for r in rows}
+
+
+async def test_an_area_pick_gets_its_deep_card_when_its_digest_is_published_and_is_not_saved(db):
+    await must_read_in_the_area(db)
+    await area(db, Q, "related")  # relevant: listed, not a pick candidate
+    await listed(db, TUE, P, Q)
+    assert await deep_rows(db) == []  # a must read in an Area alone gets no card
+    await day(db, Writer(), TUE)
+    assert await roles(db, INTERP.slug, "day") == {P.id: "pick", Q.id: "listed"}
+    (row,) = await deep_rows(db)
+    assert (row["reason"], row["state"], row["priority"]) == ("pick", "awaiting_text", 1)
+    assert await deep_rows(db, Q.id) == []
+    # Picks are not saved (decision 3).
+    saved = await (
+        await db.execute("SELECT saved FROM library WHERE paper_id = %s", (P.id,))
+    ).fetchone()
+    assert not (saved and saved["saved"]) and await outbox_of(db, events.PAPER_SAVED) == []
+
+    # Automatic: the daily cap holds it back, and the paper page shows why it is queued.
+    _, http = client(db, [make(FakeDeep(DONE), max_per_day=0)])
+    async with http:
+        page = (await http.get(f"/api/papers/{P.id}")).json()
+    assert page["card_pass"]["reason"] == "pick"
+    fake = FakeDeep(DONE)
+    assert await work(db, with_text(P), make(fake, max_per_day=0)) == {}
+    assert await work(db, with_text(P), make(fake)) == {"cards_written": 1}
+    (sent,) = fake.requests
+    assert [s["name"] for s in sent["selections"]] == ["Interpretability"]
+    assert [a["automatic"] for a in await attempts(db)] == [True]
+    await word.settle(db, P.id)  # a card already made is not made again
+    assert [r["state"] for r in await deep_rows(db)] == ["done"]
+
+
+async def test_weekly_area_picks_get_cards_and_field_picks_do_not(db):
+    """Q, only listed in Tuesday's daily digest, is picked in the Area's weekly one; R, picked
+    in the Field's weekly digest, is not an Area pick."""
+    await papers_store.upsert(db, [R])
+    await must_read_in_the_area(db)
+    await area(db, Q, "related")
+    await classify(db, R, AGENTS.slug)
+    await analyse(db, R)
+    await verdict(db, R, "related", AGENTS)
+    await verdicts.passed(db, [(R.id, 1)])
+    await listed(db, TUE, P, Q, R)
+    w = Writer()
+    await day(db, w, TUE)
+    assert await deep_rows(db, Q.id) == []
+    await week(db, w, MON)
+    assert (await roles(db, INTERP.slug, "week"))[Q.id] == "pick"
+    assert await roles(db, AGENTS.slug, "week") == {R.id: "pick"}
+    assert [r["reason"] for r in await deep_rows(db, Q.id)] == ["pick"]
+    assert await deep_rows(db, R.id) == []
+
+
+@pytest.mark.parametrize(
+    "missed",
+    [
+        "UPDATE digests SET state = 'failed', text = NULL, gist = NULL",
+        "UPDATE topics SET status = 'paused' WHERE class = 'interpretability'",
+    ],
+    ids=["digest-not-published", "area-paused"],
+)
+async def test_a_pick_pass_is_judged_again_at_claim_and_spends_nothing_unwanted(db, missed):
+    await picked(db)
+    await db.execute(missed)  # with no settle
+    fake = FakeDeep(DONE)
+    assert await work(db, with_text(P), make(fake)) == {"fulltext_dropped": 1}
+    assert fake.requests == [] and await deep_rows(db) == []
+
+
+async def test_an_unsave_a_pause_or_a_rewrite_drops_a_pick_pass_not_started(db):
+    await picked(db)
+    await word.toggle(db, P.id, Hand.UNSAVE)
+    assert await deep_rows(db) == []
+    assert P.id not in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)
+    await word.toggle(db, P.id, Hand.SAVE)  # the owner's Save: the pick wants its card again
+    assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
+
+    tree = await taxonomy_store.load(db)
+    interp = next(t for t in tree.topics if t.slug == INTERP.slug)
+    paused = tree.following(interp.model_copy(update={"status": Status.PAUSED}))
+    await word.save_taxonomy(db, paused)
+    assert await deep_rows(db) == []
+    await word.save_taxonomy(db, paused.following(interp))
+    assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
+
+    # A rewrite: the pick judged text that no longer exists.
+    rewrite = P.model_copy(update={"version": 3, "title": "Entirely different words now"})
+    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).rewritten)
+    assert await deep_rows(db) == []
+
+
+async def test_a_dismissed_pick_is_never_worked(db):
+    await picked(db)
+    assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
+    await papers_store.dismiss(db, P.id)
+    fake = FakeDeep(DONE)
+    assert await work(db, with_text(P), make(fake)) == {}
+    assert fake.requests == []
+    assert P.id not in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)
+
+
+async def test_a_pick_pass_once_for_a_focus_must_read_says_it_is_for_the_pick(db):
+    await picked(db)
+    await db.execute("UPDATE fulltext_passes SET reason = 'focus' WHERE kind = 'deep'")
+    await word.settle(db, P.id)
+    assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
+
+
+async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db):
+    await picked(db)
+    await db.execute("DELETE FROM fulltext_passes WHERE kind = 'deep'")  # its settle missed
+    assert P.id in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)
+    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
+        await nightly.text_passes(db, Config(), run, limit=0)  # no archive: it only reconciles
+    assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
+
+    await work(db, with_text(P), make(FakeDeep(DONE)))
+    assert P.id not in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)  # it has its card
 
 
 # -- what the owner sees ---------------------------------------------------------------------------

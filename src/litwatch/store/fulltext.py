@@ -12,6 +12,7 @@ from typing import Any
 import psycopg
 
 from litwatch.core import Paper, TaxonomyClass, Weight
+from litwatch.core.digests import PUBLISHED
 from litwatch.core.fulltext import (
     AUTOMATIC_PRIORITY,
     AWAITING_TOO_LONG,
@@ -30,6 +31,14 @@ from litwatch.store.taxonomy import lock_shared, row_to_class
 # Whether text pass `f` read paper `p`'s text for its latest arXiv update, or none is known: what
 # keeps a done pass current while the paper's version is unknown.
 COVERS_UPDATE = "coalesce(f.paper_updated >= p.updated, p.updated IS NULL)"
+
+_PUBLISHED = "(" + ", ".join(f"'{s.value}'" for s in PUBLISHED) + ")"
+# The topics whose published digests picked paper `p`'s current revision: a pick of text that a
+# rewrite replaced was a judgement of text that no longer exists.
+PICKED_BY = f"""ARRAY(
+    SELECT DISTINCT d.topic FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
+    WHERE dp.paper_id = p.id AND dp.role = 'pick' AND dp.paper_revision = p.revision
+      AND d.state IN {_PUBLISHED})"""
 
 
 @dataclass(frozen=True)
@@ -88,6 +97,7 @@ class DeepFacts:
     dismissed: bool
     open_pass: DeepPass | None  # the one not done
     has_card: bool  # of any revision
+    picked_by: frozenset[str]  # the topics whose published digests picked its current revision
 
 
 async def deep_facts(conn: psycopg.AsyncConnection, paper_id: str) -> DeepFacts | None:
@@ -95,7 +105,7 @@ async def deep_facts(conn: psycopg.AsyncConnection, paper_id: str) -> DeepFacts 
         await conn.execute(
             "SELECT p.revision, p.dismissed_at IS NOT NULL AS dismissed, f.id, f.reason, f.state, "
             "EXISTS (SELECT 1 FROM deep_cards c WHERE c.paper_id = p.id AND c.card IS NOT NULL) "
-            "AS has_card FROM papers p LEFT JOIN fulltext_passes f "
+            f"AS has_card, {PICKED_BY} AS picked_by FROM papers p LEFT JOIN fulltext_passes f "
             "ON f.paper_id = p.id AND f.kind = 'deep' AND f.state <> 'done' WHERE p.id = %s",
             (paper_id,),
         )
@@ -103,7 +113,8 @@ async def deep_facts(conn: psycopg.AsyncConnection, paper_id: str) -> DeepFacts 
     if row is None:
         return None
     found = DeepPass(row["id"], row["reason"], PassState(row["state"])) if row["id"] else None
-    return DeepFacts(row["revision"], row["dismissed"], found, row["has_card"])
+    picked = frozenset(row["picked_by"])
+    return DeepFacts(row["revision"], row["dismissed"], found, row["has_card"], picked)
 
 
 async def request_card(conn: psycopg.AsyncConnection, paper_id: str, revision: int) -> int:
@@ -545,8 +556,9 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
     pass open; every one without a text pass for its current revision that the rule may give one
     (an active Focus topic's central or related, an active Area's must read, its own or a
     followed descendant's; or such a verdict or label from the last `lookback`, whose settle
-    may have been missed); the `outdated` ones; and every saved Focus must read with no card,
-    or one with a recent Focus verdict or label of any value, whatever text pass it has.
+    may have been missed); the `outdated` ones; every saved Focus must read with no card,
+    or one with a recent Focus verdict or label of any value, whatever text pass it has; and
+    every pick of a published digest of an active Area topic with no card, not unsaved.
     Bounded by the queue and what qualifies but has no pass, not by the library; never cut
     short, as settling spends nothing and a cut could leave the same papers out every night."""
     rows = await (
@@ -578,6 +590,13 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
                 UNION
                 SELECT paper_id, topic, value FROM labels
                 WHERE labelled_at >= now() - %(lookback)s
+            ), area_picks AS (
+                -- Picks of the current revision in active Area topics' published digests.
+                SELECT dp.paper_id FROM digest_papers dp
+                JOIN digests d ON d.id = dp.digest_id
+                JOIN topics t ON t.class = d.topic AND t.depth = 'area' AND t.status = 'active'
+                JOIN papers pp ON pp.id = dp.paper_id AND pp.revision = dp.paper_revision
+                WHERE dp.role = 'pick' AND d.state IN {_PUBLISHED}
             ), qualifying AS (
                 SELECT paper_id FROM effective_grades
                 WHERE topic IN (SELECT class FROM focus) AND fit IN ('central', 'related')
@@ -602,6 +621,12 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
                      AND EXISTS (SELECT 1 FROM library l WHERE l.paper_id = p.id AND l.saved)
                      OR p.id IN (SELECT paper_id FROM recent
                                  WHERE topic IN (SELECT class FROM focus)))
+                    AND NOT EXISTS (SELECT 1 FROM deep_cards c WHERE c.paper_id = p.id
+                                    AND c.card IS NOT NULL))
+                -- An Area pick with no card, not unsaved: it may want a Deep pass.
+                OR (p.id IN (SELECT paper_id FROM area_picks)
+                    AND NOT EXISTS (SELECT 1 FROM library l WHERE l.paper_id = p.id
+                                    AND l.hand = 'unsave')
                     AND NOT EXISTS (SELECT 1 FROM deep_cards c WHERE c.paper_id = p.id
                                     AND c.card IS NOT NULL))
             )

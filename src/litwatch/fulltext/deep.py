@@ -1,9 +1,9 @@
 """Deep card passes (docs/specs/v1/pipeline.md, section 6; integrations.md). `word.settle` queues
-an automatic one for a saved Focus must read with no card, and `request` the owner's, which no
-settle drops. They are worked by their own worker, one at a time, since a card takes up to most
-of an hour: a claimed pass is settled under its paper's lock before anything is spent
-(`still_wanted`), its text is read from the archive at urgent priority, and the `deep`
-integration's service is given it.
+an automatic one for a Focus must read or a published Area pick with no card, unless it is
+unsaved, and `request` the owner's, which no settle drops. They are worked by their own worker,
+one at a time, since a card takes up to most of an hour: a claimed pass is settled under its
+paper's lock before anything is spent (`still_wanted`), its text is read from the archive at
+urgent priority, and the `deep` integration's service is given it.
 
 Each submission is an attempt, recorded before it is sent and given its job once accepted, so a
 worker that dies while a job runs leaves the job to the next claim to follow, never paid for
