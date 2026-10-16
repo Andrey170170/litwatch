@@ -187,7 +187,7 @@ Overview. A page inside a page (a topic's editor, Jobs, an integration's events,
 same groups, each with a line under its name ("6 waiting", "Last session 6 Oct"), and every page is a deeper screen.
 Page heads stack on the phone, and wide tables drop columns rather than scroll sideways. Under the pages, in the
 desktop sidebar's foot and at the end of the phone's list, Appearance: System, Light or Dark, System by default. The
-choice is kept on the device and put on the page before its first paint.
+choice is kept on the device and put on the page, and on the browser's bar, before its first paint.
 
 **Colours.** An item carries a 3 px left edge: yellow (`--acc`) asks for the owner's word, red (`--sig`) reports a
 failure, cyan (`--cy`) is fine or settled, amber (`--warn`) is a projection over budget or a difference worth a look.

@@ -237,6 +237,25 @@ describe("The phone's gestures", () => {
     expect(document.querySelector("main")?.dataset.came).toBe("still");
   });
 
+  it("leaves a drag that starts on a control taking the finger itself, the reorder grip, to that control", async () => {
+    scriptFetch({ ...routes, "GET /api/papers/2610.00001": full("2610.00001", { in_collection: true }) });
+    const { router } = renderApp("/");
+    await screen.findByText("Today");
+    fireEvent.click(screen.getByText("Faithful traces"));
+    await screen.findByRole("button", { name: "Back" });
+    // a grip at the edge: `touch-action: none` says it follows the finger on its own
+    const grip = document.createElement("button");
+    grip.style.touchAction = "none";
+    grip.append(document.createElement("i"));
+    screen.getByRole("main").prepend(grip);
+    swipe(grip.firstElementChild!, [8, 300], [[30, 300], [120, 300]], { lift: false });
+    // a shell drag this far would show the screen under; the grip's shows nothing and goes nowhere
+    expect(document.querySelector<HTMLElement>(".under")?.hidden).toBe(true);
+    fireEvent.pointerUp(window, { clientX: 120, clientY: 300, pointerId: 1, isPrimary: true });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/paper/2610.00001"));
+    expect(document.querySelector(".page")?.getAttribute("style") ?? "").toBe("");
+  });
+
   it("ends a drag when the screen changes under the finger, and keeps a stepped-away screen's copy at rest", async () => {
     const second = { ...paper, id: "2610.00002", title: "Second traces" };
     scriptFetch({

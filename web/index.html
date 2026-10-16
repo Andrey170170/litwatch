@@ -11,9 +11,15 @@
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>litwatch</title>
     <script>
+      // the device's appearance, on the page and the browser's bar before the first paint (lib/theme.ts keeps it after)
       try {
         var a = localStorage.getItem("litwatch.appearance");
-        if (a === "light" || a === "dark") document.documentElement.dataset.theme = a;
+        if (a === "light" || a === "dark") {
+          document.documentElement.dataset.theme = a;
+          var bars = document.querySelectorAll('meta[name="theme-color"][media]');
+          var bar = bars[a === "dark" ? 1 : 0].content;
+          for (var i = 0; i < bars.length; i++) bars[i].content = bar;
+        }
       } catch (e) {}
     </script>
   </head>
