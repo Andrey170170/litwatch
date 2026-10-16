@@ -19,7 +19,7 @@ from litwatch.config import Classification, Config, Models, RoleConfig
 from litwatch.core import FAILED_RUNS, Paper
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run, run_record
-from litwatch.llm import Gateway, ProviderError
+from litwatch.llm import Gateway, ProviderError, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
@@ -354,11 +354,13 @@ async def test_a_journal_that_fails_after_the_job_keeps_the_jobs_error_and_its_c
 
     monkeypatch.setattr(CallJournal, "by_role", lost)
     with pytest.raises(ValueError, match="the job's own"):
-        async with model_run(conn, CONFIG, "nightly", gateway=lambda config, journal: None):
+        async with model_run(conn, CONFIG, "nightly", gateway=lambda config, journal: None) as run:
+            call = await run.journal.start("judge", "m", "key", None)
+            await run.journal.record(call, Usage(model="m", cost=0.25))
             raise ValueError("the job's own")
     (run,) = await rows(conn, "SELECT error, cost, finished_at FROM runs")
     assert run["finished_at"] and run["error"] == "ValueError: the job's own"
-    assert run["cost"] == 0  # read before the count by role that failed
+    assert float(run["cost"]) == 0.25  # read before the count by role that failed
 
 
 async def test_a_run_that_cannot_close_after_the_job_failed_raises_the_jobs_error(
