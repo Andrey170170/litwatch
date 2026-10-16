@@ -664,6 +664,28 @@ async def test_two_requests_storing_the_same_fetched_paper_both_get_it(conn, sec
     assert added["n"] == 1
 
 
+async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn, monkeypatch):
+    """The owner's request resolves a paper from arXiv; before it is kept, the nightly intake
+    stores newer metadata without a version (OAI's); the owner's older record then changes
+    nothing, though its version cannot be compared (L6-3)."""
+    from litwatch.feedback import misses
+    from litwatch.intake import batch
+
+    pid = "2610.04444"
+    older = paper(pid, title="As first submitted", version=1, updated="2026-10-01T10:00:00Z")
+    monkeypatch.setattr(misses, "fetch_by_ids", lambda ids: [older])
+    _, fetched = await misses.resolve(conn, pid)
+    newer = paper(pid, title="As revised since", updated="2026-10-05T00:00:00Z")
+    await batch.store(conn, [newer], source="oai")
+    stored, inserted = await misses.keep(conn, pid, fetched)
+    assert (stored.title, stored.version, inserted) == ("As revised since", None, False)
+    assert stored.updated.startswith("2026-10-05")
+    revised = await (
+        await conn.execute("SELECT count(*) AS n FROM outbox WHERE type = 'paper.revised'")
+    ).fetchone()
+    assert revised["n"] == 0
+
+
 async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monkeypatch, slow_arxiv):
     """Process and Report as a miss on a paper litwatch lacks wait on arXiv for its budget at
     most (P5), however slowly arXiv trickles its answer in: then a 503 that says so, and
