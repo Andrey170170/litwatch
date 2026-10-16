@@ -241,6 +241,34 @@ async def test_a_batch_stays_within_the_byte_ceiling():
     await gw.close()
 
 
+async def test_a_requests_size_is_counted_as_it_is_sent_its_escapes_included():
+    gw, anthropic, _, _ = batching()
+    gw.batchers["anthropic"].max_bytes = 12_000  # each is 3,000 backslashes: 6,000 bytes as JSON
+    await asyncio.gather(*(gw.ask("brief", ask(f"{n} " + "\\" * 3_000)) for n in range(3)))
+    assert [len(keys) for keys in anthropic.submitted] == [1, 1, 1]
+    await gw.close()
+
+
+async def test_a_fallback_on_a_provider_that_batches_is_a_normal_call():
+    models = Models(
+        brief=RoleConfig(provider="openrouter", model="lab/other", fallback="brief_fallback"),
+        brief_fallback=RoleConfig(provider="anthropic", model="test-brief"),
+    )
+
+    def refusing(role, request):
+        if role.provider == "openrouter":
+            return Reply("", Stop.REFUSED, Usage(model=role.model, cost=0.001), refusal="cyber")
+        return GOOD
+
+    anthropic = BatchingProvider("anthropic", refusing)
+    providers = {"anthropic": anthropic, "openrouter": ScriptedProvider("openrouter", refusing)}
+    gw = Gateway(models, providers, retry_delays=(0.0,), batch_options=FAST | {"now": Clock()})
+    gw.batch_until(DEADLINE)
+    assert (await gw.ask("brief", ask(1))).value.yes
+    assert (anthropic.batches, len(anthropic.calls)) == ({}, 1)
+    await gw.close()
+
+
 async def test_closing_the_gateway_sends_what_still_waits_as_normal_calls():
     gw, anthropic, _, _ = batching(hold=True)
     asked = asyncio.create_task(gw.ask("brief", ask(0)))
@@ -338,6 +366,11 @@ async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn):
             "cost": 0.0005,
         },
     ]
+    dead_run = await runs.get(conn, dead)  # its totals take them, as its close would have
+    assert (float(dead_run["cost"]), dead_run["counts"]["calls"]) == (
+        0.001,
+        {"brief": {"calls": 2, "cost": 0.001}},
+    )
     await gw.close()
 
 
@@ -582,6 +615,29 @@ async def test_a_nightly_started_again_takes_back_its_passes_and_pays_for_nothin
     assert (counts["fulltext_taken_back"], counts["briefs_written"]) == (1, 1)
     assert (len(anthropic.batches), anthropic.calls) == (1, [])  # submitted once, by the first
     assert (await ft.passes(conn))[0]["state"] == "done"
+
+
+async def test_a_worker_waits_on_a_dead_nightlys_batch_rather_than_paying_again(conn, monkeypatch):
+    """A nightly dies with its pass's call in a batch and is not started again; once the lease
+    runs out the service's worker takes the pass and is answered from that batch."""
+    await passing(conn)
+    fake = ft.ready(FakeArchive())
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: ft.archive(fake))
+    writer = ft.Writer()
+    anthropic = BatchingProvider("anthropic", writer.respond, hold=True)
+    gateway = factory(writer.respond, anthropic)
+    killed = asyncio.create_task(
+        nightly.run(conn, ft.CONFIG, fetch=False, gateway=gateway, night=tonight())
+    )
+    await until(lambda: anthropic.batches)
+    killed.cancel()
+    await asyncio.gather(killed, return_exceptions=True)
+    anthropic.end("msgbatch_1")
+    await conn.execute("UPDATE fulltext_passes SET lease_until = now() - interval '1 second'")
+
+    found = await fulltext.work(conn, ft.CONFIG, ft.archive(fake), gateway=gateway)
+    assert found == {"briefs_written": 1}
+    assert (len(anthropic.batches), anthropic.calls) == (1, [])
 
 
 @asynccontextmanager

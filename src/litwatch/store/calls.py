@@ -91,17 +91,35 @@ class CallJournal:
                 (batch_id, key),
             )
             return
-        await self.conn.execute(
+        cur = await self.conn.execute(
             "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
             "WHERE id = (SELECT min(id) FROM inference_calls WHERE batch_id = %s "
-            "AND request_key = %s AND usage->>'cost' IS NULL)",
+            "AND request_key = %s AND usage->>'cost' IS NULL) RETURNING run_id",
             (Jsonb(usage.model_dump(mode="json")), batch_id, key),
         )
+        await self._retally(await cur.fetchone())
 
     async def record(self, call_id: int, usage: Usage) -> None:
-        await self.conn.execute(
-            "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() WHERE id = %s",
+        cur = await self.conn.execute(
+            "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
+            "WHERE id = %s RETURNING run_id",
             (Jsonb(usage.model_dump(mode="json")), call_id),
+        )
+        await self._retally(await cur.fetchone())
+
+    async def _retally(self, row: dict[str, Any] | None) -> None:
+        """A charge on another run's call (a dead run's batch, read later) is in that run's cost
+        and calls by role, as its own run's close would have put it."""
+        if row is None or row["run_id"] == self.run_id:
+            return
+        await self.conn.execute(
+            "UPDATE runs SET cost = t.cost, counts = jsonb_set(counts, '{calls}', t.calls) "
+            "FROM (SELECT round(coalesce(sum(cost), 0)::numeric, 4) AS cost, "
+            "coalesce(jsonb_object_agg(operation, jsonb_build_object('calls', calls, "
+            "'cost', cost)), '{}') AS calls FROM (SELECT operation, count(*) AS calls, "
+            "coalesce(sum((usage->>'cost')::numeric), 0)::float AS cost FROM inference_calls "
+            "WHERE run_id = %(run)s GROUP BY operation) roles) t WHERE runs.id = %(run)s",
+            {"run": row["run_id"]},
         )
 
     async def accept(self, call_id: int, output: dict[str, Any]) -> None:

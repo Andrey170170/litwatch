@@ -48,6 +48,7 @@ from litwatch.llm import CallError, Gateway
 from litwatch.llm.batches import DRAIN
 from litwatch.store import fulltext as store_
 from litwatch.store import papers as papers_store
+from litwatch.store.calls import CallJournal
 from litwatch.store.fulltext import Claimed
 
 log = logging.getLogger(__name__)
@@ -126,6 +127,19 @@ def _write(
         return a
 
     return bounded(attempts, one, gateway.width(CONCURRENCY))
+
+
+def _attaching(factory: GatewayFactory) -> GatewayFactory:
+    """`factory`'s gateways, sending no batch but waiting on a call a dead run left in an open
+    batch rather than paying for it again. The batch is past that run's deadline: it is
+    cancelled at once, and its answers kept."""
+
+    def gateway(config: Config, journal: CallJournal) -> Gateway:
+        found = factory(config, journal)
+        found.batch_until(datetime.now(UTC))
+        return found
+
+    return gateway
 
 
 def _read_of(text: PaperText | None) -> TextRead | None:
@@ -298,10 +312,12 @@ async def work(
         texts = [a for a in attempts if a.text is not None]
         if not texts:
             continue
+        # With no nightly running, a key in an open batch is a dead run's (models.md, batches).
+        factory = _attaching(gateway) if owners is None else gateway
         opened = (
             contextlib.nullcontext(run)
             if run
-            else model_run(conn, config, "fulltext", gateway=gateway)
+            else model_run(conn, config, "fulltext", gateway=factory)
         )
         async with opened as r, _write(texts, r.gateway) as answered:
             async for a in answered:

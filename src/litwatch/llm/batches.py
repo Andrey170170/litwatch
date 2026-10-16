@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import json
 import logging
 import time
 from collections.abc import Callable, Coroutine
@@ -44,6 +45,13 @@ class BatchProvider(Protocol):
 class BatchJournal(Protocol):
     async def batched(self, call_ids: list[int], batch_id: str) -> None: ...
     async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None: ...
+
+
+def _size(request: Request) -> int:
+    """About what a request adds to a batch: its texts and schema as JSON, in UTF-8 bytes, and
+    the envelope."""
+    parts = [request.system, request.user, request.output.model_json_schema()]
+    return len(json.dumps(parts, ensure_ascii=False).encode()) + 1_000
 
 
 @dataclass
@@ -106,8 +114,7 @@ class Batcher:
             return await self._shared(self._futures[key])
         future = asyncio.get_running_loop().create_future()
         self._futures[key] = future
-        # UTF-8 bytes, and the schema and envelope; JSON's escapes fit in the provider's margin.
-        size = len(request.system.encode()) + len(request.user.encode()) + 2_000
+        size = _size(request)
         self._held.append(_Held(key, role, request, call_id, size))
         self._joined = time.monotonic()
         if self._flusher is None or self._flusher.done():
@@ -235,7 +242,7 @@ class Batcher:
             now = self.now()
             for batch_id, batch in list(self._open.items()):
                 await self._check(batch_id, batch, now)
-            if self._open and now >= self.deadline + self.drain:  # each looked at once first
+            if self._open and self.now() >= self.deadline + self.drain:  # each looked at first
                 log.warning("%d batches still open after the deadline's drain", len(self._open))
                 for batch_id in list(self._open):
                     batch = self._open.pop(batch_id)

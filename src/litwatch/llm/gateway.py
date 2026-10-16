@@ -253,7 +253,7 @@ class Gateway:
             if exc.kind != "refused" or fallback is None:
                 raise
         log.info("role=%s paper=%s refused: asking %s", role_name, paper_id, fallback)
-        return await self._ask(fallback, request, paper_id=paper_id, send=send)
+        return await self._ask(fallback, request, paper_id=paper_id, send=send, batch=False)
 
     async def _reused[T: BaseModel](self, role_name: str, request: Request) -> Answer[T] | None:
         """The validated answer of an identical earlier call, at no cost."""
@@ -280,13 +280,14 @@ class Gateway:
         *,
         paper_id: str | None = None,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
+        batch: bool = True,
     ) -> Answer[T]:
         role = self.models.role(role_name)
         key = self.request_key(role, request)
         journal = self.journal
         if answer := await self._reused(role_name, request):
             return answer
-        call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
+        call_id, reply = await self._batched(role_name, role, key, request, paper_id, send, batch)
         try:
             if reply is None:
                 reply = await self.complete(role_name, request, send)
@@ -331,14 +332,15 @@ class Gateway:
         request: Request,
         paper_id: str | None,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None,
+        batch: bool,
     ) -> tuple[int | None, Reply | None]:
         """The call's journal row, and its reply when a batch gave one (None: send it as a
         normal call). A key a dead run left in an open batch waits on that batch, on its row,
         past the deadline too (the batch is cancelled then); one the batch did not answer is
         sent as a normal call. A normal call has a row of its own when the batch it was given
-        up on may still answer it on its row."""
+        up on may still answer it on its row. Without `batch` (a fallback) it is a normal call."""
         journal = self.journal
-        batcher = self.batchers.get(role.provider) if send is None else None
+        batcher = self.batchers.get(role.provider) if send is None and batch else None
         if batcher and journal and (row := await journal.in_batch(key)):
             if reply := await batcher.attach(row["batch_id"], key, row["id"]):
                 if reply.usage.reused:  # shared with a call on that row: a row of its own
