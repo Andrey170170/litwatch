@@ -11,10 +11,10 @@ what intake read from the archive itself (the event's `source` is "archive"): it
 
 The storage policy (archive.md) is the archive's to apply: under `paper-archive pdfs wanted`
 it holds PDFs asked for at background priority. On `grade.changed` to relevant or must read,
-and on `paper.saved`, this asks for the paper's PDF at `WANTED` priority, above background,
-once the paper still qualifies when the event is handled (`store.word.keeps_pdf`), and a revision of
-a paper that qualifies asks for its new PDF the same way. A PDF the owner
-opens is asked for urgently by the API, and one a full-text pass falls back to by the queue.
+on `paper.saved`, and on a revision (read from arXiv or from the archive), this asks for the
+paper's PDF at `WANTED` priority, above background, when the paper qualifies at the time the
+event is handled (`store.word.keeps_pdf`). A PDF the owner opens is asked for urgently by the
+API, and one a full-text pass falls back to by the queue.
 
 It is also a `SearchProvider`: litwatch's search box asks it beside the collection, which
 adds the papers litwatch never ingested. Other integrations (webdav, deep) read PDFs through
@@ -47,7 +47,7 @@ from litwatch.archive import (
     ArchiveVersionUnknown,
 )
 from litwatch.config import Config
-from litwatch.core import SEARCH_TIMEOUT_SECONDS, Event, Paper, SearchFilters, SearchHit
+from litwatch.core import SEARCH_TIMEOUT_SECONDS, Event, SearchFilters, SearchHit
 from litwatch.integrations import (
     IntegrationError,
     enabled_using,
@@ -62,6 +62,14 @@ log = logging.getLogger(__name__)
 
 ARTIFACTS = ("pdf", "source")
 KEPT = ("relevant", "must_read")  # the grades whose papers' PDFs the storage policy keeps
+
+
+def _registers(event: Event) -> bool:
+    """A new or revised paper the archive does not have yet: intake read it from arXiv."""
+    return (
+        event.type in (events.PAPER_ADDED, events.PAPER_REVISED)
+        and event.payload.get("source") != papers_store.ARCHIVE
+    )
 
 
 def client(options: dict[str, Any]) -> ArchiveClient:
@@ -139,12 +147,10 @@ class Archive:
         self.register = register
 
     def wants(self, event: Event) -> bool:
-        if not self.register:
-            return False
-        if event.type in (events.PAPER_ADDED, events.PAPER_REVISED):
-            return event.payload.get("source") != papers_store.ARCHIVE
-        return event.type == events.PAPER_SAVED or (
-            event.type == events.GRADE_CHANGED and event.payload.get("after") in KEPT
+        return self.register and (
+            _registers(event)
+            or event.type in (events.PAPER_REVISED, events.PAPER_SAVED)
+            or (event.type == events.GRADE_CHANGED and event.payload.get("after") in KEPT)
         )
 
     async def aclose(self) -> None:
@@ -155,28 +161,23 @@ class Archive:
         paper = await papers_store.get(conn, event.paper_id)
         if paper is None:
             return
-        if event.type not in (events.PAPER_ADDED, events.PAPER_REVISED):
-            if await word_store.keeps_pdf(conn, paper.id):
-                await self._keep_pdf(paper)
+        # Read when handled: a grade already taken back asks for nothing.
+        keep = await word_store.keeps_pdf(conn, paper.id)
+        if _registers(event):
+            await self.archive.upsert_paper(paper)
+        elif not keep:
             return
-        await self.archive.upsert_paper(paper)
         try:
             paper = await self.archive.resolve(paper)
         except ArchiveVersionUnknown:
-            log.info("archive: %s has no known arXiv version; metadata only", paper.id)
+            log.info("archive: %s has no known arXiv version; nothing to fetch", paper.id)
             return
-        # A revision of a paper the policy keeps asks for its new PDF above background too.
-        kept = WANTED if await word_store.keeps_pdf(conn, paper.id) else BACKGROUND
-        for kind in ARTIFACTS:
-            await self.archive.request(paper, kind, kept if kind == "pdf" else BACKGROUND)
-
-    async def _keep_pdf(self, paper: Paper) -> None:
-        try:
-            paper = await self.archive.resolve(paper)
-        except ArchiveVersionUnknown:
-            log.info("archive: %s has no known arXiv version; no PDF to keep", paper.id)
-            return
-        await self.archive.request(paper, "pdf", WANTED)
+        if _registers(event):
+            for kind in ARTIFACTS:
+                kept = kind == "pdf" and keep
+                await self.archive.request(paper, kind, WANTED if kept else BACKGROUND)
+        else:  # saved, graded up, or a revision the archive already has: only its PDF
+            await self.archive.request(paper, "pdf", WANTED)
 
     def search(self, query: str, filters: SearchFilters) -> list[SearchHit]:
         params: dict[str, Any] = {"q": query, "limit": min(filters.limit, 50)}

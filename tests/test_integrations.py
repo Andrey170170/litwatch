@@ -220,6 +220,11 @@ async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(wor
         (P.id, 3, "pdf", WANTED),
         (P.id, 3, "source", BACKGROUND),
     ]
+    # A revision read from the archive is not registered again, but its PDF is still asked for.
+    fake.jobs.clear()
+    await papers_store.upsert(conn, [paper(P.id, version=4)], source=papers_store.ARCHIVE)
+    await deliver(conn, a)
+    assert [(j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [(4, "pdf", WANTED)]
 
 
 async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world):
