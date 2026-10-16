@@ -194,6 +194,12 @@ queries on the restart's data with PostgreSQL's JIT on and off (`EXPLAIN (ANALYZ
 synthetic papers JIT added 100–800 ms per topic query (#52), since it compiles anew on every execution. Turn it off
 for litwatch's connections if the full system shows the same.
 
+Run with one week, not two (the owner, 2026-10-16: about $130 left on the Anthropic API, and the slice projected
+$97–115 for two weeks): the papers submitted 2026-10-09 to 10-15, listed 10-12 to 10-16, under a $62 hard cap
+(`evals/2026-10-16-restart.md`). The week before comes with the backfill. JIT stays on: at 2,951 papers no list
+statement reaches `jit_above_cost`, and on and off time the same. The dearest one's estimate grows toward it with the
+collection, so `evals/2026-10-16-restart/jit.py` runs again with the backfill or a month after the switch.
+
 **W1–W4 · The web app** (Fable 5.1, worktree, PRs into `v1`). W1: the shell (sidebar, drawer, header, run status),
 the look's tokens and faces, Papers, the Topics tab and topic page, the paper page with its ladder, rail and open
 states. W2: Settings (Overview, Needs you, Calibrate, Misses, Topics and the editor with the re-run offer, Taxonomy,
@@ -203,9 +209,6 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
 
 ### Deferred to later PRs
 
-- **N6:** the digest voice harness spares a title's part before a colon but not before a "?", so a digest naming a
-  paper by its leading question reads as a breach (N4's run, interpretability 2026-10-07). Spare it before N6 reads
-  the restart's digests.
 - **N8:** the n8n Notion workflow and its README still read the first v1's shapes (`take.written`, a topic's `take`,
   `kind: watch`). Rewrite them against v1's events (`brief.written`, `gist.written`, `digest.written`) with the
   switch, which owns the Notion export.

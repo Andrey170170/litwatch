@@ -1,0 +1,13 @@
+topic,paper_id,grade,title,brief,text_source,pass_state,failed_runs,last_error
+circuits,2610.13078,must_read,"Attention Sees, MLP Refuses: Tracing the Attention-to-MLP Safety Pathway in LLMs",t,latex,done,0,
+circuits,2610.13895,must_read,Task Context Shapes Component Roles in Language Models,t,latex,done,0,
+circuits,2610.15850,must_read,What Do Sparse Autoencoder Feature Discovery Scores Identify? From Activations to Interventions,t,latex,done,0,
+circuits,2610.17898,relevant,Evaluating the Causal Faithfulness of SHAP as a Candidate Attribution Method for SAE Features,t,latex,done,0,
+circuits,2610.18674,must_read,From Relation-Specific Heads to Shared Interventions: Contextual Entrainment in Language Models,t,latex,done,0,
+circuits,2610.20683,must_read,Causal Syntax Circuits in CodeLMs: Budget and Probe Decide What Looks Localised,t,latex,done,0,
+circuits,2610.20748,must_read,Interpreting Language Model Parameters,t,latex,done,0,
+circuits,2610.20887,relevant,Do Emergent Misalignment Models Share a Circuit?,t,latex,done,0,
+circuits,2610.21176,must_read,Language Models Share a Readout Bottleneck in Working Memory,t,latex,done,0,
+circuits,2610.21638,relevant,Spurious Attention Heads in Vision Transformers: Mechanistic Identification of Annotation-Driven Bias in Medical Chest X-Ray Analysis,t,latex,done,0,
+cot-faithfulness,2610.18105,must_read,Chain of Thought Monitoring Can Fail Even When CoT Is Necessary,t,latex,done,0,
+cot-monitoring,2610.18105,must_read,Chain of Thought Monitoring Can Fail Even When CoT Is Necessary,t,latex,done,0,
