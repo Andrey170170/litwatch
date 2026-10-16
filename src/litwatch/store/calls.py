@@ -207,15 +207,15 @@ async def mean_cost(
 ) -> float | None:
     """What a call of `role` on `provider`, `model` and `effort` alike cost on average over
     its latest `last` billed calls (reused replies left out), or None when it has none: what an
-    estimate goes by. Calls under another provider or effort, or sent in a batch, are left out,
-    as they cost differently (an estimate is of normal calls)."""
+    estimate goes by. Calls under another provider or effort, or answered in a batch, are left
+    out, as they cost differently (an estimate is of normal calls)."""
     row = await (
         await conn.execute(
             "SELECT avg(cost) AS cost FROM (SELECT (usage->>'cost')::float AS cost "
             "FROM inference_calls WHERE operation = %s AND usage->>'model' = %s "
             "AND usage->>'via' = %s AND usage->>'effort' IS NOT DISTINCT FROM %s "
             "AND usage->>'cost' IS NOT NULL AND NOT coalesce((usage->>'reused')::boolean, false) "
-            "AND batch_id IS NULL ORDER BY id DESC LIMIT %s) recent",
+            "AND usage->>'service_tier' IS DISTINCT FROM 'batch' ORDER BY id DESC LIMIT %s) recent",
             (role, model, provider, effort, last),
         )
     ).fetchone()

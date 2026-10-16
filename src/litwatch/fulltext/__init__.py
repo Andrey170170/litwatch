@@ -266,14 +266,14 @@ async def work(
     worker's. The calls go on `run`, or on a run of kind `fulltext` opened only when some text
     arrived. Returns how the tries ended.
 
-    A batching `run` claims all the automatic passes due at once, held until its gateway's
-    deadline, and leaves the owner's to the service's worker; without a run, while another
-    job holds the run lock, only the owner's are worked (models.md, batches)."""
+    A `run` (a nightly) leaves the owner's passes to the service's worker; batching, it claims
+    all the automatic ones due at once, held until its gateway's deadline. Without a run, while
+    another job holds the run lock, only the owner's are worked (models.md, batches)."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
-    lease, wide, owners = LEASE, False, None
+    lease, wide, owners = LEASE, False, False if run else None
     if run and (until := run.gateway.batching_until()):
-        lease, wide, owners = until - datetime.now(UTC) + DRAIN + LEASE, True, False
+        lease, wide = until - datetime.now(UTC) + DRAIN + LEASE, True
     reads = asyncio.Semaphore(CONCURRENCY)
 
     async def read_one(c: Claimed) -> Attempt:

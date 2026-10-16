@@ -349,8 +349,11 @@ async def test_the_estimate_goes_by_the_journal_and_counts_what_is_left(conn, mo
     judge = CONFIG.models.judge.model_copy(update={"effort": "high"})
     harder = CONFIG.model_copy(update={"models": CONFIG.models.model_copy(update={"judge": judge})})
     assert (await replay.estimate(conn, harder, r))["grading"] == pytest.approx(3 * (0.003 + 0.001))
-    # Nor are calls sent in a batch, at half price, what a replay's normal calls go by.
+    # A call a batch did not answer, sent normally on its row, is a normal call to go by.
     await conn.execute("UPDATE inference_calls SET batch_id = 'msgbatch_1'")
+    assert await replay.estimate(conn, CONFIG, r) == pytest.approx(again)
+    # Calls answered in a batch, at half price, are not what a replay's normal calls go by.
+    await conn.execute('UPDATE inference_calls SET usage = usage || \'{"service_tier": "batch"}\'')
     assert await replay.estimate(conn, CONFIG, r) == pytest.approx(first)
 
 

@@ -817,11 +817,11 @@ async def nightly_running(conn):
         yield
 
 
-async def batching_work(conn, writer, fake, anthropic):
-    """`fulltext.work` as a batching nightly runs it."""
+async def batching_work(conn, writer, fake, anthropic, until=None):
+    """`fulltext.work` as a nightly runs it, batching until `until` (the night's deadline)."""
     gateway = factory(writer.respond, anthropic)
     async with model_run(conn, ft.CONFIG, "nightly", gateway=gateway) as run:
-        run.gateway.batch_until(tonight()[1])
+        run.gateway.batch_until(until or tonight()[1])
         try:
             return await fulltext.work(conn, ft.CONFIG, ft.archive(fake), run=run)
         finally:
@@ -863,10 +863,14 @@ async def test_a_worker_leaves_the_nightly_its_passes_from_the_claim_after_it_st
     assert await ft.work(conn, ft.ready(FakeArchive()), ft.Writer()) == {"briefs_written": 1}
 
 
+@pytest.mark.parametrize("batched", [True, False], ids=["batched", "late"])
 @pytest.mark.parametrize("action", ["now", "pdf"])
-async def test_during_a_nightly_the_owners_pass_is_the_workers_at_once(conn, monkeypatch, action):
-    """V8: "run it now" and "Use the PDF" make the pass the owner's: the batching nightly leaves
-    it, and the service's worker runs it with a normal call while the nightly holds the lock."""
+async def test_during_a_nightly_the_owners_pass_is_the_workers_at_once(
+    conn, monkeypatch, action, batched
+):
+    """V8: "run it now" and "Use the PDF" make the pass the owner's: the nightly leaves it,
+    batching or not (`late`: past its deadline), and the service's worker runs it with a normal
+    call while the nightly holds the lock."""
     monkeypatch.setattr("litwatch.archive.text.pdf_to_markdown", lambda pdf: "From the PDF. " * 40)
     await passing(conn)
     writer = ft.Writer()
@@ -878,8 +882,9 @@ async def test_during_a_nightly_the_owners_pass_is_the_workers_at_once(conn, mon
         assert (await http.post(f"/api/settings/fulltext/{row['id']}/{action}")).status_code == 204
     fake = ft.ready(FakeArchive())
     anthropic = BatchingProvider("anthropic", writer.respond)
+    until = None if batched else datetime.now(UTC)
     async with nightly_running(conn):
-        assert await batching_work(conn, writer, fake, anthropic) == {}
+        assert await batching_work(conn, writer, fake, anthropic, until) == {}
         assert await ft.work(conn, fake, writer) == {"briefs_written": 1}
     assert anthropic.batches == {}
 
