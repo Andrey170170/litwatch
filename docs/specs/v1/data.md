@@ -202,10 +202,10 @@ The archive is required: texts, PDFs and search come from it. Its storage policy
 
 Secrets and the service's process settings come from the environment, each secret also as `NAME_FILE` naming a file
 that holds it: `LITWATCH_DATABASE_URL` (or `LITWATCH_DB_HOST` and its siblings), `LITWATCH_API_TOKEN`,
-`LITWATCH_READ_TOKEN`, the provider keys, the archive's URL and token. `LITWATCH_LOG_FORMAT=json` writes one JSON
-object per line (`ts`, `level`, `msg`, `component`); the image sets it. `LITWATCH_METRICS_PORT` (or `litwatch serve
---metrics-port`) serves, without a token, `/metrics` in Prometheus' text format (the `homelab_job_*` family for the
-nightly and publications jobs, read from the run records, and litwatch's own gauges) and `/status` as a
-`homelab.status/v1` document (the nightly, the pipeline's stopped papers, digests, each integration, the archive,
-deep, the budget), for a monitoring system on an internal network. A run records the database session of the
-process running it, so a run whose process died reads as failed rather than running.
+`LITWATCH_READ_TOKEN`, the provider keys, the archive's token; the archive's URL is `LITWATCH_ARCHIVE_URL`.
+`LITWATCH_LOG_FORMAT=json` writes one JSON object per line (`ts`, `level`, `msg`, `component`); the image sets it.
+`LITWATCH_METRICS_PORT` (or `litwatch serve --metrics-port`) serves, without a token, `/metrics` in Prometheus' text
+format (the `homelab_job_*` family for the nightly and publications jobs, read from the run records, and litwatch's
+own gauges) and `/status` as a `homelab.status/v1` document (the nightly, the pipeline's stopped papers, digests, each
+integration, the archive, deep, the budget), for a monitoring system on an internal network. A run records the
+database session of the process running it, so a run whose process died reads as failed rather than running.

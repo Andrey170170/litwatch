@@ -307,8 +307,9 @@ def secret(name: str) -> str | None:
 
 
 def database_url() -> str:
-    """A full DSN, or one assembled from LITWATCH_DB_HOST/NAME/USER and a password file."""
-    if url := os.environ.get("LITWATCH_DATABASE_URL"):
+    """A full DSN (itself a secret, so also from a file), or one assembled from
+    LITWATCH_DB_HOST/NAME/USER and a password file."""
+    if url := secret("LITWATCH_DATABASE_URL"):
         return url
     host = os.environ.get("LITWATCH_DB_HOST")
     if not host:

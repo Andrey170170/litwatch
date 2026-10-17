@@ -91,3 +91,11 @@ def test_a_database_password_with_url_characters_is_quoted(monkeypatch):
     url = urlsplit(config.database_url())
     assert (url.hostname, url.port, url.path) == ("db", 5432, "/litwatch")
     assert unquote(url.password) == odd
+
+
+def test_a_database_url_is_read_from_its_file(monkeypatch, tmp_path):
+    (tmp_path / "url").write_text("postgresql://u@db/litwatch\n")
+    monkeypatch.delenv("LITWATCH_DATABASE_URL", raising=False)
+    monkeypatch.delenv("LITWATCH_DB_HOST", raising=False)
+    monkeypatch.setenv("LITWATCH_DATABASE_URL_FILE", str(tmp_path / "url"))
+    assert config.database_url() == "postgresql://u@db/litwatch"
