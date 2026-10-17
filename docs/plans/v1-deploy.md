@@ -96,7 +96,9 @@ stay untouched (R1).
   `litwatch intake archive --since 2026-10-09 --until <the day before the switch night>` (no model calls), then
   `litwatch nightly --no-digests` started at 02:00 inside the container (a transient timer, `systemd-run --user
   --on-calendar`), so it batches as the scheduled nightly would (a nightly started by hand inside the window
-  batches; decision 60). `--no-digests` also skips the nightly's wait for texts, and with the scheduler off the
+  batches; decision 60). It keeps its arXiv fetch on purpose: the archive intake ends the day before, and the fetch
+  brings the switch day's listing, which today's digest needs (it re-reads the last three days too, which the
+  archive already gave, at no model cost). `--no-digests` also skips the nightly's wait for texts, and with the scheduler off the
   service's full-text worker does not run, so in the morning `litwatch fulltext --wait 3600` first works the passes
   still left (awaiting text from the archive, or past the deadline; normal calls, as N6's step 3). Then `litwatch
   digests write --since 2026-10-12 --until <the switch day>` writes every day of the window in order, today's
@@ -105,7 +107,8 @@ stay untouched (R1).
   stopping the process does not cancel it, so a kill-at-a-cap watchdog (N6's `cap.sh`) cannot hold a line here.
   Instead the count and the estimate are shown first (pipeline.md): about $20 for about 3,300 papers at P3's
   measured $6.19 per 1,000, plus about $2 of digests at full price; at most about $45 if nothing were batched. The
-  owner confirms the count and the bound before the timer is set.
+  count shown adds one day's listing (about 500 papers) for the switch day the nightly fetches. The owner confirms
+  the count and the bound before the timer is set.
 - **Zotero keeps its collections under their new names.** The integration finds its subcollections by name and
   defaults to 0.x's "Tier 1" and "Tier 2", so switch-on sets `subcollections = {must_read = "Must read", relevant =
   "Relevant"}` in `[integrations.zotero]` after the owner renames the two in his library; the existing collections
