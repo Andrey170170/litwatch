@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+import contextlib
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -16,7 +16,7 @@ import yaml
 from rich.console import Console
 
 from litwatch import config as configuration
-from litwatch import seeds, store
+from litwatch import logs, seeds, store
 from litwatch.archive import ArchiveError
 from litwatch.core import Paper, Taxonomy
 from litwatch.feedback import word
@@ -25,7 +25,7 @@ from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
-from litwatch.jobs.lock import run_lock
+from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.publications import Dblp
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
@@ -63,8 +63,7 @@ Until = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The last da
 
 def _run[T](work: Callable[[psycopg.AsyncConnection], Awaitable[T]], *, migrate: bool = True) -> T:
     """Run `work` on a connection to the configured database, migrated first."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logs.setup()
 
     async def main() -> T:
         async with await store.connect(configuration.database_url()) as conn:
@@ -74,7 +73,7 @@ def _run[T](work: Callable[[psycopg.AsyncConnection], Awaitable[T]], *, migrate:
 
     try:
         return asyncio.run(main())
-    except store.LegacyDatabaseError as exc:
+    except (store.LegacyDatabaseError, BusyError) as exc:
         raise SystemExit(str(exc)) from exc
 
 
@@ -580,13 +579,20 @@ def publications(
 def serve(
     host: Annotated[str, typer.Option(help="Address to listen on.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to listen on.")] = 8080,
+    metrics_port: Annotated[
+        int | None,
+        typer.Option(
+            envvar="LITWATCH_METRICS_PORT",
+            min=1,
+            max=65535,
+            help="Also serve /metrics and /status, without a token, on this port of --host.",
+        ),
+    ] = None,
     config: ConfigPath = None,
 ) -> None:
     """Serve the API and the web app, with the integrations the
     configuration enables. Needs LITWATCH_API_TOKEN; LITWATCH_READ_TOKEN, if set, is a
     second token that may only search and read papers (for the deep service)."""
-    import uvicorn  # noqa: PLC0415
-
     from litwatch.api import create_app  # noqa: PLC0415
 
     token = configuration.secret("LITWATCH_API_TOKEN")
@@ -610,7 +616,38 @@ def serve(
         read_token=configuration.secret("LITWATCH_READ_TOKEN"),
         archive=fulltext.archive_for(cfg),
     )
-    uvicorn.run(app_, host=host, port=port)
+    logs.setup()
+    asyncio.run(_serve(app_, host, port, metrics_port))
+
+
+async def _serve(app_: Any, host: str, port: int, metrics_port: int | None) -> None:
+    """The app, and the monitoring app beside it on `metrics_port`. The app's server owns the
+    signals; when either server stops, for a signal or a failure, the other stops too, and a
+    failure is raised."""
+    import uvicorn  # noqa: PLC0415
+
+    from litwatch.api.monitor import create_monitor  # noqa: PLC0415
+
+    class _Beside(uvicorn.Server):
+        @contextlib.contextmanager
+        def capture_signals(self) -> Iterator[None]:
+            yield
+
+    main = uvicorn.Server(uvicorn.Config(app_, host=host, port=port, log_config=None))
+    if metrics_port is None:
+        await main.serve()
+        return
+    beside = _Beside(
+        uvicorn.Config(
+            create_monitor(app_), host=host, port=metrics_port, log_config=None, lifespan="off"
+        )
+    )
+    tasks = [asyncio.create_task(main.serve()), asyncio.create_task(beside.serve())]
+    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    main.should_exit = beside.should_exit = True
+    await asyncio.gather(*tasks)
+    if not main.started or not beside.started:
+        raise SystemExit("a server could not start")
 
 
 @app.command("openapi")

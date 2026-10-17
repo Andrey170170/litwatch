@@ -11,7 +11,7 @@ from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Opinion, Pu
 from litwatch.feedback import word
 from litwatch.integrations import webdav as webdav_mod
 from litwatch.integrations.webdav import WebDav, WebDAVWriter
-from litwatch.integrations.zotero import Zotero, ZoteroClient, attachment_filename
+from litwatch.integrations.zotero import Zotero, ZoteroClient, attachment_filename, is_item_of
 from litwatch.jobs import publications as lookups
 from litwatch.store import integrations as state
 from litwatch.store import outbox, verdicts
@@ -155,6 +155,39 @@ async def test_an_item_0x_made_is_found_and_updated_not_made_again(world):
         "litwatch:watch:cot-faithfulness:must_read",
     }
     assert fake.collection_names("OLDITEM1") == {"MINE", "Litwatch", "Tier 1"}
+
+
+async def test_an_item_whose_title_differs_is_found_by_its_arxiv_id(world):
+    conn, fake = world, FakeZotero()
+    # The owner retitled 0.x's item; another item only cites the paper in its abstract.
+    fake.add_item(
+        "CITES001",
+        {"itemType": "preprint", "title": "A survey", "abstractNote": "Builds on 2610.00001."},
+    )
+    fake.add_item(
+        "CITES002",
+        {
+            "itemType": "preprint",
+            "title": "A reply",
+            "url": "https://arxiv.org/abs/2610.00002",
+            "extra": "Related: https://arxiv.org/abs/2610.00001",
+        },
+    )
+    fake.add_item(
+        "OLDITEM1",
+        {
+            "itemType": "preprint",
+            "title": "Hidden steps (my notes)",
+            "url": "https://arxiv.org/abs/2610.00001v1",
+        },
+    )
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+
+    assert len(fake.tops()) == 3
+    assert await state.zotero_item(conn, P.id) == "OLDITEM1"
 
 
 async def test_grades_published_versions_and_cards_reach_the_notes(world):
@@ -447,3 +480,27 @@ async def test_an_item_made_again_gets_its_pdf_again(world, pdfs):
         "state": "stored",
     }
     assert f"{attachment}.prop" in dav.files
+
+
+def test_an_item_is_the_papers_by_its_own_identifiers_only():
+    assert is_item_of({"url": "https://arxiv.org/pdf/2610.00001v3.pdf"}, "2610.00001")
+    assert is_item_of({"archiveID": "arXiv:2610.00001"}, "2610.00001")
+    assert is_item_of({"DOI": "10.48550/arXiv.2610.00001"}, "2610.00001")
+    assert is_item_of({"extra": "tex.key: x\narXiv: 2610.00001v2"}, "2610.00001")
+    assert is_item_of({"url": "https://arxiv.org/abs/hep-th/9901001"}, "hep-th/9901001")
+    assert not is_item_of({"url": "https://arxiv.org/abs/2610.000012"}, "2610.00001")
+    assert is_item_of({"url": "https://arxiv.org/html/2610.00001v1"}, "2610.00001")
+    assert is_item_of({"url": "https://arxiv.org/abs/2610.00001?context=cs#S2"}, "2610.00001")
+    assert not is_item_of({"url": "https://example.org/abs/2610.00001"}, "2610.00001")
+    # A URL that is no URL neither names the paper nor stops the other identifiers.
+    assert not is_item_of({"url": "https://["}, "2610.00001")
+    assert is_item_of({"url": "https://[", "DOI": "10.48550/arXiv.2610.00001"}, "2610.00001")
+    assert not is_item_of({"extra": "Related: https://arxiv.org/abs/2610.00001"}, "2610.00001")
+    assert not is_item_of({"abstractNote": "2610.00001"}, "2610.00001")
+    # The Extra line litwatch itself writes, on an item since moved to its published version.
+    assert is_item_of(
+        {"url": "https://doi.org/10.1/x", "extra": "arXiv:2610.00001 [cs.CL]"}, "2610.00001"
+    )
+    # A standalone PDF is no paper's item: notes cannot hang under it.
+    pdf = {"itemType": "attachment", "url": "https://arxiv.org/pdf/2610.00001"}
+    assert not is_item_of(pdf, "2610.00001")

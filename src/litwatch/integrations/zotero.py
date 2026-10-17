@@ -34,6 +34,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import psycopg
@@ -119,6 +120,37 @@ class Collections:
     @property
     def managed(self) -> set[str]:
         return {self.root, *self.by_grade.values()}
+
+
+def _url_path(url: Any) -> str:
+    """The path of an arXiv URL, whatever its query or fragment; "" for any other host, or for
+    a value that is no URL."""
+    try:
+        parts = urlsplit(str(url).strip())
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return ""
+    return parts.path if host in ("arxiv.org", "www.arxiv.org", "export.arxiv.org") else ""
+
+
+def is_item_of(data: dict[str, Any], arxiv_id: str) -> bool:
+    """Whether a Zotero item's own identifiers name this arXiv paper: its arXiv URL (abstract,
+    PDF or HTML page), its archive ID (`arXiv:<id>`), its arXiv DOI, or an `arXiv: <id>` line
+    in Extra, with the category litwatch writes after it or not; any version. An attachment or
+    a note is no paper's item: litwatch hangs its notes under the item."""
+    if data.get("itemType") in ("attachment", "note"):
+        return False
+    paper = re.escape(arxiv_id) + r"(v\d+)?"
+    own = [
+        (_url_path(data.get("url", "")), rf"^/(abs|pdf|html)/{paper}(\.pdf)?/?$"),
+        (data.get("archiveID", ""), rf"^arxiv:\s*{paper}$"),
+        (data.get("DOI", ""), rf"^(https?://doi\.org/)?10\.48550/arxiv\.{paper}$"),
+        *(
+            (line, rf"^arxiv:\s*{paper}(\s*\[[^\]]*\])?$")
+            for line in str(data.get("extra", "")).splitlines()
+        ),
+    ]
+    return any(re.match(pattern, str(value).strip(), re.IGNORECASE) for value, pattern in own)
 
 
 class ZoteroClient:
@@ -257,14 +289,21 @@ class ZoteroClient:
     # -- items --------------------------------------------------------------------------------
 
     async def find_item(self, paper: Paper) -> str | None:
-        """An existing top-level item for this paper, by arXiv id or exact title."""
+        """An existing top-level item for this paper: by its arXiv id in the item's fields,
+        whatever its title (the owner may have edited it, or a revision retitled the paper),
+        else by exact title."""
+        rows = await self._get_all("/items/top", q=paper.id, qmode="everything", itemType="-note")
+        for row in rows:
+            # "everything" also matches an item that only cites the paper, so the id must be
+            # the item's own.
+            if is_item_of(row["data"], paper.id):
+                return row["key"]
         rows = await self._get_all(
             "/items/top", q=paper.title, qmode="titleCreatorYear", itemType="-note"
         )
         for row in rows:
-            data = row["data"]
-            haystack = " ".join(str(data.get(k, "")) for k in ("url", "extra", "archiveID", "DOI"))
-            if paper.id in haystack or _norm(data.get("title", "")) == _norm(paper.title):
+            own = row["data"].get("itemType") not in ("attachment", "note")
+            if own and _norm(row["data"].get("title", "")) == _norm(paper.title):
                 return row["key"]
         return None
 

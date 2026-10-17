@@ -69,6 +69,11 @@ class DeepClient:
         self.poll_seconds = poll_seconds
         self.timeout_seconds = timeout_seconds
 
+    async def health(self) -> None:
+        """Raise unless the service answers its health check."""
+        resp = await self.http.get(f"{self.base_url}/healthz", timeout=10.0)
+        resp.raise_for_status()
+
     async def submit(self, submission: dict[str, Any]) -> str:
         """Submit one paper; returns the job's id. The service does not deduplicate, so a
         caller records the attempt before and the job after, and never submits twice."""

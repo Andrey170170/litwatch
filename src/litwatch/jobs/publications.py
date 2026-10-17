@@ -12,6 +12,7 @@ import psycopg
 from litwatch import events
 from litwatch.core import Publication
 from litwatch.jobs.context import run_record
+from litwatch.jobs.lock import job_lock
 from litwatch.publications.dblp import PublicationSource, SourceError
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
@@ -93,8 +94,9 @@ async def for_copy(
 async def run(
     conn: psycopg.AsyncConnection, source: PublicationSource, limit: int = LIMIT
 ) -> dict[str, int]:
-    """Look up the library papers that are due, as a `publications` run."""
-    async with run_record(conn, "publications") as record:
+    """Look up the library papers that are due, as a `publications` run. Runs never overlap:
+    each takes its due papers once, so one that died beside another would go unseen."""
+    async with job_lock(conn, "publications"), run_record(conn, "publications") as record:
         record.fields["cost"] = 0
         counts = record.counts
         counts |= {"looked_up": 0, "found": 0, "failed": 0}

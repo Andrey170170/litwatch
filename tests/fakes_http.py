@@ -58,10 +58,17 @@ class FakeZotero:
             return self._page(list(self.collections.values()), query)
         if path == "/items/top":
             q = query["q"][0].lower()
+            # "everything" searches every field (and attachments' full text); otherwise titles.
+            everything = query.get("qmode") == ["everything"]
+
+            def searched(data: dict[str, Any]) -> str:
+                fields = [v for v in data.values() if isinstance(v, str)] if everything else []
+                return " ".join([data.get("title", ""), *fields]).lower()
+
             rows = [
                 i
                 for i in self.items.values()
-                if not i["data"].get("parentItem") and q in i["data"].get("title", "").lower()
+                if not i["data"].get("parentItem") and q in searched(i["data"])
             ]
             return self._page(rows, query)
         if path.endswith("/children"):

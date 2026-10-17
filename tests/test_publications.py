@@ -12,6 +12,7 @@ from litwatch.config import Config
 from litwatch.core import Hand, Publication
 from litwatch.feedback import word
 from litwatch.jobs import publications as lookups
+from litwatch.jobs.lock import BusyError, job_lock
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
@@ -186,6 +187,20 @@ async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db
     # The same record found again is no new event.
     await lookups.look_up(db, source, P.id)
     assert await events(db) == [P.id]
+
+
+async def test_runs_never_overlap(db):
+    # Each run takes its due papers once: one beside another could die unseen (monitoring).
+    other = await store_sibling(db)
+    try:
+        async with job_lock(other, "publications"):
+            with pytest.raises(BusyError):
+                await lookups.run(db, Source())
+        # The scheduler holds the same lock while it runs the job: its session may.
+        async with job_lock(db, "publications"):
+            assert (await lookups.run(db, Source()))["looked_up"] == 2
+    finally:
+        await other.close()
 
 
 async def test_a_run_stops_when_dblp_keeps_failing(db, monkeypatch):

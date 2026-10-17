@@ -19,13 +19,46 @@ async def start(
     window_from: datetime | None = None,
     window_to: datetime | None = None,
 ) -> int:
+    """Open a run on `conn`, the connection its job keeps for as long as it runs: the run records
+    that session, and is alive while it lasts (`ALIVE`)."""
     row = await (
         await conn.execute(
-            "INSERT INTO runs (kind, window_from, window_to) VALUES (%s, %s, %s) RETURNING id",
+            "INSERT INTO runs (kind, window_from, window_to, backend_pid, backend_start) "
+            "SELECT %s, %s, %s, pid, backend_start FROM pg_stat_activity "
+            "WHERE pid = pg_backend_pid() RETURNING id",
             (kind, window_from, window_to),
         )
     ).fetchone()
     return row["id"]
+
+
+# Whether run `r`'s process still has its session. A process that dies without closing its run
+# (killed, out of memory) loses its session with it, so its run is over: open, not alive.
+ALIVE = (
+    "EXISTS (SELECT 1 FROM pg_stat_activity a "
+    "WHERE a.pid = r.backend_pid AND a.backend_start = r.backend_start)"
+)
+
+
+async def latest(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
+    """The newest run of `kind`, with `alive`."""
+    return await (
+        await conn.execute(
+            f"SELECT r.*, {ALIVE} AS alive FROM runs r WHERE kind = %s ORDER BY id DESC LIMIT 1",
+            (kind,),
+        )
+    ).fetchone()
+
+
+async def last_success(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
+    """The newest run of `kind` that finished without an error."""
+    return await (
+        await conn.execute(
+            "SELECT * FROM runs WHERE kind = %s AND finished_at IS NOT NULL AND error IS NULL "
+            "ORDER BY id DESC LIMIT 1",
+            (kind,),
+        )
+    ).fetchone()
 
 
 async def first_since(conn: psycopg.AsyncConnection, kind: str, since: datetime) -> datetime | None:
