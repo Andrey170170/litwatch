@@ -9,7 +9,7 @@ scheduler on until 2026-10-14; it is now stopped. Most of that code stays: the r
 issues, and adds classification, analysis, the full-text queue and digests.
 
 The milestones below replace the first spec's M7 for everything up to the switch. Each ends with something that runs
-and a stated check. Each milestone is one or more PRs into `v1`, shipped as
+and a stated check. Each milestone is one or more PRs, into `v1` until the switch and into `main` since, shipped as
 [`docs/agents/workflow.md`](../../agents/workflow.md) says. The order of work, the PRs and their evidence are in
 the build plan, [`docs/plans/v1-build.md`](../../plans/v1-build.md) (approved 2026-10-14): the archive's code moves
 in first (decision 49), and the web app (N7) is built from N2 onward, beside the core.
@@ -39,9 +39,11 @@ the archive's size in the search box; Use the PDF; a PDF read without the AGPL e
 backup and one-transaction recovery reconcile). N6, the restart (#71,
 `evals/2026-10-16-restart.md`), over one week rather than two by the owner's call of 2026-10-16 (the week before comes
 with the backfill). Next: the owner's read of N3's ten Briefs; the owner's instance applies the PDF
-policy; the model-spend plan ([`docs/plans/model-spend.md`](../../plans/model-spend.md), decisions 60–62), which brings
-the nightly under the owner's caps before the switch (#74, #75); then N8, the switch
-([`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md)).
+policy. The model-spend plan ([`docs/plans/model-spend.md`](../../plans/model-spend.md), decisions 60–62) brought
+the nightly under the owner's caps before the switch (#74, #75). N8, the switch
+([`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md)): the telemetry (#77), and v1 in place of 0.14 on the night of
+2026-10-16, accepted by the owner on 10-17 ([`evals/2026-10-17-switch.md`](../../../evals/2026-10-17-switch.md)), when
+`v1` merged into `main`. Next: N8's P4, Zotero and WebDAV after a few stable nights and the removal of 0.14.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).

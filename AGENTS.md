@@ -1,8 +1,8 @@
 # litwatch
 
 litwatch reads every new arXiv paper in its categories, sorts and judges each against the owner's topics, and serves
-the results through its own web app. It is single-user and self-hosted. Branch `v1` is a rework in progress; release
-0.14 on `main` is what runs in production.
+the results through its own web app. It is single-user and self-hosted. v1, on `main`, runs in
+production since 2026-10-17, in place of release 0.14.
 
 ## Where things are
 
