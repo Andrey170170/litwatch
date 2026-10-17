@@ -50,6 +50,18 @@ async def latest(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | N
     ).fetchone()
 
 
+async def running(conn: psycopg.AsyncConnection, kind: str) -> bool:
+    """Whether any run of `kind` is open and alive: jobs without the run lock may overlap."""
+    row = await (
+        await conn.execute(
+            f"SELECT EXISTS (SELECT 1 FROM runs r WHERE kind = %s AND finished_at IS NULL "
+            f"AND {ALIVE}) AS running",
+            (kind,),
+        )
+    ).fetchone()
+    return row["running"]
+
+
 async def last_success(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
     """The newest run of `kind` that finished without an error."""
     return await (

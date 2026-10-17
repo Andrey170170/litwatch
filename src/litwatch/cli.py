@@ -583,6 +583,8 @@ def serve(
         int | None,
         typer.Option(
             envvar="LITWATCH_METRICS_PORT",
+            min=1,
+            max=65535,
             help="Also serve /metrics and /status, without a token, on this port of --host.",
         ),
     ] = None,
@@ -620,7 +622,8 @@ def serve(
 
 async def _serve(app_: Any, host: str, port: int, metrics_port: int | None) -> None:
     """The app, and the monitoring app beside it on `metrics_port`. The app's server owns the
-    signals; when it stops, the monitoring server stops with it."""
+    signals; when either server stops, for a signal or a failure, the other stops too, and a
+    failure is raised."""
     import uvicorn  # noqa: PLC0415
 
     from litwatch.api.monitor import create_monitor  # noqa: PLC0415
@@ -639,12 +642,12 @@ async def _serve(app_: Any, host: str, port: int, metrics_port: int | None) -> N
             create_monitor(app_), host=host, port=metrics_port, log_config=None, lifespan="off"
         )
     )
-    task = asyncio.create_task(beside.serve())
-    try:
-        await main.serve()
-    finally:
-        beside.should_exit = True
-        await task
+    tasks = [asyncio.create_task(main.serve()), asyncio.create_task(beside.serve())]
+    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    main.should_exit = beside.should_exit = True
+    await asyncio.gather(*tasks)
+    if not main.started or not beside.started:
+        raise SystemExit("a server could not start")
 
 
 @app.command("openapi")

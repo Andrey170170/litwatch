@@ -121,6 +121,19 @@ class Collections:
         return {self.root, *self.by_grade.values()}
 
 
+def is_item_of(data: dict[str, Any], arxiv_id: str) -> bool:
+    """Whether a Zotero item's own identifiers name this arXiv paper: its arXiv URL, its
+    archive ID (`arXiv:<id>`), its arXiv DOI, or an `arXiv: <id>` line in Extra; any version."""
+    paper = re.escape(arxiv_id) + r"(v\d+)?"
+    own = [
+        (data.get("url", ""), rf"^https?://(www\.)?arxiv\.org/(abs|pdf)/{paper}(\.pdf)?/?$"),
+        (data.get("archiveID", ""), rf"^arxiv:\s*{paper}$"),
+        (data.get("DOI", ""), rf"^(https?://doi\.org/)?10\.48550/arxiv\.{paper}$"),
+        *((line, rf"^arxiv:\s*{paper}$") for line in str(data.get("extra", "")).splitlines()),
+    ]
+    return any(re.match(pattern, str(value).strip(), re.IGNORECASE) for value, pattern in own)
+
+
 class ZoteroClient:
     """Thin async wrapper over the Web API v3. Writes are conflict-aware: read, mutate, PATCH
     with the version."""
@@ -262,10 +275,9 @@ class ZoteroClient:
         else by exact title."""
         rows = await self._get_all("/items/top", q=paper.id, qmode="everything", itemType="-note")
         for row in rows:
-            data = row["data"]
-            # "everything" also matches the full text of a PDF that cites the paper.
-            haystack = " ".join(str(data.get(k, "")) for k in ("url", "extra", "archiveID", "DOI"))
-            if paper.id in haystack:
+            # "everything" also matches an item that only cites the paper, so the id must be
+            # the item's own.
+            if is_item_of(row["data"], paper.id):
                 return row["key"]
         rows = await self._get_all(
             "/items/top", q=paper.title, qmode="titleCreatorYear", itemType="-note"

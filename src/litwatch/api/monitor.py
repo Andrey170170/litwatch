@@ -31,9 +31,17 @@ SERVICE = "litwatch"
 JOBS = {"nightly": "classified", "publications": "looked_up"}
 # The owner reads at 09:00; the nightly's deadline is 07:30 by default, its digests done by it.
 READY_AFTER_DEADLINE = timedelta(minutes=90)
-PROBE_SECONDS = 5.0
+# Probes run together, inside the ten seconds Prometheus and Vergil wait for an answer.
+PROBE_SECONDS = 3.0
 # A lag past this many events, on an integration that is not failing, is worth a look.
 LAG_DEGRADED = 500
+
+
+@dataclass
+class Job:
+    latest: dict | None  # the newest run
+    success: dict | None  # the newest that finished without an error
+    running: bool  # some run is open and alive
 
 
 @dataclass
@@ -41,7 +49,7 @@ class Facts:
     """What both endpoints are built from, read once per request."""
 
     now: datetime
-    jobs: dict[str, tuple[dict | None, dict | None]]  # kind: (latest run, last success)
+    jobs: dict[str, Job]
     status: dict[str, Any]  # the status line's (`store.reading.status`)
     passes: dict[tuple[str, str], int]
     cursors: dict[str, Cursor]  # of the loaded integrations
@@ -56,7 +64,14 @@ async def facts(
     archive: ArchiveClient | None,
 ) -> Facts:
     now = datetime.now(UTC)
-    jobs = {k: (await runs.latest(conn, k), await runs.last_success(conn, k)) for k in JOBS}
+    jobs = {
+        k: Job(
+            await runs.latest(conn, k),
+            await runs.last_success(conn, k),
+            await runs.running(conn, k),
+        )
+        for k in JOBS
+    }
     found = Facts(
         now=now,
         jobs=jobs,
@@ -65,10 +80,13 @@ async def facts(
         cursors=await outbox.cursors(conn, [i.name for i in integrations]),
         spend=await budget_lines(conn, config.budget),
     )
+    probes = {}
     if archive is not None:
-        found.probes["archive"] = await _probe(archive.indexed())
+        probes["archive"] = archive.indexed()
     for deep in (i for i in integrations if isinstance(i, Deep)):
-        found.probes["deep"] = await _probe(deep.client.health())
+        probes["deep"] = deep.client.health()
+    answers = await asyncio.gather(*map(_probe, probes.values()))
+    found.probes = dict(zip(probes, answers, strict=True))
     return found
 
 
@@ -90,6 +108,11 @@ def _ts(at: datetime | None) -> float | None:
     return at.timestamp() if at else None
 
 
+def _escaped(value: str) -> str:
+    """A label value as the text format wants it."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
 def metrics(f: Facts) -> str:
     """The exposition: the homelab's `homelab_job_*` family for the scheduler's jobs, then
     litwatch's own gauges. Labels are bounded: job, step, pass kind and state, integration,
@@ -101,41 +124,47 @@ def metrics(f: Facts) -> str:
         for labels, value in rows:
             if value is None:
                 continue
-            text = ",".join(f'{k}="{v}"' for k, v in labels.items())
+            text = ",".join(f'{k}="{_escaped(v)}"' for k, v in labels.items())
             number = repr(float(value))  # every digit: a timestamp needs ten
             out.append(f"{name}{{{text}}} {number}" if text else f"{name} {number}")
 
     def per_job(get: Any) -> list[tuple[dict[str, str], float | None]]:
-        return [({"job_id": f"{SERVICE}/{k}"}, get(k, *f.jobs[k])) for k in JOBS]
+        return [({"job_id": f"{SERVICE}/{k}"}, get(k, f.jobs[k])) for k in JOBS]
 
-    def duration(_: str, run: dict | None, __: dict | None) -> float | None:
+    def duration(_: str, job: Job) -> float | None:
+        run = job.latest
         if run is None or run["finished_at"] is None:
             return None
         return (run["finished_at"] - run["started_at"]).total_seconds()
 
-    def items(kind: str, run: dict | None, _: dict | None) -> float | None:
+    def items(kind: str, job: Job) -> float | None:
+        run = job.latest
         if run is None or run["finished_at"] is None:
             return None
         return (run["counts"] or {}).get(JOBS[kind], 0)
 
+    def last_success(_: str, job: Job) -> float | None:
+        # 0 before the first success, so `last_run > last_success` holds for a first failure.
+        if job.latest is None:
+            return None
+        return _ts(job.success["finished_at"]) if job.success else 0.0
+
     gauge(
         "homelab_job_last_run_timestamp_seconds",
         "Start of the last run.",
-        per_job(lambda _, run, __: _ts(run and run["started_at"])),
+        per_job(lambda _, job: _ts(job.latest and job.latest["started_at"])),
     )
     gauge(
         "homelab_job_last_success_timestamp_seconds",
         "End of the last successful run.",
-        per_job(lambda _, __, ok: _ts(ok and ok["finished_at"])),
+        per_job(last_success),
     )
     gauge("homelab_job_last_duration_seconds", "Duration of the last run.", per_job(duration))
     gauge("homelab_job_last_items", "Items handled by the last run.", per_job(items))
     gauge(
         "homelab_job_running",
         "1 while a run is in progress.",
-        per_job(
-            lambda _, run, __: float(bool(run and run["finished_at"] is None and run["alive"]))
-        ),
+        per_job(lambda _, job: float(job.running)),
     )
     s = f.status
     gauge(
@@ -221,13 +250,15 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
     """The status document's components, each with the observed and expected value in its
     reason whenever it is not healthy."""
     now, s, out = f.now, f.status, []
-    _, ok = f.jobs["nightly"]
+    ok = f.jobs["nightly"].success
     night = due_night(config, now)
     if s["state"] == "failed":
         out.append(_component("nightly", "failed", f"last run {s['run_id']}: {s['error']}", now))
-    elif s["state"] != "running" and night and (ok is None or ok["started_at"] < night[0]):
+    elif night and (ok is None or ok["started_at"] < night[0]):
+        # Running or not: past the time the owner reads, the night's results are late.
         last = ok["finished_at"].isoformat() if ok else "never"
-        reason = f"last successful nightly {last}; expected one by {night[1].isoformat()}"
+        running = "; a nightly is still running" if s["state"] == "running" else ""
+        reason = f"last successful nightly {last}; expected one by {night[1].isoformat()}{running}"
         out.append(_component("nightly", "degraded", reason, now))
     else:
         out.append(_component("nightly", "healthy", None, now))

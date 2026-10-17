@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from litwatch.api import create_app
-from litwatch.api.monitor import Facts, components, create_monitor, due_night, metrics
+from litwatch.api.monitor import Facts, Job, components, create_monitor, due_night, metrics
 from litwatch.config import Config, Schedule
 from litwatch.store import db, runs
 
@@ -75,7 +75,7 @@ async def test_a_nightly_whose_process_died_reads_failed_not_running(conn, monit
     text = (await monitor.get("/metrics")).text
     assert sample(text, "homelab_job_running") == 0
     assert sample(text, "homelab_job_last_run_timestamp_seconds") is not None
-    assert sample(text, "homelab_job_last_success_timestamp_seconds") is None
+    assert sample(text, "homelab_job_last_success_timestamp_seconds") == 0
     nightly = component((await monitor.get("/status")).json(), "nightly")
     assert nightly["status"] == "failed"
     assert "ended without closing it" in nightly["reason"]
@@ -84,6 +84,9 @@ async def test_a_nightly_whose_process_died_reads_failed_not_running(conn, monit
 async def test_a_run_that_raised_reads_failed_with_its_error(conn, monitor):
     run_id = await runs.start(conn, "nightly")
     await runs.finish(conn, run_id, error="RuntimeError: boom")
+    # Before the first success, last success is 0, so a first failure alerts as one.
+    text = (await monitor.get("/metrics")).text
+    assert sample(text, "homelab_job_last_success_timestamp_seconds") == 0
     nightly = component((await monitor.get("/status")).json(), "nightly")
     assert nightly["status"] == "failed"
     assert "boom" in nightly["reason"]
@@ -92,14 +95,15 @@ async def test_a_run_that_raised_reads_failed_with_its_error(conn, monitor):
 SCHEDULED = Config(schedule=Schedule(enabled=True, timezone="America/Denver"))
 
 
-def facts(now: datetime, success_started: datetime | None) -> Facts:
+def facts(now: datetime, success_started: datetime | None, running: bool = False) -> Facts:
     ok = (
         {"started_at": success_started, "finished_at": success_started} if success_started else None
     )
+    state = "running" if running else "quiet" if ok else "none"
     return Facts(
         now=now,
-        jobs={"nightly": (ok, ok), "publications": (None, None)},
-        status={"state": "quiet" if ok else "none", **STOPPED},
+        jobs={"nightly": Job(ok, ok, running), "publications": Job(None, None, False)},
+        status={"state": state, **STOPPED},
         passes={},
         cursors={},
         spend=[],
@@ -127,6 +131,10 @@ def test_a_missed_night_reads_degraded_and_a_done_one_healthy():
     late = components(facts(now, last_night), SCHEDULED)[0]
     assert late["status"] == "degraded"
     assert "expected one by 2026-10-20T09:00:00-06:00" in late["reason"]
+    # Still running past the time the owner reads: late all the same.
+    running = components(facts(now, last_night, running=True), SCHEDULED)[0]
+    assert running["status"] == "degraded"
+    assert "still running" in running["reason"]
     # The scheduler off (the switch night): no night is expected.
     assert components(facts(now, last_night), Config())[0]["status"] == "healthy"
 
@@ -153,3 +161,22 @@ def test_the_deadline_moves_due():
     late_deadline = Config(schedule=Schedule(enabled=True, timezone="UTC", deadline=time(9, 0)))
     _, due = due_night(late_deadline, datetime(2026, 10, 20, 12, 0, tzinfo=UTC))
     assert due == datetime(2026, 10, 20, 10, 30, tzinfo=UTC)
+
+
+async def test_overlapping_runs_read_running_until_both_end(conn, monitor):
+    # Publications takes no run lock: a newer run that finished leaves an older one running.
+    other = await db.sibling(conn)
+    await runs.start(other, "publications")
+    newer = await runs.start(conn, "publications")
+    await runs.finish(conn, newer, counts={"looked_up": 3})
+    text = (await monitor.get("/metrics")).text
+    assert sample(text, "homelab_job_running", "litwatch/publications") == 1
+    await other.close()
+    text = (await monitor.get("/metrics")).text
+    assert sample(text, "homelab_job_running", "litwatch/publications") == 0
+
+
+def test_label_values_are_escaped():
+    f = facts(datetime(2026, 10, 20, 16, 0, tzinfo=UTC), None)
+    f.passes = {("pdf", 'say "hi"\\n'): 1}
+    assert '{kind="pdf",state="say \\"hi\\"\\\\n"} 1.0' in metrics(f)
