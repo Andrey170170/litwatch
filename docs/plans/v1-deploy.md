@@ -73,7 +73,8 @@ stay untouched (R1).
   session, not from an unfinished record alone: each run records the session of the process running it
   (`pg_backend_pid()` and its `backend_start`), and a run is alive while that session exists. A nightly killed by
   SIGKILL or OOM leaves `finished_at` empty, and reads as failed because its session is gone. This holds for every
-  job, `publications` included, which takes no run lock (the shared run lock could not say which job holds it).
+  job, `publications` included, which takes no run lock (the shared run lock could not say which job holds it);
+  runs of one kind never overlap (`publications` takes its own job lock), so the newest run says it all.
   `job_id` is `litwatch/nightly` (its weekly digests run inside it) and `litwatch/publications`, the
   scheduler's two jobs.
 - **JSON logs by setting, on in the image.** `LITWATCH_LOG_FORMAT=json` (default `text`, as development reads it);

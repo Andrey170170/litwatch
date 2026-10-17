@@ -23,15 +23,13 @@ from litwatch import store
 from litwatch.config import Config
 from litwatch.jobs import nightly, publications
 from litwatch.jobs.context import GatewayFactory, default_gateway
-from litwatch.jobs.lock import BusyError
+from litwatch.jobs.lock import SCHEDULE_LOCK, BusyError
 from litwatch.publications import Dblp, PublicationSource
 
 log = logging.getLogger(__name__)
 
 CATCH_UP = timedelta(hours=6)
 TICK_SECONDS = 30
-# Held per job kind while deciding and running, so two schedulers never run one fire twice.
-SCHEDULE_LOCK = 7213913
 
 
 @dataclass(frozen=True)

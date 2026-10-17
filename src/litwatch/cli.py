@@ -25,7 +25,7 @@ from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
-from litwatch.jobs.lock import run_lock
+from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.publications import Dblp
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
@@ -73,7 +73,7 @@ def _run[T](work: Callable[[psycopg.AsyncConnection], Awaitable[T]], *, migrate:
 
     try:
         return asyncio.run(main())
-    except store.LegacyDatabaseError as exc:
+    except (store.LegacyDatabaseError, BusyError) as exc:
         raise SystemExit(str(exc)) from exc
 
 

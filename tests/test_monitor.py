@@ -167,19 +167,6 @@ def test_the_deadline_moves_due():
     assert due == datetime(2026, 10, 20, 10, 30, tzinfo=UTC)
 
 
-async def test_overlapping_runs_read_running_until_both_end(conn, monitor):
-    # Publications takes no run lock: a newer run that finished leaves an older one running.
-    other = await db.sibling(conn)
-    await runs.start(other, "publications")
-    newer = await runs.start(conn, "publications")
-    await runs.finish(conn, newer, counts={"looked_up": 3})
-    text = (await monitor.get("/metrics")).text
-    assert sample(text, "homelab_job_running", "litwatch/publications") == 1
-    await other.close()
-    text = (await monitor.get("/metrics")).text
-    assert sample(text, "homelab_job_running", "litwatch/publications") == 0
-
-
 def test_label_values_are_escaped():
     f = facts(datetime(2026, 10, 20, 16, 0, tzinfo=UTC), None)
     f.passes = {("pdf", 'say "hi"\\n'): 1}

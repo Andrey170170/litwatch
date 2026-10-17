@@ -41,7 +41,7 @@ LAG_DEGRADED = 500
 class Job:
     latest: dict | None  # the newest run
     success: dict | None  # the newest that finished without an error
-    running: bool  # some run is open and alive
+    running: bool  # the newest run is open and alive (runs of a kind never overlap)
 
 
 @dataclass
@@ -64,14 +64,11 @@ async def facts(
     archive: ArchiveClient | None,
 ) -> Facts:
     now = datetime.now(UTC)
-    jobs = {
-        k: Job(
-            await runs.latest(conn, k),
-            await runs.last_success(conn, k),
-            await runs.running(conn, k),
-        )
-        for k in JOBS
-    }
+    jobs = {}
+    for k in JOBS:
+        latest = await runs.latest(conn, k)
+        running = bool(latest and latest["finished_at"] is None and latest["alive"])
+        jobs[k] = Job(latest, await runs.last_success(conn, k), running)
     found = Facts(
         now=now,
         jobs=jobs,
