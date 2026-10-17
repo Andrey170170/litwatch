@@ -27,7 +27,7 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 | 19 | Announced once | kept for Focus digests |
 | 20 | Quality is a calibration workspace | kept, questions changed ([feedback.md](feedback.md)) |
 | 21 | Writer: Opus 5.5 | kept |
-| 22 | No scheduled runs before cutover | superseded: the side-by-side stack runs its scheduler |
+| 22 | No scheduled runs before cutover | superseded: v1 takes 0.14's place, scheduler on after the switch night (decision 63) |
 | 23 | Daily and weekly issues are separate | superseded by digests per topic and period |
 | 24 | Triage stops after three failed nights | kept for classification |
 | 25 | Bulk BibTeX does not wait | kept |

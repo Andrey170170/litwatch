@@ -355,7 +355,7 @@ the branch's UI before then. Not taken: prune page by page, patching pages W1 de
 **In:** N0–N7 as the spec and DESIGN.md say, with the changes of 2026-10-14 (decision 48 as amended, decisions
 53–56).
 
-**Out:** N8 (side by side and the switch, the Zotero renames and R9): it touches production and the owner's library,
-so it gets its own plan once N6 and W4 run on the sandbox. N9 (release). Backfill of the papers not processed,
+**Out:** N8 (the switch, the Zotero renames and R9): it touches production and the owner's library, so it gets its
+own plan once N6 and W4 run on the sandbox ([`v1-deploy.md`](v1-deploy.md)). N9 (release). Backfill of the papers not processed,
 through the same archive intake over older windows, likely on a local model; semantic search, citations, other
 sources: after v1. Retiring the archive's own web interface: after the switch.
