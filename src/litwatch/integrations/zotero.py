@@ -123,13 +123,20 @@ class Collections:
 
 def is_item_of(data: dict[str, Any], arxiv_id: str) -> bool:
     """Whether a Zotero item's own identifiers name this arXiv paper: its arXiv URL, its
-    archive ID (`arXiv:<id>`), its arXiv DOI, or an `arXiv: <id>` line in Extra; any version."""
+    archive ID (`arXiv:<id>`), its arXiv DOI, or an `arXiv: <id>` line in Extra, with the
+    category litwatch writes after it or not; any version. An attachment or a note is no
+    paper's item: litwatch hangs its notes under the item."""
+    if data.get("itemType") in ("attachment", "note"):
+        return False
     paper = re.escape(arxiv_id) + r"(v\d+)?"
     own = [
         (data.get("url", ""), rf"^https?://(www\.)?arxiv\.org/(abs|pdf)/{paper}(\.pdf)?/?$"),
         (data.get("archiveID", ""), rf"^arxiv:\s*{paper}$"),
         (data.get("DOI", ""), rf"^(https?://doi\.org/)?10\.48550/arxiv\.{paper}$"),
-        *((line, rf"^arxiv:\s*{paper}$") for line in str(data.get("extra", "")).splitlines()),
+        *(
+            (line, rf"^arxiv:\s*{paper}(\s*\[[^\]]*\])?$")
+            for line in str(data.get("extra", "")).splitlines()
+        ),
     ]
     return any(re.match(pattern, str(value).strip(), re.IGNORECASE) for value, pattern in own)
 
@@ -283,7 +290,8 @@ class ZoteroClient:
             "/items/top", q=paper.title, qmode="titleCreatorYear", itemType="-note"
         )
         for row in rows:
-            if _norm(row["data"].get("title", "")) == _norm(paper.title):
+            own = row["data"].get("itemType") not in ("attachment", "note")
+            if own and _norm(row["data"].get("title", "")) == _norm(paper.title):
                 return row["key"]
         return None
 

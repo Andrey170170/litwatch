@@ -105,10 +105,10 @@ stay untouched (R1).
   included, and the scheduler is switched on.
 - **The catch-up's cost is bounded before it starts, not watched.** Once a batch is accepted its charges come, and
   stopping the process does not cancel it, so a kill-at-a-cap watchdog (N6's `cap.sh`) cannot hold a line here.
-  Instead the count and the estimate are shown first (pipeline.md): about $20 for about 3,300 papers at P3's
-  measured $6.19 per 1,000, plus about $2 of digests at full price; at most about $45 if nothing were batched. The
-  count shown adds one day's listing (about 500 papers) for the switch day the nightly fetches. The owner confirms
-  the count and the bound before the timer is set.
+  Instead the count and the estimate are shown first (pipeline.md): about $24 for about 3,800 papers (the window's
+  3,300 and the switch day's listing the nightly fetches) at P3's measured $6.19 per 1,000, plus about $2 of digests
+  at full price; at most about $50 if nothing were batched. The owner confirms the count and the bound before the
+  timer is set.
 - **Zotero keeps its collections under their new names.** The integration finds its subcollections by name and
   defaults to 0.x's "Tier 1" and "Tier 2", so switch-on sets `subcollections = {must_read = "Must read", relevant =
   "Relevant"}` in `[integrations.zotero]` after the owner renames the two in his library; the existing collections
@@ -151,7 +151,7 @@ Settled with the owner on 2026-10-16:
   touched, so 0.14 resumes; its intake looks back over the days it missed (checked before P3: `LITWATCH_INTAKE_SOURCE
   = oai` and its lookback). Before Zotero is on, v1 has written nothing outside its own database except archive
   registrations (deduplicated by the archive) and text fetches.
-- **R2. The catch-up costs more than estimated.** Bounded before it starts (about $45 if nothing batched), and the
+- **R2. The catch-up costs more than estimated.** Bounded before it starts (about $50 if nothing batched), and the
   journal is read in the morning per step and per provider against the estimate. A nightly started outside
   02:00–07:30 does not batch, so the catch-up starts at 02:00.
 - **R3. The budget line goes amber from the catch-up.** The new database's month to date includes the catch-up, and

@@ -491,3 +491,10 @@ def test_an_item_is_the_papers_by_its_own_identifiers_only():
     assert not is_item_of({"url": "https://arxiv.org/abs/2610.000012"}, "2610.00001")
     assert not is_item_of({"extra": "Related: https://arxiv.org/abs/2610.00001"}, "2610.00001")
     assert not is_item_of({"abstractNote": "2610.00001"}, "2610.00001")
+    # The Extra line litwatch itself writes, on an item since moved to its published version.
+    assert is_item_of(
+        {"url": "https://doi.org/10.1/x", "extra": "arXiv:2610.00001 [cs.CL]"}, "2610.00001"
+    )
+    # A standalone PDF is no paper's item: notes cannot hang under it.
+    pdf = {"itemType": "attachment", "url": "https://arxiv.org/pdf/2610.00001"}
+    assert not is_item_of(pdf, "2610.00001")

@@ -1,19 +1,17 @@
 """The monitoring side: `/metrics` and `/status` read the run records, a run whose process died
 reads as failed, and a nightly that did not happen reads as late."""
 
-import re
 from datetime import UTC, datetime, time
 
 import httpx
 import pytest
+from prometheus_client.parser import text_string_to_metric_families
 
 from litwatch.api import create_app
 from litwatch.api.monitor import Facts, Job, components, create_monitor, due_night, metrics
 from litwatch.config import Config, Schedule
 from litwatch.store import db, runs
 
-# A sample line of the exposition: a name, bounded labels, a number.
-SAMPLE = re.compile(r'^[a-z_]+(\{[a-z_]+="[a-z0-9_./-]+"(,[a-z_]+="[a-z0-9_./-]+")*\})? \S+$')
 STOPPED = {
     "awaiting_classification": 0,
     "analysis_failed": 0,
@@ -31,11 +29,17 @@ async def monitor(conn):
         yield c
 
 
+def parsed(text: str) -> dict[tuple[str, tuple], float]:
+    """The exposition as Prometheus reads it; the parser raises on what it would reject."""
+    return {
+        (s.name, tuple(sorted(s.labels.items()))): s.value
+        for family in text_string_to_metric_families(text)
+        for s in family.samples
+    }
+
+
 def sample(text: str, name: str, job: str = "litwatch/nightly") -> float | None:
-    for line in text.splitlines():
-        if line.startswith(f'{name}{{job_id="{job}"}} '):
-            return float(line.split()[-1])
-    return None
+    return parsed(text).get((name, (("job_id", job),)))
 
 
 def component(document: dict, id_: str) -> dict:
@@ -47,7 +51,6 @@ async def test_a_finished_nightly_is_measured_from_its_record(conn, monitor):
     await runs.finish(conn, run_id, counts={"classified": 42})
 
     text = (await monitor.get("/metrics")).text
-    assert all(SAMPLE.match(line) for line in text.splitlines() if not line.startswith("#"))
     assert sample(text, "homelab_job_last_items") == 42
     assert sample(text, "homelab_job_running") == 0
     assert sample(text, "homelab_job_last_success_timestamp_seconds") >= sample(
@@ -89,7 +92,7 @@ async def test_a_run_that_raised_reads_failed_with_its_error(conn, monitor):
     assert sample(text, "homelab_job_last_success_timestamp_seconds") == 0
     nightly = component((await monitor.get("/status")).json(), "nightly")
     assert nightly["status"] == "failed"
-    assert "boom" in nightly["reason"]
+    assert "boom" in nightly["reason"] and "expected" in nightly["reason"]
 
 
 SCHEDULED = Config(schedule=Schedule(enabled=True, timezone="America/Denver"))
@@ -154,7 +157,8 @@ def test_every_unhealthy_component_says_why():
     }
     assert all(c.get("reason") for c in found.values() if c["status"] != "healthy")
     assert "2 analysis failed" in found["pipeline"]["reason"]
-    assert all(SAMPLE.match(x) for x in metrics(f).splitlines() if not x.startswith("#"))
+    assert "expected an answer within 3 s" in found["archive"]["reason"]
+    assert parsed(metrics(f))[("litwatch_up", (("dependency", "archive"),))] == 0
 
 
 def test_the_deadline_moves_due():
@@ -179,4 +183,5 @@ async def test_overlapping_runs_read_running_until_both_end(conn, monitor):
 def test_label_values_are_escaped():
     f = facts(datetime(2026, 10, 20, 16, 0, tzinfo=UTC), None)
     f.passes = {("pdf", 'say "hi"\\n'): 1}
-    assert '{kind="pdf",state="say \\"hi\\"\\\\n"} 1.0' in metrics(f)
+    labels = (("kind", "pdf"), ("state", 'say "hi"\\n'))
+    assert parsed(metrics(f))[("litwatch_fulltext_passes", labels)] == 1

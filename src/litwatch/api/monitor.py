@@ -253,7 +253,14 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
     ok = f.jobs["nightly"].success
     night = due_night(config, now)
     if s["state"] == "failed":
-        out.append(_component("nightly", "failed", f"last run {s['run_id']}: {s['error']}", now))
+        out.append(
+            _component(
+                "nightly",
+                "failed",
+                f"last run {s['run_id']}: {s['error']}; expected it to finish without an error",
+                now,
+            )
+        )
     elif night and (ok is None or ok["started_at"] < night[0]):
         # Running or not: past the time the owner reads, the night's results are late.
         last = ok["finished_at"].isoformat() if ok else "never"
@@ -289,7 +296,10 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
     )
     for name, c in sorted(f.cursors.items()):
         if c.failing is not None:
-            reason = f"stopped on event {c.failing} after {c.failures} failures: {c.last_error}"
+            reason = (
+                f"stopped on event {c.failing} after {c.failures} failures: {c.last_error}; "
+                "expected no failing event"
+            )
             out.append(_component(f"integration-{name}", "degraded", reason, now))
         elif c.lag > LAG_DEGRADED:
             reason = f"{c.lag} events behind; expected at most {LAG_DEGRADED}"
@@ -299,7 +309,16 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
     for name, err in sorted(f.probes.items()):
         # Without the archive nothing is read or taken in; without deep only cards wait.
         status = "healthy" if err is None else ("failed" if name == "archive" else "degraded")
-        out.append(_component(name, status, f"does not answer: {err}" if err else None, now))
+        out.append(
+            _component(
+                name,
+                status,
+                f"does not answer: {err}; expected an answer within {PROBE_SECONDS:g} s"
+                if err
+                else None,
+                now,
+            )
+        )
     over = [x for x in f.spend if x.over]
     reason = "; ".join(
         f"{x.provider} projected ${x.projected:.2f} this month, budget ${x.budget:.2f}"

@@ -30,6 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "prometheus-client>=0.20",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
