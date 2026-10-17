@@ -19,10 +19,9 @@ import psycopg
 
 from litwatch.core import FAILED_RUNS, Depth, Rarity, Taxonomy, Weight
 from litwatch.core.grading import NO_WEIGHT, WEIGHT_FLOORS
-from litwatch.store import failures, fulltext
+from litwatch.store import failures, fulltext, runs
 from litwatch.store.analyses import CURRENT_GIST, CURRENT_GIST_SOURCE, CURRENT_WEIGHT
 
-STALE_AFTER = timedelta(hours=36)
 # A stored JSON null in `authors` reads as no authors.
 AUTHORS = "CASE WHEN jsonb_typeof(p.authors) = 'array' THEN p.authors ELSE '[]' END"
 # Each rarity's place, low to high, for sorting and picking the highest.
@@ -128,7 +127,7 @@ async def _one(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> d
 
 
 async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
-    """The latest nightly run: none yet, running, failed (or stuck past `STALE_AFTER`), or done;
+    """The latest nightly run: none yet, running, failed (or open with its process gone), or done;
     done with papers awaiting classification, with analysis, a grading or a full-text pass
     stopped, or with a digest that failed, needs the owner's attention. What is stopped is
     counted whether or not a night ran (a digest written by hand can fail before the first).
@@ -148,10 +147,9 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         "fulltext_failed": texts,
         "digests_failed": failed_digests,
     }
-    run = await _one(conn, "SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
+    run = await runs.latest(conn, "nightly")
     if run is None:
         return {"state": "none", **stopped}
-    now = (await _one(conn, "SELECT now() AS now"))["now"]
     papers = await _one(
         conn,
         # The owner's classifications by hand (model `owner`) during the run are not its work.
@@ -166,7 +164,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         "papers": papers["n"],
         **stopped,
     }
-    if run["finished_at"] is None and now - run["started_at"] < STALE_AFTER:
+    if run["finished_at"] is None and run["alive"]:
         waiting = await _one(
             conn,
             """
@@ -181,7 +179,8 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         )
         return result | {"state": "running", "waiting": waiting["n"]}
     if run["error"] or run["finished_at"] is None:
-        return result | {"state": "failed", "error": run["error"]}
+        error = run["error"] or "the run's process ended without closing it"
+        return result | {"state": "failed", "error": error}
     attention = awaiting or analysis or ungraded or texts or failed_digests
     return result | {"state": "attention" if attention else "quiet"}
 

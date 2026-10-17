@@ -778,3 +778,14 @@ async def text_pass_for(conn: psycopg.AsyncConnection, paper_id: str) -> dict[st
             (paper_id,),
         )
     ).fetchone()
+
+
+async def count_by_state(conn: psycopg.AsyncConnection) -> dict[tuple[str, str], int]:
+    """Passes not done, by (kind, state)."""
+    rows = await (
+        await conn.execute(
+            "SELECT kind, state, count(*) AS n FROM fulltext_passes WHERE state <> 'done' "
+            "GROUP BY kind, state"
+        )
+    ).fetchall()
+    return {(r["kind"], r["state"]): r["n"] for r in rows}

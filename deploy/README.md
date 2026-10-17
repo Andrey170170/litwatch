@@ -41,3 +41,11 @@ docker compose exec archive paper-archive --no-mount-guard status
 ```
 
 Its data lives in the `archive-work` (catalog, search index) and `archive-files` (sources and PDFs) volumes.
+
+## Monitoring
+
+`LITWATCH_METRICS_PORT` (or `litwatch serve --metrics-port`) has litwatch also serve `/metrics` in Prometheus' text
+format and `/status` as a `homelab.status/v1` document on that port, without a token
+([`docs/specs/v1/data.md`](../docs/specs/v1/data.md), configuration). Add it to the `litwatch` service's
+`environment` and publish the port only on a network your monitoring reaches, never through a public proxy. The image
+logs one JSON object per line; `LITWATCH_LOG_FORMAT=text` gives plain lines.

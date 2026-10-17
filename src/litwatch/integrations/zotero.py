@@ -257,14 +257,21 @@ class ZoteroClient:
     # -- items --------------------------------------------------------------------------------
 
     async def find_item(self, paper: Paper) -> str | None:
-        """An existing top-level item for this paper, by arXiv id or exact title."""
+        """An existing top-level item for this paper: by its arXiv id in the item's fields,
+        whatever its title (the owner may have edited it, or a revision retitled the paper),
+        else by exact title."""
+        rows = await self._get_all("/items/top", q=paper.id, qmode="everything", itemType="-note")
+        for row in rows:
+            data = row["data"]
+            # "everything" also matches the full text of a PDF that cites the paper.
+            haystack = " ".join(str(data.get(k, "")) for k in ("url", "extra", "archiveID", "DOI"))
+            if paper.id in haystack:
+                return row["key"]
         rows = await self._get_all(
             "/items/top", q=paper.title, qmode="titleCreatorYear", itemType="-note"
         )
         for row in rows:
-            data = row["data"]
-            haystack = " ".join(str(data.get(k, "")) for k in ("url", "extra", "archiveID", "DOI"))
-            if paper.id in haystack or _norm(data.get("title", "")) == _norm(paper.title):
+            if _norm(row["data"].get("title", "")) == _norm(paper.title):
                 return row["key"]
         return None
 

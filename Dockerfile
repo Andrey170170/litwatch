@@ -51,7 +51,8 @@ LABEL org.opencontainers.image.title="litwatch" \
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    HOME=/var/lib/litwatch
+    HOME=/var/lib/litwatch \
+    LITWATCH_LOG_FORMAT=json
 
 WORKDIR /var/lib/litwatch
 

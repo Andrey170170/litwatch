@@ -175,9 +175,8 @@ default_threshold = 0.8    # a class without its own threshold
 focus_threshold = 0.5      # a class at or under a Focus topic
 uncertain_floor = 0.1
 
-[archive]                  # required
-url = "http://archive:8787"
-pdfs = "followed"          # "followed" (the storage policy) or "all"
+[integrations.archive]     # registers papers and wanted PDFs; its URL and token come from
+                           # LITWATCH_ARCHIVE_URL and LITWATCH_ARCHIVE_TOKEN(_FILE)
 
 [grading]
 area_check_min_confidence = 0.7
@@ -197,3 +196,16 @@ timezone = "America/Denver" # the owner's; none is the server's own zone
 
 The models are proposals until N1 and N2 measure them. The taxonomy and topics live in the database, edited in
 Settings, with YAML import and export; [taxonomy.md](taxonomy.md) is the seed.
+
+The archive is required: texts, PDFs and search come from it. Its storage policy (the PDFs it keeps, "wanted" or
+"all") is the archive's own setting, `paper-archive pdfs`, not litwatch's.
+
+Secrets and the service's process settings come from the environment, each secret also as `NAME_FILE` naming a file
+that holds it: `LITWATCH_DATABASE_URL` (or `LITWATCH_DB_HOST` and its siblings), `LITWATCH_API_TOKEN`,
+`LITWATCH_READ_TOKEN`, the provider keys, the archive's URL and token. `LITWATCH_LOG_FORMAT=json` writes one JSON
+object per line (`ts`, `level`, `msg`, `component`); the image sets it. `LITWATCH_METRICS_PORT` (or `litwatch serve
+--metrics-port`) serves, without a token, `/metrics` in Prometheus' text format (the `homelab_job_*` family for the
+nightly and publications jobs, read from the run records, and litwatch's own gauges) and `/status` as a
+`homelab.status/v1` document (the nightly, the pipeline's stopped papers, digests, each integration, the archive,
+deep, the budget), for a monitoring system on an internal network. A run records the database session of the
+process running it, so a run whose process died reads as failed rather than running.

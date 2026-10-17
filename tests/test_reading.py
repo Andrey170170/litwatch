@@ -15,7 +15,7 @@ from litwatch.core.classification import Membership, Source
 from litwatch.feedback import word
 from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
-from litwatch.store import failures, verdicts
+from litwatch.store import failures, runs, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -520,9 +520,9 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
         "digests_failed": 0,
         "over_budget": [],
     }
-    await conn.execute(
-        "INSERT INTO runs (kind, started_at) VALUES ('nightly', now() - '1m'::interval)"
-    )
+    # A run its process holds open (this test's own session).
+    await runs.start(conn, "nightly")
+    await conn.execute("UPDATE runs SET started_at = now() - '1m'::interval")
     await classify(conn, P, FAITH.slug)
     running = (await client.get("/api/status")).json()
     assert (running["state"], running["papers"], running["waiting"]) == ("running", 1, 1)
@@ -539,11 +539,13 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
     await conn.execute("UPDATE runs SET error = 'boom'")
     status = (await client.get("/api/status")).json()
     assert (status["state"], status["error"]) == ("failed", "boom")
-    # A run that never finished and was started long ago failed too.
-    await conn.execute(
-        "UPDATE runs SET error = NULL, finished_at = NULL, started_at = '2020-01-01'"
+    # A run left open by a process that is gone failed too.
+    await conn.execute("UPDATE runs SET error = NULL, finished_at = NULL, backend_pid = NULL")
+    status = (await client.get("/api/status")).json()
+    assert (status["state"], status["error"]) == (
+        "failed",
+        "the run's process ended without closing it",
     )
-    assert (await client.get("/api/status")).json()["state"] == "failed"
 
 
 async def test_a_reported_miss_is_the_owners_word(client, conn):

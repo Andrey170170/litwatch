@@ -157,6 +157,30 @@ async def test_an_item_0x_made_is_found_and_updated_not_made_again(world):
     assert fake.collection_names("OLDITEM1") == {"MINE", "Litwatch", "Tier 1"}
 
 
+async def test_an_item_whose_title_differs_is_found_by_its_arxiv_id(world):
+    conn, fake = world, FakeZotero()
+    # The owner retitled 0.x's item; another item only cites the paper in its abstract.
+    fake.add_item(
+        "CITES001",
+        {"itemType": "preprint", "title": "A survey", "abstractNote": "Builds on 2610.00001."},
+    )
+    fake.add_item(
+        "OLDITEM1",
+        {
+            "itemType": "preprint",
+            "title": "Hidden steps (my notes)",
+            "url": "https://arxiv.org/abs/2610.00001v1",
+        },
+    )
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+
+    assert len(fake.tops()) == 2
+    assert await state.zotero_item(conn, P.id) == "OLDITEM1"
+
+
 async def test_grades_published_versions_and_cards_reach_the_notes(world):
     conn, fake = world, FakeZotero()
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
