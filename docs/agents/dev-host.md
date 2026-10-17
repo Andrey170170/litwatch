@@ -7,9 +7,9 @@ development share one Docker daemon and one process table.
 
 | Name | What | Where |
 | --- | --- | --- |
-| containers `litwatch`, `litwatch-deep` | 0.14, in production | |
+| containers `litwatch`, `litwatch-db`, `litwatch-deep` | v1, in production since 2026-10-17; 0.14 stopped on 2026-10-16, kept until N8's P4 (its database dumped to `~/backups/litwatch-0.14-2026-10-16.dump`) | stack `/opt/homelab-config/stacks/litwatch` (its README) |
 | containers `litwatch-v1`, `litwatch-v1-db`, `litwatch-deep-v1` | the first v1's deployment, **stopped** since 2026-10-14 (not removed; its database dumped to `~/backups/litwatch-v1-first-build-2026-10-14.dump`) | stack `/opt/homelab-config/stacks/litwatch-v1` (its README) |
-| container `litwatch-v1-dev` | development Postgres | 127.0.0.1:55432; databases `litwatch` (an adopted copy of production), `test` (pytest), `sandbox` (end-to-end runs) |
+| container `litwatch-v1-dev` | development Postgres | 127.0.0.1:55432; databases `litwatch` (an adopted copy of 0.14's production), `test` (pytest), `sandbox` (end-to-end runs) |
 | user unit `litwatch-sketches` | the UI sketches | port 8791, serving `docs/specs/v1/sketches/` |
 
 Production and the stopped v1 deployment are touched only when the task is about them.
