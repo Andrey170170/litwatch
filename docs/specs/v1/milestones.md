@@ -9,7 +9,7 @@ scheduler on until 2026-10-14; it is now stopped. Most of that code stays: the r
 issues, and adds classification, analysis, the full-text queue and digests.
 
 The milestones below replace the first spec's M7 for everything up to the switch. Each ends with something that runs
-and a stated check. Each milestone is one or more PRs into `v1`, shipped as
+and a stated check. Each milestone is one or more PRs, into `v1` until the switch and into `main` since, shipped as
 [`docs/agents/workflow.md`](../../agents/workflow.md) says. The order of work, the PRs and their evidence are in
 the build plan, [`docs/plans/v1-build.md`](../../plans/v1-build.md) (approved 2026-10-14): the archive's code moves
 in first (decision 49), and the web app (N7) is built from N2 onward, beside the core.
