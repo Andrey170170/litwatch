@@ -232,15 +232,16 @@ def due_night(config: Config, now: datetime) -> tuple[datetime, datetime] | None
     if not config.schedule.enabled:
         return None
     zone = config.schedule.zone
-    at = now.astimezone(zone)
+    # One iterator, stepped back: rebuilding it a second before a fire loops forever when the
+    # fire was moved by a spring-forward gap.
+    fires = croniter(config.schedule.nightly, now.astimezone(zone))
     while True:
-        fired = croniter(config.schedule.nightly, at).get_prev(datetime)
+        fired = fires.get_prev(datetime)
         deadline = datetime.combine(fired.date(), config.schedule.deadline, zone)
         if deadline <= fired:
             deadline += timedelta(days=1)
         if deadline + READY_AFTER_DEADLINE <= now:
             return fired, deadline + READY_AFTER_DEADLINE
-        at = fired - timedelta(seconds=1)  # tonight's is not due yet: the night before's
 
 
 def components(f: Facts, config: Config) -> list[dict[str, Any]]:

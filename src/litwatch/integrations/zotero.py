@@ -34,6 +34,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import psycopg
@@ -121,16 +122,23 @@ class Collections:
         return {self.root, *self.by_grade.values()}
 
 
+def _url_path(url: Any) -> str:
+    """The path of an arXiv URL, whatever its query or fragment; "" for any other host."""
+    parts = urlsplit(str(url).strip())
+    host = (parts.hostname or "").lower()
+    return parts.path if host in ("arxiv.org", "www.arxiv.org", "export.arxiv.org") else ""
+
+
 def is_item_of(data: dict[str, Any], arxiv_id: str) -> bool:
-    """Whether a Zotero item's own identifiers name this arXiv paper: its arXiv URL, its
-    archive ID (`arXiv:<id>`), its arXiv DOI, or an `arXiv: <id>` line in Extra, with the
-    category litwatch writes after it or not; any version. An attachment or a note is no
-    paper's item: litwatch hangs its notes under the item."""
+    """Whether a Zotero item's own identifiers name this arXiv paper: its arXiv URL (abstract,
+    PDF or HTML page), its archive ID (`arXiv:<id>`), its arXiv DOI, or an `arXiv: <id>` line
+    in Extra, with the category litwatch writes after it or not; any version. An attachment or
+    a note is no paper's item: litwatch hangs its notes under the item."""
     if data.get("itemType") in ("attachment", "note"):
         return False
     paper = re.escape(arxiv_id) + r"(v\d+)?"
     own = [
-        (data.get("url", ""), rf"^https?://(www\.)?arxiv\.org/(abs|pdf)/{paper}(\.pdf)?/?$"),
+        (_url_path(data.get("url", "")), rf"^/(abs|pdf|html)/{paper}(\.pdf)?/?$"),
         (data.get("archiveID", ""), rf"^arxiv:\s*{paper}$"),
         (data.get("DOI", ""), rf"^(https?://doi\.org/)?10\.48550/arxiv\.{paper}$"),
         *(

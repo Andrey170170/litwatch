@@ -489,6 +489,9 @@ def test_an_item_is_the_papers_by_its_own_identifiers_only():
     assert is_item_of({"extra": "tex.key: x\narXiv: 2610.00001v2"}, "2610.00001")
     assert is_item_of({"url": "https://arxiv.org/abs/hep-th/9901001"}, "hep-th/9901001")
     assert not is_item_of({"url": "https://arxiv.org/abs/2610.000012"}, "2610.00001")
+    assert is_item_of({"url": "https://arxiv.org/html/2610.00001v1"}, "2610.00001")
+    assert is_item_of({"url": "https://arxiv.org/abs/2610.00001?context=cs#S2"}, "2610.00001")
+    assert not is_item_of({"url": "https://example.org/abs/2610.00001"}, "2610.00001")
     assert not is_item_of({"extra": "Related: https://arxiv.org/abs/2610.00001"}, "2610.00001")
     assert not is_item_of({"abstractNote": "2610.00001"}, "2610.00001")
     # The Extra line litwatch itself writes, on an item since moved to its published version.

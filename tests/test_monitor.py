@@ -52,6 +52,9 @@ async def test_a_finished_nightly_is_measured_from_its_record(conn, monitor):
 
     text = (await monitor.get("/metrics")).text
     assert sample(text, "homelab_job_last_items") == 42
+    # An empty queue reads 0, not no data.
+    brief_ready = ("litwatch_fulltext_passes", (("kind", "brief"), ("state", "ready")))
+    assert parsed(text)[brief_ready] == 0
     assert sample(text, "homelab_job_running") == 0
     assert sample(text, "homelab_job_last_success_timestamp_seconds") >= sample(
         text, "homelab_job_last_run_timestamp_seconds"
@@ -159,6 +162,12 @@ def test_every_unhealthy_component_says_why():
     assert "2 analysis failed" in found["pipeline"]["reason"]
     assert "expected an answer within 3 s" in found["archive"]["reason"]
     assert parsed(metrics(f))[("litwatch_up", (("dependency", "archive"),))] == 0
+
+
+def test_a_spring_forward_morning_finds_the_night_before():
+    # 2027-03-14: 02:00 does not exist in Denver; at 08:00 local (14:00 UTC) the 13th's is due.
+    fired, _ = due_night(SCHEDULED, datetime(2027, 3, 14, 14, 0, tzinfo=UTC))
+    assert fired.astimezone(UTC) == datetime(2027, 3, 13, 9, 0, tzinfo=UTC)
 
 
 def test_the_deadline_moves_due():
