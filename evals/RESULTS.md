@@ -187,3 +187,12 @@ importance). All five stay visible as tier 2. Whether human-annotated
 benchmarks and probe-versus-trace analyses should count as tier 1 is a
 rubric question for the PI; the sentence to loosen is the one starting "The
 knowledge of what the model actually computed must come from".
+
+## 2026-10-09 · v1 Watch pipeline, first trial
+
+Triage (Haiku 5.5 medium, three-way answer) passed 89 of 90 papers 0.14 put at tier 1–2 on the
+CoT topics; a yes-or-no triage lost 8–10. Graders kept 87 of 90. Muse and Luna as check model
+gave the same reconciled grade on 170 of 184 pairs; Muse split less (45 against 59). About
+$0.50 a night. The owner labelled the 100 sampled rejects and found none relevant (0 of 70 in
+the interpretability and safety fields, 0 of 30 elsewhere). Report:
+`2026-10-09-v1-watch.md`.

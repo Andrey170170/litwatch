@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 1b · direction</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<script src="lib/wire.js"></script>
+<style>
+  /* page chrome */
+  .dirs { display: flex; gap: 4px; }
+  .dirs button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+  .dirs button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+  .dirs button i { font-style: normal; margin-left: 4px; }
+  .tune { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--fg2); }
+  .tune select { font: inherit; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 6px; padding: 2px 4px; }
+  .desc { max-width: 90ch; margin: 0 0 14px; font-size: 14px; }
+  .desc b { font-weight: 600; }
+  .side-by-side { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .notes { flex: 1; min-width: 300px; max-width: 60ch; }
+  .notes ol { padding-left: 20px; margin: 6px 0; } .notes li { margin: 6px 0; }
+
+  /* desktop shell B (from round 1) */
+  .body { display: flex; flex: 1; min-height: 0; }
+  .side { width: 236px; flex: none; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 12px 8px; }
+  .side .wm { padding: 2px 8px; display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -.02em; font-size: 15px; cursor: default; }
+  .side .status { padding: 0 8px 12px; }
+  .side .it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-weight: 500; color: var(--fg2); font-size: 13.5px; }
+  .side .it:hover { background: var(--hover); }
+  .side .it.on { background: var(--sel); color: var(--fg); }
+  .side .it .k { margin-left: auto; font-size: 11.5px; color: var(--fg3); font-weight: 500; }
+  .side .it .k.hot { color: var(--fg); background: var(--line); border-radius: 8px; padding: 0 6px; }
+  .side .sec { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--fg3); padding: 14px 8px 4px; }
+  .side .it .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 450; }
+  .side .foot { margin-top: auto; }
+  .main { flex: 1; min-width: 0; }
+  .main .inner { max-width: 860px; padding: 18px 24px 40px; }
+
+  /* phone shell C, with a drawer that follows the finger */
+  .frame.phone { user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+  .frame.phone, .frame.phone .scroll, .frame.phone .panel { touch-action: pan-y; }
+  .screen { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .pbar { display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 8px 0 6px; background: var(--surface); border-bottom: 1px solid var(--line); flex: none; }
+  .pbar .wm { font-weight: 700; letter-spacing: -.02em; font-size: 16px; }
+  .pbar .ttl { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pbar .sp { flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+  .pp { padding: 12px; }
+  .prow .t { font-size: 15px; }
+  .drawer { position: absolute; inset: 0; z-index: 5; pointer-events: none; --ease: cubic-bezier(.2, .85, .25, 1); }
+  .drawer.live { pointer-events: auto; }
+  .drawer .shade { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); opacity: 0; }
+  .drawer .panel { position: absolute; top: 0; bottom: 0; left: 0; width: min(300px, 82%); transform: translateX(-100%); background: var(--surface); padding: 14px 8px; display: flex; flex-direction: column; overflow-y: auto; }
+  .drawer.live .panel { box-shadow: 4px 0 24px rgba(0, 0, 0, .22); }
+  .drawer .wm { font-weight: 700; padding: 4px 10px 2px; letter-spacing: -.02em; font-size: 16px; }
+  .drawer .status { padding: 0 10px 10px; }
+  .drawer .it { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; font-weight: 500; cursor: pointer; }
+  .drawer .it:active { background: var(--hover); }
+  .drawer .it.on { background: var(--sel); }
+  .drawer .sec { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--fg3); padding: 14px 10px 4px; }
+  .drawer .nm { font-weight: 450; font-size: 14px; }
+  .edgehint { position: absolute; left: 0; top: 0; bottom: 0; width: var(--edge, 40px); z-index: 4; pointer-events: none; display: none;
+    background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--r3) 25%, transparent) 0 6px, transparent 6px 12px); }
+  .show-edge .edgehint { display: block; }
+
+  /* on a phone, the phone frame is the whole screen */
+  @media (max-width: 640px) {
+    body { overflow: hidden; }
+    .top { padding: 6px 8px; gap: 6px; } .top h1, .top .chipbtn, .dirs button i { display: none; }
+    .desk-sec, .desc, .notes, .intro { display: none; }
+    .wrap { padding: 0; }
+    .frame.phone { position: fixed; top: 45px; left: 0; right: 0; bottom: 0; width: auto; height: auto; border: 0; border-radius: 0; }
+  }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 1b · direction</h1>
+  <div class="dirs" id="dirs"></div>
+  <span class="sp"></span>
+  <label class="tune">Edge <select id="edge"><option>24</option><option selected>40</option><option>64</option><option>96</option></select></label>
+  <label class="tune"><input type="checkbox" id="showedge"> zone</label>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">Shell fixed from round 1: desktop B (sidebar), phone C (drawer). This round asks what it should feel like. Switch directions at the top, and Light/Dark for each; both frames are live. On a phone this page shows only the phone, full screen, so the swipe can be tried for real.</p>
+  <p class="desc" id="desc"></p>
+  <div class="desk-sec"><div class="frame desk" id="D"></div></div>
+  <div class="side-by-side" style="margin-top:24px">
+    <div class="frame phone" id="M"></div>
+    <div class="notes">
+      <p><b>The drawer.</b> Put a finger (or the mouse) in the left edge strip and drag right: the drawer follows and settles open or shut by where you let go and how fast. Drag it left, or tap the shade, to close. A drag that starts vertical scrolls instead and never opens it; a rightward drag outside the edge does nothing. "Edge" sets the strip's width, "zone" shows it.</p>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Which direction: A, B, C or D? Or a mix, such as Night City's colours with Mission control's type?</li>
+        <li>How far should it go: everything shown (scanlines, glitch, cut corners, drafting grid) or only the colours and type?</li>
+        <li>Light and dark: equally good, or is one of them the real app and the other a courtesy?</li>
+        <li>The swipe: does it feel right, and what edge width works on your phone? Phones keep the very edge for their own back gesture, so the strip has to start a little inward.</li>
+        <li>On a paper or topic page the bar shows ‹ instead of ☰. Should an edge swipe there go back, the iOS way, and the drawer open only from top-level screens?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const DIRS = {
+  neat: ["A", "Neat", "<b>A · Neat.</b> Round 1's plain look, as the baseline."],
+  nc: ["B", "Night City", "<b>B · Night City.</b> Cyberpunk 2077's interface. Near-black, signal yellow as the one accent, red labels, cyan status; condensed caps, cut corners, faint scanlines, a glitch on the wordmark's hover. Light mode turns it into a daylight poster: black ink, yellow selection."],
+  news: ["C", "Newsprint", "<b>C · Newsprint.</b> The paper idea. Blackletter masthead, serif type, ink rules instead of boxes, a drop cap, round ink stamps for topics, a little paper grain. Dark mode is a night edition."],
+  mc: ["D", "Mission control", "<b>D · Mission control.</b> Retro-futurism in print: a 1970s flight manual. Wide caps labels, numbered sections, a drafting grid, registration marks at box corners, signal orange. Dark mode is an amber CRT."],
+};
+let dir = (location.hash.slice(1) in DIRS && location.hash.slice(1)) || localStorage.getItem("lw-dir") || "nc";
+const dirsEl = document.getElementById("dirs");
+function setDir(d) {
+  dir = d; localStorage.setItem("lw-dir", d); history.replaceState(null, "", "#" + d);
+  document.querySelectorAll(".frame").forEach((f) => (f.dataset.dir = d));
+  dirsEl.innerHTML = Object.entries(DIRS).map(([k, [l, n]]) => `<button data-d="${k}" class="${k === d ? "on" : ""}">${l}<i>${n}</i></button>`).join("");
+  document.getElementById("desc").innerHTML = DIRS[d][2];
+}
+dirsEl.onclick = (e) => { const b = e.target.closest("[data-d]"); if (b) setDir(b.dataset.d); };
+
+/* ── desktop: sidebar shell ── */
+const TABS = ["Digest", "Topics", "Papers"];
+function sideHTML(st) {
+  const it = (key) => `<div class="it${st.tab === key && !st.topic ? " on" : ""}" data-tab="${key}">${key}</div>`;
+  const tps = TOPICS.map((t) => { const x = DIGEST[t.id]; const n = x && !x.quiet ? x.c.split(" ")[0] : ""; return `<div class="it${st.topic === t.id ? " on" : ""}" data-topic="${t.id}">${badge(t.id)}<span class="nm">${t.n}</span>${n ? `<span class="k${t.depth === "focus" ? " hot" : ""}">${n}</span>` : ""}</div>`; }).join("");
+  return `<div class="side"><div class="wm">litwatch</div><div class="status">530 read · all quiet</div>${TABS.map(it).join("")}
+    <div class="sec">Following</div>${tps}<div class="foot"><div class="it">⚙ Settings</div></div></div>`;
+}
+function mainHTML(st) {
+  if (st.paper) return `<a class="back" data-back>‹ Back</a>` + paperView(st.paper);
+  if (st.topic) return topicPage(st.topic);
+  if (st.tab === "Digest") return st.history ? `<a class="back" data-back>‹ Today</a>` + historyView() : dayView();
+  if (st.tab === "Topics") return topicsView();
+  return papersView();
+}
+(function desktop() {
+  const el = document.getElementById("D");
+  const st = { tab: "Digest", topic: null, paper: null, history: false };
+  const draw = () => (el.innerHTML = `<div class="body">${sideHTML(st)}<div class="main scroll"><div class="inner">${mainHTML(st)}</div></div></div>`);
+  el.addEventListener("click", (e) => {
+    const f = (s) => e.target.closest(s); let n;
+    if ((n = f("[data-tab]"))) Object.assign(st, { tab: n.dataset.tab, topic: null, paper: null, history: false });
+    else if ((n = f("[data-paper]"))) st.paper = n.dataset.paper;
+    else if ((n = f("[data-topic]"))) Object.assign(st, { topic: n.dataset.topic, paper: null });
+    else if (f("[data-go=history]")) st.history = true;
+    else if (f("[data-back]")) { if (st.paper) st.paper = null; else st.history = false; }
+    else return;
+    draw(); el.querySelector(".main").scrollTop = 0;
+  });
+  draw();
+})();
+
+/* ── phone: digest home and a drawer ── */
+(function phone() {
+  const el = document.getElementById("M");
+  const st = { tab: "Digest", topic: null, paper: null, history: false };
+  el.innerHTML = `<div class="screen"></div><div class="edgehint"></div><div class="drawer"><div class="shade"></div><div class="panel"></div></div>`;
+  const scr = el.querySelector(".screen"), drawer = el.querySelector(".drawer"), panel = drawer.querySelector(".panel"), shade = drawer.querySelector(".shade");
+
+  function screen() {
+    if (st.paper) return { title: "", body: paperView(st.paper), back: true };
+    if (st.topic) return { title: T[st.topic].n, body: topicPage(st.topic).replace(/<div style="display:flex;gap:10px[^]*?<\/div>\s*<\/div>/, ""), back: true };
+    if (st.tab === "Digest") return st.history ? { title: "History", body: historyView(), back: true } : { body: dayView() };
+    if (st.tab === "Topics") return { body: topicsView() };
+    return { body: papersView() };
+  }
+  function draw() {
+    const s = screen();
+    const left = s.back ? `<button class="ib" data-back>‹</button><span class="ttl">${s.title || ""}</span>`
+      : `<button class="ib" data-menu>☰</button><span class="wm">litwatch</span><span class="dot" title="530 read · all quiet"></span>`;
+    scr.innerHTML = `<div class="pbar">${left}<span class="sp"></span><button class="ib">⚙</button></div><div class="scroll"><div class="pp">${s.body}</div></div>`;
+    panel.innerHTML = `<div class="wm">litwatch</div><div class="status">530 read · all quiet</div>
+      ${TABS.map((t) => `<div class="it${st.tab === t && !st.topic ? " on" : ""}" data-tab="${t}">${t}</div>`).join("")}
+      <div class="sec">Following</div>${TOPICS.map((t) => `<div class="it${st.topic === t.id ? " on" : ""}" data-topic="${t.id}">${badge(t.id)}<span class="nm">${t.n}</span></div>`).join("")}
+      <div class="it" style="margin-top:auto">⚙ Settings</div>`;
+  }
+
+  // Drawer position: 0 shut, 1 open. While a finger drags, it follows with no transition; on release it
+  // settles with a decelerating ease whose length matches the finger's speed.
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let pos = 0, g = null, clickBlockUntil = 0;
+  const W = () => panel.offsetWidth;
+  function place(p, ms = 0) {
+    pos = Math.max(0, Math.min(1, p));
+    const t = reduce || !ms ? "none" : `transform ${ms}ms var(--ease), opacity ${ms}ms var(--ease)`;
+    panel.style.transition = shade.style.transition = t;
+    panel.style.transform = `translateX(${(pos - 1) * 100}%)`;
+    shade.style.opacity = pos;
+    drawer.classList.toggle("live", pos > 0);
+  }
+  function settle(to, v = 0) {
+    const px = Math.abs(to - pos) * W();
+    const ms = Math.abs(v) > 0.3 ? Math.min(300, Math.max(120, (px / Math.abs(v)) * 1.6)) : 280;
+    place(to, ms);
+  }
+  const edge = () => +document.getElementById("edge").value;
+
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button > 0 || g) return;
+    const x = e.clientX - el.getBoundingClientRect().left;
+    const shut = pos === 0;
+    if (shut && x > edge()) return;                 // opening starts only in the edge strip
+    if (!shut && !drawer.contains(e.target)) return;
+    g = { id: e.pointerId, x0: e.clientX, y0: e.clientY, p0: pos, drag: false, s: [[e.timeStamp, e.clientX]] };
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!g || e.pointerId !== g.id) return;
+    const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
+    if (!g.drag) {
+      if (Math.hypot(dx, dy) < 8) return;            // slop: a tap stays a tap
+      const horizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
+      const rightWay = g.p0 === 0 ? dx > 0 : dx < 0;
+      if (!horizontal || !rightWay) { g = null; return; }   // vertical: leave it to scrolling
+      g.drag = true; g.x0 = e.clientX;
+      try { el.setPointerCapture(e.pointerId); } catch {}
+    }
+    g.s.push([e.timeStamp, e.clientX]);
+    while (g.s.length > 2 && e.timeStamp - g.s[0][0] > 90) g.s.shift();
+    place(g.p0 + (e.clientX - g.x0) / W());
+  });
+  function end(e) {
+    if (!g || e.pointerId !== g.id) return;
+    if (g.drag) {
+      const [t0, x0] = g.s[0], [t1, x1] = g.s[g.s.length - 1];
+      const v = t1 > t0 ? (x1 - x0) / (t1 - t0) : 0;  // px per ms
+      const to = e.type === "pointercancel" ? Math.round(pos) : v > 0.35 ? 1 : v < -0.35 ? 0 : pos > 0.5 ? 1 : 0;
+      settle(to, v);
+      clickBlockUntil = performance.now() + 350;
+    }
+    g = null;
+  }
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+
+  el.addEventListener("click", (e) => {
+    if (performance.now() < clickBlockUntil) return;
+    const f = (s) => e.target.closest(s); let n;
+    if (e.target === shade) return settle(0);
+    if (f("[data-menu]")) return settle(1);
+    if ((n = f("[data-tab]"))) Object.assign(st, { tab: n.dataset.tab, topic: null, paper: null, history: false });
+    else if ((n = f("[data-paper]"))) st.paper = n.dataset.paper;
+    else if ((n = f("[data-topic]"))) Object.assign(st, { topic: n.dataset.topic, paper: null });
+    else if (f("[data-go=history]")) st.history = true;
+    else if (f("[data-back]")) { if (st.paper) st.paper = null; else if (st.topic) st.topic = null; else st.history = false; }
+    else return;
+    draw();
+    scr.querySelector(".scroll").scrollTop = 0;
+    if (pos > 0) settle(0);
+  });
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && pos > 0) settle(0); });
+  draw(); place(0);
+})();
+
+const syncEdge = () => {
+  document.getElementById("M").style.setProperty("--edge", document.getElementById("edge").value + "px");
+  document.getElementById("M").classList.toggle("show-edge", document.getElementById("showedge").checked);
+};
+document.getElementById("edge").onchange = document.getElementById("showedge").onchange = syncEdge;
+syncEdge();
+setDir(dir);
+</script>
+</body></html>

@@ -1,0 +1,215 @@
+Runs
+   kind   | runs |     first_start     |      last_end       
+----------+------+---------------------+---------------------
+ intake   |    1 | 2026-10-16 14:42:23 | 2026-10-16 14:42:28
+ nightly  |    1 | 2026-10-16 14:42:37 | 2026-10-16 15:33:50
+ fulltext |   49 | 2026-10-16 15:35:51 | 2026-10-16 15:50:44
+ digests  |    1 | 2026-10-16 15:51:07 | 2026-10-16 15:56:30
+(4 rows)
+
+Calls by role (the journal)
+    role     |    via     | calls | failed | no_cost |  cost   |        first        |        last         
+-------------+------------+-------+--------+---------+---------+---------------------+---------------------
+ classify    | openrouter |  2951 |      0 |       0 |  0.7541 | 2026-10-16 14:42:38 | 2026-10-16 14:43:34
+ analyse     | anthropic  |  2951 |      1 |       0 |  1.1449 | 2026-10-16 14:43:50 | 2026-10-16 15:04:14
+ field_grade | anthropic  |  2573 |      0 |       0 |  0.4903 | 2026-10-16 15:04:18 | 2026-10-16 15:33:07
+ judge       | anthropic  |   962 |      2 |       0 |  5.1890 | 2026-10-16 15:04:18 | 2026-10-16 15:33:04
+ check       | openrouter |   442 |      0 |       0 |  0.2269 | 2026-10-16 15:04:18 | 2026-10-16 15:33:04
+ area_check  | openrouter |   527 |      0 |       0 |  0.0190 | 2026-10-16 15:04:21 | 2026-10-16 15:33:06
+ brief       | anthropic  |   189 |      1 |       0 | 39.2854 | 2026-10-16 15:35:52 | 2026-10-16 15:50:26
+ writer      | anthropic  |    30 |      0 |       0 |  3.2238 | 2026-10-16 15:51:09 | 2026-10-16 15:56:08
+(8 rows)
+
+    via     |  cost   
+------------+---------
+ anthropic  | 49.3334
+ openrouter |  1.0000
+(2 rows)
+
+Papers by listing day
+ announced  | papers 
+------------+--------
+ 2026-10-12 |    355
+ 2026-10-13 |    946
+ 2026-10-14 |    575
+ 2026-10-15 |    560
+ 2026-10-16 |    515
+(5 rows)
+
+ classifications | gists | verdicts 
+-----------------+-------+----------
+            2951 |  3138 |     3533
+(1 row)
+
+Effective grades by depth
+ depth | pairs | papers | must_read 
+-------+-------+--------+-----------
+ area  |   527 |    486 |       142
+ field |  2573 |   1722 |       889
+ focus |   433 |    347 |         9
+(3 rows)
+
+Focus fits
+      topic       |   fit    | count 
+------------------+----------+-------
+ circuits         | adjacent |   129
+ circuits         | central  |    10
+ circuits         | none     |    19
+ circuits         | related  |    25
+ cot-faithfulness | adjacent |    27
+ cot-faithfulness | central  |     1
+ cot-faithfulness | none     |   114
+ cot-faithfulness | related  |     6
+ cot-monitoring   | adjacent |    61
+ cot-monitoring   | central  |     1
+ cot-monitoring   | none     |    37
+ cot-monitoring   | related  |     3
+(12 rows)
+
+Failed steps
+  paper_id  |   step   |        topic         | failed_runs |             last_error             |                                       title                                       
+------------+----------+----------------------+-------------+------------------------------------+-----------------------------------------------------------------------------------
+ 2610.19975 | analysis |                      |           1 | invalid: 1 validation errors: gist | LatentLoop: Scaling Looped MoE Models with Asymmetric Compute Allocation
+ 2610.13116 | grading  | alignment-and-safety |           1 | refused: bio                       | DRYLAB-Bench: Benchmarking the Biosecurity Risk of Agentic LLM Mutation Design
+ 2610.21200 | grading  | alignment-and-safety |           1 | refused: bio                       | Poisoning the corpora of protein design systems during pre-training and retrieval
+(3 rows)
+
+Full-text passes
+  kind  | reason |     state     | count 
+--------+--------+---------------+-------
+ brief  | focus  | done          |    44
+ deep   | focus  | done          |     8
+ deep   | pick   | awaiting_text |     1
+ deep   | pick   | done          |    16
+ weight | area   | done          |   144
+ weight | area   | failed        |     1
+(6 rows)
+
+  paper_id  |  kind  |     state     | failed_runs |   last_error   |                                                                       title                                                                       
+------------+--------+---------------+-------------+----------------+---------------------------------------------------------------------------------------------------------------------------------------------------
+ 2610.16067 | deep   | awaiting_text |           0 |                | When Agent Evaluation Becomes Unreliable: An Empirical Study of Oracle Failures and Configuration-Dependent Measurement in an LLM Agent Benchmark
+ 2610.17907 | weight | failed        |           1 | refused: cyber | SpecCloak: Probing Harmful Code Generation through Engineering Specifications
+(2 rows)
+
+Brief-role calls by the pass kind of their paper
+ kinds  | calls |  cost  |  mean  |  max  | input_tokens 
+--------+-------+--------+--------+-------+--------------
+ brief  |    44 |  8.501 | 0.1932 | 0.394 |        44797
+ weight |   145 | 30.785 | 0.2123 | 0.461 |        49585
+(2 rows)
+
+Briefs and Weights
+ text_source | briefs | with_overstatement 
+-------------+--------+--------------------
+ pdf         |      1 |                  1
+ latex       |    187 |                 71
+(2 rows)
+
+ focus_briefs_with_overstatement | focus_briefs 
+---------------------------------+--------------
+                              21 |           44
+(1 row)
+
+  source   |   weight    | count 
+-----------+-------------+-------
+ abstract  | incremental |   677
+ abstract  | solid       |  2273
+ full_text | incremental |    43
+ full_text | landmark    |     1
+ full_text | solid       |   144
+(5 rows)
+
+  pass  |   weight    | count 
+--------+-------------+-------
+ brief  | incremental |    13
+ brief  | solid       |    31
+ weight | incremental |    30
+ weight | landmark    |     1
+ weight | solid       |   113
+(5 rows)
+
+Digests
+ period |    day     |            topic            |    state    |                                     counts                                     
+--------+------------+-----------------------------+-------------+--------------------------------------------------------------------------------
+ day    | 2026-10-12 | alignment-and-safety        | written     | {"picks": 2, "papers": 26, "central": 10, "related": 6, "must_read": 8}
+ day    | 2026-10-12 | circuits                    | written     | {"picks": 0, "papers": 5, "central": 2, "related": 3, "must_read": 2}
+ day    | 2026-10-12 | cot-faithfulness            | nothing_new | {"picks": 0, "papers": 0, "central": 0, "related": 0, "must_read": 0}
+ day    | 2026-10-12 | cot-monitoring              | nothing_new | {"picks": 0, "papers": 0, "central": 0, "related": 0, "must_read": 0}
+ day    | 2026-10-12 | interpretability            | written     | {"picks": 2, "papers": 25, "central": 6, "related": 7, "must_read": 5}
+ day    | 2026-10-13 | alignment-and-safety        | written     | {"picks": 2, "papers": 94, "central": 42, "related": 17, "must_read": 27}
+ day    | 2026-10-13 | circuits                    | written     | {"picks": 0, "papers": 7, "central": 1, "related": 6, "must_read": 1}
+ day    | 2026-10-13 | cot-faithfulness            | written     | {"picks": 0, "papers": 1, "central": 0, "related": 1, "must_read": 0}
+ day    | 2026-10-13 | cot-monitoring              | nothing_new | {"picks": 0, "papers": 0, "central": 0, "related": 0, "must_read": 0}
+ day    | 2026-10-13 | interpretability            | written     | {"picks": 2, "papers": 63, "central": 16, "related": 15, "must_read": 12}
+ day    | 2026-10-14 | alignment-and-safety        | written     | {"picks": 2, "papers": 80, "central": 29, "related": 25, "must_read": 23}
+ day    | 2026-10-14 | circuits                    | written     | {"picks": 0, "papers": 6, "central": 2, "related": 4, "must_read": 1}
+ day    | 2026-10-14 | cot-faithfulness            | written     | {"picks": 0, "papers": 3, "central": 1, "related": 2, "must_read": 1}
+ day    | 2026-10-14 | cot-monitoring              | written     | {"picks": 0, "papers": 3, "central": 1, "related": 2, "must_read": 1}
+ day    | 2026-10-14 | interpretability            | written     | {"picks": 2, "papers": 48, "central": 13, "related": 12, "must_read": 7}
+ day    | 2026-10-15 | alignment-and-safety        | written     | {"picks": 2, "papers": 63, "central": 29, "related": 17, "must_read": 20}
+ day    | 2026-10-15 | circuits                    | written     | {"picks": 0, "papers": 7, "central": 1, "related": 6, "must_read": 1}
+ day    | 2026-10-15 | cot-faithfulness            | written     | {"picks": 0, "papers": 1, "central": 0, "related": 1, "must_read": 0}
+ day    | 2026-10-15 | cot-monitoring              | written     | {"picks": 0, "papers": 1, "central": 0, "related": 1, "must_read": 0}
+ day    | 2026-10-15 | interpretability            | written     | {"picks": 2, "papers": 41, "central": 13, "related": 8, "must_read": 9}
+ day    | 2026-10-16 | alignment-and-safety        | written     | {"picks": 2, "papers": 56, "central": 22, "related": 15, "must_read": 15}
+ day    | 2026-10-16 | circuits                    | written     | {"picks": 0, "papers": 10, "central": 4, "related": 6, "must_read": 2}
+ day    | 2026-10-16 | cot-faithfulness            | written     | {"picks": 0, "papers": 2, "central": 0, "related": 2, "must_read": 0}
+ day    | 2026-10-16 | cot-monitoring              | nothing_new | {"picks": 0, "papers": 0, "central": 0, "related": 0, "must_read": 0}
+ day    | 2026-10-16 | interpretability            | written     | {"picks": 2, "papers": 37, "central": 22, "related": 1, "must_read": 15}
+ week   | 2026-10-12 | agents                      | written     | {"picks": 3, "papers": 587, "central": 369, "related": 133, "must_read": 337}
+ week   | 2026-10-12 | alignment-and-safety        | written     | {"picks": 5, "papers": 319, "central": 132, "related": 80, "must_read": 93}
+ week   | 2026-10-12 | circuits                    | written     | {"picks": 0, "papers": 35, "central": 10, "related": 25, "must_read": 7}
+ week   | 2026-10-12 | cot-faithfulness            | written     | {"picks": 0, "papers": 7, "central": 1, "related": 6, "must_read": 1}
+ week   | 2026-10-12 | cot-monitoring              | written     | {"picks": 0, "papers": 4, "central": 1, "related": 3, "must_read": 1}
+ week   | 2026-10-12 | efficiency-and-architecture | written     | {"picks": 3, "papers": 472, "central": 187, "related": 63, "must_read": 160}
+ week   | 2026-10-12 | interpretability            | written     | {"picks": 5, "papers": 214, "central": 70, "related": 43, "must_read": 48}
+ week   | 2026-10-12 | language-models             | written     | {"picks": 3, "papers": 1722, "central": 551, "related": 585, "must_read": 465}
+ week   | 2026-10-12 | reasoning-and-rl            | written     | {"picks": 3, "papers": 257, "central": 110, "related": 94, "must_read": 91}
+(34 rows)
+
+Writer calls matched to their digests by time (a writer call names no paper)
+ period |    day     |            topic            | papers | input_tokens | cost  
+--------+------------+-----------------------------+--------+--------------+-------
+ day    | 2026-10-12 | alignment-and-safety        |     26 |        10739 | 0.056
+ day    | 2026-10-12 | circuits                    |      5 |         4309 | 0.026
+ day    | 2026-10-12 | interpretability            |     25 |        10120 | 0.058
+ day    | 2026-10-13 | alignment-and-safety        |     94 |        40748 | 0.176
+ day    | 2026-10-13 | circuits                    |      7 |         5587 | 0.029
+ day    | 2026-10-13 | cot-faithfulness            |      1 |         1645 | 0.012
+ day    | 2026-10-13 | interpretability            |     63 |        24183 | 0.108
+ day    | 2026-10-14 | alignment-and-safety        |     80 |        32965 | 0.145
+ day    | 2026-10-14 | circuits                    |      6 |         5046 | 0.027
+ day    | 2026-10-14 | cot-faithfulness            |      3 |         3054 | 0.018
+ day    | 2026-10-14 | cot-monitoring              |      3 |         2940 | 0.018
+ day    | 2026-10-14 | interpretability            |     48 |        20862 | 0.095
+ day    | 2026-10-15 | alignment-and-safety        |     63 |        28990 | 0.129
+ day    | 2026-10-15 | circuits                    |      7 |         5601 | 0.029
+ day    | 2026-10-15 | cot-faithfulness            |      1 |         1707 | 0.012
+ day    | 2026-10-15 | cot-monitoring              |      1 |         1616 | 0.011
+ day    | 2026-10-15 | interpretability            |     41 |        17305 | 0.083
+ day    | 2026-10-16 | alignment-and-safety        |     56 |        26178 | 0.117
+ day    | 2026-10-16 | circuits                    |     10 |         7885 | 0.038
+ day    | 2026-10-16 | cot-faithfulness            |      2 |         2324 | 0.015
+ day    | 2026-10-16 | interpretability            |     37 |        19720 | 0.092
+ week   | 2026-10-12 | agents                      |    587 |        54150 | 0.241
+ week   | 2026-10-12 | alignment-and-safety        |    319 |        91587 | 0.394
+ week   | 2026-10-12 | circuits                    |     35 |        26993 | 0.123
+ week   | 2026-10-12 | cot-faithfulness            |      7 |         7123 | 0.047
+ week   | 2026-10-12 | cot-monitoring              |      4 |         4337 | 0.030
+ week   | 2026-10-12 | efficiency-and-architecture |    472 |        41183 | 0.189
+ week   | 2026-10-12 | interpretability            |    214 |        77272 | 0.340
+ week   | 2026-10-12 | language-models             |   1722 |        80730 | 0.360
+ week   | 2026-10-12 | reasoning-and-rl            |    257 |        46053 | 0.209
+(30 rows)
+
+Deep cards
+ attempts | errors | mean_seconds | max_seconds | list_cost 
+----------+--------+--------------+-------------+-----------
+       24 |      0 |           54 |         104 |      2.48
+(1 row)
+
+ cards 
+-------
+    24
+(1 row)
+

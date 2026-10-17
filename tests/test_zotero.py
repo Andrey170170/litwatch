@@ -1,316 +1,506 @@
-"""Zotero client and router against an in-memory fake of the Web API and the WebDAV share."""
+"""The zotero and webdav integrations, driven through the dispatcher against in-memory fakes
+of the Zotero Web API, the WebDAV share and arXiv. Nothing here reaches a real service."""
 
-import hashlib
 import io
-import json
 import zipfile
-from typing import Any
-from urllib.parse import parse_qs
 
-import httpx
 import pytest
 
-from litwatch import route as route_mod
-from litwatch.models import Paper
-from litwatch.route import Router
-from litwatch.webdav import WebDAVWriter
-from litwatch.zotero import NOTE_MARKER, ZoteroClient, attachment_filename, webdav_payload
-from tests.conftest import screen_result
+from litwatch import events
+from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Opinion, Publication, Verdict
+from litwatch.feedback import word
+from litwatch.integrations import webdav as webdav_mod
+from litwatch.integrations.webdav import WebDav, WebDAVWriter
+from litwatch.integrations.zotero import Zotero, ZoteroClient, attachment_filename, is_item_of
+from litwatch.jobs import publications as lookups
+from litwatch.store import integrations as state
+from litwatch.store import outbox, verdicts
+from litwatch.store import papers as papers_store
+from litwatch.store import taxonomy as taxonomy_store
+from tests.conftest import FAITH, TREE, deliver, paper, start
+from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
 
-PAPER = Paper(
-    id="2605.25052",
-    title="BonaFide: Grounding Chain-of-Thought Faithfulness",
-    abstract="We define faithfulness.",
-    authors=["Ana Marasović", "Jane Q. Doe"],
-    categories=["cs.CL"],
-    primary_category="cs.CL",
-    published="2026-05-27T12:00:00+00:00",
-    url="https://arxiv.org/abs/2605.25052",
+P = paper(
+    "2610.00001",
+    title="Traces that hide steps",
+    abstract="Hidden computation in CoT.",
+    published="2026-10-01T12:00:00+00:00",
 )
-PDF = b"%PDF-1.7 fake body"
-
-
-def result(tier: int):
-    return screen_result(PAPER.id, cot_faithfulness=tier, mech_interp=3)
-
-
-class FakeZotero:
-    """Enough of api.zotero.org for the client: collections, items, children, PATCH versions."""
-
-    def __init__(self) -> None:
-        self.collections: dict[str, dict[str, Any]] = {}
-        self.items: dict[str, dict[str, Any]] = {}
-        self.version = 100
-        self.calls: list[str] = []
-
-    def _key(self) -> str:
-        return f"K{len(self.collections) + len(self.items) + 1:07d}"
-
-    def handle(self, req: httpx.Request) -> httpx.Response:
-        path = req.url.path.removeprefix("/users/1")
-        self.calls.append(f"{req.method} {path}")
-        query = parse_qs(req.url.query.decode())
-        if path == "/collections":
-            if req.method == "GET":
-                return httpx.Response(200, json=list(self.collections.values()))
-            return self._create(self.collections, json.loads(req.content))
-        if path == "/items" and req.method == "POST":
-            return self._create(self.items, json.loads(req.content))
-        if path == "/items/top":
-            q = query["q"][0].lower()
-            rows = [
-                i
-                for i in self.items.values()
-                if not i["data"].get("parentItem") and q in i["data"]["title"].lower()
-            ]
-            return httpx.Response(200, json=rows)
-        if path.endswith("/children"):
-            parent = path.split("/")[2]
-            rows = [i for i in self.items.values() if i["data"].get("parentItem") == parent]
-            return httpx.Response(200, json=rows)
-        key = path.split("/")[2]
-        item = self.items[key]
-        if req.method == "GET":
-            return httpx.Response(200, json=item)
-        if int(req.headers["If-Unmodified-Since-Version"]) != item["version"]:
-            return httpx.Response(412)
-        self.version += 1
-        item["data"] = {**item["data"], **json.loads(req.content)}
-        item["version"] = self.version
-        return httpx.Response(204)
-
-    def _create(self, store: dict[str, Any], objects: list[dict[str, Any]]) -> httpx.Response:
-        successful = {}
-        for i, data in enumerate(objects):
-            key = self._key()
-            self.version += 1
-            store[key] = {"key": key, "version": self.version, "data": {"key": key, **data}}
-            successful[str(i)] = {"key": key}
-        return httpx.Response(200, json={"successful": successful, "failed": {}})
-
-
-class FakeDAV:
-    def __init__(self) -> None:
-        self.files: dict[str, bytes] = {}
-
-    def handle(self, req: httpx.Request) -> httpx.Response:
-        name = req.url.path.rsplit("/", 1)[-1]
-        if req.method == "PUT":
-            self.files[name] = req.content
-            return httpx.Response(201)
-        return httpx.Response(200 if name in self.files else 404)
+# What a stored card says it was written from.
+LABEL = {"revision": 1, "version": 1, "source": "latex", "pass_id": None}
+CARD = {
+    "summary": "First paragraph.\n\nSecond paragraph.",
+    "key_claim": "Probes predict unfaithful reasoning.",
+    "paper_kind": "method",
+    "faithfulness": {
+        "mismatch": ["omission"],
+        "ground_truth": "task construction",
+        "detection_method": "Hints whose use is revealed by the answer.",
+        "definition": "A step is faithful iff it acknowledges the hint it followed.",
+        "monitor_type": "white-box",
+        "internals_signal": ["probes"],
+        "generality": "Three tasks, two models.",
+    },
+    "evaluation_setup": {"models": ["Qwen3-8B"], "tasks": ["MMLU"], "generalization": "No."},
+    "prior_work": [{"title": "Turpin et al.", "relation": "Reuses the setup."}],
+    "code_available": True,
+    "code_url": "https://github.com/x/y",
+    "limitations": ["Two models only."],
+}
 
 
 @pytest.fixture
-def fake() -> FakeZotero:
-    return FakeZotero()
+async def world(conn):
+    await taxonomy_store.save(conn, TREE)
+    await papers_store.upsert(conn, [P])
+    return conn
 
 
-@pytest.fixture
+async def grade(conn, g: str) -> None:
+    """A verdict whose grade, with no Weight yet (solid), is `g`."""
+    fit = {"must_read": Fit.CENTRAL, "relevant": Fit.RELATED}.get(g) or Fit(g)
+    await verdicts.add(
+        conn,
+        Verdict(
+            paper_id=P.id,
+            topic=FAITH.slug,
+            topic_version="v",
+            fit=fit,
+            reason="r",
+            opinions={"judge": Opinion(fit=fit, reason="r", model="anthropic:x")},
+        ),
+    )
+    await word.settle(conn, P.id)
+
+
+async def say(conn, value: LabelValue) -> None:
+    await word.label(
+        conn, Label(paper_id=P.id, topic=FAITH.slug, value=value, origin=LabelOrigin.READER)
+    )
+
+
 def client(fake: FakeZotero) -> ZoteroClient:
-    http = httpx.AsyncClient(transport=httpx.MockTransport(fake.handle))
-    return ZoteroClient("1", "key", http=http)
+    return ZoteroClient("1", "key", http=mock(fake.handle), retry_seconds=0)
 
 
-def tags(fake: FakeZotero, key: str) -> set[str]:
-    return {t["tag"] for t in fake.items[key]["data"]["tags"]}
+def zotero(fake: FakeZotero, **kw) -> Zotero:
+    return Zotero(client(fake), **kw)
 
 
-async def test_ensure_item_creates_tree_and_converges_on_tier_change(fake, client):
-    key = await client.ensure_item(PAPER, 1, ["litwatch:sel:cot-faithfulness:1"])
-    names = {c["data"]["name"] for c in fake.collections.values()}
-    assert names == {"Litwatch", "Tier 1", "Tier 2"}
-    cols = await client.collections()
-    data = fake.items[key]["data"]
-    assert data["itemType"] == "preprint" and data["archiveID"] == "arXiv:2605.25052"
-    assert data["creators"][0] == {
-        "creatorType": "author",
-        "firstName": "Ana",
-        "lastName": "Marasović",
+async def run(conn, *integrations) -> None:
+    for integration in integrations:
+        await deliver(conn, integration)
+
+
+# -- zotero ----------------------------------------------------------------------------------------
+
+
+async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_deleted(world):
+    conn, fake = world, FakeZotero()
+    z = zotero(fake)
+    await start(conn, z)
+
+    await grade(conn, "must_read")
+    await run(conn, z)
+    (item,) = fake.tops()
+    key = item["key"]
+    assert await state.zotero_item(conn, P.id) == key
+    assert fake.collection_names(key) == {"Litwatch", "Tier 1"}
+    assert "litwatch:watch:cot-faithfulness:must_read" in fake.tags(key)
+    (note,) = fake.notes(key)
+    assert "litwatch:screen schema=2" in note and "Chain-of-thought faithfulness" in note
+
+    await say(conn, LabelValue.RELATED)
+    await run(conn, z)
+    assert fake.collection_names(key) == {"Litwatch", "Tier 2"}
+    assert "litwatch:watch:cot-faithfulness:relevant" in fake.tags(key)
+    assert "litwatch:watch:cot-faithfulness:must_read" not in fake.tags(key)
+
+    # Unsaved: out of the collections and tagged dropped, but still there.
+    await word.toggle(conn, P.id, Hand.UNSAVE)
+    await run(conn, z)
+    assert fake.collection_names(key) == set()
+    assert fake.tags(key) == {"litwatch:dropped"}
+    assert not any(c.startswith("DELETE") for c in fake.calls)
+
+    # Saved again: back, and the same item.
+    await word.toggle(conn, P.id, Hand.SAVE)
+    await run(conn, z)
+    assert [i["key"] for i in fake.tops()] == [key]
+    assert fake.collection_names(key) == {"Litwatch", "Tier 2"}
+    assert "litwatch:dropped" not in fake.tags(key)
+
+
+async def test_an_item_0x_made_is_found_and_updated_not_made_again(world):
+    conn, fake = world, FakeZotero()
+    # Found by its title; 0.x's tier and selection tags give way to v1's grade tag.
+    fake.add_item(
+        "OLDITEM1",
+        {
+            "itemType": "preprint",
+            "title": P.title,
+            "collections": ["MINE"],
+            "tags": [{"tag": "litwatch:tier:1"}, {"tag": "litwatch:sel:cot-faithfulness:1"}],
+        },
+    )
+    fake.items["OLDITEM1"]["data"]["tags"].append({"tag": "read-later"})
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+
+    assert [i["key"] for i in fake.tops()] == ["OLDITEM1"]
+    assert fake.tags("OLDITEM1") == {
+        "read-later",
+        "litwatch:watch:cot-faithfulness:must_read",
     }
-    assert set(data["collections"]) == {cols.root, cols.by_tier[1]}
-    assert tags(fake, key) == {"litwatch:tier:1", "litwatch:sel:cot-faithfulness:1"}
-
-    # The user adds their own collection and tag; a later demotion keeps both.
-    data["collections"].append("USERCOLL")
-    data["tags"].append({"tag": "mine"})
-    again = await client.ensure_item(PAPER, 2, ["litwatch:sel:cot-faithfulness:2"])
-    assert again == key, "no duplicate item"
-    data = fake.items[key]["data"]
-    assert set(data["collections"]) == {"USERCOLL", cols.root, cols.by_tier[2]}
-    assert tags(fake, key) == {"mine", "litwatch:tier:2", "litwatch:sel:cot-faithfulness:2"}
-    assert sum(1 for i in fake.items.values() if not i["data"].get("parentItem")) == 1
-
-    # Dropping below tier 2 releases the item: managed collections and litwatch tags go.
-    await client.release_item(key)
-    data = fake.items[key]["data"]
-    assert data["collections"] == ["USERCOLL"] and tags(fake, key) == {"mine"}
+    assert fake.collection_names("OLDITEM1") == {"MINE", "Litwatch", "Tier 1"}
 
 
-async def test_legacy_subcollections_are_managed(fake, client):
-    """Items filed under the phase 3 names move to the tier collections on re-route."""
-    fake._create(fake.collections, [{"name": "Litwatch"}])
-    (root,) = fake.collections
-    fake._create(fake.collections, [{"name": "Must Read", "parentCollection": root}])
-    legacy = [k for k in fake.collections if k != root][0]
-    key = await client.ensure_item(PAPER, 2)
-    fake.items[key]["data"]["collections"].append(legacy)
-    await client.ensure_item(PAPER, 2)
-    cols = await client.collections()
-    assert legacy in cols.managed and legacy not in fake.items[key]["data"]["collections"]
-
-
-async def test_find_item_adopts_hand_added_item(fake, client):
-    fake._create(
-        fake.items,
-        [
-            {
-                "itemType": "preprint",
-                "title": "bonafide: grounding chain-of-thought faithfulness",
-                "extra": "arXiv:2605.25052 [cs]",
-                "collections": [],
-                "tags": [],
-            }
-        ],
+async def test_an_item_whose_title_differs_is_found_by_its_arxiv_id(world):
+    conn, fake = world, FakeZotero()
+    # The owner retitled 0.x's item; another item only cites the paper in its abstract.
+    fake.add_item(
+        "CITES001",
+        {"itemType": "preprint", "title": "A survey", "abstractNote": "Builds on 2610.00001."},
     )
-    (existing,) = fake.items
-    assert await client.ensure_item(PAPER, 2) == existing
+    fake.add_item(
+        "CITES002",
+        {
+            "itemType": "preprint",
+            "title": "A reply",
+            "url": "https://arxiv.org/abs/2610.00002",
+            "extra": "Related: https://arxiv.org/abs/2610.00001",
+        },
+    )
+    fake.add_item(
+        "OLDITEM1",
+        {
+            "itemType": "preprint",
+            "title": "Hidden steps (my notes)",
+            "url": "https://arxiv.org/abs/2610.00001v1",
+        },
+    )
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+
+    assert len(fake.tops()) == 3
+    assert await state.zotero_item(conn, P.id) == "OLDITEM1"
 
 
-async def test_upsert_note_is_single_and_replaced_in_place(fake, client):
-    key = await client.ensure_item(PAPER, 2)
-    note = await client.upsert_note(key, f"{NOTE_MARKER}<p>one</p>")
-    assert await client.upsert_note(key, f"{NOTE_MARKER}<p>two</p>") == note
-    assert fake.items[note]["data"]["note"].endswith("<p>two</p>")
-    assert [i for i in fake.items.values() if i["data"].get("itemType") == "note"] == [
-        fake.items[note]
+async def test_grades_published_versions_and_cards_reach_the_notes(world):
+    conn, fake = world, FakeZotero()
+    z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    (item,) = fake.tops()
+    key = item["key"]
+    assert "Chain-of-thought faithfulness</b> · must read" in fake.notes(key)[0]
+
+    await lookups.store_record(
+        conn, P.id, Publication(venue="NeurIPS", year=2026, doi="10.1/x"), by_owner=True
+    )
+    await run(conn, z)
+    (note,) = fake.notes(key)
+    assert "NeurIPS 2026" in note and "doi:10.1/x" in note
+
+    await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, [], **LABEL)
+    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await run(conn, z)
+    notes = fake.notes(key)
+    assert len(notes) == 2
+    assert any("Probes predict unfaithful reasoning." in n for n in notes)
+    assert {"litwatch:processed", "litwatch:kind:method", "litwatch:code"} <= fake.tags(key)
+    assert "INBOX" in fake.items[key]["data"]["collections"]
+
+
+async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(world):
+    conn, fake = world, FakeZotero()
+    z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await state.put_card(conn, P.id, CARD, "deep-model", {}, [], **LABEL)
+    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await run(conn, z)
+    (item,) = fake.tops()
+    key = item["key"]
+
+    def inbox() -> bool:
+        return "INBOX" in fake.items[key]["data"]["collections"]
+
+    assert inbox()
+    await say(conn, LabelValue.RELATED)  # below must read: out of the inbox
+    await run(conn, z)
+    assert not inbox() and "Tier 2" in fake.collection_names(key)
+    await say(conn, LabelValue.CENTRAL)  # back
+    await run(conn, z)
+    assert inbox()
+    await word.toggle(conn, P.id, Hand.UNSAVE)  # unsaved: out with the other collections
+    await run(conn, z)
+    assert not inbox() and fake.collection_names(key) == set()
+
+
+async def test_a_create_whose_answer_was_lost_is_made_once(world):
+    conn, fake = world, FakeZotero()
+    fake.lose_answers = 100  # every create happens, then answers 502
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    assert (await outbox.cursor(conn, z.name)).failing is None
+    (item,) = fake.tops()
+    assert sorted(c["data"]["name"] for c in fake.collections.values()) == [
+        "Litwatch",
+        "Tier 1",
+        "Tier 2",
     ]
+    assert len(fake.notes(item["key"])) == 1
+    assert await state.zotero_item(conn, P.id) == item["key"]
 
 
-async def test_patch_retries_after_version_conflict(fake, client, monkeypatch):
-    key = await client.ensure_item(PAPER, 2)
-    real = fake.handle
-    bumped = False
-
-    def racy(req):
-        nonlocal bumped
-        if req.method == "GET" and req.url.path.endswith(key) and not bumped:
-            bumped = True
-            resp = real(req)
-            fake.items[key]["version"] += 1  # someone else wrote in between
-            return resp
-        return real(req)
-
-    client.http._transport = httpx.MockTransport(racy)
-    monkeypatch.setattr("litwatch.zotero.asyncio.sleep", _no_sleep)
-    await client.patch_item(key, lambda d: d.__setitem__("title", "changed"))
-    assert fake.items[key]["data"]["title"] == "changed"
-
-
-async def _no_sleep(_):
-    return None
-
-
-async def test_webdav_payload_matches_zotero_layout():
-    archive, prop = webdav_payload(PAPER, PDF)
-    with zipfile.ZipFile(io.BytesIO(archive)) as zf:
-        assert zf.namelist() == [attachment_filename(PAPER)]
-        assert zf.read(zf.namelist()[0]) == PDF
-    assert attachment_filename(PAPER) == (
-        "Marasović et al. - 2026 - BonaFide  Grounding Chain-of-Thought Faithfulness.pdf"
+async def test_whats_there_is_looked_for_past_the_first_page(world):
+    conn, fake = world, FakeZotero()
+    # Many collections before litwatch's own, and an 0.x item with many notes before its own.
+    for i in range(120):
+        fake.add_item(f"COL{i:05d}", {})
+        fake.collections[f"COL{i:05d}"] = fake.items.pop(f"COL{i:05d}")
+        fake.collections[f"COL{i:05d}"]["data"]["name"] = f"Reading {i}"
+    fake.collections["COL00119"]["data"]["name"] = "Litwatch"  # on the second page
+    fake.add_item("OLDITEM1", {"itemType": "preprint", "title": P.title, "collections": []})
+    for i in range(130):
+        fake.add_item(f"N{i:05d}", {"itemType": "note", "parentItem": "OLDITEM1", "note": "mine"})
+    fake.add_item(
+        "OLDNOTE1",
+        {
+            "itemType": "note",
+            "parentItem": "OLDITEM1",
+            "note": "<!-- litwatch:screen schema=1 --><p>0.x</p>",
+        },
     )
-    assert prop.decode() == (
-        '<properties version="1"><mtime>1779883200000</mtime>'
-        f"<hash>{hashlib.md5(PDF).hexdigest()}</hash></properties>"  # noqa: S324
-    )
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+
+    names = [c["data"]["name"] for c in fake.collections.values()]
+    assert names.count("Litwatch") == 1 and "Litwatch" in fake.collection_names("OLDITEM1")
+    screens = [n for n in fake.notes("OLDITEM1") if "litwatch:screen" in n]
+    assert len(screens) == 1 and "schema=2" in screens[0]
+
+
+async def test_an_item_is_found_past_the_first_page_of_matches(world):
+    conn, fake = world, FakeZotero()
+    # Thirty other items whose titles contain the paper's, then the paper's own.
+    for i in range(30):
+        fake.add_item(f"REPLY{i:03d}", {"itemType": "preprint", "title": f"{P.title}: reply {i}"})
+    fake.add_item("THEITEM1", {"itemType": "preprint", "title": P.title})
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    assert len(fake.tops()) == 31
+    assert await state.zotero_item(conn, P.id) == "THEITEM1"
+
+
+async def test_a_paper_never_in_the_library_gets_no_item(world):
+    conn, fake = world, FakeZotero()
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "adjacent")
+    await run(conn, z)
+    assert fake.items == {} and fake.calls == []
+
+
+# -- webdav ----------------------------------------------------------------------------------------
 
 
 @pytest.fixture
-def router(fake: FakeZotero, monkeypatch) -> tuple[Router, FakeDAV, list[str]]:
-    dav = FakeDAV()
-    downloads: list[str] = []
-
-    def arxiv(req: httpx.Request) -> httpx.Response:
-        downloads.append(req.url.path)
-        return httpx.Response(200, content=PDF)
-
-    monkeypatch.setattr(route_mod, "ARXIV_PACING_SECONDS", 0)
-    zotero = ZoteroClient(
-        "1", "key", http=httpx.AsyncClient(transport=httpx.MockTransport(fake.handle))
+def pdfs(monkeypatch):
+    monkeypatch.setattr(webdav_mod, "ARXIV_PACING_SECONDS", 0)
+    fake, dav, arxiv = FakeZotero(), FakeDAV(), FakeArxiv()
+    w = WebDav(
+        client(fake),
+        WebDAVWriter("https://dav.test/zotero", "u", "p", http=mock(dav.handle)),
+        http=mock(arxiv.handle),
     )
-    webdav = WebDAVWriter(
-        "https://dav/zotero",
-        "u",
-        "p",
-        http=httpx.AsyncClient(transport=httpx.MockTransport(dav.handle)),
-    )
-    return (
-        Router(zotero, webdav, http=httpx.AsyncClient(transport=httpx.MockTransport(arxiv))),
-        dav,
-        downloads,
-    )
+    return fake, dav, arxiv, w
 
 
-async def test_router_attaches_pdf_once_for_tier_1(fake, router):
-    r, dav, downloads = router
-    routed = await r.route(PAPER, result(1))
-    assert routed.tier == 1 and routed.attachment_key
-    att = fake.items[routed.attachment_key]["data"]
-    assert att["parentItem"] == routed.item_key and att["linkMode"] == "imported_url"
-    assert att["md5"] == hashlib.md5(PDF).hexdigest()  # noqa: S324
-    assert set(dav.files) == {f"{routed.attachment_key}.zip", f"{routed.attachment_key}.prop"}
-    note = next(i for i in fake.items.values() if i["data"].get("itemType") == "note")
-    assert "Best tier</b></td><td>1" in note["data"]["note"]
-    assert (
-        "<b>cot-faithfulness</b></td><td>tier 1, high: Defines faithfulness &amp; a"
-        in note["data"]["note"]
-    )
-    assert tags(fake, routed.item_key) == {
-        "litwatch:tier:1",
-        "litwatch:sel:cot-faithfulness:1",
-        "litwatch:sel:mech-interp:3",
+async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+
+    await run(conn, w)  # before zotero made the item: retried later
+    assert (await outbox.cursor(conn, w.name)).failing is not None
+    await run(conn, z)
+    await outbox.retry(conn, w.name)
+    await run(conn, w)
+
+    (item,) = fake.tops()
+    (attachment,) = fake.attachments(item["key"])
+    assert await state.webdav_file(conn, P.id) == {
+        "item_key": item["key"],
+        "attachment_key": attachment,
+        "state": "stored",
     }
+    assert "litwatch:pdf" in fake.tags(attachment)
+    with zipfile.ZipFile(io.BytesIO(dav.files[f"{attachment}.zip"])) as zf:
+        assert zf.read(attachment_filename(P)) == PDF
+    assert f"{attachment}.prop" in dav.files
+    assert arxiv.calls == [f"/pdf/{P.id}"]
 
-    again = await r.route(PAPER, result(1))
-    assert again == routed
-    assert downloads == ["/pdf/2605.25052"], "downloaded exactly once"
-
-
-async def test_router_skips_pdf_for_tier_2(fake, router):
-    r, dav, downloads = router
-    routed = await r.route(PAPER, result(2))
-    assert routed.attachment_key is None and not dav.files and not downloads
-
-
-async def test_router_refuses_non_members(router):
-    r, _, _ = router
-    with pytest.raises(ValueError, match="not routable"):
-        await r.route(PAPER, result(3))
+    # Handled again (a restart mid-way, say): nothing is fetched or attached twice.
+    for event in await outbox.after(conn, outbox.START, 100):
+        if w.wants(event):
+            await w.handle(conn, event)
+    assert len(fake.attachments(item["key"])) == 1 and len(arxiv.calls) == 1
 
 
-async def test_router_follows_the_committed_tier_over_the_stored_screening(router):
-    # A selection reactivated after the screening makes the paper tier 2 without a new screen.
-    r, _, _ = router
-    assert (await r.route(PAPER, result(4), 2)).tier == 2
+async def test_an_overruled_or_unsaved_must_read_fetches_no_pdf_until_it_is_back(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+
+    # The verdict says must read; the owner says relevant before webdav gets to it.
+    await grade(conn, "must_read")
+    await say(conn, LabelValue.RELATED)
+    await run(conn, z, w)
+    assert arxiv.calls == [] and dav.files == {}
+
+    # Must read again, but unsaved by hand: still nothing.
+    await say(conn, LabelValue.CENTRAL)
+    await word.toggle(conn, P.id, Hand.UNSAVE)
+    await run(conn, z, w)
+    assert arxiv.calls == []
+
+    # Saved again: `paper.saved` does what was skipped.
+    await word.toggle(conn, P.id, Hand.SAVE)
+    await run(conn, z, w)
+    assert arxiv.calls == [f"/pdf/{P.id}"] and await state.webdav_file(conn, P.id)
 
 
-async def test_pending_tier1_pdf_raises_and_retry_reuses_zotero_item(fake, router, monkeypatch):
-    r, dav, downloads = router
-    real_download = r._download
+async def test_an_interrupted_upload_is_finished_not_taken_for_done(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    dav.fail = {".prop"}  # the zip arrives, the prop does not
+    await run(conn, w)
+    (item,) = fake.tops()
+    (attachment,) = fake.attachments(item["key"])
+    assert (await state.webdav_file(conn, P.id))["state"] == "pending"
+    assert (await outbox.cursor(conn, w.name)).failing is not None
 
-    async def pending(_paper):
-        return None
+    await outbox.retry(conn, w.name)
+    await run(conn, w)
+    assert fake.attachments(item["key"]) == [attachment]
+    assert {f"{attachment}.zip", f"{attachment}.prop"} <= set(dav.files)
+    assert (await state.webdav_file(conn, P.id))["state"] == "stored"
 
-    monkeypatch.setattr(r, "_download", pending)
-    with pytest.raises(route_mod.PDFUnavailableError, match="not available yet"):
-        await r.route(PAPER, result(1))
-    items = [i for i in fake.items.values() if i["data"].get("itemType") == "preprint"]
-    assert len(items) == 1
-    item_key = items[0]["key"]
-    assert not dav.files and not downloads
 
-    monkeypatch.setattr(r, "_download", real_download)
-    routed = await r.route(PAPER, result(1))
-    assert routed.item_key == item_key and routed.attachment_key
-    assert sum(i["data"].get("itemType") == "preprint" for i in fake.items.values()) == 1
-    assert len(downloads) == 1
+async def test_an_attachment_made_by_a_lost_create_is_found_and_finished(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    fake.lose_answers = 1  # the attachment is made; its answer is lost
+    await run(conn, w)
+    await outbox.retry(conn, w.name)
+    await run(conn, w)
+    (item,) = fake.tops()
+    (attachment,) = fake.attachments(item["key"])
+    assert await state.webdav_file(conn, P.id) == {
+        "item_key": item["key"],
+        "attachment_key": attachment,
+        "state": "stored",
+    }
+    assert f"{attachment}.prop" in dav.files
+
+
+async def test_the_owners_own_pdf_is_left_alone(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    (item,) = fake.tops()
+    fake.add_item(
+        "OWNERPDF",
+        {"itemType": "attachment", "parentItem": item["key"], "contentType": "application/pdf"},
+    )
+    await run(conn, w)
+    assert await state.webdav_file(conn, P.id) == {
+        "item_key": item["key"],
+        "attachment_key": "OWNERPDF",
+        "state": "owner",
+    }
+    assert arxiv.calls == [] and dav.files == {}
+
+
+async def test_an_item_made_again_gets_its_pdf_again(world, pdfs):
+    conn = world
+    fake, dav, arxiv, w = pdfs
+    z = zotero(fake)
+    for integration in (z, w):
+        await start(conn, integration)
+    await grade(conn, "must_read")
+    await run(conn, z, w)
+    (first,) = fake.tops()
+    assert (await state.webdav_file(conn, P.id))["state"] == "stored"
+
+    # The owner deletes the item in Zotero; unsaving and saving makes litwatch a new one.
+    for key in [first["key"], *fake.attachments(first["key"]), *fake.notes_keys(first["key"])]:
+        del fake.items[key]
+    await word.toggle(conn, P.id, Hand.UNSAVE)
+    await word.toggle(conn, P.id, Hand.SAVE)
+    await run(conn, z, w)
+    (second,) = fake.tops()
+    assert second["key"] != first["key"]
+    (attachment,) = fake.attachments(second["key"])
+    assert await state.webdav_file(conn, P.id) == {
+        "item_key": second["key"],
+        "attachment_key": attachment,
+        "state": "stored",
+    }
+    assert f"{attachment}.prop" in dav.files
+
+
+def test_an_item_is_the_papers_by_its_own_identifiers_only():
+    assert is_item_of({"url": "https://arxiv.org/pdf/2610.00001v3.pdf"}, "2610.00001")
+    assert is_item_of({"archiveID": "arXiv:2610.00001"}, "2610.00001")
+    assert is_item_of({"DOI": "10.48550/arXiv.2610.00001"}, "2610.00001")
+    assert is_item_of({"extra": "tex.key: x\narXiv: 2610.00001v2"}, "2610.00001")
+    assert is_item_of({"url": "https://arxiv.org/abs/hep-th/9901001"}, "hep-th/9901001")
+    assert not is_item_of({"url": "https://arxiv.org/abs/2610.000012"}, "2610.00001")
+    assert is_item_of({"url": "https://arxiv.org/html/2610.00001v1"}, "2610.00001")
+    assert is_item_of({"url": "https://arxiv.org/abs/2610.00001?context=cs#S2"}, "2610.00001")
+    assert not is_item_of({"url": "https://example.org/abs/2610.00001"}, "2610.00001")
+    # A URL that is no URL neither names the paper nor stops the other identifiers.
+    assert not is_item_of({"url": "https://["}, "2610.00001")
+    assert is_item_of({"url": "https://[", "DOI": "10.48550/arXiv.2610.00001"}, "2610.00001")
+    assert not is_item_of({"extra": "Related: https://arxiv.org/abs/2610.00001"}, "2610.00001")
+    assert not is_item_of({"abstractNote": "2610.00001"}, "2610.00001")
+    # The Extra line litwatch itself writes, on an item since moved to its published version.
+    assert is_item_of(
+        {"url": "https://doi.org/10.1/x", "extra": "arXiv:2610.00001 [cs.CL]"}, "2610.00001"
+    )
+    # A standalone PDF is no paper's item: notes cannot hang under it.
+    pdf = {"itemType": "attachment", "url": "https://arxiv.org/pdf/2610.00001"}
+    assert not is_item_of(pdf, "2610.00001")

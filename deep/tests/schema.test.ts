@@ -8,6 +8,9 @@ const core = {
   paper_kind: "method",
   evaluation_setup: { models: ["Qwen3-8B"], tasks: ["GSM8K"], generalization: "Not tested across models." },
   prior_work: [{ title: "Turpin et al.", relation: "Reuses the biased-context setup for hints.", arxiv_id: "2305.04388" }],
+  among_collection: [
+    { arxiv_id: "2604.01234", title: "Probing hidden steps", relation: "extends", note: "Same probes, here across four tasks." },
+  ],
   code_available: true,
   code_url: "https://github.com/x/y",
   weights_available: false,
@@ -88,4 +91,32 @@ test("cross-field rules", () => {
   assert.equal(v2.ok, false);
   const v3 = validate({ ...good, faithfulness: { ...faithfulness, monitor_type: "black-box", internals_signal: [] } }, ["faithfulness"]);
   assert.equal(v3.ok, true);
+});
+
+test("among_collection names only collection papers this session's searches returned", () => {
+  const found = { collection: new Set(["2604.01234"]), self: "2605.00001" };
+  assert.equal(validate(core, [], found).ok, true);
+  const unseen = validate({ ...core, among_collection: [{ ...core.among_collection[0], arxiv_id: "2604.09999" }] }, [], found);
+  assert.equal(unseen.ok, false);
+  if (!unseen.ok) assert.ok(unseen.errors.some((e) => e.startsWith("/among_collection/0/arxiv_id: no store.search")), unseen.errors.join("\n"));
+  const itself = validate({ ...core, among_collection: [{ ...core.among_collection[0], arxiv_id: "2605.00001" }] }, [], { ...found, collection: new Set(["2605.00001"]) });
+  assert.equal(itself.ok, false);
+  const relation = validate({ ...core, among_collection: [{ ...core.among_collection[0], relation: "cites" }] }, [], found);
+  assert.equal(relation.ok, false);
+  if (!relation.ok) assert.ok(relation.errors.some((e) => e.startsWith("/among_collection/0/relation: must be one of: agrees, contradicts, extends, supersedes")), relation.errors.join("\n"));
+  const { among_collection: _, ...without } = core;
+  assert.equal(validate(without).ok, false, "required, though it may be empty");
+  assert.equal(validate({ ...core, among_collection: [] }, [], found).ok, true);
+});
+
+test("an arXiv id is a modern or a legacy one, without its version", () => {
+  const legacy = ["cs/9901001", "math.AG/0601001", "hep-th/9901001"];
+  const found = { collection: new Set(legacy), self: "2605.00001" };
+  const among = legacy.map((arxiv_id) => ({ ...core.among_collection[0], arxiv_id }));
+  const prior = [{ ...core.prior_work[0], arxiv_id: "math.AG/0601001" }];
+  assert.equal(validate({ ...core, among_collection: among, prior_work: prior }, [], found).ok, true);
+  for (const bad of ["cs/9901001v2", "2604.01234v3", "9901001", "cs/990100", "CS/9901001x"]) {
+    const result = validate({ ...core, among_collection: [{ ...core.among_collection[0], arxiv_id: bad }] });
+    assert.equal(result.ok, false, bad);
+  }
 });

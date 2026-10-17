@@ -40,6 +40,10 @@ export const MONITOR_TARGETS = [
   "other",
 ] as const;
 export const PRESSURES = ["none", "prompted evasion", "optimization against the monitor", "both"] as const;
+export const RELATIONS = ["agrees", "contradicts", "extends", "supersedes"] as const;
+// A version-stripped arXiv id, modern (2305.04388) or legacy (cs/9901001, math.AG/0601001), as
+// litwatch stores them.
+const ARXIV_ID = "^(?:\\d{4}\\.\\d{4,5}|[a-z-]+(?:\\.[A-Z]{2})?/\\d{7})$";
 
 const CORE = {
   summary: Type.String({
@@ -70,12 +74,31 @@ const CORE = {
         minLength: 20,
         description: "What this paper takes from it or claims to improve on.",
       }),
-      arxiv_id: Type.Optional(Type.String({ pattern: "^\\d{4}\\.\\d{4,5}$" })),
+      arxiv_id: Type.Optional(Type.String({ pattern: ARXIV_ID })),
     }),
     {
       minItems: 1,
       maxItems: 6,
       description: "The closest prior work the paper builds on or claims to improve on.",
+    },
+  ),
+  among_collection: Type.Array(
+    Type.Object({
+      arxiv_id: Type.String({ pattern: ARXIV_ID, description: "As store.search returned it." }),
+      title: Type.String({ minLength: 5 }),
+      relation: enumOf(RELATIONS, "How this paper stands to that one."),
+      note: Type.String({
+        minLength: 20,
+        maxLength: 400,
+        description: "One sentence on where the two meet: the shared question and what differs.",
+      }),
+    }),
+    {
+      maxItems: 8,
+      description:
+        "Papers the lab's collection holds (store.search hits with in_collection true), recent and on the " +
+        "same question, that this paper agrees with, contradicts, extends or supersedes. Only relations both " +
+        "papers' texts support; empty when none does.",
     },
   ),
   code_available: Type.Boolean({
@@ -238,7 +261,15 @@ export function schemaJson(extensions: string[]): string {
 
 export type Validation = { ok: true; value: Result } | { ok: false; errors: string[] };
 
-export function validate(input: unknown, extensions: string[] = []): Validation {
+/** What the session's searches found: the collection's papers the agent was shown, and the paper itself. */
+export interface Found {
+  collection: ReadonlySet<string>;
+  self: string;
+}
+
+/** Validate a submitted result. With `found`, each among_collection entry must be a collection paper a
+ * search in this session returned, other than the paper itself. */
+export function validate(input: unknown, extensions: string[] = [], found?: Found): Validation {
   const schema = resultSchema(extensions);
   const errors = schemaErrors(schema, input);
   if (input && typeof input === "object")
@@ -248,8 +279,19 @@ export function validate(input: unknown, extensions: string[] = []): Validation 
     const value = input as Result & Record<string, unknown>;
     if (value.code_available && !value.code_url) errors.push("/code_url: required when code_available is true");
     for (const name of extensions) errors.push(...(EXTENSION_RULES[name]?.(value[name]) ?? []));
+    if (found) errors.push(...amongErrors(value.among_collection, found));
   }
   return errors.length ? { ok: false, errors } : { ok: true, value: input as Result };
+}
+
+function amongErrors(among: Result["among_collection"], found: Found): string[] {
+  return among.flatMap((entry, i) =>
+    entry.arxiv_id === found.self
+      ? [`/among_collection/${i}/arxiv_id: is this paper itself`]
+      : found.collection.has(entry.arxiv_id)
+        ? []
+        : [`/among_collection/${i}/arxiv_id: no store.search in this session returned it with in_collection true`],
+  );
 }
 
 /** One line per offending path; union noise from literal alternatives collapsed into one line. */

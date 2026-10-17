@@ -1,0 +1,11 @@
+# CodeRabbit reviews PRs into the default branch by default; v1 work targets `v1` (and stacked
+# feature branches), so review PRs into any branch.
+#
+# Reviews are rationed, so only a PR's opening push is reviewed automatically. Later rounds are
+# asked for with `@coderabbitai review` once a round's fixes are pushed together, and rebases
+# cost nothing. Stacked PRs stay drafts (skipped by default) until their base merges.
+reviews:
+  auto_review:
+    auto_incremental_review: false
+    base_branches:
+      - ".*"

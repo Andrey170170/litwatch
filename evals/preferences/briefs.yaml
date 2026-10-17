@@ -1,0 +1,19 @@
+# The preference set's Briefs (docs/agents/verification.md): papers whose Brief, overstatement
+# line and Gist the owner has read or will read. `litwatch eval briefs` writes them and
+# `litwatch eval briefs-report` sets them beside the abstract.
+#
+# Per paper: `area`, the class its Weight is judged in; the owner's `overstates` (true, false, or
+# null until read); `key_facts` a Brief must keep and `must_not`, claims no Brief or Gist may make;
+# a `note`. The first ten are milestone N3's hand-read papers: Focus papers the owner labelled
+# central, in both Focus topics, methods, benchmarks and analyses.
+papers:
+  - {id: "2610.12445", area: cot-monitoring, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2610.11351", area: cot-monitoring, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2610.10947", area: cot-monitoring, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2610.10405", area: cot-monitoring, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2610.07186", area: cot-faithfulness, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2610.04594", area: cot-faithfulness, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2610.03458", area: cot-monitoring, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2610.02588", area: cot-monitoring, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2610.02015", area: cot-monitoring, overstates: null, key_facts: [], must_not: [], note: null}
+  - {id: "2609.32670", area: cot-faithfulness, overstates: null, key_facts: [], must_not: [], note: null}

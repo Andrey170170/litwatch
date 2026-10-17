@@ -60,11 +60,51 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  container:
-    name: Container smoke test
-    needs: [quality, deep]
+  archive:
+    name: Archive tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: archive
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+      - run: uv venv && uv pip install -r requirements.lock -e .
+      - run: .venv/bin/python -m unittest discover -s tests
+
+  web:
+    name: Web app type check, tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  container:
+    name: Container and stack smoke tests
+    needs: [quality, deep, web, archive]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - run: docker build --tag litwatch:ci --build-arg VERSION=ci --build-arg REVISION="${GITHUB_SHA}" .
@@ -77,3 +117,19 @@ jobs:
           --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m
           litwatch:ci --help
       - run: docker build --tag litwatch-deep:ci --build-arg VERSION=ci --build-arg REVISION="${GITHUB_SHA}" deep
+      - run: docker build --tag litwatch-archive:ci archive
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+      - run: uv run --no-project --with playwright==1.64.0 playwright install --with-deps chromium
+      - name: Stack smoke test (tests/stack/smoke.sh)
+        run: tests/stack/smoke.sh smoke-out
+        env:
+          SMOKE_BUILD: "0"
+          LITWATCH_TAG: ci
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stack-smoke
+          path: smoke-out/

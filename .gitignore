@@ -8,3 +8,9 @@ dist/
 evals/runs/
 deep/node_modules/
 *.outcome.json
+.env.*
+.playwright-mcp/
+
+# The built web app (web/ -> pnpm build)
+src/litwatch/api/web/
+web/node_modules/

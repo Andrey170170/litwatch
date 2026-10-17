@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 2 · the Digest</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+</head>
+<body>
+<div class="top">
+  <h1>Round 2 · the Digest</h1>
+  <div class="dirs" id="vars"></div>
+  <span class="sp"></span>
+  <label class="tune" style="font-size:12px;color:var(--fg2)"><input type="checkbox" id="showedge"> edge</label>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">Night City, toned down: no scanlines, plainer numbers. The ladder is fixed by the spec: History → a day → a digest → a paper. This round asks how you move along it. Today is Tue 13 Oct; Mon 12 has last week's weekly digests; Thu 8 has a digest that failed to write. Day texts other than today's are samples.</p>
+  <p class="desc" id="desc"></p>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" id="M"></div>
+    <div class="notes">
+      <p><b>Phone.</b> Edge swipe on Digest, Topics or Papers opens the drawer. On anything deeper it drags the page back with the previous one underneath; let go past ~40% or flick to go back. On a phone, Android's own back gesture walks the same steps.</p>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Which way through the levels: A pages, B one unfolding column, C colour grid with a slide-over? Or a mix, such as C's grid above B's column?</li>
+        <li>The grid in C: topics as rows in their fixed order, days as columns, each cell the colour of that digest's best paper. Does it work as History for you?</li>
+        <li>On a day, each digest shows its Gist and up to 3 pick titles. Right amount, or should picks show their Gists too, or only the Gist with no titles?</li>
+        <li>This week's weekly digests: a pinned group at the top of the Digest tab (B), only in History (A), or a W column in the grid (C)?</li>
+        <li>"Nothing new" digests keep their slot. Full block as now, or a thin one-line row in the same slot?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+/* ── variants ── */
+const VARS = {
+  A: ["Pages", "<b>A · Pages.</b> Each level is its own screen. Digest opens on today; ‹ › walk the days; History is a page of Marks, this week's weeklies pinned on top; a digest is a page; a paper is a page."],
+  B: ["Unfolding column", "<b>B · One unfolding column.</b> No History page: the Digest tab is one column, this week's weeklies pinned on top, then today at Gist level, then earlier days at Mark level. Tapping unfolds in place, Mark → Gist → full digest; only a paper leaves the column. Nothing above what you opened moves."],
+  C: ["Grid + slide-over", "<b>C · Colour grid.</b> The top of the Digest tab is three weeks as a grid: a row per topic in the fixed order, a column per day, W columns for weeklies, each cell coloured by its best paper. Pick a column to read that day below; pick a cell to open that digest. On desktop it slides over from the right; on a phone it is a page."],
+};
+const V = new URLSearchParams(location.search).get("v") in VARS ? new URLSearchParams(location.search).get("v") : "A";
+document.getElementById("vars").innerHTML = Object.entries(VARS).map(([k, [n]]) => `<button class="${k === V ? "on" : ""}" onclick="location.search='?v=${k}'">${k}<i>${n}</i></button>`).join("");
+document.getElementById("desc").innerHTML = VARS[V][1];
+
+/* B · one column that unfolds in place */
+function columnView(st) {
+  const lv = (key, def) => (key in st.lv ? st.lv[key] : def);
+  const act = (key, n) => `data-lv="${key}#${n}"`; act.fold = true;
+  function run(keys, def) { // consecutive Mark rows share one list; anything unfolded breaks it
+    let h = "", rows = "";
+    const flush = () => { if (rows) h += `<div class="list">${rows}</div>`; rows = ""; };
+    for (const key of keys) {
+      const l = lv(key, def), { id, m } = src(key), anim = st.just === key ? "unfold" : "";
+      if (l === 0 || m.r === -1) { rows += markRow(key, id, m, act); continue; }
+      flush();
+      if (l === 1) h += gistBlock(key, act, anim);
+      else h += `<div class="dblock ${anim}"><div class="hd" ${act(key, 1)}>${badge(id)}<span class="n">${T[id].n}</span><span class="c">${m.c}</span>${foldBtn(key, act)}</div><div class="body2">${digestBody(key)}</div></div>`;
+    }
+    flush(); return h;
+  }
+  const wk = DAY[THIS_WEEK].week;
+  let h = `<div class="grp pin"><span class="t">This week</span><span class="s">weekly digests · ${wk.range}</span></div>` + run(TOPICS.map((t) => `${THIS_WEEK}|${t.id}|w`), 0);
+  for (const d of NEWEST) {
+    h += `<div class="grp click" data-dayall="${d.key}"><span class="t">${d.key}</span><span class="s">${d.key === TODAY ? "today" : d.none ? "" : "tap to unfold the day"}</span></div>`;
+    if (d.none) { h += `<div class="none">No papers released.</div>`; continue; }
+    h += run(DAILY.map((id) => `${d.key}|${id}`), d.key === TODAY ? 1 : 0);
+    if (d.week && d.key !== THIS_WEEK) h += `<div class="grp"><span class="s">Weekly · ${d.week.range}</span></div>` + run(TOPICS.map((t) => `${d.key}|${t.id}|w`), 0);
+  }
+  return h;
+}
+
+/* ── routing per variant ── */
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, day: TODAY, history: false, dg: null, lv: {}, just: null },
+    view(st) {
+      const slide = V === "C" && !phone && st.tab === "Digest" && !st.topic;
+      if (st.paper && !slide) return { body: paperView(st.paper), title: "" };
+      if (st.topic) return { body: phone ? topicPage(st.topic).replace(/<div style="display:flex;gap:10px[^]*?<\/div>\s*<\/div>/, "") : topicPage(st.topic), title: T[st.topic].n };
+      if (st.tab === "Topics") return { body: topicsView() };
+      if (st.tab === "Papers") return { body: papersView() };
+      if (V === "A") {
+        if (st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+        if (st.history) return { body: historyList(), title: "History" };
+        return { body: daystrip(st.day, true) + dayBody(st.day) };
+      }
+      if (V === "B") return { body: columnView(st) };
+      const base = gridView(st.day) + daystrip(st.day, false) + dayBody(st.day);
+      if (phone) return st.dg ? { body: digestPage(st.dg), title: dgTitle(st.dg) } : { body: base };
+      const ov = st.paper ? paperView(st.paper) : st.dg ? digestPage(st.dg) : null;
+      return { body: base, overlay: ov && `<a class="back" data-back>‹ ${st.paper && st.dg ? "Digest" : "Close"}</a>${ov}` };
+    },
+    click(e, nav) {
+      const f = (s) => e.target.closest(s); let n;
+      if (f("[data-paper]") || f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-step]"))) nav.set({ day: stepDay(nav.st.day, +n.dataset.step) });
+      else if (f("[data-go=history]")) nav.go({ history: true });
+      else if ((n = f("[data-day]"))) nav.go({ history: false, day: n.dataset.day });
+      else if ((n = f("[data-gday]"))) nav.set({ day: n.dataset.gday });
+      else if ((n = f("[data-cell]"))) { const day = n.dataset.cell.split("|")[0]; if (!n.dataset.cell.endsWith("|w")) nav.set({ day }); nav.go({ dg: n.dataset.cell }); }
+      else if ((n = f("[data-lv]"))) { const [key, l] = n.dataset.lv.split("#"); nav.set({ lv: { ...nav.st.lv, [key]: +l }, just: key }); }
+      else if ((n = f("[data-dayall]"))) {
+        const d = DAY[n.dataset.dayall]; if (d.none) return true;
+        const keys = DAILY.map((id) => `${d.key}|${id}`), def = d.key === TODAY ? 1 : 0;
+        const open = keys.some((k) => (k in nav.st.lv ? nav.st.lv[k] : def) > 0);
+        const lv = { ...nav.st.lv }; keys.forEach((k) => (lv[k] = open ? 0 : 1));
+        nav.set({ lv, just: null });
+      }
+      else if ((n = f("[data-dg]"))) nav.go({ dg: n.dataset.dg });
+      else return false;
+      return true;
+    },
+  };
+}
+mountDesk(document.getElementById("D"), makeApp(false));
+mountPhone(document.getElementById("M"), makeApp(true));
+document.getElementById("showedge").onchange = (e) => document.getElementById("M").classList.toggle("show-edge", e.target.checked);
+</script>
+</body></html>

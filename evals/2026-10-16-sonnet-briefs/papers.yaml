@@ -1,0 +1,43 @@
+# P1's papers (docs/plans/model-spend.md): N6's three refusals, 12 Focus Briefs and 25 Weight
+# re-checks from n6_restart (select.sql), with the area each pass judged Weight in.
+papers:
+  - {id: "2610.12989", area: circuits, note: brief}
+  - {id: "2610.17365", area: circuits, note: brief}
+  - {id: "2610.15957", area: interpretability, note: brief}
+  - {id: "2610.21456", area: circuits, note: brief}
+  - {id: "2610.22127", area: interpretability, note: brief}
+  - {id: "2610.18407", area: architectures, note: brief}
+  - {id: "2610.19768", area: reasoning-analyses, note: brief}
+  - {id: "2610.21261", area: interpretability, note: brief}
+  - {id: "2610.19731", area: alignment-and-safety, note: brief}
+  - {id: "2610.17301", area: alignment-and-safety, note: brief}
+  - {id: "2610.12842", area: representations, note: brief}
+  - {id: "2610.19709", area: circuits, note: brief}
+  - {id: "2610.20221", area: lm-evaluation, note: weight}
+  - {id: "2610.19365", area: interpretability, note: weight}
+  - {id: "2610.18262", area: model-security, note: weight}
+  - {id: "2610.20852", area: interpretability, note: weight}
+  - {id: "2610.15207", area: jailbreaks, note: weight}
+  - {id: "2610.18331", area: representations, note: weight}
+  - {id: "2610.19452", area: model-security, note: weight}
+  - {id: "2610.16426", area: alignment-and-safety, note: weight}
+  - {id: "2610.16371", area: interpretability, note: weight}
+  - {id: "2610.15883", area: model-security, note: weight}
+  - {id: "2610.22244", area: alignment-and-safety, note: weight}
+  - {id: "2610.15778", area: reward-hacking, note: weight}
+  - {id: "2610.13886", area: jailbreaks, note: weight}
+  - {id: "2610.22046", area: interpretability, note: weight}
+  - {id: "2610.18159", area: alignment-and-safety, note: weight}
+  - {id: "2610.14190", area: interpretability, note: weight}
+  - {id: "2610.18122", area: lm-evaluation, note: weight}
+  - {id: "2610.20993", area: lm-evaluation, note: weight}
+  - {id: "2610.15634", area: alignment-and-safety, note: weight}
+  - {id: "2610.13928", area: model-security, note: weight}
+  - {id: "2610.17457", area: model-security, note: weight}
+  - {id: "2610.17641", area: steering, note: weight}
+  - {id: "2610.20840", area: representations, note: weight}
+  - {id: "2610.16084", area: steering, note: weight}
+  - {id: "2610.18415", area: hallucination, note: weight}
+  - {id: "2610.13116", area: safety-evaluations, note: refused}
+  - {id: "2610.17907", area: jailbreaks, note: refused}
+  - {id: "2610.21200", area: model-security, note: refused}

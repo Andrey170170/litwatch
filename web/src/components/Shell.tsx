@@ -1,0 +1,256 @@
+/**
+ * The shell (DESIGN.md, "Shell"): on the desktop a sidebar and the main column; on the phone a header, the page,
+ * the page's bottom bar, the drawer, and the gestures (`gestures.ts`). The main column records how it was reached
+ * (go, back, top, or stepped to) so the page can slide in from the right side.
+ */
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router";
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { freshVisit } from "@/api/queries";
+import { useDesktop } from "@/hooks/useDesktop";
+import { countRender } from "@/lib/renders";
+import { arrival, historyIndex } from "@/lib/steps";
+import { SettingsSide } from "@/routes/settings";
+import { Badge } from "./Badge";
+import { usePhoneGestures } from "./gestures";
+import { RunStatus } from "./RunStatus";
+import { Sheet } from "./Sheet";
+import { Unavailable, useSummary } from "./Summary";
+import { Slot } from "./slots";
+import { Toaster } from "./Toaster";
+
+const TABS = [
+  { to: "/", name: "Digest" },
+  { to: "/topics", name: "Topics" },
+  { to: "/papers", name: "Papers" },
+] as const;
+
+/** Where the app is: its path, and the history state the way there left. */
+export type Where = { pathname: string; state: { page?: boolean } };
+
+/** A deeper screen has "‹ Back" (desktop) or "‹" and its title (phone); a top-level one the tabs' chrome. A Day or
+ * Week opened from History is a page, by the state its link set, and its steps keep. */
+export function isDeeper({ pathname, state }: Where): boolean {
+  return !!state.page || !["/", "/week", "/history", "/topics", "/papers"].includes(pathname.replace(/\/$/, "") || "/");
+}
+
+/** Settings owns the sidebar on its pages, and on a paper opened from one of them. */
+function inSettings(location: { pathname: string; state: { settings?: boolean } }): boolean {
+  return location.pathname.startsWith("/settings") || !!location.state.settings;
+}
+
+/** The sidebar's head: the wordmark and the run's status. */
+export function SideHead() {
+  return (
+    <div className="wm">
+      <Link to="/" className="mark">
+        litwatch
+      </Link>
+      <RunStatus />
+    </div>
+  );
+}
+
+type Came = "go" | "back" | "top" | "keep" | "next" | "prev" | "still";
+
+/** The screen's key: its path, and on the phone the number of the last arrival by gesture, so a step within one
+ * route (a Day to the next) mounts afresh and plays its entry. */
+const screenKey = (pathname: string) => `${pathname}#${arrival().n}`;
+
+/** How the current screen was reached, kept until the screen changes: by a gesture (stepped next or prev, or
+ * already in view after a swipe back), else from the history index: forward is deeper, backward is back. */
+function useCame(): Came {
+  const location = useLocation();
+  const index = historyIndex(location);
+  const a = arrival();
+  const key = screenKey(location.pathname);
+  const [seen, setSeen] = useState<{ key: string; n: number; index: number; came: Came }>(() => ({ key, n: a.n, index, came: "top" }));
+  if (seen.key === key) return seen.came;
+  const came: Came = a.n !== seen.n && a.how ? a.how : !isDeeper(location) ? "top" : index < seen.index ? "back" : "go";
+  setSeen({ key, n: a.n, index, came });
+  return came;
+}
+
+/** The followed topics, from the shell's summary: the list re-renders only when the topics themselves change. A
+ * summary never read leaves the section with that word, not empty. */
+const Following = memo(function Following({ onPick }: { onPick?: () => void }) {
+  const { data: topics, unavailable, retry } = useSummary((s) => s.topics);
+  countRender("following");
+  if (unavailable)
+    return (
+      <>
+        <div className="sec">Following</div>
+        <Unavailable what="topics" retry={retry} />
+      </>
+    );
+  if (!topics?.length) return null;
+  return (
+    <>
+      <div className="sec">Following</div>
+      {topics.map((t) => (
+        <Link key={t.slug} to="/topics/$slug" params={{ slug: t.slug }} className="it" activeProps={{ className: "it on" }} onClick={onPick}>
+          <Badge topic={t} />
+          <span className="nm">{t.name}</span>
+        </Link>
+      ))}
+    </>
+  );
+});
+
+/** The Digest's views, under Digest in the drawer (DESIGN.md, "Shell"); the desktop has them in the tab. */
+const DIGEST_VIEWS = [
+  { to: "/", name: "Day" },
+  { to: "/week", name: "Week" },
+  { to: "/history", name: "History" },
+] as const;
+
+/** The tabs; Digest is on for any of its views. In the drawer the views follow it as sub-items. */
+function Tabs({ onPick, drawer }: { onPick?: () => void; drawer?: boolean }) {
+  const { pathname } = useLocation();
+  const inDigest = DIGEST_VIEWS.some((v) => v.to === (pathname.replace(/\/$/, "") || "/"));
+  return TABS.map((t) => (
+    <Fragment key={t.to}>
+      <Link to={t.to} className={`it tab${t.name === "Digest" && inDigest ? " on" : ""}`} activeOptions={{ exact: true }} activeProps={{ className: "it tab on" }} onClick={onPick}>
+        {t.name}
+      </Link>
+      {drawer &&
+        t.name === "Digest" &&
+        DIGEST_VIEWS.map((v) => (
+          <Link key={v.to} to={v.to} className="it sub" activeOptions={{ exact: true, includeSearch: false }} activeProps={{ className: "it sub on" }} onClick={onPick}>
+            {v.name}
+          </Link>
+        ))}
+    </Fragment>
+  ));
+}
+
+/** The reading sidebar; memoised, with nothing passed in, so a route change re-renders only its active links. */
+const ReadingSide = memo(function ReadingSide() {
+  countRender("side");
+  return (
+    <aside className="side">
+      <SideHead />
+      <nav className="nav">
+        <Tabs />
+        <Following />
+      </nav>
+      <nav className="foot nav">
+        <Link to="/settings" className="it">
+          ⚙ Settings
+        </Link>
+      </nav>
+    </aside>
+  );
+});
+
+function Desktop() {
+  const came = useCame();
+  const location = useLocation();
+  return (
+    <div className="app">
+      {inSettings(location) ? <SettingsSide /> : <ReadingSide />}
+      <main className="main" data-came={came} data-scroll-restoration-id="main">
+        {/* keyed by screen: a navigation mounts the column anew, so its arrival plays again even from the same side */}
+        <div className="inner" key={screenKey(location.pathname)}>
+          <Outlet />
+        </div>
+      </main>
+      <Toaster />
+    </div>
+  );
+}
+
+function Phone() {
+  const location = useLocation();
+  const router = useRouter();
+  const came = useCame();
+  const deeper = isDeeper(location);
+  const [menu, setMenu] = useState(false);
+  useEffect(() => setMenu(false), [location.pathname]);
+  const back = () => (router.history.canGoBack() ? router.history.back() : router.navigate({ to: "/" }));
+  const els = { root: useRef<HTMLElement | null>(null), page: useRef<HTMLElement | null>(null), main: useRef<HTMLElement | null>(null), under: useRef<HTMLElement | null>(null), panel: useRef<HTMLElement | null>(null), shade: useRef<HTMLElement | null>(null) };
+  const { drawerDrag, onRendered } = usePhoneGestures(els, { deeper, menu, setMenu, deeperAt: isDeeper });
+  const key = screenKey(location.pathname);
+  // a screen a swipe back brought in has rendered: the page that followed the finger gives way to it
+  useLayoutEffect(onRendered, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="phone" ref={els.root as React.RefObject<HTMLDivElement>}>
+      <div className="under" ref={els.under as React.RefObject<HTMLDivElement>} hidden />
+      <div className="page" ref={els.page as React.RefObject<HTMLDivElement>}>
+        <header className="pbar">
+          {deeper ? (
+            <>
+              <button className="ib" onClick={back} aria-label="Back">
+                ‹
+              </button>
+              <Slot name="title" className="ttl" />
+            </>
+          ) : (
+            <>
+              <button className="ib" onClick={() => setMenu(true)} aria-label="Menu">
+                ☰
+              </button>
+              <Slot name="bar" className="ttl" />
+            </>
+          )}
+          <span className="sp" />
+          <RunStatus />
+          <Link to="/settings" className="ib" aria-label="Settings">
+            ⚙
+          </Link>
+        </header>
+        <main className="scroll screen" ref={els.main} data-came={came} key={key} data-scroll-restoration-id="screen">
+          <div className="pp">
+            <Outlet />
+          </div>
+        </main>
+        <Slot name="foot" />
+      </div>
+      <Sheet open={menu} onClose={() => setMenu(false)} side="left" label="Menu" drag={drawerDrag} panelRef={els.panel} shadeRef={els.shade}>
+        <div className="wm">
+          <Link to="/" className="mark" onClick={() => setMenu(false)}>
+            litwatch
+          </Link>
+          <RunStatus />
+        </div>
+        <nav className="nav">
+          <Tabs onPick={() => setMenu(false)} drawer />
+          <Following onPick={() => setMenu(false)} />
+        </nav>
+        <nav className="foot nav">
+          <Link to="/settings" className="it" onClick={() => setMenu(false)}>
+            ⚙ Settings
+          </Link>
+        </nav>
+      </Sheet>
+      <Toaster />
+    </div>
+  );
+}
+
+export function Shell() {
+  const router = useRouter();
+  const qc = useQueryClient();
+  // A page reached by a link loads afresh; Back finds it as it was left. A push within the page (a filter,
+  // Calibrate's `?at=`) is no visit.
+  useEffect(() => {
+    let at = router.state.location.pathname;
+    return router.history.subscribe(({ location, action }) => {
+      if (action.type === "PUSH" && location.pathname !== at) freshVisit(qc, location.pathname);
+      at = location.pathname;
+    });
+  }, [router, qc]);
+  return useDesktop() ? <Desktop /> : <Phone />;
+}
+
+/** "‹ Back" at the top of a deeper page on the desktop. */
+export function Back() {
+  const router = useRouter();
+  const desktop = useDesktop();
+  if (!desktop) return null;
+  return (
+    <button className="back" onClick={() => (router.history.canGoBack() ? router.history.back() : router.navigate({ to: "/" }))}>
+      ‹ Back
+    </button>
+  );
+}

@@ -1,0 +1,166 @@
+paper_id,primary,members,unsettled
+1910.04076,computer-vision,computer-vision machine-learning,robotics
+2404.05880,jailbreaks,alignment-and-safety jailbreaks,federated-and-private machine-learning safety-training
+2405.08448,preference-training,language-models preference-training,
+2412.16555,jailbreaks,alignment-and-safety jailbreaks,language-models multimodal
+2502.18770,reward-hacking,alignment-and-safety language-models preference-training reward-hacking,
+2505.13878,preference-training,language-models preference-training,
+2506.19459,probabilistic-inference,machine-learning probabilistic-inference,
+2509.22230,reasoning-and-rl,language-models reasoning-and-rl,efficiency-and-architecture inference-efficiency
+2510.07492,ai-for-science,ai-for-science computer-vision machine-learning,media-generation
+2512.00614,multi-agent-systems,agents language-models multi-agent-systems,federated-and-private machine-learning
+2512.09198,ai-for-science,ai-for-science machine-learning,
+2512.18318,media-generation,machine-learning media-generation,efficiency-and-architecture inference-efficiency language-models
+2601.04260,circuits,circuits interpretability,
+2602.03994,cot-faithfulness,circuits cot-faithfulness interpretability,
+2603.21045,media-generation,machine-learning media-generation,computer-vision
+2603.28662,agent-evaluation,agent-evaluation agents language-models,multimodal
+2605.06979,circuits,circuits interpretability,automated-interpretability
+2605.17610,multimodal,language-models multimodal,alignment-and-safety efficiency-and-architecture inference-efficiency reasoning-and-rl safety-evaluations test-time-compute
+2605.19227,model-security,alignment-and-safety model-security,language-models multimodal
+2605.28003,reasoning-and-rl,language-models reasoning-and-rl,pretraining
+2605.29000,language-tasks,language-models language-tasks,efficiency-and-architecture long-context
+2606.08496,automated-interpretability,automated-interpretability interpretability sparse-autoencoders,
+2606.22327,inference-efficiency,efficiency-and-architecture inference-efficiency language-models,
+2606.23933,reinforcement-learning,machine-learning reinforcement-learning,
+2606.28525,safety-training,alignment-and-safety interpretability safety-training,representations reward-hacking steering
+2607.00691,learning-theory,learning-theory machine-learning,media-generation
+2607.20995,circuits,circuits interpretability,
+2607.21971,rl-for-reasoning,language-models reasoning-and-rl rl-for-reasoning test-time-compute,
+2608.21114,reinforcement-learning,machine-learning reinforcement-learning,
+2608.21501,rl-for-reasoning,language-models reasoning-and-rl rl-for-reasoning,
+2608.21678,media-generation,machine-learning media-generation,
+2608.21766,deception,alignment-and-safety deception interpretability representations steering,training-dynamics
+2608.22055,multi-agent-systems,agents language-models multi-agent-systems,machine-learning robotics
+2608.22636,reinforcement-learning,machine-learning reinforcement-learning,learning-theory
+2608.23075,ai-for-science,ai-for-science machine-learning,
+2608.23247,classical-ai,classical-ai machine-learning,
+2608.23809,sparse-autoencoders,interpretability language-models multilingual sparse-autoencoders,representations
+2608.24232,safety-evaluations,alignment-and-safety cot-monitoring safety-evaluations,
+2608.24715,computer-vision,computer-vision machine-learning,ai-for-science
+2608.24771,ai-for-science,ai-for-science machine-learning,time-series
+2608.24964,probabilistic-inference,machine-learning probabilistic-inference,learning-theory
+2608.25315,interpretability-evaluation,interpretability interpretability-evaluation,steering
+2608.26683,reinforcement-learning,machine-learning reinforcement-learning,
+2608.27348,cot-monitoring,alignment-and-safety cot-monitoring,oversight-and-control
+2608.27420,rl-for-reasoning,language-models reasoning-and-rl rl-for-reasoning,
+2608.27448,rl-for-reasoning,language-models reasoning-and-rl rl-for-reasoning,test-time-compute
+2608.28393,time-series,machine-learning time-series,probabilistic-inference
+2608.29252,rl-for-reasoning,language-models reasoning-and-rl rl-for-reasoning,
+2608.29289,ai-for-science,ai-for-science machine-learning,time-series
+2608.29605,agents,agents language-models,efficiency-and-architecture long-context
+2608.30647,long-context,efficiency-and-architecture language-models long-context,inference-efficiency
+2608.30916,agent-evaluation,agent-evaluation agents language-models,
+2608.30923,time-series,machine-learning time-series,
+2609.00047,graph-learning,graph-learning machine-learning,
+2609.01633,graph-learning,ai-for-science graph-learning machine-learning,
+2609.02566,ai-for-science,ai-for-science machine-learning,reinforcement-learning
+2609.02852,model-security,alignment-and-safety cot-monitoring model-security,cot-faithfulness interpretability
+2609.02986,architectures,architectures efficiency-and-architecture language-models long-context,circuits interpretability
+2609.04851,robotics,machine-learning robotics,
+2609.06100,rl-for-reasoning,language-models reasoning-and-rl rl-for-reasoning,
+2609.06704,cot-faithfulness,cot-faithfulness interpretability,language-models multimodal
+2609.06951,steering,interpretability steering,representations
+2609.07053,representations,interpretability representations,
+2609.09324,time-series,machine-learning time-series,
+2609.12004,ai-for-science,ai-for-science machine-learning,learning-theory
+2609.12419,rl-for-reasoning,language-models reasoning-and-rl rl-for-reasoning,
+2609.13040,learning-theory,learning-theory machine-learning,
+2609.13548,computer-use-agents,agents computer-use-agents language-models,
+2609.13889,model-security,alignment-and-safety model-security,agents language-models
+2609.13914,machine-learning,machine-learning,
+2609.14141,learning-theory,learning-theory machine-learning,
+2609.15037,training-systems,efficiency-and-architecture language-models training-systems,
+2609.15687,ai-for-science,ai-for-science machine-learning,
+2609.15989,cot-monitoring,alignment-and-safety cot-monitoring model-security,cot-faithfulness interpretability
+2609.16069,time-series,machine-learning time-series,media-generation
+2609.16071,time-series,machine-learning time-series,
+2609.16382,representations,interpretability representations,training-dynamics
+2609.17241,inference-efficiency,efficiency-and-architecture inference-efficiency language-models,
+2609.17951,classical-ai,classical-ai machine-learning,
+2609.18204,oversight-and-control,alignment-and-safety oversight-and-control,language-models lm-evaluation
+2609.19101,reward-hacking,alignment-and-safety interpretability oversight-and-control representations reward-hacking,
+2609.19650,multilingual,language-models language-tasks multilingual,
+2609.19801,agent-evaluation,agent-evaluation agents language-models,machine-learning robotics
+2609.19832,graph-learning,graph-learning machine-learning,time-series
+2609.20129,jailbreaks,alignment-and-safety interpretability jailbreaks sparse-autoencoders,
+2609.20732,retrieval,language-models retrieval,language-tasks
+2609.21561,reasoning-and-rl,language-models reasoning-and-rl,reasoning-analyses
+2609.22119,deception,alignment-and-safety deception interpretability steering,representations
+2609.22219,representations,interpretability interpretability-evaluation representations,circuits
+2609.23065,cot-faithfulness,cot-faithfulness interpretability,circuits sparse-autoencoders
+2609.23371,long-context,efficiency-and-architecture language-models long-context retrieval,
+2609.23680,classical-ai,classical-ai machine-learning,
+2609.23773,federated-and-private,federated-and-private machine-learning,
+2609.24855,language-tasks,language-models language-tasks,
+2609.26000,media-generation,machine-learning media-generation,
+2609.26063,federated-and-private,federated-and-private graph-learning machine-learning,
+2609.26603,graph-learning,ai-for-science graph-learning machine-learning,
+2609.27041,representations,interpretability representations,language-models reasoning-analyses reasoning-and-rl
+2609.27294,architectures,architectures efficiency-and-architecture language-models,inference-efficiency training-systems
+2609.27470,inference-efficiency,efficiency-and-architecture inference-efficiency language-models multimodal,long-context
+2609.27871,agents,agents language-models,alignment-and-safety oversight-and-control
+2609.28080,lm-evaluation,language-models lm-evaluation,
+2609.30877,learning-theory,learning-theory machine-learning,
+2609.31009,inference-efficiency,efficiency-and-architecture inference-efficiency language-models,
+2609.31098,representations,interpretability representations,training-dynamics
+2609.32570,machine-learning,machine-learning,computer-vision
+2609.32790,federated-and-private,federated-and-private machine-learning,learning-theory
+2609.33134,reasoning-analyses,language-models reasoning-analyses reasoning-and-rl,cot-faithfulness interpretability
+2609.33455,reasoning-and-rl,language-models reasoning-and-rl,
+2609.33891,learning-theory,learning-theory machine-learning,ai-and-society fairness
+2609.34715,ai-for-science,ai-for-science machine-learning,
+2609.34970,reward-hacking,alignment-and-safety reward-hacking,interpretability safety-training training-dynamics
+2609.35074,cot-faithfulness,cot-faithfulness interpretability,alignment-and-safety cot-monitoring hallucination language-models
+2609.35599,representations,interpretability representations steering,
+2609.35628,learning-theory,learning-theory machine-learning,
+2609.35732,agent-evaluation,agent-evaluation agents hallucination language-models,
+2609.35880,reinforcement-learning,machine-learning reinforcement-learning,
+2609.35912,model-security,alignment-and-safety model-security,agent-evaluation agents language-models multimodal safety-evaluations
+2609.35928,multi-agent-systems,agents language-models multi-agent-systems,ai-and-society fairness
+2609.36221,interpretability,interpretability,circuits
+2609.36222,inference-efficiency,efficiency-and-architecture inference-efficiency language-models,architectures
+2609.36368,multimodal,language-models multimodal,
+2609.36452,inference-efficiency,efficiency-and-architecture inference-efficiency language-models,architectures
+2609.36584,training-systems,efficiency-and-architecture language-models training-systems,
+2609.36956,jailbreaks,alignment-and-safety jailbreaks,
+2609.37522,agents,agents language-models,efficiency-and-architecture inference-efficiency
+2609.37680,circuits,circuits interpretability representations,
+2609.38415,safety-evaluations,alignment-and-safety safety-evaluations,deception model-security
+2609.39010,ai-for-science,ai-for-science machine-learning,
+2609.39114,learning-theory,learning-theory machine-learning,efficiency-and-architecture language-models training-systems
+2609.39838,cot-monitoring,alignment-and-safety cot-monitoring,
+2610.00024,circuits,circuits interpretability representations,language-models multimodal
+2610.00367,inference-efficiency,efficiency-and-architecture inference-efficiency language-models,architectures
+2610.00961,oversight-and-control,ai-and-society alignment-and-safety human-ai-interaction oversight-and-control,agents coding-agents language-models
+2610.01127,pretraining,language-models pretraining,
+2610.01358,ai-for-science,ai-for-science machine-learning,
+2610.02015,reasoning-analyses,alignment-and-safety cot-monitoring language-models reasoning-analyses reasoning-and-rl,
+2610.02098,interpretability-evaluation,circuits interpretability interpretability-evaluation,automated-interpretability
+2610.02588,agent-evaluation,agent-evaluation agents language-models,alignment-and-safety reward-hacking
+2610.03771,media-generation,machine-learning media-generation,
+2610.04469,rl-for-reasoning,language-models multimodal reasoning-and-rl rl-for-reasoning,
+2610.04594,cot-faithfulness,cot-faithfulness interpretability,interpretability-evaluation
+2610.04596,rl-for-reasoning,language-models reasoning-and-rl rl-for-reasoning,
+2610.05166,robotics,machine-learning robotics,
+2610.05300,agents,agents language-models,
+2610.05492,robotics,machine-learning robotics,language-models multimodal retrieval
+2610.05819,robotics,machine-learning robotics,reinforcement-learning
+2610.06637,agents,agents language-models,reasoning-and-rl
+2610.06782,retrieval,agents language-models retrieval,multilingual
+2610.07167,robotics,machine-learning robotics,learning-theory
+2610.07333,training-systems,efficiency-and-architecture language-models training-systems,architectures
+2610.07458,graph-learning,graph-learning machine-learning,
+2610.07522,inference-efficiency,efficiency-and-architecture inference-efficiency language-models,
+2610.07643,inference-efficiency,efficiency-and-architecture inference-efficiency language-models,long-context
+2610.08118,time-series,machine-learning time-series,
+2610.08703,language-tasks,language-models language-tasks,lm-evaluation
+2610.09639,reasoning-analyses,language-models reasoning-analyses reasoning-and-rl,
+2610.10657,model-security,alignment-and-safety model-security reward-hacking,
+2610.10878,agents,agents language-models,reasoning-and-rl
+2610.11318,ai-for-science,ai-for-science machine-learning,media-generation
+2610.11351,deception,alignment-and-safety deception,cot-monitoring
+2610.11407,time-series,machine-learning probabilistic-inference time-series,media-generation
+2610.11578,coding-agents,agents coding-agents language-models retrieval,multi-agent-systems
+2610.12235,agents,agents language-models,lm-evaluation
+2610.12445,deception,alignment-and-safety deception oversight-and-control,interpretability representations

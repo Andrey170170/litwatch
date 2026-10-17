@@ -1,0 +1,5 @@
+# P1 (docs/plans/model-spend.md): the `brief` role on claude-sonnet-5-5 at high.
+[models.brief]
+provider = "anthropic"
+model = "claude-sonnet-5-5"
+effort = "high"

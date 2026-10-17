@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Round 1 · phone shell</title>
+<link rel="stylesheet" href="lib/wire.css">
+<script src="lib/wire.js"></script>
+<style>
+  .pbar { display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 8px 0 14px; background: var(--surface); border-bottom: 1px solid var(--line); flex: none; }
+  .pbar .wm { font-weight: 700; letter-spacing: -.02em; font-size: 16px; }
+  .pbar .ttl { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pbar .sp { flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .tabsbar { display: grid; grid-template-columns: repeat(3, 1fr); height: 58px; border-top: 1px solid var(--line); background: var(--surface); flex: none; }
+  .tabsbar a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; font-weight: 500; color: var(--fg3); cursor: pointer; }
+  .tabsbar a b { font-size: 18px; font-weight: 400; line-height: 1; }
+  .tabsbar a.on { color: var(--fg); }
+  .strip { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--line); flex: none; }
+  .strip .badge { width: 30px; height: 30px; font-size: 11px; border-radius: 8px; cursor: pointer; }
+  .strip .sep { width: 1px; background: var(--line); margin: 4px 2px; flex: none; }
+  .pp { padding: 12px; }
+  .pp .h1 { font-size: 19px; }
+  .drawer { position: absolute; inset: 0; display: flex; z-index: 5; }
+  .drawer .shade { flex: 1; background: rgba(0,0,0,.35); }
+  .drawer .panel { width: 290px; background: var(--surface); padding: 14px 8px; display: flex; flex-direction: column; overflow-y: auto; order: -1; }
+  .drawer .it { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; font-weight: 500; cursor: pointer; }
+  .drawer .it.on { background: var(--sel); }
+  .drawer .sec { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--fg3); padding: 14px 10px 4px; }
+  .drawer .nm { font-weight: 450; font-size: 14px; }
+  .prow .t { font-size: 15px; } .prow .g { font-size: 14px; }
+</style></head>
+<body>
+<div class="top"><h1>Round 1 · the shell on a phone</h1><span class="sp"></span><a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button></div>
+<div class="wrap">
+<p class="intro">Coarse structure only. Each phone is live: tap tabs, topics, digests, papers, "History", ‹ back. On a real phone, open this page and scroll sideways between the three.</p>
+<div class="row-of-phones">
+  <div class="phone-wrap"><h2>A · Bottom tabs</h2><p class="why">Three tabs at the thumb, one gear top right, status as a dot by the name. Topics are a tab away.</p><div class="frame phone" id="A"></div></div>
+  <div class="phone-wrap"><h2>B · Tabs + topic strip</h2><p class="why">A, plus every followed topic's icon in a strip under the bar: one tap to any topic from anywhere, always in the same order.</p><div class="frame phone" id="B"></div></div>
+  <div class="phone-wrap"><h2>C · Digest home + drawer</h2><p class="why">No tab bar: the Digest fills the screen; a drawer (☰) holds Topics, Papers, every topic and Settings, like the sidebar of desktop B/C.</p><div class="frame phone" id="C"></div></div>
+</div>
+</div>
+<script>
+const TABS = [["Digest", "▤"], ["Topics", "◈"], ["Papers", "⌕"]];
+function screen(st) {
+  if (st.paper) return { title: "", body: paperView(st.paper), back: true };
+  if (st.topic) return { title: T[st.topic].n, body: topicPage(st.topic).replace(/<div style="display:flex;gap:10px[^]*?<\/div>\s*<\/div>/, ""), back: true };
+  if (st.tab === "Digest") return st.history ? { title: "History", body: historyView(), back: true } : { body: dayView() };
+  if (st.tab === "Topics") return { body: topicsView() };
+  return { body: papersView() };
+}
+function bar(st, s, menu) {
+  const left = s.back ? `<button class="ib" data-back>‹</button><span class="ttl">${s.title || ""}</span>` : `${menu ? '<button class="ib" data-menu>☰</button>' : ""}<span class="wm">litwatch</span><span class="dot" title="530 read · all quiet"></span>`;
+  return `<div class="pbar">${left}<span class="sp"></span><button class="ib">⚙</button></div>`;
+}
+const tabsbar = (st) => `<div class="tabsbar">${TABS.map(([t, i]) => `<a class="${st.tab === t ? "on" : ""}" data-tab="${t}"><b>${i}</b>${t}</a>`).join("")}</div>`;
+const strip = () => `<div class="strip">${TOPICS.map((t, i) => (i === 3 || i === 5 ? '<span class="sep"></span>' : "") + `<span data-topic="${t.id}">${badge(t.id)}</span>`).join("")}</div>`;
+function drawer(st) {
+  return `<div class="drawer"><div class="shade" data-menu></div><div class="panel"><div class="wm" style="font-weight:700;padding:4px 10px 2px">litwatch</div><div class="status" style="padding:0 10px 10px">530 read · all quiet</div>
+    ${TABS.map(([t]) => `<div class="it${st.tab === t && !st.topic ? " on" : ""}" data-tab="${t}">${t}</div>`).join("")}
+    <div class="sec">Following</div>${TOPICS.map((t) => `<div class="it${st.topic === t.id ? " on" : ""}" data-topic="${t.id}">${badge(t.id)}<span class="nm">${t.n}</span></div>`).join("")}
+    <div class="it" style="margin-top:auto">⚙ Settings</div></div></div>`;
+}
+const layouts = {
+  A: (st, s) => bar(st, s) + `<div class="scroll"><div class="pp">${s.body}</div></div>` + tabsbar(st),
+  B: (st, s) => bar(st, s) + strip() + `<div class="scroll"><div class="pp">${s.body}</div></div>` + tabsbar(st),
+  C: (st, s) => bar(st, s, true) + `<div class="scroll"><div class="pp">${s.body}</div></div>` + (st.menu ? drawer(st) : ""),
+};
+for (const id of Object.keys(layouts)) {
+  const el = document.getElementById(id);
+  const st = { tab: "Digest", topic: null, paper: null, history: false, menu: false };
+  const draw = () => (el.innerHTML = layouts[id](st, screen(st)));
+  el.addEventListener("click", (e) => {
+    const f = (sel) => e.target.closest(sel);
+    let n;
+    if ((n = f("[data-tab]"))) Object.assign(st, { tab: n.dataset.tab, topic: null, paper: null, history: false, menu: false });
+    else if (f("[data-menu]")) st.menu = !st.menu;
+    else if ((n = f("[data-paper]"))) st.paper = n.dataset.paper;
+    else if ((n = f("[data-topic]"))) Object.assign(st, { topic: n.dataset.topic, paper: null, menu: false });
+    else if (f("[data-go=history]")) st.history = true;
+    else if (f("[data-back]")) { if (st.paper) st.paper = null; else if (st.topic) st.topic = null; else st.history = false; }
+    else return;
+    draw();
+  });
+  draw();
+}
+</script>
+</body></html>

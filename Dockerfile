@@ -2,6 +2,19 @@
 
 FROM ghcr.io/astral-sh/uv:0.11.16@sha256:440fd6477af86a2f1b38080c539f1672cd22acb1b1a47e321dba5158ab08864d AS uv
 
+# The web app, built first so the Python package ships it at src/litwatch/api/web/.
+FROM node:24-slim AS web
+
+WORKDIR /app/web
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+COPY web/ ./
+# vite.config.ts writes to ../src/litwatch/api/web, so this lands in /app/src/litwatch/api/web.
+RUN pnpm build
+
+
 FROM python:3.13.13-slim-trixie@sha256:aa938a849bcb82dce8f49480f056ab82bf5c1c3ebc294f0430f37b6820e7f286 AS builder
 
 COPY --from=uv /uv /uvx /usr/local/bin/
@@ -18,6 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 COPY . ./
+COPY --from=web /app/src/litwatch/api/web src/litwatch/api/web
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -37,7 +51,8 @@ LABEL org.opencontainers.image.title="litwatch" \
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    HOME=/var/lib/litwatch
+    HOME=/var/lib/litwatch \
+    LITWATCH_LOG_FORMAT=json
 
 WORKDIR /var/lib/litwatch
 

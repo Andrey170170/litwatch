@@ -1,0 +1,6969 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "litwatch",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/status": {
+      "get": {
+        "summary": "Status",
+        "operationId": "status_api_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/papers": {
+      "get": {
+        "summary": "Papers",
+        "description": "Papers: the whole collection, rarest first. A search also asks the search providers, on\nits first page, for papers the collection lacks: the `outside` band. A filter only the\ncollection has (topic, depth, a level, saved, code, Weight) leaves the band out; `source`\nkeeps one band only.",
+        "operationId": "papers_api_papers_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "rarity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              "title": "Rarity"
+            }
+          },
+          {
+            "name": "grade",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/GradeLevel"
+              },
+              "title": "Grade"
+            }
+          },
+          {
+            "name": "saved",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Saved"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "name": "weight",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Weight"
+              },
+              "title": "Weight"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
+          },
+          {
+            "name": "topic",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Topic"
+            }
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Depth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Depth"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "collection",
+                    "outside"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Papers"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/papers/{paper_id}/pdf": {
+      "get": {
+        "summary": "Pdf",
+        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record\nof it. arXiv's PDF without an archive, for a paper neither holds, or when the archive\ncannot get it in time. The database is read before the wait, which holds no connection.",
+        "operationId": "pdf_api_papers__paper_id__pdf_get",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF, from the archive",
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "307": {
+            "description": "arXiv's PDF: no archive, or none it could get in time"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/papers/{paper_id}": {
+      "get": {
+        "summary": "Paper",
+        "description": "The paper's page; for a paper litwatch has not fetched, the archive's record of it.",
+        "operationId": "paper_api_papers__paper_id__get",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paper"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "503": {
+            "description": "The archive, asked for a paper litwatch lacks, did not answer"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/papers/{paper_id}/publication": {
+      "put": {
+        "summary": "Set Publication",
+        "description": "The owner names the published version by DBLP key or DOI, or says there is none.\nA lookup never overwrites it. A DOI DBLP does not know is kept with the arXiv entry.",
+        "operationId": "set_publication_api_papers__paper_id__publication_put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Publication"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Set Publication Api Papers  Paper Id  Publication Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Forget Publication",
+        "description": "Drop the stored version, the owner's choice included; the paper is looked up again.",
+        "operationId": "forget_publication_api_papers__paper_id__publication_delete",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bibtex": {
+      "post": {
+        "summary": "Bibtex Selection",
+        "description": "BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the\npublished version as soon as DBLP has it; several use what is stored. `cited` are\npapers a search provider found outside the collection: they get arXiv entries from\nwhat the hit carries, with no fetch, no lookup and nothing written.",
+        "operationId": "bibtex_selection_api_bibtex_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BibtexIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Bibtex Filter",
+        "description": "BibTeX for every collection paper a Papers filter matches.",
+        "operationId": "bibtex_filter_api_bibtex_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "rarity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              "title": "Rarity"
+            }
+          },
+          {
+            "name": "grade",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/GradeLevel"
+              },
+              "title": "Grade"
+            }
+          },
+          {
+            "name": "saved",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Saved"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "name": "weight",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Weight"
+              },
+              "title": "Weight"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
+          },
+          {
+            "name": "topic",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Topic"
+            }
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Depth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Depth"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "collection",
+                    "outside"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lookup": {
+      "post": {
+        "summary": "Lookup",
+        "description": "Find a paper by arXiv id or link, fetching it when the collection lacks it.",
+        "operationId": "lookup_api_lookup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Lookup"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/topics": {
+      "get": {
+        "summary": "Topics",
+        "description": "The Topics tab: the shown topics grouped Focus, Area, Field, each in the owner's order.",
+        "operationId": "topics_api_topics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TopicGroup"
+                  },
+                  "type": "array",
+                  "title": "Response Topics Api Topics Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/topics/{slug}": {
+      "get": {
+        "summary": "Topic",
+        "description": "A topic's page: its papers (its subtree's), each as the topic shows it, rarest first.",
+        "operationId": "topic_api_topics__slug__get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "rarity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              "title": "Rarity"
+            }
+          },
+          {
+            "name": "grade",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/GradeLevel"
+              },
+              "title": "Grade"
+            }
+          },
+          {
+            "name": "saved",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Saved"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "name": "weight",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Weight"
+              },
+              "title": "Weight"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Sort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
+              "title": "Sort"
+            },
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopicPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reactions/{paper_id}": {
+      "put": {
+        "summary": "React",
+        "description": "A thumb for the topic of the surface it was given on, replacing the one there. Wrong\ntopic and great find on a Focus topic are the owner's word, and say so.",
+        "operationId": "react_api_reactions__paper_id__put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReactionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Unreact",
+        "description": "Clear a thumb: it takes back its own word and nothing else. A thumb on a topic no longer\nshown can be cleared too; it carried no word, so nothing is said.",
+        "operationId": "unreact_api_reactions__paper_id__delete",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          },
+          {
+            "name": "topic",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Topic"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/{paper_id}": {
+      "put": {
+        "summary": "Save",
+        "description": "Save or unsave by hand; the newest use outranks every other reason.",
+        "operationId": "save_api_library__paper_id__put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/labels/{topic}/{paper_id}": {
+      "put": {
+        "summary": "Label",
+        "description": "The Fit control on a paper's page: the owner's own word on any shown topic (origin\n`reader`). Unsure is stored and counts nowhere.",
+        "operationId": "label_api_labels__topic___paper_id__put",
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Topic"
+            }
+          },
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Unlabel",
+        "description": "Tapping the filled segment: the label goes, and the verdict's Fit stands again.",
+        "operationId": "unlabel_api_labels__topic___paper_id__delete",
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Topic"
+            }
+          },
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/misses": {
+      "post": {
+        "summary": "Report Miss",
+        "description": "File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper\nlitwatch lacks is fetched first, as Process fetches it, with no transaction open, and\nstored in the report's own, so a refused report stores nothing.",
+        "operationId": "report_miss_api_misses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MissIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
+          "409": {
+            "description": "Not a Focus topic"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests/days/{day}": {
+      "get": {
+        "summary": "Day",
+        "description": "A day's daily digests, every topic's at Gist level, and where \u2039 \u203a step.",
+        "operationId": "day_api_digests_days__day__get",
+        "parameters": [
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Day"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests/weeks/{day}": {
+      "get": {
+        "summary": "Week",
+        "description": "The weekly digests of the week holding `day`, and where \u2039 \u203a step.",
+        "operationId": "week_api_digests_weeks__day__get",
+        "parameters": [
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Week"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests": {
+      "get": {
+        "summary": "History",
+        "description": "History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily\nMarks and whether arXiv listed papers on it, and the weeks those days fall in with their\nweekly Marks.",
+        "operationId": "history_api_digests_get",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/History"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests/{digest_id}": {
+      "get": {
+        "summary": "Digest",
+        "description": "A digest in full: its text and its papers by role, each as it was shown.",
+        "operationId": "digest_api_digests__digest_id__get",
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such digest, or its topic is no longer shown"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/digests/{digest_id}/write": {
+      "post": {
+        "summary": "Write Again",
+        "description": "Write a failed digest again now, over the papers due for it now, as a run of its own.\nIt may fail again. 409 when it is not failed (written meanwhile), its topic is paused, or\nanother job holds the run lock.",
+        "operationId": "write_again_api_digests__digest_id__write_post",
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such digest, or its topic is no longer shown"
+          },
+          "409": {
+            "description": "The digest is not failed, its topic is not active, or a job runs"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/taxonomy": {
+      "get": {
+        "summary": "Taxonomy",
+        "description": "The class tree and the followed topics; null before one is imported.",
+        "operationId": "taxonomy_api_settings_taxonomy_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Taxonomy"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Taxonomy Api Settings Taxonomy Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/taxonomy.yaml": {
+      "get": {
+        "summary": "Taxonomy Yaml",
+        "description": "The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML).",
+        "operationId": "taxonomy_yaml_api_settings_taxonomy_yaml_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No taxonomy yet"
+          }
+        }
+      }
+    },
+    "/api/settings/taxonomy/stats": {
+      "get": {
+        "summary": "Taxonomy Stats",
+        "operationId": "taxonomy_stats_api_settings_taxonomy_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyStats"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics/{slug}/keywords": {
+      "get": {
+        "summary": "Keyword Matches",
+        "description": "How many papers of the last 90 days each of the topic's keywords matches (the editor).",
+        "operationId": "keyword_matches_api_settings_topics__slug__keywords_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Keyword Matches Api Settings Topics  Slug  Keywords Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such topic"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics/{slug}": {
+      "put": {
+        "summary": "Save Topic",
+        "description": "Follow class `slug`, or edit its topic. The class takes the subject as its description.\nEdits apply forward; a change of depth or content settles the topic's papers again (see\nfeedback.word.save_taxonomy).",
+        "operationId": "save_topic_api_settings_topics__slug__put",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Topic"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such class"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/topics-order": {
+      "put": {
+        "summary": "Order",
+        "description": "The owner's order, which topic lists and cards follow. The list must name every topic\nonce.",
+        "operationId": "order_api_settings_topics_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Order"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/quality": {
+      "get": {
+        "summary": "Quality Page",
+        "description": "At the top, what last night left; below, how well the Focus topics are doing.",
+        "operationId": "quality_page_api_settings_quality_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Quality Page Api Settings Quality Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/misses": {
+      "get": {
+        "summary": "Misses",
+        "description": "Reported misses, newest first, each with its trace.",
+        "operationId": "misses_api_settings_misses_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Miss"
+                  },
+                  "type": "array",
+                  "title": "Response Misses Api Settings Misses Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/classification/{paper_id}/dismiss": {
+      "post": {
+        "summary": "Dismiss",
+        "description": "Litwatch drops the paper from processing; it stays searchable in the archive.",
+        "operationId": "dismiss_api_settings_classification__paper_id__dismiss_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Awaiting"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/classification/{paper_id}": {
+      "put": {
+        "summary": "Classify By Hand",
+        "description": "The owner names the paper's classes, which go on as usual with source `owner`.",
+        "operationId": "classify_by_hand_api_settings_classification__paper_id__put",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassesIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Classify By Hand Api Settings Classification  Paper Id  Put"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/classification/{paper_id}/correction": {
+      "post": {
+        "summary": "Correct",
+        "description": "Fix the text classification choked on. It counts as a rewrite: the next run classifies\nthe corrected paper.",
+        "operationId": "correct_api_settings_classification__paper_id__correction_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/analysis/{paper_id}/retry": {
+      "post": {
+        "summary": "Retry Analysis",
+        "description": "Analysis failed three runs in a row on this text: give it three more, from the next run.",
+        "operationId": "retry_analysis_api_settings_analysis__paper_id__retry_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Awaiting"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/grading/{topic}/{paper_id}/now": {
+      "post": {
+        "summary": "Grade Now",
+        "description": "A grading failed three runs in a row on this text: grade it now, as a run of its own.\nIt counts as the first of three more runs. Until it is recorded the grading stays a pending\nfailure, so a request cut short leaves it to the next nightly run; 409 when the paper's text\nchanged, it was dismissed or the topic was paused while it was graded.",
+        "operationId": "grade_now_api_settings_grading__topic___paper_id__now_post",
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Topic"
+            }
+          },
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Awaiting"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GradedOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper's text changed, or it no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/fulltext/{pass_id}/now": {
+      "post": {
+        "summary": "Run Pass Now",
+        "description": "A full-text pass (a Deep card's included) failed three runs in a row, or awaits its text\nover a week: run it now. It is first in line for its worker, with three more runs; its text\nis asked for again at urgent priority. 409 when it no longer waits for the owner (it ran,\nthe paper's text changed, it was dropped).",
+        "operationId": "run_pass_now_api_settings_fulltext__pass_id__now_post",
+        "parameters": [
+          {
+            "name": "pass_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Pass Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such full-text pass"
+          },
+          "409": {
+            "description": "The pass no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/fulltext/{pass_id}/pdf": {
+      "post": {
+        "summary": "Use Pdf",
+        "description": "\"Use the PDF\", for a paper whose LaTeX reads badly: run the pass now, as above, reading\nthe paper's PDF from then on instead of its LaTeX.",
+        "operationId": "use_pdf_api_settings_fulltext__pass_id__pdf_post",
+        "parameters": [
+          {
+            "name": "pass_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Pass Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such full-text pass"
+          },
+          "409": {
+            "description": "The pass no longer waits for the owner"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/calibrate": {
+      "get": {
+        "summary": "Sessions",
+        "operationId": "sessions_api_settings_calibrate_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Sessions Api Settings Calibrate Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Draw",
+        "description": "Draw a session of about twenty papers. The seed is recorded with it.",
+        "operationId": "draw_api_settings_calibrate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DrawIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object",
+                  "title": "Response Draw Api Settings Calibrate Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/calibrate/{session_id}": {
+      "get": {
+        "summary": "Session",
+        "operationId": "session_api_settings_calibrate__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Session Api Settings Calibrate  Session Id  Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/calibrate/{session_id}/more": {
+      "post": {
+        "summary": "More",
+        "description": "Continue with the papers waiting for a word: splits, misses and thumbed papers.",
+        "operationId": "more_api_settings_calibrate__session_id__more_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response More Api Settings Calibrate  Session Id  More Post"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/calibrate/{session_id}/items/{position}": {
+      "put": {
+        "summary": "Answer",
+        "operationId": "answer_api_settings_calibrate__session_id__items__position__put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "position",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Position"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Answer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such session, or no paper at that position in it"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/runs": {
+      "get": {
+        "summary": "Runs",
+        "operationId": "runs_api_settings_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Runs Api Settings Runs Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/schedule": {
+      "get": {
+        "summary": "Schedule",
+        "operationId": "schedule_api_settings_schedule_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/config": {
+      "get": {
+        "summary": "Config",
+        "description": "The loaded configuration, secrets masked. Read-only: litwatch.toml is the source.",
+        "operationId": "config_api_settings_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Config Api Settings Config Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/integrations": {
+      "get": {
+        "summary": "Status",
+        "description": "One card per loaded integration, then one per configured section that is turned off\n(its cursor kept, so its lag shows what turning it on again would hand it).",
+        "operationId": "status_api_settings_integrations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IntegrationCard"
+                  },
+                  "type": "array",
+                  "title": "Response Status Api Settings Integrations Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/integrations/{name}/retry": {
+      "post": {
+        "summary": "Retry",
+        "description": "Try the failing event again now, without waiting out its backoff.",
+        "operationId": "retry_api_settings_integrations__name__retry_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such integration is loaded"
+          },
+          "409": {
+            "description": "Nothing is failing"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/integrations/{name}/skip": {
+      "post": {
+        "summary": "Skip",
+        "description": "Give up on the failing event; the integration goes on with the next. Returns the\nevent skipped. `event_id` names the event the owner confirmed: when another one is\nfailing by then, nothing is skipped (409).",
+        "operationId": "skip_api_settings_integrations__name__skip_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failing"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration is loaded"
+          },
+          "409": {
+            "description": "Nothing is failing, or another event than the one named is"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "summary": "Changes",
+        "description": "The outbox in order, from after a position: for a client that polls instead of taking\nwebhooks. Start without `after`, then pass the `next` of each answer to read on. Only\nevents whose transactions are settled are listed, so reading on never misses one that\ncommitted late.",
+        "operationId": "changes_api_events_get",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "0.0",
+              "title": "After"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changes"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/papers/{paper_id}/card": {
+      "post": {
+        "summary": "Request Card",
+        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no\ntransaction open, and stored in the request's own.",
+        "operationId": "request_card_api_papers__paper_id__card_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardRequested"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "No card provider is configured, or the paper is dismissed"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search/scope": {
+      "get": {
+        "summary": "Search Scope",
+        "description": "The search box's scope beyond the collection (its placeholder names the archive's size).",
+        "operationId": "search_scope_api_search_scope_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchScope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/summary": {
+      "get": {
+        "summary": "Summary",
+        "operationId": "summary_api_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Summary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/session": {
+      "post": {
+        "summary": "Sign In",
+        "description": "Exchange the token for the cookie the web app then rides on.",
+        "operationId": "sign_in_api_session_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Ack": {
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "saved": {
+            "type": "boolean",
+            "title": "Saved"
+          },
+          "grades": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Grade"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Grades"
+          }
+        },
+        "type": "object",
+        "required": [
+          "saved"
+        ],
+        "title": "Ack",
+        "description": "What an action changed. The page shows the result where it was taken; `message` is set\nonly for what it cannot show (DESIGN.md, acknowledgement): a thumb that gives or takes back\nthe owner's word on a Focus topic, and a reported miss."
+      },
+      "AmongRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "agrees",
+              "contradicts",
+              "extends",
+              "supersedes"
+            ],
+            "title": "Relation"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "in_collection": {
+            "type": "boolean",
+            "title": "In Collection",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "relation"
+        ],
+        "title": "AmongRow",
+        "description": "A paper a Deep card places this one among: one of the collection's, by its arXiv id, with\nhow the two relate and its rarity now (null outside the collection)."
+      },
+      "Answer": {
+        "properties": {
+          "fit": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LabelValue"
+            },
+            "type": "object",
+            "title": "Fit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "matters",
+                  "fine",
+                  "not_for_me"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fit"
+        ],
+        "title": "Answer",
+        "description": "One paper's answers. Fit for the topic it was drawn or taken for (central, related,\nadjacent, none or unsure) is required on the first answer; an edit after it may leave it\nout, and the recorded answer stands. A Fit sent is a label; one left out writes none, so\nediting the appraisal alone recreates no label the owner has since taken back."
+      },
+      "Awaiting": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "title": "Awaiting",
+        "description": "What every action on a paper awaiting classification names: the paper revision the\nowner saw on Quality. The action applies only to that text."
+      },
+      "Badge": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "monogram": {
+            "type": "string",
+            "title": "Monogram"
+          },
+          "colour": {
+            "type": "string",
+            "title": "Colour"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "depth",
+          "monogram",
+          "colour"
+        ],
+        "title": "Badge",
+        "description": "A followed topic as a badge shows it: its class's slug and name, its depth (the badge's\nshape), monogram and colour."
+      },
+      "BibtexIn": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ids"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaperQuery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cited": {
+            "items": {
+              "$ref": "#/components/schemas/CitedIn"
+            },
+            "type": "array",
+            "title": "Cited"
+          }
+        },
+        "type": "object",
+        "title": "BibtexIn"
+      },
+      "Brief": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "overstatement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overstatement"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "arxiv_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Version"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "latex",
+              "pdf"
+            ],
+            "title": "Source"
+          },
+          "written_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Written At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "revision",
+          "source",
+          "written_at"
+        ],
+        "title": "Brief",
+        "description": "The paper's Brief: its current revision's, or the newest from an older revision\n(`revision` says which) until the current one is written. `overstatement`, when the full\ntext does not support the abstract, opens it."
+      },
+      "CardPass": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "request",
+              "focus",
+              "pick"
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting_text",
+              "ready",
+              "running",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          },
+          "failed_runs": {
+            "type": "integer",
+            "title": "Failed Runs",
+            "default": 0
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "reason",
+          "state",
+          "queued_at"
+        ],
+        "title": "CardPass",
+        "description": "The paper's Deep card in the full-text queue: the owner's request or automatic (a Focus\nmust read, or an Area pick), and where it is (awaiting the paper's text, ready, being\nwritten, or failed this run and to be tried again; `failed_runs` says how often)."
+      },
+      "CardRequested": {
+        "properties": {
+          "pass_id": {
+            "type": "integer",
+            "title": "Pass Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pass_id"
+        ],
+        "title": "CardRequested"
+      },
+      "Changes": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "next": {
+            "type": "string",
+            "title": "Next"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events",
+          "next"
+        ],
+        "title": "Changes",
+        "description": "A page of the changes feed, and the position to read on from."
+      },
+      "CitedIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "CitedIn",
+        "description": "A paper outside the collection, as a search hit gives it: enough for an arXiv entry."
+      },
+      "ClassSource": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "classifier",
+              "uncertain",
+              "keyword",
+              "owner",
+              "miss"
+            ],
+            "title": "Source"
+          },
+          "member": {
+            "type": "boolean",
+            "title": "Member",
+            "default": true
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "ClassSource"
+      },
+      "ClassesIn": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision",
+          "classes"
+        ],
+        "title": "ClassesIn"
+      },
+      "Classification": {
+        "properties": {
+          "primary": {
+            "type": "string",
+            "title": "Primary"
+          },
+          "primary_name": {
+            "type": "string",
+            "title": "Primary Name"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "paper_revision": {
+            "type": "integer",
+            "title": "Paper Revision"
+          },
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/PaperClass"
+            },
+            "type": "array",
+            "title": "Classes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "primary",
+          "primary_name",
+          "model",
+          "at",
+          "paper_revision",
+          "classes"
+        ],
+        "title": "Classification",
+        "description": "The newest classification and the current memberships, classes of the current tree only\n(a retired class leads nowhere)."
+      },
+      "Contribution": {
+        "type": "string",
+        "enum": [
+          "method",
+          "analysis",
+          "benchmark",
+          "theory",
+          "position",
+          "survey"
+        ],
+        "title": "Contribution",
+        "description": "What kind of contribution a paper makes. Facts, not scores."
+      },
+      "CorrectionIn": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstract"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "title": "CorrectionIn"
+      },
+      "CurrentVerdict": {
+        "properties": {
+          "fit": {
+            "$ref": "#/components/schemas/Fit"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "split": {
+            "type": "boolean",
+            "title": "Split",
+            "default": false
+          },
+          "escalated": {
+            "type": "boolean",
+            "title": "Escalated",
+            "default": false
+          },
+          "opinions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Opinion"
+            },
+            "type": "object",
+            "title": "Opinions"
+          },
+          "paper_revision": {
+            "type": "integer",
+            "title": "Paper Revision",
+            "default": 1
+          },
+          "recorded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fit",
+          "reason"
+        ],
+        "title": "CurrentVerdict",
+        "description": "A topic's current verdict: the Fit that stands, each grader's answer by role, and the\npaper revision it was made from."
+      },
+      "Day": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "released": {
+            "type": "boolean",
+            "title": "Released"
+          },
+          "digests": {
+            "items": {
+              "$ref": "#/components/schemas/DigestCard"
+            },
+            "type": "array",
+            "title": "Digests"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
+          "weekly": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "released",
+          "digests"
+        ],
+        "title": "Day",
+        "description": "A day's daily digests in the fixed topic order. `released` is false on a day arXiv listed\nnothing; `previous` and `next` are the nearest days with digests; on a Monday, `weekly` is\nthe Monday of the week whose weekly digests came out that day."
+      },
+      "DeepCard": {
+        "properties": {
+          "card": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Card"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "written_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Written At"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "arxiv_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Version"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "latex",
+                  "pdf"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "among": {
+            "items": {
+              "$ref": "#/components/schemas/AmongRow"
+            },
+            "type": "array",
+            "title": "Among"
+          }
+        },
+        "type": "object",
+        "required": [
+          "card"
+        ],
+        "title": "DeepCard",
+        "description": "A Deep card: the reading card the deep service wrote, as it wrote it, and what it was\nwritten from (the paper revision and arXiv version, null where unknown, and the text's\nsource). `among` is its \"among the collection\" section as rows."
+      },
+      "Depth": {
+        "type": "string",
+        "enum": [
+          "focus",
+          "area",
+          "field"
+        ],
+        "title": "Depth",
+        "description": "How closely the owner follows a topic: the research question, the area, the wider field."
+      },
+      "Digest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/Badge"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DigestPeriod"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DigestState"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DigestCounts"
+          },
+          "best_rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gist"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "written_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Written At"
+          },
+          "papers": {
+            "items": {
+              "$ref": "#/components/schemas/DigestPaper"
+            },
+            "type": "array",
+            "title": "Papers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "period",
+          "day",
+          "state",
+          "counts",
+          "written_at",
+          "papers"
+        ],
+        "title": "Digest",
+        "description": "A digest in full: its text and every paper by role; why it failed, when it did."
+      },
+      "DigestCard": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/Badge"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DigestPeriod"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DigestState"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DigestCounts"
+          },
+          "best_rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gist"
+          },
+          "papers": {
+            "items": {
+              "$ref": "#/components/schemas/DigestPaper"
+            },
+            "type": "array",
+            "title": "Papers"
+          },
+          "more": {
+            "type": "integer",
+            "title": "More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "period",
+          "day",
+          "state",
+          "counts",
+          "papers",
+          "more"
+        ],
+        "title": "DigestCard",
+        "description": "A digest at Gist level (a Day or a Week): its Gist and up to three of its papers (its\npicks, else its central papers); `more` are the rest."
+      },
+      "DigestCounts": {
+        "properties": {
+          "papers": {
+            "type": "integer",
+            "title": "Papers",
+            "default": 0
+          },
+          "picks": {
+            "type": "integer",
+            "title": "Picks",
+            "default": 0
+          },
+          "central": {
+            "type": "integer",
+            "title": "Central",
+            "default": 0
+          },
+          "related": {
+            "type": "integer",
+            "title": "Related",
+            "default": 0
+          },
+          "must_read": {
+            "type": "integer",
+            "title": "Must Read",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "DigestCounts",
+        "description": "What a digest's Mark counts: the papers it covered, its picks, and of them those central,\nrelated, and graded must read."
+      },
+      "DigestMark": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/Badge"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DigestPeriod"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DigestState"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DigestCounts"
+          },
+          "best_rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "period",
+          "day",
+          "state",
+          "counts"
+        ],
+        "title": "DigestMark",
+        "description": "A digest at Mark level (History): its topic, how many papers, its best rarity."
+      },
+      "DigestPaper": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "announced": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Announced"
+          },
+          "role": {
+            "$ref": "#/components/schemas/DigestRole"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gist"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rarity": {
+            "$ref": "#/components/schemas/Rarity"
+          },
+          "set_aside": {
+            "type": "boolean",
+            "title": "Set Aside",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "role",
+          "revision",
+          "rarity"
+        ],
+        "title": "DigestPaper",
+        "description": "A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set\nit below relevant where it was graded."
+      },
+      "DigestPeriod": {
+        "type": "string",
+        "enum": [
+          "day",
+          "week"
+        ],
+        "title": "DigestPeriod"
+      },
+      "DigestRole": {
+        "type": "string",
+        "enum": [
+          "pick",
+          "listed",
+          "mentioned"
+        ],
+        "title": "DigestRole",
+        "description": "How a digest shows one of its papers."
+      },
+      "DigestState": {
+        "type": "string",
+        "enum": [
+          "written",
+          "nothing_new",
+          "failed"
+        ],
+        "title": "DigestState",
+        "description": "A digest is published once written, or once it says \"Nothing new\"; a failed one is\nwritten again by the next run, over the papers due then."
+      },
+      "DrawIn": {
+        "properties": {
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          }
+        },
+        "type": "object",
+        "title": "DrawIn"
+      },
+      "Event": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "paper_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paper Id"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "xid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "Event",
+        "description": "A fact written to the outbox in the same transaction as the data it describes."
+      },
+      "Facets": {
+        "properties": {
+          "contribution": {
+            "$ref": "#/components/schemas/Contribution"
+          },
+          "releases_code": {
+            "type": "boolean",
+            "title": "Releases Code"
+          },
+          "releases_weights": {
+            "type": "boolean",
+            "title": "Releases Weights"
+          }
+        },
+        "type": "object",
+        "required": [
+          "contribution",
+          "releases_code",
+          "releases_weights"
+        ],
+        "title": "Facets",
+        "description": "Facts about the paper, never combined into anything."
+      },
+      "Failing": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "paper_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paper Id"
+          },
+          "failures": {
+            "type": "integer",
+            "title": "Failures"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "failures"
+        ],
+        "title": "Failing",
+        "description": "The event an integration is stuck on; its later events wait behind it."
+      },
+      "Fit": {
+        "type": "string",
+        "enum": [
+          "central",
+          "related",
+          "adjacent",
+          "none"
+        ],
+        "title": "Fit",
+        "description": "How close a paper is to one topic, most inclusive first."
+      },
+      "Gist": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "abstract",
+              "full_text"
+            ],
+            "title": "Source",
+            "default": "abstract"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "Gist"
+      },
+      "Grade": {
+        "type": "string",
+        "enum": [
+          "must_read",
+          "relevant",
+          "adjacent",
+          "none"
+        ],
+        "title": "Grade",
+        "description": "A paper's standing on one topic, from its Fit there and its Weight, most inclusive first."
+      },
+      "GradeCounts": {
+        "properties": {
+          "must_read": {
+            "type": "integer",
+            "title": "Must Read",
+            "default": 0
+          },
+          "relevant": {
+            "type": "integer",
+            "title": "Relevant",
+            "default": 0
+          },
+          "adjacent": {
+            "type": "integer",
+            "title": "Adjacent",
+            "default": 0
+          },
+          "none": {
+            "type": "integer",
+            "title": "None",
+            "default": 0
+          },
+          "ungraded": {
+            "type": "integer",
+            "title": "Ungraded",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "GradeCounts",
+        "description": "Papers per grade on a topic's page; `ungraded` have none there."
+      },
+      "GradeLevel": {
+        "type": "string",
+        "enum": [
+          "must_read",
+          "relevant",
+          "adjacent",
+          "none",
+          "ungraded"
+        ]
+      },
+      "GradedBadge": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "monogram": {
+            "type": "string",
+            "title": "Monogram"
+          },
+          "colour": {
+            "type": "string",
+            "title": "Colour"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rarity": {
+            "$ref": "#/components/schemas/Rarity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "depth",
+          "monogram",
+          "colour",
+          "grade",
+          "rarity"
+        ],
+        "title": "GradedBadge",
+        "description": "A badge on a paper, one per followed topic whose page holds it: the grade and rarity\nthat page shows (`core.page_standing`); grade null where neither the topic nor a followed\ndescendant graded it, the rarity then its Weight's floor."
+      },
+      "GradedOut": {
+        "properties": {
+          "graded": {
+            "type": "boolean",
+            "title": "Graded"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "graded"
+        ],
+        "title": "GradedOut",
+        "description": "What grading now found: the Fit that stands, or why there is no verdict."
+      },
+      "Grader": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "holds": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "Grader",
+        "description": "One grader's answer in the verdict: its role, and its Fit, or for `area_check` whether\nthe judge's Fit holds."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Hand": {
+        "type": "string",
+        "enum": [
+          "save",
+          "unsave"
+        ],
+        "title": "Hand",
+        "description": "The owner's newest use of the Save toggle."
+      },
+      "History": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryDay"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryWeek"
+            },
+            "type": "array",
+            "title": "Weeks"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "weeks"
+        ],
+        "title": "History",
+        "description": "Days from `until` back to `since`, newest first, and the weeks they touch; `start` is the\nday of the oldest digest, where History stops."
+      },
+      "HistoryDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "released": {
+            "type": "boolean",
+            "title": "Released"
+          },
+          "marks": {
+            "items": {
+              "$ref": "#/components/schemas/DigestMark"
+            },
+            "type": "array",
+            "title": "Marks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "released",
+          "marks"
+        ],
+        "title": "HistoryDay"
+      },
+      "HistoryItem": {
+        "properties": {
+          "what": {
+            "type": "string",
+            "enum": [
+              "graded",
+              "labelled",
+              "reacted",
+              "missed",
+              "classified"
+            ],
+            "title": "What"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "followed": {
+            "type": "boolean",
+            "title": "Followed",
+            "default": false
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split"
+          },
+          "escalated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escalated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "what",
+          "at"
+        ],
+        "title": "HistoryItem",
+        "description": "Something said about the paper, oldest first: every verdict (`value` its Fit), the\nowner's label (its value) and thumb (its value and reason) as they stand, misses, and each\nclassification (`topic` is its primary class). `followed`: the topic is followed now."
+      },
+      "HistoryWeek": {
+        "properties": {
+          "monday": {
+            "type": "string",
+            "format": "date",
+            "title": "Monday"
+          },
+          "marks": {
+            "items": {
+              "$ref": "#/components/schemas/DigestMark"
+            },
+            "type": "array",
+            "title": "Marks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "monday",
+          "marks"
+        ],
+        "title": "HistoryWeek"
+      },
+      "IntegrationCard": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "lag": {
+            "type": "integer",
+            "title": "Lag",
+            "default": 0
+          },
+          "failing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Failing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "failed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped",
+            "default": 0
+          },
+          "answers_card_requests": {
+            "type": "boolean",
+            "title": "Answers Card Requests",
+            "default": false
+          },
+          "search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchStats"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "enabled"
+        ],
+        "title": "IntegrationCard",
+        "description": "One integration under Settings \u2192 Integrations."
+      },
+      "LabelIn": {
+        "properties": {
+          "value": {
+            "$ref": "#/components/schemas/LabelValue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "LabelIn"
+      },
+      "LabelState": {
+        "properties": {
+          "value": {
+            "$ref": "#/components/schemas/LabelValue"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "provisional": {
+            "type": "boolean",
+            "title": "Provisional",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "origin"
+        ],
+        "title": "LabelState"
+      },
+      "LabelValue": {
+        "type": "string",
+        "enum": [
+          "central",
+          "related",
+          "adjacent",
+          "none",
+          "unsure"
+        ],
+        "title": "LabelValue",
+        "description": "A label's answer: a Fit (`core.grading.Fit`), or unsure."
+      },
+      "Lookup": {
+        "properties": {
+          "row": {
+            "$ref": "#/components/schemas/Row"
+          },
+          "fetched": {
+            "type": "boolean",
+            "title": "Fetched"
+          }
+        },
+        "type": "object",
+        "required": [
+          "row",
+          "fetched"
+        ],
+        "title": "Lookup"
+      },
+      "LookupIn": {
+        "properties": {
+          "q": {
+            "type": "string",
+            "title": "Q",
+            "description": "An arXiv id or link"
+          }
+        },
+        "type": "object",
+        "required": [
+          "q"
+        ],
+        "title": "LookupIn"
+      },
+      "Miss": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "reported_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reported At"
+          },
+          "trace": {
+            "$ref": "#/components/schemas/MissTrace"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "paper_id",
+          "title",
+          "topic",
+          "reported_at",
+          "trace"
+        ],
+        "title": "Miss"
+      },
+      "MissIn": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "fit": {
+            "type": "string",
+            "enum": [
+              "central",
+              "related"
+            ],
+            "title": "Fit",
+            "default": "central"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id",
+          "topic"
+        ],
+        "title": "MissIn"
+      },
+      "MissTrace": {
+        "properties": {
+          "classified": {
+            "type": "boolean",
+            "title": "Classified"
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability"
+          },
+          "threshold": {
+            "type": "number",
+            "title": "Threshold"
+          },
+          "classifier": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classifier"
+          },
+          "below": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Below"
+          },
+          "uncertain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertain"
+          },
+          "keyword": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keyword"
+          },
+          "graded": {
+            "type": "boolean",
+            "title": "Graded"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "graders": {
+            "items": {
+              "$ref": "#/components/schemas/Grader"
+            },
+            "type": "array",
+            "title": "Graders",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "classified",
+          "threshold",
+          "graded"
+        ],
+        "title": "MissTrace",
+        "description": "What each stage concluded for the owner's topic when the reported paper went through the\npipeline (feedback.md, misses), on the paper's current text. `classified`: classification\nhas run; then `probability` is the classifier's for the topic's class against the class's\n`threshold`, and `classifier`, `uncertain` and `keyword` say which way in admitted it;\n`below` says the classifier admitted it to a class under the topic's only, not to the\ntopic's own class.\n`graded`: a verdict exists; then `fit` is the Fit that stands by the rule of the depth it\nwas graded at (core.grading), and `graders` the answers it stands on, in the order the\ntopic's current depth asks its graders (the roles a verdict from another depth holds\nafter). The page reads where the paper was let go from `fit`, not from the graders."
+      },
+      "NextFire": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "cron": {
+            "type": "string",
+            "title": "Cron"
+          },
+          "next": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "cron",
+          "next"
+        ],
+        "title": "NextFire"
+      },
+      "OpenState": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "awaiting_classification",
+              "analysis_stopped",
+              "split",
+              "escalated",
+              "ungraded",
+              "fulltext_failed",
+              "card_failed",
+              "awaiting_text"
+            ],
+            "title": "Kind"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "pass_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "revision"
+        ],
+        "title": "OpenState",
+        "description": "What waits on the owner for this paper, as Needs you lists it, with the paper revision\nthe action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the\ntext), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or\n`ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep card's\n`card_failed`, or either `awaiting_text` over a week (run it now)."
+      },
+      "Opinion": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "holds": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holds"
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "title": "Opinion",
+        "description": "One grader's answer: a Fit with one sentence why, or, from `area_check`, whether the\njudge's Fit holds and the probability that it does."
+      },
+      "Order": {
+        "properties": {
+          "slugs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Slugs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slugs"
+        ],
+        "title": "Order"
+      },
+      "OutsideRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "source"
+        ],
+        "title": "OutsideRow",
+        "description": "A paper a search provider found that the collection lacks."
+      },
+      "Paper": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "abstract": {
+            "type": "string",
+            "title": "Abstract"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/Version"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 1
+          },
+          "arxiv_url": {
+            "type": "string",
+            "title": "Arxiv Url"
+          },
+          "pdf_url": {
+            "type": "string",
+            "title": "Pdf Url"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "in_collection": {
+            "type": "boolean",
+            "title": "In Collection"
+          },
+          "stored": {
+            "type": "boolean",
+            "title": "Stored",
+            "default": true
+          },
+          "next_run": {
+            "type": "boolean",
+            "title": "Next Run",
+            "default": false
+          },
+          "rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "badges": {
+            "items": {
+              "$ref": "#/components/schemas/GradedBadge"
+            },
+            "type": "array",
+            "title": "Badges"
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Gist"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Brief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text_pass": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextPass"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeightState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "facets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Facets"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "saved": {
+            "type": "boolean",
+            "title": "Saved",
+            "default": false
+          },
+          "hand": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Hand"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/PaperTopic"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Classification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "states": {
+            "items": {
+              "$ref": "#/components/schemas/OpenState"
+            },
+            "type": "array",
+            "title": "States"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryItem"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "publication": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Publication"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publication_by_owner": {
+            "type": "boolean",
+            "title": "Publication By Owner",
+            "default": false
+          },
+          "card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeepCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card_pass": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardPass"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card_requestable": {
+            "type": "boolean",
+            "title": "Card Requestable",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "authors",
+          "abstract",
+          "arxiv_url",
+          "pdf_url",
+          "source_url",
+          "in_collection",
+          "topics"
+        ],
+        "title": "Paper",
+        "description": "A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)\nand the rail, its open states and its history. Outside the collection (never classified)\nit has no rarity; an archive paper litwatch has not fetched is not `stored` either, and has\nonly the archive's metadata."
+      },
+      "PaperClass": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Path"
+          },
+          "member": {
+            "type": "boolean",
+            "title": "Member"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ClassSource"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "path",
+          "member",
+          "sources"
+        ],
+        "title": "PaperClass",
+        "description": "A class the paper has a membership of, by source. `member`: one stands that puts the\npaper in the class (the uncertain band and the keyword check are for grading only). `path`\nis its classes' names from the top down to it."
+      },
+      "PaperQuery": {
+        "properties": {
+          "q": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          },
+          "rarity": {
+            "items": {
+              "$ref": "#/components/schemas/Rarity"
+            },
+            "type": "array",
+            "title": "Rarity"
+          },
+          "grade": {
+            "items": {
+              "$ref": "#/components/schemas/GradeLevel"
+            },
+            "type": "array",
+            "title": "Grade"
+          },
+          "saved": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "weight": {
+            "items": {
+              "$ref": "#/components/schemas/Weight"
+            },
+            "type": "array",
+            "title": "Weight"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
+          },
+          "topic": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topic"
+          },
+          "depth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Depth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "collection",
+                  "outside"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "title": "PaperQuery",
+        "description": "Papers' filters: also the pages of one or more topics (each with its subtree), or of\nevery topic at a depth, and one band of a search."
+      },
+      "PaperRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "PaperRef"
+      },
+      "PaperTopic": {
+        "properties": {
+          "topic": {
+            "$ref": "#/components/schemas/Badge"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Via"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurrentVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "word": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "label": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LabelState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missed": {
+            "type": "boolean",
+            "title": "Missed",
+            "default": false
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TopicState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "topic"
+        ],
+        "title": "PaperTopic",
+        "description": "A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its\nown effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),\nits current verdict, the owner's word that stands (from the label, a thumb or a miss), the\nlabel and thumb themselves, and its open state."
+      },
+      "Papers": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/Row"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/RarityCounts"
+          },
+          "outside": {
+            "items": {
+              "$ref": "#/components/schemas/OutsideRow"
+            },
+            "type": "array",
+            "title": "Outside"
+          },
+          "left_out": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Left Out"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "total",
+          "counts"
+        ],
+        "title": "Papers",
+        "description": "A page of Papers, the whole filter's total, and the papers per rarity under every filter\nbut the levels. A search also brings what search providers found that the collection lacks,\nas a band of its own on the first page; a provider that failed or was too slow is named in\n`left_out`."
+      },
+      "Publication": {
+        "properties": {
+          "dblp_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dblp Key"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "misc"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          },
+          "container": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Container"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "title": "Publication",
+        "description": "The published record of a paper: what a BibTeX entry needs, as DBLP has it."
+      },
+      "PublicationIn": {
+        "properties": {
+          "dblp_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dblp Key"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "none": {
+            "type": "boolean",
+            "title": "None",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "PublicationIn",
+        "description": "The owner's correction: a DBLP key, a DOI, or that there is no published version."
+      },
+      "Rarity": {
+        "type": "string",
+        "enum": [
+          "common",
+          "uncommon",
+          "rare",
+          "epic",
+          "legendary"
+        ],
+        "title": "Rarity",
+        "description": "What a paper's colour shows, low to high."
+      },
+      "RarityCounts": {
+        "properties": {
+          "legendary": {
+            "type": "integer",
+            "title": "Legendary",
+            "default": 0
+          },
+          "epic": {
+            "type": "integer",
+            "title": "Epic",
+            "default": 0
+          },
+          "rare": {
+            "type": "integer",
+            "title": "Rare",
+            "default": 0
+          },
+          "uncommon": {
+            "type": "integer",
+            "title": "Uncommon",
+            "default": 0
+          },
+          "common": {
+            "type": "integer",
+            "title": "Common",
+            "default": 0
+          },
+          "unrated": {
+            "type": "integer",
+            "title": "Unrated",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "RarityCounts",
+        "description": "Papers per rarity level; `unrated` have none yet (not classified)."
+      },
+      "ReactionIn": {
+        "properties": {
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "value": {
+            "$ref": "#/components/schemas/ReactionValue"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "ReactionIn"
+      },
+      "ReactionReason": {
+        "type": "string",
+        "enum": [
+          "wrong_topic",
+          "overrated",
+          "not_interesting",
+          "already_knew",
+          "underrated",
+          "great_find"
+        ],
+        "title": "ReactionReason",
+        "description": "What a thumb says went wrong or right, each pointing at the stage that would have made the\nmistake (feedback.md, reactions)."
+      },
+      "ReactionState": {
+        "properties": {
+          "value": {
+            "$ref": "#/components/schemas/ReactionValue"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "ReactionState"
+      },
+      "ReactionValue": {
+        "type": "string",
+        "enum": [
+          "up",
+          "down"
+        ],
+        "title": "ReactionValue"
+      },
+      "Row": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published"
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gist"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Weight"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "facets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Facets"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "badges": {
+            "items": {
+              "$ref": "#/components/schemas/GradedBadge"
+            },
+            "type": "array",
+            "title": "Badges"
+          },
+          "saved": {
+            "type": "boolean",
+            "title": "Saved",
+            "default": false
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RowState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "authors"
+        ],
+        "title": "Row",
+        "description": "One paper in a list. `rarity` is the list's: the mixed list's on Papers, the topic page's\non a topic. No Gist, Weight or facets until analysis succeeds; no rarity until classified."
+      },
+      "RowState": {
+        "type": "string",
+        "enum": [
+          "word",
+          "failure"
+        ]
+      },
+      "RunStatus": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "running",
+              "failed",
+              "attention",
+              "quiet"
+            ],
+            "title": "State"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "papers": {
+            "type": "integer",
+            "title": "Papers",
+            "default": 0
+          },
+          "waiting": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting"
+          },
+          "awaiting_classification": {
+            "type": "integer",
+            "title": "Awaiting Classification",
+            "default": 0
+          },
+          "analysis_failed": {
+            "type": "integer",
+            "title": "Analysis Failed",
+            "default": 0
+          },
+          "ungraded": {
+            "type": "integer",
+            "title": "Ungraded",
+            "default": 0
+          },
+          "fulltext_failed": {
+            "type": "integer",
+            "title": "Fulltext Failed",
+            "default": 0
+          },
+          "digests_failed": {
+            "type": "integer",
+            "title": "Digests Failed",
+            "default": 0
+          },
+          "over_budget": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Over Budget"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "RunStatus",
+        "description": "The latest nightly run: none yet, running, failed, or finished without an error, with\npapers waiting for the owner (`attention`) or not (`quiet`)."
+      },
+      "SaveIn": {
+        "properties": {
+          "saved": {
+            "type": "boolean",
+            "title": "Saved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "saved"
+        ],
+        "title": "SaveIn"
+      },
+      "ScheduleOut": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "zone": {
+            "type": "string",
+            "title": "Zone"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/NextFire"
+            },
+            "type": "array",
+            "title": "Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "zone",
+          "jobs"
+        ],
+        "title": "ScheduleOut",
+        "description": "The schedule as the Runs page shows it: whether it is on, the zone the cron times are\nread in, and when each job next fires (or would, if it were on)."
+      },
+      "SearchScope": {
+        "properties": {
+          "archive_papers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Papers"
+          }
+        },
+        "type": "object",
+        "title": "SearchScope",
+        "description": "What the search box reaches beyond the collection: the papers the archive's search index\nholds, None without an archive or when it does not answer in time."
+      },
+      "SearchStats": {
+        "properties": {
+          "queries": {
+            "type": "integer",
+            "title": "Queries",
+            "default": 0
+          },
+          "left_out": {
+            "type": "integer",
+            "title": "Left Out",
+            "default": 0
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_error_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          }
+        },
+        "type": "object",
+        "title": "SearchStats",
+        "description": "How a search provider has answered since the service started."
+      },
+      "SessionIn": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "SessionIn"
+      },
+      "SettingsHints": {
+        "properties": {
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting"
+          },
+          "last_session": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Session"
+          },
+          "misses": {
+            "type": "integer",
+            "title": "Misses"
+          },
+          "topics": {
+            "type": "integer",
+            "title": "Topics"
+          },
+          "classes": {
+            "type": "integer",
+            "title": "Classes"
+          },
+          "spent": {
+            "type": "number",
+            "title": "Spent"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "failing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "waiting",
+          "misses",
+          "topics",
+          "classes",
+          "spent"
+        ],
+        "title": "SettingsHints",
+        "description": "What the Settings sidebar says beside each page: how many things wait on the owner, the\nlast Calibrate session, the misses reported, the topics followed and the classes, the\nmonth's spend against its budget (the budgeted providers' spend, or every provider's when\nnone has a budget), and the integrations failing."
+      },
+      "Sort": {
+        "type": "string",
+        "enum": [
+          "rarest",
+          "newest",
+          "added",
+          "title",
+          "best"
+        ]
+      },
+      "Status": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "active",
+          "paused"
+        ],
+        "title": "Status",
+        "description": "Whether a topic is in use."
+      },
+      "StripDigest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DigestState"
+          },
+          "best_rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "day",
+          "state"
+        ],
+        "title": "StripDigest",
+        "description": "One square of a topic's digest strip: a digest, coloured by its best rarity (none for\nnothing new), red when it failed."
+      },
+      "Summary": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/Badge"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/SettingsHints"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "topics",
+          "settings"
+        ],
+        "title": "Summary",
+        "description": "What the shell shows on every page (the status line, the sidebar's topics, the Settings\nhints), read by one poll and never through a page's own reads: counts only."
+      },
+      "Taxonomy": {
+        "properties": {
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyClass"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Classes"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/Topic"
+            },
+            "type": "array",
+            "title": "Topics"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "classes"
+        ],
+        "title": "Taxonomy",
+        "description": "The tree, parents before children and siblings in the owner's order, and the followed\ntopics in the owner's order. Construction fails with every problem found."
+      },
+      "TaxonomyClass": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 2,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 10,
+            "title": "Description"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMaximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description"
+        ],
+        "title": "TaxonomyClass",
+        "description": "One node of the tree. `parent` is the parent's slug, None at the top."
+      },
+      "TaxonomyStats": {
+        "properties": {
+          "members": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Members"
+          },
+          "thresholds": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Thresholds"
+          },
+          "topic_revisions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Topic Revisions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "members",
+          "thresholds",
+          "topic_revisions"
+        ],
+        "title": "TaxonomyStats",
+        "description": "What the Taxonomy and Topics pages show beside the tree: papers standing in each class or\nunder it, the threshold each class is admitted at (its own, or the configured default for\nits depth), and the current revision of each followed topic."
+      },
+      "TextPass": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "brief",
+              "weight"
+            ],
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting_text",
+              "ready",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "queued_at"
+        ],
+        "title": "TextPass",
+        "description": "The full-text pass queued last for the paper's current text: a Brief (Focus) or a Weight\nre-check with a Brief (Area pick candidate), and where it is. A paper without one shows its\nabstract in the Brief's place."
+      },
+      "Topic": {
+        "properties": {
+          "class": {
+            "type": "string",
+            "title": "Class"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "monogram": {
+            "type": "string",
+            "maxLength": 2,
+            "minLength": 1,
+            "title": "Monogram"
+          },
+          "colour": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "title": "Colour"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status",
+            "default": "active"
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 20,
+            "title": "Subject"
+          },
+          "rubric": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rubric"
+          },
+          "interests": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interests"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keywords"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "class",
+          "depth",
+          "monogram",
+          "colour",
+          "subject"
+        ],
+        "title": "Topic",
+        "description": "A class the owner follows, keyed by the class's slug (`class` in YAML and JSON). The\ngraders read its subject (the Fit definition) and, for a Focus topic, its rubric (what each\nFit level means for it)."
+      },
+      "TopicCard": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "monogram": {
+            "type": "string",
+            "title": "Monogram"
+          },
+          "colour": {
+            "type": "string",
+            "title": "Colour"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "strip": {
+            "items": {
+              "$ref": "#/components/schemas/StripDigest"
+            },
+            "type": "array",
+            "title": "Strip"
+          },
+          "papers": {
+            "type": "integer",
+            "title": "Papers"
+          },
+          "saved": {
+            "type": "integer",
+            "title": "Saved"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/RarityCounts"
+          },
+          "newest_must_read": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaperRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "depth",
+          "monogram",
+          "colour",
+          "status",
+          "subject",
+          "papers",
+          "saved",
+          "counts"
+        ],
+        "title": "TopicCard",
+        "description": "A topic on the Topics tab: its page's papers, how many are saved, how many at each of\nthe page's rarity levels, and its newest must read."
+      },
+      "TopicGroup": {
+        "properties": {
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/TopicCard"
+            },
+            "type": "array",
+            "title": "Topics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "depth",
+          "topics"
+        ],
+        "title": "TopicGroup"
+      },
+      "TopicHead": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "monogram": {
+            "type": "string",
+            "title": "Monogram"
+          },
+          "colour": {
+            "type": "string",
+            "title": "Colour"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "strip": {
+            "items": {
+              "$ref": "#/components/schemas/StripDigest"
+            },
+            "type": "array",
+            "title": "Strip"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "depth",
+          "monogram",
+          "colour",
+          "status",
+          "subject"
+        ],
+        "title": "TopicHead"
+      },
+      "TopicPage": {
+        "properties": {
+          "topic": {
+            "$ref": "#/components/schemas/TopicHead"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/TopicRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/RarityCounts"
+          },
+          "grades": {
+            "$ref": "#/components/schemas/GradeCounts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "topic",
+          "rows",
+          "total",
+          "counts",
+          "grades"
+        ],
+        "title": "TopicPage",
+        "description": "A page of a topic's papers, its total, and the papers per rarity and per grade under\nevery filter but the levels."
+      },
+      "TopicRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authors"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published"
+          },
+          "gist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gist"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Weight"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "facets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Facets"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "badges": {
+            "items": {
+              "$ref": "#/components/schemas/GradedBadge"
+            },
+            "type": "array",
+            "title": "Badges"
+          },
+          "saved": {
+            "type": "boolean",
+            "title": "Saved",
+            "default": false
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RowState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Via"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "authors"
+        ],
+        "title": "TopicRow",
+        "description": "A paper on a topic's page: the topic's own grade, else the highest of the followed topics\nunder it (`via`), else none (ungraded there, coloured by its Weight)."
+      },
+      "TopicState": {
+        "type": "string",
+        "enum": [
+          "split",
+          "escalated",
+          "ungraded",
+          "grading_again"
+        ]
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Version": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "Version"
+      },
+      "Week": {
+        "properties": {
+          "monday": {
+            "type": "string",
+            "format": "date",
+            "title": "Monday"
+          },
+          "digests": {
+            "items": {
+              "$ref": "#/components/schemas/DigestCard"
+            },
+            "type": "array",
+            "title": "Digests"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "type": "object",
+        "required": [
+          "monday",
+          "digests"
+        ],
+        "title": "Week",
+        "description": "A week's weekly digests in the fixed topic order, keyed by its Monday."
+      },
+      "Weight": {
+        "type": "string",
+        "enum": [
+          "landmark",
+          "solid",
+          "incremental"
+        ],
+        "title": "Weight",
+        "description": "How much a paper matters in its own area, whatever topic it is graded for."
+      },
+      "WeightState": {
+        "properties": {
+          "weight": {
+            "$ref": "#/components/schemas/Weight"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "abstract",
+              "full_text"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "weight",
+          "reason",
+          "source"
+        ],
+        "title": "WeightState"
+      }
+    }
+  }
+}

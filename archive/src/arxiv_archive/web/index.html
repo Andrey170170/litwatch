@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#16191d" media="(prefers-color-scheme: dark)">
+  <title>Paper archive</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container header-inner">
+    <a class="brand" href="/"><img class="brand-mark" src="/assets/favicon.svg" alt="" width="22" height="22">Paper archive</a>
+    <p id="index-status" class="index-status" role="status"></p>
+  </div></header>
+  <main id="main" class="container">
+    <section id="search-view" aria-labelledby="search-heading">
+      <h1 id="search-heading">Search the archive</h1>
+      <p class="intro">Titles, abstracts, authors and arXiv IDs.</p>
+      <form id="search-form" role="search">
+        <div class="search-line">
+          <div class="search-box">
+            <label class="visually-hidden" for="query">Search papers</label>
+            <input id="query" name="q" type="search" maxlength="300" placeholder="Search a topic, author or arXiv ID" autocomplete="off" enterkeyhint="search" spellcheck="false">
+            <kbd class="key-hint" aria-hidden="true">/</kbd>
+          </div>
+          <button class="primary" type="submit">Search</button>
+        </div>
+        <div class="filters">
+          <label>Category<input id="category" name="category" list="categories" placeholder="Any" maxlength="32" autocomplete="off"></label>
+          <datalist id="categories">
+            <option value="cs.AI">Artificial intelligence</option>
+            <option value="cs.CL">Computation and language</option>
+            <option value="cs.LG">Machine learning</option>
+            <option value="cs.CV">Computer vision</option>
+            <option value="cs.IR">Information retrieval</option>
+            <option value="cs.NE">Neural and evolutionary computing</option>
+            <option value="stat.ML">Machine learning (statistics)</option>
+          </datalist>
+          <label>From<input id="date-from" name="date_from" type="date"></label>
+          <label>To<input id="date-to" name="date_to" type="date"></label>
+          <label>Local files<select id="availability" name="availability">
+            <option value="all">Any</option>
+            <option value="pdf">PDF stored</option>
+            <option value="source">LaTeX stored</option>
+            <option value="both">PDF and LaTeX stored</option>
+            <option value="any">PDF or LaTeX stored</option>
+            <option value="none">Nothing stored</option>
+          </select></label>
+        </div>
+      </form>
+      <div class="result-toolbar">
+        <p id="results-label" role="status">Loading papers…</p>
+        <div class="toolbar-actions">
+          <button id="export-selected" class="text-button" type="button" disabled>Export selected as BibTeX</button>
+          <label class="sort-control">Sort
+            <select id="sort" name="sort" form="search-form">
+              <option value="relevance">Relevance</option>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="title_asc">Title A–Z</option>
+              <option value="title_desc">Title Z–A</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <p id="search-message" class="message" role="status" hidden></p>
+      <section id="results" aria-label="Search results" aria-busy="true"></section>
+      <nav id="pagination" class="pagination" aria-label="Result pages" hidden>
+        <button id="previous" type="button" disabled>Previous</button>
+        <span id="page-label" class="muted"></span>
+        <button id="next" type="button" disabled>Next</button>
+      </nav>
+    </section>
+    <section id="detail-view" hidden aria-label="Paper details">
+      <a id="back-to-search" class="back-link" href="/">Back to search</a>
+      <div id="paper-detail" aria-live="polite"></div>
+    </section>
+    <noscript><p class="message">Enable JavaScript to search the archive. Paper files remain accessible through the archive API.</p></noscript>
+  </main>
+  <footer class="container">Metadata search over the local arXiv mirror. PDFs and LaTeX sources are served from the archive when stored.</footer>
+</body>
+</html>

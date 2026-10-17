@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 4 · the paper page</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<link rel="stylesheet" href="lib/papers.css">
+<link rel="stylesheet" href="lib/paper.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<script src="lib/papers.js"></script>
+<script src="lib/topicpage.js"></script>
+<script src="lib/paper.js"></script>
+<style>
+  .sw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+  .sw button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px; color: var(--fg2); }
+  .sw button.on { background: var(--fg); color: var(--page); border-color: var(--fg); }
+  @media (max-width: 640px) { .sw > span { display: none; } .sw button { padding: 3px 6px; } }
+  .states { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .states button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; color: var(--fg2); }
+  .states button:hover { color: var(--fg); border-color: var(--fg2); }
+  .pbar .ttl2 { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .pbar .ttl2 .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
+  .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
+  .frame { position: relative; }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 4 · the paper page</h1>
+  <span class="sp"></span>
+  <span class="sw"><span>Layout</span><button data-sw="pv:A">A ladder</button><button data-sw="pv:B">B rail</button><button data-sw="pv:C">C folded</button></span>
+  <span class="sw"><span>Desktop opens it as</span><button data-sw="open:over">slide-over</button><button data-sw="open:page">page</button></span>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">The paper page, the last rung of every list. It reads top to bottom as the ladder: the <b>Gist</b>, the <b>Brief</b> (or the abstract where there is none), the <b>Deep card</b>, then <b>the paper</b> itself (links, versions, where it was published). Above the ladder: the paper's level and topics, its title and facts, Save and the links. Each topic the paper is in gets a row with its grade there, the verdict behind it, thumbs with their reasons, and a label. <b>A</b> keeps everything in one column, all open; <b>B</b> puts the actions, topics and facts in a rail beside the ladder when there is room; <b>C</b> is A with the topic rows and the Deep card's sections folded to one line each. Open papers in different states:</p>
+  <div class="states">
+    <button data-pp="cotf|2610.04321">Landmark with its Deep card</button>
+    <button data-pp="cotm|2610.04780">Deep card being written</button>
+    <button data-pp="cotf|2610.05112">Brief from an older revision</button>
+    <button data-pp="interp|2610.04990">No Brief, abstract instead</button>
+    <button data-pp="|2305.04388">Archive only, not processed</button>
+  </div>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" id="M"></div>
+    <div class="notes">
+      <p>Things to try: a 👍 or 👎 on a topic row asks for the reason, and the note at the bottom says what it did. Label sets your Fit for that topic. ✓ and ✗ beside the Gist and Brief say whether the text is accurate (faint until hovered). Prior work and Among the collection open those papers' pages; a prior paper outside the collection opens the archive's page with Process and Deep read. On the phone, Save and the thumbs sit in the bottom bar, and a swipe across the page (away from the edge) steps to the previous or next paper of the list you came from; the number in the bar is its place there.</p>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>Layout: A one column, B with a rail, or C folded?</li>
+        <li>On desktop, does a paper open as a slide-over over the list (the list stays where it was) or as its own page?</li>
+        <li>Thumbs and labels per topic row, as here, or one pair of thumbs for the page that asks for the topic only when the paper is in several?</li>
+        <li>Phone: should a sideways swipe step through the list's papers, as it steps days?</li>
+        <li>Is anything missing from the top of the page, or anything there you would not look at?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const SW = Object.assign({ v: "C", pv: "A", open: "over", bar: "inline", cards: "rich" }, JSON.parse(localStorage.getItem("lw-r4") || "{}"));
+const PG = { pgopen: [], pick: null, pickth: null, lab: null, rs: null, rsT: null };
+
+function toast(frame, msg) {
+  frame.querySelectorAll(".toast").forEach((t) => t.remove());
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; frame.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+// the paper's place in the list it was opened from, for the phone's swipe and its counter
+function inList(st) {
+  if (!st.paper || !(st.topic || st.tab === "Papers")) return null;
+  const L = listFor(st, st.topic), i = L.findIndex((p) => p.id === st.paper);
+  return i < 0 ? null : { L, i };
+}
+const surface = (st, pd) => (st.topic && pd.lv[st.topic] ? st.topic : pd.tp[0]);
+
+function pgBody(pd, st, phone) {
+  const v = SW.pv, opt = { folded: v === "C" };
+  if (v === "B") return `<div class="pg B">${pgHead(pd)}<div class="pgcols"><div class="pgmain">${pgLadder(pd, st, { nopaper: true })}</div>
+    <aside class="pgrail">${phone ? "" : pgActions(pd)}${pgTopics(pd, st)}${pgPaper(pd)}</aside></div></div>`;
+  return `<div class="pg ${v}">${pgHead(pd)}${phone ? "" : pgActions(pd)}${pgTopics(pd, st, opt)}${pgLadder(pd, st, opt)}</div>`;
+}
+let rsOpen = false;
+function pgFoot(pd, st) {
+  if (pd.arch) return `<div class="pfoot pgf"><a data-process="${pd.id}"><small>Process</small></a><a data-deep="${pd.id}"><small>Deep read</small></a><a data-miss="${pd.id}"><small>A miss</small></a></div>`;
+  const t = st.rsT || surface(st, pd), re = REACT[pd.id + "|" + t], at = inList(st), enter = st.rs && !rsOpen;
+  rsOpen = !!st.rs;
+  const sheet = !st.rs ? "" : `<div class="fsheet${enter ? " enter" : ""}"><div class="shade2" data-rs="x"></div><div class="sheetp">
+    ${pd.tp.length > 1 ? `<div class="cap2">Topic</div><div class="row">${pd.tp.map((x) => `<a class="fchip2${x === t ? " on" : ""}" data-rst="${x}">${badge(x)} ${T[x].n}</a>`).join("")}</div>` : ""}
+    <div class="cap2">${st.rs === "up" ? "👍 Why" : "👎 Why"} · ${T[t].n}</div><div class="why big">${REASONS[st.rs].map(([w, n]) => `<a class="${re && re.why === w ? "on" : ""}" data-why="${pd.id}|${t}|${st.rs}|${w}">${n}</a>`).join("")}${re ? `<a class="clr" data-why="${pd.id}|${t}|-|-">Clear</a>` : ""}</div>
+    <button class="done" data-rs="x">Cancel</button></div></div>`;
+  return `<div class="pfoot pgf"><a class="${pd.sv ? "on" : ""}" data-save="${pd.id}">${pd.sv ? "★" : "☆"}</a><a class="${re && re.thumb === "up" ? "on" : "dim"}" data-rs="up">👍</a>
+    <span class="lbl">${at ? `${at.i + 1}/${at.L.length}` : ""}</span><a class="${re && re.thumb === "down" ? "on" : "dim"}" data-rs="down">👎</a><a data-bib="${pd.id}">⧉</a></div>${sheet}`;
+}
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, dg: null, ...FD, ...PG },
+    view(st) {
+      const pd = st.paper && paperData(st.paper);
+      if (phone && pd) return { body: pgBody(pd, st, true), title: st.topic ? T[st.topic].n : "Paper", foot: pgFoot(pd, st) };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      if (!phone && pd && SW.open === "page") return { body: pgBody(pd, st, false), title: pd.t };
+      const v = st.topic ? topicV(st, phone) : st.tab === "Papers" ? papersV(st, phone) : st.tab === "Topics" ? topicsV()
+        : { body: daystrip(TODAY, false) + dayBody(TODAY, DG, { weekly: false }), title: "Digest" };
+      if (phone) return v;
+      const ov = pd ? pgBody(pd, st, false) : st.dg ? digestPage(st.dg) : null;
+      return { ...v, overlay: ov && `<a class="back" data-back>‹ Close</a>${ov}` };
+    },
+    swipe(st) {
+      const at = inList(st);
+      if (!at) return null;
+      const to = (p) => p && { paper: p.id, ...PG, pgopen: st.pgopen };
+      return { older: to(at.L[at.i - 1]), newer: to(at.L[at.i + 1]) };
+    },
+    click(e, nav) {
+      const f = (s) => e.target.closest(s), st = nav.st, fr = e.currentTarget; let n;
+      const toggle = (a, x) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]);
+      if ((n = f("[data-save]"))) { const p = P[n.dataset.save]; p.sv = !p.sv; nav.set({}); if (st.paper) toast(fr, p.sv ? "Saved: it joins the library." : "Unsaved: it leaves the library until you save it again."); return true; }
+      if ((n = f("[data-process]"))) { toast(fr, `Processing ${n.dataset.process}: classified, analysed and graded like a new paper.`); return true; }
+      if ((n = f("[data-deep]"))) { REQ.add(n.dataset.deep); nav.set({}); toast(fr, "Deep card asked for. It starts as soon as the archive has the text."); return true; }
+      if (f("[data-miss]")) { toast(fr, "Report as a miss: you pick its topic, and it is saved at once."); return true; }
+      if ((n = f("[data-bib]"))) { const pd = paperData(n.dataset.bib); toast(fr, `BibTeX copied${pd.pub ? ` (${pd.pub})` : " (arXiv entry)"}.`); return true; }
+      if (f("[data-doi]")) { toast(fr, "Paste a DOI or DBLP key; litwatch never overwrites it."); return true; }
+      if ((n = f("[data-au]"))) { const a = n.closest(".au"); a.textContent = a.dataset.auall; return true; }
+      if ((n = f("[data-th]"))) { const [id, t, th] = n.dataset.th.split("|"), k = id + "|" + t; nav.set(st.pick === k && st.pickth === th ? { pick: null } : { pick: k, pickth: th, lab: null }); return true; }
+      if ((n = f("[data-why]"))) {
+        const [id, t, th, why] = n.dataset.why.split("|"), k = id + "|" + t, pd = paperData(id);
+        if (th === "-") { delete REACT[k]; toast(fr, "Reaction cleared; its word is taken back."); }
+        else { REACT[k] = { thumb: th, why }; if (why === "wrong" && T[t].depth === "focus") P[id].sv = false; toast(fr, reactAck(pd, t, th, why)); }
+        nav.set({ pick: null, rs: null, rsT: null }); return true;
+      }
+      if ((n = f("[data-labopen]"))) { const k = n.dataset.labopen; nav.set({ lab: st.lab === k ? null : k, pick: null }); return true; }
+      if ((n = f("[data-lab]"))) { const [id, t, fit] = n.dataset.lab.split("|"), k = id + "|" + t; if (LABEL[k] === fit) delete LABEL[k]; else LABEL[k] = fit;
+        nav.set({ lab: null }); toast(fr, LABEL[k] ? `Labelled ${fit} on ${T[t].n}${fit === "unsure" ? "; unsure counts nowhere" : ""}.` : "Label removed."); return true; }
+      if ((n = f("[data-rate]"))) { const [id, r, v] = n.dataset.rate.split("|"), k = id + "|" + r; RATE[k] = RATE[k] === v ? undefined : v; nav.set({}); return true; }
+      if ((n = f("[data-pgfold]"))) { nav.set({ pgopen: toggle(st.pgopen, n.dataset.pgfold) }); return true; }
+      if ((n = f("[data-rs]"))) { nav.set(n.dataset.rs === "x" ? { rs: null, rsT: null } : { rs: n.dataset.rs }); return true; }
+      if ((n = f("[data-rst]"))) { nav.set({ rsT: n.dataset.rst }); return true; }
+      if ((n = f(".pg [data-paper]"))) { nav.go({ paper: n.dataset.paper, ...PG }); return true; }
+      if (f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-topic]")) && !f("[data-paper], [data-cell]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
+      else if ((n = f("[data-rl]"))) nav.set({ rset: toggle(st.rset, +n.dataset.rl), n: 40 });
+      else if ((n = f("[data-chip]"))) nav.set({ [n.dataset.chip]: !st[n.dataset.chip], n: 40 });
+      else if ((n = f("[data-sort]"))) nav.set({ sort: n.dataset.sort });
+      else if ((n = f("[data-tf]"))) nav.set({ tf: toggle(st.tf, n.dataset.tf), n: 40 });
+      else if ((n = f("[data-unfold]"))) nav.set({ open: toggle(st.open, +n.dataset.unfold) });
+      else if (f("[data-clear]")) nav.set({ ...FD });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else if ((n = f("[data-paper]"))) nav.go({ paper: n.dataset.paper, ...PG });
+      else return false;
+      return true;
+    },
+  };
+}
+
+const D = document.getElementById("D"), M = document.getElementById("M");
+const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
+[[D, navs[0]], [M, navs[1]]].forEach(([f, n]) => { autoLoad(f, n); liveSearch(f, n); });
+function openPaper(topic, id) { navs.forEach((n) => { n.top(topic ? { tab: null, topic } : { tab: "Papers" }); n.go({ paper: id, ...PG }); }); }
+openPaper("cotf", "2610.04321");
+document.querySelectorAll("[data-pp]").forEach((b) => b.onclick = () => openPaper(...b.dataset.pp.split("|")));
+function markSwitches() { document.querySelectorAll("[data-sw]").forEach((b) => { const [k, v] = b.dataset.sw.split(":"); b.classList.toggle("on", SW[k] === v); }); }
+document.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => {
+  const [k, v] = b.dataset.sw.split(":"); SW[k] = v;
+  localStorage.setItem("lw-r4", JSON.stringify({ pv: SW.pv, open: SW.open })); markSwitches(); navs.forEach((n) => n.set({}));
+});
+markSwitches();
+</script>
+</body></html>

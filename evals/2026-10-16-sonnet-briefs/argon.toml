@@ -1,0 +1,5 @@
+# P1 (docs/plans/model-spend.md): the `brief` role on google/gemini-4-argon at high.
+[models.brief]
+provider = "openrouter"
+model = "google/gemini-4-argon"
+effort = "high"

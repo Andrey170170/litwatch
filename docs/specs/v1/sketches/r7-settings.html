@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Round 7b · Settings</title>
+<link rel="stylesheet" href="lib/wire.css">
+<link rel="stylesheet" href="lib/dirs.css">
+<link rel="stylesheet" href="lib/shell.css">
+<link rel="stylesheet" href="lib/digest.css">
+<link rel="stylesheet" href="lib/papers.css">
+<link rel="stylesheet" href="lib/paper.css">
+<link rel="stylesheet" href="lib/look.css">
+<link rel="stylesheet" href="lib/interact.css">
+<link rel="stylesheet" href="lib/settings.css">
+<script src="lib/wire.js"></script>
+<script src="lib/shell.js"></script>
+<script src="lib/digest.js"></script>
+<script src="lib/papers.js"></script>
+<script src="lib/topicpage.js"></script>
+<script src="lib/paper.js"></script>
+<script src="lib/settings.js"></script>
+<style>
+  .states { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .states button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; color: var(--fg2); }
+  .states button:hover { color: var(--fg); border-color: var(--fg2); }
+  .pbar .ttl2 { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .pbar .ttl2 .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .frame[data-dir="nc"] .pbar .ttl2 { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .empty { padding: 24px 0; color: var(--fg3); font-size: 13px; }
+  .empty a { color: var(--acc, var(--fg)); cursor: pointer; }
+  .frame { position: relative; }
+</style></head>
+<body>
+<div class="top">
+  <h1>Round 7b · Settings</h1>
+  <span class="sp"></span>
+  <a class="chipbtn" href="index.html">All rounds</a><button id="theme"></button>
+</div>
+<div class="wrap">
+  <p class="intro">Settings, behind the gear, on the app as chosen so far: Settings takes the sidebar, numbers as bars. The ⚙ at the foot of the sidebar (on the phone, the ⚙ in the bar or in the drawer) opens them. Jump to:</p>
+  <div class="states">
+    <button data-jump="overview">Overview</button>
+    <button data-jump="needs">Needs you</button>
+    <button data-jump="split">A paper with a split</button>
+    <button data-jump="fulltext">A paper whose full text failed</button>
+    <button data-jump="calibrate">Calibrate</button>
+    <button data-jump="session">A past session</button>
+    <button data-jump="editor">A topic's editor</button>
+    <button data-jump="taxonomy">Taxonomy</button>
+    <button data-jump="jobs">Jobs</button>
+    <button data-jump="events">zotero's events</button>
+    <button data-jump="digest">Back to the Digest</button>
+  </div>
+  <div class="desk-sec"><div class="frame desk" data-dir="nc" data-rar="glow" data-react="reason" data-hover="glow" data-motion="subtle" data-sheet="drag" id="D"></div></div>
+  <div class="side-by-side">
+    <div class="frame phone" data-dir="nc" data-rar="glow" data-react="reason" data-hover="glow" data-motion="subtle" data-sheet="drag" id="M"></div>
+    <div class="notes">
+      <p><b>What changed in 7b</b></p>
+      <ul>
+        <li><b>Overview</b> holds how the pipeline is doing: four tiles (what needs the owner, last night, this month's spend, the last Calibrate session), then recall, precision, reactions and matters with no topic. <b>Needs you</b> holds only what waits on the owner.</li>
+        <li><b>On the paper's page</b>, the same items: a note under the head in the same colour (yellow asks for a word, red reports a failure) with the same actions, and the topic row in the rail marked (a split keeps its Fit control open; ungraded shows red). On the phone the note's Label opens the ⋯ sheet, where the topic is marked too. Settling it on either page settles it on both.</li>
+        <li><b>Calibrate</b>: the strip of squares jumps; on the phone the number in the bar opens a list of the session's papers. Past sessions open a review: the owner's Fit against the pipeline's, amber where they differ.</li>
+        <li><b>The re-run offer</b> takes the place of Save and Cancel, in the topic editor and in the class editor. Not now leaves it in Runs and cost › Jobs as "not run", to run now, with tonight's run, or discard.</li>
+        <li><b>Jobs</b> and <b>an integration's events</b> are pages of their own. Topics drag by ⋮⋮; Taxonomy's carets fold, the row opens the editor.</li>
+      </ul>
+      <p><b>Questions</b></p>
+      <ol>
+        <li>The gear opens Overview. Should it open Needs you instead while something waits there?</li>
+        <li>Paper states show on the paper's page only. Should list rows (Digest, topic pages, Papers) mark them too, say a small yellow or red tick at the row's edge?</li>
+        <li>A re-run put off with Not now waits in Jobs. Should the topic's editor also say so ("Version 4 has a re-run not run ›")?</li>
+        <li>A past Calibrate session shows where the owner's Fit differs from the pipeline's. Enough, or should a difference there turn into a label with one click?</li>
+        <li>Taxonomy on the phone: Members hidden, long names cut, the class editor opening in its row. Fine, or the editor as a page of its own?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script>
+const SW = { v: "C", bar: "inline", cards: "rich", acts: "grid" };
+// the chosen interactions (round 6)
+const IX = { react: "reason", sheet: "drag" };
+SHELL_RUN = "over"; // openrouter is projected over its budget (Runs and cost)
+// what a Settings page starts with
+const SETST = { sub: null, cal: null, calpick: false, cls: null, fold: null, saved: false, nopen: null, evf: null, paper: null };
+let gistUp = false;
+const PG = { pick: null, pickth: null, lab: null, rs: null, rsT: null, rstrip: null, ps: false, pgopen: [] };
+
+function toast(frame, msg) {
+  frame.querySelectorAll(".toast").forEach((t) => t.remove());
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; frame.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+// a reaction on a Focus topic that writes the owner's word: its effect is not on the page, so it is acknowledged
+const ownerWord = (t, why) => T[t].depth === "focus" && (why === "wrong" || why === "great");
+// the paper's place in the list it was opened from, in the order the list shows: shelf by shelf, sorted inside each
+function inList(st) {
+  if (!st.paper || !(st.topic || st.tab === "Papers")) return null;
+  const shelf = (p) => Math.min(lvOf(p, st.topic), 4);
+  const L = listFor(st, st.topic).sort((a, b) => shelf(b) - shelf(a)), i = L.findIndex((p) => p.id === st.paper);
+  return i < 0 ? null : { L, i };
+}
+const toggle = (a, x) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]);
+const surface = (st, pd) => (st.topic && pd.lv[st.topic] ? st.topic : pd.tp[0]);
+
+function pgBody(pd, st, phone) {
+  if (phone) return `<div class="pg B">${pgHead(pd)}${pgNotes(pd, st, true)}${pgLadder(pd, st, { nopaper: true })}</div>`;
+  return `<div class="pg B track${gistUp ? " gistup" : ""}">${pgHead(pd, { acts: SW.acts === "head" })}${pgNotes(pd, st, false)}<div class="pgcols"><div class="pgmain">${pgLadder(pd, st)}</div><aside class="pgrail">${pgRail(pd, st, { acts: SW.acts })}</aside></div></div>`;
+}
+// the phone's bottom bar and its two sheets (the reasons for a thumb, and the paper); a sheet animates only as it opens
+let lastSheet = null;
+function pgFoot(pd, st) {
+  const cur = st.rs ? "rs" : st.ps ? "ps" : st.rstrip ? "strip" : null, enter = cur && cur !== lastSheet;
+  lastSheet = cur;
+  const more = `<a data-ps="open" title="The paper: links, BibTeX, labels">⋯</a>`;
+  if (pd.arch) return `<div class="pfoot pgf"><a data-process="${pd.id}"><small>Process</small></a><a data-deep="${pd.id}"><small>Deep read</small></a>${more}</div>${st.ps ? pgSheet(pd, enter) : ""}`;
+  const t = st.rsT || surface(st, pd), re = REACT[pd.id + "|" + t], at = inList(st);
+  const rs = !st.rs ? "" : `<div class="fsheet${enter ? " enter" : ""}"><div class="shade2" data-rs="x"></div><div class="sheetp">
+    ${pd.tp.length > 1 ? `<div class="cap2">Topic</div><div class="row">${pd.tp.map((x) => `<a class="fchip2${x === t ? " on" : ""}" data-rst="${x}">${badge(x)} ${T[x].n}</a>`).join("")}</div>` : ""}
+    <div class="cap2">${st.rs === "up" ? "👍 Why" : "👎 Why"} · ${T[t].n}</div><div class="why big">${REASONS[st.rs].map(([w, n]) => `<a class="${re && re.why === w ? "on" : ""}" data-why="${pd.id}|${t}|${st.rs}|${w}">${n}</a>`).join("")}${re ? `<a class="clr" data-why="${pd.id}|${t}|-|-">Clear</a>` : ""}</div>
+    <button class="done" data-rs="x">Cancel</button></div></div>`;
+  // thumb first: the strip is the acknowledgement (the thumb is already counted); it moves the thumb to another
+  // topic or adds the reason
+  const strip = !st.rstrip || !re ? "" : `<div class="rstrip${enter ? " enter" : ""}"><div class="rsh">${re.thumb === "up" ? "👍" : "👎"} Counted on
+    ${pd.tp.length > 1 ? pd.tp.map((x) => `<a class="fchip2${x === t ? " on" : ""}" data-rmove="${x}">${badge(x)} ${T[x].n}</a>`).join("") : `${badge(t)} ${T[t].n}`}</div>
+    <div class="why big after"><span class="whyq">Why, if you like:</span>${REASONS[re.thumb].map(([w, n]) => `<a class="${re.why === w ? "on" : ""}" data-why="${pd.id}|${t}|${re.thumb}|${w}">${n}</a>`).join("")}</div></div>`;
+  return `${strip}<div class="pfoot pgf"><a class="${pd.sv ? "on" : ""}" data-save="${pd.id}">${pd.sv ? "★" : "☆"}</a><a class="${re && re.thumb === "up" ? "on" : "dim"}" data-rs="up">👍</a>
+    <span class="lbl">${at ? `${at.i + 1}/${at.L.length}` : ""}</span><a class="${re && re.thumb === "down" ? "on" : "dim"}" data-rs="down">👎</a>${more}</div>${rs}${st.ps ? pgSheet(pd, enter) : ""}`;
+}
+
+function makeApp(phone) {
+  return {
+    start: { tab: "Digest", topic: null, paper: null, dg: null, set: null, ...SETST, ...FD, ...PG },
+    view(st) {
+      const pd = st.paper && paperData(st.paper);
+      // a paper opened from a Settings page keeps the Settings sidebar
+      if (pd && st.set && !phone) return { body: pgBody(pd, st, false), title: pd.t, side: setSide(st) };
+      if (st.set && !pd) return setV(st, phone);
+      if (pd) return phone ? { body: pgBody(pd, st, true), title: st.topic ? T[st.topic].n : "Paper", foot: pgFoot(pd, st) } : { body: pgBody(pd, st, false), title: pd.t };
+      if (phone && st.dg) return { body: digestPage(st.dg), title: dgTitle(st.dg) };
+      const v = st.topic ? topicV(st, phone) : st.tab === "Papers" ? papersV(st, phone) : st.tab === "Topics" ? topicsV()
+        : { body: daystrip(TODAY, false) + dayBody(TODAY, DG, { weekly: false }), title: "Digest" };
+      if (phone) return v;
+      const ov = st.dg ? digestPage(st.dg) : null;
+      return { ...v, overlay: ov && `<a class="back" data-back>‹ Close</a>${ov}` };
+    },
+    swipe(st) {
+      const at = inList(st);
+      if (!at) return null;
+      const to = (p) => p && { paper: p.id, ...PG };
+      return { older: to(at.L[at.i - 1]), newer: to(at.L[at.i + 1]) };
+    },
+    click(e, nav) {
+      const f = (s) => e.target.closest(s), st = nav.st, fr = e.currentTarget; let n;
+      // acknowledged only where the page does not show the result: a copy, a request, the owner's word
+      const done = (msg) => toast(fr, msg);
+      // Settings
+      if ((n = f("[data-settings]"))) { // the gear opens Settings; the run status opens the page it names
+        const to = n.dataset.settings;
+        if (to ? st.set !== to || st.sub || st.paper : !st.set) nav.go({ set: to || (phone ? "index" : "overview"), tab: null, topic: null, dg: null, ...SETST });
+        return true; }
+      if (f("[data-leave]")) { while (nav.stack.length && nav.st.set) nav.back(); if (nav.st.set) nav.top({}); return true; }
+      if ((n = f("[data-sset]"))) {
+        const to = { set: n.dataset.sset, ...SETST };
+        if (phone) nav.go(to);
+        else { while (nav.stack.length > 1 && (nav.st.sub || nav.st.paper)) nav.back(); nav.set(to, "top"); }
+        return true;
+      }
+      if (f(".grip")) return true; // the grip drags; a click on it opens nothing
+      if ((n = f("[data-sub]"))) { FORM_DIRTY = false; nav.go({ sub: n.dataset.sub, saved: false, evf: null }); return true; }
+      if ((n = f("[data-settle]"))) {
+        // a Needs you item (by index) settles wherever it shows; on a paper's page its note goes, so the result is said
+        const [k, msg] = n.dataset.settle.split("|");
+        if (/^\d+$/.test(k)) NEED[+k].done = msg; else SETTLED[k] = msg;
+        nav.set({ nopen: null });
+        if (st.paper) done(msg);
+        return true;
+      }
+      if ((n = f("[data-nopen]"))) { nav.set({ nopen: +n.dataset.nopen < 0 ? null : +n.dataset.nopen }); return true; }
+      if ((n = f("[data-saved]"))) { if (FORM_DIRTY) { FORM_DIRTY = false; nav.set({ saved: true }, "keep"); } return true; }
+      // a choice in an editor's form changes it, in place (a redraw would lose what was typed)
+      if ((n = f(".form [data-x], .sws i, .kw .x"))) {
+        if (!n.matches(".kw .x")) { [...n.parentNode.children].forEach((c) => c.classList.remove("on")); n.classList.add("on"); } else n.closest(".kw").remove();
+        markDirty(fr); return true;
+      }
+      if ((n = f("[data-toast]"))) { done(n.dataset.toast); return true; }
+      if ((n = f("[data-notnow], [data-rerun]"))) {
+        // either way the offer goes; a put-off re-run waits in Jobs, so the toast says where
+        const run = !!n.dataset.rerun, [what, cnt, cost] = (n.dataset.rerun || n.dataset.notnow).split("|");
+        const scope = [...RR].map((k) => ({ labels: "labelled papers and misses", members: "existing members", kw: "keyword matches", range: "1 Sep – 13 Oct" })[k]).join(", ");
+        JOBS.unshift({ k: "Re-run", what, scope: scope.charAt(0).toUpperCase() + scope.slice(1), n: +cnt, done: 0, cost: +cost, st: run ? "running" : "offered", at: run ? "started just now" : "saved just now, not run" });
+        nav.set({ saved: false, cls: null });
+        done(run ? `Re-run started: ${(+cnt).toLocaleString("en")} papers, stops at $5.00. Progress in Runs and cost › Jobs.` : "Not run. It waits in Runs and cost › Jobs, to run now or with tonight's run.");
+        return true;
+      }
+      if ((n = f("[data-job]"))) {
+        const [i, a] = n.dataset.job.split("|"), j = JOBS[+i];
+        if (a === "discard") JOBS.splice(+i, 1);
+        else Object.assign(j, a === "run" ? { st: "running", done: 0, at: "started just now" } : { st: "queued", at: "" });
+        if (a === "run" && j.need != null) NEED[j.need].done = "Writing it again; it appears on Thu 8 Oct when done.";
+        nav.set({}); return true;
+      }
+      if ((n = f("[data-evf]"))) { nav.set({ evf: n.dataset.evf }); return true; }
+      if ((n = f("[data-rr]"))) { const k = n.dataset.rr; RR.has(k) ? RR.delete(k) : RR.add(k); nav.set({}); return true; }
+      if ((n = f("[data-calpick]"))) { nav.set({ calpick: n.dataset.calpick === "1" }); return true; }
+      if ((n = f("[data-cal]"))) { const i = +n.dataset.cal; if (i >= 0 && i !== st.cal) nav.set({ cal: i, calpick: false }, st.cal == null || i > st.cal ? "go" : "back"); else nav.set({ calpick: false }); return true; }
+      if ((n = f("[data-cf], [data-cc], [data-cv], [data-cg], [data-cw]"))) {
+        const a = (CAL[st.cal] = CAL[st.cal] || { fit: {}, wrong: [] }), d = n.dataset, flip = (k, v) => (a[k] = a[k] === v ? undefined : v);
+        if (d.cf) { const [t, v] = d.cf.split("|"); a.fit[t] = a.fit[t] === v ? undefined : v; }
+        else if (d.cc) flip("cls", d.cc); else if (d.cv) flip("val", d.cv); else if (d.cg) flip("gb", d.cg);
+        else a.wrong = toggle(a.wrong, d.cw);
+        nav.set({}); return true;
+      }
+      if ((n = f("[data-fold]"))) {
+        const i = +n.dataset.fold, cur = st.fold || TREE.flatMap((r, j) => (r[5] ? [j] : []));
+        nav.set({ fold: toggle(cur, i) }); return true;
+      }
+      if ((n = f("[data-cls]"))) { FORM_DIRTY = false; const i = +n.dataset.cls; nav.set({ cls: i < 0 || st.cls === i ? null : i, saved: false }); return true; }
+      if ((n = f("[data-tog]"))) { n.classList.toggle("on"); return true; }
+      if (f("[data-x], .tin")) return true;
+      // thumb first: a click anywhere else puts the offered reasons away
+      if (IX.react === "thumb" && (st.pick || st.rstrip) && !f(".why, .rstrip, [data-th], [data-rs]")) nav.set({ pick: null, rstrip: null });
+      if ((n = f("[data-save]"))) { const p = P[n.dataset.save]; p.sv = !p.sv; nav.set({}); return true; }
+      if ((n = f("[data-process]"))) { done("Queued for processing."); return true; }
+      if ((n = f("[data-deep]"))) { REQ.add(n.dataset.deep); nav.set({}); return true; }
+      if ((n = f("[data-miss]"))) { done("Report as a miss: pick its topic."); return true; }
+      if ((n = f("[data-bib]"))) { const pd = paperData(n.dataset.bib); done(`BibTeX copied${pd.pub ? `, ${pd.pub}` : ", arXiv entry"}`); return true; }
+      if ((n = f("[data-copy]"))) { done(`Copied ${n.dataset.copy}`); return true; }
+      if (f("[data-doi]")) { done("Paste a DOI or DBLP key."); return true; }
+      if ((n = f("[data-au]"))) { const a = n.closest(".au"); a.textContent = a.dataset.auall; return true; }
+      if ((n = f("[data-th]")) && IX.react === "thumb") {
+        const [id, t, th] = n.dataset.th.split("|"), k = id + "|" + t;
+        if (REACT[k] && REACT[k].thumb === th) { const was = REACT[k]; delete REACT[k]; nav.set({ pick: null }); if (ownerWord(t, was.why)) done(`Mark on ${T[t].n} taken back`); }
+        else { REACT[k] = { thumb: th, why: null }; nav.set({ pick: k, pickth: th, lab: null }); }
+        return true;
+      }
+      if ((n = f("[data-th]"))) { const [id, t, th] = n.dataset.th.split("|"), k = id + "|" + t; nav.set(st.pick === k && st.pickth === th ? { pick: null } : { pick: k, pickth: th, lab: null }); return true; }
+      if ((n = f("[data-why]"))) {
+        const [id, t, th, why] = n.dataset.why.split("|"), k = id + "|" + t, pd = paperData(id);
+        const was = REACT[k];
+        if (th === "-") delete REACT[k];
+        else { REACT[k] = { thumb: th, why }; if (why === "wrong" && T[t].depth === "focus") P[id].sv = false; }
+        nav.set({ pick: null, rs: null, rsT: null, rstrip: null });
+        if (th !== "-" && ownerWord(t, why)) done(reactAck(pd, t, th, why));
+        else if (th === "-" && was && ownerWord(t, was.why)) done(`Mark on ${T[t].n} taken back`);
+        return true;
+      }
+      if ((n = f("[data-labopen]"))) { const k = n.dataset.labopen; nav.set({ lab: st.lab === k ? null : k, pick: null }); return true; }
+      if ((n = f("[data-lab]"))) { const [id, t, fit] = n.dataset.lab.split("|"), k = id + "|" + t; if (LABEL[k] === fit) delete LABEL[k]; else LABEL[k] = fit;
+        nav.set({ lab: null }); return true; }
+      if ((n = f("[data-rate]"))) { const [id, r, v] = n.dataset.rate.split("|"), k = id + "|" + r; RATE[k] = RATE[k] === v ? undefined : v; nav.set({}); return true; }
+      if ((n = f("[data-rs]")) && IX.react === "thumb" && n.dataset.rs !== "x") {
+        const pd = paperData(st.paper), th = n.dataset.rs, t = st.rsT || surface(st, pd), k = pd.id + "|" + t;
+        if (REACT[k] && REACT[k].thumb === th) { const was = REACT[k]; delete REACT[k]; nav.set({ rstrip: null, ps: false }); if (ownerWord(t, was.why)) done(`Mark on ${T[t].n} taken back`); }
+        else { REACT[k] = { thumb: th, why: null }; nav.set({ rstrip: th, ps: false }); }
+        return true;
+      }
+      if ((n = f("[data-rmove]"))) {
+        const pd = paperData(st.paper), from = st.rsT || surface(st, pd), to = n.dataset.rmove, re = REACT[pd.id + "|" + from];
+        if (to !== from && re) { delete REACT[pd.id + "|" + from]; REACT[pd.id + "|" + to] = re; }
+        nav.set({ rsT: to }); return true;
+      }
+      if ((n = f("[data-rs]"))) { nav.set(n.dataset.rs === "x" ? { rs: null, rsT: null } : { rs: n.dataset.rs, ps: false }); return true; }
+      if ((n = f("[data-rst]"))) { nav.set({ rsT: n.dataset.rst }); return true; }
+      if ((n = f("[data-ps]"))) { nav.set({ ps: n.dataset.ps !== "x", rs: null }); return true; }
+      if ((n = f(".pg [data-paper]"))) { nav.go({ paper: n.dataset.paper, ...PG }); return true; }
+      if (f(".side, .drawer .panel")) return false;
+      if ((n = f("[data-topic]")) && !f("[data-paper], [data-cell]")) nav.go({ tab: null, topic: n.dataset.topic, paper: null, dg: null, ...FD });
+      else if ((n = f("[data-rl]"))) nav.set({ rset: toggle(st.rset, +n.dataset.rl), n: 40 });
+      else if ((n = f("[data-chip]"))) nav.set({ [n.dataset.chip]: !st[n.dataset.chip], n: 40 });
+      else if ((n = f("[data-sort]"))) nav.set({ sort: n.dataset.sort });
+      else if ((n = f("[data-tf]"))) nav.set({ tf: toggle(st.tf, n.dataset.tf), n: 40 });
+      else if ((n = f("[data-unfold]"))) nav.set({ open: toggle(st.open, +n.dataset.unfold) });
+      else if (f("[data-clear]")) nav.set({ ...FD });
+      else if ((n = f("[data-dg], [data-cell]"))) nav.go({ dg: n.dataset.dg || n.dataset.cell, paper: null });
+      else if ((n = f("[data-paper]"))) nav.go({ paper: n.dataset.paper, ...PG });
+      else return false;
+      return true;
+    },
+  };
+}
+
+const D = document.getElementById("D"), M = document.getElementById("M");
+const markDirty = (fr) => { FORM_DIRTY = true; fr.querySelectorAll(".btn.dis[data-saved]").forEach((b) => { b.classList.remove("dis"); b.removeAttribute("title"); }); };
+[D, M].forEach((fr) => fr.addEventListener("input", (e) => { if (e.target.closest(".form")) markDirty(fr); }));
+const navs = [mountDesk(D, makeApp(false)), mountPhone(M, makeApp(true))];
+[[D, navs[0]], [M, navs[1]]].forEach(([f, n]) => { autoLoad(f, n); liveSearch(f, n); });
+function openPaper(topic, id) { navs.forEach((n) => { n.top(topic ? { tab: null, topic } : { tab: "Papers" }); n.go({ paper: id, ...PG }); }); }
+// open a Settings page on both frames: the desktop straight there, the phone through the list as a person would
+function openSet(set, extra = {}) {
+  navs.forEach((n, i) => { n.top({}); n.go(i ? { set: "index", tab: null, ...SETST } : { set, tab: null, ...SETST, ...extra }); if (i) n.go({ set, ...SETST, ...extra }); });
+}
+const then = (patch) => navs.forEach((n) => n.go(patch));
+const JUMP = {
+  digest: () => navs.forEach((n) => n.top({ tab: "Digest", topic: null })),
+  overview: () => openSet("overview"), needs: () => openSet("needs"), calibrate: () => openSet("calibrate", { cal: 2 }), taxonomy: () => openSet("taxonomy"),
+  split: () => { openSet("needs"); then({ paper: "2610.04780", ...PG }); }, fulltext: () => { openSet("needs"); then({ paper: "2610.03877", ...PG }); },
+  session: () => { openSet("calibrate"); then({ sub: "cs:0" }); }, jobs: () => { openSet("runs"); then({ sub: "jobs" }); },
+  events: () => { openSet("integrations"); then({ sub: "ev:zotero" }); }, editor: () => { openSet("topics"); then({ sub: "t:cotf" }); },
+};
+document.querySelectorAll("[data-jump]").forEach((b) => b.onclick = () => JUMP[b.dataset.jump]());
+// the Gist is "up" once the reading column's Gist has scrolled out of view; checked on scroll and after each redraw
+function checkGist() {
+  const g = D.querySelector(".pgmain .gistr"), m = D.querySelector(".main"), pg = D.querySelector(".pg.track");
+  if (!g || !pg) return;
+  gistUp = g.getBoundingClientRect().bottom < m.getBoundingClientRect().top + 8;
+  pg.classList.toggle("gistup", gistUp);
+}
+D.addEventListener("scroll", checkGist, true);
+new MutationObserver(checkGist).observe(D, { childList: true });
+// iOS shows :active on touch only once the page listens for touches
+document.addEventListener("touchstart", () => {}, { passive: true });
+
+// drag a phone sheet down to close it: it follows the finger, and past a third of its height (or flicked) it goes,
+// by the same click as its shade; otherwise it springs back
+let sg = null, swallow = false;
+M.addEventListener("pointerdown", (e) => {
+  const sp = e.target.closest(".fsheet .sheetp");
+  if (IX.sheet !== "drag" || !sp || e.button > 0 || e.clientY - sp.getBoundingClientRect().top > 28) return; // the handle's strip
+  sg = { sp, id: e.pointerId, y0: e.clientY, x0: e.clientX, drag: false, s: [[e.timeStamp, e.clientY]] };
+});
+M.addEventListener("pointermove", (e) => {
+  if (!sg || e.pointerId !== sg.id) return;
+  const dy = e.clientY - sg.y0;
+  if (!sg.drag) {
+    if (Math.hypot(dy, e.clientX - sg.x0) < 8) return;
+    if (dy < 0 || Math.abs(dy) < Math.abs(e.clientX - sg.x0)) { sg = null; return; }
+    sg.drag = true; sg.y0 = e.clientY; sg.sp.style.animation = "none";
+    try { M.setPointerCapture(e.pointerId); } catch {}
+  }
+  sg.s.push([e.timeStamp, e.clientY]);
+  while (sg.s.length > 2 && e.timeStamp - sg.s[0][0] > 90) sg.s.shift();
+  sg.sp.style.transition = "none";
+  sg.sp.style.transform = `translateY(${Math.max(0, e.clientY - sg.y0)}px)`;
+});
+function sheetEnd(e) {
+  if (!sg || e.pointerId !== sg.id) return;
+  const g = sg; sg = null;
+  if (!g.drag) return;
+  swallow = true; setTimeout(() => (swallow = false), 350);
+  const dy = Math.max(0, e.clientY - g.y0), [t0, y0] = g.s[0], [t1, y1] = g.s.at(-1), v = t1 > t0 ? (y1 - y0) / (t1 - t0) : 0;
+  const go = e.type !== "pointercancel" && (dy > g.sp.offsetHeight / 3 || v > 0.5);
+  const ms = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : go ? 160 : 200;
+  g.sp.style.transition = ms ? `transform ${ms}ms cubic-bezier(.2, .85, .25, 1)` : "none";
+  g.sp.style.transform = go ? "translateY(100%)" : "";
+  if (go) setTimeout(() => g.sp.closest(".fsheet").querySelector(".shade2").click(), ms);
+}
+M.addEventListener("pointerup", sheetEnd);
+M.addEventListener("pointercancel", sheetEnd);
+// the release of a drag is not a tap on whatever lies under the finger
+document.addEventListener("click", (e) => { if (swallow && e.isTrusted) { swallow = false; e.stopPropagation(); e.preventDefault(); } }, true);
+
+// drag a topic by its grip to reorder it within its depth: the row moves as the pointer passes a neighbour's middle,
+// and on release TOPICS takes the new order, which the sidebar and the Digest follow. Caught before the phone's edge swipe.
+let tg = null;
+[D, M].forEach((fr) => {
+  fr.addEventListener("pointerdown", (e) => {
+    const g = e.target.closest(".trow .grip");
+    if (!g || e.button > 0) return;
+    e.stopPropagation(); e.preventDefault();
+    tg = { fr, row: g.closest(".trow"), id: e.pointerId, moved: false };
+    tg.row.classList.add("drag");
+    try { g.setPointerCapture(e.pointerId); } catch {}
+  }, true);
+  fr.addEventListener("pointermove", (e) => {
+    if (!tg || tg.fr !== fr || e.pointerId !== tg.id) return;
+    const row = tg.row, mid = (r) => r.getBoundingClientRect().top + r.offsetHeight / 2;
+    for (let p; (p = row.previousElementSibling) && e.clientY < mid(p);) { row.parentNode.insertBefore(row, p); tg.moved = true; }
+    for (let n; (n = row.nextElementSibling) && e.clientY > mid(n);) { row.parentNode.insertBefore(n, row); tg.moved = true; }
+  }, true);
+  const end = (e) => {
+    if (!tg || tg.fr !== fr || e.pointerId !== tg.id) return;
+    const { row, moved } = tg, list = row.parentNode, dep = list.dataset.order;
+    row.classList.remove("drag"); tg = null;
+    if (!moved) return;
+    swallow = true; setTimeout(() => (swallow = false), 350);
+    const order = [...list.children].map((r) => T[r.dataset.tid]), slots = TOPICS.flatMap((t, i) => (t.depth === dep ? [i] : []));
+    slots.forEach((s, j) => (TOPICS[s] = order[j]));
+    navs.forEach((n) => n.set({}));
+  };
+  fr.addEventListener("pointerup", end, true);
+  fr.addEventListener("pointercancel", end, true);
+});
+</script>
+</body></html>

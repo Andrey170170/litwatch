@@ -1,71 +1,102 @@
-"""API contract without a database: the run-in-progress guard and request validation."""
+"""The API's gate (the token and the read token) and its serving of the built web app."""
 
-import asyncio
-
+import httpx
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from litwatch import api
-from litwatch.config import Settings
+from litwatch.api import app as app_module
+from litwatch.api import create_app
+from litwatch.store import feedback as feedback_store
+from litwatch.store import papers as papers_store
+from litwatch.store import taxonomy as taxonomy_store
+from tests.conftest import FAITH, TREE, paper
+
+TOKEN = "s3cret"
+
+
+READ_TOKEN = "r3ad"
 
 
 @pytest.fixture
-def app(monkeypatch):
-    settings = Settings(openrouter_api_key="x", database_url="postgresql://unused")
-    application = api.create_app(settings)
-
-    async def fake_run(*args, **kwargs):
-        await asyncio.sleep(0.05)
-
-    monkeypatch.setattr(api.ingest, "run", fake_run)
-    monkeypatch.setattr(api.db, "connect", _fake_connect)
-    return application
+async def client(conn):
+    await taxonomy_store.save(conn, TREE)
+    await papers_store.upsert(conn, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
+    # The app opens its own connections; point them at the test schema.
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN, read_token=READ_TOKEN))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
 
 
-async def _fake_connect(dsn):
-    class Conn:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            return False
-
-    return Conn()
+AUTH = {"authorization": f"Bearer {TOKEN}"}
+READ = {"authorization": f"Bearer {READ_TOKEN}"}
 
 
-async def test_second_run_is_rejected_while_first_is_active(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        first = await c.post("/runs", json={"days": 2})
-        assert first.status_code == 202 and first.json()["days"] == 2
-        second = await c.post("/runs", json={"days": 2})
-        assert second.status_code == 409
-        await app.state.runs["task"]
-        third = await c.post("/runs", json={"days": 1, "kind": "backfill"})
-        assert third.status_code == 202
+async def test_the_read_token_only_searches_and_reads_papers(client):
+    found = await client.get("/api/papers", params={"q": "canonical", "limit": 5}, headers=READ)
+    assert found.status_code == 200 and len(found.json()["rows"]) == 3
+    assert (await client.get("/api/papers/2609.1", headers=READ)).json()["id"] == "2609.1"
+    for method, path in [
+        ("GET", "/api/status"),
+        ("GET", "/api/topics"),
+        ("GET", "/api/settings/config"),
+        ("PUT", "/api/library/2609.1"),
+        ("POST", "/api/papers/2609.1/card"),
+        ("PUT", "/api/papers/2609.1/publication"),
+    ]:
+        answer = await client.request(method, path, headers=READ, json={})
+        assert answer.status_code == 403, (method, path)
+    # Not a way in for the web app: no session and no cookie.
+    assert (await client.post("/api/session", json={"token": READ_TOKEN})).status_code == 401
+    client.cookies.set("litwatch_token", READ_TOKEN)
+    assert (await client.get("/api/papers")).status_code == 401
 
 
-async def test_run_request_validation(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        assert (await c.post("/runs", json={"days": 0})).status_code == 422
-        assert (await c.post("/runs", json={"kind": "weird"})).status_code == 422
+async def test_everything_but_the_health_check_needs_the_token(client):
+    assert (await client.get("/healthz")).status_code == 200
+    assert (await client.get("/api/status")).status_code == 401
+    assert (
+        await client.get("/api/status", headers={"authorization": "Bearer no"})
+    ).status_code == 401
+    assert (await client.get("/api/status", headers=AUTH)).status_code == 200
 
 
-async def test_papers_tier_filter_must_be_integers(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        assert (await c.get("/papers", params={"tier": "must_read"})).status_code == 422
+async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn):
+    await papers_store.upsert(conn, [paper("cs/9901001")])
+    url = f"/api/labels/{FAITH.slug}/cs/9901001"
+    assert (await client.put(url, json={"value": "related"}, headers=AUTH)).status_code == 200
+    assert [label.paper_id for label in await feedback_store.labels(conn)] == ["cs/9901001"]
+    assert (await client.delete(url, headers=AUTH)).status_code == 200
+    assert await feedback_store.labels(conn) == []
 
 
-def test_selection_rows_report_validation_errors_per_row():
-    from pydantic import ValidationError
+async def test_a_good_bearer_header_works_beside_a_stale_cookie(client):
+    client.cookies.set("litwatch_token", "old")
+    assert (await client.get("/api/status", headers=AUTH)).status_code == 200
+    # The scheme is checked, not skipped over.
+    wrong_scheme = {"authorization": f"Basic  {TOKEN}"}
+    assert (await client.get("/api/status", headers=wrong_scheme)).status_code == 401
 
-    from litwatch.api import SelectionRow, _brief
-    from litwatch.selection import from_spec
 
-    row = SelectionRow(name="Agents", subject="too short")
-    with pytest.raises(ValidationError) as exc:
-        from_spec(row.model_dump())
-    assert "subject" in _brief(exc.value)
-    ok = from_spec(
-        SelectionRow(name="Agents and tools", subject="s" * 30, keywords="a, b").model_dump()
-    )
-    assert ok.slug == "agents-and-tools" and ok.keywords == ["a", "b"]
+def _web(app) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_the_built_web_app_is_served_with_its_index_for_client_routes(tmp_path, monkeypatch):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<p>shell</p>")
+    (tmp_path / "assets" / "app.js").write_text("console.log(1)")
+    (tmp_path / "manifest.webmanifest").write_text("{}")
+    monkeypatch.setattr(app_module, "WEB", tmp_path)
+    async with _web(create_app("postgresql://unused", TOKEN)) as web:
+        assert (await web.get("/")).text == "<p>shell</p>"
+        assert (await web.get("/papers?lookup=2609.1")).text == "<p>shell</p>"
+        assert (await web.get("/assets/app.js")).text == "console.log(1)"
+        assert (await web.get("/manifest.webmanifest")).text == "{}"
+        # An unknown API path is not the app's: it stays a 404.
+        assert (await web.get("/api/nothing-here", headers=AUTH)).status_code == 404
+
+
+async def test_an_unbuilt_web_app_says_how_to_build_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "WEB", tmp_path)
+    async with _web(create_app("postgresql://unused", TOKEN)) as web:
+        assert "pnpm build" in (await web.get("/")).text

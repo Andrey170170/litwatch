@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#faf7f1"/>
+  <text x="32" y="43" text-anchor="middle" font-family="Charter, Georgia, serif" font-weight="700" font-size="40" fill="#1a1a18">L</text>
+  <rect x="12" y="50" width="40" height="2" fill="#1a1a18"/>
+  <rect x="12" y="54" width="40" height="1" fill="#1a1a18"/>
+</svg>

@@ -1,6 +1,6 @@
 {
   "name": "litwatch-deep",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "description": "Deep processor for litwatch: a Pi agent with one JavaScript REPL tool over the paper",
   "type": "module",

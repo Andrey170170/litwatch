@@ -1,0 +1,61 @@
+/* Round 6, interactions: each option is a data attribute on the frame (react, ack, hover, motion, sheet).
+   The first value of each is the behaviour of the rounds so far; press feedback is the same in every option. */
+
+/* the glow's two values are registered so a hover can ease them instead of jumping */
+@property --g1 { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
+@property --g2 { syntax: "<length>"; inherits: false; initial-value: 0px; }
+
+/* ── press: every tappable row and control darkens while held, buttons sink a pixel ── */
+.frame :is(.prow, .drow, .br, .tbl .tr, .tcard2, .dblock .hd, .side .it, .drawer .it):active { background-color: var(--hover); }
+.frame :is(.btn, .hbtn, .agrid a, .th, .lb, .why a, .fchip2, .pfoot a, .fsheet .done):active { transform: translateY(1px); background-color: var(--hover); }
+
+/* ── reasons offered after the thumb: the row reads as an optional follow-up ── */
+.why .whyq { align-self: center; font-size: 12px; color: var(--fg3); margin-right: 2px; }
+.why.big .whyq { font-size: 12.5px; width: 100%; }
+/* the phone's strip of reasons, just above the bottom bar */
+.rstrip { flex: none; padding: 10px 12px 12px; background: var(--surface); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.rstrip.enter { animation: lw-up .2s cubic-bezier(.2, .85, .25, 1); }
+.rstrip .rsh { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--fg2); }
+.rstrip .rsh .on { border-color: var(--acc, var(--fg)); color: var(--fg); }
+.rstrip .why { border: 0; background: none; padding: 0; }
+
+/* ── the acknowledgement: a short toast in the note style, under the main column (above the phone's bottom bar).
+   Only effects the page does not show are acknowledged ── */
+.frame .toast { background: var(--surface); color: var(--fg); border: 1px solid var(--acc, var(--fg)); padding: 7px 12px; font-size: 12.5px; max-width: min(380px, 86%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .3); animation: lw-ack 2.6s ease-out forwards; }
+.frame.desk .toast { left: calc(50% + 118px); }
+.frame[data-dir="nc"] .toast { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+@keyframes lw-ack { 0% { opacity: 0; translate: 0 4px; } 6%, 82% { opacity: 1; translate: 0 0; } 100% { opacity: 0; } }
+
+/* ── desktop hover on rows: a background (as now), the glow brightening with a wider stripe, or a yellow frame ── */
+.frame.desk[data-hover="glow"] :is(.prow, .drow:not(.quiet), .br, .tbl .tr) { transition: --g1 .16s ease-out, --g2 .16s ease-out, box-shadow .16s ease-out; }
+.frame.desk[data-hover="glow"] :is(.prow, .drow:not(.quiet), .br, .tbl .tr):hover { background-color: transparent; --g1: calc(var(--gs) * var(--gk) * 2); --g2: calc(var(--gl) * 1.5); }
+.frame.desk[data-hover="glow"] :is(.prow, .drow):hover::before { width: 6px; }
+.frame.desk[data-hover="glow"] :is(.br, .tbl .tr):hover { box-shadow: inset 6px 0 0 var(--rc); }
+.frame.desk[data-hover="glow"] .drow.quiet:hover { background-color: var(--hover); }
+.frame.desk[data-hover="frame"] :is(.prow, .drow, .br, .tbl .tr):hover {
+  background-color: transparent;
+  background-image: linear-gradient(225deg, var(--acc) 0 6px, transparent 6px),
+    linear-gradient(90deg, color-mix(in srgb, var(--rc) var(--g1, 0%), transparent), transparent min(60%, var(--g2, 0px)));
+}
+.frame.desk[data-hover="frame"] :is(.prow, .drow):hover { box-shadow: inset 0 0 0 1px var(--acc); }
+.frame.desk[data-hover="frame"] :is(.br, .tbl .tr):hover { box-shadow: inset 4px 0 0 var(--rc), inset 0 0 0 1px var(--acc); }
+
+/* ── page motion: none on desktop and the phone, subtle (the phone as now, the desktop page slides in a little), or
+   Night City: subtle, with the arriving page's title flickering in the wordmark's glitch ── */
+.frame[data-motion="none"] :is(.screen.in-go, .screen.in-back, .in-older, .in-newer, .over.enter .shade, .over.enter .sheet, .fsheet.enter .shade2, .fsheet.enter .sheetp, .rstrip.enter) { animation: none; }
+.frame:is([data-motion="subtle"], [data-motion="nc"]) .main.nav-go > .inner { animation: lw-in-go .22s cubic-bezier(.2, .85, .25, 1); }
+.frame:is([data-motion="subtle"], [data-motion="nc"]) .main.nav-back > .inner { animation: lw-in-back .22s cubic-bezier(.2, .85, .25, 1); }
+.frame:is([data-motion="subtle"], [data-motion="nc"]) .main.nav-top > .inner { animation: lw-fade .16s ease-out; }
+.frame[data-motion="nc"] :is(.main:not(.nav-keep), .screen.in-go, .screen.in-back) :is(.h1, .pbar .ttl, .pbar .ttl2) { animation: nc-glitch .4s steps(3) .08s 1; }
+
+/* ── phone sheets: a handle shows they can be dragged down to close ── */
+.frame[data-sheet="drag"] .fsheet .sheetp { touch-action: none; }
+.frame[data-sheet="drag"] .fsheet .sheetp :is(.cpk, [style*="overflow"]) { touch-action: pan-y; }
+.frame[data-sheet="drag"] .fsheet .sheetp::before { content: ""; align-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--fg3); margin: -6px 0 -2px; flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .frame :is(.main, .main > .inner, .screen, .over .sheet, .fsheet .sheetp, .rstrip, .h1, .pbar .ttl, .pbar .ttl2) { animation: none !important; }
+  .frame .toast { animation: lw-ack-still 2.6s step-end forwards; }
+}
+@keyframes lw-ack-still { to { opacity: 0; } }

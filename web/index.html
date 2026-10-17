@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#e9ebe7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#07090d" media="(prefers-color-scheme: dark)" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <title>litwatch</title>
+    <script>
+      // the device's appearance, on the page and the browser's bar before the first paint (lib/theme.ts keeps it after)
+      try {
+        var a = localStorage.getItem("litwatch.appearance");
+        if (a === "light" || a === "dark") {
+          document.documentElement.dataset.theme = a;
+          var bars = document.querySelectorAll('meta[name="theme-color"][media]');
+          var bar = bars[a === "dark" ? 1 : 0].content;
+          for (var i = 0; i < bars.length; i++) bars[i].content = bar;
+        }
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,185 @@
+/* Look directions for round 1b. Each one restyles wire.css's fragments inside a frame with data-dir set;
+   "neat" has no rules here, it is wire.css as is. */
+@import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&family=UnifrakturMaguntia&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Michroma&display=swap");
+
+/* ───────────── B · Night City: Cyberpunk 2077's interface ───────────── */
+.frame[data-dir="nc"] {
+  --bg: #e9ebe7; --surface: #f6f7f3; --fg: #0c0f13; --fg2: #47515b; --fg3: #7b858e;
+  --line: #cdd2d1; --line2: #dfe3e1; --hover: #f7f1b8; --sel: #f3e600; --sel-fg: #0c0f13;
+  --acc: #f3e600; --sig: #d90f2d; --cy: #00899b; --ok: #00899b;
+  --r1: #7c858d; --r2: #179d48; --r3: #1d6fe8; --r4: #9b3ff2; --r5: #ef8700;
+  --cut: 9px;
+  font-family: "Chakra Petch", sans-serif;
+}
+html[data-theme="dark"] .frame[data-dir="nc"] {
+  --bg: #07090d; --surface: #0c1117; --fg: #dde6ec; --fg2: #8a9eac; --fg3: #546676;
+  --line: #1a2833; --line2: #121c25; --hover: #0e2027; --sel: rgba(243, 230, 0, .1); --sel-fg: #f3e600;
+  --sig: #ff3b4e; --cy: #2de2e6; --ok: #2de2e6;
+  --r1: #8a96a0; --r2: #36cf78; --r3: #3d8dff; --r4: #b45cff; --r5: #ff9a1f;
+}
+.frame[data-dir="nc"] .wm { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .2em; font-size: 18px; }
+html[data-theme="dark"] .frame[data-dir="nc"] .wm { color: var(--acc); }
+.frame[data-dir="nc"] .wm .st { color: var(--cy); }
+.frame[data-dir="nc"] .wm .st::before { border-radius: 0; }
+.frame[data-dir="nc"] .wm:hover { animation: nc-glitch .45s steps(3) 1; }
+@keyframes nc-glitch {
+  0% { text-shadow: 2px 0 var(--sig), -2px 0 var(--cy); transform: translateX(1px); }
+  35% { text-shadow: -3px 0 var(--sig), 2px 0 var(--cy); transform: translateX(-1px) skewX(-6deg); }
+  70% { text-shadow: 1px 0 var(--sig), -1px 0 var(--cy); transform: none; }
+  100% { text-shadow: none; }
+}
+.frame[data-dir="nc"] .status { font: 400 11px "JetBrains Mono", monospace; text-transform: uppercase; color: var(--cy); letter-spacing: .03em; }
+.frame[data-dir="nc"] .status::before, .frame[data-dir="nc"] .dot { border-radius: 0; background: var(--cy); }
+html[data-theme="dark"] .frame[data-dir="nc"] .status::before { box-shadow: 0 0 6px var(--cy); }
+.frame[data-dir="nc"] .sec, .frame[data-dir="nc"] .cap { font-family: Rajdhani, sans-serif; font-weight: 700; letter-spacing: .22em; color: var(--sig); }
+.frame[data-dir="nc"] .sec::before, .frame[data-dir="nc"] .cap::before { content: "// "; }
+.frame[data-dir="nc"] .side .it, .frame[data-dir="nc"] .drawer .it { border-radius: 0; font-family: Rajdhani, sans-serif; font-weight: 600; font-size: 15px; }
+.frame[data-dir="nc"] .side .it[data-tab], .frame[data-dir="nc"] .drawer .it[data-tab] { text-transform: uppercase; letter-spacing: .1em; }
+.frame[data-dir="nc"] .side .it.on, .frame[data-dir="nc"] .drawer .it.on { background: var(--sel); color: var(--sel-fg); box-shadow: inset 3px 0 0 var(--fg); }
+html[data-theme="dark"] .frame[data-dir="nc"] .side .it.on, html[data-theme="dark"] .frame[data-dir="nc"] .drawer .it.on { box-shadow: inset 3px 0 0 var(--acc); }
+.frame[data-dir="nc"] .side .it .k { font-family: "JetBrains Mono", monospace; }
+.frame[data-dir="nc"] .side .it .k.hot { background: var(--sig); color: #fff; border-radius: 0; }
+.frame[data-dir="nc"] .list, .frame[data-dir="nc"] .dblock, .frame[data-dir="nc"] .btn {
+  border-radius: 0; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+}
+.frame[data-dir="nc"] .dblock .list { clip-path: none; }
+.frame[data-dir="nc"] .dblock .hd .n { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; font-size: 15.5px; }
+.frame[data-dir="nc"] .dblock .hd .c, .frame[data-dir="nc"] .drow .c { font-family: "JetBrains Mono", monospace; color: var(--sig); text-transform: uppercase; font-size: 11.5px; }
+.frame[data-dir="nc"] .prow:hover::before, .frame[data-dir="nc"] .drow:hover::before { box-shadow: 0 0 10px var(--rc); }
+.frame[data-dir="nc"] .prow .d, .frame[data-dir="nc"] .mono { font-family: "JetBrains Mono", monospace; }
+.frame[data-dir="nc"] .badge { border-radius: 0; font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 10.5px; letter-spacing: .02em; clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%); }
+.frame[data-dir="nc"] .btn { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; padding: 0 14px; }
+.frame[data-dir="nc"] .btn:hover { background: var(--acc); color: #0c0f13; border-color: var(--acc); }
+.frame[data-dir="nc"] .fchip, .frame[data-dir="nc"] .search .in { border-radius: 0; }
+.frame[data-dir="nc"] .h1 { font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 25px; line-height: 1.12; letter-spacing: .01em; }
+.frame[data-dir="nc"] .daystrip .day, .frame[data-dir="nc"] .dayh { font-family: Rajdhani, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
+.frame[data-dir="nc"] .pbar { box-shadow: inset 0 -2px 0 var(--acc); }
+html[data-theme="dark"] .frame[data-dir="nc"] .drawer .panel { box-shadow: inset -1px 0 0 var(--acc); }
+
+/* ───────────── C · Newsprint: the paper idea ───────────── */
+.frame[data-dir="news"] {
+  --bg: #f1ebdd; --surface: #f6f1e5; --fg: #1c1a16; --fg2: #57503f; --fg3: #8b826f;
+  --line: #cbc0a8; --line2: #ddd4bf; --hover: #e9e1cd; --sel: #e2d8c0; --rule: #1c1a16; --ok: #4c7f45;
+  --r1: #9b9484; --r2: #4c7f45; --r3: #2d5f94; --r4: #6f4a96; --r5: #b8661c;
+  font-family: Newsreader, Georgia, serif; font-size: 15px;
+}
+html[data-theme="dark"] .frame[data-dir="news"] {
+  --bg: #15130e; --surface: #1b1812; --fg: #ebe3d1; --fg2: #b1a790; --fg3: #7d7461;
+  --line: #3b3529; --line2: #29251c; --hover: #221e16; --sel: #2d281e; --rule: #d9d0bc; --ok: #7fae76;
+  --r1: #8f887a; --r2: #7fae76; --r3: #6f9fd4; --r4: #a687cc; --r5: #dc944c;
+}
+.frame[data-dir="news"] .main, .frame[data-dir="news"] .screen .scroll {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .45 0 0 0 0 .35 0 0 0 .28 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-blend-mode: multiply;
+}
+.frame[data-dir="news"] .side { background: var(--bg); border-right: 3px double var(--line); }
+.frame[data-dir="news"] .wm { font-family: UnifrakturMaguntia, serif; font-weight: 400; font-size: 27px; letter-spacing: 0; text-transform: capitalize; }
+.frame[data-dir="news"] .wm::before { content: "The\00a0"; }
+.frame[data-dir="news"] .side .wm { border-bottom: 3px double var(--rule); padding-bottom: 4px; margin-bottom: 6px; }
+.frame[data-dir="news"] .pbar .wm { font-size: 23px; }
+.frame[data-dir="news"] .status { font-style: italic; font-size: 13px; }
+.frame[data-dir="news"] .sec, .frame[data-dir="news"] .cap, .frame[data-dir="news"] .dayh, .frame[data-dir="news"] .daystrip .day {
+  font-family: Newsreader, serif; font-variant: small-caps; text-transform: lowercase; letter-spacing: .1em; font-weight: 600;
+}
+.frame[data-dir="news"] .sec { font-size: 14px; color: var(--fg); border-top: 1px solid var(--rule); margin-top: 12px; padding-top: 6px; }
+.frame[data-dir="news"] .cap { font-size: 15px; color: var(--fg); border-bottom: 1px solid var(--rule); padding-bottom: 2px; }
+.frame[data-dir="news"] .side .it, .frame[data-dir="news"] .drawer .it { border-radius: 0; font-size: 15px; font-weight: 500; }
+.frame[data-dir="news"] .side .it.on, .frame[data-dir="news"] .drawer .it.on { background: var(--sel); font-weight: 700; }
+.frame[data-dir="news"] .side .it .k { font-style: italic; font-size: 13px; }
+.frame[data-dir="news"] .side .it .k.hot { background: none; color: var(--fg); font-weight: 700; }
+.frame[data-dir="news"] .list { background: transparent; border: 0; border-top: 2px solid var(--rule); border-bottom: 1px solid var(--rule); border-radius: 0; }
+.frame[data-dir="news"] .prow { border-top: 1px solid var(--line); padding: 8px 4px 8px 14px; }
+.frame[data-dir="news"] .prow::before, .frame[data-dir="news"] .drow::before { width: 3px; }
+.frame[data-dir="news"] .prow .t { font-weight: 600; font-size: 15.5px; line-height: 1.3; }
+.frame[data-dir="news"] .prow .g { font-size: 14.5px; }
+.frame[data-dir="news"] .prow .d, .frame[data-dir="news"] .dblock .hd .c, .frame[data-dir="news"] .drow .c { font-style: italic; }
+.frame[data-dir="news"] .dblock { background: transparent; border: 0; border-radius: 0; margin-bottom: 26px; }
+.frame[data-dir="news"] .dblock .hd { padding: 0 0 4px; }
+.frame[data-dir="news"] .dblock .hd .n { font-size: 22px; font-weight: 700; letter-spacing: -.012em; }
+.frame[data-dir="news"] .dblock .hd .c { font-size: 14px; }
+.frame[data-dir="news"] .dblock .p { padding: 0 0 10px; font-size: 16px; line-height: 1.5; }
+.frame[data-dir="news"] .daystrip + .dblock .p::first-letter { float: left; font-size: 3.3em; line-height: .82; padding: 5px 6px 0 0; font-weight: 700; }
+.frame[data-dir="news"] .dblock .list { border-top: 1px solid var(--rule); border-bottom: 0; }
+.frame[data-dir="news"] .dblock .more { font-style: italic; padding: 6px 0; font-size: 14px; }
+.frame[data-dir="news"] .dblock.quiet .hd .n { font-size: 17px; }
+.frame[data-dir="news"] .daystrip { border-bottom: 3px double var(--rule); padding-bottom: 6px; margin-bottom: 18px; }
+.frame[data-dir="news"] .daystrip .day { font-size: 17px; }
+.frame[data-dir="news"] .badge { border-radius: 50%; font-family: Newsreader, serif; font-weight: 700; font-size: 9.5px; }
+.frame[data-dir="news"] .badge.focus { background: color-mix(in srgb, var(--tc) 78%, var(--fg)); }
+.frame[data-dir="news"] .h1 { font-weight: 700; font-size: 29px; line-height: 1.12; letter-spacing: -.015em; }
+.frame[data-dir="news"] .prose { font-size: 17px; line-height: 1.6; }
+.frame[data-dir="news"] .btn, .frame[data-dir="news"] .fchip, .frame[data-dir="news"] .search .in { border-radius: 0; background: transparent; border-color: var(--rule); font-family: inherit; font-size: 14px; }
+.frame[data-dir="news"] .btn:hover { background: var(--fg); color: var(--bg); }
+.frame[data-dir="news"] .mono { font-family: "IBM Plex Mono", monospace; }
+
+/* ───────────── D · Mission control: retro-futurism in print ───────────── */
+.frame[data-dir="mc"] {
+  --bg: #e5e3dc; --surface: #f0eee8; --fg: #1a1d21; --fg2: #545a61; --fg3: #878c90;
+  --line: #c4c1b8; --line2: #d8d5cd; --hover: #e8e2d4; --sel: #1a1d21; --sel-fg: #f0eee8;
+  --acc: #e5531a; --grid: rgba(26, 29, 33, .055); --tick: #1a1d21;
+  --r1: #8d9196; --r2: #3f8a4a; --r3: #2b65b3; --r4: #7b4bb5; --r5: #d48a00;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+html[data-theme="dark"] .frame[data-dir="mc"] {
+  --bg: #100e0a; --surface: #17140f; --fg: #f1e3c4; --fg2: #b39c74; --fg3: #7a6a4f;
+  --line: #3a3123; --line2: #262017; --hover: #211b12; --sel: #ffb000; --sel-fg: #100e0a;
+  --acc: #ffb000; --grid: rgba(255, 176, 0, .045); --tick: #b39c74; --ok: #ffb000;
+  --r1: #8d8574; --r2: #6fbf6a; --r3: #5f9be0; --r4: #b08ae0; --r5: #ff7d2e;
+}
+.frame[data-dir="mc"] .main, .frame[data-dir="mc"] .screen .scroll {
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.frame[data-dir="mc"] .wm { font-family: Michroma, sans-serif; font-weight: 400; font-size: 14px; letter-spacing: .16em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+.frame[data-dir="mc"] .wm::before { content: ""; width: 9px; height: 18px; background: var(--acc); flex: none; }
+.frame[data-dir="mc"] .wm::after { content: "MK·1"; font: 500 10px "IBM Plex Mono", monospace; color: var(--fg3); letter-spacing: .06em; }
+html[data-theme="dark"] .frame[data-dir="mc"] .wm { text-shadow: 0 0 8px rgba(255, 176, 0, .35); }
+.frame[data-dir="mc"] .status { font: 500 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
+.frame[data-dir="mc"] .status::before, .frame[data-dir="mc"] .dot { border-radius: 0; }
+.frame[data-dir="mc"] .sec, .frame[data-dir="mc"] .cap { font-family: Michroma, sans-serif; font-weight: 400; font-size: 9.5px; letter-spacing: .18em; color: var(--fg2); }
+.frame[data-dir="mc"] .sec { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.frame[data-dir="mc"] .cap::before { content: "▸ "; color: var(--acc); }
+.frame[data-dir="mc"] .side { counter-reset: tab; }
+.frame[data-dir="mc"] .side .it, .frame[data-dir="mc"] .drawer .it { border-radius: 2px; }
+.frame[data-dir="mc"] .side .it[data-tab], .frame[data-dir="mc"] .drawer .it[data-tab] { counter-increment: tab; }
+.frame[data-dir="mc"] .side .it[data-tab]::before, .frame[data-dir="mc"] .drawer .it[data-tab]::before { content: counter(tab, decimal-leading-zero); font: 500 11px "IBM Plex Mono", monospace; color: var(--fg3); width: 20px; }
+.frame[data-dir="mc"] .drawer .panel { counter-reset: tab; }
+.frame[data-dir="mc"] .side .it.on, .frame[data-dir="mc"] .drawer .it.on, .frame[data-dir="mc"] .it.on::before, .frame[data-dir="mc"] .it.on .k { background: var(--sel); color: var(--sel-fg); }
+.frame[data-dir="mc"] .side .it .k { font-family: "IBM Plex Mono", monospace; }
+.frame[data-dir="mc"] .side .it .k.hot { background: var(--acc); color: #fff; border-radius: 2px; }
+.frame[data-dir="mc"] .list, .frame[data-dir="mc"] .dblock {
+  border-radius: 0; border-color: var(--line2); background-repeat: no-repeat;
+  background-image:
+    linear-gradient(var(--tick) 0 0), linear-gradient(var(--tick) 0 0), linear-gradient(var(--tick) 0 0), linear-gradient(var(--tick) 0 0),
+    linear-gradient(var(--tick) 0 0), linear-gradient(var(--tick) 0 0), linear-gradient(var(--tick) 0 0), linear-gradient(var(--tick) 0 0);
+  background-size: 9px 1px, 1px 9px, 9px 1px, 1px 9px, 9px 1px, 1px 9px, 9px 1px, 1px 9px;
+  background-position: 0 0, 0 0, 100% 0, 100% 0, 0 100%, 0 100%, 100% 100%, 100% 100%;
+  background-color: var(--surface);
+}
+.frame[data-dir="mc"] .dblock .list { background-image: none; border-color: var(--line2); }
+.frame[data-dir="mc"] .dblock .hd .n { font-family: Michroma, sans-serif; font-weight: 400; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+.frame[data-dir="mc"] .dblock .hd .c, .frame[data-dir="mc"] .prow .d, .frame[data-dir="mc"] .drow .c, .frame[data-dir="mc"] .mono {
+  font-family: "IBM Plex Mono", monospace; text-transform: uppercase; font-size: 11px; letter-spacing: .02em;
+}
+.frame[data-dir="mc"] .badge { border-radius: 2px; font-family: "IBM Plex Mono", monospace; font-weight: 500; }
+.frame[data-dir="mc"] .h1 { font-weight: 600; font-size: 22px; letter-spacing: -.01em; }
+.frame[data-dir="mc"] .btn { border-radius: 2px; font-family: "IBM Plex Mono", monospace; text-transform: uppercase; font-size: 11.5px; letter-spacing: .04em; }
+.frame[data-dir="mc"] .btn:hover { background: var(--fg); color: var(--surface); }
+.frame[data-dir="mc"] .fchip, .frame[data-dir="mc"] .search .in { border-radius: 2px; }
+.frame[data-dir="mc"] .daystrip .day, .frame[data-dir="mc"] .dayh { font-family: Michroma, sans-serif; font-weight: 400; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.frame[data-dir="mc"] .pbar { box-shadow: inset 0 -2px 0 var(--acc); }
+.frame[data-dir="nc"] .wm .st.bad { color: var(--sig); }
+.frame[data-dir="nc"] .wm .st.bad::before { background: var(--sig); }
+.frame[data-dir="nc"] .wm .st.run, .frame[data-dir="nc"] .pbar > .st.run { color: var(--acc); }
+.frame[data-dir="nc"] .wm .st.run::before, .frame[data-dir="nc"] .pbar > .st.run::before { background: var(--acc); }
+.frame[data-dir="nc"] .pbar > .st.bad { color: var(--sig); }
+.frame[data-dir="nc"] .pbar > .st.bad::before { background: var(--sig); }
+.frame[data-dir="nc"] .pbar > .st::before { border-radius: 0; }
+.frame[data-dir="nc"] :is(.wm, .pbar) > .st.warn { color: var(--warn); }
+.frame[data-dir="nc"] :is(.wm, .pbar) > .st.warn::before { background: var(--warn); animation: none; }
+.frame[data-dir="nc"] .mday, .frame[data-dir="nc"] .mweek { clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%); }
+.frame[data-dir="nc"] .month .mh { font-family: Rajdhani, sans-serif; font-weight: 700; letter-spacing: .14em; }
+/* the Digest views under Digest in the drawer: the tab stays filled, the view is marked by colour only */
+html .frame[data-dir="nc"] .drawer .it.subit { font-family: "Chakra Petch", sans-serif; font-weight: 500; font-size: 14px; }
+html .frame[data-dir="nc"] .drawer .it.subit.on { background: none; box-shadow: none; color: var(--acc); }
+html .frame[data-dir="nc"] .drawer .it.subit.on::before { content: "› "; margin-left: -12px; }

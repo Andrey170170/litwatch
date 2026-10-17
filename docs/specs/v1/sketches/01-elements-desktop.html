@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>litwatch v1 · element sheet (desktop)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ---------- sheet chrome (outside the mockups; inherits the thread's theme) ---------- */
+html, body { margin: 0; background: none; }
+body { font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; font-size: 14px; line-height: 1.5; color: var(--foreground, inherit); }
+main { max-width: 728px; width: 100%; }
+h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; letter-spacing: -.01em; }
+h2 { font-size: 15px; font-weight: 600; margin: 32px 0 6px; letter-spacing: -.01em; }
+h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; opacity: .65; margin: 18px 0 6px; }
+p.note { margin: 0 0 10px; opacity: .8; font-size: 13px; max-width: 64ch; }
+p.note b { font-weight: 600; }
+.sheet-sw { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 10px 0 0; font-size: 12px; opacity: .9; }
+.sheet-sw button { font: inherit; font-weight: 500; padding: 3px 10px; border-radius: 6px; border: 1px solid currentColor; background: none; color: inherit; cursor: pointer; opacity: .6; }
+.sheet-sw button[aria-pressed="true"] { opacity: 1; }
+.pair { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.pair + .pair { margin-top: 12px; }
+.pal-label { font-size: 12px; font-weight: 600; opacity: .7; width: 100%; margin: 6px 0 -4px; }
+
+/* ---------- a mockup panel: its own background, padding, radius; carries one theme ---------- */
+.panel { box-sizing: border-box; padding: 16px; border-radius: 12px; background: var(--bg); color: var(--fg); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-feature-settings: "cv11", "ss01"; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+body.phone .panel { width: 390px; max-width: 100%; }
+body.desktop .panel { width: 100%; }
+body.desktop .phone-frame, body.desktop .dim { width: 390px; }
+.panel.lt { color-scheme: light;
+  --bg:#f4f5f7; --surface:#ffffff; --fg:#1a1d21; --fg2:#5b6570; --fg3:#8c959e; --line:#e2e5e9; --line2:#eceef1; --hover:#eef0f3; --ink:#111417; --ink-fg:#ffffff;
+  --ok:#1a9c4b; --warn:#d2860b; --bad:#d93025; --wait:#8c959e; --amber-bg:#fff6e0; }
+.panel.dk { color-scheme: dark;
+  --bg:#0f1114; --surface:#171a1f; --fg:#e4e7eb; --fg2:#9aa4ad; --fg3:#6a747e; --line:#272c33; --line2:#1f242a; --hover:#1e2329; --ink:#e4e7eb; --ink-fg:#0f1114;
+  --ok:#3fbf62; --warn:#e8b23d; --bad:#f0574a; --wait:#6a747e; --amber-bg:#2a2410; }
+
+/* rarity palettes. A classic loot, B calm reading, C sparse (common has no stripe). */
+body[data-pal="a"] .panel.lt, .panel.lt.pal-a { --r1:#8b9097; --r2:#1f9d4b; --r3:#1f6fe0; --r4:#8a4ce6; --r5:#e0760e; --r1s:1; }
+body[data-pal="a"] .panel.dk, .panel.dk.pal-a { --r1:#7f8891; --r2:#3fb950; --r3:#4d8ff5; --r4:#a371f7; --r5:#f0883e; --r1s:1; }
+body[data-pal="b"] .panel.lt, .panel.lt.pal-b { --r1:#a1a8b0; --r2:#2a9a78; --r3:#3b7dd8; --r4:#7c63c9; --r5:#c8921c; --r1s:1; }
+body[data-pal="b"] .panel.dk, .panel.dk.pal-b { --r1:#6f7983; --r2:#3fb39a; --r3:#5b9bf0; --r4:#9a86e0; --r5:#e3b341; --r1s:1; }
+body[data-pal="c"] .panel.lt, .panel.lt.pal-c { --r1:transparent; --r2:#aeb4bb; --r3:#2f7ad9; --r4:#7c5ce0; --r5:#d4a017; --r1s:0; }
+body[data-pal="c"] .panel.dk, .panel.dk.pal-c { --r1:transparent; --r2:#4b5563; --r3:#5b9bf0; --r4:#a78bfa; --r5:#f2c14e; --r1s:0; }
+
+/* topic colours (per followed topic; the hue is the topic's, the box style is its depth) */
+.panel { --t-cotf:#c026d3; --t-cotm:#e11d48; --t-circ:#0891b2; --t-interp:#4f46e5; --t-align:#ea580c; --t-lm:#0284c7; --t-reason:#65a30d; --t-agents:#ca8a04; --t-eff:#0d9488; }
+.panel.dk { --t-cotf:#e879f9; --t-cotm:#fb7185; --t-circ:#22d3ee; --t-interp:#818cf8; --t-align:#fb923c; --t-lm:#38bdf8; --t-reason:#a3e635; --t-agents:#facc15; --t-eff:#2dd4bf; }
+[data-t="cotf"] { --tc: var(--t-cotf); } [data-t="cotm"] { --tc: var(--t-cotm); } [data-t="circ"] { --tc: var(--t-circ); }
+[data-t="interp"] { --tc: var(--t-interp); } [data-t="align"] { --tc: var(--t-align); } [data-t="lm"] { --tc: var(--t-lm); }
+[data-t="reason"] { --tc: var(--t-reason); } [data-t="agents"] { --tc: var(--t-agents); } [data-t="eff"] { --tc: var(--t-eff); }
+[data-r="1"] { --rc: var(--r1); } [data-r="2"] { --rc: var(--r2); } [data-r="3"] { --rc: var(--r3); } [data-r="4"] { --rc: var(--r4); } [data-r="5"] { --rc: var(--r5); }
+
+/* ---------- primitives ---------- */
+.cap { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--fg2); margin: 0 0 6px; }
+.cap small { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--fg3); margin-left: 6px; }
+.list { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.list + .cap, .block + .cap { margin-top: 14px; }
+.mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+a, .lnk { color: inherit; text-decoration: none; }
+.muted { color: var(--fg2); } .faint { color: var(--fg3); }
+
+/* badge: one icon + one colour per topic; depth is the box style: Focus solid, Area tinted, Field outlined */
+.badge { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; border-radius: 5px; color: var(--tc); background: color-mix(in srgb, var(--tc) 16%, transparent); vertical-align: middle; }
+.badge svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.badge.focus { background: var(--tc); color: #fff; }
+.panel.dk .badge.focus { color: #0f1114; }
+.badge.field { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--tc) 70%, transparent); }
+.badge.lg { width: 28px; height: 28px; border-radius: 8px; } .badge.lg svg { width: 18px; height: 18px; stroke-width: 2; }
+body.phone .badge { width: 20px; height: 20px; } body.phone .badge svg { width: 13px; height: 13px; }
+.badges { display: inline-flex; gap: 4px; align-items: center; flex: none; }
+.tname { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+
+/* rank glyph: the non-colour backup for rarity. 4 bars; filled = level − 1 */
+.rank { display: inline-flex; align-items: flex-end; gap: 1.5px; width: 13px; height: 11px; flex: none; }
+.rank i { display: block; width: 2px; border-radius: 1px; background: var(--line); }
+.rank i:nth-child(1){height:4px} .rank i:nth-child(2){height:6px} .rank i:nth-child(3){height:8.5px} .rank i:nth-child(4){height:11px}
+[data-r="2"] .rank i:nth-child(-n+1), [data-r="3"] .rank i:nth-child(-n+2), [data-r="4"] .rank i:nth-child(-n+3), [data-r="5"] .rank i:nth-child(-n+4) { background: var(--rc); }
+[data-r="1"] .rank i { opacity: calc(.5 + .5 * var(--r1s, 1)); }
+[data-r="0"] .rank { visibility: hidden; }
+
+/* paper row: stripe | rank | title (+gist +meta) | badges | saved. Same slots in every list. */
+.row { position: relative; display: grid; grid-template-columns: 14px 1fr auto 18px; column-gap: 8px; align-items: start; padding: 7px 10px 7px 12px; border-top: 1px solid var(--line2); color: var(--fg); text-decoration: none; }
+.row:first-child { border-top: 0; }
+.row:hover { background: var(--hover); }
+.row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rc); }
+.row[data-r="0"]::before { background: repeating-linear-gradient(to bottom, var(--line) 0 3px, transparent 3px 6px); }
+.row[data-r="5"] { background: color-mix(in srgb, var(--r5) 7%, var(--surface)); }
+.row[data-r="5"]:hover { background: color-mix(in srgb, var(--r5) 12%, var(--surface)); }
+.row .rank { margin-top: 4px; }
+.row .t { font-size: 13.5px; font-weight: 500; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.phone .row .t { font-size: 15px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.row.l1 .t { white-space: normal; display: block; }
+.row.l1 .g, .row.l1 .m { display: block; }
+.row.l1 .m { display: flex; }
+.row .g { font-size: 13px; line-height: 1.45; color: var(--fg2); margin-top: 2px; }
+body.phone .row .g { font-size: 14px; }
+.row .m { font-size: 12px; color: var(--fg3); margin-top: 3px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.row .badges { margin-top: 1px; }
+.row .sv { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg); }
+.row .sv svg { width: 13px; height: 13px; }
+.row[data-r="0"] .t { color: var(--fg2); font-weight: 450; }
+.row.nobadge { grid-template-columns: 14px 1fr 18px; }
+.row.pick .t::before { content: "Pick"; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg2); margin-right: 8px; vertical-align: 1px; }
+.row.struck .t { text-decoration: line-through; color: var(--fg3); }
+
+/* facet chips: facts, quiet */
+.chip { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--fg2); font-size: 11px; font-weight: 500; letter-spacing: .01em; white-space: nowrap; }
+.chip.ok { border-color: color-mix(in srgb, var(--ok) 40%, transparent); color: var(--ok); }
+
+/* rarity pill (paper page) */
+.rpill { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px 0 6px; border-radius: 5px; background: color-mix(in srgb, var(--rc) 14%, transparent); color: var(--rc); font-size: 12px; font-weight: 600; }
+.rpill .rank { height: 10px; }
+.gpill { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px 0 2px; border-radius: 5px; font-size: 12px; font-weight: 500; color: var(--fg2); }
+
+/* digest rows: stripe (best colour) | badge | topic | count */
+.drow { position: relative; display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; align-items: center; padding: 8px 10px 8px 14px; border-top: 1px solid var(--line2); }
+.drow:first-child { border-top: 0; }
+.drow::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rc); }
+.drow .n { font-size: 13.5px; font-weight: 500; }
+.drow .c { font-size: 12.5px; color: var(--fg2); white-space: nowrap; }
+.drow .c b { font-weight: 600; color: var(--rc); }
+.drow.quiet .c { color: var(--fg3); }
+.drow.week .n small { font-weight: 500; color: var(--fg3); margin-left: 6px; font-size: 12px; }
+.drow.week .n small::before { content: "▣"; margin-right: 4px; font-size: 10px; }
+.dayh { display: flex; align-items: baseline; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--fg2); padding: 14px 0 6px; }
+.dayh:first-child { padding-top: 0; }
+.dayh small { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--fg3); }
+.dayline { font-size: 13px; color: var(--fg3); padding: 4px 0 0; }
+body.phone .drow .n { font-size: 14px; } body.phone .drow .c { font-size: 12.5px; }
+body.phone .drow.week .n small { display: block; margin: 1px 0 0; }
+body.phone .desk-only { display: none; }
+
+/* digest gist block */
+.dg { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.dg .hd { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px; }
+.dg .hd .n { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.dg .hd .s { font-size: 12px; color: var(--fg3); margin-left: auto; white-space: nowrap; }
+.dg .p { padding: 0 12px 10px; font-size: 14px; line-height: 1.55; color: var(--fg); margin: 0; }
+body.phone .dg .p { font-size: 15px; }
+.dg .list { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.dg .more { display: block; padding: 8px 12px 10px 26px; font-size: 12.5px; font-weight: 500; color: var(--fg2); border-top: 1px solid var(--line2); }
+
+/* paper page pieces */
+.pp { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.pp h1.t { font-size: 19px; font-weight: 600; line-height: 1.3; letter-spacing: -.012em; margin: 0 0 8px; }
+body.phone .pp h1.t { font-size: 20px; }
+.pp .grades { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 8px; }
+.pp .meta { font-size: 12.5px; color: var(--fg2); line-height: 1.5; }
+.pp .meta .mono { color: var(--fg2); }
+.pp .acts { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn.on { background: var(--ink); color: var(--ink-fg); border-color: var(--ink); } .btn.on svg { fill: currentColor; }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--fg2); }
+.btn.icon { width: 28px; padding: 0; justify-content: center; }
+body.phone .btn { height: 34px; font-size: 13.5px; } body.phone .btn.icon { width: 36px; }
+.sec { margin-top: 16px; }
+.sec .cap { display: flex; align-items: baseline; }
+.prose { font-size: 14.5px; line-height: 1.6; margin: 0; color: var(--fg); }
+body.phone .prose { font-size: 15.5px; line-height: 1.58; }
+.prose + .prose { margin-top: 8px; }
+.over { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 6px; background: var(--amber-bg); color: var(--fg); font-size: 13.5px; line-height: 1.5; margin-bottom: 10px; }
+.over b { color: var(--warn); font-weight: 600; }
+.over svg { width: 15px; height: 15px; flex: none; margin-top: 2px; stroke: var(--warn); fill: none; stroke-width: 2.2; stroke-linecap: round; }
+/* deep card: the same sans, one size, small bold headings; sections 16px apart */
+.deep h4 { font-size: 13px; font-weight: 600; margin: 16px 0 4px; letter-spacing: -.005em; color: var(--fg); }
+.deep h4:first-of-type { margin-top: 10px; }
+.deep ul { margin: 0; padding-left: 18px; } .deep li { margin: 2px 0; }
+.deep .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; font-size: 13.5px; }
+.deep .kv dt { color: var(--fg2); } .deep .kv dd { margin: 0; }
+/* reference rows: prior work and "among the collection" — one row shape, whole row is the link */
+.refs { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 6px; }
+.ref { position: relative; display: grid; grid-template-columns: 1fr auto; column-gap: 10px; padding: 8px 10px 8px 12px; border-top: 1px solid var(--line2); color: var(--fg); text-decoration: none; }
+.ref:first-child { border-top: 0; } .ref:hover { background: var(--hover); }
+.ref::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rc, transparent); }
+.ref .t { font-size: 13.5px; font-weight: 500; line-height: 1.35; }
+.ref .rel { grid-column: 1 / -1; font-size: 13px; line-height: 1.45; color: var(--fg2); margin-top: 2px; }
+.ref .rel .chip { margin-right: 6px; vertical-align: 1px; }
+.ref .id { font-size: 11.5px; color: var(--fg3); white-space: nowrap; margin-top: 2px; }
+.ref .ext { font-size: 11.5px; color: var(--fg3); white-space: nowrap; margin-top: 2px; }
+body.phone .ref .t { font-size: 14.5px; } body.phone .ref .rel { font-size: 13.5px; }
+
+/* controls */
+.thumbs { display: inline-flex; align-items: center; gap: 2px; }
+.thumbs button, .ib { width: 28px; height: 28px; border: 0; background: none; border-radius: 6px; color: var(--fg3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.thumbs button svg, .ib svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.thumbs button.on { color: var(--fg); } .thumbs button.on svg { fill: currentColor; }
+body.phone .thumbs button, body.phone .ib { width: 36px; height: 36px; }
+.reasons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.reasons .chip { height: 24px; padding: 0 10px; font-size: 12.5px; cursor: pointer; background: var(--surface); color: var(--fg); }
+body.phone .reasons .chip { height: 32px; font-size: 14px; padding: 0 12px; }
+.reasons .chip.sel { background: var(--ink); color: var(--ink-fg); border-color: var(--ink); }
+.ack { font-size: 12.5px; color: var(--fg2); margin-top: 6px; }
+.ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seg { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+.seg button { height: 24px; padding: 0 10px; border: 0; background: none; border-radius: 5px; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--fg2); cursor: pointer; }
+.seg button.on { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.panel.dk .seg button.on { box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.inp { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12.5px; color: var(--fg2); }
+.inp svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.inp.search { flex: 1; min-width: 140px; }
+.inp.sel::after { content: "⌄"; margin-left: auto; color: var(--fg3); }
+.cnt { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--ink); color: var(--ink-fg); font-size: 10.5px; font-weight: 600; }
+
+/* status line */
+.status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fg2); white-space: nowrap; }
+.status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dot); flex: none; }
+.status.ok { --dot: var(--ok); } .status.warn { --dot: var(--warn); color: var(--fg); } .status.bad { --dot: var(--bad); color: var(--fg); }
+.status.wait { --dot: var(--wait); } .status.wait::before { animation: none; }
+
+/* app chrome: phone frame and desktop header */
+.phone-frame { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.topbar { display: flex; align-items: center; height: 48px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--line2); }
+.topbar .wm { font-weight: 700; letter-spacing: -.02em; font-size: 16px; }
+.topbar .status { margin-left: 12px; }
+.topbar .ib { margin-left: auto; color: var(--fg2); }
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr); height: 56px; border-top: 1px solid var(--line); background: var(--surface); }
+.tabs a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--fg3); }
+.tabs a svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tabs a.on { color: var(--fg); } .tabs a.on svg { stroke-width: 2.4; }
+.dhead { display: flex; align-items: center; gap: 22px; height: 44px; padding: 0 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.dhead .wm { font-weight: 700; letter-spacing: -.02em; font-size: 15px; }
+.dhead nav { display: flex; gap: 16px; font-size: 13.5px; font-weight: 500; color: var(--fg2); }
+.dhead nav a.on { color: var(--fg); box-shadow: inset 0 -2px 0 var(--fg); padding-bottom: 2px; }
+.dhead .status { margin-left: auto; }
+.sheet { background: var(--surface); border-radius: 16px 16px 0 0; padding: 8px 16px 16px; box-shadow: 0 -8px 30px rgba(0,0,0,.18); }
+.sheet .handle { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 10px; }
+.sheet .sh { display: flex; align-items: center; font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+.sheet .sh .ib { margin-left: auto; }
+.sheet .grp { margin-top: 12px; } .sheet .grp .cap { margin-bottom: 8px; }
+.sheet .seg { display: flex; } .sheet .seg button { flex: 1; height: 34px; font-size: 13.5px; padding: 0 4px; white-space: nowrap; }
+.sheet .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.sheet .opts .chip { height: 34px; padding: 0 14px; font-size: 14px; color: var(--fg); background: var(--surface); }
+.sheet .opts .chip.sel { background: var(--ink); color: var(--ink-fg); border-color: var(--ink); }
+.sheet .done { width: 100%; height: 44px; margin-top: 18px; border-radius: 8px; border: 0; background: var(--ink); color: var(--ink-fg); font: inherit; font-size: 15px; font-weight: 600; }
+.dim { background: color-mix(in srgb, var(--fg) 45%, transparent); padding: 60px 0 0; border-radius: 12px; }
+
+/* scale */
+.scale { display: grid; grid-template-columns: 1fr; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.sw { position: relative; display: grid; grid-template-columns: 14px 92px 1fr auto; column-gap: 10px; align-items: center; padding: 7px 10px 7px 14px; border-top: 1px solid var(--line2); font-size: 13px; }
+.sw:first-child { border-top: 0; }
+.sw::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rc); }
+.sw .nm { font-weight: 600; color: var(--rc); } .sw[data-r="1"] .nm { color: var(--fg2); }
+.sw .ex { color: var(--fg2); font-size: 12.5px; }
+.sw .dot { width: 14px; height: 14px; border-radius: 4px; background: var(--rc); }
+.sw[data-r="1"] .dot { opacity: var(--r1s, 1); box-shadow: inset 0 0 0 1px var(--line); }
+.sw[data-r="5"] { background: color-mix(in srgb, var(--r5) 7%, var(--surface)); }
+body.phone .sw { grid-template-columns: 14px 80px 1fr auto; } body.phone .sw .ex { font-size: 12px; }
+.typeline { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; font-size: 13px; align-items: baseline; }
+.typeline .k { color: var(--fg2); font-size: 12px; }
+</style>
+</head>
+<body class="desktop" data-pal="a">
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-cotf" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-cotm" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-circ" viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-interp" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></symbol>
+  <symbol id="i-align" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-lm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-reason" viewBox="0 0 24 24"><path d="M9 18h6M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></symbol>
+  <symbol id="i-agents" viewBox="0 0 24 24"><rect x="3" y="10" width="18" height="11" rx="2"/><circle cx="12" cy="4.5" r="2"/><path d="M12 6.5V10M8 15.5h.01M16 15.5h.01"/></symbol>
+  <symbol id="i-eff" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+  <symbol id="i-bm" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88z"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="i-digest" viewBox="0 0 24 24"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9h4"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></symbol>
+  <symbol id="i-topics" viewBox="0 0 24 24"><path d="m12 2 9 4.5-9 4.5-9-4.5L12 2z"/><path d="m3 11.5 9 4.5 9-4.5M3 16.5l9 4.5 9-4.5"/></symbol>
+  <symbol id="i-papers" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></symbol>
+</svg>
+
+<main>
+<h1>litwatch v1 · element sheet · desktop</h1>
+<p class="note">The building blocks every screen is made of, each in light and dark. One type system (Inter, tabular figures; JetBrains Mono for arXiv ids), one look: a dense, neutral tool surface where the only strong colour is signal, rarity on the left edge of every row and topic badges on the right. Nothing on a row ever moves.</p>
+<div class="sheet-sw">Palette for the whole sheet: <button data-pal="a" aria-pressed="true">A classic</button><button data-pal="b">B calm</button><button data-pal="c">C sparse</button></div>
+
+<!-- ============ 0. type ============ -->
+<h2>0 · Type and look</h2>
+<p class="note">Everything is one sans at a few sizes. No serif anywhere, including the Deep card. Rows sit on a surface one step lighter (light) or darker (dark) than the page, separated by hairlines, not cards.</p>
+<div class="pair" data-themes="lt dk"><template>
+  <div class="typeline">
+    <span class="k">Row title</span><span style="font-size:13.5px;font-weight:500">Faithfulness Gaps in Long Chains of Thought <span class="faint">13.5 / 500 (phone 15)</span></span>
+    <span class="k">Gist, prose</span><span style="font-size:13px;color:var(--fg2)">Across 4 model families, 31% of correct answers rest on computations the trace never mentions. <span class="faint">13 / 400 (phone 14)</span></span>
+    <span class="k">Meta</span><span style="font-size:12px;color:var(--fg3)">7 Oct 2026 · <span class="mono">2610.04321</span> · analysis · code <span class="faint">12 / 400</span></span>
+    <span class="k">Section label</span><span class="cap" style="margin:0">Brief <small>11 / 600 / caps</small></span>
+    <span class="k">Page title</span><span style="font-size:19px;font-weight:600;letter-spacing:-.012em;line-height:1.3">Faithfulness Gaps in Long Chains of Thought <span class="faint" style="font-size:12px;font-weight:400;letter-spacing:0">19 / 600 (phone 20)</span></span>
+    <span class="k">Reading</span><span class="prose">The Brief and the Deep card are set in the same face at 14.5 px, 1.6 line height, on the phone 15.5 px. <span class="faint">14.5 / 400 (phone 15.5)</span></span>
+  </div>
+</template></div>
+
+<!-- ============ 1. rarity ============ -->
+<h2>1 · Rarity scale</h2>
+<p class="note">Five levels as loot colours, on the left edge of every row, with the <b>rank glyph</b> (four bars, one more filled per level) as the non-colour backup. Legendary rows also get a faint tint of their colour so they read as a different row, not only a different edge. Three palettes, each in light and dark; the button at the top switches the whole sheet so the lists further down can be judged in each.</p>
+<div class="pair" data-themes="lt dk" data-pals="a b c"><template>
+  <div class="scale">
+    <div class="sw" data-r="5"><span class="dot"></span><span class="nm">Legendary</span><span class="ex">must read, landmark</span><span class="rank"><i></i><i></i><i></i><i></i></span></div>
+    <div class="sw" data-r="4"><span class="dot"></span><span class="nm">Epic</span><span class="ex">must read</span><span class="rank"><i></i><i></i><i></i><i></i></span></div>
+    <div class="sw" data-r="3"><span class="dot"></span><span class="nm">Rare</span><span class="ex">relevant · landmark by Weight alone</span><span class="rank"><i></i><i></i><i></i><i></i></span></div>
+    <div class="sw" data-r="2"><span class="dot"></span><span class="nm">Uncommon</span><span class="ex">adjacent · solid by Weight alone</span><span class="rank"><i></i><i></i><i></i><i></i></span></div>
+    <div class="sw" data-r="1"><span class="dot"></span><span class="nm">Common</span><span class="ex">none · incremental</span><span class="rank"><i></i><i></i><i></i><i></i></span></div>
+  </div>
+</template></div>
+<p class="note" style="margin-top:10px"><b>A classic</b> is the loot convention (grey, green, blue, purple, orange). <b>B calm</b> keeps the same hue order at lower saturation, tuned for a list read every morning. <b>C sparse</b> drops the stripe on common and greys uncommon, so in a long mixed list only rare and above carry colour at all. The rank glyph is identical in all three.</p>
+
+<!-- ============ 2. badges ============ -->
+<h2>2 · Topic badges</h2>
+<p class="note">One icon and one hue per followed topic, like T3 Code's project icons. Depth is the box, not the colour: <b>Focus</b> solid, <b>Area</b> tinted, <b>Field</b> outlined. Row size 18 px (phone 20), header size 28 px. The hue is a different layer from rarity: badges sit at the right end of a row in a box, stripes at the left edge, so the two never share a position.</p>
+<div class="pair" data-themes="lt dk"><template>
+  <p class="cap">Focus</p>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <span class="tname"><span class="badge lg focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span>Chain-of-thought faithfulness <span class="badge focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span></span>
+    <span class="tname"><span class="badge lg focus" data-t="cotm"><svg><use href="#i-cotm"/></svg></span>Chain-of-thought monitoring <span class="badge focus" data-t="cotm"><svg><use href="#i-cotm"/></svg></span></span>
+    <span class="tname"><span class="badge lg focus" data-t="circ"><svg><use href="#i-circ"/></svg></span>Circuits and causal analysis <span class="badge focus" data-t="circ"><svg><use href="#i-circ"/></svg></span></span>
+  </div>
+  <p class="cap" style="margin-top:14px">Area</p>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <span class="tname"><span class="badge lg area" data-t="interp"><svg><use href="#i-interp"/></svg></span>Interpretability <span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span></span>
+    <span class="tname"><span class="badge lg area" data-t="align"><svg><use href="#i-align"/></svg></span>Alignment and safety <span class="badge area" data-t="align"><svg><use href="#i-align"/></svg></span></span>
+  </div>
+  <p class="cap" style="margin-top:14px">Field</p>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <span class="tname"><span class="badge lg field" data-t="lm"><svg><use href="#i-lm"/></svg></span>Language models <span class="badge field" data-t="lm"><svg><use href="#i-lm"/></svg></span></span>
+    <span class="tname"><span class="badge lg field" data-t="reason"><svg><use href="#i-reason"/></svg></span>Reasoning and RL post-training <span class="badge field" data-t="reason"><svg><use href="#i-reason"/></svg></span></span>
+    <span class="tname"><span class="badge lg field" data-t="agents"><svg><use href="#i-agents"/></svg></span>Agents and tool use <span class="badge field" data-t="agents"><svg><use href="#i-agents"/></svg></span></span>
+    <span class="tname"><span class="badge lg field" data-t="eff"><svg><use href="#i-eff"/></svg></span>Efficiency and architecture <span class="badge field" data-t="eff"><svg><use href="#i-eff"/></svg></span></span>
+  </div>
+  <p class="cap" style="margin-top:14px">In a row <small>the topic giving the highest level first</small></p>
+  <span class="badges"><span class="badge focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span><span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span><span class="badge field" data-t="lm"><svg><use href="#i-lm"/></svg></span></span>
+</template></div>
+
+<!-- ============ 3. paper rows ============ -->
+<h2>3 · A paper at each detail level</h2>
+<p class="note">Every row has the same slots left to right: stripe, rank glyph, title, badges, saved mark. A Gist row adds two lines under the title and nothing else moves. On a topic page the badge slot is dropped, since every row is the same topic.</p>
+<div class="pair" data-themes="lt dk"><template>
+  <p class="cap">Mark (L0) in a mixed list <small>Papers, search, a day's digest</small></p>
+  <div class="list">
+    <a class="row" data-r="5" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Faithfulness Gaps in Long Chains of Thought: Measuring Omitted Computation at Scale</span><span class="badges"><span class="badge focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span><span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span></span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+    <a class="row" data-r="4" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Steganographic Drift: How RL Against a Monitor Reshapes Reasoning Traces</span><span class="badges"><span class="badge focus" data-t="cotm"><svg><use href="#i-cotm"/></svg></span><span class="badge area" data-t="align"><svg><use href="#i-align"/></svg></span></span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+    <a class="row" data-r="3" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Attribution Graphs for Arithmetic Circuits in Instruction-Tuned Models</span><span class="badges"><span class="badge focus" data-t="circ"><svg><use href="#i-circ"/></svg></span></span><span class="sv"></span></a>
+    <a class="row" data-r="2" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Sparse Crosscoders Recover Shared Features Across Model Families</span><span class="badges"><span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span></span><span class="sv"></span></a>
+    <a class="row" data-r="2" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">GRPO With Length Penalties Does Not Shorten Thinking at Test Time</span><span class="badges"><span class="badge field" data-t="reason"><svg><use href="#i-reason"/></svg></span><span class="badge field" data-t="lm"><svg><use href="#i-lm"/></svg></span></span><span class="sv"></span></a>
+    <a class="row" data-r="1" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">KV-Cache Eviction by Attention Entropy for Long-Context Serving</span><span class="badges"><span class="badge field" data-t="eff"><svg><use href="#i-eff"/></svg></span></span><span class="sv"></span></a>
+    <a class="row" data-r="0" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Locating and Editing Factual Associations in GPT <span class="chip" style="margin-left:6px;vertical-align:1px">not in the collection</span></span><span class="badges"></span><span class="sv"></span></a>
+  </div>
+  <p class="cap">Mark (L0) on a topic page <small>no badges; the topic's own grade gives the colour</small></p>
+  <div class="list">
+    <a class="row nobadge" data-r="5" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Faithfulness Gaps in Long Chains of Thought: Measuring Omitted Computation at Scale</span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+    <a class="row nobadge" data-r="4" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Can Models Report Their Own Decision Rules? Causal Tests of LLM Introspection</span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+    <a class="row nobadge" data-r="3" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Verbalized Confidence Tracks Hidden Computation Only After Reasoning Training</span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+    <a class="row nobadge" data-r="2" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Cited but Not Consulted: A Counterfactual Audit of Legal Chain-of-Thought</span><span class="sv"></span></a>
+  </div>
+  <p class="cap">Gist (L1) <small>Mark, then one sentence, then date · id · facets</small></p>
+  <div class="list">
+    <a class="row l1" data-r="5" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span><span class="t">Faithfulness Gaps in Long Chains of Thought: Measuring Omitted Computation at Scale</span><span class="g">Across four model families, 31% of correct answers rest on computations the trace never mentions, and the share grows with trace length rather than with task difficulty.</span><span class="m">7 Oct 2026 · <span class="mono">2610.04321</span> <span class="chip">analysis</span><span class="chip">code</span></span></span><span class="badges"><span class="badge focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span><span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span></span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+    <a class="row l1" data-r="3" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span><span class="t">Attribution Graphs for Arithmetic Circuits in Instruction-Tuned Models</span><span class="g">Attribution graphs built from transcoders recover the same carry-propagation circuit in three instruction-tuned models, with per-edge effects confirmed by activation patching.</span><span class="m">8 Oct 2026 · <span class="mono">2610.03877</span> <span class="chip">method</span><span class="chip">code</span><span class="chip">weights</span></span></span><span class="badges"><span class="badge focus" data-t="circ"><svg><use href="#i-circ"/></svg></span></span><span class="sv"></span></a>
+    <a class="row l1" data-r="2" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span><span class="t">A Survey of Verifiable Rewards for Reasoning Post-Training</span><span class="g">Organises 140 papers on verifiable reward design by what is checked, where the signal comes from, and how reward hacking was observed in each setting.</span><span class="m">6 Oct 2026 · <span class="mono">2610.01644</span> <span class="chip">survey</span></span></span><span class="badges"><span class="badge field" data-t="reason"><svg><use href="#i-reason"/></svg></span></span><span class="sv"></span></a>
+  </div>
+  <p class="cap">States <small>saved · later set below relevant in a published digest · pick</small></p>
+  <div class="list">
+    <a class="row nobadge" data-r="4" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Saved: the mark sits in the last slot, filled; the slot is empty otherwise</span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+    <a class="row nobadge struck" data-r="2" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Monitor Jailbreaking: Evading Chain-of-Thought Monitoring Without Encoded Reasoning</span><span class="sv"></span></a>
+    <a class="row nobadge pick" data-r="4" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Steganographic Drift: How RL Against a Monitor Reshapes Reasoning Traces</span><span class="sv"></span></a>
+  </div>
+</template></div>
+
+<!-- ============ 4. paper page ============ -->
+<h2>4 · Paper page pieces</h2>
+<p class="note">Header, then the ladder downwards: Brief (or the abstract in its place), the Deep card, then the paper's neighbours. The Deep card is the same type as everything else, with small bold headings; prior work and "among the collection" are the same row shape, the whole row a link to the paper page.</p>
+<div class="pair" data-themes="lt dk"><template>
+  <div class="pp">
+    <h1 class="t">Faithfulness Gaps in Long Chains of Thought: Measuring Omitted Computation at Scale</h1>
+    <div class="grades">
+      <span class="rpill" data-r="5"><span class="rank"><i></i><i></i><i></i><i></i></span>Legendary</span>
+      <span class="gpill"><span class="badge focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span>must read</span>
+      <span class="gpill"><span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span>relevant</span>
+    </div>
+    <div class="meta">Okafor, Lindqvist, Sato and 3 more · <span class="mono">arXiv:2610.04321</span> v2 · 7 Oct 2026 · revised 11 Oct · <span class="chip">analysis</span> <span class="chip">code</span></div>
+    <div class="acts">
+      <button class="btn on"><svg><use href="#i-bm"/></svg>Saved</button>
+      <button class="btn">arXiv</button><button class="btn">PDF</button><button class="btn">BibTeX</button>
+      <span class="thumbs" style="margin-left:auto"><button><svg><use href="#i-up"/></svg></button><button><svg><use href="#i-down"/></svg></button></span>
+    </div>
+    <div class="sec">
+      <p class="cap">Brief</p>
+      <div class="over"><svg><use href="#i-warn"/></svg><span><b>The abstract overstates:</b> the 31% figure holds for traces over 2k tokens; under 500 tokens the gap is 6%.</span></div>
+      <p class="prose">The authors build a benchmark of 4,800 arithmetic and logic problems where the answer can be reached by one of two computations, and instrument four open model families to find which one ran. Comparing the trace to the recovered computation, 31% of correct answers rest on a computation the trace never states, and 9% on one the trace contradicts. The share grows with trace length and is flat across task difficulty, which the authors read as a property of long-form generation rather than of hard problems. Faithfulness training on 20k examples halves the omitted share at a 3-point accuracy cost. The main limit is the recovery method: it is validated on toy settings only and assumes the two computations are separable in the residual stream, which the paper does not test beyond layer 20.</p>
+    </div>
+    <div class="sec">
+      <p class="cap">Abstract <small>no Brief for this paper</small></p>
+      <p class="prose">When the Brief is absent, the abstract sits in its place under this label, with the reason as the small note: "no Brief for this paper" for an Area or Field paper, "Brief awaiting text" while the pass waits for the archive.</p>
+    </div>
+    <div class="sec deep">
+      <p class="cap">Deep card <small>12 Oct 2026</small></p>
+      <p class="prose">The paper asks whether a model's chain of thought reports the computation that produced its answer, and measures the gap at a scale earlier work did not reach. Its method is a two-path benchmark: each problem admits two distinct computations, and a probe trained on known cases says which one the model ran.</p>
+      <h4>Key claim</h4>
+      <p class="prose">Omission grows with trace length, not with difficulty; this holds in all four families and survives temperature and prompt-format changes.</p>
+      <h4>Evaluation setup</h4>
+      <dl class="kv"><dt>Models</dt><dd>Llama 4 8B and 70B, Qwen 3.5 14B, Gemma 4 27B, OLMo 3 32B</dd><dt>Data</dt><dd>4,800 two-path problems; 600 held out for the probe</dd><dt>Metric</dt><dd>share of correct answers whose trace omits or contradicts the recovered computation</dd></dl>
+      <h4>Limitations</h4>
+      <ul class="prose"><li>The probe is validated on toy tasks only; its accuracy on the full benchmark is estimated, not measured.</li><li>Separability of the two computations is assumed past layer 20.</li><li>No closed models, so the length effect may not transfer.</li></ul>
+      <h4>Prior work</h4>
+      <div class="refs">
+        <a class="ref" href="#"><span class="t">Measuring Faithfulness in Chain-of-Thought Reasoning</span><span class="id mono">2307.13702</span><span class="rel">Defines the omitted-computation notion the benchmark operationalises; this paper replaces its hand-built cases with a two-path construction.</span></a>
+        <a class="ref" href="#"><span class="t">Reasoning Models Don't Always Say What They Think</span><span class="id mono">2505.05410</span><span class="rel">The hint-taking protocol the authors compare against; their omission rates are two to three times higher on matched problems.</span></a>
+        <a class="ref" href="#"><span class="t">Attribution Patching: Activation Patching at Industrial Scale</span><span class="ext">no arXiv id</span><span class="rel">Supplies the fast patching estimate used to recover which computation ran.</span></a>
+      </div>
+      <h4>Among the collection</h4>
+      <div class="refs">
+        <a class="ref" data-r="4" href="#"><span class="t">Can Models Report Their Own Decision Rules? Causal Tests of LLM Introspection</span><span class="id mono">2610.04780</span><span class="rel"><span class="chip">agrees</span>Finds the same length effect for self-reports of decision rules, with a different recovery method.</span></a>
+        <a class="ref" data-r="3" href="#"><span class="t">Verbalized Confidence Tracks Hidden Computation Only After Reasoning Training</span><span class="id mono">2609.18840</span><span class="rel"><span class="chip">contradicts</span>Reports omission falling with length after RL post-training, on a narrower task set.</span></a>
+        <a class="ref" data-r="2" href="#"><span class="t">Cited but Not Consulted: A Counterfactual Audit of Legal Chain-of-Thought</span><span class="id mono">2610.02210</span><span class="rel"><span class="chip">extends</span>Applies the same audit idea to statute citations in legal reasoning.</span></a>
+      </div>
+    </div>
+  </div>
+</template></div>
+
+<!-- ============ 5. digest ============ -->
+<h2>5 · Digest pieces</h2>
+<p class="note">History is days, newest first, each day the topics' Marks in one fixed order (Focus, Area, Field); a topic with nothing new keeps its slot. The stripe is the best paper's colour. A day opens to each topic's Gist with up to three pick Marks.</p>
+<div class="pair" data-themes="lt dk"><template>
+  <p class="cap">History <small>digest Marks</small></p>
+  <div class="dayh">Monday 12 Oct <small>· weekly digests written</small></div>
+  <div class="list">
+    <div class="drow week" data-r="5"><span class="badge focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span><span class="n">Chain-of-thought faithfulness <small>Week 5–11 Oct</small></span><span class="c">9 central · <b>2 must read</b></span></div>
+    <div class="drow week" data-r="4"><span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span><span class="n">Interpretability <small>Week 5–11 Oct</small></span><span class="c">5 picks · <b>1 must read</b></span></div>
+    <div class="drow week" data-r="3"><span class="badge field" data-t="lm"><svg><use href="#i-lm"/></svg></span><span class="n">Language models <small>Week 5–11 Oct</small></span><span class="c">3 picks</span></div>
+    <div class="drow" data-r="5"><span class="badge focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span><span class="n">Chain-of-thought faithfulness</span><span class="c">4 new · <b>1 must read</b></span></div>
+    <div class="drow" data-r="4"><span class="badge focus" data-t="cotm"><svg><use href="#i-cotm"/></svg></span><span class="n">Chain-of-thought monitoring</span><span class="c">2 new · <b>1 must read</b></span></div>
+    <div class="drow quiet" data-r="1"><span class="badge focus" data-t="circ"><svg><use href="#i-circ"/></svg></span><span class="n">Circuits and causal analysis</span><span class="c">Nothing new</span></div>
+    <div class="drow" data-r="3"><span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span><span class="n">Interpretability</span><span class="c">11 new · <b>1 pick</b></span></div>
+    <div class="drow quiet" data-r="1"><span class="badge area" data-t="align"><svg><use href="#i-align"/></svg></span><span class="n">Alignment and safety</span><span class="c">Nothing new</span></div>
+  </div>
+  <div class="dayh">Sunday 11 Oct</div>
+  <div class="dayline">No papers released.</div>
+  <div class="dayh">Friday 9 Oct</div>
+  <div class="list">
+    <div class="drow" data-r="4"><span class="badge focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span><span class="n">Chain-of-thought faithfulness</span><span class="c">2 new · <b>1 must read</b></span></div>
+    <div class="drow" data-r="3"><span class="badge focus" data-t="cotm"><svg><use href="#i-cotm"/></svg></span><span class="n">Chain-of-thought monitoring</span><span class="c">3 new</span></div>
+    <div class="drow" data-r="4"><span class="badge focus" data-t="circ"><svg><use href="#i-circ"/></svg></span><span class="n">Circuits and causal analysis</span><span class="c">1 new · <b>1 must read</b></span></div>
+    <div class="drow" data-r="2"><span class="badge area" data-t="interp"><svg><use href="#i-interp"/></svg></span><span class="n">Interpretability</span><span class="c">8 new</span></div>
+    <div class="drow" data-r="3"><span class="badge area" data-t="align"><svg><use href="#i-align"/></svg></span><span class="n">Alignment and safety</span><span class="c">6 new · <b>1 pick</b></span></div>
+  </div>
+  <p class="cap" style="margin-top:16px">A day: one topic's digest Gist <small>up to 3 pick Marks, then the count of the rest</small></p>
+  <div class="dg">
+    <div class="hd"><span class="badge lg focus" data-t="cotf"><svg><use href="#i-cotf"/></svg></span><span class="n">Chain-of-thought faithfulness</span><span class="s">Mon 12 Oct · 4 new</span></div>
+    <p class="p">The day's central papers converge on trace length as the main driver of omitted computation. Okafor et al. measure it at scale across four open families and report that faithfulness training halves the gap at a small accuracy cost; two shorter studies reach the same direction with introspection and confidence probes. One related paper applies a counterfactual audit to legal citations.</p>
+    <div class="list">
+      <a class="row nobadge" data-r="5" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Faithfulness Gaps in Long Chains of Thought: Measuring Omitted Computation at Scale</span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+      <a class="row nobadge" data-r="4" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Can Models Report Their Own Decision Rules? Causal Tests of LLM Introspection</span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+      <a class="row nobadge" data-r="3" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Verbalized Confidence Tracks Hidden Computation Only After Reasoning Training</span><span class="sv"><svg><use href="#i-bm" style="fill:currentColor"/></svg></span></a>
+    </div>
+    <a class="more" href="#">+1 more</a>
+  </div>
+  <div class="dg" style="margin-top:10px">
+    <div class="hd"><span class="badge lg area" data-t="interp"><svg><use href="#i-interp"/></svg></span><span class="n">Interpretability</span><span class="s">Mon 12 Oct · 11 new</span></div>
+    <p class="p">A quiet day for methods and a busy one for sparse autoencoders: three papers train crosscoders across model families, and two evaluate feature splitting under different dictionary sizes. The one pick is a transcoder-based attribution study that recovers the same arithmetic circuit in three instruction-tuned models.</p>
+    <div class="list">
+      <a class="row nobadge pick" data-r="4" href="#"><span class="rank"><i></i><i></i><i></i><i></i></span><span class="t">Attribution Graphs for Arithmetic Circuits in Instruction-Tuned Models</span><span class="sv"></span></a>
+    </div>
+    <a class="more" href="#">+10 more</a>
+  </div>
+</template></div>
+
+<!-- ============ 6. controls ============ -->
+<h2>6 · Controls</h2>
+<p class="note">Save is a bookmark that fills. Thumbs are quiet until used; a thumb opens its reasons as chips and the acknowledgement says what happened. Filters are a toolbar on a desktop and one button opening a sheet on the phone. The status line is one dot and a sentence, in the header beside the wordmark. The gear is the only way into Settings.</p>
+<div class="pair" data-themes="lt dk"><template>
+  <p class="cap">Save</p>
+  <div class="ctl"><button class="btn"><svg><use href="#i-bm"/></svg>Save</button><button class="btn on"><svg><use href="#i-bm"/></svg>Saved</button><span class="faint" style="font-size:12px">in a row: the filled mark in the last slot, nothing when unsaved</span></div>
+
+  <p class="cap" style="margin-top:16px">Thumbs <small>quiet · up · down with reasons open · acknowledged</small></p>
+  <div class="ctl" style="gap:18px">
+    <span class="thumbs"><button><svg><use href="#i-up"/></svg></button><button><svg><use href="#i-down"/></svg></button></span>
+    <span class="thumbs"><button class="on"><svg><use href="#i-up"/></svg></button><button><svg><use href="#i-down"/></svg></button></span>
+    <span class="thumbs"><button><svg><use href="#i-up"/></svg></button><button class="on"><svg><use href="#i-down"/></svg></button></span>
+  </div>
+  <div class="block" style="margin-top:8px">
+    <span class="thumbs"><button class="on"><svg><use href="#i-up"/></svg></button><button><svg><use href="#i-down"/></svg></button></span>
+    <div class="reasons"><span class="chip">Underrated</span><span class="chip">Great find</span></div>
+  </div>
+  <div class="block" style="margin-top:10px">
+    <span class="thumbs"><button><svg><use href="#i-up"/></svg></button><button class="on"><svg><use href="#i-down"/></svg></button></span>
+    <div class="reasons"><span class="chip sel">Wrong topic</span><span class="chip">Overrated</span><span class="chip">Not interesting</span><span class="chip">Already knew it</span></div>
+    <div class="ack">Marked not on Chain-of-thought monitoring; it leaves the library.</div>
+  </div>
+
+  <div class="desk-only"><p class="cap" style="margin-top:16px">Filter and sort, desktop toolbar</p>
+  <div class="ctl">
+    <span class="inp search"><svg><use href="#i-search"/></svg>Search titles and abstracts</span>
+    <span class="seg"><button class="on">All</button><button>Saved</button><button>Also adjacent</button></span>
+    <span class="inp sel">2026</span><span class="inp sel">Rarity</span>
+    <button class="btn ghost">Export BibTeX</button>
+  </div></div>
+  <p class="cap" style="margin-top:16px">Filter button, phone <small>opens the sheet; the count is how many filters are set</small></p>
+  <div class="ctl"><span class="inp search"><svg><use href="#i-search"/></svg>Search</span><button class="btn"><svg><use href="#i-filter"/></svg>Filter <span class="cnt">2</span></button></div>
+
+  <p class="cap" style="margin-top:16px">Status line <small>in the header; opens Quality</small></p>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <span class="status ok">530 read · all quiet</span>
+    <span class="status warn">530 read · 2 disagreements · 1 ungraded</span>
+    <span class="status bad">last night's run failed · showing Tuesday</span>
+    <span class="status wait">running since 06:02</span>
+  </div>
+</template></div>
+
+<h3>App chrome</h3>
+<div class="pair" data-themes="lt dk"><template>
+  <p class="cap">Phone: header with the one gear, the three tabs below <small>Digest open</small></p>
+  <div class="phone-frame">
+    <div class="topbar"><span class="wm">litwatch</span><span class="status ok">530 read · all quiet</span><button class="ib"><svg><use href="#i-gear"/></svg></button></div>
+    <div style="height:72px;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:12px">page</div>
+    <div class="tabs"><a class="on" href="#"><svg><use href="#i-digest"/></svg>Digest</a><a href="#"><svg><use href="#i-topics"/></svg>Topics</a><a href="#"><svg><use href="#i-papers"/></svg>Papers</a></div>
+  </div>
+  <div class="desk-only"><p class="cap" style="margin-top:16px">Desktop: one header line</p>
+  <div class="dhead"><span class="wm">litwatch</span><nav><a class="on" href="#">Digest</a><a href="#">Topics</a><a href="#">Papers</a></nav><span class="status warn">530 read · 2 disagreements</span><button class="ib"><svg><use href="#i-gear"/></svg></button></div></div>
+  <p class="cap" style="margin-top:16px">Phone filter sheet <small>full width, 16 px gutters, one Done</small></p>
+  <div class="dim">
+    <div class="sheet">
+      <div class="handle"></div>
+      <div class="sh">Filter and sort<button class="ib"><svg><use href="#i-x"/></svg></button></div>
+      <div class="grp"><p class="cap">Show</p><span class="seg"><button class="on">All</button><button>Saved</button><button>Also adjacent</button></span></div>
+      <div class="grp"><p class="cap">Year</p><div class="opts"><span class="chip sel">Any</span><span class="chip">2026</span><span class="chip">2025</span><span class="chip">2024</span><span class="chip">Earlier</span></div></div>
+      <div class="grp"><p class="cap">Sort by</p><div class="opts"><span class="chip sel">Rarity</span><span class="chip">Newest</span><span class="chip">Added</span><span class="chip">Title</span></div></div>
+      <button class="done">Done · 39 papers</button>
+    </div>
+  </div>
+</template></div>
+
+</main>
+<script>
+// Clone each section's template into one panel per theme (and per palette where asked).
+document.querySelectorAll('.pair').forEach(pair => {
+  const tpl = pair.querySelector('template');
+  const themes = (pair.dataset.themes || 'lt dk').split(' ');
+  const pals = (pair.dataset.pals || '').split(' ').filter(Boolean);
+  const groups = pals.length ? pals : [''];
+  groups.forEach(pal => {
+    if (pal) { const l = document.createElement('div'); l.className = 'pal-label'; l.textContent = { a: 'A · classic loot', b: 'B · calm reading', c: 'C · sparse (common has no stripe)' }[pal]; pair.appendChild(l); }
+    themes.forEach(th => {
+      const p = document.createElement('div');
+      p.className = 'panel ' + th + (pal ? ' pal-' + pal : '');
+      p.appendChild(tpl.content.cloneNode(true));
+      pair.appendChild(p);
+    });
+  });
+  tpl.remove();
+});
+document.querySelectorAll('.sheet-sw button').forEach(b => b.addEventListener('click', () => {
+  document.body.dataset.pal = b.dataset.pal;
+  document.querySelectorAll('.sheet-sw button').forEach(x => x.setAttribute('aria-pressed', x === b));
+}));
+</script>
+</body>
+</html>
