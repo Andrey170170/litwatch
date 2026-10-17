@@ -27,7 +27,7 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 | 19 | Announced once | kept for Focus digests |
 | 20 | Quality is a calibration workspace | kept, questions changed ([feedback.md](feedback.md)) |
 | 21 | Writer: Opus 5.5 | kept |
-| 22 | No scheduled runs before cutover | superseded: the side-by-side stack runs its scheduler |
+| 22 | No scheduled runs before cutover | superseded: v1 takes 0.14's place, scheduler on after the switch night (decision 63) |
 | 23 | Daily and weekly issues are separate | superseded by digests per topic and period |
 | 24 | Triage stops after three failed nights | kept for classification |
 | 25 | Bulk BibTeX does not wait | kept |
@@ -100,7 +100,8 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 50. **Costs.** Month-to-date spend per provider; amber against a monthly budget; nightly runs never downgraded; hard
     ceilings on re-runs and backfills.
 51. **The library.** Focus papers at relevant or above are saved automatically; everything else by hand. Zotero's
-    "Tier 1" and "Tier 2" collections become "Must read" and "Relevant" at the switch.
+    "Tier 1" and "Tier 2" collections become "Must read" and "Relevant" when Zotero is switched on after the
+    switch (decision 66).
 52. **Order of work.** The core is redesigned before the switch, in two passes: this spec, then the UI sketches and
     design; no code until both are merged. 0.14 stays production meanwhile.
 
@@ -150,6 +151,22 @@ Anthropic API and $20–30 on OpenRouter, against about $215 and $4 at the resta
 62. **The full text is read without its bibliography, and paid for once.** A pass that asks the identical question
     again (the same text, title, abstract and area, the journal's request key) is answered by the gateway's journal at
     no cost.
+
+## Decided 2026-10-16, the switch
+
+The plan is [`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md).
+
+63. **v1 takes 0.14's place**, its stack, paths and catalog entry, instead of running beside it; the two never run
+    at once, so the deep credential moves without a new sign-in.
+64. **The switch check runs on the catch-up week**: the week v1 reads from the archive on its first night is one
+    0.14 has already processed, so the comparison needs no nights side by side.
+65. **litwatch follows the homelab's telemetry convention**: JSON logs, Prometheus metrics with the shared job
+    metrics read from the run records, and a `homelab.status/v1` status endpoint built from what the status line
+    knows, on an internal port. The owner's instance sits behind the gateway's nginx and is instrumented in Vergil.
+66. **Zotero and WebDAV are switched on after a few stable nights**, catching up from the first event: their
+    cursors are created at the start of the outbox when the database is made. The collections are renamed then.
+67. **Notion stops at the switch** until the owner has talked to the PI; the export is then rewritten against v1's
+    events or removed.
 
 ## Open
 

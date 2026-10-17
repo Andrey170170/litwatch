@@ -210,8 +210,8 @@ smoke test's page list. A web PR starts on a surface only once its endpoints are
 ### Deferred to later PRs
 
 - **N8:** the n8n Notion workflow and its README still read the first v1's shapes (`take.written`, a topic's `take`,
-  `kind: watch`). Rewrite them against v1's events (`brief.written`, `gist.written`, `digest.written`) with the
-  switch, which owns the Notion export.
+  `kind: watch`). Notion stops at the switch (decision 67); after the owner's talk with the PI, rewrite them
+  against v1's events (`brief.written`, `gist.written`, `digest.written`) or remove them.
 - **N6 (the owner, 2026-10-15):** the Area must-read volume (a median of 20 a night for Alignment and safety, 12 for
   Interpretability) and the full-text cost it brings (about $9 per 1,000 papers) are accepted for the restart.
   Reassess them after one to two weeks of running, together with the cost, and tune then. The Focus related ×
@@ -355,7 +355,7 @@ the branch's UI before then. Not taken: prune page by page, patching pages W1 de
 **In:** N0–N7 as the spec and DESIGN.md say, with the changes of 2026-10-14 (decision 48 as amended, decisions
 53–56).
 
-**Out:** N8 (side by side and the switch, the Zotero renames and R9): it touches production and the owner's library,
-so it gets its own plan once N6 and W4 run on the sandbox. N9 (release). Backfill of the papers not processed,
+**Out:** N8 (the switch, the Zotero renames and R9): it touches production and the owner's library, so it gets its
+own plan once N6 and W4 run on the sandbox ([`v1-deploy.md`](v1-deploy.md)). N9 (release). Backfill of the papers not processed,
 through the same archive intake over older windows, likely on a local model; semantic search, citations, other
 sources: after v1. Retiring the archive's own web interface: after the switch.
