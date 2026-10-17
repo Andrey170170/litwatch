@@ -38,8 +38,8 @@ the protocol through which it answers searches. What litwatch tells the archive 
 `[integrations.archive]` (on in the stack): new and revised papers to register (`paper.added`, `paper.revised`), and
 the PDFs the storage policy keeps (`grade.changed` to relevant or must read, `paper.saved`).
 
-**Changed: Zotero.** The collections 0.x named "Tier 1" and "Tier 2" become "Must read" and "Relevant", renamed at the
-switch. The note on an item carries the Gist and Brief instead of a take, and the Deep card when there is one.
+**Changed: Zotero.** The collections 0.x named "Tier 1" and "Tier 2" become "Must read" and "Relevant", renamed when
+Zotero is switched on after the switch (decision 66). The note on an item carries the Gist and Brief instead of a take, and the Deep card when there is one.
 
 **Changed: deep.** A card is requested for a Focus paper at must read, an Area pick, and any paper the owner asks for
 (`card.requested`, honoured whatever the grade). It goes through the full-text queue like any pass, so it starts when
@@ -57,4 +57,5 @@ cancels automatic card passes that have not started. A card the owner asked for 
 card already made is kept.
 
 Notion stays outside the built-in set: a documented n8n workflow subscribes by webhook and reads the API. The PI's
-Notion view carries Focus topics only until the owner has talked to her (first v1, decision 5).
+Notion view carries Focus topics only until the owner has talked to her (first v1, decision 5); it stops at the
+switch until then (decision 67).

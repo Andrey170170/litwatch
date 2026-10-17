@@ -151,6 +151,22 @@ Anthropic API and $20–30 on OpenRouter, against about $215 and $4 at the resta
     again (the same text, title, abstract and area, the journal's request key) is answered by the gateway's journal at
     no cost.
 
+## Decided 2026-10-16, the switch
+
+The plan is [`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md).
+
+63. **v1 takes 0.14's place**, its stack, paths and catalog entry, instead of running beside it; the two never run
+    at once, so the deep credential moves without a new sign-in.
+64. **The switch check runs on the catch-up week**: the week v1 reads from the archive on its first night is one
+    0.14 has already processed, so the comparison needs no nights side by side.
+65. **litwatch follows the homelab's telemetry convention**: JSON logs, Prometheus metrics with the shared job
+    metrics read from the run records, and a `homelab.status/v1` status endpoint built from what the status line
+    knows, on an internal port. The owner's instance sits behind the gateway's nginx and is instrumented in Vergil.
+66. **Zotero and WebDAV are switched on after a few stable nights**, catching up from the first event: their
+    cursors are created at the start of the outbox when the database is made. The collections are renamed then.
+67. **Notion stops at the switch** until the owner has talked to the PI; the export is then rewritten against v1's
+    events or removed.
+
 ## Open
 
 - The grade table and rarity offsets are starting points, tuned in N2.

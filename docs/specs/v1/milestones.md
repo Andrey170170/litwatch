@@ -40,7 +40,8 @@ backup and one-transaction recovery reconcile). N6, the restart (#71,
 `evals/2026-10-16-restart.md`), over one week rather than two by the owner's call of 2026-10-16 (the week before comes
 with the backfill). Next: the owner's read of N3's ten Briefs; the owner's instance applies the PDF
 policy; the model-spend plan ([`docs/plans/model-spend.md`](../../plans/model-spend.md), decisions 60–62), which brings
-the nightly under the owner's caps before the switch.
+the nightly under the owner's caps before the switch (#74, #75); then N8, the switch
+([`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md)).
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).
@@ -93,11 +94,16 @@ every Focus paper at central with its Brief, or the reason it has none; the dige
 phone gestures and the PWA) as the build plan says. *Check:* every page walked on the sandbox at phone and desktop
 widths, dark and light, beside its sketch; the owner's read.
 
-**N8 · Side by side and switch** (the first spec's M7, adapted). A few days beside 0.14 with the scheduler on and the
-owner reading v1 every morning; Zotero stays off until the switch and its collections are renamed then. The switch
-happens when v1's Focus output for those days contains everything 0.14 put at tier 1–2 on the two CoT selections, or
-each difference has been looked at. The owner removes 0.14 by hand. Carried notes: do not share v1's Postgres with
-services holding transactions open; check a resumed WebDAV upload's md5 and mtime against the real library once.
+**N8 · The switch** (the first spec's M7, adapted; the plan is [`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md)).
+v1 takes 0.14's place on the owner's server rather than running beside it (decision 63): 0.14 stops after its last
+daily run and v1 starts on an empty database, the last week read from the archive and processed by the scheduled
+nightly. The switch holds when v1's Focus output for that week contains everything 0.14 put at tier 1–2 on the two CoT
+selections for the same papers, or each difference has been looked at (decision 64); otherwise 0.14 comes back. Before
+it, litwatch follows the homelab's telemetry convention: JSON logs, metrics with the shared job metrics, a status
+endpoint (decision 65). Zotero and WebDAV stay off for a few stable nights and then catch up from the first event; the
+collections are renamed then (decision 66). Notion stops at the switch (decision 67). The owner removes 0.14 by hand.
+Carried notes: do not share v1's Postgres with services holding transactions open; check a resumed WebDAV upload's
+md5 and mtime against the real library once.
 
 **N9 · Release** (the first spec's M8, unchanged): compose file, install and configuration docs, repository clean-up,
 MIT licence, `v1.0.0`; `evals/` and homelab specifics leave the repository; the AGPL `pdf` extra stays optional.
