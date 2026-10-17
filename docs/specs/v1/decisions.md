@@ -100,7 +100,8 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 50. **Costs.** Month-to-date spend per provider; amber against a monthly budget; nightly runs never downgraded; hard
     ceilings on re-runs and backfills.
 51. **The library.** Focus papers at relevant or above are saved automatically; everything else by hand. Zotero's
-    "Tier 1" and "Tier 2" collections become "Must read" and "Relevant" at the switch.
+    "Tier 1" and "Tier 2" collections become "Must read" and "Relevant" when Zotero is switched on after the
+    switch (decision 66).
 52. **Order of work.** The core is redesigned before the switch, in two passes: this spec, then the UI sketches and
     design; no code until both are merged. 0.14 stays production meanwhile.
 
