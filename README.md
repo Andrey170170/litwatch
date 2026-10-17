@@ -4,12 +4,10 @@ Insurance against missing a paper on a research question you watch. Every new ar
 the configured categories is stored, sorted into classes and judged against your topics, and
 the results are served through litwatch's own web app.
 
-This branch is v1 in progress. The specification is in `docs/specs/v1/` and the terms in
-`GLOSSARY.md`. The first v1 design's pipeline (triage, takes, reviews and issues) has been taken
-out, and the redesigned core (classes, detail levels, digests per depth) is being built in its
-place before the switch; the nightly run is intake, classification, analysis, grading, the
-full-text queue and the digests, the API serves Papers, the topics, a paper's page and the
-digests, and the web app is a placeholder. Release 0.14 lives on `main`.
+This is v1, which replaced release 0.14 on 2026-10-17. The specification is in `docs/specs/v1/`
+and the terms in `GLOSSARY.md`. The nightly run is intake, classification, analysis, grading, the
+full-text queue and the digests; the web app serves the papers, the topics, a paper's page and the
+digests.
 
 ## Running it
 
