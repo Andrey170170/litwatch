@@ -123,9 +123,13 @@ class Collections:
 
 
 def _url_path(url: Any) -> str:
-    """The path of an arXiv URL, whatever its query or fragment; "" for any other host."""
-    parts = urlsplit(str(url).strip())
-    host = (parts.hostname or "").lower()
+    """The path of an arXiv URL, whatever its query or fragment; "" for any other host, or for
+    a value that is no URL."""
+    try:
+        parts = urlsplit(str(url).strip())
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return ""
     return parts.path if host in ("arxiv.org", "www.arxiv.org", "export.arxiv.org") else ""
 
 

@@ -492,6 +492,9 @@ def test_an_item_is_the_papers_by_its_own_identifiers_only():
     assert is_item_of({"url": "https://arxiv.org/html/2610.00001v1"}, "2610.00001")
     assert is_item_of({"url": "https://arxiv.org/abs/2610.00001?context=cs#S2"}, "2610.00001")
     assert not is_item_of({"url": "https://example.org/abs/2610.00001"}, "2610.00001")
+    # A URL that is no URL neither names the paper nor stops the other identifiers.
+    assert not is_item_of({"url": "https://["}, "2610.00001")
+    assert is_item_of({"url": "https://[", "DOI": "10.48550/arXiv.2610.00001"}, "2610.00001")
     assert not is_item_of({"extra": "Related: https://arxiv.org/abs/2610.00001"}, "2610.00001")
     assert not is_item_of({"abstractNote": "2610.00001"}, "2610.00001")
     # The Extra line litwatch itself writes, on an item since moved to its published version.
