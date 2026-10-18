@@ -281,11 +281,13 @@ html[data-theme="light"] .sheet .done { color: var(--fg); border-color: var(--fg
 .qbox:focus-within { border-color: var(--acc); }
 .qbox.big { max-width: none; height: 40px; }
 .qbox.short { min-width: 180px; max-width: 220px; flex: 0 1 220px; }
-.fchip { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid var(--line); font: 700 12px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg2); white-space: nowrap; }
+.fchip { display: inline-flex; align-items: center; justify-content: center; padding: 5px 11px; border: 1px solid var(--line); font: 700 12px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg2); white-space: nowrap; }
 .fchip:hover { color: var(--fg); }
 .fchip.on { color: var(--acc); border-color: var(--acc); }
 .fchip:active { transform: translateY(1px); background: var(--hover); }
-.sortseg { display: inline-flex; align-items: center; height: 34px; gap: 12px; font: 700 12px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; }
+/* in a list's controls, as tall as the search box and the rarity bar beside it */
+.ctlrow .fchip { height: 34px; padding-block: 0; }
+.sortseg { display: inline-flex; gap: 12px; font: 700 12px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; }
 .sortseg button { color: var(--fg3); }
 .sortseg button:hover { color: var(--fg); }
 .sortseg button.on { color: var(--acc); }
