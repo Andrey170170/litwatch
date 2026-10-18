@@ -125,6 +125,9 @@ async def day(day: date, request: Request, c: Conn) -> s.Day:
     monday = day - timedelta(days=7)
     if day.weekday() == 0 and await _marks(c, DigestPeriod.WEEK, monday, monday):
         weekly = monday
+    # The run before the cards: it is closed only once its digests are written, so a run read as
+    # done never comes with the cards from before its last digest (the reads are not one snapshot).
+    run = today_run(day, now, schedule, await reading.status(c)) if today else None
     return s.Day(
         day=day,
         released=await store_.released(c, day),
@@ -132,7 +135,7 @@ async def day(day: date, request: Request, c: Conn) -> s.Day:
         previous=await store_.step(c, DigestPeriod.DAY, day, False, shown),
         next=await store_.step(c, DigestPeriod.DAY, day, True, shown),
         weekly=weekly,
-        run=today_run(day, now, schedule, await reading.status(c)) if today else None,
+        run=run,
     )
 
 
