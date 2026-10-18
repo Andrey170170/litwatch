@@ -46,19 +46,18 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
   - empty and quiet states: a quiet day, a topic with nothing new, no search results;
   - dark and light;
   - integrations the action triggers.
-- How: `litwatch serve --port 8766` on the sandbox and `pnpm dev` in `web/`; open with `preview_open` and drive
-  with the preview tools. If T3's browser panel is unavailable, report that and stop the visual check.
+- How: a sandbox copied from production (`scripts/refresh-sandbox.sh --production`), `litwatch serve --port 8766`
+  on it and `pnpm dev` in `web/`; open with `preview_open` and drive with the preview tools. If T3's browser panel
+  is unavailable, report that and stop the visual check.
 
 ### Schema and data migrations
 - Works means: a fresh database migrates, and existing data comes through intact.
-- Evidence: pytest migrating a fresh schema; a data migration also runs on a fresh sandbox copy, with counts
-  before and after and a check that nothing the owner touched (labels, reactions, saved papers, Zotero items, Deep
-  cards) is lost.
-- How: build the sandbox at the schema before the change (`scripts/refresh-sandbox.sh`, see
-  [dev-host.md](dev-host.md); run it from the base branch), count with SQL, `litwatch db migrate` against it, count
-  again. A fresh sandbox has none of the owner's word; where the check needs it, restore the first v1's dump
-  (`~/backups/litwatch-v1-first-build-2026-10-14.dump`) into a new scratch database on `litwatch-v1-dev` instead,
-  and drop it afterwards; never start the stopped deployment.
+- Evidence: pytest migrating a fresh schema; a data migration also runs on a sandbox copied from production, with
+  counts before and after and a check that nothing the owner touched (labels, reactions, saved papers, Zotero items,
+  Deep cards) is lost.
+- How: build the sandbox from production at the base branch's schema (`scripts/refresh-sandbox.sh --production`,
+  see [dev-host.md](dev-host.md); run it from the base branch), count with SQL, `litwatch db migrate` from the
+  change's checkout, count again.
 
 ### Integrations (Zotero, WebDAV, deep, archive, webhook)
 - Works means: an event produces the right external effect, and a failure is retried and visible.
@@ -100,10 +99,9 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - **Fakes stand in for model providers and HTTP services in tests.** A claim about what a model writes or decides
   is shown by the quality harness or an evaluation, never by a fake.
 - **End-to-end runs use the sandbox**, a development database of real papers with the scheduler and integrations
-  off. From N2a it is built fresh: an empty schema plus a window of papers read from the archive and run through the
-  pipeline, as the restart does. Until then it is the last copy of the first v1's deployment, which stopped on
-  2026-10-14. An empty database is a bad test; hand-written rows are for visual states (long titles, odd counts)
-  only, never to claim that behavior works.
+  off: a copy of production, with the owner's word, verdicts and cards, or an empty schema plus a window of papers
+  read from the archive and run through the pipeline, as the restart does. An empty database is a bad test;
+  hand-written rows are for visual states (long titles, odd counts) only, never to claim that behavior works.
 - **The quality harness** scores an artifact (Gist, Brief, digest, Deep card, classification) on a gold set:
   papers with the owner's recorded judgments, the **preference set**. Each entry holds the key facts that must
   survive, the claims that must not appear, and ratings of earlier outputs. Scoring is rule checks (length,
@@ -113,6 +111,7 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - **Owner checks.** A claim only the owner can judge (a milestone check that says "read by the owner") is
   prepared by the agent and listed in the PR as pending; the PR does not merge until the owner has done it.
 - **Spending.** Model calls for evidence may cost up to $5 per change without asking; above that, ask first.
+- **Production is only read**, by `scripts/refresh-sandbox.sh --production`.
 - **Never touched**: production 0.14, the first v1's stopped deployment (its containers and database) and its deep
   service, and the owner's Zotero library. The live archive is only read (metadata, search).
 
