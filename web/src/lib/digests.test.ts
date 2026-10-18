@@ -33,7 +33,8 @@ describe("today's run", () => {
     expect(at("running", { papers: 120, total: 480 })).toMatchObject({ tag: "Running", tone: "warn", meta: "120 / 480 papers read", progress: 0.25 });
     expect(at("overrun", { papers: 470, total: 480 })?.line).toBe("The run is past its 07:30 deadline and still going. Digests follow.");
     expect(at("late")).toMatchObject({ tag: "No signal", tone: "sig", line: "The nightly run was due at 02:00 and has not started." });
-    expect(at("failed", { error: "anthropic down" })).toMatchObject({ tag: "Run failed", tone: "sig" });
+    // No promise of a retry: a run failing before its digests leaves none failed for the next run to write again.
+    expect(at("failed", { error: "anthropic down" })).toMatchObject({ tag: "Run failed", tone: "sig", line: "Today's run failed before writing today's digests." });
     expect(at("done")).toBeNull();
   });
   it("is read again until it is done", () => {
