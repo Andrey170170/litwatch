@@ -82,7 +82,7 @@ read. The states are the server's (`api/digests.py`, `today_run`), the times in 
 | running | Running | `--warn` | The nightly run is reading today's papers. Digests follow. (212 / 480 papers read) |
 | running past the night's deadline | Overrun | `--warn` | The run is past its 07:30 deadline and still going. Digests follow. |
 | 15 minutes past due, not started | No signal | `--sig` | The nightly run was due at 02:00 and has not started. |
-| failed | Run failed | `--sig` | Today's run failed. The next run writes today's digests. Then its error and "Needs you ›". |
+| failed | Run failed | `--sig` | Today's run failed. Today has no digests. Then its error and "Needs you ›". |
 
 Once the run is done, the day's cards or its one line. While the run is to settle the Day is read again every
 minute.
