@@ -105,15 +105,17 @@ if [[ -n "$production" ]]; then
   # - its open model batches and Deep jobs, settled here as not followed, so a sandbox run
   #   never waits on, reads or cancels production's work with the shared credentials;
   # - its outbox positions, production's transaction ids, which this cluster's snapshots
-  #   cannot compare: every copied event and cursor moves to the first normal id, settled for
-  #   any snapshot here; their order becomes id order, and each cursor keeps its id.
+  #   cannot compare: every copied event moves to the first normal id, settled for any
+  #   snapshot here, and every cursor to the end of the copy, its failures cleared, so a
+  #   sandbox integration handles only the sandbox's own events, never production's again.
   docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -q -1 -U postgres -d "$NEXT" <<'SQL'
 UPDATE inference_calls SET error = 'sandbox: copied from production, not followed'
     WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL;
 UPDATE deep_attempts SET ended_at = now(), error = 'sandbox: copied from production, not followed'
     WHERE ended_at IS NULL;
 UPDATE outbox SET xid = '3';
-UPDATE integration_cursors SET position_xid = '3';
+UPDATE integration_cursors SET position_xid = '3', position = (SELECT coalesce(max(id), 0) FROM outbox),
+    failing = NULL, failures = 0, retry_at = NULL, last_error = NULL, failed_at = NULL, skipped = 0;
 SQL
 else
   LITWATCH_DATABASE_URL=$next_dsn uv run litwatch intake archive "${window[@]}"

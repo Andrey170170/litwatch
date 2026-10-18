@@ -37,7 +37,7 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   complete. Its two sources:
   - `--production`: a copy of production's database (one read-only `pg_dump` in `litwatch-db`, a few seconds),
     brought to this checkout's schema, with production's open model batches and Deep jobs settled as not
-    followed. It has the owner's word, verdicts, Deep cards and digests: the source for web checks and data
+    followed and every integration's cursor at the end of the copied events. It has the owner's word, verdicts, Deep cards and digests: the source for web checks and data
     migrations.
   - by default, the migrations plus the papers of a window read from the archive (`--days 14` by default, or
     `--since`/`--until`), as the restart builds one, for pipeline runs from nothing. It only reads the archive.
