@@ -27,9 +27,9 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   `TEST_DATABASE_URL` (dev `test`), `LITWATCH_API_TOKEN`, and the host archive: `LITWATCH_ARCHIVE_URL`
   (`http://127.0.0.1:8787`) and `LITWATCH_ARCHIVE_TOKEN_FILE` (`/srv/arxiv-work/catalog/api-token`, the file
   production's stack mounts). Source it first so `.env` only fills in the API keys.
-- A `litwatch` command that opens the database, `serve` included, first applies this checkout's migrations to it.
-  Point one only at a database built for this checkout's schema or one behind it: a stale copy can fail halfway
-  through and stay half-migrated.
+- Database commands can apply this checkout's migrations automatically; `serve` does. Read-only evaluation commands
+  opt out. Point one only at a database built for this checkout's schema or one behind it: a stale copy can fail
+  halfway through and stay half-migrated.
 - The agent shell exports `ANTHROPIC_BASE_URL` for the agent's own proxy. The Anthropic SDK picks it up and every
   litwatch call fails with 401, hence `env -u`.
 - Dev API: `litwatch serve --port 8766`; the web app's `pnpm dev` (port 5173) proxies `/api` to it.

@@ -106,7 +106,7 @@ if [[ -n "$production" ]]; then
   #   never waits on, reads or cancels production's work with the shared credentials;
   # - its outbox positions, production's transaction ids, which this cluster's snapshots
   #   cannot compare: every copied event and cursor moves to the first normal id, settled for
-  #   any snapshot here, keeping their order by id and each cursor's place among them.
+  #   any snapshot here; their order becomes id order, and each cursor keeps its id.
   docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -q -1 -U postgres -d "$NEXT" <<'SQL'
 UPDATE inference_calls SET error = 'sandbox: copied from production, not followed'
     WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL;
