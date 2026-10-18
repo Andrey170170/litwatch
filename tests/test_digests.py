@@ -905,6 +905,9 @@ def run(state: str, started: datetime, **more) -> dict:
         (denver(4), run("failed", denver(2), error="anthropic down"), "failed"),
         (denver(9), run("attention", denver(2)), "done"),
         (denver(9), run("quiet", denver(2)), "done"),
+        (denver(1), run("quiet", denver(0, 30)), "waiting"),  # by hand before the fire
+        (denver(1), run("running", denver(0, 30), waiting=268), "running"),
+        (denver(11), run("quiet", denver(10)), "done"),  # again by hand after a failure
     ],
 )
 def test_todays_run_waits_runs_and_ends_or_is_late(now, latest, state):

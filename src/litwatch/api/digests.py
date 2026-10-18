@@ -87,7 +87,7 @@ def today_run(
 ) -> s.TodayRun | None:
     """Where today's nightly run stands (DESIGN.md, Day), when `day` is today in the schedule's
     zone, the schedule is on and the nightly fires today; else None. `run` is the latest nightly
-    run's status (`store.reading.status`); it is today's when it started today."""
+    run's status (`store.reading.status`)."""
     zone = schedule.zone
     if not schedule.enabled or now.astimezone(zone).date() != day:
         return None
@@ -98,8 +98,11 @@ def today_run(
     if deadline <= due:
         deadline += timedelta(days=1)
     night = {"due": due, "deadline": deadline}
+    # Today's run started at or after tonight's fire, as the scheduler counts it (`is_due`): a run
+    # by hand before it leaves the fire outstanding; one still going shows as it goes.
     started = run.get("started_at") if run else None
-    if run is None or started is None or started.astimezone(zone).date() != day:
+    ours = started is not None and started.astimezone(zone).date() == day
+    if run is None or not ours or (started < due and run["state"] != "running"):
         return s.TodayRun(state="late" if now >= due + GRACE else "waiting", **night)
     if run["state"] == "running":
         state = "overrun" if now > deadline else "running"
