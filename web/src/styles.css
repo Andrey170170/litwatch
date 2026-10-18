@@ -404,6 +404,22 @@ html[data-theme="light"] .modes a.on { color: var(--fg); }
 html[data-theme="light"] .wkline { color: var(--fg); border-color: var(--fg); }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .wkline { color: var(--fg); border-color: var(--fg); } }
 .none { color: var(--fg3); font-size: 13px; padding: 4px 0 2px; }
+/* Today's run in place of the cards (DESIGN.md, Day): the run status's square and tones, a cut card. */
+.tonight { --t: var(--cy); display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; padding: 12px 14px 13px; background: var(--surface); border: 1px solid var(--line2); border-left: 3px solid var(--t); clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
+.tonight.warn { --t: var(--warn); }
+.tonight.sig { --t: var(--sig); }
+.tonight .hd { display: flex; align-items: center; gap: 8px; font: 500 11.5px var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--t); }
+.tonight .hd::before { content: ""; width: 7px; height: 7px; background: currentColor; flex: none; }
+.tonight.live .hd::before { animation: lw-pulse 1.2s ease-in-out infinite; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tonight .hd::before { box-shadow: 0 0 6px currentColor; } }
+html[data-theme="dark"] .tonight .hd::before { box-shadow: 0 0 6px currentColor; }
+.tonight .tg { padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--t) 45%, transparent); background: color-mix(in srgb, var(--t) 9%, transparent); clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%); }
+.tonight .at { margin-left: auto; color: var(--fg3); letter-spacing: 0.04em; }
+.tonight p { margin: 0; font-size: 13.5px; color: var(--fg2); }
+.tonight .bar { height: 3px; background: color-mix(in srgb, var(--t) 18%, transparent); }
+.tonight .bar i { display: block; height: 100%; background: var(--t); transition: width 0.4s ease-out; }
+.tonight .err { font: 11.5px var(--font-mono); color: var(--fg3); overflow-wrap: anywhere; }
+.tonight .lnk { align-self: flex-start; }
 /* a digest card at Gist level; the whole card opens the digest */
 .dblock { background: var(--surface); border: 1px solid var(--line2); margin-bottom: 10px; cursor: pointer; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
 .dblock:hover { border-color: var(--acc); }

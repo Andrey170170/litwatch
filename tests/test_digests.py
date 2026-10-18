@@ -14,7 +14,8 @@ import pytest
 
 from litwatch import digests, fulltext
 from litwatch.api import create_app
-from litwatch.config import Config
+from litwatch.api.digests import today_run
+from litwatch.config import Config, Schedule
 from litwatch.core import Label, LabelValue, Status
 from litwatch.core.classification import Source
 from litwatch.core.digests import DigestPeriod, listing_day, voice_problems
@@ -798,9 +799,9 @@ def test_the_voice_check_names_each_rule_broken_and_spares_titles():
 # -- the Digest tab --------------------------------------------------------------------------------
 
 
-def client(conn, w: Writer) -> httpx.AsyncClient:
+def client(conn, w: Writer, config: Config | None = None) -> httpx.AsyncClient:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, Config(), gateway=w.gateway)
+    app = create_app(dsn, TOKEN, config or Config(), gateway=w.gateway)
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
@@ -880,3 +881,54 @@ async def test_a_failed_digest_is_written_again_at_the_owners_word(db):
         assert (again.status_code, again.json()["state"]) == (200, "written")
         assert [p["id"] for p in again.json()["papers"]] == [P.id]
         assert (await http.post(f"/api/digests/{failed['id']}/write")).status_code == 409
+
+
+DENVER = Schedule(enabled=True, timezone="America/Denver")  # nightly 02:00, deadline 07:30
+
+
+def denver(hour: int, minute: int = 0, day: date = WED) -> datetime:
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=DENVER.zone)
+
+
+def run(state: str, started: datetime, **more) -> dict:
+    return {"state": state, "started_at": started.astimezone(UTC), "papers": 212, **more}
+
+
+@pytest.mark.parametrize(
+    ("now", "latest", "state"),
+    [
+        (denver(1), None, "waiting"),
+        (denver(2, 10), run("quiet", denver(2, 0, TUE)), "waiting"),  # yesterday's run
+        (denver(2, 20), run("quiet", denver(2, 0, TUE)), "late"),
+        (denver(3), run("running", denver(2), waiting=268), "running"),
+        (denver(8), run("running", denver(2), waiting=12), "overrun"),
+        (denver(4), run("failed", denver(2), error="anthropic down"), "failed"),
+        (denver(9), run("attention", denver(2)), "done"),
+        (denver(9), run("quiet", denver(2)), "done"),
+    ],
+)
+def test_todays_run_waits_runs_and_ends_or_is_late(now, latest, state):
+    got = today_run(WED, now, DENVER, latest)
+    assert got is not None and got.state == state
+    assert (got.due, got.deadline) == (denver(2), denver(7, 30))
+    if state in ("running", "overrun"):
+        assert (got.papers, got.total) == (212, 480 if state == "running" else 224)
+    assert got.error == ("anthropic down" if state == "failed" else None)
+
+
+def test_only_today_has_a_run_and_only_with_the_schedule_on():
+    assert today_run(TUE, denver(9), DENVER, None) is None  # yesterday, in Denver
+    assert today_run(WED, denver(9), Schedule(timezone="America/Denver"), None) is None
+    # 23:30 in Denver is already the next day in UTC: still Wednesday's run
+    assert today_run(WED, denver(23, 30), DENVER, None).state == "late"
+
+
+async def test_the_day_carries_todays_run_on_today_only(db):
+    w = Writer()
+    config = Config(schedule=Schedule(enabled=True))
+    today = datetime.now(config.schedule.zone).date()
+    async with client(db, w, config) as http:
+        now = (await http.get(f"/api/digests/days/{today}")).json()
+        before = (await http.get(f"/api/digests/days/{today - timedelta(days=1)}")).json()
+    assert now["run"]["state"] in ("waiting", "late") and now["run"]["due"].startswith(str(today))
+    assert before["run"] is None

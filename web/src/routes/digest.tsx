@@ -6,7 +6,7 @@
  */
 import { useInfiniteQuery, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearch, type LinkProps } from "@tanstack/react-router";
-import { Fragment, useEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain } from "@/api/mutations";
 import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
@@ -14,10 +14,9 @@ import { Badge } from "@/components/Badge";
 import { Sheet } from "@/components/Sheet";
 import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
-import { useSummary } from "@/components/Summary";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
-import { addDays, calendarMonths, dayLabel, emptyDay, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, weekRange, type Card, type DigestPaper, type Mark } from "@/lib/digests";
+import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, tonight, unsettled, weekRange, type Card, type DigestPaper, type Mark, type TodayRun } from "@/lib/digests";
 import { openedFrom } from "@/lib/listContext";
 import { useSteps } from "@/lib/steps";
 import { rowDate } from "@/lib/format";
@@ -205,23 +204,41 @@ function useStepTo(to: "/" | "/week", prev: string | null | undefined, next: str
  * has ‹ back and its label for a title. */
 const useOnPage = () => !!useLocation().state.page;
 
+/** Today's run in place of the cards while it is still to settle (DESIGN.md, Day): the tag in its tone with the
+ * night's time or the papers read, one line, the bar while it runs; a failure's error and the way to Needs you. */
+function Tonight({ run }: { run: TodayRun }) {
+  const t = tonight(run);
+  if (!t) return null;
+  return (
+    <div className={`tonight ${t.tone}${run.state === "running" || run.state === "overrun" ? " live" : ""}`} role="status">
+      <div className="hd">
+        <span className="tg">{t.tag}</span>
+        <span className="at">{t.meta}</span>
+      </div>
+      <p>{t.line}</p>
+      {t.progress !== undefined && (
+        <div className="bar">
+          <i style={{ width: `${Math.round(t.progress * 100)}%` }} />
+        </div>
+      )}
+      {run.state === "failed" && (
+        <>
+          {run.error && <div className="err">{run.error}</div>}
+          <Link to="/settings/$page" params={{ page: "needs" }} className="lnk">
+            Needs you ›
+          </Link>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function DigestPage() {
   const search = useSearch({ from: "/" });
   const now = today();
   const day = search.day ?? now;
-  const q = useQuery(dayQuery(day));
-  const run = useSummary((s) => s.status).data;
-  // The latest run's end the day was read under. A run ending while an empty today is open reads the day again, and
-  // until that read is back the run is taken as unknown, so the line never says what the run did not find.
-  const ended = run?.finished_at ?? null;
-  const [readUnder, setReadUnder] = useState(ended);
-  const empty = day === now && q.data !== undefined && !q.data.digests.length;
-  const refetch = q.refetch;
-  useEffect(() => {
-    if (ended === readUnder) return;
-    if (empty) void refetch().then(() => setReadUnder(ended));
-    else setReadUnder(ended);
-  }, [ended, readUnder, empty, refetch]);
+  // Today, the Day is read again every minute until its run is done, so the panel follows the run.
+  const q = useQuery({ ...dayQuery(day), refetchInterval: (query) => (unsettled(query.state.data) ? 60_000 : false) });
   const desktop = useDesktop();
   // Stepping skips days without digests, but today is always a stop: the tab opens there, so › always leads back.
   // (A browser behind the server's zone can be shown a later day as the next: today still comes first.)
@@ -249,7 +266,7 @@ export function DigestPage() {
         </Link>
       )}
       <State q={q} what="the day" />
-      {q.data && !q.data.digests.length && <div className="none">{emptyDay(day, now, q.data.released, ended === readUnder ? run : undefined)}</div>}
+      {q.data && !q.data.digests.length && (q.data.run && unsettled(q.data) ? <Tonight run={q.data.run} /> : <div className="none">{q.data.released ? "No digests for this day." : "No papers released."}</div>)}
       {q.data?.digests.map((c) => (
         <DigestCard key={c.id} card={c} />
       ))}

@@ -69,9 +69,23 @@ swipe), "Today" over it on today. Then one digest card per daily topic in the fi
 below). On a Monday one line above the cards, "Weekly digests for 5–11 Oct are out ›", opens that Week; the weekly
 cards themselves are not repeated in the Day. A weekend or holiday with no release
 is one line, "No papers released", and stepping skips it; today is always a stop, so › from the last day with
-digests leads back to it. Today, until a nightly run started today has finished without failing, says so instead:
-"Today's digests are being written." while it runs, else "Nothing yet today. The next nightly run writes today's
-digests."; a run ending while today is open reads the day again.
+digests leads back to it.
+
+**Today's run.** Until today's nightly run is done, today without digests shows where the run stands in place of the
+cards: a cut card with a 3 px left edge in its tone, the run status's square (pulsing while it runs) and a tag in
+Mono caps, the night's time or the papers read at the right, one line, and while it runs a 3 px bar of the papers
+read. The states are the server's (`api/digests.py`, `today_run`), the times in local time:
+
+| State | Tag | Tone | Line |
+| --- | --- | --- | --- |
+| before the nightly is due | Standby | `--cy` | Today's digests arrive with the nightly run. (run at 02:00) |
+| running | Running | `--warn` | The nightly run is reading today's papers. Digests follow. (212 / 480 papers read) |
+| running past the night's deadline | Overrun | `--warn` | The run is past its 07:30 deadline and still going. Digests follow. |
+| 15 minutes past due, not started | No signal | `--sig` | The nightly run was due at 02:00 and has not started. |
+| failed | Run failed | `--sig` | Today's run failed. The next run writes today's digests. Then its error and "Needs you ›". |
+
+Once the run is done, the day's cards or its one line. While the run is to settle the Day is read again every
+minute.
 
 **Week.** One week's weekly digests, every topic in the fixed order, the same cards; "‹ 5–11 Oct ›" steps by week.
 
