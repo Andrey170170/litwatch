@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import type { MouseEvent } from "react";
 import type { Schemas } from "@/api/client";
 import { useSave } from "@/api/mutations";
-import { rowDate } from "@/lib/format";
+import { fullDate, rowDate, tableDate } from "@/lib/format";
 import { openedFrom } from "@/lib/listContext";
 import { CONTRIBUTION_NAME, rc, type Rarity } from "@/lib/rarity";
 import { Badge } from "./Badge";
@@ -93,7 +93,9 @@ export function TableRow({ row, rarity, topic, list }: RowProps) {
       )}
       <span className="kd">{row.facets ? CONTRIBUTION_NAME[row.facets.contribution] : ""}</span>
       <Facets facets={row.facets} />
-      <span className="dt">{rowDate(row.published)}</span>
+      <span className="dt" title={fullDate(row.published)}>
+        {tableDate(row.published)}
+      </span>
       <Star id={row.id} saved={row.saved} />
     </Link>
   );

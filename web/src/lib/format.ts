@@ -18,6 +18,12 @@ export function rowDate(iso: string | null | undefined, now = new Date()): strin
   const d = parse(iso);
   return d.getFullYear() === now.getFullYear() ? ROW.format(d) : ROW_YEAR.format(d);
 }
+/** A table row's date, in its narrow column: "13 Oct", or the year alone when not this year. */
+export function tableDate(iso: string | null | undefined, now = new Date()): string {
+  if (!iso) return "";
+  const d = parse(iso);
+  return d.getFullYear() === now.getFullYear() ? ROW.format(d) : String(d.getFullYear());
+}
 /** "13 Oct 2026" */
 export function fullDate(iso: string | null | undefined): string {
   return iso ? ROW_YEAR.format(parse(iso)) : "";
