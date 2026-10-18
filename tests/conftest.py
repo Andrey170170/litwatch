@@ -68,6 +68,24 @@ def paper(id: str = "2609.11934", **fields) -> Paper:
     return Paper(id=id, **{**defaults, **fields})
 
 
+# The dev host's own services, which `.env.v1` exports for running litwatch: no test reaches one.
+HOST_SERVICES = (
+    "LITWATCH_ARCHIVE_URL",
+    "LITWATCH_ARCHIVE_TOKEN",
+    "LITWATCH_ARCHIVE_TOKEN_FILE",
+    "LITWATCH_ZOTERO_USER_ID",
+    "ZOTERO_API_KEY",
+    "ZOTERO_API_KEY_FILE",
+)
+
+
+@pytest.fixture(autouse=True)
+def no_host_services(monkeypatch):
+    for name in HOST_SERVICES:
+        monkeypatch.setenv(name, "")  # recorded, so the undo also removes what a test's .env sets
+        monkeypatch.delenv(name)
+
+
 @pytest.fixture
 async def conn():
     """A connection to an empty, migrated schema. Skips without `TEST_DATABASE_URL`, which
