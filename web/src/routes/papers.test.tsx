@@ -39,7 +39,7 @@ describe("Papers", () => {
     renderApp("/papers");
     const top = await screen.findByRole("region", { name: "Epic and legendary" });
     expect(await within(top).findByText("Epic one")).toBeInTheDocument();
-    expect(within(top).getAllByText("13 Oct")).toHaveLength(2);
+    expect(within(top).getAllByText("13 Oct 2026")).toHaveLength(2);
     expect(within(top).getByText("Gist of Epic one")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Rare" })).toHaveTextContent("Rare one");
     const uncommon = screen.getByRole("region", { name: "Uncommon" });

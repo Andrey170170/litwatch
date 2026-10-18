@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import type { MouseEvent } from "react";
 import type { Schemas } from "@/api/client";
 import { useSave } from "@/api/mutations";
-import { fullDate, rowDate, tableDate } from "@/lib/format";
+import { fullDate } from "@/lib/format";
 import { openedFrom } from "@/lib/listContext";
 import { CONTRIBUTION_NAME, rc, type Rarity } from "@/lib/rarity";
 import { Badge } from "./Badge";
@@ -74,7 +74,7 @@ export function ReadingRow({ row, rarity, topic, list }: RowProps) {
         {row.facets && <span className="kd">{CONTRIBUTION_NAME[row.facets.contribution]}</span>}
         <Facets facets={row.facets} />
         <span className="sp" />
-        <span className="dt">{rowDate(row.published)}</span>
+        <span className="dt">{fullDate(row.published)}</span>
       </div>
     </Link>
   );
@@ -93,9 +93,7 @@ export function TableRow({ row, rarity, topic, list }: RowProps) {
       )}
       <span className="kd">{row.facets ? CONTRIBUTION_NAME[row.facets.contribution] : ""}</span>
       <Facets facets={row.facets} />
-      <span className="dt" title={fullDate(row.published)}>
-        {tableDate(row.published)}
-      </span>
+      <span className="dt">{fullDate(row.published)}</span>
       <Star id={row.id} saved={row.saved} />
     </Link>
   );
