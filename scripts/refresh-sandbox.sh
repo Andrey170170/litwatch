@@ -5,8 +5,9 @@
 # checkout's schema. Run from the repository root on the owner's server (docs/agents/dev-host.md).
 #
 # The new database is built as `<db>_next` and replaces `<db>` only once it is complete, so a
-# failed refresh leaves the previous sandbox as it was. It runs only against the dev Postgres
-# (container litwatch-v1-dev, 127.0.0.1:55432) and never touches `litwatch` or `test`.
+# failed refresh leaves the previous sandbox as it was. Everything it writes is on
+# the dev Postgres (container litwatch-v1-dev, 127.0.0.1:55432), never `litwatch` or `test`;
+# production is only read, by --production's pg_dump.
 #
 #   --days N        the N days ending today (UTC); the default, with N = 14
 #   --since DATE    the window's first day instead (YYYY-MM-DD)
@@ -63,7 +64,7 @@ for name in "$db" "$NEXT" "$OLD"; do
   fi
 done
 
-# Every database this script touches is on the server of the dev DSN, which must be the dev
+# Every database this script writes is on the server of the dev DSN, which must be the dev
 # Postgres: the one known address, and the port the container publishes.
 set -a; . "$env_file"; set +a
 dsn=$LITWATCH_DATABASE_URL
