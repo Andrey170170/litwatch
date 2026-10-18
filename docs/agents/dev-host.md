@@ -27,8 +27,8 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   `TEST_DATABASE_URL` (dev `test`), `LITWATCH_API_TOKEN`, and the host archive: `LITWATCH_ARCHIVE_URL`
   (`http://127.0.0.1:8787`) and `LITWATCH_ARCHIVE_TOKEN_FILE` (`/srv/arxiv-work/catalog/api-token`, the file
   production's stack mounts). Source it first so `.env` only fills in the API keys.
-- Every `litwatch` command, `serve` included, first applies this checkout's migrations to the database it points
-  at. Point it only at a database built for this checkout's schema or one behind it: a stale copy can fail halfway
+- A `litwatch` command that opens the database, `serve` included, first applies this checkout's migrations to it.
+  Point one only at a database built for this checkout's schema or one behind it: a stale copy can fail halfway
   through and stay half-migrated.
 - The agent shell exports `ANTHROPIC_BASE_URL` for the agent's own proxy. The Anthropic SDK picks it up and every
   litwatch call fails with 401, hence `env -u`.
@@ -36,8 +36,9 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
 - The sandbox: `scripts/refresh-sandbox.sh` rebuilds `sandbox` and replaces the old one only once the new one is
   complete. Its two sources:
   - `--production`: a copy of production's database (one read-only `pg_dump` in `litwatch-db`, a few seconds),
-    brought to this checkout's schema. It has the owner's word, verdicts, Deep cards and digests: the source for
-    web checks and data migrations.
+    brought to this checkout's schema, with production's open model batches and Deep jobs settled as not
+    followed. It has the owner's word, verdicts, Deep cards and digests: the source for web checks and data
+    migrations.
   - by default, the migrations plus the papers of a window read from the archive (`--days 14` by default, or
     `--since`/`--until`), as the restart builds one, for pipeline runs from nothing. It only reads the archive.
 

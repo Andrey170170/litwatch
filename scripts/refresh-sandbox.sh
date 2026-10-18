@@ -97,10 +97,25 @@ if [[ -n "$production" ]]; then
   docker exec "$PROD_CONTAINER" pg_dump -U "$PROD_USER" -d "$PROD_DB" -Fc --no-owner --no-privileges \
     | docker exec -i "$CONTAINER" pg_restore -U postgres --role "$dsn_user" --no-owner --no-privileges \
         --exit-on-error -d "$NEXT"
-  # Production may be behind this checkout: a branch's new migrations apply to the copy.
-  LITWATCH_DATABASE_URL=$next_dsn uv run litwatch db migrate
+fi
+# Production may be behind this checkout: a branch's new migrations apply to the copy too.
+LITWATCH_DATABASE_URL=$next_dsn uv run litwatch db migrate
+if [[ -n "$production" ]]; then
+  # What only means something to production is cut loose, in one transaction:
+  # - its open model batches and Deep jobs, settled here as not followed, so a sandbox run
+  #   never waits on, reads or cancels production's work with the shared credentials;
+  # - its outbox positions, production's transaction ids, which this cluster's snapshots
+  #   cannot compare: every copied event and cursor moves to the first normal id, settled for
+  #   any snapshot here, keeping their order by id and each cursor's place among them.
+  docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -q -1 -U postgres -d "$NEXT" <<'SQL'
+UPDATE inference_calls SET error = 'sandbox: copied from production, not followed'
+    WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL;
+UPDATE deep_attempts SET ended_at = now(), error = 'sandbox: copied from production, not followed'
+    WHERE ended_at IS NULL;
+UPDATE outbox SET xid = '3';
+UPDATE integration_cursors SET position_xid = '3';
+SQL
 else
-  LITWATCH_DATABASE_URL=$next_dsn uv run litwatch db migrate
   LITWATCH_DATABASE_URL=$next_dsn uv run litwatch intake archive "${window[@]}"
 fi
 
