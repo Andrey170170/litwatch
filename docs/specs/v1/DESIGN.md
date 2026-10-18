@@ -382,7 +382,8 @@ count sits on its own line under the name, so it starts at the same place in eve
 
 **Paper row**, three forms: the digest row (title and date); the reading row (title and ★ on the first line, the Gist,
 then badges where the list mixes topics, kind, ⟨/⟩ and ◆ facets and the date); the table row, one line (stripe, title,
-badges on Papers, kind, facets, date, ★), its stripe an inset full-height edge. ★ saves and unsaves in place.
+badges on Papers, kind, facets, date, ★; a date from another year is its year alone, the day on hover), its stripe
+an inset full-height edge. ★ saves and unsaves in place.
 
 **State mark.** A paper row whose paper has an open state (Paper, open states) carries an 11 px triangle in its
 top-right corner: yellow for the owner's word, red for a failure; yellow when it has both. A topic's states count in
