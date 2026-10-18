@@ -73,10 +73,12 @@ export function markShort(m: Mark): string {
 /** "Daily digest · Wed 14 Oct", "Weekly digest · 5–11 Oct". */
 export const periodLine = (m: Pick<Mark, "period" | "day">) => (m.period === "week" ? `Weekly digest · ${weekRange(m.day)}` : `Daily digest · ${dayLabel(m.day)}`);
 
-/** The one line a day without digests shows. Today, until a nightly run started today has finished, nothing is
- * known yet: the line says the run is writing, or that it has not come (`run` is the latest run, from the summary). */
+/** The one line a day without digests shows. Today, until a nightly run started today has finished without failing,
+ * nothing is known yet: the line says the run is writing, or that it has not come (`run` is the latest run, from the
+ * summary; undefined while it is unknown). */
 export function emptyDay(day: string, today: string, released: boolean, run: Schemas["RunStatus"] | undefined): string {
-  if (day === today && run) {
+  if (day === today) {
+    if (!run) return "Nothing yet today.";
     if (run.state === "running") return "Today's digests are being written.";
     const looked = run.state !== "failed" && run.started_at && isoDay(new Date(run.started_at)) === today;
     if (!looked) return "Nothing yet today. The next nightly run writes today's digests.";

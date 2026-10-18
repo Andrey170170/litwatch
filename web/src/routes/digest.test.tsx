@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
+import { freshClient, json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" };
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" };
@@ -55,6 +55,32 @@ describe("the Digest", () => {
     expect(await screen.findByText("Nothing yet today. The next nightly run writes today's digests.")).toBeInTheDocument();
     expect(screen.getByText("Today")).toBeInTheDocument();
     expect(screen.getByLabelText("Newer")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("reads an empty today again when the run ends, and shows what it wrote", async () => {
+    vi.setSystemTime(new Date(2026, 9, 19, 3));
+    viewport(true);
+    const started = new Date(2026, 9, 19, 2).toISOString();
+    let summaryNow: object = { ...summary, status: { ...status, state: "running", started_at: started, finished_at: null } };
+    const empty = { ...day, day: "2026-10-19", released: false, digests: [], previous: "2026-10-16", next: null };
+    let today: object = empty;
+    scriptFetch({ "GET /api/summary": () => json(summaryNow), "GET /api/status": status, "GET /api/digests/days/2026-10-19": () => json(today) });
+    const client = freshClient();
+    renderApp("/", client);
+    expect(await screen.findByText("Today's digests are being written.")).toBeInTheDocument();
+    today = { ...empty, released: true, digests: [{ ...card, day: "2026-10-19" }] };
+    summaryNow = { ...summary, status: { ...status, started_at: started, finished_at: new Date(2026, 9, 19, 4).toISOString() } };
+    await client.invalidateQueries({ queryKey: ["summary"] });
+    expect(await screen.findByText("Two measurement papers.")).toBeInTheDocument();
+    expect(screen.queryByText("No papers released.")).toBeNull();
+  });
+
+  it("stops on today even when a browser behind the server's zone is shown a later day as the next", async () => {
+    vi.setSystemTime(new Date(2026, 9, 18, 20));
+    viewport(true);
+    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", next: "2026-10-19" } });
+    renderApp("/?day=2026-10-16");
+    expect(await screen.findByRole("link", { name: "Newer" })).toHaveAttribute("href", "/?day=2026-10-18");
   });
 
   it("opens a digest over the day on the desktop, its papers by role, and closes it back to the day", async () => {

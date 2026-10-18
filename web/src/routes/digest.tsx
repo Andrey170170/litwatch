@@ -6,7 +6,7 @@
  */
 import { useInfiniteQuery, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearch, type LinkProps } from "@tanstack/react-router";
-import { Fragment, useEffect, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain } from "@/api/mutations";
 import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
@@ -211,9 +211,21 @@ export function DigestPage() {
   const day = search.day ?? now;
   const q = useQuery(dayQuery(day));
   const run = useSummary((s) => s.status).data;
+  // The latest run's end the day was read under. A run ending while an empty today is open reads the day again, and
+  // until that read is back the run is taken as unknown, so the line never says what the run did not find.
+  const ended = run?.finished_at ?? null;
+  const [readUnder, setReadUnder] = useState(ended);
+  const empty = day === now && q.data !== undefined && !q.data.digests.length;
+  const refetch = q.refetch;
+  useEffect(() => {
+    if (ended === readUnder) return;
+    if (empty) void refetch().then(() => setReadUnder(ended));
+    else setReadUnder(ended);
+  }, [ended, readUnder, empty, refetch]);
   const desktop = useDesktop();
   // Stepping skips days without digests, but today is always a stop: the tab opens there, so › always leads back.
-  const next = q.data && (q.data.next ?? (day < now ? now : null));
+  // (A browser behind the server's zone can be shown a later day as the next: today still comes first.)
+  const next = q.data && (day < now && (!q.data.next || q.data.next > now) ? now : q.data.next);
   useStepTo("/", q.data?.previous, next);
   const page = useOnPage();
   const stepper = (foot?: boolean) => <Stepper to="/" prev={q.data?.previous} next={next} label={dayLabel(day)} small={day === now ? "Today" : undefined} foot={foot} />;
@@ -237,7 +249,7 @@ export function DigestPage() {
         </Link>
       )}
       <State q={q} what="the day" />
-      {q.data && !q.data.digests.length && <div className="none">{emptyDay(day, now, q.data.released, run)}</div>}
+      {q.data && !q.data.digests.length && <div className="none">{emptyDay(day, now, q.data.released, ended === readUnder ? run : undefined)}</div>}
       {q.data?.digests.map((c) => (
         <DigestCard key={c.id} card={c} />
       ))}

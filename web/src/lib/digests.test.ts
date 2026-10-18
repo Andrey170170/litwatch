@@ -35,7 +35,14 @@ describe("a day without digests", () => {
     expect(emptyDay("2026-10-14", "2026-10-14", false, run("quiet", 2))).toBe("No papers released.");
     expect(emptyDay("2026-10-14", "2026-10-14", true, run("quiet", 2))).toBe("No digests for this day.");
   });
+  it("does not take a run started late yesterday, in UTC already today, for today's", () => {
+    expect(emptyDay("2026-10-14", "2026-10-14", false, run("quiet", 23, 13))).toBe("Nothing yet today. The next nightly run writes today's digests.");
+  });
+  it("says only that there is nothing yet while the run is unknown", () => {
+    expect(emptyDay("2026-10-14", "2026-10-14", false, undefined)).toBe("Nothing yet today.");
+  });
   it("says what a past day had, whatever the run", () => {
+    expect(emptyDay("2026-10-11", "2026-10-14", false, undefined)).toBe("No papers released.");
     expect(emptyDay("2026-10-11", "2026-10-14", false, run("running", 2))).toBe("No papers released.");
   });
 });
