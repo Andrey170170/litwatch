@@ -42,6 +42,7 @@ describe("Papers", () => {
     expect(within(top).getAllByText("13 Oct 2026")).toHaveLength(2);
     expect(within(top).getByText("Gist of Epic one")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Rare" })).toHaveTextContent("Rare one");
+    expect(within(screen.getByRole("region", { name: "Rare" })).getByText("13 Oct 2026")).toBeInTheDocument();
     const uncommon = screen.getByRole("region", { name: "Uncommon" });
     await within(uncommon).findByText("4");
     expect(within(uncommon).queryByRole("link")).toBeNull();
