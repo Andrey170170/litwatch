@@ -126,7 +126,7 @@ html[data-theme="light"] a.inl, html[data-theme="light"] button.inl { color: var
 .badge.sm { width: 16px; height: 16px; font-size: 8px; }
 .bs { display: inline-flex; gap: 3px; }
 
-/* rarity on a row: a 4px stripe and a glow fading across the row; hover brightens and widens it */
+/* rarity on a row: a 4px stripe and a glow fading across the row; on a link, hover brightens and widens it */
 .row {
   --gs: 15%; --gl: 220px; --g1: calc(var(--gs) * var(--gk)); --g2: var(--gl);
   position: relative; box-shadow: inset 4px 0 0 var(--rc, transparent);
@@ -134,9 +134,9 @@ html[data-theme="light"] a.inl, html[data-theme="light"] button.inl { color: var
   transition: --g1 0.16s ease-out, --g2 0.16s ease-out, box-shadow 0.16s ease-out;
 }
 @media (hover: hover) {
-  .row:hover { --g1: calc(var(--gs) * var(--gk) * 2); --g2: calc(var(--gl) * 1.5); box-shadow: inset 6px 0 0 var(--rc, transparent); }
+  a.row:hover { --g1: calc(var(--gs) * var(--gk) * 2); --g2: calc(var(--gl) * 1.5); box-shadow: inset 6px 0 0 var(--rc, transparent); }
 }
-.row:active { background-color: var(--hover); }
+a.row:active { background-color: var(--hover); }
 /* the state mark: a triangle in the top-right corner, yellow for the owner's word, red for a failure */
 .row[data-state]::after { content: ""; position: absolute; top: 0; right: 0; border-style: solid; border-width: 0 11px 11px 0; border-color: transparent var(--acc) transparent transparent; }
 .row[data-state="failure"]::after { border-right-color: var(--sig); }
@@ -281,10 +281,12 @@ html[data-theme="light"] .sheet .done { color: var(--fg); border-color: var(--fg
 .qbox:focus-within { border-color: var(--acc); }
 .qbox.big { max-width: none; height: 40px; }
 .qbox.short { min-width: 180px; max-width: 220px; flex: 0 1 220px; }
-.fchip { padding: 5px 11px; border: 1px solid var(--line); font: 700 12px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg2); white-space: nowrap; }
+.fchip { display: inline-flex; align-items: center; justify-content: center; padding: 5px 11px; border: 1px solid var(--line); font: 700 12px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg2); white-space: nowrap; }
 .fchip:hover { color: var(--fg); }
 .fchip.on { color: var(--acc); border-color: var(--acc); }
 .fchip:active { transform: translateY(1px); background: var(--hover); }
+/* in a list's controls, as tall as the search box and the rarity bar beside it */
+.ctlrow .fchip { height: 34px; padding-block: 0; }
 .sortseg { display: inline-flex; gap: 12px; font: 700 12px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; }
 .sortseg button { color: var(--fg3); }
 .sortseg button:hover { color: var(--fg); }
@@ -306,20 +308,22 @@ html[data-theme="light"] :is(.fchip.on, .sortseg button.on) { color: var(--fg); 
 .rseg:hover { background: color-mix(in srgb, var(--rc) 30%, transparent); }
 .rseg.on { background: color-mix(in srgb, var(--rc) 38%, transparent); box-shadow: inset 0 3px 0 var(--rc), inset 0 0 0 1px var(--rc); }
 .rseg.off { opacity: 0.4; }
-.rbar.inl .rseg { flex-direction: row; align-items: center; gap: 6px; height: 34px; padding: 0 8px; container-type: inline-size; }
+.rbar.inl .rseg { flex-direction: row; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 8px; container-type: inline-size; }
 .rbar.inl .rseg b { font-size: 12.5px; }
 @container (max-width: 92px) { .rbar.inl .rseg span { display: none; } }
 .phone .rseg { padding: 8px 7px; }
 .phone .rseg span { display: none; }
 /* shelf head: a rarity square, the name, the count */
 /* a shelf head: a band of the rarity's colour, found before its name is read, with room above and below it */
-.shh { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 12px; margin: 24px 0 10px; font: 700 14px var(--font-name); color: var(--fg); text-transform: uppercase; letter-spacing: 0.1em; text-align: left; background: color-mix(in srgb, var(--rc) 16%, transparent); box-shadow: inset 4px 0 0 var(--rc); }
-.shh:first-child { margin-top: 0; }
+.shh { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 12px; margin: 0 0 10px; font: 700 14px var(--font-name); color: var(--fg); text-transform: uppercase; letter-spacing: 0.1em; text-align: left; background: color-mix(in srgb, var(--rc) 16%, transparent); box-shadow: inset 4px 0 0 var(--rc); }
+.shelf + .shelf { margin-top: 28px; }
 .shh .sq { width: 12px; height: 12px; background: var(--rc); flex: none; }
 .shh .k { font: 600 13px var(--font-mono); color: var(--fg2); letter-spacing: 0; }
-.shh .tg { margin-left: auto; font: 600 11.5px var(--font-name); color: var(--fg2); letter-spacing: 0.08em; }
+.shh .tg { margin-left: auto; font: 600 11.5px var(--font-name); color: var(--fg2); letter-spacing: 0.08em; opacity: 0.6; }
+.shh:hover { background: color-mix(in srgb, var(--rc) 26%, transparent); }
+.shh:hover .tg, .shh.fold .tg { opacity: 1; }
 .shh.fold { color: var(--fg2); }
-.shh.fold:hover { color: var(--fg); background: color-mix(in srgb, var(--rc) 26%, transparent); }
+.shh.fold:hover { color: var(--fg); }
 .loadmore { padding: 10px 0; font-size: 12px; color: var(--fg3); }
 .loadmore.quiet { opacity: 0.55; font-size: 12px; }
 /* the table row: one line */
@@ -525,8 +529,9 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .rung { margin: 0 0 22px; }
 .rung .rl { display: flex; align-items: center; gap: 10px; font: 700 12px var(--font-name); letter-spacing: 0.2em; text-transform: uppercase; color: var(--sig); margin-bottom: 6px; }
 @container (min-width: 900px) {
-  .rung { display: grid; grid-template-columns: 104px 1fr; gap: 16px; }
-  .rung .rl { flex-direction: column; align-items: flex-start; padding-top: 3px; }
+  /* the name sits on the first line of its body, whatever that line's size */
+  .rung { display: grid; grid-template-columns: 104px 1fr; gap: 16px; align-items: baseline; }
+  .rung .rl { flex-direction: column; align-items: flex-start; }
 }
 .prose { font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; }
 .prose.gist { font-size: 16px; line-height: 1.5; color: var(--fg); }
@@ -546,7 +551,7 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .kv.sm { font-size: 12.5px; margin-top: 10px; }
 .phone .kv { grid-template-columns: 76px 1fr; }
 .tag { display: inline-block; margin: 0 4px 4px 0; padding: 1px 7px; border: 1px solid var(--line); font-size: 12px; font-style: normal; }
-.lim { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.5; }
+.lim { margin: 0; padding: 0; font-size: 13.5px; line-height: 1.5; }
 .lim li { margin-bottom: 4px; }
 .pw { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 7px 8px; margin: 0 -8px; font-size: 13px; text-align: left; width: calc(100% + 16px); }
 .pw:not(.nolink):hover { background: color-mix(in srgb, var(--fg) 5%, transparent); cursor: pointer; }
@@ -569,7 +574,7 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .pgcols { display: block; }
 @container (min-width: 760px) {
   .pgcols { display: grid; grid-template-columns: 1fr 270px; gap: 28px; align-items: start; }
-  .pgrail { position: sticky; top: 0; }
+  .pgrail { position: sticky; top: 20px; }
 }
 /* the rail's Gist moves in once the reading column's has scrolled out of view */
 .rgist { border-left: 3px solid var(--rc, var(--line)); padding-left: 10px; margin-bottom: 0; opacity: 0; max-height: 0; overflow: hidden; transform: translateX(-28px);

@@ -214,4 +214,27 @@ describe("Papers", () => {
     await router.navigate({ to: "/papers" });
     await waitFor(() => expect(gets()).toBeGreaterThan(before));
   });
+
+  it("folds a shelf that starts open, and keeps it folded on the way back", async () => {
+    viewport(true);
+    scriptFetch({
+      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
+      "GET /api/topics": [],
+      "GET /api/papers": ({ url }) =>
+        new URL(url, "http://x").searchParams.get("rarity") === "rare" ? { rows: [row("2610.00003", "Rare one", "rare")], total: 1, counts } : { rows: [], total: 0, counts },
+    });
+    const { router } = renderApp("/papers");
+    const head = () => within(screen.getByRole("region", { name: "Rare" })).getByRole("button", { expanded: true });
+    expect(await screen.findByText("Rare one")).toBeInTheDocument();
+    await userEvent.click(head());
+    expect(screen.queryByText("Rare one")).toBeNull();
+    await router.navigate({ to: "/topics" });
+    await screen.findByText("No topics are followed yet.");
+    router.history.back();
+    const folded = await screen.findByRole("button", { name: /Rare/, expanded: false });
+    expect(screen.queryByText("Rare one")).toBeNull();
+    // Opened again, so the session's memory is as the other tests expect.
+    await userEvent.click(folded);
+    expect(await screen.findByText("Rare one")).toBeInTheDocument();
+  });
 });
