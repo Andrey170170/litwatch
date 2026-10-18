@@ -364,9 +364,26 @@ async def calls(conn) -> list[dict]:
     ).fetchall()
 
 
+class Together(CallJournal):
+    """A journal whose first `n` calls wait for each other once their rows are in, so they join
+    one batch however slow the database: on a slow runner the inserts alone can outlast the
+    batcher's quiet, and the calls go in batches of their own."""
+
+    def __init__(self, conn, run_id: int, n: int) -> None:
+        super().__init__(conn, run_id)
+        self._together, self._left = asyncio.Barrier(n), n
+
+    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
+        call_id = await super().start(role, model, key, paper_id)
+        if self._left > 0:
+            self._left -= 1
+            await self._together.wait()
+        return call_id
+
+
 async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn):
     dead = await runs.start(conn, "nightly")
-    gw, anthropic, _, clock = batching(CallJournal(conn, dead), hold=True)
+    gw, anthropic, _, clock = batching(Together(conn, dead, 2), hold=True)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
 
     async def recorded():
@@ -407,7 +424,7 @@ async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn):
 
 async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_again(conn):
     dead = await runs.start(conn, "nightly")
-    gw, anthropic, _, clock = batching(CallJournal(conn, dead), hold=True)
+    gw, anthropic, _, clock = batching(Together(conn, dead, 2), hold=True)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
 
     async def recorded():
@@ -433,7 +450,7 @@ async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_agai
 
 async def test_a_run_past_the_deadline_cancels_a_dead_runs_batch_and_keeps_its_answers(conn):
     dead = await runs.start(conn, "nightly")
-    gw, anthropic, _, clock = batching(CallJournal(conn, dead), hold=True)
+    gw, anthropic, _, clock = batching(Together(conn, dead, 2), hold=True)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
 
     async def recorded():
