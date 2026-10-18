@@ -1280,7 +1280,7 @@
     "/api/digests/days/{day}": {
       "get": {
         "summary": "Day",
-        "description": "A day's daily digests, every topic's at Gist level, and where \u2039 \u203a step.",
+        "description": "A day's daily digests, every topic's at Gist level, and where \u2039 \u203a step; today, where\nits nightly run stands.",
         "operationId": "day_api_digests_days__day__get",
         "parameters": [
           {
@@ -3331,6 +3331,16 @@
               }
             ],
             "title": "Weekly"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TodayRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3340,7 +3350,7 @@
           "digests"
         ],
         "title": "Day",
-        "description": "A day's daily digests in the fixed topic order. `released` is false on a day arXiv listed\nnothing; `previous` and `next` are the nearest days with digests; on a Monday, `weekly` is\nthe Monday of the week whose weekly digests came out that day."
+        "description": "A day's daily digests in the fixed topic order. `released` is false on a day arXiv listed\nnothing; `previous` and `next` are the nearest days with digests; on a Monday, `weekly` is\nthe Monday of the week whose weekly digests came out that day. `run` is today's nightly run,\non today only (in the schedule's zone) and only while the schedule is on."
       },
       "DeepCard": {
         "properties": {
@@ -6437,6 +6447,67 @@
         ],
         "title": "TextPass",
         "description": "The full-text pass queued last for the paper's current text: a Brief (Focus) or a Weight\nre-check with a Brief (Area pick candidate), and where it is. A paper without one shows its\nabstract in the Brief's place."
+      },
+      "TodayRun": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "late",
+              "running",
+              "overrun",
+              "failed",
+              "done"
+            ],
+            "title": "State"
+          },
+          "due": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Due"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Deadline"
+          },
+          "papers": {
+            "type": "integer",
+            "title": "Papers",
+            "default": 0
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "due",
+          "deadline"
+        ],
+        "title": "TodayRun",
+        "description": "Where today's nightly run stands: `waiting` until it is due, `late` once it is overdue\nand has not started, `running` (`overrun` past the night's deadline) with the papers read\nof `total`, `failed` with its error, or `done`. `due` and `deadline` are tonight's."
       },
       "Topic": {
         "properties": {

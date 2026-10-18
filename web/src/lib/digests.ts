@@ -73,6 +73,36 @@ export function markShort(m: Mark): string {
 /** "Daily digest · Wed 14 Oct", "Weekly digest · 5–11 Oct". */
 export const periodLine = (m: Pick<Mark, "period" | "day">) => (m.period === "week" ? `Weekly digest · ${weekRange(m.day)}` : `Daily digest · ${dayLabel(m.day)}`);
 
+/** Where today's nightly run stands, from the Day (`run`, today only). */
+export type TodayRun = Schemas["TodayRun"];
+
+const CLOCK = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
+const clock = (iso: string) => CLOCK.format(new Date(iso));
+
+/** Today's run as the panel in place of the cards shows it (DESIGN.md, Day): a tag and its tone, one line, and
+ * mono meta beside the tag; `progress` while it runs. None once it is done: the day's cards or its line say the rest. */
+export function tonight(run: TodayRun): { tag: string; tone: "cy" | "warn" | "sig"; line: string; meta: string; progress?: number } | null {
+  const read = run.total ? `${run.papers} / ${run.total} papers read` : `${run.papers} papers read`;
+  const progress = run.total ? run.papers / run.total : undefined;
+  switch (run.state) {
+    case "waiting":
+      return { tag: "Standby", tone: "cy", line: "Today's digests arrive with the nightly run.", meta: `run at ${clock(run.due)}` };
+    case "running":
+      return { tag: "Running", tone: "warn", line: "The nightly run is reading today's papers. Digests follow.", meta: read, progress };
+    case "overrun":
+      return { tag: "Overrun", tone: "warn", line: `The run is past its ${clock(run.deadline)} deadline and still going. Digests follow.`, meta: read, progress };
+    case "late":
+      return { tag: "No signal", tone: "sig", line: `The nightly run was due at ${clock(run.due)} and has not started.`, meta: `due ${clock(run.due)}` };
+    case "failed":
+      return { tag: "Run failed", tone: "sig", line: "Today's run failed. The next run writes today's digests.", meta: `due ${clock(run.due)}` };
+    case "done":
+      return null;
+  }
+}
+
+/** A Day is read again every minute while today's run is still to settle. */
+export const unsettled = (d: { run?: TodayRun | null } | undefined) => !!d?.run && d.run.state !== "done";
+
 /** The sections a digest's papers fall into, in order (DESIGN.md, "A digest"): picks, then the papers its text
  * names, then the rest, which a Focus digest splits by Fit (Related rows have no Gist). */
 export function sections(depth: Schemas["Depth"], period: Schemas["DigestPeriod"], papers: DigestPaper[]): { name: string; papers: DigestPaper[]; gist: boolean }[] {

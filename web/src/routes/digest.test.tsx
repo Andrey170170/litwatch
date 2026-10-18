@@ -41,6 +41,49 @@ describe("the Digest", () => {
     expect(screen.getByText(/Tue 13 Oct/)).toBeInTheDocument();
   });
 
+  it("steps from the last day with digests to an empty today, where today's run stands in place of the cards", async () => {
+    vi.setSystemTime(new Date(2026, 9, 19, 1));
+    viewport(true);
+    const night = { due: new Date(2026, 9, 19, 2).toISOString(), deadline: new Date(2026, 9, 19, 7, 30).toISOString(), papers: 0, total: null, error: null };
+    scriptFetch({
+      "GET /api/summary": summary,
+      "GET /api/status": status,
+      "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", previous: "2026-10-15", next: null },
+      "GET /api/digests/days/2026-10-19": { ...day, day: "2026-10-19", released: false, digests: [], previous: "2026-10-16", next: null, run: { ...night, state: "waiting" } },
+    });
+    renderApp("/?day=2026-10-16");
+    await userEvent.click(await screen.findByRole("link", { name: "Newer" }));
+    const panel = await screen.findByRole("status");
+    expect(within(panel).getByText("Standby")).toBeInTheDocument();
+    expect(within(panel).getByText("run at 02:00")).toBeInTheDocument();
+    expect(screen.queryByText("No papers released.")).toBeNull();
+    expect(screen.getByText("Today")).toBeInTheDocument();
+    expect(screen.getByLabelText("Newer")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("reads today again every minute while its run goes, and shows the digests once it is done", async () => {
+    vi.setSystemTime(new Date(2026, 9, 19, 3));
+    viewport(true);
+    const night = { due: new Date(2026, 9, 19, 2).toISOString(), deadline: new Date(2026, 9, 19, 7, 30).toISOString(), papers: 120, total: 480, error: null };
+    const empty = { ...day, day: "2026-10-19", released: true, digests: [], previous: "2026-10-16", next: null, run: { ...night, state: "running" } };
+    let today: object = empty;
+    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-19": () => json(today) });
+    renderApp("/");
+    expect(await screen.findByText("120 / 480 papers read")).toBeInTheDocument();
+    today = { ...empty, digests: [{ ...card, day: "2026-10-19" }], run: { ...night, state: "done" } };
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await screen.findByText("Two measurement papers.")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("stops on today even when a browser behind the server's zone is shown a later day as the next", async () => {
+    vi.setSystemTime(new Date(2026, 9, 18, 20));
+    viewport(true);
+    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", next: "2026-10-19" } });
+    renderApp("/?day=2026-10-16");
+    expect(await screen.findByRole("link", { name: "Newer" })).toHaveAttribute("href", "/?day=2026-10-18");
+  });
+
   it("opens a digest over the day on the desktop, its papers by role, and closes it back to the day", async () => {
     viewport(true);
     scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-14": day, "GET /api/digests/7": digest });

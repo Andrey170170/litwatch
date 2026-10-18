@@ -302,7 +302,8 @@ export interface paths {
         };
         /**
          * Day
-         * @description A day's daily digests, every topic's at Gist level, and where ‹ › step.
+         * @description A day's daily digests, every topic's at Gist level, and where ‹ › step; today, where
+         *     its nightly run stands.
          */
         get: operations["day_api_digests_days__day__get"];
         put?: never;
@@ -1280,7 +1281,8 @@ export interface components {
          * Day
          * @description A day's daily digests in the fixed topic order. `released` is false on a day arXiv listed
          *     nothing; `previous` and `next` are the nearest days with digests; on a Monday, `weekly` is
-         *     the Monday of the week whose weekly digests came out that day.
+         *     the Monday of the week whose weekly digests came out that day. `run` is today's nightly run,
+         *     on today only (in the schedule's zone) and only while the schedule is on.
          */
         Day: {
             /**
@@ -1298,6 +1300,7 @@ export interface components {
             next?: string | null;
             /** Weekly */
             weekly?: string | null;
+            run?: components["schemas"]["TodayRun"] | null;
         };
         /**
          * DeepCard
@@ -2484,6 +2487,38 @@ export interface components {
              * Format: date-time
              */
             queued_at: string;
+        };
+        /**
+         * TodayRun
+         * @description Where today's nightly run stands: `waiting` until it is due, `late` once it is overdue
+         *     and has not started, `running` (`overrun` past the night's deadline) with the papers read
+         *     of `total`, `failed` with its error, or `done`. `due` and `deadline` are tonight's.
+         */
+        TodayRun: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "waiting" | "late" | "running" | "overrun" | "failed" | "done";
+            /**
+             * Due
+             * Format: date-time
+             */
+            due: string;
+            /**
+             * Deadline
+             * Format: date-time
+             */
+            deadline: string;
+            /**
+             * Papers
+             * @default 0
+             */
+            papers: number;
+            /** Total */
+            total?: number | null;
+            /** Error */
+            error?: string | null;
         };
         /**
          * Topic

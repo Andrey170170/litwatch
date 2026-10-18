@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
 
 import psycopg
@@ -12,10 +12,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn
 from litwatch.api.reading import _looks
+from litwatch.config import Schedule
 from litwatch.core.digests import DigestPeriod, week_of
 from litwatch.jobs import digests as jobs
+from litwatch.jobs import scheduler
 from litwatch.jobs.lock import BusyError
 from litwatch.store import digests as store_
+from litwatch.store import reading
 from litwatch.store import taxonomy as taxonomy_store
 
 router = APIRouter(prefix="/api/digests")
@@ -75,14 +78,56 @@ async def _cards(c: psycopg.AsyncConnection, period: DigestPeriod, day: date) ->
     ]
 
 
+# How long past its time the nightly may take to start before today's run counts as late.
+GRACE = timedelta(minutes=15)
+
+
+def today_run(
+    day: date, now: datetime, schedule: Schedule, run: dict[str, Any] | None
+) -> s.TodayRun | None:
+    """Where today's nightly run stands (DESIGN.md, Day), when `day` is today in the schedule's
+    zone, the schedule is on and the nightly fires today; else None. `run` is the latest nightly
+    run's status (`store.reading.status`)."""
+    zone = schedule.zone
+    if not schedule.enabled or now.astimezone(zone).date() != day:
+        return None
+    due = scheduler.last_fire(schedule.nightly, datetime.combine(day, time.max, zone))
+    if due.date() != day:
+        return None
+    deadline = datetime.combine(day, schedule.deadline, zone)
+    if deadline <= due:
+        deadline += timedelta(days=1)
+    night = {"due": due, "deadline": deadline}
+    # Today's run started at or after tonight's fire, as the scheduler counts it (`is_due`): a run
+    # by hand before it leaves the fire outstanding; one still going shows as it goes.
+    started = run.get("started_at") if run else None
+    ours = started is not None and started.astimezone(zone).date() == day
+    if run is None or not ours or (started < due and run["state"] != "running"):
+        return s.TodayRun(state="late" if now >= due + GRACE else "waiting", **night)
+    if run["state"] == "running":
+        state = "overrun" if now > deadline else "running"
+        total = run["papers"] + (run.get("waiting") or 0)
+        return s.TodayRun(state=state, papers=run["papers"], total=total, **night)
+    if run["state"] == "failed":
+        return s.TodayRun(state="failed", error=run.get("error"), **night)
+    return s.TodayRun(state="done", **night)
+
+
 @router.get("/days/{day}")
-async def day(day: date, c: Conn) -> s.Day:
-    """A day's daily digests, every topic's at Gist level, and where ‹ › step."""
+async def day(day: date, request: Request, c: Conn) -> s.Day:
+    """A day's daily digests, every topic's at Gist level, and where ‹ › step; today, where
+    its nightly run stands."""
     weekly = None
     shown = await _shown(c)
+    schedule = request.app.state.config.schedule
+    now = datetime.now(UTC)
+    today = schedule.enabled and now.astimezone(schedule.zone).date() == day
     monday = day - timedelta(days=7)
     if day.weekday() == 0 and await _marks(c, DigestPeriod.WEEK, monday, monday):
         weekly = monday
+    # The run before the cards: it is closed only once its digests are written, so a run read as
+    # done never comes with the cards from before its last digest (the reads are not one snapshot).
+    run = today_run(day, now, schedule, await reading.status(c)) if today else None
     return s.Day(
         day=day,
         released=await store_.released(c, day),
@@ -90,6 +135,7 @@ async def day(day: date, c: Conn) -> s.Day:
         previous=await store_.step(c, DigestPeriod.DAY, day, False, shown),
         next=await store_.step(c, DigestPeriod.DAY, day, True, shown),
         weekly=weekly,
+        run=run,
     )
 
 

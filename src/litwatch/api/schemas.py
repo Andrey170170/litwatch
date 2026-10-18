@@ -660,10 +660,24 @@ class Digest(DigestMark):
     papers: list[DigestPaper]
 
 
+class TodayRun(BaseModel):
+    """Where today's nightly run stands: `waiting` until it is due, `late` once it is overdue
+    and has not started, `running` (`overrun` past the night's deadline) with the papers read
+    of `total`, `failed` with its error, or `done`. `due` and `deadline` are tonight's."""
+
+    state: Literal["waiting", "late", "running", "overrun", "failed", "done"]
+    due: datetime
+    deadline: datetime
+    papers: int = 0
+    total: int | None = None
+    error: str | None = None
+
+
 class Day(BaseModel):
     """A day's daily digests in the fixed topic order. `released` is false on a day arXiv listed
     nothing; `previous` and `next` are the nearest days with digests; on a Monday, `weekly` is
-    the Monday of the week whose weekly digests came out that day."""
+    the Monday of the week whose weekly digests came out that day. `run` is today's nightly run,
+    on today only (in the schedule's zone) and only while the schedule is on."""
 
     day: date
     released: bool
@@ -671,6 +685,7 @@ class Day(BaseModel):
     previous: date | None = None
     next: date | None = None
     weekly: date | None = None
+    run: TodayRun | None = None
 
 
 class Week(BaseModel):

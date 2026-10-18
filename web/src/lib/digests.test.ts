@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, slotted, weekRange, type HistoryPage, type Mark } from "./digests";
+import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, slotted, tonight, unsettled, weekRange, type HistoryPage, type Mark, type TodayRun } from "./digests";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" } as const;
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" } as const;
@@ -22,6 +22,22 @@ describe("days", () => {
   it("takes only dates that exist", () => {
     expect(isIsoDay("2028-02-29")).toBe(true);
     expect(["2026-02-31", "2026-13-01", "2026-2-1", "today", 7].map(isIsoDay)).toEqual([false, false, false, false, false]);
+  });
+});
+
+describe("today's run", () => {
+  const night = { due: new Date(2026, 9, 14, 2).toISOString(), deadline: new Date(2026, 9, 14, 7, 30).toISOString(), papers: 0, total: null, error: null };
+  const at = (state: TodayRun["state"], more: Partial<TodayRun> = {}) => tonight({ ...night, state, ...more });
+  it("names each state with its tone, the night's times in local time and the papers read so far", () => {
+    expect(at("waiting")).toMatchObject({ tag: "Standby", tone: "cy", meta: "run at 02:00" });
+    expect(at("running", { papers: 120, total: 480 })).toMatchObject({ tag: "Running", tone: "warn", meta: "120 / 480 papers read", progress: 0.25 });
+    expect(at("overrun", { papers: 470, total: 480 })?.line).toBe("The run is past its 07:30 deadline and still going. Digests follow.");
+    expect(at("late")).toMatchObject({ tag: "No signal", tone: "sig", line: "The nightly run was due at 02:00 and has not started." });
+    expect(at("failed", { error: "anthropic down" })).toMatchObject({ tag: "Run failed", tone: "sig" });
+    expect(at("done")).toBeNull();
+  });
+  it("is read again until it is done", () => {
+    expect([unsettled({ run: { ...night, state: "running" } }), unsettled({ run: { ...night, state: "done" } }), unsettled({ run: null })]).toEqual([true, false, false]);
   });
 });
 

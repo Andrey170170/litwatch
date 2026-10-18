@@ -16,7 +16,7 @@ import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
-import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, weekRange, type Card, type DigestPaper, type Mark } from "@/lib/digests";
+import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, tonight, unsettled, weekRange, type Card, type DigestPaper, type Mark, type TodayRun } from "@/lib/digests";
 import { openedFrom } from "@/lib/listContext";
 import { useSteps } from "@/lib/steps";
 import { rowDate } from "@/lib/format";
@@ -204,14 +204,48 @@ function useStepTo(to: "/" | "/week", prev: string | null | undefined, next: str
  * has ‹ back and its label for a title. */
 const useOnPage = () => !!useLocation().state.page;
 
+/** Today's run in place of the cards while it is still to settle (DESIGN.md, Day): the tag in its tone with the
+ * night's time or the papers read, one line, the bar while it runs; a failure's error and the way to Needs you. */
+function Tonight({ run }: { run: TodayRun }) {
+  const t = tonight(run);
+  if (!t) return null;
+  return (
+    <div className={`tonight ${t.tone}${run.state === "running" || run.state === "overrun" ? " live" : ""}`} role="status">
+      <div className="hd">
+        <span className="tg">{t.tag}</span>
+        <span className="at">{t.meta}</span>
+      </div>
+      <p>{t.line}</p>
+      {t.progress !== undefined && (
+        <div className="bar">
+          <i style={{ width: `${Math.round(t.progress * 100)}%` }} />
+        </div>
+      )}
+      {run.state === "failed" && (
+        <>
+          {run.error && <div className="err">{run.error}</div>}
+          <Link to="/settings/$page" params={{ page: "needs" }} className="lnk">
+            Needs you ›
+          </Link>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function DigestPage() {
   const search = useSearch({ from: "/" });
-  const day = search.day ?? today();
-  const q = useQuery(dayQuery(day));
+  const now = today();
+  const day = search.day ?? now;
+  // Today, the Day is read again every minute until its run is done, so the panel follows the run.
+  const q = useQuery({ ...dayQuery(day), refetchInterval: (query) => (unsettled(query.state.data) ? 60_000 : false) });
   const desktop = useDesktop();
-  useStepTo("/", q.data?.previous, q.data?.next);
+  // Stepping skips days without digests, but today is always a stop: the tab opens there, so › always leads back.
+  // (A browser behind the server's zone can be shown a later day as the next: today still comes first.)
+  const next = q.data && (day < now && (!q.data.next || q.data.next > now) ? now : q.data.next);
+  useStepTo("/", q.data?.previous, next);
   const page = useOnPage();
-  const stepper = (foot?: boolean) => <Stepper to="/" prev={q.data?.previous} next={q.data?.next} label={dayLabel(day)} small={day === today() ? "Today" : undefined} foot={foot} />;
+  const stepper = (foot?: boolean) => <Stepper to="/" prev={q.data?.previous} next={next} label={dayLabel(day)} small={day === now ? "Today" : undefined} foot={foot} />;
   return (
     <>
       <Fill name={page ? "title" : "bar"}>
@@ -232,7 +266,7 @@ export function DigestPage() {
         </Link>
       )}
       <State q={q} what="the day" />
-      {q.data && !q.data.digests.length && <div className="none">{q.data.released ? "No digests for this day." : "No papers released."}</div>}
+      {q.data && !q.data.digests.length && (q.data.run && unsettled(q.data) ? <Tonight run={q.data.run} /> : <div className="none">{q.data.released ? "No digests for this day." : "No papers released."}</div>)}
       {q.data?.digests.map((c) => (
         <DigestCard key={c.id} card={c} />
       ))}
