@@ -94,7 +94,7 @@ export function tonight(run: TodayRun): { tag: string; tone: "cy" | "warn" | "si
     case "late":
       return { tag: "No signal", tone: "sig", line: `The nightly run was due at ${clock(run.due)} and has not started.`, meta: `due ${clock(run.due)}` };
     case "failed":
-      return { tag: "Run failed", tone: "sig", line: "Today's run failed before writing today's digests.", meta: `due ${clock(run.due)}` };
+      return { tag: "Run failed", tone: "sig", line: "Today's run failed. Today has no digests.", meta: `due ${clock(run.due)}` };
     case "done":
       return null;
   }
