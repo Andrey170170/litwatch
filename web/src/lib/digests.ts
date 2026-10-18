@@ -73,6 +73,17 @@ export function markShort(m: Mark): string {
 /** "Daily digest · Wed 14 Oct", "Weekly digest · 5–11 Oct". */
 export const periodLine = (m: Pick<Mark, "period" | "day">) => (m.period === "week" ? `Weekly digest · ${weekRange(m.day)}` : `Daily digest · ${dayLabel(m.day)}`);
 
+/** The one line a day without digests shows. Today, until a nightly run started today has finished, nothing is
+ * known yet: the line says the run is writing, or that it has not come (`run` is the latest run, from the summary). */
+export function emptyDay(day: string, today: string, released: boolean, run: Schemas["RunStatus"] | undefined): string {
+  if (day === today && run) {
+    if (run.state === "running") return "Today's digests are being written.";
+    const looked = run.state !== "failed" && run.started_at && isoDay(new Date(run.started_at)) === today;
+    if (!looked) return "Nothing yet today. The next nightly run writes today's digests.";
+  }
+  return released ? "No digests for this day." : "No papers released.";
+}
+
 /** The sections a digest's papers fall into, in order (DESIGN.md, "A digest"): picks, then the papers its text
  * names, then the rest, which a Focus digest splits by Fit (Related rows have no Gist). */
 export function sections(depth: Schemas["Depth"], period: Schemas["DigestPeriod"], papers: DigestPaper[]): { name: string; papers: DigestPaper[]; gist: boolean }[] {

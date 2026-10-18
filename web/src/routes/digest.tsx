@@ -14,9 +14,10 @@ import { Badge } from "@/components/Badge";
 import { Sheet } from "@/components/Sheet";
 import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
+import { useSummary } from "@/components/Summary";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
-import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, weekRange, type Card, type DigestPaper, type Mark } from "@/lib/digests";
+import { addDays, calendarMonths, dayLabel, emptyDay, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, weekRange, type Card, type DigestPaper, type Mark } from "@/lib/digests";
 import { openedFrom } from "@/lib/listContext";
 import { useSteps } from "@/lib/steps";
 import { rowDate } from "@/lib/format";
@@ -206,12 +207,16 @@ const useOnPage = () => !!useLocation().state.page;
 
 export function DigestPage() {
   const search = useSearch({ from: "/" });
-  const day = search.day ?? today();
+  const now = today();
+  const day = search.day ?? now;
   const q = useQuery(dayQuery(day));
+  const run = useSummary((s) => s.status).data;
   const desktop = useDesktop();
-  useStepTo("/", q.data?.previous, q.data?.next);
+  // Stepping skips days without digests, but today is always a stop: the tab opens there, so › always leads back.
+  const next = q.data && (q.data.next ?? (day < now ? now : null));
+  useStepTo("/", q.data?.previous, next);
   const page = useOnPage();
-  const stepper = (foot?: boolean) => <Stepper to="/" prev={q.data?.previous} next={q.data?.next} label={dayLabel(day)} small={day === today() ? "Today" : undefined} foot={foot} />;
+  const stepper = (foot?: boolean) => <Stepper to="/" prev={q.data?.previous} next={next} label={dayLabel(day)} small={day === now ? "Today" : undefined} foot={foot} />;
   return (
     <>
       <Fill name={page ? "title" : "bar"}>
@@ -232,7 +237,7 @@ export function DigestPage() {
         </Link>
       )}
       <State q={q} what="the day" />
-      {q.data && !q.data.digests.length && <div className="none">{q.data.released ? "No digests for this day." : "No papers released."}</div>}
+      {q.data && !q.data.digests.length && <div className="none">{emptyDay(day, now, q.data.released, run)}</div>}
       {q.data?.digests.map((c) => (
         <DigestCard key={c.id} card={c} />
       ))}

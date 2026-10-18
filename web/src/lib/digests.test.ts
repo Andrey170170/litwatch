@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, slotted, weekRange, type HistoryPage, type Mark } from "./digests";
+import { calendarMonths, emptyDay, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, slotted, weekRange, type HistoryPage, type Mark } from "./digests";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" } as const;
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" } as const;
@@ -22,6 +22,21 @@ describe("days", () => {
   it("takes only dates that exist", () => {
     expect(isIsoDay("2028-02-29")).toBe(true);
     expect(["2026-02-31", "2026-13-01", "2026-2-1", "today", 7].map(isIsoDay)).toEqual([false, false, false, false, false]);
+  });
+});
+
+describe("a day without digests", () => {
+  const run = (state: "running" | "failed" | "quiet", hour: number, day = 14) =>
+    ({ state, started_at: new Date(2026, 9, day, hour).toISOString(), papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 }) as const;
+  it("says today has nothing yet until a run started today has finished, and what it found after", () => {
+    expect(emptyDay("2026-10-14", "2026-10-14", false, run("quiet", 2, 13))).toBe("Nothing yet today. The next nightly run writes today's digests.");
+    expect(emptyDay("2026-10-14", "2026-10-14", true, run("running", 2))).toBe("Today's digests are being written.");
+    expect(emptyDay("2026-10-14", "2026-10-14", true, run("failed", 2))).toBe("Nothing yet today. The next nightly run writes today's digests.");
+    expect(emptyDay("2026-10-14", "2026-10-14", false, run("quiet", 2))).toBe("No papers released.");
+    expect(emptyDay("2026-10-14", "2026-10-14", true, run("quiet", 2))).toBe("No digests for this day.");
+  });
+  it("says what a past day had, whatever the run", () => {
+    expect(emptyDay("2026-10-11", "2026-10-14", false, run("running", 2))).toBe("No papers released.");
   });
 });
 

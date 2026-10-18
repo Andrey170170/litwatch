@@ -41,6 +41,22 @@ describe("the Digest", () => {
     expect(screen.getByText(/Tue 13 Oct/)).toBeInTheDocument();
   });
 
+  it("steps from the last day with digests to an empty today, which says the night's run has not come yet", async () => {
+    vi.setSystemTime(new Date(2026, 9, 19, 1));
+    viewport(true);
+    scriptFetch({
+      "GET /api/summary": { ...summary, status: { ...status, started_at: new Date(2026, 9, 18, 2).toISOString() } },
+      "GET /api/status": status,
+      "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", previous: "2026-10-15", next: null },
+      "GET /api/digests/days/2026-10-19": { ...day, day: "2026-10-19", released: false, digests: [], previous: "2026-10-16", next: null },
+    });
+    renderApp("/?day=2026-10-16");
+    await userEvent.click(await screen.findByRole("link", { name: "Newer" }));
+    expect(await screen.findByText("Nothing yet today. The next nightly run writes today's digests.")).toBeInTheDocument();
+    expect(screen.getByText("Today")).toBeInTheDocument();
+    expect(screen.getByLabelText("Newer")).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("opens a digest over the day on the desktop, its papers by role, and closes it back to the day", async () => {
     viewport(true);
     scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-14": day, "GET /api/digests/7": digest });

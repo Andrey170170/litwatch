@@ -68,7 +68,9 @@ Day, today.
 swipe), "Today" over it on today. Then one digest card per daily topic in the fixed order, at Gist level (anatomy
 below). On a Monday one line above the cards, "Weekly digests for 5–11 Oct are out ›", opens that Week; the weekly
 cards themselves are not repeated in the Day. A weekend or holiday with no release
-is one line, "No papers released", and stepping skips it.
+is one line, "No papers released", and stepping skips it; today is always a stop, so › from the last day with
+digests leads back to it. Today before a nightly run started today has finished says so instead: "Today's digests
+are being written." while it runs, else "Nothing yet today. The next nightly run writes today's digests."
 
 **Week.** One week's weekly digests, every topic in the fixed order, the same cards; "‹ 5–11 Oct ›" steps by week.
 
