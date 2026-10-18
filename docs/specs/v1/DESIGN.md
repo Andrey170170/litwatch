@@ -108,8 +108,9 @@ sized by count), the title of its newest must read (which opens that paper), and
 - The controls in one row: search within the topic, ★ Saved, ⟨/⟩ Code, the **rarity bar** inline, the count, and the
   sort, Newest or Rarest (Best match while a search is typed).
 - The papers as **shelves** by the topic's grade: Must read (epic and legendary) and Relevant (rare) open, Adjacent
-  and "In the topic, not graded up" folded to a count until opened. Must read shows reading rows (title and Gist), the
-  others table rows. The sort applies inside each shelf; a shelf loads more as it scrolls.
+  and "In the topic, not graded up" folded to a count until opened; any shelf's head folds or opens it, remembered
+  for the session. Must read shows reading rows (title and Gist), the others table rows. The sort applies inside each
+  shelf; a shelf loads more as it scrolls.
 
 **Papers.** The whole collection with the same controls and shelves, plus: a wide search box over the collection and
 the archive ("Search the collection and the archive (3.1M papers)"); a row of topic badges that filter to one or more
@@ -393,8 +394,8 @@ how many papers the other filters leave at that level (with a minimum, so every 
 its count and name. A tap filters to that level; several can be on, and the rest dim.
 
 **Shelf head.** A band of the rarity's colour, 40 px tall with air above and below, carrying the rarity square, the
-shelf's name and its count: the colour is found before the name is read. A folded shelf adds "show", an open lower
-shelf "fold".
+shelf's name and its count: the colour is found before the name is read. A folded shelf adds "show", an open one a
+fainter "fold".
 
 **Digest strip.** Squares of 14 px (11 px on Topics cards), 3 px apart, in the digest's best rarity; nothing new is an
 empty square, a failed digest a red ×. Newest at the right, after the label "Daily digests" or "Weekly digests".

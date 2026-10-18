@@ -1,6 +1,6 @@
 /**
  * Shelves: a list cut by rarity (Papers) or grade (a topic page), the top ones open with reading rows, the lower
- * ones folded to a count until opened; each loads more as it scrolls (DESIGN.md, "Topics").
+ * ones folded to a count until opened, and any head folds or opens its shelf; each loads more as it scrolls (DESIGN.md, "Topics").
  */
 import { useInfiniteQuery, type InfiniteData, type QueryKey, type UseInfiniteQueryOptions } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef } from "react";
@@ -33,7 +33,7 @@ function ShelfView<P extends Page, K extends QueryKey>({ shelf, query, topic, li
   // Read from the session's memory each render, so a changed filter (a new listKey) shows that list's own state
   // without remounting the shelf, which would drop the rows kept on screen while the new ones load.
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const open = shelf.open || shelfOpen(shelfKey);
+  const open = shelfOpen(shelfKey, shelf.open);
   const toggle = () => {
     setShelfOpen(shelfKey, !open);
     rerender();
@@ -44,17 +44,16 @@ function ShelfView<P extends Page, K extends QueryKey>({ shelf, query, topic, li
   const rows = open ? (q.data?.pages.flatMap((p) => p.rows) ?? []) : [];
   const style = { "--rc": rc(shelf.colour) } as React.CSSProperties;
   const list = { key: shelfKey, ids: rows.map((r) => r.id), total: total ?? rows.length };
-  const Head = shelf.open ? "div" : "button";
   const moreFailed = q.isFetchNextPageError;
   const retry = () => void (moreFailed ? q.fetchNextPage() : q.refetch());
   return (
-    <section aria-label={shelf.name}>
-      <Head className={`shh${open ? "" : " fold"}`} style={style} onClick={shelf.open ? undefined : toggle} aria-expanded={shelf.open ? undefined : open}>
+    <section className="shelf" aria-label={shelf.name}>
+      <button className={`shh${open ? "" : " fold"}`} style={style} onClick={toggle} aria-expanded={open}>
         <span className="sq" />
         {shelf.name}
         <span className="k">{total ?? ""}</span>
-        {!shelf.open && <span className="tg">{open ? "fold" : "show"}</span>}
-      </Head>
+        <span className="tg">{open ? "fold" : "show"}</span>
+      </button>
       {open && (
         <div className={shelf.form === "table" ? "tbl" : "blist"}>
           {rows.map((r) =>

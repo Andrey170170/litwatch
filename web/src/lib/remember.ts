@@ -1,10 +1,11 @@
 /**
- * What the app remembers for the session so the way back lands where the reader was: the lower shelves opened on a
- * list, and the papers a Deep card was asked for (the API has no queued state to read back).
+ * What the app remembers for the session so the way back lands where the reader was: the shelves opened or folded
+ * on a list, and the papers a Deep card was asked for (the API has no queued state to read back).
  */
 import { useSyncExternalStore } from "react";
 
-const openShelves = new Set<string>();
+// shelf key → open, only for shelves the reader toggled; the rest keep the shelf's own default
+const shelves = new Map<string, boolean>();
 // paper id → when the card it already had was written (null for none), so a Write again is told from its old card
 const askedCards = new Map<string, string | null>();
 const watchers = new Set<() => void>();
@@ -14,11 +15,8 @@ const watch = (w: () => void) => {
   return () => void watchers.delete(w);
 };
 
-export const shelfOpen = (key: string) => openShelves.has(key);
-export function setShelfOpen(key: string, open: boolean) {
-  if (open) openShelves.add(key);
-  else openShelves.delete(key);
-}
+export const shelfOpen = (key: string, byDefault: boolean) => shelves.get(key) ?? byDefault;
+export const setShelfOpen = (key: string, open: boolean) => void shelves.set(key, open);
 
 export function rememberCard(id: string, writtenAt: string | null) {
   askedCards.set(id, writtenAt);
