@@ -1,0 +1,415 @@
+set,role,paper,subject,label,note
+quality,judge,2301.13379,cot-faithfulness,none,
+quality,judge,2305.02556,cot-faithfulness,none,
+quality,judge,2412.01113,cot-faithfulness,central,
+quality,judge,2502.05242,cot-faithfulness,adjacent,
+quality,judge,2502.14829,cot-faithfulness,central,
+quality,judge,2502.18848,cot-faithfulness,central,
+quality,judge,2504.01875,cot-faithfulness,adjacent,
+quality,judge,2507.12379,cot-faithfulness,adjacent,
+quality,judge,2507.22928,cot-faithfulness,central,
+quality,judge,2510.04040,cot-faithfulness,central,
+quality,judge,2512.01222,cot-faithfulness,adjacent,
+quality,judge,2604.17502,cot-faithfulness,none,
+quality,judge,2605.11891,cot-faithfulness,none,
+quality,judge,2605.13717,cot-faithfulness,none,
+quality,judge,2606.16193,cot-faithfulness,adjacent,
+quality,judge,2607.23147,cot-faithfulness,none,
+quality,judge,2608.21114,cot-faithfulness,none,
+quality,judge,2608.23906,cot-faithfulness,none,
+quality,judge,2608.25490,cot-faithfulness,none,
+quality,judge,2608.29492,cot-faithfulness,none,
+quality,judge,2608.29956,cot-faithfulness,adjacent,
+quality,judge,2609.00067,cot-faithfulness,adjacent,
+quality,judge,2609.00515,cot-faithfulness,none,
+quality,judge,2609.01352,cot-faithfulness,none,
+quality,judge,2609.03719,cot-faithfulness,none,
+quality,judge,2609.04875,cot-faithfulness,none,
+quality,judge,2609.06685,cot-faithfulness,none,
+quality,judge,2609.10239,cot-faithfulness,none,
+quality,judge,2609.11870,cot-faithfulness,none,
+quality,judge,2609.17171,cot-faithfulness,adjacent,
+quality,judge,2609.18985,cot-faithfulness,none,
+quality,judge,2609.30768,cot-faithfulness,none,
+quality,judge,2609.34444,cot-faithfulness,none,
+quality,judge,2609.34463,cot-faithfulness,none,
+quality,judge,2609.37616,cot-faithfulness,none,
+quality,judge,2609.38098,cot-faithfulness,none,
+quality,judge,2610.00185,cot-faithfulness,none,
+quality,judge,2610.03025,cot-faithfulness,none,
+quality,judge,2610.03510,cot-faithfulness,none,
+quality,judge,2610.05492,cot-faithfulness,none,
+quality,judge,2610.06854,cot-faithfulness,none,
+quality,judge,2610.06918,cot-faithfulness,none,
+quality,judge,2610.07458,cot-faithfulness,none,
+quality,judge,2502.05242,cot-monitoring,central,
+quality,judge,2504.01875,cot-monitoring,adjacent,
+quality,judge,2504.08016,cot-monitoring,none,
+quality,judge,2507.20335,cot-monitoring,none,
+quality,judge,2512.01222,cot-monitoring,central,
+quality,judge,2512.10100,cot-monitoring,none,
+quality,judge,2603.18908,cot-monitoring,none,
+quality,judge,2603.20662,cot-monitoring,none,
+quality,judge,2605.09502,cot-monitoring,adjacent,
+quality,judge,2605.10065,cot-monitoring,none,
+quality,judge,2605.10971,cot-monitoring,none,
+quality,judge,2605.13717,cot-monitoring,none,
+quality,judge,2606.16193,cot-monitoring,adjacent,
+quality,judge,2606.29960,cot-monitoring,none,
+quality,judge,2608.28623,cot-monitoring,related,
+quality,judge,2608.29492,cot-monitoring,none,
+quality,judge,2609.00449,cot-monitoring,none,
+quality,judge,2609.03331,cot-monitoring,none,
+quality,judge,2609.03687,cot-monitoring,none,
+quality,judge,2609.04875,cot-monitoring,none,
+quality,judge,2609.06685,cot-monitoring,none,
+quality,judge,2609.07662,cot-monitoring,none,
+quality,judge,2609.07808,cot-monitoring,none,
+quality,judge,2609.08136,cot-monitoring,none,
+quality,judge,2609.14127,cot-monitoring,none,
+quality,judge,2609.15517,cot-monitoring,adjacent,
+quality,judge,2609.17171,cot-monitoring,adjacent,
+quality,judge,2609.22119,cot-monitoring,adjacent,
+quality,judge,2609.27421,cot-monitoring,none,
+quality,judge,2609.30768,cot-monitoring,none,
+quality,judge,2609.34198,cot-monitoring,none,
+quality,judge,2609.34463,cot-monitoring,none,
+quality,judge,2609.35161,cot-monitoring,none,
+quality,judge,2609.37616,cot-monitoring,none,
+quality,judge,2610.01766,cot-monitoring,none,
+quality,judge,2610.04132,cot-monitoring,none,
+quality,judge,2610.05541,cot-monitoring,none,
+quality,judge,2610.06918,cot-monitoring,none,
+quality,judge,2610.07458,cot-monitoring,none,
+quality,check,2301.13379,cot-faithfulness,none,
+quality,check,2305.02556,cot-faithfulness,none,
+quality,check,2412.01113,cot-faithfulness,central,
+quality,check,2502.05242,cot-faithfulness,adjacent,
+quality,check,2502.14829,cot-faithfulness,central,
+quality,check,2502.18848,cot-faithfulness,central,
+quality,check,2504.01875,cot-faithfulness,adjacent,
+quality,check,2507.12379,cot-faithfulness,adjacent,
+quality,check,2507.22928,cot-faithfulness,central,
+quality,check,2510.04040,cot-faithfulness,central,
+quality,check,2512.01222,cot-faithfulness,adjacent,
+quality,check,2604.17502,cot-faithfulness,none,
+quality,check,2605.11891,cot-faithfulness,none,
+quality,check,2605.13717,cot-faithfulness,none,
+quality,check,2606.16193,cot-faithfulness,adjacent,
+quality,check,2607.23147,cot-faithfulness,none,
+quality,check,2608.21114,cot-faithfulness,none,
+quality,check,2608.23906,cot-faithfulness,none,
+quality,check,2608.25490,cot-faithfulness,none,
+quality,check,2608.29492,cot-faithfulness,none,
+quality,check,2608.29956,cot-faithfulness,adjacent,
+quality,check,2609.00067,cot-faithfulness,adjacent,
+quality,check,2609.00515,cot-faithfulness,none,
+quality,check,2609.01352,cot-faithfulness,none,
+quality,check,2609.03719,cot-faithfulness,none,
+quality,check,2609.04875,cot-faithfulness,none,
+quality,check,2609.06685,cot-faithfulness,none,
+quality,check,2609.10239,cot-faithfulness,none,
+quality,check,2609.11870,cot-faithfulness,none,
+quality,check,2609.17171,cot-faithfulness,adjacent,
+quality,check,2609.18985,cot-faithfulness,none,
+quality,check,2609.30768,cot-faithfulness,none,
+quality,check,2609.34444,cot-faithfulness,none,
+quality,check,2609.34463,cot-faithfulness,none,
+quality,check,2609.37616,cot-faithfulness,none,
+quality,check,2609.38098,cot-faithfulness,none,
+quality,check,2610.00185,cot-faithfulness,none,
+quality,check,2610.03025,cot-faithfulness,none,
+quality,check,2610.03510,cot-faithfulness,none,
+quality,check,2610.05492,cot-faithfulness,none,
+quality,check,2610.06854,cot-faithfulness,none,
+quality,check,2610.06918,cot-faithfulness,none,
+quality,check,2610.07458,cot-faithfulness,none,
+quality,check,2502.05242,cot-monitoring,central,
+quality,check,2504.01875,cot-monitoring,adjacent,
+quality,check,2504.08016,cot-monitoring,none,
+quality,check,2507.20335,cot-monitoring,none,
+quality,check,2512.01222,cot-monitoring,central,
+quality,check,2512.10100,cot-monitoring,none,
+quality,check,2603.18908,cot-monitoring,none,
+quality,check,2603.20662,cot-monitoring,none,
+quality,check,2605.09502,cot-monitoring,adjacent,
+quality,check,2605.10065,cot-monitoring,none,
+quality,check,2605.10971,cot-monitoring,none,
+quality,check,2605.13717,cot-monitoring,none,
+quality,check,2606.16193,cot-monitoring,adjacent,
+quality,check,2606.29960,cot-monitoring,none,
+quality,check,2608.28623,cot-monitoring,related,
+quality,check,2608.29492,cot-monitoring,none,
+quality,check,2609.00449,cot-monitoring,none,
+quality,check,2609.03331,cot-monitoring,none,
+quality,check,2609.03687,cot-monitoring,none,
+quality,check,2609.04875,cot-monitoring,none,
+quality,check,2609.06685,cot-monitoring,none,
+quality,check,2609.07662,cot-monitoring,none,
+quality,check,2609.07808,cot-monitoring,none,
+quality,check,2609.08136,cot-monitoring,none,
+quality,check,2609.14127,cot-monitoring,none,
+quality,check,2609.15517,cot-monitoring,adjacent,
+quality,check,2609.17171,cot-monitoring,adjacent,
+quality,check,2609.22119,cot-monitoring,adjacent,
+quality,check,2609.27421,cot-monitoring,none,
+quality,check,2609.30768,cot-monitoring,none,
+quality,check,2609.34198,cot-monitoring,none,
+quality,check,2609.34463,cot-monitoring,none,
+quality,check,2609.35161,cot-monitoring,none,
+quality,check,2609.37616,cot-monitoring,none,
+quality,check,2610.01766,cot-monitoring,none,
+quality,check,2610.04132,cot-monitoring,none,
+quality,check,2610.05541,cot-monitoring,none,
+quality,check,2610.06918,cot-monitoring,none,
+quality,check,2610.07458,cot-monitoring,none,
+quality,field_grade,1806.07366,efficiency-and-architecture,,
+quality,field_grade,2501.05559,language-models,,
+quality,field_grade,2510.14980,agents,,
+quality,field_grade,2510.24469,language-models,,
+quality,field_grade,2601.17226,reasoning-and-rl,,
+quality,field_grade,2603.07373,efficiency-and-architecture,,
+quality,field_grade,2603.19714,reasoning-and-rl,,
+quality,field_grade,2604.17738,language-models,,
+quality,field_grade,2605.30443,language-models,,
+quality,field_grade,2606.10044,agents,,
+quality,field_grade,2606.12487,language-models,,
+quality,field_grade,2606.14715,agents,,
+quality,field_grade,2607.18915,reasoning-and-rl,,
+quality,field_grade,2608.03172,language-models,,
+quality,field_grade,2608.04904,language-models,,
+quality,field_grade,2608.25097,language-models,,
+quality,field_grade,2609.22943,language-models,,
+quality,field_grade,2609.25001,language-models,,
+quality,field_grade,2610.13238,agents,,
+quality,field_grade,2610.13277,efficiency-and-architecture,,
+quality,field_grade,2610.14173,language-models,,
+quality,field_grade,2610.14252,efficiency-and-architecture,,
+quality,field_grade,2610.14745,efficiency-and-architecture,,
+quality,field_grade,2610.14968,agents,,
+quality,field_grade,2610.15081,efficiency-and-architecture,,
+quality,field_grade,2610.15163,language-models,,
+quality,field_grade,2610.15373,language-models,,
+quality,field_grade,2610.15481,language-models,,
+quality,field_grade,2610.15544,language-models,,
+quality,field_grade,2610.15954,language-models,,
+quality,field_grade,2610.15963,efficiency-and-architecture,,
+quality,field_grade,2610.16020,efficiency-and-architecture,,
+quality,field_grade,2610.16118,efficiency-and-architecture,,
+quality,field_grade,2610.16784,language-models,,
+quality,field_grade,2610.16838,agents,,
+quality,field_grade,2610.17266,reasoning-and-rl,,
+quality,field_grade,2610.17436,efficiency-and-architecture,,
+quality,field_grade,2610.17665,agents,,
+quality,field_grade,2610.17679,efficiency-and-architecture,,
+quality,field_grade,2610.17767,reasoning-and-rl,,
+quality,field_grade,2610.17840,language-models,,
+quality,field_grade,2610.17869,language-models,,
+quality,field_grade,2610.18069,agents,,
+quality,field_grade,2610.18162,language-models,,
+quality,field_grade,2610.18497,agents,,
+quality,field_grade,2610.18497,language-models,,
+quality,field_grade,2610.18614,language-models,,
+quality,field_grade,2610.19064,language-models,,
+quality,field_grade,2610.19271,efficiency-and-architecture,,
+quality,field_grade,2610.19424,language-models,,
+quality,field_grade,2610.19475,agents,,
+quality,field_grade,2610.19550,agents,,
+quality,field_grade,2610.19827,language-models,,
+quality,field_grade,2610.20959,language-models,,
+quality,field_grade,2610.21229,reasoning-and-rl,,
+quality,field_grade,2610.21640,language-models,,
+quality,field_grade,2610.21656,reasoning-and-rl,,
+quality,field_grade,2610.22289,agents,,
+quality,field_grade,2610.22382,language-models,,
+quality,field_grade,2610.23818,language-models,,
+quality,analyse,1307.2965,computer-vision,,
+quality,analyse,2401.04282,machine-learning,,
+quality,analyse,2505.24311,learning-theory,,
+quality,analyse,2508.08216,machine-learning,,
+quality,analyse,2510.24736,ai-for-science,,
+quality,analyse,2601.07535,reinforcement-learning,,
+quality,analyse,2603.14371,inference-efficiency,,
+quality,analyse,2604.03867,steering,,
+quality,analyse,2604.08905,rl-for-reasoning,,
+quality,analyse,2604.12378,multilingual,,
+quality,analyse,2605.16418,machine-learning,,
+quality,analyse,2606.01442,machine-learning,,
+quality,analyse,2606.18986,language-tasks,,
+quality,analyse,2607.12723,coding-agents,,
+quality,analyse,2607.18317,multilingual,,
+quality,analyse,2609.34692,time-series,,
+quality,analyse,2609.36572,rl-for-reasoning,,
+quality,analyse,2610.12355,reasoning-and-rl,,
+quality,analyse,2610.12843,media-generation,,
+quality,analyse,2610.13247,lm-evaluation,,
+quality,analyse,2610.13447,inference-efficiency,,
+quality,analyse,2610.13812,media-generation,,
+quality,analyse,2610.13912,agents,,
+quality,analyse,2610.14279,architectures,,
+quality,analyse,2610.14293,media-generation,,
+quality,analyse,2610.14349,multimodal,,
+quality,analyse,2610.14400,reinforcement-learning,,
+quality,analyse,2610.14953,reinforcement-learning,,
+quality,analyse,2610.14980,language-tasks,,
+quality,analyse,2610.15223,learning-theory,,
+quality,analyse,2610.15571,learning-theory,,
+quality,analyse,2610.15760,time-series,,
+quality,analyse,2610.15850,interpretability,,
+quality,analyse,2610.15888,rl-for-reasoning,,
+quality,analyse,2610.16102,long-context,,
+quality,analyse,2610.16172,rl-for-reasoning,,
+quality,analyse,2610.16450,lm-evaluation,,
+quality,analyse,2610.16579,language-tasks,,
+quality,analyse,2610.16940,machine-learning,,
+quality,analyse,2610.17164,ai-for-science,,
+quality,analyse,2610.17379,reasoning-and-rl,,
+quality,analyse,2610.17494,machine-learning,,
+quality,analyse,2610.17782,language-tasks,,
+quality,analyse,2610.18683,agents,,
+quality,analyse,2610.19028,fairness,,
+quality,analyse,2610.19422,jailbreaks,,
+quality,analyse,2610.19427,lm-evaluation,,
+quality,analyse,2610.19856,lm-evaluation,,
+quality,analyse,2610.19997,architectures,,
+quality,analyse,2610.21189,steering,,
+quality,analyse,2610.21308,efficiency-and-architecture,,
+quality,analyse,2610.21335,computer-vision,,
+quality,analyse,2610.21537,efficiency-and-architecture,,
+quality,analyse,2610.21582,reinforcement-learning,,
+quality,analyse,2610.22139,hallucination,,
+quality,analyse,2610.22269,agents,,
+quality,analyse,2610.22364,robotics,,
+quality,analyse,2610.22484,machine-learning,,
+quality,analyse,2610.22981,hallucination,,
+quality,analyse,2610.23311,agents,,
+quality,brief,2610.12445,cot-monitoring,,
+quality,brief,2610.11351,cot-monitoring,,
+quality,brief,2610.10947,cot-monitoring,,
+quality,brief,2610.10405,cot-monitoring,,
+quality,brief,2610.07186,cot-faithfulness,,
+quality,brief,2610.04594,cot-faithfulness,,
+quality,brief,2610.03458,cot-monitoring,,
+quality,brief,2610.02588,cot-monitoring,,
+quality,brief,2610.02015,cot-monitoring,,
+quality,brief,2609.32670,cot-faithfulness,,
+quality,writer,,23,,
+quality,writer,,21,,
+quality,writer,,26,,
+quality,writer,,24,,
+quality,writer,,30,,
+refusals,judge,2610.13116,alignment-and-safety,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,check,2610.13116,alignment-and-safety,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,field_grade,2610.13116,language-models,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,analyse,2610.13116,safety-evaluations,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,brief,2610.13116,safety-evaluations,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,judge,2610.21200,alignment-and-safety,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,check,2610.21200,alignment-and-safety,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,field_grade,2610.21200,language-models,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,analyse,2610.21200,model-security,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,brief,2610.21200,model-security,,"Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19."
+refusals,judge,2610.17907,alignment-and-safety,,Refused by Opus 5.5 for the Brief in N6 (cyber); Sonnet 5.5 answered it then.
+refusals,check,2610.17907,alignment-and-safety,,Refused by Opus 5.5 for the Brief in N6 (cyber); Sonnet 5.5 answered it then.
+refusals,field_grade,2610.17907,language-models,,Refused by Opus 5.5 for the Brief in N6 (cyber); Sonnet 5.5 answered it then.
+refusals,analyse,2610.17907,jailbreaks,,Refused by Opus 5.5 for the Brief in N6 (cyber); Sonnet 5.5 answered it then.
+refusals,brief,2610.17907,jailbreaks,,Refused by Opus 5.5 for the Brief in N6 (cyber); Sonnet 5.5 answered it then.
+refusals,judge,2602.06172,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,check,2602.06172,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,field_grade,2602.06172,language-models,,"From the archive's search, theme biosecurity."
+refusals,analyse,2602.06172,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,brief,2602.06172,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,judge,2607.05462,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,check,2607.05462,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,field_grade,2607.05462,language-models,,"From the archive's search, theme biosecurity."
+refusals,analyse,2607.05462,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,brief,2607.05462,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,judge,2606.11150,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,check,2606.11150,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,field_grade,2606.11150,language-models,,"From the archive's search, theme biosecurity."
+refusals,analyse,2606.11150,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,brief,2606.11150,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,judge,2608.02684,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,check,2608.02684,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,field_grade,2608.02684,language-models,,"From the archive's search, theme biosecurity."
+refusals,analyse,2608.02684,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,brief,2608.02684,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,judge,2605.28843,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,check,2605.28843,alignment-and-safety,,"From the archive's search, theme biosecurity."
+refusals,field_grade,2605.28843,language-models,,"From the archive's search, theme biosecurity."
+refusals,analyse,2605.28843,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,brief,2605.28843,safety-evaluations,,"From the archive's search, theme biosecurity."
+refusals,judge,2607.12200,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,check,2607.12200,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,field_grade,2607.12200,language-models,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,analyse,2607.12200,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,brief,2607.12200,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,judge,2604.14865,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,check,2604.14865,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,field_grade,2604.14865,language-models,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,analyse,2604.14865,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,brief,2604.14865,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,judge,2609.15383,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,check,2609.15383,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,field_grade,2609.15383,language-models,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,analyse,2609.15383,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,brief,2609.15383,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,judge,2610.13928,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,check,2610.13928,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,field_grade,2610.13928,language-models,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,analyse,2610.13928,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,brief,2610.13928,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,judge,2604.18487,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,check,2604.18487,alignment-and-safety,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,field_grade,2604.18487,language-models,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,analyse,2604.18487,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,brief,2604.18487,safety-evaluations,,"From the archive's search, theme chemical weapons and CBRN."
+refusals,judge,2605.05807,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,check,2605.05807,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,field_grade,2605.05807,language-models,,"From the archive's search, theme cyber offence."
+refusals,analyse,2605.05807,model-security,,"From the archive's search, theme cyber offence."
+refusals,brief,2605.05807,model-security,,"From the archive's search, theme cyber offence."
+refusals,judge,2606.30819,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,check,2606.30819,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,field_grade,2606.30819,language-models,,"From the archive's search, theme cyber offence."
+refusals,analyse,2606.30819,model-security,,"From the archive's search, theme cyber offence."
+refusals,brief,2606.30819,model-security,,"From the archive's search, theme cyber offence."
+refusals,judge,2609.09798,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,check,2609.09798,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,field_grade,2609.09798,language-models,,"From the archive's search, theme cyber offence."
+refusals,analyse,2609.09798,model-security,,"From the archive's search, theme cyber offence."
+refusals,brief,2609.09798,model-security,,"From the archive's search, theme cyber offence."
+refusals,judge,2607.06963,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,check,2607.06963,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,field_grade,2607.06963,language-models,,"From the archive's search, theme cyber offence."
+refusals,analyse,2607.06963,model-security,,"From the archive's search, theme cyber offence."
+refusals,brief,2607.06963,model-security,,"From the archive's search, theme cyber offence."
+refusals,judge,2605.30667,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,check,2605.30667,alignment-and-safety,,"From the archive's search, theme cyber offence."
+refusals,field_grade,2605.30667,language-models,,"From the archive's search, theme cyber offence."
+refusals,analyse,2605.30667,model-security,,"From the archive's search, theme cyber offence."
+refusals,brief,2605.30667,model-security,,"From the archive's search, theme cyber offence."
+refusals,judge,2603.03081,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,check,2603.03081,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,field_grade,2603.03081,language-models,,"From the archive's search, theme jailbreaks."
+refusals,analyse,2603.03081,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,brief,2603.03081,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,judge,2610.23030,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,check,2610.23030,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,field_grade,2610.23030,language-models,,"From the archive's search, theme jailbreaks."
+refusals,analyse,2610.23030,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,brief,2610.23030,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,judge,2605.08277,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,check,2605.08277,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,field_grade,2605.08277,language-models,,"From the archive's search, theme jailbreaks."
+refusals,analyse,2605.08277,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,brief,2605.08277,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,judge,2604.15725,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,check,2604.15725,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,field_grade,2604.15725,language-models,,"From the archive's search, theme jailbreaks."
+refusals,analyse,2604.15725,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,brief,2604.15725,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,judge,2606.28153,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,check,2606.28153,alignment-and-safety,,"From the archive's search, theme jailbreaks."
+refusals,field_grade,2606.28153,language-models,,"From the archive's search, theme jailbreaks."
+refusals,analyse,2606.28153,jailbreaks,,"From the archive's search, theme jailbreaks."
+refusals,brief,2606.28153,jailbreaks,,"From the archive's search, theme jailbreaks."

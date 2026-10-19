@@ -1,0 +1,173 @@
+# The fallback replay's ladders (docs/plans/failure-handling.md, P1): per role that writes, its
+# own model first, then the plan's starting list, then the other candidates the plan names.
+# `litwatch eval ladders` asks each candidate alone. Prices are USD per million input and output
+# tokens: Anthropic's from `llm/prices.py`, the rest from OpenRouter's catalogue on 2026-10-19;
+# they only size the estimate and each call's reservation, and every recorded cost is the
+# provider's own. `output_tokens` is about a call's mean in production's journal (a reasoning
+# candidate's own thinking is not known before the run); `reserve_output_tokens` bounds a call.
+# A candidate's effort is its role's own model's, where the model takes one.
+
+[judge]
+output_tokens = 600
+reserve_output_tokens = 8000
+
+[[judge.candidates]]
+name = "opus"
+price = [4.0, 20.0]
+provider = "anthropic"
+model = "claude-opus-5-5"
+effort = "medium"
+
+[[judge.candidates]]
+name = "sonnet"
+price = [2.0, 10.0]
+provider = "anthropic"
+model = "claude-sonnet-5-5"
+effort = "medium"
+
+[[judge.candidates]]
+name = "sol"
+price = [2.0, 10.0]
+provider = "openrouter"
+model = "openai/gpt-6.1-sol"
+effort = "medium"
+
+[[judge.candidates]]
+name = "kimi"
+price = [0.239, 11.936]
+provider = "openrouter"
+model = "moonshotai/kimi-k3"
+effort = "medium"
+
+[check]
+output_tokens = 2100
+reserve_output_tokens = 16000
+
+[[check.candidates]]
+name = "muse"
+price = [0.1, 0.2]
+provider = "openrouter"
+model = "meta/muse-spark-1.3-contributor"
+effort = "high"
+
+[[check.candidates]]
+name = "ds-flash-1017"
+price = [0.15, 0.6]
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash-1017"
+effort = "high"
+
+[[check.candidates]]
+name = "gemini-flash"
+price = [0.825, 4.125]
+provider = "openrouter"
+model = "google/gemini-3.8-flash"
+effort = "high"
+
+[[check.candidates]]
+name = "ds-pro"
+price = [0.66, 1.98]
+provider = "openrouter"
+model = "deepseek/deepseek-v4-pro-0813"
+effort = "high"
+
+[[check.candidates]]
+name = "minimax-free"
+price = [0.0, 0.0]
+provider = "openrouter"
+model = "minimax/minimax-m3.1-flash:free"
+effort = "high"
+
+[analyse]
+output_tokens = 650
+reserve_output_tokens = 4000
+
+[[analyse.candidates]]
+name = "haiku"
+price = [0.1, 0.5]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+
+[[analyse.candidates]]
+name = "luna"
+price = [0.1, 0.5]
+provider = "openrouter"
+model = "openai/gpt-6-luna"
+
+[[analyse.candidates]]
+name = "ds-flash"
+price = [0.033, 0.08]
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash"
+
+[field_grade]
+output_tokens = 300
+reserve_output_tokens = 4000
+
+[[field_grade.candidates]]
+name = "haiku"
+price = [0.1, 0.5]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+
+[[field_grade.candidates]]
+name = "luna"
+price = [0.1, 0.5]
+provider = "openrouter"
+model = "openai/gpt-6-luna"
+
+[[field_grade.candidates]]
+name = "ds-flash"
+price = [0.033, 0.08]
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash"
+
+[brief]
+output_tokens = 1700
+reserve_output_tokens = 16000
+
+[[brief.candidates]]
+name = "sonnet"
+price = [2.0, 10.0]
+provider = "anthropic"
+model = "claude-sonnet-5-5"
+effort = "high"
+
+[[brief.candidates]]
+name = "sol"
+price = [2.0, 10.0]
+provider = "openrouter"
+model = "openai/gpt-6.1-sol"
+effort = "high"
+
+[[brief.candidates]]
+name = "kimi"
+price = [0.239, 11.936]
+provider = "openrouter"
+model = "moonshotai/kimi-k3"
+effort = "high"
+
+[writer]
+output_tokens = 800
+reserve_output_tokens = 8000
+
+[[writer.candidates]]
+name = "opus"
+price = [4.0, 20.0]
+provider = "anthropic"
+model = "claude-opus-5-5"
+effort = "medium"
+
+[[writer.candidates]]
+name = "sonnet"
+price = [2.0, 10.0]
+provider = "anthropic"
+model = "claude-sonnet-5-5"
+effort = "medium"
+
+[[writer.candidates]]
+name = "kimi"
+price = [0.239, 11.936]
+provider = "openrouter"
+model = "moonshotai/kimi-k3"
+effort = "medium"
