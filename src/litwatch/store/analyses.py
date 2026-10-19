@@ -125,6 +125,16 @@ CURRENT_GIST_ID = _GIST.format(col="id")
 CURRENT_GIST_SOURCE = _GIST.format(col="source")
 
 
+async def current_gist(conn: psycopg.AsyncConnection, paper_id: str) -> str | None:
+    """The paper's current Gist, the one its page shows; None while it has none."""
+    row = await (
+        await conn.execute(
+            f"SELECT {CURRENT_GIST} AS text FROM papers p WHERE p.id = %s", (paper_id,)
+        )
+    ).fetchone()
+    return row["text"] if row else None
+
+
 async def current_gist_id(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
     row = await (
         await conn.execute(

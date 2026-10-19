@@ -22,7 +22,7 @@ from litwatch.core import Grade
 from litwatch.events import Integration
 from litwatch.store import word as word_store
 
-BUILT_IN = ("zotero", "webdav", "archive", "deep", "webhook")
+BUILT_IN = ("zotero", "webdav", "archive", "deep", "notion", "webhook")
 
 
 class IntegrationError(ValueError):
