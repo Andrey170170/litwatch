@@ -21,7 +21,7 @@ its current end. `docs/integrations.md` documents the contract, the payloads and
 changed, whatever caused it), `publication.found`, `card.requested`, `card.ready`.
 
 **Changed:** `take.written` is replaced by `brief.written` (paper, paper revision) and `gist.written`; `verdict.recorded`
-carries Fit, Weight and the derived grade; new `digest.written` (topic, period, day) for exports such as Notion.
+carries Fit, Weight and the derived grade; new `digest.written` (topic, period, day) for exports.
 
 ## Built-in integrations
 
@@ -30,7 +30,8 @@ carries Fit, Weight and the derived grade; new `digest.written` (topic, period, 
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `gist.written`, `brief.written`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step; on unsave it tags the item as dropped and never deletes it |
 | `webdav` | `grade.changed` to must read, `paper.saved` | Stores the PDF for Zotero's file sync, read from the archive |
 | `deep` | see below | Requests a Deep card; emits `card.ready` |
-| `webhook` | any, by filter | POSTs the event to a URL; n8n and the Notion export hang off it |
+| `notion` | `grade.changed`, `gist.written`, `brief.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the Focus papers for a reader outside litwatch (below) |
+| `webhook` | any, by filter | POSTs the event to a URL, for n8n and the like |
 
 **Changed: `archive` is no longer an integration.** It is part of the stack ([archive.md](archive.md)); the archive
 client moves to its own module used by intake, the full-text queue, search and `webdav`, and `SearchProvider` stays as
@@ -56,6 +57,57 @@ must read; for a pick, the digest that picked it is published. Either way the pa
 cancels automatic card passes that have not started. A card the owner asked for is never cancelled by an Unsave, and a
 card already made is kept.
 
-Notion stays outside the built-in set: a documented n8n workflow subscribes by webhook and reads the API. The PI's
-Notion view carries Focus topics only until the owner has talked to her (first v1, decision 5); it stops at the
-switch until then (decision 67).
+## The Notion export
+
+**Changed (decisions 68–76).** Notion becomes a built-in integration, `notion`, that talks to Notion's API directly;
+n8n is no longer involved, and the first v1's n8n workflow is removed. It is the PI's view of litwatch, not the
+owner's: the owner reads the web app, the PI reads a Notion table and does not use litwatch itself. She tries it for a
+week from 2026-10-19; if she does not use it, it is switched off in the configuration.
+
+**What it holds.** Papers only, no digests: every paper whose effective grade for an exported topic is relevant or
+above. The exported topics default to the Focus topics (now CoT faithfulness, CoT monitoring, Circuits) and the
+minimum grade to relevant; both are options. A page stands on its own: the PI cannot reach litwatch, so nothing
+links into it; it links to arXiv, the PDF and the published version.
+
+**Its words.** None of litwatch's internal terms reach Notion. Grades read **Must read** and **Worth a look**
+(relevant); a paper taken off the list reads **No longer listed**. The detail levels read **TL;DR** (the Gist),
+**Summary** (the Brief, or the abstract when there is none) and **Deep read** (the Deep card). Topics carry short
+names. A "How to read this" page beside the database explains the topics, the grades, the text on each paper and
+which column is the reader's. The words are recorded in the glossary under *Notion export*.
+
+**The database.** One row per paper. Its columns: Title, Grade, Topic (the exported topics it is listed for), TL;DR,
+Published, Status, Authors, Venue, arXiv, PDF, Added, Why, and one grade column per exported topic. Grade is the best
+of the paper's topic grades; the topic grade columns are what the topic views group by, since one paper can be a
+must read for one topic and worth a look for another. Views: All papers, grouped by Grade, and one per exported
+topic, showing its papers grouped by that topic's grade; each sorted newest published first. Grades are
+coloured from Notion's palette: Must read orange, Worth a look blue, No longer listed grey. Rarity, the web app's
+colour, is not exported: it spans all followed classes, and the PI reads only these topics.
+
+**The page.** A short callout pointing to "How to read this", the TL;DR, the Summary, and the Deep read when there is
+one: a collapsed toggle holding one coloured callout per section of the card, as 0.14's reading card had them (key
+claim, summary, the faithfulness and monitoring sections when the card has them, evaluation, closest prior work with
+arXiv links, limitations, code). litwatch owns the body and rewrites it when its text changes.
+
+**Leaving and returning.** A paper whose grade for a topic falls below the minimum keeps its page: that topic's
+grade becomes No longer listed, and Grade too once no topic lists it. A **Why** line says, in plain words and with
+the date, who took it off and why: the owner, by the name the configuration gives, or litwatch on re-checking it;
+and whether it was judged off-topic or less important (its Fit fell, or only its Weight). Pages are never deleted.
+A paper that qualifies again is listed again and its Why is cleared.
+
+**Who owns what.** The integration creates the database, its columns and its views once, when it is set up, under a
+page the configuration names. After that it writes only its own properties and the page body; views, column widths
+and what a view hides are the owner's to arrange and are never reset. Adding an exported topic adds its grade column
+and its view. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
+are not part of its body and survive rewrites. Nothing flows back from Notion into litwatch.
+
+**First fill and after.** When it is set up the integration fills the database with every paper that qualifies at
+that moment, the papers v1 already holds included; from then on it follows the events above from its cursor. It
+reads everything through the repositories, so a repeated event writes the same page.
+
+**Access.** It authenticates with its own Notion internal integration's token (a secret, never `litwatch.toml`),
+which the owner shares with the one Notion page that holds the database.
+
+**The owner's instance.** The database goes on the existing LitWatch page, which the PI can already see. Once the
+owner has checked it, 0.14's Papers, Digest and Selections databases and the LitWatch page's untitled linked view go
+to Notion's trash (decision 76). The Research workspace's own Papers source is fed from Zotero by other n8n
+workflows, has no relation to 0.14's databases and is not touched.

@@ -166,7 +166,36 @@ The plan is [`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md).
 66. **Zotero and WebDAV are switched on after a few stable nights**, catching up from the first event: their
     cursors are created at the start of the outbox when the database is made. The collections are renamed then.
 67. **Notion stops at the switch** until the owner has talked to the PI; the export is then rewritten against v1's
-    events or removed.
+    events or removed. Settled by decisions 68–76.
+
+## Decided 2026-10-19, the Notion export
+
+The owner talked to the PI: she asked for a week to see whether the Notion view is useful to her. Settles decision
+67. The export is described in [integrations.md](integrations.md), *The Notion export*.
+
+68. **Notion is a built-in integration** talking to Notion's API, off unless configured and shipped with litwatch;
+    n8n leaves the path and the first v1's workflow is removed. *Why:* the outbox already gives it a cursor, retries,
+    failures under Settings and tests; an n8n workflow has none of these and lives outside the repository.
+69. **Notion is the PI's view, not the owner's**: papers only, no digests; the exported topics and the minimum grade
+    are options, by default the Focus topics at relevant or above. Pages stand on their own, with no links into
+    litwatch. *Why:* the owner reads the web app; the PI cannot reach it.
+70. **Plain words only**: Must read, Worth a look, No longer listed; TL;DR, Summary, Deep read; short topic names;
+    a "How to read this" page. *Why:* the PI does not know litwatch's terms, and Fit levels read as jargon.
+71. **A paper that leaves keeps its page**, marked No longer listed with a Why line naming who took it off (the
+    owner, or litwatch on re-checking) and whether it was judged off-topic or less important. Pages are never
+    deleted. *Why:* a row the PI saw should not vanish without a reason.
+72. **A grade per exported topic**, plus Grade as the best of them; topic views group by their topic's grade.
+    *Why:* a paper can be a must read for one topic and worth a look for another.
+73. **litwatch sets the database up once and then writes only its own columns and the page body.** Views and layout
+    are the owner's; Status is the reader's; nothing comes back from Notion. *Why:* the owner arranges the views by
+    hand, and a trial needs no feedback path.
+74. **The Deep read is coloured callouts by section**, inside a collapsed toggle, as 0.14's reading card was. *Why:*
+    the owner liked 0.14's look; the toggle keeps the page short for a reader who stops at the Summary.
+75. **The first set-up fills the database with every paper that qualifies then**, not only papers from new events.
+76. **On the owner's instance the database goes on the existing LitWatch page**, already shared with the PI, behind
+    its own Notion integration token. 0.14's Papers, Digest and Selections databases and the page's linked view go to
+    Notion's trash once the owner has checked the new database; the Research workspace's Zotero-fed Papers is not
+    touched.
 
 ## Open
 

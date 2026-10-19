@@ -1,5 +1,5 @@
-"""webhook: POSTs every event that matches a filter to a URL, as JSON. n8n workflows, and
-through them the Notion export, hang off this.
+"""webhook: POSTs every event that matches a filter to a URL, as JSON, for n8n workflows and
+other receivers outside litwatch.
 
 The body is the event: `{"id", "type", "paper_id", "payload", "created_at", "xid"}`. A
 receiver reads anything more through litwatch's API. The event id is also sent as
