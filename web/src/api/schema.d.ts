@@ -550,9 +550,10 @@ export interface paths {
         /**
          * Acknowledge
          * @description Acknowledge on Needs you: the owner has seen these items, and they stop counting in the
-         *     run status. An item is marked only while it still waits on the owner as shown (a step on
-         *     the revision named); one that recovers and fails again comes back unacknowledged. It moves
-         *     no paper. A failed nightly run is not an item and is never acknowledged.
+         *     run status. An item is marked only while it still waits on the owner as shown (the same
+         *     failure, not a later one); one that recovers and fails again comes back unacknowledged. It
+         *     moves no paper. A failed nightly run is not an item and is never acknowledged. Answers with
+         *     the items marked, for the page to fold those and only those.
          */
         post: operations["acknowledge_api_settings_acknowledge_post"];
         delete?: never;
@@ -1046,10 +1047,11 @@ export interface components {
             };
         };
         /**
-         * AcknowledgeIn
-         * @description What the owner acknowledged: stopped steps, full-text passes and failed digests (by id).
+         * Acknowledgement
+         * @description Items of Needs you, each as shown: stopped steps, full-text passes and failed digests
+         *     (by id). The owner's Acknowledge names them; the answer names those it marked.
          */
-        AcknowledgeIn: {
+        Acknowledgement: {
             /**
              * Steps
              * @default []
@@ -1059,7 +1061,7 @@ export interface components {
              * Passes
              * @default []
              */
-            passes: number[];
+            passes: components["schemas"]["PassSeen"][];
             /**
              * Digests
              * @default []
@@ -2151,6 +2153,20 @@ export interface components {
             left_out?: string[];
         };
         /**
+         * PassSeen
+         * @description A full-text pass as Needs you showed it, and since when it waited, which names this
+         *     failure.
+         */
+        PassSeen: {
+            /** Id */
+            id: number;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+        };
+        /**
          * Publication
          * @description The published record of a paper: what a BibTeX entry needs, as DBLP has it.
          */
@@ -2437,7 +2453,8 @@ export interface components {
         Step: "classification" | "analysis" | "grading";
         /**
          * StepSeen
-         * @description A stopped step as Needs you showed it: the paper, its revision then, a grading's topic.
+         * @description A stopped step as Needs you showed it: the paper, its revision then, a grading's topic,
+         *     and when it last failed, which names this failure.
          */
         StepSeen: {
             step: components["schemas"]["Step"];
@@ -2447,6 +2464,11 @@ export interface components {
             revision: number;
             /** Topic */
             topic?: string | null;
+            /**
+             * Failed At
+             * Format: date-time
+             */
+            failed_at: string;
         };
         /**
          * StripDigest
@@ -3813,16 +3835,18 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AcknowledgeIn"];
+                "application/json": components["schemas"]["Acknowledgement"];
             };
         };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Acknowledgement"];
+                };
             };
             /** @description Validation Error */
             422: {

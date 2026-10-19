@@ -167,33 +167,48 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
 
 
 class StepSeen(BaseModel):
-    """A stopped step as Needs you showed it: the paper, its revision then, a grading's topic."""
+    """A stopped step as Needs you showed it: the paper, its revision then, a grading's topic,
+    and when it last failed, which names this failure."""
 
     step: failures.Step
     paper_id: str
     revision: int
     topic: str | None = None
+    failed_at: datetime
 
 
-class AcknowledgeIn(BaseModel):
-    """What the owner acknowledged: stopped steps, full-text passes and failed digests (by id)."""
+class PassSeen(BaseModel):
+    """A full-text pass as Needs you showed it, and since when it waited, which names this
+    failure."""
+
+    id: int
+    since: datetime
+
+
+class Acknowledgement(BaseModel):
+    """Items of Needs you, each as shown: stopped steps, full-text passes and failed digests
+    (by id). The owner's Acknowledge names them; the answer names those it marked."""
 
     steps: list[StepSeen] = []
-    passes: list[int] = []
+    passes: list[PassSeen] = []
     digests: list[int] = []
 
 
-@router.post("/acknowledge", status_code=204)
-async def acknowledge(body: AcknowledgeIn, c: Conn) -> None:
+@router.post("/acknowledge")
+async def acknowledge(body: Acknowledgement, c: Conn) -> Acknowledgement:
     """Acknowledge on Needs you: the owner has seen these items, and they stop counting in the
-    run status. An item is marked only while it still waits on the owner as shown (a step on
-    the revision named); one that recovers and fails again comes back unacknowledged. It moves
-    no paper. A failed nightly run is not an item and is never acknowledged."""
-    steps = [(x.step, x.paper_id, x.topic or "", x.revision) for x in body.steps]
+    run status. An item is marked only while it still waits on the owner as shown (the same
+    failure, not a later one); one that recovers and fails again comes back unacknowledged. It
+    moves no paper. A failed nightly run is not an item and is never acknowledged. Answers with
+    the items marked, for the page to fold those and only those."""
+    steps = [(x.step, x.paper_id, x.topic or "", x.revision, x.failed_at) for x in body.steps]
+    passes = [(x.id, x.since) for x in body.passes]
     async with c.transaction():
-        await failures.acknowledge(c, steps, FAILED_RUNS)
-        await fulltext_store.acknowledge(c, body.passes, FAILED_RUNS)
-        await digests_store.acknowledge(c, body.digests)
+        return Acknowledgement(
+            steps=await failures.acknowledge(c, steps, FAILED_RUNS),
+            passes=await fulltext_store.acknowledge(c, passes, FAILED_RUNS),
+            digests=await digests_store.acknowledge(c, body.digests),
+        )
 
 
 # -- misses ----------------------------------------------------------------------------------------

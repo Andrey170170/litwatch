@@ -690,12 +690,13 @@ STUCK = (
 
 
 async def stuck(conn: psycopg.AsyncConnection, runs: int) -> list[dict[str, Any]]:
-    """The passes waiting on the owner, with their paper's title and when the owner
-    acknowledged them, most failed first."""
+    """The passes waiting on the owner, with their paper's title, since when they wait
+    (`SINCE`) and when the owner acknowledged them, most failed first."""
     return await (
         await conn.execute(
             "SELECT f.id, f.paper_id, f.paper_revision AS revision, p.title, f.kind, f.state, "
-            "f.failed_runs, f.last_error, f.queued_at, f.acknowledged_at FROM fulltext_passes f "
+            f"f.failed_runs, f.last_error, f.queued_at, {SINCE} AS since, f.acknowledged_at "
+            "FROM fulltext_passes f "
             f"JOIN papers p ON p.id = f.paper_id WHERE {STUCK} "
             "ORDER BY f.failed_runs DESC, f.queued_at, f.id",
             stuck_params(runs),
@@ -718,18 +719,30 @@ async def count_stuck(
     return row["n"]
 
 
-async def acknowledge(conn: psycopg.AsyncConnection, ids: list[int], runs: int) -> int:
-    """The owner's Acknowledge on the named passes: each still waiting on them is marked seen.
-    Returns how many were marked."""
-    if not ids:
-        return 0
-    cur = await conn.execute(
-        "UPDATE fulltext_passes f SET acknowledged_at = now() FROM papers p "
-        "WHERE f.id = ANY(%(ids)s) AND p.id = f.paper_id AND f.acknowledged_at IS NULL "
-        f"AND {STUCK}",
-        {"ids": ids} | stuck_params(runs),
-    )
-    return cur.rowcount
+# Since when a pass waiting on the owner (`STUCK`) waits, which names its failure: a failed one
+# from its last try, as no run takes it again but on the owner's word; one awaiting its text from
+# when it was queued, which only the owner's run-now moves. A failure after the text arrived,
+# or after a retry, has another state or a later time.
+SINCE = "(CASE WHEN f.state = 'failed' THEN f.tried_at ELSE f.queued_at END)"
+
+
+async def acknowledge(
+    conn: psycopg.AsyncConnection, items: list[tuple[int, datetime]], runs: int
+) -> list[dict[str, Any]]:
+    """The owner's Acknowledge on the named passes, each by its id and since when it waits
+    (`SINCE`): each still waiting on them as named is marked seen. Returns those marked."""
+    if not items:
+        return []
+    ids, since = map(list, zip(*items, strict=True))
+    return await (
+        await conn.execute(
+            "UPDATE fulltext_passes f SET acknowledged_at = now() FROM papers p, "
+            "unnest(%(ids)s::bigint[], %(since)s::timestamptz[]) AS x (id, since) "
+            f"WHERE f.id = x.id AND {SINCE} = x.since AND p.id = f.paper_id "
+            f"AND f.acknowledged_at IS NULL AND {STUCK} RETURNING f.id, {SINCE} AS since",
+            {"ids": ids, "since": since} | stuck_params(runs),
+        )
+    ).fetchall()
 
 
 async def paper_of(conn: psycopg.AsyncConnection, pass_id: int) -> str | None:

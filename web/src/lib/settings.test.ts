@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { acknowledged, answerOf, differs, labelled, level, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toAcknowledge, toToml, took, waiting, type Quality, type Session, type SessionItem } from "./settings";
+import { acknowledged, answerOf, differs, labelled, level, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toAcknowledge, toToml, took, waiting, type Quality, type Seen, type Session, type SessionItem } from "./settings";
 
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [] };
-const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
-const stuck = { paper_id: "1", revision: 1, title: "t", failed_runs: 3, last_error: null, failed_at: "2026-10-15" };
+const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01", since: "2026-10-03T03:00:00Z" } as const;
+const stuck = { paper_id: "1", revision: 1, title: "t", failed_runs: 3, last_error: null, failed_at: "2026-10-15T03:00:00Z" };
 const split = { paper_id: "1", revision: 1, topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
 
 describe("waiting", () => {
@@ -32,23 +32,39 @@ describe("toAcknowledge and acknowledged", () => {
   it("names a group's rows as shown, never a split, nor what is settled or acknowledged already", () => {
     expect(toAcknowledge(q, ["ungraded"])).toEqual({
       steps: [
-        { step: "grading", paper_id: "1", revision: 1, topic: "a" },
-        { step: "grading", paper_id: "1", revision: 2, topic: "b" },
+        { step: "grading", paper_id: "1", revision: 1, topic: "a", failed_at: "2026-10-15T03:00:00Z" },
+        { step: "grading", paper_id: "1", revision: 2, topic: "b", failed_at: "2026-10-15T03:00:00Z" },
       ],
       passes: [],
       digests: [],
     });
-    const later = settle(acknowledged(q, { steps: [], passes: [7], digests: [] }, "2026-10-19T10:00:00Z"), "analysis_failed", { paper_id: "1" }, "Tried again");
+    const later = settle(acknowledged(q, { steps: [], passes: [{ id: 7, since: "2026-10-03T03:00:00+00:00" }], digests: [] }, "2026-10-19T10:00:00Z"), "analysis_failed", { paper_id: "1" }, "Tried again");
     expect(toAcknowledge(later, ["awaiting_classification", "ungraded", "analysis_failed", "fulltext", "digests"])).toMatchObject({ passes: [], digests: [4] });
     expect(toAcknowledge(later, ["analysis_failed"]).steps).toEqual([]);
   });
-  it("marks only the rows named, in place, and they stop counting as waiting", () => {
-    const after = acknowledged(q, { steps: [{ step: "grading", paper_id: "1", revision: 1, topic: "a" }, { step: "analysis", paper_id: "5", revision: 1, topic: null }], passes: [], digests: [4] }, "2026-10-19T10:00:00Z");
+  it("marks only the rows named as shown, in place, and they stop counting as waiting", () => {
+    const failed = "2026-10-15T03:00:00.000+00:00";
+    const marked: Seen = {
+      steps: [
+        { step: "grading", paper_id: "1", revision: 1, topic: "a", failed_at: failed },
+        { step: "grading", paper_id: "1", revision: 2, topic: "b", failed_at: "2026-10-18T03:00:00Z" },
+        { step: "analysis", paper_id: "5", revision: 1, topic: null, failed_at: failed },
+      ],
+      passes: [],
+      digests: [4],
+    };
+    const after = acknowledged(q, marked, "2026-10-19T10:00:00Z");
+    // Topic b's row shows an earlier failure than the one named: not this row.
     expect(after.night.ungraded.map((s) => s.acknowledged_at ?? null)).toEqual(["2026-10-19T10:00:00Z", null]);
     // The step names the list: paper 5 waits on classification, not analysis.
     expect(after.night.awaiting_classification[0]!.acknowledged_at).toBeUndefined();
     expect(after.night.digests[0]!.acknowledged_at).toBe("2026-10-19T10:00:00Z");
     expect(waiting(q) - waiting(after)).toBe(2);
+  });
+  it("leaves a row settled on this visit where it is", () => {
+    const tried = settle(q, "fulltext", { paper_id: "3" }, "Running");
+    const after = acknowledged(tried, { steps: [], passes: [{ id: 7, since: pass.since }], digests: [] }, "2026-10-19T10:00:00Z");
+    expect([after.night.fulltext[0]!.settled, after.night.fulltext[0]!.acknowledged_at]).toEqual(["Running", undefined]);
   });
 });
 

@@ -375,9 +375,10 @@ export function useAcknowledge() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (seen: Seen) => ok(await api.POST("/api/settings/acknowledge", { body: seen })),
-    onSuccess: (_r, seen) => {
+    // Folds what the API marked, not what was named: a row that stopped waiting meanwhile stays.
+    onSuccess: (marked) => {
       refreshSummary(qc);
-      return settleNeeds(qc, (q) => acknowledged(q, seen, new Date().toISOString()));
+      return settleNeeds(qc, (q) => acknowledged(q, marked, new Date().toISOString()));
     },
     onError: (e) => toast(said(e), "error"),
   });

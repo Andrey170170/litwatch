@@ -7,6 +7,7 @@ failed run, after a retry or on a new revision, clears the mark."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 import psycopg
@@ -126,20 +127,29 @@ async def count_stuck(
     return row["n"]
 
 
-type Item = tuple[Step, str, str, int]  # step, paper, topic ('' but for grading), paper revision
+# A failure as the owner saw it: step, paper, topic ('' but for grading), paper revision, and
+# when it last failed, which names the failure: a step left for the owner is not run again, so
+# a later failure, after a retry, has a later time.
+type Item = tuple[Step, str, str, int, datetime]
 
 
-async def acknowledge(conn: psycopg.AsyncConnection, items: list[Item], runs: int) -> int:
+async def acknowledge(
+    conn: psycopg.AsyncConnection, items: list[Item], runs: int
+) -> list[dict[str, Any]]:
     """The owner's Acknowledge on the named failures: each that still waits for them after at
-    least `runs` runs, on that revision, is marked seen. Returns how many were marked."""
+    least `runs` runs, as named, is marked seen. Returns those marked, as named."""
     if not items:
-        return 0
-    cur = await conn.execute(
-        "UPDATE step_failures f SET acknowledged_at = now() FROM papers p, "
-        "unnest(%s::text[], %s::text[], %s::text[], %s::int[]) AS x (step, paper_id, topic, rev) "
-        "WHERE f.step = x.step AND f.paper_id = x.paper_id AND f.topic = x.topic "
-        "AND f.paper_revision = x.rev AND p.id = f.paper_id AND f.failed_runs >= %s "
-        f"AND f.acknowledged_at IS NULL AND {ACTIONABLE}",
-        (*map(list, zip(*items, strict=True)), runs),
-    )
-    return cur.rowcount
+        return []
+    return await (
+        await conn.execute(
+            "UPDATE step_failures f SET acknowledged_at = now() FROM papers p, "
+            "unnest(%s::text[], %s::text[], %s::text[], %s::int[], %s::timestamptz[]) "
+            "AS x (step, paper_id, topic, rev, failed_at) "
+            "WHERE f.step = x.step AND f.paper_id = x.paper_id AND f.topic = x.topic "
+            "AND f.paper_revision = x.rev AND f.failed_at = x.failed_at AND p.id = f.paper_id "
+            f"AND f.failed_runs >= %s AND f.acknowledged_at IS NULL AND {ACTIONABLE} "
+            "RETURNING f.step, f.paper_id, nullif(f.topic, '') AS topic, "
+            "f.paper_revision AS revision, f.failed_at",
+            (*map(list, zip(*items, strict=True)), runs),
+        )
+    ).fetchall()

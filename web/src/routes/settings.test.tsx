@@ -25,7 +25,7 @@ const split = {
   label: null,
 };
 const stuck = { paper_id: "2610.00002", revision: 1, title: "A stuck paper", failed_runs: 3, last_error: "invalid", failed_at: "2026-10-14T03:00:00Z" };
-const pass = { id: 7, paper_id: "2610.00003", revision: 1, title: "A textless paper", kind: "brief", state: "failed", failed_runs: 3, last_error: "the LaTeX did not build", queued_at: "2026-10-08T03:00:00Z" };
+const pass = { id: 7, paper_id: "2610.00003", revision: 1, title: "A textless paper", kind: "brief", state: "failed", failed_runs: 3, last_error: "the LaTeX did not build", queued_at: "2026-10-08T03:00:00Z", since: "2026-10-14T03:00:00Z" };
 const digest = { id: 3, topic: "mi", period: "day", day: "2026-10-08", error: "the writer timed out twice", written_at: "2026-10-09T03:00:00Z" };
 const quality = {
   night: { run: 6, error: null, splits: [split], awaiting_classification: [], analysis_failed: [stuck], ungraded: [], fulltext: [pass], digests: [digest] },
@@ -397,14 +397,15 @@ describe("Settings", () => {
       ...common,
       // What the server counts after each Acknowledge: the pass's group first, then everything.
       "GET /api/summary": () => ({ ...summaryOf(4 - [0, 1, 3][acks().length]!), status: [failed, { ...failed, fulltext_failed: 0 }, { ...status, papers: 530 }][acks().length] }),
-      "POST /api/settings/acknowledge": () => new Response(null, { status: 204 }),
+      // It marks all it was named (`+00:00` as the API writes an instant).
+      "POST /api/settings/acknowledge": (c) => c.body,
       "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }),
     });
     renderApp("/settings/needs");
     expect(await screen.findByRole("link", { name: "3 failed" })).toBeInTheDocument();
     const textGroup = screen.getByText("Full text · 1").closest(".ngrp") as HTMLElement;
     await userEvent.click(within(textGroup).getByRole("button", { name: "Acknowledge" }));
-    await waitFor(() => expect(acks().map((c) => c.body)).toEqual([{ steps: [], passes: [7], digests: [] }]));
+    await waitFor(() => expect(acks().map((c) => c.body)).toEqual([{ steps: [], passes: [{ id: 7, since: "2026-10-14T03:00:00Z" }], digests: [] }]));
     // The pass folds away; what remains keeps its order, and the run status counts one fewer.
     await waitFor(() => expect(screen.queryByRole("link", { name: "A textless paper" })).toBeNull());
     expect(screen.getAllByRole("link", { name: /paper$/ }).map((l) => l.textContent)).toEqual(["A split paper", "A stuck paper"]);
@@ -413,7 +414,7 @@ describe("Settings", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Acknowledge all" }));
     // Splits are not acknowledged: they wait on a Fit.
-    await waitFor(() => expect(acks()[1]?.body).toEqual({ steps: [{ step: "analysis", paper_id: "2610.00002", revision: 1, topic: null }], passes: [], digests: [3] }));
+    await waitFor(() => expect(acks()[1]?.body).toEqual({ steps: [{ step: "analysis", paper_id: "2610.00002", revision: 1, topic: null, failed_at: "2026-10-14T03:00:00Z" }], passes: [], digests: [3] }));
     expect(await screen.findByRole("link", { name: "530" })).toHaveClass("ok");
     expect(screen.queryByRole("button", { name: "Acknowledge all" })).toBeNull();
     expect(screen.getByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
@@ -432,13 +433,19 @@ describe("Settings", () => {
     viewport(true);
     const seen = "2026-10-19T08:00:00Z";
     const night = { ...quality.night, analysis_failed: [{ ...stuck, acknowledged_at: seen }], fulltext: [pass], digests: [{ ...digest, acknowledged_at: seen }] };
-    const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night }, "POST /api/settings/acknowledge": () => new Response(null, { status: 204 }) });
+    // The pass stopped waiting as shown before the click landed: the API marks nothing.
+    const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night }, "POST /api/settings/acknowledge": { steps: [], passes: [], digests: [] } });
     renderApp("/settings/needs");
     expect(await screen.findByRole("button", { name: "Acknowledged · 2" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
     expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Acknowledge all" }));
-    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: [], passes: [7], digests: [] }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: [], passes: [{ id: 7, since: "2026-10-14T03:00:00Z" }], digests: [] }));
+    // So the pass stays where it was, still to acknowledge.
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/summary").length).toBeGreaterThan(1));
+    expect(screen.getByRole("link", { name: "A textless paper" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Acknowledged · 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Acknowledge all" })).toBeInTheDocument();
   });
 
   it("lists a full-text pass that failed three runs and runs it now, settling it in place", async () => {

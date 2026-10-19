@@ -69,7 +69,7 @@ export type Split = {
 export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; acknowledged_at?: string | null; settled?: string };
 
 /** A full-text pass waiting on the owner (`store.fulltext.stuck`): failed three runs, or awaiting its text over
- * a week. */
+ * a week. `since`: since when it waits, which names this failure for Acknowledge. */
 export type TextPassStuck = {
   id: number;
   paper_id: string;
@@ -80,6 +80,7 @@ export type TextPassStuck = {
   failed_runs: number;
   last_error: string | null;
   queued_at: string;
+  since: string;
   acknowledged_at?: string | null;
   settled?: string;
 };
@@ -200,8 +201,8 @@ export function waiting(q: Quality): number {
 export type Red = "awaiting_classification" | "ungraded" | "analysis_failed" | "fulltext" | "digests";
 export const RED: Red[] = ["awaiting_classification", "ungraded", "analysis_failed", "fulltext", "digests"];
 
-/** What an Acknowledge names (`POST /api/settings/acknowledge`). */
-export type Seen = Schemas["AcknowledgeIn"];
+/** What an Acknowledge names, and what the API answers it marked (`POST /api/settings/acknowledge`). */
+export type Seen = Schemas["Acknowledgement"];
 
 const STEP = { awaiting_classification: "classification", analysis_failed: "analysis", ungraded: "grading" } as const;
 type StepList = keyof typeof STEP;
@@ -209,14 +210,14 @@ type StepList = keyof typeof STEP;
 /** Whether a row is to acknowledge: not acknowledged yet, nor settled on this visit (it no longer waits). */
 const unseen = (x: { settled?: string; acknowledged_at?: string | null }) => !x.settled && !x.acknowledged_at;
 
-/** What Acknowledge on the `lists` names: their rows the owner sees there now, each as it is shown (a step on the
- * revision shown, so a rewrite meanwhile is not acknowledged unseen). */
+/** What Acknowledge on the `lists` names: their rows the owner sees there now, each as it is shown (the failure
+ * shown, by when it failed, so a later failure meanwhile is not acknowledged unseen). */
 export function toAcknowledge(q: Quality, lists: Red[]): Seen {
   const n = q.night;
   const steps = (Object.keys(STEP) as StepList[])
     .filter((l) => lists.includes(l))
-    .flatMap((l) => n[l].filter(unseen).map((s) => ({ step: STEP[l], paper_id: s.paper_id, revision: s.revision, topic: s.topic ?? null })));
-  const passes = lists.includes("fulltext") ? n.fulltext.filter(unseen).map((p) => p.id) : [];
+    .flatMap((l) => n[l].filter(unseen).map((s) => ({ step: STEP[l], paper_id: s.paper_id, revision: s.revision, topic: s.topic ?? null, failed_at: s.failed_at })));
+  const passes = lists.includes("fulltext") ? n.fulltext.filter(unseen).map((p) => ({ id: p.id, since: p.since })) : [];
   const digests = lists.includes("digests") ? n.digests.filter(unseen).map((d) => d.id) : [];
   return { steps, passes, digests };
 }
@@ -224,14 +225,20 @@ export function toAcknowledge(q: Quality, lists: Red[]): Seen {
 /** Whether `seen` names anything. */
 export const any = (seen: Seen): boolean => seen.steps.length + seen.passes.length + seen.digests.length > 0;
 
-/** The quality page with what an Acknowledge named marked acknowledged `at`: those rows fold away, the rest stay
- * where they were. */
-export function acknowledged(q: Quality, seen: Seen, at: string): Quality {
+/** The same instant, however each side wrote it. */
+const at = (a: string, b: string) => Date.parse(a) === Date.parse(b);
+
+/** The quality page with what the API answered it marked (`seen`) acknowledged `when`: those rows, as shown, fold
+ * away; the rest, and a row settled on this visit, stay where they were. */
+export function acknowledged(q: Quality, seen: Seen, when: string): Quality {
   const night = { ...q.night };
-  const mark = <T extends { acknowledged_at?: string | null }>(xs: T[], named: (x: T) => boolean): T[] => xs.map((x) => (named(x) && !x.acknowledged_at ? { ...x, acknowledged_at: at } : x));
+  const mark = <T extends { acknowledged_at?: string | null; settled?: string }>(xs: T[], named: (x: T) => boolean): T[] =>
+    xs.map((x) => (unseen(x) && named(x) ? { ...x, acknowledged_at: when } : x));
   for (const l of Object.keys(STEP) as StepList[])
-    night[l] = mark(night[l], (s) => seen.steps.some((x) => x.step === STEP[l] && x.paper_id === s.paper_id && x.revision === s.revision && (x.topic ?? null) === (s.topic ?? null)));
-  night.fulltext = mark(night.fulltext, (p) => seen.passes.includes(p.id));
+    night[l] = mark(night[l], (s) =>
+      seen.steps.some((x) => x.step === STEP[l] && x.paper_id === s.paper_id && x.revision === s.revision && (x.topic ?? null) === (s.topic ?? null) && at(x.failed_at, s.failed_at)),
+    );
+  night.fulltext = mark(night.fulltext, (p) => seen.passes.some((x) => x.id === p.id && at(x.since, p.since)));
   night.digests = mark(night.digests, (d) => seen.digests.includes(d.id));
   return { ...q, night };
 }

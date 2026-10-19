@@ -1,8 +1,9 @@
 """Acknowledge on Needs you (DESIGN.md, Needs you; decision 72): the owner marks stopped steps,
-full-text passes and failed digests seen, and they stop counting in the run status. One that
-recovers and fails again comes back; a failed nightly run is never acknowledged."""
+full-text passes and failed digests seen, each as the page showed it, and they stop counting in
+the run status. One that recovers and fails again comes back; a failed nightly run is never
+acknowledged."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import httpx
 import pytest
@@ -89,13 +90,34 @@ async def everything(conn) -> tuple[int, int]:
     return await stop_pass(conn), await fail_digest(conn)
 
 
-async def ack(client, steps=(), passes=(), digests=()) -> None:
-    body = {"steps": list(steps), "passes": list(passes), "digests": list(digests)}
-    assert (await client.post("/api/settings/acknowledge", json=body)).status_code == 204
+LISTS = {"awaiting_classification": "classification", "analysis_failed": "analysis"}
+LISTS |= {"ungraded": "grading"}
+ALL = (*LISTS, "fulltext", "digests")
 
 
-def step(step: str, p, topic: str | None = None, revision: int = 1) -> dict:
-    return {"step": step, "paper_id": p.id, "revision": revision, "topic": topic}
+async def shown(client, *lists: str) -> dict:
+    """What Needs you names on Acknowledge for `lists`: their rows not yet acknowledged, each
+    as the page shows it."""
+    night = (await client.get("/api/settings/quality")).json()["night"]
+    rows = {k: [x for x in night[k] if not x["acknowledged_at"]] for k in lists}
+    steps = [
+        {k: x[k] for k in ("paper_id", "revision", "topic", "failed_at")} | {"step": LISTS[k]}
+        for k in LISTS
+        for x in rows.get(k, [])
+    ]
+    passes = [{"id": x["id"], "since": x["since"]} for x in rows.get("fulltext", [])]
+    digests = [x["id"] for x in rows.get("digests", [])]
+    return {"steps": steps, "passes": passes, "digests": digests}
+
+
+async def ack(client, body: dict) -> dict:
+    """Acknowledge `body`; the API's answer, what it marked."""
+    answer = await client.post("/api/settings/acknowledge", json=body)
+    assert answer.status_code == 200
+    return answer.json()
+
+
+NOTHING = {"steps": [], "passes": [], "digests": []}
 
 
 async def status(client) -> dict:
@@ -103,14 +125,23 @@ async def status(client) -> dict:
 
 
 async def test_acknowledge_per_group_then_all_clears_the_run_status(client, conn):
-    pass_id, digest_id = await everything(conn)
+    await everything(conn)
     before = await status(client)
     assert before["state"] == "attention"
     assert [before[k] for k in (*STOPPED, "digests_failed")] == [1, 1, 1, 1, 1]
     assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 5
 
-    # One group: only its count drops; the item stays listed, marked.
-    await ack(client, steps=[step("grading", Q, FAITH.slug)])
+    # One group: only its count drops; the item stays listed, marked. The API answers with
+    # what it marked, as named.
+    group = await shown(client, "ungraded")
+    assert len(group["steps"]) == 1
+    marked = await ack(client, group)
+    assert [{**x, "failed_at": None} for x in marked["steps"]] == [
+        {**x, "failed_at": None} for x in group["steps"]
+    ]
+    assert datetime.fromisoformat(marked["steps"][0]["failed_at"]) == datetime.fromisoformat(
+        group["steps"][0]["failed_at"]
+    )
     after = await status(client)
     assert (after["state"], after["ungraded"], after["analysis_failed"]) == ("attention", 0, 1)
     night = (await client.get("/api/settings/quality")).json()["night"]
@@ -119,38 +150,54 @@ async def test_acknowledge_per_group_then_all_clears_the_run_status(client, conn
     assert night["analysis_failed"][0]["acknowledged_at"] is None
 
     # Acknowledge all: the status line shows the night's papers again.
-    await ack(
-        client,
-        steps=[step("classification", P), step("analysis", Q)],
-        passes=[pass_id],
-        digests=[digest_id],
-    )
+    rest = await shown(client, *ALL)
+    marked = await ack(client, rest)
+    assert [len(marked[k]) for k in ("steps", "passes", "digests")] == [2, 1, 1]
     quiet = await status(client)
     assert quiet["state"] == "quiet"
     assert [quiet[k] for k in (*STOPPED, "digests_failed")] == [0, 0, 0, 0, 0]
     assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 0
     night = (await client.get("/api/settings/quality")).json()["night"]
-    lists = ("awaiting_classification", "analysis_failed", "ungraded", "fulltext", "digests")
-    assert all(len(night[k]) == 1 and night[k][0]["acknowledged_at"] for k in lists)
+    assert all(len(night[k]) == 1 and night[k][0]["acknowledged_at"] for k in ALL)
 
 
 async def test_only_what_still_waits_as_shown_is_acknowledged(client, conn):
     await stop(conn, P, "analysis")
+    (seen,) = (await shown(client, "analysis_failed"))["steps"]
     # Named for another revision (the text changed under the page), or a step never stopped.
-    await ack(client, steps=[step("analysis", P, revision=2), step("classification", Q)])
+    other = {**seen, "revision": 2}
+    never = {**seen, "step": "classification", "paper_id": Q.id}
+    assert await ack(client, {**NOTHING, "steps": [other, never]}) == NOTHING
     assert (await status(client))["analysis_failed"] == 1
     (row,) = await (await conn.execute("SELECT acknowledged_at FROM step_failures")).fetchall()
     assert row["acknowledged_at"] is None
 
 
+async def test_a_page_older_than_the_failure_acknowledges_nothing(client, conn):
+    """The page showed a failure; meanwhile it was tried again and failed again. Acknowledge
+    from that page names the earlier failure, and marks nothing: the owner has not seen this
+    one. Nor is a failed digest of a topic no longer active marked."""
+    pass_id, _ = await everything(conn)
+    stale = await shown(client, *ALL)
+    retried = await client.post(f"/api/settings/analysis/{Q.id}/retry", json={"revision": 1})
+    assert retried.status_code == 204
+    await stop(conn, Q, "analysis")
+    assert (await client.post(f"/api/settings/fulltext/{pass_id}/now")).status_code == 204
+    await fail_pass(conn, pass_id)
+    await conn.execute("UPDATE topics SET status = 'paused' WHERE class = %s", (FAITH.slug,))
+
+    marked = await ack(client, stale)
+    # The classification still waits as shown; the analysis and the pass failed again since,
+    # and the paused topic's digest and grading no longer wait.
+    assert [x["step"] for x in marked["steps"]] == ["classification"]
+    assert (marked["passes"], marked["digests"]) == ([], [])
+    back = await status(client)
+    assert (back["analysis_failed"], back["fulltext_failed"]) == (1, 1)
+
+
 async def test_an_item_that_recovers_and_fails_again_comes_back(client, conn):
     pass_id, digest_id = await everything(conn)
-    await ack(
-        client,
-        steps=[step("classification", P), step("analysis", Q), step("grading", Q, FAITH.slug)],
-        passes=[pass_id],
-        digests=[digest_id],
-    )
+    await ack(client, await shown(client, *ALL))
     assert (await status(client))["state"] == "quiet"
 
     # Try again on the analysis: it recovers, then fails three more runs.
@@ -187,7 +234,7 @@ async def test_a_failed_nightly_run_is_not_acknowledged(client, conn):
         "INSERT INTO runs (kind, started_at, finished_at, error) "
         "VALUES ('nightly', now(), now(), 'archive down')"
     )
-    await ack(client, steps=[step("analysis", P)])
+    await ack(client, await shown(client, "analysis_failed"))
     failed = await status(client)
     assert (failed["state"], failed["error"], failed["analysis_failed"]) == (
         "failed",
@@ -206,7 +253,7 @@ async def test_a_new_text_or_a_text_that_arrives_brings_a_failure_back(client, c
         "queued_at = now() - interval '8 days' WHERE id = %s",
         (pass_id,),
     )
-    await ack(client, steps=[step("classification", P)], passes=[pass_id])
+    await ack(client, await shown(client, "awaiting_classification", "fulltext"))
     assert (await status(client))["state"] == "quiet"
 
     rewritten = paper(P.id, title=P.title, abstract="A wholly new abstract.", version=2)
