@@ -411,3 +411,21 @@ async def test_a_nested_change_settles_for_the_outer_cause(db):
     async with word.change(db, P.id, cause=Cause.VERDICT):
         await word.label(db, said("central"))
     assert await causes(db) == ["verdict", "verdict"]
+
+
+async def test_the_owners_word_stays_the_cause_when_the_fit_does_not_move(db):
+    """A label that agrees with the verdict still moves the grade (the owner's word outweighs
+    the Weight), and it is the owner's, not the Weight's."""
+    await weighed(db, Weight.INCREMENTAL)
+    await graded(db, "related")  # related and incremental: adjacent
+    await word.label(db, said("related"))
+    await word.unlabel(db, P.id, FAITH.slug)
+    moves = [
+        (e["fit_before"], e["fit_after"], e["after"], e["cause"])
+        for t, e in await outbox(db)
+        if t == "grade.changed"
+    ][1:]
+    assert moves == [
+        ("related", "related", "relevant", "owner"),
+        ("related", "related", "adjacent", "owner"),
+    ]

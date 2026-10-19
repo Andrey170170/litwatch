@@ -27,9 +27,9 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
 
 ### The cause
 
-- **The caller of `settle` names the cause.** `word.change(conn, *ids, cause=…)`, `settle`, `settle_all`,
-  `settle_ties`, `settle_topic` and `sync` all take a required keyword `cause`, and `settle` puts it on every
-  `grade.changed` it emits. `settle` cannot work it out alone: a cleared owner's word and a re-check both end on the
+- **The caller of `settle` names the cause.** `word.change(conn, *ids, cause=…)`, `settle` and `settle_all` take a
+  required keyword `cause` (a `core.Cause`), and `settle` puts it on every `grade.changed` it emits. `settle_topic`
+  and `settle_ties` always settle for `taxonomy`, and `sync` for `verdict`. `settle` cannot work it out alone: a cleared owner's word and a re-check both end on the
   verdict.
   - `owner`: the owner's actions. These are the reading actions in `api/reading.py`, Calibrate, misses, and the
     owner's actions in `api/settings.py` and `api/integrations.py`.
