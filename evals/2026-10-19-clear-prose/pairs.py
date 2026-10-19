@@ -29,6 +29,10 @@ def _words(text: str | None) -> int:
 def main() -> None:
     briefs = {r["paper_id"]: r["output"] for r in _lines(HERE / "round2.jsonl") if r.get("output")}
     with psycopg.connect(configuration.database_url(), row_factory=dict_row) as conn:
+        # Production's Briefs as copied, not the development database's.
+        name = conn.execute("SELECT current_database() AS db").fetchone()["db"]
+        if name != "clear_prose":
+            raise SystemExit(f"connected to {name!r}: point it at the clear_prose copy only")
         old = {
             r["paper_id"]: r
             for r in conn.execute(

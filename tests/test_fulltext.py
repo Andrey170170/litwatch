@@ -840,9 +840,10 @@ def test_an_overstatement_is_one_line_saying_so_and_lengths_are_guarded():
 
 def test_a_brief_keeps_its_paragraphs_up_to_three():
     first, second = " ".join(BRIEF.split()[:70]), " ".join(BRIEF.split()[70:])
-    out = brief.Output.model_validate(ANSWER | {"brief": f" {first} \n\n\n {second}\n"})
+    wrapped = first.replace(" layer ", " layer\n", 1)  # a line break inside a paragraph
+    out = brief.Output.model_validate(ANSWER | {"brief": f" {wrapped} \n\n\n {second}\n"})
     assert out.brief == f"{first}\n\n{second}"
-    four = "\n".join([first, second, "A third paragraph.", "A fourth."])
+    four = "\n\n".join([first, second, "A third paragraph.", "A fourth."])
     with pytest.raises(ValueError, match="4 paragraphs"):
         brief.Output.model_validate(ANSWER | {"brief": four})
 

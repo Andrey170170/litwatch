@@ -24,6 +24,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 
 HERE = Path(__file__).parent
+SCRATCH = "clear_prose"
 # The three opaque Gists read on 2026-10-19, then nine more abstract Gists in md5(paper_id) order.
 GISTS_SQL = """
 WITH latest AS (
@@ -49,11 +50,12 @@ DIGESTS = [
 
 
 async def main() -> None:
-    url = configuration.database_url()
-    if not url.endswith("/clear_prose"):
-        raise SystemExit("this replay deletes digests: point it at the clear_prose copy only")
     gateway = build(configuration.load(None).models)
-    async with await store.connect(url) as conn:
+    async with await store.connect(configuration.database_url()) as conn:
+        # The database connected to, not the DSN's text: this replay deletes digests.
+        name = (await (await conn.execute("SELECT current_database() AS db")).fetchone())["db"]
+        if name != SCRATCH:
+            raise SystemExit(f"connected to {name!r}: point it at the {SCRATCH} copy only")
         tree = await taxonomy_store.load(conn)
         rows = await (await conn.execute(GISTS_SQL)).fetchall()
         papers = {p.id: p for p in await papers_store.get_many(conn, [r["paper_id"] for r in rows])}

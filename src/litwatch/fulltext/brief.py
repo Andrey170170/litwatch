@@ -4,6 +4,7 @@ Weight. It asks and writes nothing."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from pydantic import BaseModel, Field, field_validator
@@ -99,8 +100,9 @@ class Output(BaseModel):
     @field_validator("brief")
     @classmethod
     def _brief_length(cls, brief: str) -> str:
-        """Any line break ends a paragraph; the paragraphs are kept, a blank line between them."""
-        paragraphs = [" ".join(p.split()) for p in brief.splitlines() if p.strip()]
+        """A blank line ends a paragraph, a single line break does not; the paragraphs are kept,
+        a blank line between them."""
+        paragraphs = [" ".join(p.split()) for p in re.split(r"\n\s*\n", brief) if p.strip()]
         if len(paragraphs) > BRIEF_PARAGRAPHS:
             raise ValueError(f"a Brief of {len(paragraphs)} paragraphs")
         _words(" ".join(paragraphs), BRIEF_WORDS, "Brief")
