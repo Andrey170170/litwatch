@@ -11,7 +11,7 @@ from datetime import date
 
 import psycopg
 
-from litwatch.core import Paper
+from litwatch.core import Cause, Paper
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
 
@@ -39,7 +39,7 @@ async def store(
         async with conn.transaction():
             await word.lock_many(conn, [p.id for p in page])
             stored = await papers_store.upsert(conn, page, source=source, listed=listed)
-            await word.settle_all(conn, stored.rewritten)
+            await word.settle_all(conn, stored.rewritten, cause=Cause.VERDICT)
         total.inserted += stored.inserted
         total.updated += stored.updated
         total.rewritten += stored.rewritten

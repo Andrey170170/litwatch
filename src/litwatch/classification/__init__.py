@@ -14,7 +14,7 @@ import psycopg
 
 from litwatch import events
 from litwatch.concurrency import bounded
-from litwatch.core import Paper
+from litwatch.core import Cause, Paper
 from litwatch.core.classification import (
     CHOSEN,
     Classified,
@@ -147,7 +147,7 @@ async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
     stay and outrank them (`core.classification.standing`). The paper is settled: classified,
     it is in the collection and has a rarity, from its Weight alone until it is graded.
     """
-    async with word.change(conn, c.paper.id):
+    async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
         if not await papers_store.still_current(conn, c.paper):
             return False
         if c.error is not None or c.classified is None or c.model is None:
@@ -182,7 +182,7 @@ async def by_hand(
         raise ValueError("the primary class must be one of the classes named")
     versions = {c.slug: c.version for c in tree.classes}
     hits = keyword(tree, paper.title, paper.abstract)
-    async with word.change(conn, paper.id):
+    async with word.change(conn, paper.id, cause=Cause.OWNER):
         if not await papers_store.still_current(conn, paper):
             return False
         await store.add(conn, paper, tree.classes_version, primary, None, OWNER)

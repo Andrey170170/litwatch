@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from litwatch import events
 from litwatch.concurrency import bounded
-from litwatch.core import Analysis, Contribution, Facets, Paper, TaxonomyClass, Weight
+from litwatch.core import Analysis, Cause, Contribution, Facets, Paper, TaxonomyClass, Weight
 from litwatch.core.analysis import WEIGHT_DEFINITIONS
 from litwatch.feedback import word
 from litwatch.llm import CallError, Gateway, Request, Usage
@@ -136,7 +136,7 @@ async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
     `gist.written` when that Gist is current, and settle the paper (its grades and rarity
     follow the Weight); or record its failure. Returns False when there was nothing to record:
     the paper's text changed meanwhile, or it was dismissed."""
-    async with word.change(conn, a.paper.id):
+    async with word.change(conn, a.paper.id, cause=Cause.VERDICT):
         if not await papers_store.still_current(conn, a.paper):
             return False
         if a.analysis is None or a.model is None:

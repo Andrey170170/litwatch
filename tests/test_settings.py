@@ -5,7 +5,7 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Fit, Opinion, Verdict
+from litwatch.core import Cause, Fit, Opinion, Verdict
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -68,7 +68,7 @@ async def test_a_topic_edit_applies_forward_and_a_depth_change_settles_its_paper
             opinions={},
         ),
     )  # fmt: skip
-    assert (await word.settle(conn, P.id)).saved
+    assert (await word.settle(conn, P.id, cause=Cause.VERDICT)).saved
     area = body | {"depth": "area", "rubric": None}
     assert (await client.put(f"/api/settings/topics/{FAITH.slug}", json=area)).status_code == 200
     row = await (await conn.execute("SELECT saved FROM library")).fetchone()

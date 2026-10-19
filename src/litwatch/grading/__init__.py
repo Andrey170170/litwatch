@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from litwatch import events
 from litwatch.concurrency import bounded
 from litwatch.config import Grading
-from litwatch.core import Depth, Fit, Opinion, Paper, Status, Taxonomy, Topic, Verdict
+from litwatch.core import Cause, Depth, Fit, Opinion, Paper, Status, Taxonomy, Topic, Verdict
 from litwatch.core.grading import FIT_DEFINITIONS, grading_topics
 from litwatch.core.grading import grade as derived
 from litwatch.feedback import word
@@ -218,7 +218,7 @@ async def record(conn: psycopg.AsyncConnection, g: Graded) -> bool:
     nothing to record: the paper's text changed meanwhile, it was dismissed, or the topic is
     no longer active (paused during the call: a paused topic grades nothing)."""
     paper, slug = g.due.paper, g.due.topic.slug
-    async with word.change(conn, paper.id):
+    async with word.change(conn, paper.id, cause=Cause.VERDICT):
         if not await papers_store.still_current(conn, paper):
             return False
         if slug not in {t.slug for t in await taxonomy_store.topics(conn, Status.ACTIVE)}:

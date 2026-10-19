@@ -2,6 +2,7 @@
 
 from litwatch.core.analysis import Analysis, Contribution, Facets, Weight
 from litwatch.core.grading import (
+    Cause,
     Effective,
     Fit,
     Opinion,
@@ -45,6 +46,7 @@ from litwatch.core.types import (
 )
 
 __all__ = [
+    "Cause",
     "FAILED_RUNS",
     "SEARCH_TIMEOUT_SECONDS",
     "Analysis",

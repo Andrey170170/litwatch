@@ -10,7 +10,7 @@ import pytest
 
 from litwatch import integrations
 from litwatch.config import Config
-from litwatch.core import Fit, Hand, Opinion, Verdict
+from litwatch.core import Cause, Fit, Hand, Opinion, Verdict
 from litwatch.events import Integration
 from litwatch.feedback import word
 from litwatch.store import papers as papers_store
@@ -47,7 +47,7 @@ async def grade(conn, g: str) -> None:
             opinions={"judge": Opinion(fit=fit, reason="r", model="anthropic:x")},
         ),
     )
-    await word.settle(conn, P.id)
+    await word.settle(conn, P.id, cause=Cause.VERDICT)
 
 
 async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):

@@ -10,7 +10,7 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Analysis, Facets, Fit, Opinion, Status, Verdict, Weight
+from litwatch.core import Analysis, Cause, Facets, Fit, Opinion, Status, Verdict, Weight
 from litwatch.core.classification import Membership, Source
 from litwatch.feedback import word
 from litwatch.store import analyses as analyses_store
@@ -49,14 +49,14 @@ async def classify(conn, p, *classes, keyword=()) -> None:
     ]
     found += [Membership(slug=k, source=Source.KEYWORD) for k in keyword]
     await classifications_store.replace(conn, p, found, VERSIONS)
-    await word.settle(conn, p.id)
+    await word.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def analyse(conn, p, weight="solid", *, code=False, gist="Probes find hidden steps.") -> None:
     facets = Facets(contribution="method", releases_code=code, releases_weights=False)
     found = Analysis(gist=gist, weight=Weight(weight), weight_reason="Sound work.", facets=facets)
     await analyses_store.add(conn, p, "other", found, "test")
-    await word.settle(conn, p.id)
+    await word.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) -> None:
@@ -79,7 +79,7 @@ async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) 
             escalated=escalated,
         ),
     )
-    await word.settle(conn, p.id)
+    await word.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def stop(conn, p, step: str, topic: str = "") -> None:

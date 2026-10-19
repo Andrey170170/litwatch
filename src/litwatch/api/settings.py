@@ -17,7 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from litwatch import classification, grading, seeds
 from litwatch.api.deps import Conn, budget_lines
-from litwatch.core import FAILED_RUNS, Fit, Paper, Status, Taxonomy, Topic
+from litwatch.core import FAILED_RUNS, Cause, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.core.budget import month_start
 from litwatch.core.classification import thresholds
 from litwatch.core.grading import GRADERS
@@ -325,7 +325,7 @@ async def _awaiting(
     for the owner on it at `revision` (`failures.waiting`); 409 if its text changed or it no
     longer waits (a nightly rewrite, another action, its topic paused). Eligibility is read
     after the locks, in the transaction that acts, and the paper is settled at its end."""
-    async with word.change(c, paper_id):
+    async with word.change(c, paper_id, cause=Cause.OWNER):
         paper = await papers_store.lock(c, paper_id)
         if paper is None:
             raise HTTPException(status_code=404, detail="no such paper")
@@ -408,7 +408,8 @@ async def grade_now(
     It counts as the first of three more runs. Until it is recorded the grading stays a pending
     failure, so a request cut short leaves it to the next nightly run; 409 when the paper's text
     changed, it was dismissed or the topic was paused while it was graded."""
-    async with word.change(c, paper_id):  # the topic read under the taxonomy lock, shared
+    # The topic is read under the taxonomy lock, shared.
+    async with word.change(c, paper_id, cause=Cause.OWNER):
         tree = await taxonomy_store.load(c)
         followed = tree.topic(topic) if tree else None
         if tree is None or followed is None:
@@ -462,7 +463,7 @@ async def _run_now(pass_id: int, request: Request, c: Any, *, pdf: bool) -> None
     paper_id = await fulltext_store.paper_of(c, pass_id)  # a pass never changes paper
     if paper_id is None:
         raise HTTPException(status_code=404, detail="no such full-text pass")
-    async with word.change(c, paper_id):  # as every write to a paper's passes
+    async with word.change(c, paper_id, cause=Cause.OWNER):  # as every write to a paper's passes
         if not await fulltext_store.run_now(c, pass_id, FAILED_RUNS, pdf=pdf):
             raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
     request.app.state.fulltext_wake.set()
