@@ -402,21 +402,21 @@ class Notion:
         ]
         if not wanted:
             return
-        known: dict[str, str] = {}  # the database's views by name
+        known: dict[str, list[str]] = {}  # the database's views by name, oldest first
         for v in await self.notion.every("/views", database_id=db.database_id):
             view = await self.notion.request("GET", f"/views/{v['id']}")
-            known.setdefault(view["name"], view["id"])
+            known.setdefault(view["name"], []).append(view["id"])
         fresh = list(known) == [DEFAULT_VIEW]  # a new database, with Notion's one view
         # Views litwatch made, whatever the owner named them since: none is taken twice.
         owned = {db.all_view, *(t["view"] for t in db.topics.values())} - {None}
         for slug, name, group in wanted:
-            view = known.get(name)
-            if view in owned:
-                view = None
+            view = next((v for v in known.get(name, []) if v not in owned), None)
             if view is None:
                 body = self._view(db, name, group, columns, filtered=slug is not None)
                 if slug is None and fresh:
-                    made = await self.notion.request("PATCH", f"/views/{known[DEFAULT_VIEW]}", body)
+                    made = await self.notion.request(
+                        "PATCH", f"/views/{known[DEFAULT_VIEW][0]}", body
+                    )
                 else:
                     target = {"database_id": db.database_id, "data_source_id": db.data_source_id}
                     made = await self.notion.request(
@@ -621,9 +621,12 @@ class Notion:
                 "seen": seen,
             }
 
-        if dropped and (dismissed is not None or (before.get("by") != "dismissed" and not newer)):
+        if dropped and before.get("by") == "dismissed":
+            if dismissed is not None:
+                return {**before, "grade": grade}  # still set aside
+        elif dropped and not newer:
             return {**before, "grade": grade}  # still why it is off
-        if dismissed is not None:
+        if dismissed is not None and not dropped:
             return gone(f"{self.owner_name} set it aside.", dismissed, "dismissed")
         if not dropped and grade == before["grade"]:  # listed at this grade, no longer: it rose
             return gone(
@@ -678,7 +681,8 @@ class Notion:
         named = [self._db.topics[s]["name"] for s in self._order(self._db) if s in topics]
         where = (record.venue or record.container, record.year) if record else ()
         doi = f"https://doi.org/{record.doi}" if record and record.doi else None
-        published = record and (record.url or doi)
+        published = record.url or doi if record else None
+        venue = " ".join(str(x) for x in where if x) or ("Published version" if published else "")
         return {
             "title": {"title": _rich(paper.title)},
             "Grade": {"select": {"name": self._shown(topics)}},
@@ -686,7 +690,7 @@ class Notion:
             "TL;DR": {"rich_text": _rich(gist or "")},
             "Published": {"date": {"start": paper.published[:10]} if paper.published else None},
             "Authors": {"rich_text": _rich(", ".join(paper.authors))},
-            "Venue": {"rich_text": _rich(" ".join(str(x) for x in where if x), link=published)},
+            "Venue": {"rich_text": _rich(venue, link=published)},
             "arXiv": {"url": f"https://arxiv.org/abs/{paper.id}"},
             "PDF": {"url": f"https://arxiv.org/pdf/{paper.id}"},
             "Added": {"date": {"start": added.isoformat()}},

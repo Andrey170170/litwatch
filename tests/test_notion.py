@@ -289,6 +289,13 @@ async def test_venue_links_to_the_published_version(world):
     assert plain(venue) == "NeurIPS 2026"
     assert venue[0]["text"]["link"] == {"url": "https://doi.org/10.5555/x"}
 
+    async with conn.transaction():  # the owner's DOI, which DBLP did not know
+        await publications_store.put(conn, A.id, Publication(doi="10.5555/y"), by_owner=True)
+    assert await start(conn, notion(fake))
+    venue = fake.row(A.id)["properties"][unquote(fake.source()["properties"]["Venue"]["id"])]
+    assert plain(venue["rich_text"]) == "Published version"
+    assert venue["rich_text"][0]["text"]["link"] == {"url": "https://doi.org/10.5555/y"}
+
 
 async def test_a_delisted_paper_says_why_and_listing_it_again_clears_that(world):
     conn, fake = world, FakeNotion(PARENT)
@@ -319,6 +326,7 @@ async def test_the_why_is_the_newest_change_that_took_it_off(world):
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, A, FAITH.slug, "relevant")
     await grade(conn, B, FAITH.slug, "relevant")
+    await grade(conn, C, FAITH.slug, "relevant")
     n = notion(fake)
     assert await start(conn, n)
     verdicts = f"{FAITHFUL}, {{}}: litwatch re-checked it and judged it off-topic."
@@ -338,6 +346,16 @@ async def test_the_why_is_the_newest_change_that_took_it_off(world):
     await grade(conn, B, FAITH.slug, "adjacent")
     await deliver(conn, n)
     assert fake.value(fake.row(B.id), "Why") == verdicts.format(await last_day(conn))
+
+    # Dismissed after such a sequence, the topic it had left keeps the newest reason.
+    await say(conn, C, FAITH.slug, LabelValue.NONE)
+    await deliver(conn, n)
+    await word.unlabel(conn, C.id, FAITH.slug)
+    await grade(conn, C, FAITH.slug, "adjacent")
+    day = await last_day(conn)
+    await papers_store.dismiss(conn, C.id)
+    assert await start(conn, notion(fake))
+    assert fake.value(fake.row(C.id), "Why") == verdicts.format(day)
 
 
 async def test_a_topic_exported_again_says_why_its_paper_left_meanwhile(world):
@@ -666,6 +684,15 @@ async def test_a_new_topic_never_takes_a_view_litwatch_made_for_another(world):
     db = await state.database(conn, "notion")
     view = fake.views[db.topics[FAITH.slug]["view"]]
     assert view["id"] != db.all_view and "filter" in view
+
+    # The same, with the topic view made but its reply lost: that one is adopted.
+    await conn.execute(
+        "UPDATE notion_databases SET topics = jsonb_set(topics, %s, 'null')",
+        ([FAITH.slug, "view"],),
+    )
+    assert await start(conn, notion(fake))
+    assert (await state.database(conn, "notion")).topics[FAITH.slug]["view"] == view["id"]
+    assert len([v for v in fake.views.values() if v["name"] == FAITHFUL]) == 2
 
 
 # -- taken away: a dismissed paper, a page trashed in Notion ---------------------------------------
