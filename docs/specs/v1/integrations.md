@@ -112,7 +112,8 @@ page the configuration names. After that it writes only its own properties and t
 and what a view hides are the owner's to arrange and are never reset. When it starts, the integration compares the
 exported topics with the database: a topic newly exported gets its grade column and its view, and its qualifying
 papers are filled in; a topic no longer exported keeps its column, view and rows, which are no longer written; a
-changed name renames that topic's option and column. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
+changed name renames that topic's option and column. A raised minimum grade turns the papers below it No longer listed, with a Why
+that says so; a lowered one lists them again. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
 are not part of its body and survive rewrites. Nothing flows back from Notion into litwatch.
 
 **First fill and after.** When it is set up the integration fills the database with every paper that qualifies at
