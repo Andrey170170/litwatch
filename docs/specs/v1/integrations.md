@@ -7,7 +7,7 @@ Mostly carried from the first v1 (built in M6, PRs #26 and #28). Changes are mar
 A transactional outbox: a pipeline step writes its event in the same transaction as its data. The `Integration`
 protocol is `name`, `wants(event)`, `handle(conn, event)`, idempotent; the connection lets it read through the
 repositories and emit events of its own. A dispatcher delivers per integration with its own cursor, retries with
-backoff and exposes failures to the API. Integrations deliver only events below the cluster's oldest open
+backoff and exposes failures to the API, a failing setup's as well as a failing event's. Integrations deliver only events below the cluster's oldest open
 transaction, so litwatch's Postgres should not be shared with services that hold transactions open.
 
 Integrations are the extension system and the built-in ones get no private access: each is one module using only
@@ -112,7 +112,8 @@ page the configuration names. After that it writes only its own properties and t
 and what a view hides are the owner's to arrange and are never reset. When it starts, the integration compares the
 exported topics with the database: a topic newly exported gets its grade column and its view, and its qualifying
 papers are filled in; a topic no longer exported keeps its column, view and rows, which are no longer written; a
-changed name renames that topic's option and column. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
+changed name renames that topic's option and column. A raised minimum grade turns the papers below it No longer listed, with a Why
+that says so; a lowered one lists them again. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
 are not part of its body and survive rewrites. Nothing flows back from Notion into litwatch.
 
 **First fill and after.** When it is set up the integration fills the database with every paper that qualifies at
