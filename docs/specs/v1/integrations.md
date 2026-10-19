@@ -66,7 +66,9 @@ week from 2026-10-19; if she does not use it, it is switched off in the configur
 
 **What it holds.** Papers only, no digests: every paper whose effective grade for an exported topic is relevant or
 above. The exported topics default to the Focus topics (now CoT faithfulness, CoT monitoring, Circuits) and the
-minimum grade to relevant; both are options. A page stands on its own: the PI cannot reach litwatch, so nothing
+minimum grade to relevant; both are options, and each exported topic's name in Notion can be set (it defaults to
+the topic's name). The export follows grades, not the library: Save and Unsave do not move a paper in or out of it,
+since the library is the owner's own and the PI's view is what litwatch judges. A page stands on its own: the PI cannot reach litwatch, so nothing
 links into it; it links to arXiv, the PDF and the published version.
 
 **Its words.** None of litwatch's internal terms reach Notion. Grades read **Must read** and **Worth a look**
@@ -75,7 +77,7 @@ links into it; it links to arXiv, the PDF and the published version.
 names. A "How to read this" page beside the database explains the topics, the grades, the text on each paper and
 which column is the reader's. The words are recorded in the glossary under *Notion export*.
 
-**The database.** One row per paper. Its columns: Title, Grade, Topic (the exported topics it is listed for), TL;DR,
+**The database.** One row per paper. Its columns: Title, Grade, Topic (the exported topics it is or was listed for), TL;DR,
 Published, Status, Authors, Venue, arXiv, PDF, Added, Why, and one grade column per exported topic. Grade is the best
 of the paper's topic grades; the topic grade columns are what the topic views group by, since one paper can be a
 must read for one topic and worth a look for another. Views: All papers, grouped by Grade, and one per exported
@@ -88,16 +90,21 @@ one: a collapsed toggle holding one coloured callout per section of the card, as
 claim, summary, the faithfulness and monitoring sections when the card has them, evaluation, closest prior work with
 arXiv links, limitations, code). litwatch owns the body and rewrites it when its text changes.
 
-**Leaving and returning.** A paper whose grade for a topic falls below the minimum keeps its page: that topic's
-grade becomes No longer listed, and Grade too once no topic lists it. A **Why** line says, in plain words and with
-the date, who took it off and why: the owner, by the name the configuration gives, or litwatch on re-checking it;
-and whether it was judged off-topic or less important (its Fit fell, or only its Weight). Pages are never deleted.
-A paper that qualifies again is listed again and its Why is cleared.
+**Leaving and returning.** A paper whose grade for a topic falls below the minimum keeps its page and stays in that
+topic's view: that topic's grade becomes No longer listed, and Grade too once no topic lists it. **Why** holds one
+line per topic the paper has left, in plain words and with the date: who took it off and why. The cause is the
+owner's word (the owner named as the configuration says), litwatch re-checking the paper, or a change to the topic's
+definition; and it was judged off-topic or less important (its Fit fell, or only its Weight). The cause comes from
+the event: `grade.changed` gains a `cause` field (`verdict`, `weight`, `owner`, `taxonomy`), written by whatever
+changed the grade, while the integration still checks the present grade before writing. Pages are never deleted.
+A paper listed again for a topic loses that topic's line.
 
 **Who owns what.** The integration creates the database, its columns and its views once, when it is set up, under a
 page the configuration names. After that it writes only its own properties and the page body; views, column widths
-and what a view hides are the owner's to arrange and are never reset. Adding an exported topic adds its grade column
-and its view. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
+and what a view hides are the owner's to arrange and are never reset. When it starts, the integration compares the
+exported topics with the database: a topic newly exported gets its grade column and its view, and its qualifying
+papers are filled in; a topic no longer exported keeps its column, view and rows, which are no longer written; a
+changed name renames that topic's option and column. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
 are not part of its body and survive rewrites. Nothing flows back from Notion into litwatch.
 
 **First fill and after.** When it is set up the integration fills the database with every paper that qualifies at

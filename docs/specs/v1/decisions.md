@@ -177,13 +177,14 @@ The owner talked to the PI: she asked for a week to see whether the Notion view 
     n8n leaves the path and the first v1's workflow is removed. *Why:* the outbox already gives it a cursor, retries,
     failures under Settings and tests; an n8n workflow has none of these and lives outside the repository.
 69. **Notion is the PI's view, not the owner's**: papers only, no digests; the exported topics and the minimum grade
-    are options, by default the Focus topics at relevant or above. Pages stand on their own, with no links into
-    litwatch. *Why:* the owner reads the web app; the PI cannot reach it.
+    are options, by default the Focus topics at relevant or above. It follows grades, not the library. Pages stand
+    on their own, with no links into litwatch. *Why:* the owner reads the web app; the PI cannot reach it.
 70. **Plain words only**: Must read, Worth a look, No longer listed; TL;DR, Summary, Deep read; short topic names;
     a "How to read this" page. *Why:* the PI does not know litwatch's terms, and Fit levels read as jargon.
-71. **A paper that leaves keeps its page**, marked No longer listed with a Why line naming who took it off (the
-    owner, or litwatch on re-checking) and whether it was judged off-topic or less important. Pages are never
-    deleted. *Why:* a row the PI saw should not vanish without a reason.
+71. **A paper that leaves keeps its page**, marked No longer listed with a Why line per topic left, naming who took it
+    off (the owner, litwatch on re-checking, or a change to the topic) and whether it was judged off-topic or less
+    important; `grade.changed` gains a `cause` for this. Pages are never deleted. *Why:* a row the PI saw should not
+    vanish without a reason.
 72. **A grade per exported topic**, plus Grade as the best of them; topic views group by their topic's grade.
     *Why:* a paper can be a must read for one topic and worth a look for another.
 73. **litwatch sets the database up once and then writes only its own columns and the page body.** Views and layout
