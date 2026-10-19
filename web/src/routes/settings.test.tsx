@@ -389,6 +389,58 @@ describe("Settings", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ revision: 2, title: "A garbled title", abstract: "The abstract, rewritten." }));
   });
 
+  it("acknowledges a red group, then all: they fold away keeping their buttons, and the run status clears", async () => {
+    viewport(true);
+    const failed = { ...status, papers: 530, analysis_failed: 1, fulltext_failed: 1, digests_failed: 1 };
+    const acks = () => calls.filter((c) => c.url === "/api/settings/acknowledge");
+    const calls = scriptFetch({
+      ...common,
+      // What the server counts after each Acknowledge: the pass's group first, then everything.
+      "GET /api/summary": () => ({ ...summaryOf(4 - [0, 1, 3][acks().length]!), status: [failed, { ...failed, fulltext_failed: 0 }, { ...status, papers: 530 }][acks().length] }),
+      "POST /api/settings/acknowledge": () => new Response(null, { status: 204 }),
+      "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }),
+    });
+    renderApp("/settings/needs");
+    expect(await screen.findByRole("link", { name: "3 failed" })).toBeInTheDocument();
+    const textGroup = screen.getByText("Full text · 1").closest(".ngrp") as HTMLElement;
+    await userEvent.click(within(textGroup).getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(acks().map((c) => c.body)).toEqual([{ steps: [], passes: [7], digests: [] }]));
+    // The pass folds away; what remains keeps its order, and the run status counts one fewer.
+    await waitFor(() => expect(screen.queryByRole("link", { name: "A textless paper" })).toBeNull());
+    expect(screen.getAllByRole("link", { name: /paper$/ }).map((l) => l.textContent)).toEqual(["A split paper", "A stuck paper"]);
+    expect(screen.getByRole("button", { name: "Acknowledged · 1" })).toHaveAttribute("aria-expanded", "false");
+    expect(await screen.findByRole("link", { name: "2 failed" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledge all" }));
+    // Splits are not acknowledged: they wait on a Fit.
+    await waitFor(() => expect(acks()[1]?.body).toEqual({ steps: [{ step: "analysis", paper_id: "2610.00002", revision: 1, topic: null }], passes: [], digests: [3] }));
+    expect(await screen.findByRole("link", { name: "530" })).toHaveClass("ok");
+    expect(screen.queryByRole("button", { name: "Acknowledge all" })).toBeNull();
+    expect(screen.getByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+
+    // Open, the section is grouped as above, and its rows keep their buttons.
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledged · 3" }));
+    const folded = screen.getByRole("region", { name: "Acknowledged" });
+    expect(within(folded).getAllByText(/ · 1$/).map((c) => c.textContent)).toEqual(["Analysis · 1", "Full text · 1", "Digests · 1"]);
+    expect(within(folded).queryByRole("button", { name: "Acknowledge" })).toBeNull();
+    const row = within(folded).getByRole("link", { name: "A textless paper" }).closest(".need") as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Run it now" }));
+    await waitFor(() => expect(row).toHaveClass("settled"));
+  });
+
+  it("folds the rows the API says were acknowledged, and counts only the others", async () => {
+    viewport(true);
+    const seen = "2026-10-19T08:00:00Z";
+    const night = { ...quality.night, analysis_failed: [{ ...stuck, acknowledged_at: seen }], fulltext: [pass], digests: [{ ...digest, acknowledged_at: seen }] };
+    const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night }, "POST /api/settings/acknowledge": () => new Response(null, { status: 204 }) });
+    renderApp("/settings/needs");
+    expect(await screen.findByRole("button", { name: "Acknowledged · 2" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
+    expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledge all" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: [], passes: [7], digests: [] }));
+  });
+
   it("lists a full-text pass that failed three runs and runs it now, settling it in place", async () => {
     viewport(true);
     const calls = scriptFetch({ ...common, "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }) });

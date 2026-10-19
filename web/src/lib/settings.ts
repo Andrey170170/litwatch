@@ -64,8 +64,9 @@ export type Split = {
   settled?: string;
 };
 
-/** A paper stuck after three failed runs of a step (`store.failures.stuck`). */
-export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; settled?: string };
+/** A paper stuck after three failed runs of a step (`store.failures.stuck`). `acknowledged_at`: when the owner
+ * acknowledged it, as for passes and digests (it no longer counts in the run status, and folds away). */
+export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; acknowledged_at?: string | null; settled?: string };
 
 /** A full-text pass waiting on the owner (`store.fulltext.stuck`): failed three runs, or awaiting its text over
  * a week. */
@@ -79,6 +80,7 @@ export type TextPassStuck = {
   failed_runs: number;
   last_error: string | null;
   queued_at: string;
+  acknowledged_at?: string | null;
   settled?: string;
 };
 
@@ -91,6 +93,7 @@ export type FailedDigest = {
   day: string;
   error: string | null;
   written_at: string;
+  acknowledged_at?: string | null;
   settled?: string;
   /** What the last write-again from this visit said while the digest is still to be written (client-side). */
   note?: string;
@@ -185,11 +188,52 @@ export type Value = NonNullable<Schemas["Answer"]["value"]>;
 export type Waiting = "splits" | "awaiting_classification" | "analysis_failed" | "ungraded" | "fulltext" | "digests";
 
 /** How many things wait on the owner: splits and escalations still unlabelled, the three stuck steps, the
- * full-text passes and the failed digests, less what this visit settled. */
+ * full-text passes and the failed digests, less what this visit settled and what the owner acknowledged. */
 export function waiting(q: Quality): number {
   const n = q.night;
-  const open = (xs: { settled?: string }[]) => xs.filter((x) => !x.settled).length;
+  const open = (xs: { settled?: string; acknowledged_at?: string | null }[]) => xs.filter((x) => !x.settled && !x.acknowledged_at).length;
   return open(n.splits.filter((s) => !s.label)) + open(n.awaiting_classification) + open(n.analysis_failed) + open(n.ungraded) + open(n.fulltext) + open(n.digests);
+}
+
+/** The red groups of Needs you, which Acknowledge marks seen (DESIGN.md, Needs you); the yellow ones wait on a
+ * Fit and are not acknowledged. */
+export type Red = "awaiting_classification" | "ungraded" | "analysis_failed" | "fulltext" | "digests";
+export const RED: Red[] = ["awaiting_classification", "ungraded", "analysis_failed", "fulltext", "digests"];
+
+/** What an Acknowledge names (`POST /api/settings/acknowledge`). */
+export type Seen = Schemas["AcknowledgeIn"];
+
+const STEP = { awaiting_classification: "classification", analysis_failed: "analysis", ungraded: "grading" } as const;
+type StepList = keyof typeof STEP;
+
+/** Whether a row is to acknowledge: not acknowledged yet, nor settled on this visit (it no longer waits). */
+const unseen = (x: { settled?: string; acknowledged_at?: string | null }) => !x.settled && !x.acknowledged_at;
+
+/** What Acknowledge on the `lists` names: their rows the owner sees there now, each as it is shown (a step on the
+ * revision shown, so a rewrite meanwhile is not acknowledged unseen). */
+export function toAcknowledge(q: Quality, lists: Red[]): Seen {
+  const n = q.night;
+  const steps = (Object.keys(STEP) as StepList[])
+    .filter((l) => lists.includes(l))
+    .flatMap((l) => n[l].filter(unseen).map((s) => ({ step: STEP[l], paper_id: s.paper_id, revision: s.revision, topic: s.topic ?? null })));
+  const passes = lists.includes("fulltext") ? n.fulltext.filter(unseen).map((p) => p.id) : [];
+  const digests = lists.includes("digests") ? n.digests.filter(unseen).map((d) => d.id) : [];
+  return { steps, passes, digests };
+}
+
+/** Whether `seen` names anything. */
+export const any = (seen: Seen): boolean => seen.steps.length + seen.passes.length + seen.digests.length > 0;
+
+/** The quality page with what an Acknowledge named marked acknowledged `at`: those rows fold away, the rest stay
+ * where they were. */
+export function acknowledged(q: Quality, seen: Seen, at: string): Quality {
+  const night = { ...q.night };
+  const mark = <T extends { acknowledged_at?: string | null }>(xs: T[], named: (x: T) => boolean): T[] => xs.map((x) => (named(x) && !x.acknowledged_at ? { ...x, acknowledged_at: at } : x));
+  for (const l of Object.keys(STEP) as StepList[])
+    night[l] = mark(night[l], (s) => seen.steps.some((x) => x.step === STEP[l] && x.paper_id === s.paper_id && x.revision === s.revision && (x.topic ?? null) === (s.topic ?? null)));
+  night.fulltext = mark(night.fulltext, (p) => seen.passes.includes(p.id));
+  night.digests = mark(night.digests, (d) => seen.digests.includes(d.id));
+  return { ...q, night };
 }
 
 /** Which item settled: its paper, and its topic, revision or pass where a paper can have several; a digest by its

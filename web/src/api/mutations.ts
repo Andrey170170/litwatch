@@ -8,7 +8,7 @@ import { useMutation, useMutationState, useQueryClient, type QueryClient } from 
 import { ApiError, api, ok, type Schemas } from "./client";
 import { digestQuery, patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
 import { rememberCard } from "@/lib/remember";
-import { labelled, noted, type Quality, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
+import { acknowledged, labelled, noted, type Quality, type Seen, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
 import { plural } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -365,6 +365,21 @@ export function useWriteAgain() {
       refreshSummary(qc);
       return settleNeeds(qc, (q) => (digestGone(e) ? settle(q, "digests", { id: digestId }, `No longer to be written: ${said(e)}.`) : noted(q, digestId, `Not written now: ${said(e)}.`)));
     },
+  });
+}
+
+/** Acknowledge on Needs you: the owner has seen the items named, and they stop counting in the run status. Once
+ * the API has them, their rows fold into the page's Acknowledged section and the summary is reread, so the run
+ * status and the sidebar's count follow. */
+export function useAcknowledge() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (seen: Seen) => ok(await api.POST("/api/settings/acknowledge", { body: seen })),
+    onSuccess: (_r, seen) => {
+      refreshSummary(qc);
+      return settleNeeds(qc, (q) => acknowledged(q, seen, new Date().toISOString()));
+    },
+    onError: (e) => toast(said(e), "error"),
   });
 }
 

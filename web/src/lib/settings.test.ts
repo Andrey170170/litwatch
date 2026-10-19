@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { answerOf, differs, labelled, level, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toToml, took, waiting, type Quality, type Session, type SessionItem } from "./settings";
+import { acknowledged, answerOf, differs, labelled, level, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toAcknowledge, toToml, took, waiting, type Quality, type Session, type SessionItem } from "./settings";
 
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01" } as const;
@@ -23,6 +23,32 @@ describe("waiting", () => {
     expect(after.night.ungraded[0]!.settled).toBeUndefined();
     // Of the paper's two passes, only the one run.
     expect(after.night.fulltext.map((s) => s.settled)).toEqual([undefined, "Running"]);
+  });
+});
+
+describe("toAcknowledge and acknowledged", () => {
+  const digest = { id: 4, topic: "a", period: "day", day: "2026-10-08", error: "timed out", written_at: "" } as const;
+  const q = { night: { ...night, splits: [split], awaiting_classification: [{ ...stuck, paper_id: "5" }], ungraded: [{ ...stuck, topic: "a" }, { ...stuck, topic: "b", revision: 2 }], analysis_failed: [stuck], fulltext: [pass], digests: [digest] } } as Quality;
+  it("names a group's rows as shown, never a split, nor what is settled or acknowledged already", () => {
+    expect(toAcknowledge(q, ["ungraded"])).toEqual({
+      steps: [
+        { step: "grading", paper_id: "1", revision: 1, topic: "a" },
+        { step: "grading", paper_id: "1", revision: 2, topic: "b" },
+      ],
+      passes: [],
+      digests: [],
+    });
+    const later = settle(acknowledged(q, { steps: [], passes: [7], digests: [] }, "2026-10-19T10:00:00Z"), "analysis_failed", { paper_id: "1" }, "Tried again");
+    expect(toAcknowledge(later, ["awaiting_classification", "ungraded", "analysis_failed", "fulltext", "digests"])).toMatchObject({ passes: [], digests: [4] });
+    expect(toAcknowledge(later, ["analysis_failed"]).steps).toEqual([]);
+  });
+  it("marks only the rows named, in place, and they stop counting as waiting", () => {
+    const after = acknowledged(q, { steps: [{ step: "grading", paper_id: "1", revision: 1, topic: "a" }, { step: "analysis", paper_id: "5", revision: 1, topic: null }], passes: [], digests: [4] }, "2026-10-19T10:00:00Z");
+    expect(after.night.ungraded.map((s) => s.acknowledged_at ?? null)).toEqual(["2026-10-19T10:00:00Z", null]);
+    // The step names the list: paper 5 waits on classification, not analysis.
+    expect(after.night.awaiting_classification[0]!.acknowledged_at).toBeUndefined();
+    expect(after.night.digests[0]!.acknowledged_at).toBe("2026-10-19T10:00:00Z");
+    expect(waiting(q) - waiting(after)).toBe(2);
   });
 });
 
