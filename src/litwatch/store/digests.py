@@ -282,10 +282,11 @@ async def earlier_central(
 
 
 async def as_shown(conn: psycopg.AsyncConnection, digest_id: int, focus: bool) -> list[Due]:
-    """A published digest's papers as it showed them, in a writer's order (rarest first), each
-    with the Brief and Fit reason of the revision shown, and for a `focus` topic its abstract when
-    that revision is still current: what the writer would read to write it again (an
-    evaluation's request)."""
+    """A published digest's papers with what it froze of each (title, Gist, Fit, rarity), in a
+    writer's order (rarest first), each with the latest Brief and Fit reason of the revision
+    shown, and for a `focus` topic its abstract when that revision is still current: the
+    writer's input rebuilt for an evaluation's request. It is the input the writer had as far as
+    no Brief was written and no grading recorded for that revision since."""
     rows = await (
         await conn.execute(
             f"""

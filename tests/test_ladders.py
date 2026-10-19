@@ -2,6 +2,8 @@
 case's request built as the pipeline builds it, calls under a ceiling that holds across runs,
 resuming, and the report's tables. Providers are scripted."""
 
+import asyncio
+import fcntl
 import json
 
 import pytest
@@ -11,6 +13,7 @@ from litwatch.archive import ArchiveClient
 from litwatch.config import RoleConfig
 from litwatch.fulltext import brief
 from litwatch.llm import ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
 from litwatch.quality import ladders
 from litwatch.store import papers as papers_store
 from tests.conftest import FAITH, INTERP, TREE, paper
@@ -25,11 +28,13 @@ reserve_output_tokens = 1000
 [[judge.candidates]]
 name = "own"
 price = [10.0, 10.0]
+price_max = [10.0, 10.0]
 provider = "anthropic"
 model = "lab-a/own"
 [[judge.candidates]]
 name = "other"
 price = [1.0, 1.0]
+price_max = [2.0, 2.0]
 provider = "openrouter"
 model = "lab-b/other"
 effort = "high"
@@ -65,6 +70,10 @@ def test_ladders_and_cases_load_from_their_files(tmp_path):
     assert found["judge"].candidates[1].role.effort == "high"
     with pytest.raises(ValueError, match="asked alone"):
         ladder(tmp_path, LADDERS + 'fallback = "brief_fallback"\n')
+    with pytest.raises(ValueError, match="below price"):
+        ladder(tmp_path, LADDERS.replace("price_max = [2.0, 2.0]", "price_max = [0.5, 2.0]"))
+    with pytest.raises(ValueError, match="not negative"):
+        ladder(tmp_path, LADDERS.replace("price = [1.0, 1.0]", "price = [-1.0, 1.0]"))
     cases = tmp_path / "cases.csv"
     cases.write_text(
         "set,role,paper,subject,label,note\n"
@@ -83,8 +92,15 @@ def test_the_budget_reserves_before_a_call_and_once_refused_starts_none():
     b = ladders.Budget(ceiling=1.0, spent=0.5)
     assert b.reserve(0.3) and not b.reserve(0.3)
     assert not b.reserve(0.01)  # stopped: a later, smaller call does not slip in
+    assert b.stopped == "the ceiling"
     b.settle(0.3, None)  # an unknown charge counts at its reservation
     assert b.spent == pytest.approx(0.8) and b.reserved == 0
+    # A call that cost more than its reservation shows the reservation is no bound: none starts.
+    b = ladders.Budget(ceiling=1.0, spent=0.0)
+    assert b.reserve(0.1)
+    b.settle(0.1, 0.2)
+    assert b.spent == pytest.approx(0.2) and b.stopped == "a call cost more than its reservation"
+    assert not b.reserve(0.01)
 
 
 async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want_of_a_provider(
@@ -95,6 +111,9 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
 
     def own(role, request):
         assert role.fallback is None
+        # The call's reservation is on disk before it is sent.
+        assert any(json.loads(line)["candidate"] == "own"
+                   for line in (out / ladders.PENDING).read_text().splitlines())  # fmt: skip
         if "Monitors" in request.user:
             return Reply("", Stop.REFUSED, Usage(model=role.model, cost=0.01), refusal="bio")
         return Reply(FIT.model_dump_json(), Stop.COMPLETE, Usage(model=role.model, cost=0.02))
@@ -109,6 +128,8 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
         "openrouter": ScriptedProvider("openrouter", other),
     }
     ran = await ladders.run(todo(found, chosen), providers, out, ceiling=5.0)
+    assert len(providers["openrouter"].calls) == 2  # once a case: no retries inside a call
+    assert {r.attempt for r in ran.rows} == set(ladders.reservations(out))
     outcomes = {(r.case.split("/")[1], r.candidate): r.outcome for r in ran.rows}
     assert outcomes == {
         (P.id, "own"): "answered",
@@ -147,11 +168,16 @@ async def test_the_ceiling_holds_across_runs_and_records_where_it_stopped(tmp_pa
         ),
         "openrouter": ScriptedProvider("openrouter", lambda role, request: FIT.model_dump_json()),
     }
-    # Each own call reserves its input at half a token a character and 1,000 output tokens.
-    hold = ladders.reservation(work[0].ladder, work[0].candidate, work[0].request)
-    assert hold == pytest.approx(
-        ((len(work[0].request.system) + len(work[0].request.user)) / 2 + 1000) * 10 / 1e6
-    )
+    # A call reserves its input (prompts and schema) at half a token a character and its
+    # output at its cap: Anthropic's default for own, the ladder's 1,000 for other's uncapped
+    # OpenRouter call, each at the candidate's dearest prices.
+    request = work[0].request
+    chars = len(request.system) + len(request.user)
+    chars += len(json.dumps(request.output.model_json_schema()))
+    hold = ladders.reservation(work[0].ladder, work[0].candidate, request)
+    assert hold == pytest.approx((chars / 2 + DEFAULT_MAX_TOKENS) * 10 / 1e6)
+    other = ladders.reservation(work[1].ladder, work[1].candidate, request)
+    assert other == pytest.approx((chars / 2 + 1000) * 2 / 1e6)
     ran = await ladders.run(work[:1], providers, out, ceiling=hold * 1.5, concurrency=1)
     (first,) = ran.rows
     assert first.outcome == "invalid" and first.cost is None and first.reserved == hold
@@ -161,16 +187,62 @@ async def test_the_ceiling_holds_across_runs_and_records_where_it_stopped(tmp_pa
     assert [(r.paper, r.candidate) for r in ran.rows] == [(P.id, "other")]
     assert ran.stopped_at is work[2]
     (stop,) = [json.loads(line) for line in (out / ladders.BUDGET).read_text().splitlines()]
+    assert stop["why"] == "the ceiling"
     assert stop["first_not_run"] == {"case": work[2].case.key, "candidate": "own"}
     assert stop["not_run"] == 2
     assert stop["spent"] == pytest.approx(hold + ran.rows[0].cost, abs=1e-4)
     assert len(ladders.rows(out)) == 2
 
 
+async def test_a_call_cut_off_by_a_kill_still_counts_and_one_run_at_a_time_uses_a_directory(
+    tmp_path,
+):
+    found, out = ladder(tmp_path), tmp_path / "runs"
+    work = todo(found, judged(P, Q), [])
+
+    def killed(role, request):
+        raise asyncio.CancelledError  # the run is stopped while the call is out
+
+    providers = {
+        "anthropic": ScriptedProvider("anthropic", killed),
+        "openrouter": ScriptedProvider("openrouter", lambda role, request: FIT.model_dump_json()),
+    }
+    hold = ladders.reservation(work[0].ladder, work[0].candidate, work[0].request)
+    with pytest.raises(asyncio.CancelledError):
+        await ladders.run(work[:1], providers, out, ceiling=hold * 1.5, concurrency=1)
+    assert ladders.rows(out) == [] and list(ladders.reservations(out).values()) == [hold]
+    assert ladders.spent([], ladders.reservations(out)) == pytest.approx(hold)
+    # The next run counts the call that never ended: another own call no longer fits.
+    providers["anthropic"] = ScriptedProvider("anthropic", lambda r, q: FIT.model_dump_json())
+    ran = await ladders.run(work[2:3], providers, out, ceiling=hold * 1.5, concurrency=1)
+    assert ran.rows == [] and ran.why == "the ceiling"
+    # A directory another run holds is refused before any call.
+    with (out / ladders.LOCK).open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ValueError, match="another run is using"):
+            await ladders.run(work[1:2], providers, out, ceiling=5.0)
+    assert providers["openrouter"].calls == []
+    # Neither can a ceiling or a concurrency that bounds nothing.
+    for bad in ({"ceiling": float("nan")}, {"ceiling": 5.0, "concurrency": 0}):
+        with pytest.raises(ValueError, match="positive amount"):
+            await ladders.run(work[1:2], providers, out, **{"ceiling": 5.0, **bad})
+
+
+async def test_a_call_that_costs_more_than_its_reservation_stops_the_run(tmp_path):
+    found, out = ladder(tmp_path), tmp_path / "runs"
+    work = [t for t in todo(found, judged(P, Q), []) if t.candidate.name == "other"]
+    dear = Reply(FIT.model_dump_json(), Stop.COMPLETE, Usage(model="lab-b/other", cost=1.0))
+    providers = {"openrouter": ScriptedProvider("openrouter", lambda role, request: dear)}
+    ran = await ladders.run(work, providers, out, ceiling=5.0, concurrency=1)
+    assert len(ran.rows) == 1 and ran.why == "a call cost more than its reservation"
+    (stop,) = [json.loads(line) for line in (out / ladders.BUDGET).read_text().splitlines()]
+    assert stop["why"] == ran.why and stop["first_not_run"]["case"] == work[1].case.key
+
+
 async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
     """Graders, `analyse` and `brief` from the pipeline's own builders, a paper the database
     lacks from the archive's catalog, a text only as the archive holds it, and a published
-    daily digest rebuilt as it was written."""
+    daily digest rebuilt as it was written, when nothing changed since."""
     from litwatch.store import taxonomy as taxonomy_store  # noqa: PLC0415
 
     await taxonomy_store.save(conn, TREE)
@@ -222,7 +294,9 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
     assert built[keys[7]] == "the paper is in neither the database nor the archive"
 
 
-def row(case: str, candidate: str, outcome: str = "answered", **output) -> ladders.Row:
+def row(
+    case: str, candidate: str, outcome: str = "answered", request: str = "r", **output
+) -> ladders.Row:
     return ladders.Row(
         set="quality",
         role="judge",
@@ -230,7 +304,7 @@ def row(case: str, candidate: str, outcome: str = "answered", **output) -> ladde
         paper=case.split("/")[1],
         candidate=candidate,
         model=candidate,
-        request="r",
+        request=request,
         outcome=outcome,
         output=output or None,
         cost=0.01,
@@ -241,19 +315,29 @@ def test_the_tables_compare_with_the_owner_and_the_own_model_over_what_both_answ
     found = ladder(tmp_path)
     chosen = judged(P, label="central") + judged(Q, label="none")
     p, q = chosen[0].key, chosen[1].key
+    built = {p: grading.request(P, FAITH, "CoT"), q: grading.request(Q, FAITH, "CoT")}
+    named = {c.name: c for c in found["judge"].candidates}
+
+    def call(case: str, candidate: str, outcome: str = "answered", **output) -> ladders.Row:
+        asked = ladders.asked(named[candidate], built[case])
+        return row(case, candidate, outcome, asked, **output)
+
     calls = [
-        row(p, "own", fit="central", reason="."),
-        row(q, "own", fit="adjacent", reason="."),
-        row(p, "other", fit="related", reason="."),
-        row(q, "other", "refused"),
+        call(p, "own", fit="central", reason="."),
+        call(q, "own", fit="adjacent", reason="."),
+        call(p, "other", fit="related", reason="."),
+        call(q, "other", "refused"),
+        # A later call to another request (the paper revised since, say) is not read.
+        row(p, "own", request="stale", fit="none", reason="."),
     ]
-    calls[-1].cost = None
-    text = ladders.tables(found, chosen, calls)
+    calls[3].cost = None
+    text = ladders.tables(found, chosen, calls, built)
     lines = [
         line for line in text.splitlines() if line.startswith("| own") or line.startswith("| other")
     ]
     # own: Fit as the owner 1/2, its side 2/2; other: one answer, related to central: Fit 0/1,
-    # side 1/1 against the owner and against own; its refusal's charge is unknown.
+    # side 1/1 against the owner and against own; its refusal's charge is unknown, so what it
+    # spent an answer is a lower bound.
     assert lines[0].split(" | ")[3:] == [
         "2",
         "0",
@@ -278,14 +362,14 @@ def test_the_tables_compare_with_the_owner_and_the_own_model_over_what_both_answ
         "0/1",
         "1/1",
         "≥ $0.01",
-        "$0.0100 |",
+        "≥ $0.0100 |",
     ]
-    assert "Every recorded call: 4, ≥ $0.03." in text
-    assert ladders.answers(found, chosen, calls) == "\n"  # the quality set is not listed
+    assert "Every recorded call: 5, ≥ $0.04." in text
+    assert ladders.answers(found, chosen, calls, built) == "\n"  # the quality set is not listed
     refusals = [c.model_copy(update={"set": "refusals", "note": None}) for c in chosen]
-    listed_ = ladders.answers(found, refusals, calls, {Q.id: Q.title})
+    listed_ = ladders.answers(found, refusals, calls, built, {Q.id: Q.title})
     assert f"`judge` · {Q.id} · {FAITH.slug} · {Q.title}" in listed_
     assert "- own: **adjacent**. ." in listed_ and "- other: *refused*" in listed_
     assert P.id not in listed_  # every candidate answered it
-    failed = [*calls[:3], row(p, "other", "provider"), calls[3]]
-    assert P.id not in ladders.answers(found, refusals, failed)  # an error says nothing of P
+    failed = [*calls[:3], call(p, "other", "provider"), calls[3]]
+    assert P.id not in ladders.answers(found, refusals, failed, built)  # an error says nothing

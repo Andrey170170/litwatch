@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -555,16 +556,16 @@ def eval_ladders(
     candidates: Annotated[Path, typer.Option(help="TOML: each role's ladder.")] = Path(
         "evals/2026-10-19-fallback-ladders/ladders.toml"
     ),
-    out: Annotated[Path, typer.Option(help="One <role>.jsonl per role, and budget.jsonl.")] = Path(
-        "evals/2026-10-19-fallback-ladders/runs"
-    ),
+    out: Annotated[
+        Path, typer.Option(help="One <role>.jsonl per role, pending.jsonl and budget.jsonl.")
+    ] = Path("evals/2026-10-19-fallback-ladders/runs"),
     ceiling: Annotated[float, typer.Option(help="USD that every run into --out may spend.")] = 25.0,
     which: Annotated[
         str | None, typer.Option("--set", help="Only this set: quality or refusals.")
     ] = None,
     only: Annotated[list[str] | None, typer.Option(help="Only these candidates.")] = None,
     yes: Annotated[bool, typer.Option("--yes", help="Spend without asking.")] = False,
-    concurrency: int = 8,
+    concurrency: Annotated[int, typer.Option(min=1)] = 8,
     config: ConfigPath = None,
 ) -> None:
     """Ask each case's request, as the pipeline builds it, of every candidate on its role's
@@ -572,6 +573,8 @@ def eval_ladders(
     digests from the configured database and texts the archive already holds, and writes only to
     `out`; a run resumes where it stopped. Shows what it would cost and asks first, and stops
     at the ceiling."""
+    if not (math.isfinite(ceiling) and ceiling > 0):
+        raise typer.BadParameter("--ceiling is a positive amount")
     from litwatch.fulltext import archive_for  # noqa: PLC0415
     from litwatch.llm.gateway import build  # noqa: PLC0415
     from litwatch.quality import ladders  # noqa: PLC0415
@@ -610,7 +613,7 @@ def eval_ladders(
     expected = sum(ladders.estimate(t.ladder, t.candidate, t.request) for t in work)
     console.print(
         f"{len(work)} calls, estimated ${expected:.2f}; spent so far "
-        f"${ladders.spent(done):.2f} of the ${ceiling:.2f} ceiling"
+        f"${ladders.spent(done, ladders.reservations(out)):.2f} of the ${ceiling:.2f} ceiling"
     )
     if not work or (not yes and not typer.confirm("Spend it?")):
         return
@@ -628,12 +631,10 @@ def eval_ladders(
         raise SystemExit(str(exc)) from exc
     kinds = Counter(r.outcome for r in ran.rows)
     console.print(f"{len(ran.rows)} calls: {dict(kinds)}; ${ladders.spent(ran.rows):.2f}")
-    if ran.stopped_at is not None:
+    if ran.why is not None:
         t = ran.stopped_at
-        console.print(
-            f"[red]stopped at the ceiling, first not run: {t.case.key} {t.candidate.name} "
-            f"(recorded in {out / ladders.BUDGET})[/red]"
-        )
+        first = f", first not run: {t.case.key} {t.candidate.name}" if t else ""
+        console.print(f"[red]stopped: {ran.why}{first} (recorded in {out / ladders.BUDGET})[/red]")
 
 
 @eval_app.command("ladders-report")
@@ -650,27 +651,30 @@ def eval_ladders_report(
     config: ConfigPath = None,
 ) -> None:
     """The runs' tables per role and set, then every answer on the refusals set's papers that a
-    candidate refused or answered unusably, as markdown: no model calls. Titles are read from
-    the database, else the archive's catalog."""
+    candidate refused or answered unusably, as markdown: no model calls. It builds each case's
+    request as `eval ladders` does and reads only the calls to it; titles are read from the
+    database, else the archive's catalog."""
     from litwatch.fulltext import archive_for  # noqa: PLC0415
     from litwatch.quality import ladders  # noqa: PLC0415
 
     found, chosen = ladders.ladders(candidates), ladders.cases(cases)
     archive = archive_for(configuration.load(config))
 
-    async def work(conn: psycopg.AsyncConnection) -> dict[str, str]:
+    async def work(conn: psycopg.AsyncConnection) -> tuple[dict[str, Any], dict[str, str]]:
         ids = sorted({c.paper for c in chosen if c.paper and c.set == "refusals"})
         try:
-            return {p.id: p.title for p in (await ladders.papers(conn, archive, ids)).values()}
+            built = await ladders.requests(conn, archive, chosen)
+            found_papers = await ladders.papers(conn, archive, ids)
+            return built, {p.id: p.title for p in found_papers.values()}
         finally:
             if archive is not None:
                 await archive.aclose()
 
-    titles = _run(work, migrate=False)
+    built, titles = _run(work, migrate=False)
     calls = ladders.rows(out)
-    print(ladders.tables(found, chosen, calls), end="")
+    print(ladders.tables(found, chosen, calls, built), end="")
     print("\n### Answers on the refusals set\n")
-    print(ladders.answers(found, chosen, calls, titles), end="")
+    print(ladders.answers(found, chosen, calls, built, titles), end="")
 
 
 # -- library ---------------------------------------------------------------------------------------

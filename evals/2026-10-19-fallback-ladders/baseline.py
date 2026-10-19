@@ -1,77 +1,99 @@
-"""The noise floor: production's own answer to each quality case (the nightly's, at the paper's
-current revision) against every candidate's answer in runs/, and what each candidate answered,
-into baseline.md. The role's own
-model re-asked shows how far it disagrees with itself; a candidate is read against that. No model
-calls; reads the scratch sandbox copied from production on 2026-10-19 (`fh_p1_sandbox`):
+"""Production's own answers to the quality cases against the re-run, and what each candidate
+answered, into production.csv (production's answer to each case, with where it came from) and
+baseline.md. Production's answer is the nightly's latest at the paper's current revision, given
+by the role's model under the code of its night, so the role's own model re-asked shows how far
+two of its answers to one case differ (`re-asked`); a candidate is read against that. Only the
+calls to the requests the cases build now are read. No model calls; reads the scratch sandbox
+copied from production on 2026-10-19 (`fh_p1_sandbox`) and the archive's held texts (the
+`brief` cases' requests):
 
     LITWATCH_DATABASE_URL=<dev DSN for fh_p1_sandbox> uv run python \
         evals/2026-10-19-fallback-ladders/baseline.py
 """
 
-import os
+import asyncio
+import csv
 from collections import Counter
 from pathlib import Path
 
 import psycopg
-from psycopg.rows import dict_row
 
+from litwatch import config, store
+from litwatch.fulltext import archive_for
 from litwatch.quality import ladders
 
 HERE = Path(__file__).parent
 POSITIVE = ("central", "related")
+COLUMNS = ("case", "model", "answer", "source")
 
 
-def production(conn: psycopg.Connection[dict], case: ladders.Case) -> tuple[str, str] | None:
-    """(model, answer) of production for one case: a grader's Fit, or `analyse`'s Weight."""
+async def production(conn: psycopg.AsyncConnection, case: ladders.Case) -> dict | None:
+    """Production's answer to one case: a grader's Fit from the latest verdict, or `analyse`'s
+    Weight from the latest analysis, each at the paper's current revision."""
     if case.role in ladders.GRADERS:
-        row = conn.execute(
-            """SELECT v.opinions -> %s AS said FROM verdicts v
-               JOIN papers p ON p.id = v.paper_id AND p.revision = v.paper_revision
-               WHERE v.paper_id = %s AND v.topic = %s""",
-            (case.role, case.paper, case.subject),
+        row = await (
+            await conn.execute(
+                """SELECT v.id, v.opinions -> %s AS said FROM verdicts v
+                   JOIN papers p ON p.id = v.paper_id AND p.revision = v.paper_revision
+                   WHERE v.paper_id = %s AND v.topic = %s ORDER BY v.id DESC LIMIT 1""",
+                (case.role, case.paper, case.subject),
+            )
         ).fetchone()
-        said = row and row["said"]
-        return (said["model"], said["fit"]) if said else None
-    row = conn.execute(
-        """SELECT a.model, a.weight FROM analyses a
-           JOIN papers p ON p.id = a.paper_id AND p.revision = a.paper_revision
-           WHERE a.paper_id = %s ORDER BY a.id DESC LIMIT 1""",
-        (case.paper,),
+        if row is None or row["said"] is None:
+            return None
+        said = row["said"]
+        return {"model": said["model"], "answer": said["fit"], "source": f"verdict {row['id']}"}
+    row = await (
+        await conn.execute(
+            """SELECT a.id, a.model, a.weight FROM analyses a
+               JOIN papers p ON p.id = a.paper_id AND p.revision = a.paper_revision
+               WHERE a.paper_id = %s ORDER BY a.id DESC LIMIT 1""",
+            (case.paper,),
+        )
     ).fetchone()
-    return (row["model"], row["weight"]) if row else None
+    if row is None:
+        return None
+    return {"model": row["model"], "answer": row["weight"], "source": f"analysis {row['id']}"}
 
 
-def main() -> None:
+async def main() -> None:
     found = ladders.ladders(HERE / "ladders.toml")
-    chosen = [
-        c
-        for c in ladders.cases(HERE / "cases.csv")
-        if c.set == "quality" and c.role in (*ladders.GRADERS, "analyse")
-    ]
-    last = ladders.latest(ladders.rows(HERE / "runs"))
-    with psycopg.connect(os.environ["LITWATCH_DATABASE_URL"], row_factory=dict_row) as conn:
-        said = {c.key: production(conn, c) for c in chosen}
+    every = ladders.cases(HERE / "cases.csv")
+    chosen = [c for c in every if c.set == "quality" and c.role in (*ladders.GRADERS, "analyse")]
+    archive = archive_for(config.load())
+    async with await store.connect(config.database_url()) as conn:
+        try:
+            built = await ladders.requests(conn, archive, [c for c in every if c.role != "writer"])
+        finally:
+            if archive is not None:
+                await archive.aclose()
+        said = {c.key: await production(conn, c) for c in chosen}
+    with (HERE / "production.csv").open("w", newline="") as f:
+        out = csv.DictWriter(f, COLUMNS)
+        out.writeheader()
+        out.writerows({"case": k} | v for k, v in said.items() if v)
+    last = ladders.latest(ladders.current(ladders.rows(HERE / "runs"), found, built))
     lines = [
         "# Production's answers against the re-run",
         "",
-        "Generated by baseline.py. Per role, the quality cases production has answered at the",
-        "paper's current revision; each candidate's latest answer in runs/ against production's.",
-        "For a grader the Fit and its side of the line (central or related against the rest); for",
-        "`analyse` the Weight.",
+        "Generated by baseline.py from production.csv and runs/. Per role, the quality cases",
+        "production has answered at the paper's current revision; each candidate's latest answer",
+        "against production's. For a grader the Fit and its side of the line (central or related",
+        "against the rest); for `analyse` the Weight.",
     ]
     for role in (*ladders.GRADERS, "analyse"):
         mine = [c for c in chosen if c.role == role and said[c.key]]
         if not mine:  # the owner's pairs: production has graded none of them
             lines += ["", f"## `{role}`", "", "No case answered by production."]
             continue
-        models = Counter(said[c.key][0] for c in mine)
+        models = Counter(said[c.key]["model"] for c in mine)
         lines += ["", f"## `{role}`", "", f"{len(mine)} cases; production's model: "]
         lines[-1] += ", ".join(f"`{m}` ({n})" for m, n in models.most_common())
         head = ["Candidate", "Answered", "As production"] + (["Side"] if role != "analyse" else [])
         lines += ["", "| " + " | ".join(head) + " |", "|" + " --- |" * len(head)]
         for cand in found[role].candidates:
             pairs = [
-                (said[c.key][1], r.output["fit" if role != "analyse" else "weight"])
+                (said[c.key]["answer"], r.output["fit" if role != "analyse" else "weight"])
                 for c in mine
                 if (r := last.get((c.key, cand.name))) and r.output is not None
             ]
@@ -80,7 +102,7 @@ def main() -> None:
                 side = sum((a in POSITIVE) == (b in POSITIVE) for a, b in pairs)
                 row.append(f"{side}/{len(pairs)}")
             lines.append("| " + " | ".join(str(x) for x in row) + " |")
-    lines += answered(found, ladders.cases(HERE / "cases.csv"), last)
+    lines += answered(found, every, last)
     (HERE / "baseline.md").write_text("\n".join(lines) + "\n")
 
 
@@ -93,7 +115,7 @@ def answered(
     often it drew the overstatement line), then each Fit or Weight that differs from the role's
     own model's on the same case, own → candidate."""
     lines = ["", "# What each candidate answered", ""]
-    lines.append("From runs/ alone, each case's latest answer.")
+    lines.append("From runs/ alone, each case's latest answer to its request as built now.")
     for role in (*ladders.GRADERS, "analyse", "brief"):
         key = "fit" if role in ladders.GRADERS else "weight"
         own = found[role].own.name
@@ -126,4 +148,5 @@ def answered(
 
 
 if __name__ == "__main__":
-    main()
+    config.load_dotenv()
+    asyncio.run(main())

@@ -1,4 +1,4 @@
-"""Lay out the `writer` cases for reading: each digest's request as the writer read it, then each
+"""Lay out the `writer` cases for reading: each digest's request as the cases build it, then each
 candidate's text and Gist. No model calls; reads the digests from the database the run read
 (`fh_p1_sandbox`), as `litwatch eval ladders` does:
 
@@ -21,7 +21,8 @@ SEED = 20261019
 
 
 async def main() -> None:
-    found = ladders.ladders(HERE / "ladders.toml")["writer"]
+    ladder = ladders.ladders(HERE / "ladders.toml")
+    found = ladder["writer"]
     chosen = [c for c in ladders.cases(HERE / "cases.csv") if c.role == "writer"]
     async with await store.connect(config.database_url()) as conn:
         built = await ladders.requests(conn, None, chosen)
@@ -33,7 +34,8 @@ async def main() -> None:
             ).fetchone()
             for c in chosen
         }
-    last = ladders.latest(ladders.rows(HERE / "runs"))
+    # Only the calls to the requests built now: a digest whose papers changed since is left out.
+    last = ladders.latest(ladders.current(ladders.rows(HERE / "runs"), ladder, built))
     shuffle = random.Random(SEED)
     named, blind, key = [], [], []
     for c in chosen:

@@ -13,22 +13,33 @@ topic for the graders (`judge`, `check`, `field_grade`), a paper and its area fo
 `brief`, a published daily digest for `writer`; in the `quality` set (ordinary papers, some
 with the owner's Fit) or the `refusals` set (papers likely to be refused).
 
-Spending is capped across every invocation into one directory. Before each call the harness
-reserves the call's upper bound (its input at half a token per character, and the role's
-`reserve_output_tokens`, at the candidate's prices), and starts it only while what the
-directory's calls have cost plus what is reserved stays within the ceiling; a call whose charge
-is unknown counts at its reservation. The run that reaches the ceiling stops there and records
-the first call it did not make (`budget.jsonl`).
+Spending is capped across every invocation into one directory, and one invocation at a time
+uses it. Before each call the harness records a reservation (`pending.jsonl`) for the call's
+upper bound (see `reservation`), and starts it only while what the directory's calls have cost
+plus what is reserved stays within the ceiling; a call whose charge is unknown, or that never
+recorded an end (a run killed while it was out), counts at its reservation. The run that
+reaches the ceiling, or makes a call that cost more than its reservation, starts no more and
+records why and the first call it did not make (`budget.jsonl`). Calls are made once each,
+without the gateway's retries; a call that failed for want of the provider is asked again by
+the next run.
+
+A call's identity is its request and the candidate's configuration (`asked`); the report reads
+only calls to the requests the cases build now. A change to litwatch itself between runs into
+one directory (an output model's field order, OpenRouter's default routing, how answers are
+validated) is not part of it: start a new directory after one.
 """
 
 from __future__ import annotations
 
 import asyncio
 import csv
+import fcntl
 import hashlib
 import json
+import math
 import time
 import tomllib
+import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -47,6 +58,7 @@ from litwatch.core.digests import DigestPeriod
 from litwatch.digests import writer
 from litwatch.fulltext import brief
 from litwatch.llm import CallError, Gateway, Provider, Request
+from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
 from litwatch.store import digests as digests_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -58,23 +70,31 @@ SETS = ("quality", "refusals")
 CHARS_PER_TOKEN, RESERVE_CHARS_PER_TOKEN = 3.0, 2.0
 # An answer that failed for want of the provider says nothing of the model: asked again.
 RETRIED = ("timeout", "provider")
-BUDGET = "budget.jsonl"
+BUDGET, PENDING, LOCK = "budget.jsonl", "pending.jsonl", ".lock"
 
 
 # -- the ladders -----------------------------------------------------------------------------------
 
 
 class Candidate(BaseModel):
-    """One model asked as a role, with its prices for the estimate and the reservation."""
+    """One model asked as a role, with its prices in USD per million input and output tokens:
+    `price` what a call is expected to cost (the estimate), `price_max` its dearest endpoint
+    among those its routing allows (the reservation)."""
 
     name: str
     role: RoleConfig
-    price: tuple[float, float]  # USD per million input and output tokens
+    price: tuple[float, float]
+    price_max: tuple[float, float]
 
     @model_validator(mode="after")
     def _alone(self) -> Candidate:
         if self.role.fallback is not None or self.role.decisions:
             raise ValueError(f"{self.name}: a candidate is a chat model asked alone")
+        prices = (*self.price, *self.price_max)
+        if not all(math.isfinite(p) and p >= 0 for p in prices):
+            raise ValueError(f"{self.name}: prices are finite and not negative")
+        if any(m < p for p, m in zip(self.price, self.price_max, strict=True)):
+            raise ValueError(f"{self.name}: price_max is below price")
         return self
 
 
@@ -83,7 +103,7 @@ class Ladder(BaseModel):
 
     role: str
     output_tokens: int = Field(gt=0)  # expected a call, for the estimate
-    reserve_output_tokens: int = Field(gt=0)  # a call's upper bound, for the ceiling
+    reserve_output_tokens: int = Field(gt=0)  # a call's output, for the ceiling, where uncapped
     candidates: list[Candidate] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -103,15 +123,16 @@ class Ladder(BaseModel):
 def ladders(path: Path) -> dict[str, Ladder]:
     """The ladders of a TOML file: a table per role, holding its `output_tokens`,
     `reserve_output_tokens` and an array `candidates` of tables, each a role's configuration
-    with a `name` and a `price`."""
+    with a `name`, a `price` and a `price_max`."""
     found = {}
     for role, table in tomllib.loads(path.read_text()).items():
         listed = [
             Candidate(
                 name=c["name"],
                 price=c["price"],
+                price_max=c["price_max"],
                 role=RoleConfig.model_validate(
-                    {k: v for k, v in c.items() if k not in ("name", "price")}
+                    {k: v for k, v in c.items() if k not in ("name", "price", "price_max")}
                 ),
             )
             for c in table.get("candidates", [])
@@ -213,7 +234,7 @@ async def _brief(archive: ArchiveClient | None, paper: Paper, area: Any) -> Requ
 async def _digest(
     conn: psycopg.AsyncConnection, tree: Any, topics: dict[str, Any], digest_id: int
 ) -> Request | str:
-    """A published daily digest's request, over its papers as it showed them."""
+    """A published daily digest's request, rebuilt over its papers (`digests.as_shown`)."""
     d = await digests_store.get(conn, digest_id)
     if d is None or d["text"] is None or d["period"] != DigestPeriod.DAY.value:
         return "not a written daily digest"
@@ -248,6 +269,7 @@ class Row(BaseModel):
     output_tokens: int | None = None  # thinking included
     reasoning_tokens: int | None = None
     seconds: float | None = None
+    attempt: str | None = None  # its reservation in `pending.jsonl`; None before they existed
 
 
 def asked(candidate: Candidate, request: Request) -> str:
@@ -262,10 +284,19 @@ def rows(out: Path) -> list[Row]:
     """Every call recorded in `out`, in order, those asked again included."""
     found = []
     for path in sorted(out.glob("*.jsonl")):
-        if path.name == BUDGET:
+        if path.name in (BUDGET, PENDING):
             continue
         found += [Row.model_validate_json(line) for line in path.read_text().splitlines() if line]
     return found
+
+
+def reservations(out: Path) -> dict[str, float]:
+    """Every reservation recorded in `out`, by attempt."""
+    path = out / PENDING
+    if not path.exists():
+        return {}
+    found = [json.loads(line) for line in path.read_text().splitlines() if line]
+    return {r["attempt"]: r["reserved"] for r in found}
 
 
 def latest(found: list[Row]) -> dict[tuple[str, str], Row]:
@@ -273,42 +304,62 @@ def latest(found: list[Row]) -> dict[tuple[str, str], Row]:
     return {(r.case, r.candidate): r for r in found}
 
 
-def spent(found: list[Row]) -> float:
-    """What the calls cost, each unknown charge at its reservation."""
-    return sum(r.reserved if r.cost is None else r.cost for r in found)
+def spent(found: list[Row], reserved: Mapping[str, float] | None = None) -> float:
+    """What the calls cost, each unknown charge at its reservation, and each reservation in
+    `reserved` that no call ended at its full amount."""
+    ended = {r.attempt for r in found}
+    unended = sum(v for k, v in (reserved or {}).items() if k not in ended)
+    return sum(r.reserved if r.cost is None else r.cost for r in found) + unended
 
 
-def _tokens(request: Request, per_token: float) -> float:
-    return (len(request.system) + len(request.user)) / per_token
+def _chars(request: Request) -> int:
+    schema = json.dumps(request.output.model_json_schema())
+    return len(request.system) + len(request.user) + len(schema)
 
 
 def estimate(ladder: Ladder, candidate: Candidate, request: Request) -> float:
     """What a call is expected to cost."""
     price_in, price_out = candidate.price
-    tokens = _tokens(request, CHARS_PER_TOKEN)
+    tokens = _chars(request) / CHARS_PER_TOKEN
     return (tokens * price_in + ladder.output_tokens * price_out) / 1e6
 
 
+def cap(ladder: Ladder, candidate: Candidate, request: Request) -> int:
+    """The output tokens a call's reservation holds: the cap the call is sent with (the
+    request's or the role's, else Anthropic's default), or, for an OpenRouter call sent without
+    one as the pipeline sends it, the ladder's `reserve_output_tokens`."""
+    if limit := request.max_output_tokens or candidate.role.max_output_tokens:
+        return limit
+    if candidate.role.provider == "anthropic":
+        return DEFAULT_MAX_TOKENS
+    return ladder.reserve_output_tokens
+
+
 def reservation(ladder: Ladder, candidate: Candidate, request: Request) -> float:
-    """A call's upper bound, as far as its output stays within `reserve_output_tokens`."""
-    price_in, price_out = candidate.price
-    tokens = _tokens(request, RESERVE_CHARS_PER_TOKEN)
-    return (tokens * price_in + ladder.reserve_output_tokens * price_out) / 1e6
+    """A call's upper bound: its input (prompts and schema) at half a token per character and
+    its `cap`, at the candidate's dearest prices. An OpenRouter call has no cap of its own, so
+    its bound holds while its output stays within the ladder's; one that costs more stops the
+    run."""
+    price_in, price_out = candidate.price_max
+    tokens = _chars(request) / RESERVE_CHARS_PER_TOKEN
+    return (tokens * price_in + cap(ladder, candidate, request) * price_out) / 1e6
 
 
 @dataclass
 class Budget:
-    """The ceiling, what has been spent and what calls in flight have reserved."""
+    """The ceiling, what has been spent and what calls in flight have reserved; once a call
+    may not start, none may, and `stopped` says why."""
 
     ceiling: float
     spent: float
     reserved: float = 0.0
-    stopped: bool = False
+    stopped: str | None = None
 
     def reserve(self, amount: float) -> bool:
-        """Whether a call of upper bound `amount` may start; once one may not, none may."""
-        if self.stopped or self.spent + self.reserved + amount > self.ceiling:
-            self.stopped = True
+        """Whether a call of upper bound `amount` may start."""
+        if self.stopped is None and self.spent + self.reserved + amount > self.ceiling:
+            self.stopped = "the ceiling"
+        if self.stopped is not None:
             return False
         self.reserved += amount
         return True
@@ -316,6 +367,8 @@ class Budget:
     def settle(self, amount: float, cost: float | None) -> None:
         self.reserved -= amount
         self.spent += amount if cost is None else cost
+        if cost is not None and cost > amount and self.stopped is None:
+            self.stopped = "a call cost more than its reservation"
 
 
 @dataclass(frozen=True)
@@ -324,6 +377,12 @@ class Todo:
     ladder: Ladder
     candidate: Candidate
     request: Request
+
+
+def _settled(r: Row | None, candidate: Candidate, request: Request) -> bool:
+    """Whether a call needs no asking again: it asked this request of this configuration and
+    did not fail for want of the provider."""
+    return r is not None and r.request == asked(candidate, request) and r.outcome not in RETRIED
 
 
 def todo(
@@ -346,25 +405,25 @@ def todo(
         for candidate in ladder.candidates:
             if only and candidate.name not in only:
                 continue
-            r = last.get((c.key, candidate.name))
-            if r and r.request == asked(candidate, request) and r.outcome not in RETRIED:
-                continue
-            found.append(Todo(c, ladder, candidate, request))
+            if not _settled(last.get((c.key, candidate.name)), candidate, request):
+                found.append(Todo(c, ladder, candidate, request))
     return found
 
 
 def gateway(role: str, candidate: Candidate, providers: Mapping[str, Provider]) -> Gateway:
-    """A gateway that serves `role` with the candidate alone, and validation's detail kept."""
+    """A gateway that serves `role` with the candidate alone, once a call (each attempt is a
+    call here, reserved and recorded), and validation's detail kept."""
     models = Models().model_copy(update={role: candidate.role})
-    return Gateway(models, dict(providers), debug=True)
+    return Gateway(models, dict(providers), retry_delays=(), debug=True)
 
 
 @dataclass
 class Ran:
-    """A run's calls, and where it stopped when the ceiling stopped it."""
+    """A run's calls, and where it stopped when the budget stopped it."""
 
     rows: list[Row] = field(default_factory=list)
     stopped_at: Todo | None = None
+    why: str | None = None
 
 
 async def run(
@@ -376,13 +435,40 @@ async def run(
     concurrency: int = 8,
     progress: Callable[[Row], None] | None = None,
 ) -> Ran:
-    """Make the calls in `work`, in order, appending each to `out/<role>.jsonl` as it ends,
-    while the ceiling allows (see the module's docstring). Refuses, before any call, work on a
-    provider without credentials: a call never sent would count against the ceiling."""
+    """Make the calls in `work` not already made, in order, appending each to
+    `out/<role>.jsonl` as it ends, while the budget allows (see the module's docstring).
+    Refuses, before any call, a ceiling or concurrency that can't bound a run, work on a
+    provider without credentials (a call never sent would count against the ceiling), and a
+    directory another run holds."""
+    if not (math.isfinite(ceiling) and ceiling > 0) or concurrency < 1:
+        raise ValueError("the ceiling is a positive amount, and the concurrency at least 1")
     if missing := {t.candidate.role.provider for t in work} - set(providers):
         raise ValueError(f"no credentials for {', '.join(sorted(missing))}")
     out.mkdir(parents=True, exist_ok=True)
-    budget = Budget(ceiling, spent(rows(out)))
+    with (out / LOCK).open("w") as held:
+        try:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError(f"another run is using {out}") from None
+        return await _run(work, providers, out, ceiling, concurrency, progress)
+
+
+async def _run(
+    work: list[Todo],
+    providers: Mapping[str, Provider],
+    out: Path,
+    ceiling: float,
+    concurrency: int,
+    progress: Callable[[Row], None] | None,
+) -> Ran:
+    done = rows(out)
+    last = latest(done)
+    work = [
+        t
+        for t in work
+        if not _settled(last.get((t.case.key, t.candidate.name)), t.candidate, t.request)
+    ]
+    budget = Budget(ceiling, spent(done, reservations(out)))
     gate = asyncio.Semaphore(concurrency)
     ran = Ran()
 
@@ -393,9 +479,13 @@ async def run(
                 if ran.stopped_at is None or work.index(t) < work.index(ran.stopped_at):
                     ran.stopped_at = t
                 return
+            attempt = uuid.uuid4().hex
+            held = {"attempt": attempt, "case": t.case.key, "candidate": t.candidate.name}
+            with (out / PENDING).open("a", encoding="utf-8") as f:
+                f.write(json.dumps(held | {"reserved": hold}) + "\n")
             started = time.monotonic()
             row = await _ask(t, providers)
-            row.reserved = hold
+            row.reserved, row.attempt = hold, attempt
             row.seconds = round(time.monotonic() - started, 2)
             budget.settle(hold, row.cost)
             with (out / f"{t.case.role}.jsonl").open("a", encoding="utf-8") as f:
@@ -405,12 +495,15 @@ async def run(
                 progress(row)
 
     await asyncio.gather(*(one(t) for t in work))
-    if (t := ran.stopped_at) is not None:
+    ran.why = budget.stopped
+    if ran.why is not None:
+        t = ran.stopped_at
         stop = {
             "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "why": ran.why,
             "ceiling": ceiling,
             "spent": round(budget.spent, 4),
-            "first_not_run": {"case": t.case.key, "candidate": t.candidate.name},
+            "first_not_run": t and {"case": t.case.key, "candidate": t.candidate.name},
             "not_run": len(work) - len(ran.rows),
         }
         with (out / BUDGET).open("a", encoding="utf-8") as f:
@@ -451,6 +544,21 @@ def _usage(usage: Any) -> dict[str, Any]:
         "output_tokens": usage.completion_tokens,
         "reasoning_tokens": usage.reasoning_tokens,
     }
+
+
+def current(
+    found: list[Row], ladders_: dict[str, Ladder], built: Mapping[str, Request | str]
+) -> list[Row]:
+    """The calls to each case's request as built now, by its candidate as configured now: a
+    call to another request (a paper revised since) or configuration (a candidate changed under
+    its name) is left out."""
+    named = {(role, c.name): c for role, ladder in ladders_.items() for c in ladder.candidates}
+    kept = []
+    for r in found:
+        candidate, request = named.get((r.role, r.candidate)), built.get(r.case)
+        if candidate and isinstance(request, Request) and r.request == asked(candidate, request):
+            kept.append(r)
+    return kept
 
 
 # -- the report ------------------------------------------------------------------------------------
@@ -500,19 +608,26 @@ def _table(head: list[str], body: list[list[object]]) -> list[str]:
     return lines + ["| " + " | ".join(str(c) for c in row) + " |" for row in body]
 
 
-def tables(ladders_: dict[str, Ladder], chosen: list[Case], found: list[Row]) -> str:
+def tables(
+    ladders_: dict[str, Ladder],
+    chosen: list[Case],
+    found: list[Row],
+    built: Mapping[str, Request | str],
+) -> str:
     """Per role and set, each candidate's outcomes, its agreement with the owner's Fit (over
     the labelled cases it answered) and with the role's own model (over the cases both
-    answered), and its cost, as markdown, from the recorded calls alone. Outcomes are each
-    case's latest call; costs are every call's."""
-    last = latest(found)
+    answered), and its cost, as markdown, from the `current` calls alone. Outcomes are each
+    case's latest call; costs are every call's, and a cost an answer is all of them over the
+    answers. The last line totals every recorded call, current or not."""
+    now = current(found, ladders_, built)
+    last = latest(now)
     lines: list[str] = []
     for role, ladder in ladders_.items():
         for which in SETS:
             mine = [c for c in chosen if c.role == role and c.set == which]
             if mine:
                 lines += ["", f"### `{role}`, {which} set", ""]
-                lines += _role_table(ladder, mine, last, found)
+                lines += _role_table(ladder, mine, last, now)
     lines += ["", f"Every recorded call: {len(found)}, {_dollars(found)}."]
     return "\n".join(lines).lstrip("\n") + "\n"
 
@@ -548,9 +663,11 @@ def _role_table(
                 if (ref := last.get((k, own))) and ref.output is not None and r.output is not None
             ]
             row.append("–" if cand.name == own else _share(sum(agreed), len(agreed)))
-        row.append(_dollars([r for r in found if r.candidate == cand.name and r.case in keys]))
-        known = [r.cost for r in answered.values() if r.cost is not None]
-        row.append(f"${sum(known) / len(known):.4f}" if known else "–")
+        calls = [r for r in found if r.candidate == cand.name and r.case in keys]
+        row.append(_dollars(calls))
+        known = sum(r.cost for r in calls if r.cost is not None)
+        unknown = "≥ " if any(r.cost is None for r in calls) else ""
+        row.append(f"{unknown}${known / len(answered):.4f}" if answered else "–")
         body.append(row)
     return _table(head, body)
 
@@ -577,12 +694,13 @@ def answers(
     ladders_: dict[str, Ladder],
     chosen: list[Case],
     found: list[Row],
+    built: Mapping[str, Request | str],
     titles: dict[str, str] | None = None,
 ) -> str:
     """Every case of the refusals set whose paper drew a refused, invalid or truncated answer
     in any role (a provider error or a timeout says nothing about the paper), each candidate's
-    latest answer to it, as markdown, from the recorded calls alone."""
-    last = latest(found)
+    latest answer to it, as markdown, from the `current` calls alone."""
+    last = latest(current(found, ladders_, built))
     mine = [c for c in chosen if c.set == "refusals" and c.role in ladders_]
     failed = {
         c.paper

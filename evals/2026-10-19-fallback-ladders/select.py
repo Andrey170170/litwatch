@@ -104,9 +104,13 @@ def drawn(conn: psycopg.Connection, query: str) -> list[dict]:
 def production(conn: psycopg.Connection) -> list[dict]:
     fields = drawn(
         conn,
-        """SELECT v.paper_id, v.topic FROM verdicts v JOIN topics t ON t.class = v.topic
+        # One row a pair, however many verdicts it has at the revision (the sandbox had none
+        # with two, so the draw is the one cases.csv holds).
+        """SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic FROM verdicts v
+           JOIN topics t ON t.class = v.topic
            JOIN papers p ON p.id = v.paper_id AND p.revision = v.paper_revision
-           WHERE t.depth = 'field' AND v.opinions ? 'field_grade' ORDER BY v.paper_id, v.topic""",
+           WHERE t.depth = 'field' AND v.opinions ? 'field_grade'
+           ORDER BY v.paper_id, v.topic, v.id DESC""",
     )
     analysed = drawn(
         conn,
