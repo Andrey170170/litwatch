@@ -20,7 +20,7 @@ replay first.
 
 | Texts | Papers | Model | Before | After |
 | --- | --- | --- | --- | --- |
-| Briefs and their Gists ([papers.yaml](2026-10-19-clear-prose/papers.yaml)) | 12: the seven read on 2026-10-19, five more by md5 | Sonnet 5.5, high | production's Briefs, same model and text | `litwatch eval briefs`, `--text pass` |
+| Briefs and their Gists ([papers.yaml](2026-10-19-clear-prose/papers.yaml)) | 12: the seven read on 2026-10-19, five more by md5 | Sonnet 5.5, high | production's Briefs, same model and text | `litwatch eval briefs --preferences evals/2026-10-19-clear-prose/papers.yaml --out evals/2026-10-19-clear-prose/round1.jsonl` (`round2.jsonl` for round 2), text as passes send it |
 | Gists from the abstract | 12: the three opaque ones read, nine more by md5 | Haiku 5.5 | production's | [replay.py](2026-10-19-clear-prose/replay.py) |
 | Digests | circuits day 16 Oct, interpretability day 15 Oct, cot-faithfulness and alignment-and-safety weeks of 12 Oct | Opus 5.5, medium | production's | [replay.py](2026-10-19-clear-prose/replay.py), `digests.compose` |
 
