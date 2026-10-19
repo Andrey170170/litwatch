@@ -112,10 +112,9 @@ MIT licence, `v1.0.0`; `evals/` and homelab specifics leave the repository; the 
 
 **The Notion export** (decisions 68–76, after the switch; [integrations.md](integrations.md)): the built-in `notion`
 integration and its database for the PI, on the owner's instance on the existing LitWatch page, then 0.14's Notion
-databases trashed. *Check:* the PI's database holds every paper the configuration exports (on the owner's instance, every Focus paper
-at relevant or above) that the web app shows,
-with grades per topic matching; a paper taken off a topic shows No longer listed with its Why; the owner's
-rearranged views survive a sync.
+databases trashed. *Check:* the PI's database holds every paper the configuration exports (on the owner's instance,
+every Focus paper at relevant or above) that the web app shows, with grades per topic matching; a paper taken off a
+topic shows No longer listed with its Why; the owner's rearranged views survive a sync.
 
 After v1: backfill of the archive's older papers (the owner's plan: a local decision-style model over several nights,
 for example DiffusionGemma with constrained decoding, then leftover monthly credit on the stronger graders for what it
