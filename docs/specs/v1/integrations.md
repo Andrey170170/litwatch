@@ -104,7 +104,8 @@ owner's word (the owner named as the configuration says), litwatch re-checking t
 definition; and it was judged off-topic or less important (its Fit fell, or only its Weight). The cause comes from
 the event: `grade.changed` gains a `cause` field (`verdict`, `weight`, `owner`, `taxonomy`), written by whatever
 changed the grade, while the integration still checks the present grade before writing. Pages are never deleted.
-A paper listed again for a topic loses that topic's line. The integration keeps each topic's line in its own
+A paper listed again for a topic loses that topic's line. A paper the owner dismisses is No longer listed for every
+topic it was listed for, with a line saying the owner set it aside; a dismissed paper with no page gets none. The integration keeps each topic's line in its own
 table, so a rewrite for another event or after a restart keeps it, and a `grade.changed` touches only its topic's line.
 
 **Who owns what.** The integration creates the database, its columns and its views once, when it is set up, under a
@@ -114,7 +115,9 @@ exported topics with the database: a topic newly exported gets its grade column 
 papers are filled in; a topic no longer exported keeps its column, view and rows, which are no longer written; a
 changed name renames that topic's option and column. A raised minimum grade turns the papers below it No longer listed, with a Why
 that says so; a lowered one lists them again. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
-are not part of its body and survive rewrites. Nothing flows back from Notion into litwatch.
+are not part of its body and survive rewrites. A paper's page moved to Notion's trash or deleted was removed on purpose:
+it is never written or made again. "How to read this" is litwatch's and is made again; a database in the trash stops
+the integration, shown under Settings. Nothing flows back from Notion into litwatch.
 
 **First fill and after.** When it is set up the integration fills the database with every paper that qualifies at
 that moment, the papers v1 already holds included; from then on it follows the events above from its cursor. It

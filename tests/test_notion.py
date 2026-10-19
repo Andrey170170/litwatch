@@ -532,3 +532,100 @@ async def test_a_renamed_topic_renames_its_column_and_option_but_not_its_view(wo
     assert fake.value(fake.row(A.id), "Topic") == ["Faithfulness"]
     assert fake.value(fake.row(A.id), "Faithfulness") == "Must read"
     assert fake.view_named("CoT faithfulness")  # the owner's title
+
+
+# -- taken away: a dismissed paper, a page trashed in Notion ---------------------------------------
+
+
+async def test_a_dismissed_paper_is_no_longer_listed_in_the_owners_words(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    await grade(conn, A, MON.slug, "relevant")
+    await grade(conn, C, FAITH.slug, "must_read")
+    await papers_store.dismiss(conn, C.id)  # dismissed before it had a page
+    n = notion(fake)
+    assert await start(conn, n)
+    assert [fake.value(r, "arXiv id") for r in fake.rows()] == [A.id]
+    await say(conn, A, MON.slug, LabelValue.NONE)  # MON drops it first, for its own reason
+    await deliver(conn, n)
+    off = f"{MONITORING}, {await last_day(conn)}: Andrei marked it off-topic."
+
+    await papers_store.dismiss(conn, A.id)
+    assert await start(conn, notion(fake))
+    d = (await papers_store.dismissed_at(conn, A.id)).astimezone(UTC)
+    row = fake.row(A.id)
+    assert fake.value(row, "Grade") == "No longer listed"
+    assert fake.value(row, FAITHFUL) == "No longer listed"
+    aside = f"{FAITHFUL}, {d.day} {d:%b %Y}: Andrei set it aside."
+    assert fake.value(row, "Why") == f"{aside}\n{off}"
+    assert [fake.value(r, "arXiv id") for r in fake.rows()] == [A.id]  # still none for C
+
+    # Undone (no path does it yet), the paper is listed again and its line goes.
+    await conn.execute("UPDATE papers SET dismissed_at = NULL WHERE id = %s", (A.id,))
+    assert await start(conn, notion(fake))
+    assert fake.value(row, FAITHFUL) == "Must read" and fake.value(row, "Why") == off
+
+
+async def test_a_page_taken_away_in_notion_is_left_alone_and_never_made_again(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    await grade(conn, B, FAITH.slug, "must_read")
+    n = notion(fake)
+    assert await start(conn, n)
+    a, b = fake.row(A.id), fake.row(B.id)
+    fake.trash(a["id"])
+    fake.delete(b["id"])
+
+    await say(conn, A, FAITH.slug, LabelValue.RELATED)
+    await say(conn, B, FAITH.slug, LabelValue.RELATED)
+    await deliver(conn, n)
+    assert (await outbox.cursor(conn, n.name)).failing is None  # the events did not fail
+    assert (await state.page(conn, n.name, A.id)).gone_at is not None  # trashed
+    assert (await state.page(conn, n.name, B.id)).gone_at is not None  # deleted
+    assert fake.value(a, "Grade") == "Must read"  # as it was taken away
+
+    # From then on nothing goes to them, events and restarts alike, and none is made again.
+    asked = len(fake.requests)
+    await say(conn, A, FAITH.slug, LabelValue.NONE)
+    await deliver(conn, n)
+    assert await start(conn, notion(fake))
+    assert not [r for r in fake.requests[asked:] if a["id"] in r[1] or b["id"] in r[1]]
+    made = [r for r in fake.kept("POST", "/pages") if "data_source_id" in r[2]["parent"]]
+    assert len(made) == 2  # A's and B's first pages only
+
+
+async def test_a_guide_taken_away_is_made_again_on_the_next_start(world):
+    conn, fake = world, FakeNotion(PARENT)
+    assert await start(conn, notion(fake))
+    first = (await state.database(conn, "notion")).guide_page
+    fake.trash(first)
+
+    assert await start(conn, notion(fake))
+    again = (await state.database(conn, "notion")).guide_page
+    assert again != first
+    assert fake.objects[again]["parent"] == PARENT
+    assert any(b["type"] == "heading_2" for b in fake.body(again))
+
+
+async def test_a_trashed_database_fails_the_event_and_the_setup_and_takes_no_page_for_gone(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    n = notion(fake)
+    assert await start(conn, n)
+    db = await state.database(conn, n.name)
+    fake.trash(PARENT)  # the page holding it: its rows and data source read as trashed too
+
+    await say(conn, A, FAITH.slug, LabelValue.RELATED)
+    await deliver(conn, n)
+    cursor = await outbox.cursor(conn, n.name)
+    assert cursor.failing is not None and "trash" in cursor.last_error
+    assert (await state.page(conn, n.name, A.id)).gone_at is None
+
+    # Restored, the event goes through; then a trashed database fails setup, with nothing to write.
+    del fake.objects[PARENT]["in_trash"]
+    await outbox.retry(conn, n.name)
+    await deliver(conn, n)
+    assert (await outbox.cursor(conn, n.name)).failing is None
+    fake.trash(db.database_id)
+    assert not await start(conn, notion(fake))
+    assert "trash" in (await outbox.cursor(conn, n.name)).setup_error

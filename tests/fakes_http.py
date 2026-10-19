@@ -289,7 +289,10 @@ class FakeNotion:
     `limited` answers that many next requests 429 with a Retry-After of 7 seconds. `lose_answers`
     makes the next row creations happen and then answer 502. `hidden` keeps that many next
     queries from finding the newest page, as a lagging index would. `down` answers 500 to all.
-    `requests` holds every request as (method, path, body)."""
+    `requests` holds every request as (method, path, body). `trash` and `delete` take an object
+    away as a person in Notion would; what it holds reads as trashed too, and answers as Notion
+    does (probed 2026-10-19): a trashed page reads `in_trash`, refuses edits with a 400 and its
+    blocks with a 404; a trashed data source reads `in_trash` and refuses changes and queries."""
 
     def __init__(self, *pages: str) -> None:
         self.objects: dict[str, dict[str, Any]] = {
@@ -349,6 +352,22 @@ class FakeNotion:
     def body(self, block_id: str) -> list[dict[str, Any]]:
         return [self.objects[b] for b in self.objects[block_id]["children"]]
 
+    def trash(self, key: str) -> None:
+        self.objects[key]["in_trash"] = True
+
+    def delete(self, key: str) -> None:
+        del self.objects[key]
+
+    def in_trash(self, key: str) -> bool:
+        """Whether the object or anything holding it (data source, database, page) is trashed."""
+        obj: dict[str, Any] | None = self.objects[key]
+        while obj is not None:
+            if obj.get("in_trash"):
+                return True
+            up = obj.get("source") or obj.get("database") or obj.get("parent")
+            obj = self.objects.get(up) if up else None
+        return False
+
     def view_named(self, name: str) -> dict[str, Any]:
         (found,) = [v for v in self.views.values() if v["name"] == name]
         return found
@@ -368,8 +387,16 @@ class FakeNotion:
             return httpx.Response(500, json={"code": "internal_server_error"})
         parts = path.strip("/").split("/")
         route = (req.method, parts[0], parts[2] if len(parts) > 2 else None)
+        target = parts[1] if len(parts) > 1 and parts[0] != "views" else None
+        if target is not None and target not in self.objects:
+            return httpx.Response(404, json={"code": "object_not_found"})
+        trashed = target is not None and self.in_trash(target)
+        if trashed and (req.method != "GET" or parts[0] == "blocks"):
+            if parts[0] == "blocks" and req.method == "GET" or parts[0] == "data_sources":
+                return httpx.Response(404, json={"code": "object_not_found"})
+            return httpx.Response(400, json={"code": "validation_error", "message": "archived"})
         if route == ("GET", "blocks", "children"):
-            return self._list(self.body(parts[1]))
+            return self._list([b for b in self.body(parts[1]) if not b.get("in_trash")])
         if route == ("PATCH", "blocks", "children"):
             for child in body["children"]:
                 self._block(parts[1], child)
@@ -387,7 +414,9 @@ class FakeNotion:
                 return self._query(parts[1], body)
             if req.method == "PATCH":
                 self._properties(parts[1], body["properties"])
-            return httpx.Response(200, json=self.objects[parts[1]])
+            return httpx.Response(200, json=self.objects[parts[1]] | {"in_trash": trashed})
+        if route == ("GET", "pages", None):
+            return httpx.Response(200, json={"object": "page", "id": target, "in_trash": trashed})
         if route == ("POST", "pages", None):
             return self._page(body)
         if route == ("PATCH", "pages", None):

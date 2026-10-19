@@ -286,6 +286,14 @@ async def dismiss(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     return cur.rowcount == 1
 
 
+async def dismissed_at(conn: psycopg.AsyncConnection, paper_id: str) -> datetime | None:
+    """When the owner dismissed the paper; None while it is not dismissed."""
+    row = await (
+        await conn.execute("SELECT dismissed_at FROM papers WHERE id = %s", (paper_id,))
+    ).fetchone()
+    return row["dismissed_at"] if row else None
+
+
 async def correct(
     conn: psycopg.AsyncConnection, paper_id: str, title: str | None, abstract: str | None
 ) -> bool:

@@ -18,7 +18,9 @@ CREATE TABLE notion_databases (
 -- notion: one Notion page per paper. `page_id` is null while a creation is under way: its reply
 -- may be lost, so the page is looked for before another is made. The hashes are of what was last
 -- written (null: write it again). `topics` holds, per topic the page is or was listed for, what
--- was last written: {grade (the effective grade), shown (the grade word), why, since}.
+-- was last written: {grade (the effective grade), shown (the grade word), why, since}. `gone_at`
+-- is when the page was found in Notion's trash or deleted: someone took it away, so it is never
+-- written or made again.
 CREATE TABLE notion_pages (
     integration     text NOT NULL REFERENCES notion_databases(integration) ON DELETE CASCADE,
     paper_id        text NOT NULL REFERENCES papers(id),
@@ -27,6 +29,7 @@ CREATE TABLE notion_pages (
     body_hash       text,
     topics          jsonb NOT NULL DEFAULT '{}',
     added           date NOT NULL,             -- the day the paper entered the list: "Added"
+    gone_at         timestamptz,
     updated_at      timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (integration, paper_id)
 );

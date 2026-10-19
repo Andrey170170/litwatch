@@ -4,7 +4,7 @@ wrote to each paper's page. Every row is keyed by the integration's name."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 import psycopg
@@ -29,7 +29,8 @@ class Database:
 @dataclass
 class Page:
     """What was last written to a paper's page. `page_id` is None while its creation is under
-    way; `topics` maps each topic it is or was listed for to `{grade, shown, why, since}`."""
+    way; `topics` maps each topic it is or was listed for to `{grade, shown, why, since}`.
+    `gone_at` is set once the page was found trashed or deleted in Notion."""
 
     paper_id: str
     added: date
@@ -37,13 +38,14 @@ class Page:
     properties_hash: str | None = None
     body_hash: str | None = None
     topics: dict[str, dict[str, Any]] = field(default_factory=dict)
+    gone_at: datetime | None = None
 
 
 _DATABASE = (
     "integration, parent_page, database_id, data_source_id, guide_page, guide_hash, all_view, "
     "topics"
 )
-_PAGE = "paper_id, added, page_id, properties_hash, body_hash, topics"
+_PAGE = "paper_id, added, page_id, properties_hash, body_hash, topics, gone_at"
 
 
 async def database(conn: psycopg.AsyncConnection, integration: str) -> Database | None:
@@ -88,13 +90,14 @@ async def page(conn: psycopg.AsyncConnection, integration: str, paper_id: str) -
 async def save_page(conn: psycopg.AsyncConnection, integration: str, p: Page) -> None:
     await conn.execute(
         f"""
-        INSERT INTO notion_pages (integration, {_PAGE}) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO notion_pages (integration, {_PAGE}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (integration, paper_id) DO UPDATE SET
             page_id = EXCLUDED.page_id, properties_hash = EXCLUDED.properties_hash,
-            body_hash = EXCLUDED.body_hash, topics = EXCLUDED.topics, updated_at = now()
+            body_hash = EXCLUDED.body_hash, topics = EXCLUDED.topics, gone_at = EXCLUDED.gone_at,
+            updated_at = now()
         """,
         (integration, p.paper_id, p.added, p.page_id, p.properties_hash, p.body_hash,
-         Jsonb(p.topics)),
+         Jsonb(p.topics), p.gone_at),
     )  # fmt: skip
 
 

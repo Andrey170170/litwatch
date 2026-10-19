@@ -6,7 +6,9 @@ The words are the export's own (GLOSSARY.md, The Notion export): Must read and W
 the grades, No longer listed for a paper that fell below them, TL;DR, Summary and Deep read for
 the Gist, the Brief (or the abstract) and the Deep card. A page is never deleted: a paper that
 falls below the minimum for a topic says No longer listed there, with a dated Why line saying
-who took it off and why, from the `grade.changed` that did.
+who took it off and why, from the `grade.changed` that did; a dismissed paper says it for every
+topic, the owner having set it aside. A paper's page someone moves to Notion's trash or deletes
+is left alone and never made again; "How to read this" is litwatch's and is made again.
 
 `setup` reconciles on every start, idempotently: it makes what is missing under `parent_page`
 (the database, its columns, "How to read this", the All papers view, a grade column and a view
@@ -78,6 +80,7 @@ EVENTS = {
 
 SHOWN = {Grade.MUST_READ: "Must read", Grade.RELEVANT: "Worth a look"}
 DROPPED = "No longer listed"
+TRASHED = "the database is in Notion's trash, or the page holding it is; restore it to go on"
 RANK = [SHOWN[Grade.MUST_READ], SHOWN[Grade.RELEVANT], DROPPED]  # best first
 GRADE_OPTIONS = [
     {"name": SHOWN[Grade.MUST_READ], "color": "orange"},
@@ -120,7 +123,9 @@ SECTIONS = [
 
 
 class NotionError(Exception):
-    pass
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status  # Notion's HTTP status, when it answered
 
 
 class NotionClient:
@@ -157,7 +162,9 @@ class NotionClient:
                 break
             await self.sleep(min(float(resp.headers.get("Retry-After") or 1), LONGEST_WAIT))
         if not resp.is_success:
-            raise NotionError(f"{method} {path}: {resp.status_code} {resp.text[:300]}")
+            raise NotionError(
+                f"{method} {path}: {resp.status_code} {resp.text[:300]}", resp.status_code
+            )
         return resp.json()
 
     async def every(self, path: str, **params: Any) -> list[dict[str, Any]]:
@@ -299,7 +306,10 @@ class Notion:
         column, and give Topic an option per topic exported so far. Returns the columns'
         property ids by name. Once a column was put back, every row is written again."""
         path = f"/data_sources/{db.data_source_id}"
-        props = (await self.notion.request("GET", path))["properties"]
+        source = await self.notion.request("GET", path)
+        if source.get("in_trash"):
+            raise NotionError(TRASHED)
+        props = source["properties"]
         by_id = {unquote(p["id"]): p for p in props.values()}
         missing = [c for c in COLUMNS if c not in props and c not in (TITLE, READERS)]
         change: dict[str, Any] = {c: COLUMNS[c] for c in missing}
@@ -342,7 +352,11 @@ class Notion:
         return {name: unquote(p["id"]) for name, p in props.items()}
 
     async def _guide(self, conn: psycopg.AsyncConnection, db: state.Database) -> None:
-        """ "How to read this", beside the database, rewritten when what it says changed."""
+        """ "How to read this", beside the database, rewritten when what it says changed, and
+        made again when it was taken away: it is litwatch's."""
+        if db.guide_page and await self._trashed(db.guide_page):
+            log.info("%s: %r was taken away in Notion; making it again", self.name, GUIDE_TITLE)
+            db.guide_page = None
         if not db.guide_page:
             if not (found := await self._child("child_page", GUIDE_TITLE)):
                 made = await self.notion.request(
@@ -436,19 +450,21 @@ class Notion:
         self, conn: psycopg.AsyncConnection, paper_id: str, event: Event | None
     ) -> None:
         """Bring the paper's page in line with what litwatch holds now, writing nothing that did
-        not change. `event` is the one being handled: it may say why a topic delisted it."""
-        if await fulltext_store.dismissed(conn, paper_id):
+        not change. `event` is the one being handled: it may say why a topic delisted it. A
+        page someone took away in Notion is left alone from then on."""
+        page = await state.page(conn, self.name, paper_id)
+        if page is not None and page.gone_at is not None:
             return
         paper = await papers_store.get(conn, paper_id)
         if paper is None:
             return
+        dismissed = await papers_store.dismissed_at(conn, paper_id)
         effective = await word_store.effective_for(conn, paper_id)
-        page = await state.page(conn, self.name, paper_id)
         begun = page is not None and page.page_id is None
         topics = dict(page.topics) if page else {}
         for slug in self.exported:
             grade = effective[slug].grade.value if slug in effective else None
-            if (now := self._topic(slug, topics.get(slug), grade, event)) is None:
+            if (now := self._topic(slug, topics.get(slug), grade, event, dismissed)) is None:
                 topics.pop(slug, None)
             else:
                 topics[slug] = now
@@ -465,12 +481,21 @@ class Notion:
         written = (page.page_id, page.properties_hash, page.body_hash, page.topics)
         if page.page_id is None:
             await self._create(conn, page, properties, body, begun)
-        if page.properties_hash != (digest := _hash(properties)):
-            await self.notion.request("PATCH", f"/pages/{page.page_id}", {"properties": properties})
-            page.properties_hash = digest
-        if page.body_hash != (digest := _hash(body)):
-            await self._replace_body(page.page_id, body)
-            page.body_hash = digest
+        try:
+            if page.properties_hash != (digest := _hash(properties)):
+                path = f"/pages/{page.page_id}"
+                await self.notion.request("PATCH", path, {"properties": properties})
+                page.properties_hash = digest
+            if page.body_hash != (digest := _hash(body)):
+                await self._replace_body(page.page_id, body)
+                page.body_hash = digest
+        except NotionError:
+            if not await self._gone(page.page_id):
+                raise
+            log.info("%s: the page of %s was taken away in Notion; left alone", self.name, paper_id)
+            page.gone_at = self.now()
+            await state.save_page(conn, self.name, page)
+            return
         page.topics = topics
         if (page.page_id, page.properties_hash, page.body_hash, page.topics) != written:
             await state.save_page(conn, self.name, page)
@@ -522,18 +547,45 @@ class Notion:
                 "PATCH", f"/blocks/{block}/children", {"children": body[start : start + BLOCKS]}
             )
 
+    async def _trashed(self, page_id: str) -> bool:
+        """Whether the page is in Notion's trash, itself or with what holds it, or deleted."""
+        try:
+            found = await self.notion.request("GET", f"/pages/{page_id}")
+        except NotionError as exc:
+            if exc.status == 404:
+                return True
+            raise
+        return bool(found.get("in_trash") or found.get("is_archived"))
+
+    async def _gone(self, page_id: str) -> bool:
+        """Whether someone took the paper's page away in Notion. Raises when the whole database
+        went (trashed, deleted, or no longer shared), so no page is taken for gone with it."""
+        if not await self._trashed(page_id):
+            return False
+        source = await self.notion.request("GET", f"/data_sources/{self._db.data_source_id}")
+        if source.get("in_trash"):
+            raise NotionError(TRASHED)
+        return True
+
     def _topic(
-        self, slug: str, before: dict[str, Any] | None, grade: str | None, event: Event | None
+        self,
+        slug: str,
+        before: dict[str, Any] | None,
+        grade: str | None,
+        event: Event | None,
+        dismissed: datetime | None,
     ) -> dict[str, Any] | None:
-        """What the page says for one topic, from its effective grade now and what was written
-        before; None while the paper was never listed for it."""
-        if grade is not None and Grade(grade).at_least(self.minimum):
+        """What the page says for one topic, from its effective grade now, whether the owner
+        dismissed the paper, and what was written before; None while it was never listed."""
+        if dismissed is None and grade is not None and Grade(grade).at_least(self.minimum):
             return {"grade": grade, "shown": SHOWN[Grade(grade)], "why": None, "since": None}
         if before is None:
             return None
         if before["shown"] == DROPPED:
             return {**before, "grade": grade}  # keeps its Why
-        if grade == before["grade"]:  # listed at this grade, and no longer: the minimum rose
+        if dismissed is not None:
+            why, since = f"{self.owner_name} set it aside.", dismissed
+        elif grade == before["grade"]:  # listed at this grade, and no longer: the minimum rose
             why, since = f"the list now shows only {SHOWN[self.minimum]} papers.", self.now()
         elif _delists(event, slug, self.minimum):
             why, since = self._why(event.payload), event.created_at

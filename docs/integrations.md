@@ -269,9 +269,17 @@ topic, and a hidden arXiv id used to find the row. Status is the reader's and ne
 body is a callout pointing to "How to read this", the TL;DR, the Summary (the Brief, or the
 abstract) and, with a Deep card, a collapsed Deep read with one callout per section. A paper that
 falls below the minimum for a topic says No longer listed there, with a dated Why line from the
-`grade.changed` that took it off (a missing `cause` reads as `verdict`). A page is written only when
-its properties or body changed; requests are paced to about three a second, and a 429 is waited
-out.
+`grade.changed` that took it off (a missing `cause` reads as `verdict`). A dismissed paper that has
+a page is No longer listed for every topic, "set it aside" by the owner, from the next write of it
+(dismissal emits no event, so in practice the next start); one with no page gets none. A page is
+written only when its properties or body changed; requests are paced to about three a second, and a
+429 is waited out.
+
+**Taken away in Notion.** A paper's page that Notion says is in its trash or deleted was removed on
+purpose: it is recorded as gone (`notion_pages.gone_at`), never written or made again, and the
+event goes on. "How to read this" is checked on every start and made again when gone. When the
+database itself is in the trash, or the page holding it is (its rows then read as trashed too),
+the event fails and setup fails, shown under Settings, and no page is taken for gone.
 
 ### The webhook's request
 
