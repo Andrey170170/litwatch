@@ -285,7 +285,8 @@ four groups: Not run (yellow; Run now, With tonight's run, Discard), Running and
 (red; Try again) and Done. A job that is also a Needs you item settles with it.
 
 **Integrations.** A card per integration: its name, what it is connected to, what it does and its status (cyan up to
-date, red failed, grey not loaded); a failed event with Retry now and Skip this event; All events. The outbox counts
+date, red failed, grey not loaded); a failed event with Retry now and Skip this event; a failing setup with its error
+and Retry now (it holds every event back, so it is said first); All events. The outbox counts
 under the cards. **An integration's events**: time, event, paper and result, newest first, filtered by all, failed or
 waiting; a failed event has Retry and Skip.
 

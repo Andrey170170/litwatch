@@ -535,14 +535,14 @@ export function useMore(sessionId: number) {
   });
 }
 
-/** Retry only clears the event's wait; the dispatcher sends it on its next pass, so the cards are read again over
- * the next half minute to show how it went. */
+/** Retry only clears the wait of the failing event or setup; the dispatcher tries it on its next pass, so the cards
+ * are read again over the next half minute to show how it went. */
 export function useRetryIntegration() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) => ok(await api.POST("/api/settings/integrations/{name}/retry", { params: { path: { name } } })),
     onSuccess: () => {
-      toast("Trying the event again");
+      toast("Trying again");
       const again = () => {
         refreshSummary(qc);
         return qc.invalidateQueries(settingsReads("integrations"));

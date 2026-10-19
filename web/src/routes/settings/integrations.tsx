@@ -1,5 +1,6 @@
 /** Integrations (DESIGN.md, "Integrations"): a card per integration with its status and the failing event's
- * actions, the outbox counts under them. An integration's events wait on an endpoint. */
+ * actions, or its failing setup's (Retry only: there is no event to skip), the outbox counts under them. An
+ * integration's events wait on an endpoint. */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -13,6 +14,9 @@ type Card = Schemas["IntegrationCard"];
 
 function status(c: Card): string {
   if (!c.enabled) return "Off. Turn it on in litwatch.toml.";
+  // A failing setup holds every event back, so it is said first.
+  const s = c.setup_failing;
+  if (s) return `Setup failed after ${plural(s.failures, "try", "tries")} · ${s.retry_at ? `next try ${dateTime(s.retry_at)}` : "trying again shortly"}`;
   if (c.failing) return `1 event failed after ${plural(c.failing.failures, "try", "tries")}${c.failing.retry_at ? ` · next try ${dateTime(c.failing.retry_at)}` : ""}`;
   if (c.lag) return `${plural(c.lag, "event")} waiting`;
   return `Up to date${c.skipped ? ` · ${c.skipped} skipped` : ""}`;
@@ -28,14 +32,16 @@ function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Map<string,
   const skip = useSkipEvent();
   const done = skippedOn(c, skipped);
   const f = c.enabled && !done ? c.failing : null;
+  const s = c.enabled ? c.setup_failing : null;
   return (
-    <div className={`icard${f ? " fail" : ""}${c.enabled ? "" : " off"}`}>
+    <div className={`icard${f || s ? " fail" : ""}${c.enabled ? "" : " off"}`}>
       <div className="nh">
         <span className="mono in">{c.name}</span>
         <span className="faint">{c.enabled ? "on" : "off"}</span>
       </div>
       {c.description && <div className="nb">{c.description}</div>}
       <div className="ist">{done ? `Event skipped${c.failing ? "" : ` · ${status(c)}`}` : status(c)}</div>
+      {s && <div className="ierr mono">setup{s.error ? ` → ${s.error}` : ""}</div>}
       {f && (
         <div className="ierr mono">
           {f.type}
@@ -52,15 +58,15 @@ function IntegrationCard({ c, skipped, onSkip }: { c: Card; skipped: Map<string,
       )}
       {c.enabled && (
         <div className="nact">
+          {(f || s) && (
+            <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate(c.name)}>
+              Retry now
+            </button>
+          )}
           {f && (
-            <>
-              <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate(c.name)}>
-                Retry now
-              </button>
-              <button className="btn" disabled={skip.isPending} onClick={() => skip.mutate({ name: c.name, eventId: f.event_id }, { onSuccess: () => onSkip(f.event_id) })}>
-                Skip this event
-              </button>
-            </>
+            <button className="btn" disabled={skip.isPending} onClick={() => skip.mutate({ name: c.name, eventId: f.event_id }, { onSuccess: () => onSkip(f.event_id) })}>
+              Skip this event
+            </button>
           )}
           <Link to="/settings/integrations/$name" params={{ name: c.name }} className="btn">
             All events
