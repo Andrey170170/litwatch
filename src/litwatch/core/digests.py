@@ -140,8 +140,9 @@ VOICE_RULES: dict[str, str] = {
 def voice_problems(text: str, titles: Iterable[str] = ()) -> list[str]:
     """The voice rules `text` breaks, each once, by name. The papers' titles, and their parts
     before a colon or a question mark (the writer shortens a long title so), are taken out
-    first, as is every name the text marks: a title may say "you" ("Attention Is All You Need")."""
-    text = " ".join(MARK.sub(" ", text).split())
+    first: a title may say "you" ("Attention Is All You Need"). A mark is read as the words it
+    shows, which may describe a paper rather than name it."""
+    text = " ".join(plain(text).split())
     names = {n for t in titles for n in (" ".join(t.split()), re.split(r"[:?]", t)[0].strip()) if n}
     for name in sorted(names, key=len, reverse=True):
         text = re.sub(re.escape(name), " ", text, flags=re.I)

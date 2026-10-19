@@ -797,7 +797,9 @@ def test_the_voice_check_names_each_rule_broken_and_spares_titles():
     assert voice_problems(shortened, ["Passing the Test You Trained On: Detector Rankings"]) == []
     question = "Do You Need a Bigger Probe? asks whether width or depth carries the signal."
     assert voice_problems(question, ["Do You Need a Bigger Probe? Width Versus Depth"]) == []
-    assert voice_problems("[Is It You?](2610.00001) finds a probe.") == []  # a marked name
+    marked_title = "[Is It You?](2610.00001) finds a probe."
+    assert voice_problems(marked_title, ["Is It You? Probes for the Reader"]) == []
+    assert voice_problems("[a toolkit for developers](2610.00001) ships.") == ["names an audience"]
 
 
 # -- the papers a text marks -----------------------------------------------------------------------
