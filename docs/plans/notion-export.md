@@ -4,7 +4,8 @@ The owner approved this plan on 2026-10-19. It is the reference for building the
 Notion view of litwatch. What the integration does is specified in the spec:
 [integrations.md](../specs/v1/integrations.md), section *The Notion export*, and
 [decisions.md](../specs/v1/decisions.md), decisions 68–76. Its words are in the glossary under *The Notion export*.
-This plan adds one sentence to that section: what happens when the minimum grade changes. Where the plan and the
+This plan amends integrations.md twice: that section says what a changed minimum grade does, and the dispatcher's
+paragraph says a failing setup is retried and shown like a failing event. Where the plan and the
 spec differ, the spec wins and the plan is corrected. Terms are the glossary's.
 
 ## Goal and approach
@@ -36,6 +37,10 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
     reorder.
   - `verdict`: grading, analysis, classification, full-text and Deep passes, digest picks, intake, the nightly's
     reconcile, and `sync`.
+
+  Two helpers sit in pipeline modules but are the owner's: `classification.by_hand` and `fulltext.deep.request` take
+  `owner`. A nested `change` joins the outer one and settles at its exit, so the outermost change's cause is the one
+  emitted.
 - **`settle` turns `verdict` into `weight` when the Fit did not move** (`fit_before == fit_after`), because only the
   grade table's Weight changed. An owner's or taxonomy cause is never rewritten.
 - `docs/integrations.md` documents the field with the rest of the payload.
@@ -46,12 +51,11 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
   only a handful of calls, and the sample used exactly these calls. It has the same shape as `zotero.py`'s client.
 - **It paces itself to about three requests a second.** On a 429 it waits as Retry-After says. Any other failure
   raises, so the dispatcher retries the event with backoff and shows it under Settings → Integrations.
-- **The outbox is the queue.** litwatch only writes events, each in its own transaction. The `notion` loop publishes
+- **The outbox is the queue.** litwatch only writes events, each in the transaction of the data it describes. The `notion` loop publishes
   from its own cursor at Notion's pace and holds up no other integration.
 - **No database transaction stays open across a Notion call.** The outbox reads the snapshot of the whole database
-  cluster, so a transaction left open would hide fresh events from every integration. Check how the dispatcher's
-  connection handles transactions (autocommit or not) before relying on this. Read in short transactions and call
-  Notion outside them.
+  cluster, so a transaction left open would hide fresh events from every integration. The dispatcher's connections
+  are autocommit; read and record state in short transactions and call Notion outside them.
 
 ### Reconcile on start
 
@@ -64,20 +68,35 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
 
   Then it walks every paper that qualifies or already has a page, and writes whatever changed. The same pass serves
   the first fill, a topic added or dropped, a renamed topic and a changed minimum grade.
-- **A topic no longer exported** keeps its column, view and rows. They are no longer written.
-- **A renamed topic** gets its Topic option, its grade column and its view title renamed.
-- **A paper below a raised minimum grade** becomes No longer listed for that topic. Its Why line reads, for example,
-  "19 Oct 2026: the list now shows only Must read papers." A lowered minimum lists papers again and removes that line.
+- **A topic no longer exported** keeps its column and view. On each page its fields keep their last values: its
+  grade column, its Topic option and its Why line. The page's other fields go on being written: Grade is the best
+  grade over the topics still exported, and a page with no exported topic left is not written at all.
+- **A renamed topic** gets its Topic option and its grade column renamed. Its view keeps its title, which is the
+  owner's.
+- **A changed minimum grade** is applied per topic from the state recorded for each page: the topic's effective
+  grade last written. A topic that was listed under the old minimum, whose grade is unchanged and now falls below the
+  new one, becomes No longer listed with a Why such as "19 Oct 2026: the list now shows only Must read papers." A
+  topic already No longer listed keeps its Why. A lowered minimum lists papers again and removes their line.
 - **Views are created once and recorded in the integration's state.** A view the owner rearranges or deletes is
-  never touched again. Columns the integration writes are added back if missing.
+  never touched again. Columns the integration writes are added back if missing, and the property hashes of every
+  page are then cleared so the rows are filled again.
+- **Creation is adopted, not repeated.** The paper's arXiv id is a property, and before creating a page the
+  integration asks the data source for a page with that id; one found is recorded instead of a new one created. The
+  database and the "How to read this" page are found the same way, as children of `parent_page` by title, and views
+  by name on the database. So a creation whose reply was lost, or a stop before its id was recorded, leaves no
+  duplicate.
 - Reconcile is idempotent, so a crash halfway through is finished by the next start.
+- **A failing reconcile is retried with backoff and shown under Settings.** The dispatcher today logs a failing
+  `setup` and tries again every five seconds, out of sight. P2 changes that for every integration: a failing setup
+  is retried after `backoff()`, and its error is recorded where Settings → Integrations shows an integration's
+  failure, with no event attached. Events wait behind a setup that has not finished, as they do today.
 
 ### State
 
 The integration keeps its state in its own tables, created by one migration:
 
 - **`notion_pages`**: paper → page id, a hash of the properties last written, a hash of the body last written, and
-  the Why line for each topic.
+  for each topic the effective grade last written and its Why line.
 - **A small table for the database itself**: database and data source ids, the "How to read this" page id, and the
   view id and column for each topic.
 
@@ -131,6 +150,7 @@ The layout is the approved sample's.
 - Published.
 - Status: a select of To read, Read, Useful, Not useful. Ana owns it and litwatch never writes it.
 - Authors, Venue, arXiv (url), PDF (url), Added and Why.
+- arXiv id: the paper's id as text, which identifies the page (see *Creation is adopted*). Hidden in the views.
 - One grade column per exported topic, a select with the same three options.
 
 **Views:** All papers, grouped by Grade; one view per exported topic, filtered to that topic and grouped by its grade
@@ -195,7 +215,7 @@ Each PR goes through `drive`.
 | Stage | Work | Shows before the next starts |
 | --- | --- | --- |
 | P1 | **`cause` on `grade.changed`.** Every caller of `change`/`settle` and its variants names the cause; `settle` derives `weight`; `docs/integrations.md` documents the payload. A small PR. | V1. |
-| P2 | **The `notion` integration.** The paced client, the state migration, reconcile on start, event handling, the page builder and Why lines; `notion` added to `BUILT_IN`; the package docstring; `docs/integrations.md`. A normal PR. | V2 in pytest. V3–V7 on the sandbox against the scratch page through litwatch-dev, with screenshots. Then the owner looks at the scratch database. |
+| P2 | **The `notion` integration.** The paced client, the state migration, reconcile on start, event handling, the page builder and Why lines; `notion` added to `BUILT_IN`; the package docstring; `docs/integrations.md`. The dispatcher's backoff and Settings entry for a failing setup, with the API change and regenerated client types. A normal PR. | V2 in pytest. V3–V7 on the sandbox against the scratch page through litwatch-dev, with screenshots. Then the owner looks at the scratch database. |
 | P3 | **Switch-on on the owner's instance.** With the owner present: the owner creates the "litwatch" integration and shares the LitWatch page with it; the token goes into the stack as a secret; the `[integrations.notion]` section goes into the stack's `litwatch.toml`; restart. Then delete the sample page. After the owner confirms the new database, trash 0.14's Papers, Digest and Selections databases and the LitWatch page's untitled linked view through the API. | V8. The owner arranges the views once and tells Ana. |
 
 ## Verification
@@ -206,14 +226,14 @@ then a real run against a test target on the sandbox. For the sandbox runs, buil
 
 | Claim | Evidence |
 | --- | --- |
-| V1. `grade.changed` carries the cause of the change | pytest on PostgreSQL, one case each: a label, a cleared label, a reaction, a new verdict, a new Weight alone (`weight`), and a topic edit (`taxonomy`) |
-| V2. Pages, properties, Why lines and bodies are built and written as specified, and only when they changed | pytest with Notion faked over HTTP. Request bodies for: a must read with a Deep card, a worth-a-look, a delisted paper. A repeated event sends no request. A 429 is waited out |
+| V1. `grade.changed` carries the cause of the change | pytest on PostgreSQL, one case each: a label, a cleared label, a reaction, a new verdict, a new Weight alone (`weight`), and a topic edit (`taxonomy`), and a nested change (the outer cause) |
+| V2. Pages, properties, Why lines and bodies are built and written as specified, and only when they changed | pytest with Notion faked over HTTP. Request bodies for: a must read with a Deep card, a worth-a-look, a delisted paper. A repeated event sends no request. A 429 is waited out. A page creation whose reply is lost, then a restart: the page is adopted, not duplicated. A failing setup is retried after backoff and its error is shown by the integrations API |
 | V3. A first start builds the database, its columns, the views, "How to read this", and a page for every qualifying paper | A real run on the sandbox against the scratch page. The page count equals the sandbox's count of papers at relevant or above for the exported topics. Screenshot |
 | V4. A grade that falls shows No longer listed with the right Why, and listing again clears it | On the sandbox: label a listed paper off-topic, run the dispatcher, read the page; remove the label, read it again |
 | V5. New text reaches the page | On the sandbox: an event for a paper whose Brief changed rewrites its body; an event for a paper whose text did not change makes no write |
 | V6. The owner's view arrangement survives a restart | In the scratch database: rearrange one view and hide columns in it, delete another view, restart, compare |
-| V7. Reconcile follows the configuration | Restart with `minimum_grade = "must_read"`: worth-a-look papers become No longer listed with the minimum-grade Why. Restart with one topic dropped and another added: the dropped topic's rows stay unwritten, the new one gets its column, view and papers |
-| V8. Ana's database matches what litwatch holds | After P3: the page count and the per-topic grades, compared with production's papers at relevant or above for the exported topics (a read-only query) |
+| V7. Reconcile follows the configuration | Restart with `minimum_grade = "must_read"`: listed worth-a-look papers become No longer listed with the minimum-grade Why, and a paper V4 delisted keeps its owner's Why. Restart with one topic dropped and another added: on a page of the dropped topic alone nothing is written; on a page shared with a kept topic the dropped topic's fields keep their values while the rest is written; the new topic gets its column, view and papers |
+| V8. Ana's database matches what litwatch holds | After P3: the listed pages and their per-topic grades, compared with production's papers at relevant or above for the exported topics (a read-only query) |
 
 ## Scope
 
