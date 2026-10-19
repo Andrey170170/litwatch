@@ -119,9 +119,11 @@ that came back is kept while the other is asked again. If one comes back truncat
 the grading stays pending, is retried next run, and after three failed runs is listed on Quality as ungraded with a
 button to grade it now (carried from the first v1). As in classification and analysis, only an unusable answer counts
 toward the three; a grader that did not answer (a timeout, a provider down, an `account` error) is retried without
-counting. A grader whose every model refused stops the grading at once, ungraded, with one exception: on a Focus topic,
-when one side refused throughout and the other answered, the answering side's Fit stands, marked `one_lab`, and a
-`one_lab` grade of central or related is listed on Quality for the owner to settle, as a split is. Grading it now runs at once, as a run of its own, and counts as the first of three more runs; until its result is
+counting. A grader whose every model refused stops the grading at once, ungraded, with one exception on a Focus
+topic: when one side refused throughout, the other side decides alone. Its Fit stands, marked `one_lab`, and a
+`one_lab` grade of central or related is listed on Quality for the owner to settle, as a split is. Until the other
+side answers (a timeout, say) the grading stays pending and the refused side is not asked again; if the other side
+refuses throughout too, or fails three runs, the grading is ungraded. Grading it now runs at once, as a run of its own, and counts as the first of three more runs; until its result is
 recorded the grading stays pending, so a request cut short leaves it to the next run.
 
 Grading runs nightly after analysis, once per paper revision: the first pass on a revision grades every active topic
@@ -263,16 +265,18 @@ failed, or that it is unknown (the job was lost before it reported). Automatic s
 owner's requests go first.
 
 A Deep job fails either because of the paper (no card within the job's budget, an invalid card) or because of the
-service (its model call failed: a sign-in expired, a usage limit, the provider; or litwatch could not submit or follow
-the job). The `deep` service tags which. A paper failure counts as a failed run, as below; a service failure does not:
-the pass goes back to waiting, the Deep worker pauses the whole queue for 15 minutes, and the status document shows it
-([data.md](data.md), configuration).
+service (its model call failed: a sign-in expired, a usage limit, the provider; or litwatch could not submit the job).
+The `deep` service tags which. A paper failure counts as a failed run, as below; a service failure does not: the pass
+goes back to waiting, the Deep worker pauses the whole queue for 15 minutes, and the status document shows it
+([data.md](data.md), configuration). An error following a job already accepted is a service failure too, but the job
+may still be running: the pass keeps its attempt and stays running, to be followed by its next claim after the pause,
+as when a worker dies.
 
 A pass that fails, including a model response that is truncated or invalid, is retried on the next run (a download
 the archive gave up on is asked for again with it), and goes down `brief`'s fallbacks as [models.md](models.md) says;
 a pass every model refused stops at once. After three
 failed runs, or that refusal, it is listed on Quality with the error and a button to run it now. A pass awaiting text for more than
-seven days is listed there too. Both count as terminal for the digest wait ([digests.md](digests.md), timing).
+seven days is listed there too. All three count as terminal for the digest wait ([digests.md](digests.md), timing).
 
 ## 7. The library
 

@@ -81,7 +81,7 @@ digests are read a day. It is written in the same call.
 The nightly run ends with grading. Digests are written after a **bounded wait**, which starts when that run's grading
 ends, for the full-text passes the night queued that digests depend on: Focus Briefs and the Area Weight re-checks.
 The wait ends when each of them has finished, has failed in this run (it is retried on the next run, so waiting longer
-gains nothing), or is terminal (three failed runs; text awaited for more than seven days), or at the nightly run's deadline (`[schedule] deadline`, default 07:30; [models.md](models.md), batches), whichever
+gains nothing), or is terminal (three failed runs; refused by every model of `brief`'s list; text awaited for more than seven days), or at the nightly run's deadline (`[schedule] deadline`, default 07:30; [models.md](models.md), batches), whichever
 comes first. Passes already under way at the deadline finish first (their cancelled batch's requests go as normal
 calls), so digests carry them and are written by about 08:00; a pass that finishes later updates its paper, not
 the digests. A run without a deadline waits at most `[digests] wait_minutes` (default 120).

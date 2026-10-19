@@ -54,9 +54,10 @@ with "‹ Back" at its top.
 **Run status**, in the wordmark on both: the papers read last night when the run went well ("530", a cyan square);
 the progress while it runs ("212/530", amber, pulsing); the problem when something failed ("2 failed", red); the spend when a provider's month is projected over its budget
 ("530 · $ over", amber, steady). Failed outranks running, running outranks over budget. It opens Settings: Needs you
-when something failed, Runs and cost when over budget, Overview otherwise. What counts as a problem is the spec's;
-items the owner acknowledged on Needs you don't count, so with all of them acknowledged it shows the night's papers
-again. A failed nightly run can't be acknowledged.
+when something failed, Runs and cost when over budget, Overview otherwise. What counts as a problem is the spec's:
+the red items on Needs you (stopped papers and passes, failed digests) and a failed nightly; the yellow groups, waiting
+for the owner's Fit, are not counted. Items the owner acknowledged don't count, so with all of them acknowledged it shows
+the night's papers again. A failed nightly run can't be acknowledged.
 
 ## Pages
 

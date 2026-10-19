@@ -19,7 +19,7 @@ Numbers are the first spec's (`docs/v1/SPEC.md` at e6940ea, section 9). Status s
 | 11 | Configuration is read-only in the web app | kept |
 | 12 | Reactions and labels are separate records | kept |
 | 13 | Takes are bound to text and rubric | superseded by decision 28 (Gists and Briefs are bound to the paper revision) |
-| 14 | Which splits the status line counts | kept for Focus, with "straddles relevant" read as Fit related or above |
+| 14 | Which splits the status line counts | superseded: the run status counts only failures; splits wait on Needs you (decision 72) |
 | 15 | An issue is a record | kept for digests (decision 40) |
 | 16 | A paper in two Watch topics appears in both | kept for Focus digests and topic pages; one Gist and one Brief per paper |
 | 17 | Thumbs on every paper | kept, with reasons per stage (decision 43) |
@@ -185,8 +185,9 @@ ungraded" for two biosecurity papers `judge` refused, and no new paper had a Dee
     to the owner.
 71. **Deep cards have no daily cap.** A job that fails because of the service does not count against the paper; it
     pauses the queue and goes to Vergil. A re-run's passes are background work behind the night's.
-72. **The owner acknowledges Needs you items** they have seen; acknowledged items stop counting in the run status. A
-    failed nightly is not acknowledged.
+72. **The owner acknowledges Needs you items** they have seen; acknowledged items stop counting in the run status,
+    which counts only failures (stopped papers and passes, failed digests, a failed nightly), not splits. A failed
+    nightly is not acknowledged.
 
 ## Open
 

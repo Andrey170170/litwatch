@@ -4,7 +4,8 @@ Approved by the owner on 2026-10-19. This is the reference for how v1 sorts its 
 monitoring (Vergil) and what stays in the app, the fallback models each role asks when its own model fails, Deep cards
 without a daily cap, and Acknowledge on Needs you. What litwatch does is the spec, [`docs/specs/v1/`](../specs/v1/README.md);
 this plan amended [models.md](../specs/v1/models.md) (fallback lists, lab diversity),
-[pipeline.md](../specs/v1/pipeline.md) (sections 4, 6, 9 and 10), [integrations.md](../specs/v1/integrations.md) (deep),
+[pipeline.md](../specs/v1/pipeline.md) (sections 4, 6, 9 and 10), [digests.md](../specs/v1/digests.md) (the
+wait's terminal passes), [integrations.md](../specs/v1/integrations.md) (deep),
 [data.md](../specs/v1/data.md) (configuration, the status document), [DESIGN.md](../specs/v1/DESIGN.md) (the run
 status, Needs you) and [decisions.md](../specs/v1/decisions.md) (68–72) and [milestones.md](../specs/v1/milestones.md). Where this plan and the spec differ, the spec
 wins and this plan is corrected. Terms are the glossary's.
@@ -55,6 +56,10 @@ Around that:
   (invalid or truncated) still counts as one of the paper's three failed runs and moves down one step per failed run
   (D4). A provider error or timeout never moves down: it says nothing about the paper, it isn't counted, and if it
   lasts a night it goes to Vergil.
+- **`writer` has no three-run stop**: digests are retried every run until written. Each failed digest of the topic
+  in a row starts one model further down, and the last model is kept until a digest of the topic is published.
+- **A Focus side refused while the other hasn't answered** (a timeout, say) keeps the grading pending; the refused
+  side isn't asked again, and the one-lab rule applies when the other answers.
 - **Answers are reused.** An answer any model in the list has given is reused, as the single fallback's is today.
   Asked again, the role starts from the model that answered.
 - **A refusal stops at once.** When every model in the list refuses, the step stops that night and goes straight to
@@ -85,20 +90,23 @@ Prices per million tokens, input/output, from OpenRouter's catalogue on 2026-10-
 
 - **Provider account errors.** HTTP 401, 402 and 403 become a new error kind, `account`. They are never retried and
   never count against a paper, in normal and batched calls alike.
-- **A provider failed for its account** when its latest call failed with an account error. The status clears at its
-  next answered call.
-- **A provider failed for the night** when, in the latest nightly run, it had failed calls (provider errors or
-  timeouts) and not one answered call.
-- **Many papers stopped at once:** more than max(5, 2 % of the papers the latest nightly run classified) stopped at
-  one step during that run. This is the only thing that now turns `pipeline` degraded; one stuck paper never does.
+- **A provider failed for its account** from an account error until its next reply (any answer it sent, a refusal or
+  an invalid one included; not an answer reused from the journal).
+- **A provider failed for the night** when, in the latest nightly run that has ended, it had failed calls (provider
+  errors or timeouts) and not one reply.
+- **Many papers stopped at once:** at one step (classification, analysis, grading, the Brief and Weight passes), more
+  distinct papers became terminal during the latest ended nightly, digest wait included, than max(5, 2 % of the papers
+  it classified). This is the only thing that now turns `pipeline` degraded; one stuck paper never does. Deep passes
+  are not counted; `deep` covers their service failures.
 - **Deep tells the two kinds apart.** The Deep service tags each failed job `service` (the model call failed:
   sign-in, usage limit, auth, the provider) or `paper` (no card submitted within the budget, an invalid card). An
   error submitting or following a job, seen from litwatch, is a service failure.
 - **A service failure doesn't count.** The pass goes back to waiting, and the Deep worker pauses the whole queue for
-  15 minutes before trying again, instead of moving on to the next paper.
+  15 minutes before trying again, instead of moving on to the next paper. After an error following a job already
+  accepted, the pass keeps its attempt and stays running, as it does today, and the next claim follows the job.
 - **`max_per_day` is removed**, the option and the cap. The owner's requests still go first.
-- **The `deep` component reads `/healthz`.** It is degraded when the sign-in state there is not `ok`, or when the
-  latest Deep job failed for the service. It clears with the next card.
+- **The `deep` component reads `/healthz`.** It is degraded while the sign-in state there is not `ok` or the check
+  doesn't answer, and from any service failure litwatch sees until the next card is made.
 - **Failed digests still push**, whatever the reason: a day without its digest is litwatch not doing its job.
 
 ### Acknowledge
@@ -106,8 +114,9 @@ Prices per million tokens, input/output, from OpenRouter's catalogue on 2026-10-
 - **What gets the mark.** An acknowledged mark on each stuck-step record, each full-text pass waiting for the owner,
   and each failed digest. Acknowledge on a group sets it on what is in the group now; "Acknowledge all" on everything.
 - An item that recovers and later fails again comes back unacknowledged.
-- **The run status counts only unacknowledged items.** With none left it shows the night's papers again ("530",
-  cyan).
+- **The run status counts only unacknowledged failures**: stopped papers and passes, failed digests, a failed
+  nightly. Splits and one-lab grades wait on Needs you but aren't counted, as in the code today (decision 14 is
+  marked superseded). With no failure left it shows the night's papers again ("530", cyan).
 - Acknowledged items move to a folded "Acknowledged" section at the foot of Needs you and keep their buttons.
 - Only paper and digest items are acknowledged. A failed nightly is not: it clears with the next good run.
 
@@ -179,7 +188,7 @@ By the methods in [docs/agents/verification.md](../agents/verification.md).
 | --- | --- |
 | V1. A refusal goes down the role's list in order, each answer is journalled and reused, the step stops at once when every model refuses, and start-up refuses lists that break D1 or D2 | pytest with faked providers (`tests/test_llm.py`, the configuration tests) |
 | V8. An unusable answer moves down the list as D4 says, with no more calls per paper than D4 allows, and a provider error or timeout never moves down | pytest with faked providers, counting the calls journalled for each paper |
-| V2. In a Focus grading, if every `judge` model refuses and `check` answers central, the grade stands as `one_lab` and the paper is listed on Needs you; if both sides refuse, it is ungraded and stops at once | pytest on real PostgreSQL (the grading tests) |
+| V2. In a Focus grading, if every `judge` model refuses and `check` answers central, the grade stands as `one_lab` and the paper is listed on Needs you; if `check` times out instead, the grading stays pending without asking `judge` again; if both sides refuse, it is ungraded and stops at once. A Brief or Weight pass every model refused is terminal for the digest wait | pytest on real PostgreSQL (the grading tests) |
 | V3. The papers refused so far get graded, and their Brief written | The P1 report, and a nightly on a sandbox copied from production over 2610.13116, 2610.21200 and 2610.17907, read back through the API |
 | V4. A 401 or 402 counts against no paper and turns that provider's component degraded, in normal and batched calls alike | pytest with faked SDK errors; one real call with an invalid key (`litwatch ping`) |
 | V5. With no cap every due Deep pass is worked; a service failure counts against no paper and pauses the queue; a paper failure counts | pytest with the Deep service faked over HTTP; `npm test` in `deep/` for the tags; a dev Deep instance with a broken sign-in file reports `service` |

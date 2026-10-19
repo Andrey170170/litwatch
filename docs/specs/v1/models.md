@@ -32,6 +32,10 @@ name, with the model it went to.
   one after. One call per run, as many as without fallbacks.
 - **A call that got no answer** (a timeout, a provider error, an `account` error, below) never moves down the list: it
   says nothing about the paper and is not counted against it.
+- **`writer`** writes digests, which are retried every run until written rather than stopped after three
+  ([digests.md](digests.md), a digest is a record). A refusal goes down the list at once, as above. Each failed digest of
+  the topic in a row starts the next attempt one model further down, and the last model in the list is kept until a
+  digest of the topic is published. A digest every model refused is failed like any other.
 
 A fallback may come from the same lab as the role's model (refusals follow a lab's policy, but a lab's models differ:
 Sonnet 5.5 answered all three papers Opus 5.5 refused,
