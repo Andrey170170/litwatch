@@ -1381,7 +1381,8 @@ export interface components {
         Depth: "focus" | "area" | "field";
         /**
          * Digest
-         * @description A digest in full: its text and every paper by role; why it failed, when it did.
+         * @description A digest in full: its text, which marks each paper it names as [the name](its arXiv
+         *     id), and every paper by role; why it failed, when it did.
          */
         Digest: {
             /** Id */

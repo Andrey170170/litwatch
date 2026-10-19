@@ -12,7 +12,7 @@ const paper = { id: "2610.00001", title: "Faithful traces", announced: "2026-10-
 const related = { ...paper, id: "2610.00002", title: "A related one", fit: "related", grade: "relevant", rarity: "rare", gist: "Related gist." };
 const card = { id: 7, topic: focus, period: "day", day: "2026-10-14", state: "written", counts, best_rarity: "epic", gist: "Two measurement papers.", papers: [paper, related], more: 0 };
 const quiet = { id: 8, topic: area, period: "day", day: "2026-10-14", state: "nothing_new", counts: { papers: 0, picks: 0, central: 0, related: 0, must_read: 0 }, best_rarity: null, gist: null, papers: [], more: 0 };
-const digest = { ...card, text: "Two measurement papers, both about how much reaches the trace.\n\nThe second checks statements causally.", error: null, written_at: "2026-10-15T03:00:00Z" };
+const digest = { ...card, text: "Two measurement papers, both about how much reaches the trace.\n\n[Faithful traces](2610.00001) checks statements causally.", error: null, written_at: "2026-10-15T03:00:00Z" };
 const day = { day: "2026-10-14", released: true, digests: [card, quiet], previous: "2026-10-13", next: null, weekly: null };
 
 describe("the Digest", () => {
@@ -92,7 +92,10 @@ describe("the Digest", () => {
     const over = await screen.findByRole("dialog");
     expect(router.state.location.href).toContain("digest=7");
     expect(within(over).getByText(/Daily digest · Wed 14 Oct/)).toBeInTheDocument();
-    expect(within(over).getByText("The second checks statements causally.")).toBeInTheDocument();
+    // A paper the text names shows as its name, linking to its page under the digest's topic.
+    const named = within(over).getByRole("link", { name: "Faithful traces" });
+    expect(named).toHaveAttribute("href", "/paper/2610.00001?topic=cotf");
+    expect(named.closest("p")).toHaveTextContent(/^Faithful traces checks statements causally\.$/);
     const central = within(over).getByText("Central");
     const relatedHead = within(over).getByText("Related");
     expect(central.compareDocumentPosition(relatedHead)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
@@ -116,7 +119,7 @@ describe("the Digest", () => {
     expect(document.querySelector("main.screen")).not.toBeNull();
     await userEvent.click(screen.getByText("Two measurement papers."));
     await waitFor(() => expect(router.state.location.pathname).toBe("/digests/7"));
-    expect(await screen.findByText("The second checks statements causally.")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Faithful traces" })).toBeInTheDocument();
     expect(document.querySelector(".pfoot .stp")).toBeNull();
   });
 

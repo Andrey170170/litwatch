@@ -540,7 +540,7 @@ export function DigestView({ id }: { id: number }) {
         </div>
       )}
       {d.state === "nothing_new" && <p className="prose faint">Nothing was due for this topic. The run looked and found nothing new.</p>}
-      {d.text && <Prose text={d.text} />}
+      {d.text && <Prose text={d.text} marks topic={d.topic.slug} />}
       {secs.map((s) => (
         <Fragment key={s.name}>
           <div className="cap">{s.name}</div>

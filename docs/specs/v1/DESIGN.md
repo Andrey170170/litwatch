@@ -109,7 +109,8 @@ there.
 
 **A digest** (the slide-over on the desktop; on the phone a page with ‹ back and no bottom bar, which does not step):
 a large badge, the topic's name, "Daily digest · Tue 13 Oct" or "Weekly digest · 5–11 Oct" and the count line in the
-rarity colour; the full text; then its papers by role as rows with Gists. A Focus daily digest: Central, then
+rarity colour; the full text, where a paper it names reads as part of the sentence and opens the paper's page
+(under the digest's topic; a faint underline, the accent on hover); then its papers by role as rows with Gists. A Focus daily digest: Central, then
 Related, whose rows are one line each without a Gist. An Area daily digest: Picks, Mentioned (papers its text names), Also due. A weekly digest: "Central this
 week" for Focus, Picks for the others. A digest with nothing due says so in one line; a failed one says it could not
 be written and that the next run writes it again.

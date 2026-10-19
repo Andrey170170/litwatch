@@ -1,6 +1,6 @@
 """Digests' rules (docs/specs/v1/digests.md): what each depth gets, a digest's states and its
 papers' roles, which arXiv listing first showed a paper (the day it belongs to), the weeks, and
-the rule checks on a digest's voice."""
+how its text marks the papers it names, and the rule checks on a digest's voice."""
 
 from __future__ import annotations
 
@@ -100,6 +100,28 @@ def week_of(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
+# -- the papers a text names -----------------------------------------------------------------------
+
+# A digest's text marks each paper it names, where it first speaks of it, as [the words it
+# uses](the paper's arXiv id) (digests.md, writing); the web app shows the words, linking to the
+# paper. The words may hold one level of brackets (a title's "[MASK]"); the id is a new-style
+# one (2610.12345) or an old one with its archive (cs/9901001, math.AG/0601001).
+MARK = re.compile(
+    r"\[((?:[^\[\]]|\[[^\[\]]*\])+)\]"
+    r"\((\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)\)"
+)
+
+
+def marked(text: str) -> list[str]:
+    """The ids of the papers `text` marks, each once, in the order it first names them."""
+    return list(dict.fromkeys(m.group(2) for m in MARK.finditer(text)))
+
+
+def plain(text: str) -> str:
+    """`text` with each mark replaced by the name it shows."""
+    return MARK.sub(r"\1", text)
+
+
 # -- the voice -----------------------------------------------------------------------------------
 
 # What digest text must not say (digests.md, writing): words to the reader, advice on reading,
@@ -118,8 +140,9 @@ VOICE_RULES: dict[str, str] = {
 def voice_problems(text: str, titles: Iterable[str] = ()) -> list[str]:
     """The voice rules `text` breaks, each once, by name. The papers' titles, and their parts
     before a colon or a question mark (the writer shortens a long title so), are taken out
-    first: a title may say "you" ("Attention Is All You Need")."""
-    text = " ".join(text.split())
+    first: a title may say "you" ("Attention Is All You Need"). A mark is read as the words it
+    shows, which may describe a paper rather than name it."""
+    text = " ".join(plain(text).split())
     names = {n for t in titles for n in (" ".join(t.split()), re.split(r"[:?]", t)[0].strip()) if n}
     for name in sorted(names, key=len, reverse=True):
         text = re.sub(re.escape(name), " ", text, flags=re.I)
