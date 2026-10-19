@@ -478,6 +478,12 @@ async def test_a_label_is_a_fit_or_unsure_on_any_topic(client, conn):
     url = f"/api/labels/{INTERP.slug}/{P.id}"
     said = await client.put(url, json={"value": "central"})
     assert said.json() == {"message": None, "saved": False, "grades": {INTERP.slug: "must_read"}}
+    last = await (
+        await conn.execute(
+            "SELECT payload FROM outbox WHERE type = 'grade.changed' ORDER BY id DESC"
+        )
+    ).fetchone()
+    assert last["payload"]["cause"] == "owner"
     topic = await rail()
     assert (topic["word"], topic["fit"], topic["state"]) == ("central", "central", None)
     assert topic["label"] == {"value": "central", "origin": "reader", "provisional": False}

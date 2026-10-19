@@ -18,8 +18,8 @@ from litwatch.core.types import Grade, Status
 
 class Cause(StrEnum):
     """What changed a paper's effective grade for a topic, carried on `grade.changed`: a new
-    verdict, a new Weight alone (the Fit did not move), the owner's word, or a change to the
-    topic's definition (an edit or the owner's order)."""
+    verdict; the pipeline without the Fit moving (a new Weight, or one a rewrite set aside);
+    the owner's word; or a change to the topic's definition (an edit or the owner's order)."""
 
     VERDICT = "verdict"
     WEIGHT = "weight"

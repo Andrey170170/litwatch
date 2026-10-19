@@ -96,7 +96,6 @@ class Change:
     them did, filled when the outermost change exits."""
 
     paper_ids: tuple[str, ...]
-    cause: Cause
     settled: dict[str, Settled] = field(default_factory=dict)
 
 
@@ -125,7 +124,7 @@ async def change(
         async with conn.transaction():
             yield outer
         return
-    current = Change(tuple(sorted(set(paper_ids))), cause)
+    current = Change(tuple(sorted(set(paper_ids))))
     async with conn.transaction():
         await lock_many(conn, list(current.paper_ids))
         _open[conn] = current
