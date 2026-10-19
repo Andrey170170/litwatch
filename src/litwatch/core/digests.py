@@ -102,9 +102,14 @@ def week_of(day: date) -> date:
 
 # -- the papers a text names -----------------------------------------------------------------------
 
-# A digest's text marks each paper it names, where it first names it, as [the name it uses](the
-# paper's arXiv id) (digests.md, writing); the web app shows the name, linking to the paper.
-MARK = re.compile(r"\[([^\[\]]+)\]\(([^()\s]+)\)")
+# A digest's text marks each paper it names, where it first speaks of it, as [the words it
+# uses](the paper's arXiv id) (digests.md, writing); the web app shows the words, linking to the
+# paper. The words may hold one level of brackets (a title's "[MASK]"); the id is a new-style
+# one (2610.12345) or an old one with its archive (cs/9901001, math.AG/0601001).
+MARK = re.compile(
+    r"\[((?:[^\[\]]|\[[^\[\]]*\])+)\]"
+    r"\((\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)\)"
+)
 
 
 def marked(text: str) -> list[str]:

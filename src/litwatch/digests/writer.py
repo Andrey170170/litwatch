@@ -198,13 +198,12 @@ structured output only.
 
 
 def focus_day(topic: Topic, name: str, day: date, found: Sequence[Due]) -> Request:
-    central = [d for d in found if d.fit == "central"]
-    related = [d for d in found if d.fit != "central"]
-    parts = [_topic(topic, name), f"Day: {_day(day)}"]
-    parts.append("Central papers:\n\n" + (_papers(central, day)[0] if central else "none"))
+    central, shown = _papers([d for d in found if d.fit == "central"], day)
+    related, also = _papers([d for d in found if d.fit != "central"], day)
+    parts = [_topic(topic, name), f"Day: {_day(day)}", "Central papers:\n\n" + (central or "none")]
     if related:
-        parts.append("Related papers:\n\n" + _papers(related, day)[0])
-    papers = frozenset(d.paper_id for d in found)
+        parts.append("Related papers:\n\n" + related)
+    papers = frozenset(d.paper_id for d in shown + also)
     output = _answer(FocusDay, text_words=TEXT_WORDS["focus_day"], papers=papers)
     return Request(system=FOCUS_DAY, user="\n\n".join(parts), output=output)
 
@@ -263,7 +262,7 @@ def focus_week(
     dailies: Sequence[dict[str, Any]],
     earlier: Sequence[Due],
 ) -> Request:
-    text, _ = _papers(found)
+    text, shown = _papers(found)
     back = "\n".join(
         f"[{e.paper_id}] {e.title}" + (f": {e.gist}" if e.gist else "") for e in earlier
     )
@@ -275,7 +274,7 @@ def focus_week(
         f"Earlier papers of the topic:\n\n{back or 'none'}",
     ]
     ids = frozenset(e.paper_id for e in earlier)
-    output = _answer(FocusWeek, papers=frozenset(d.paper_id for d in found) | ids, earlier=ids)
+    output = _answer(FocusWeek, papers=frozenset(d.paper_id for d in shown) | ids, earlier=ids)
     return Request(system=FOCUS_WEEK, user="\n\n".join(parts), output=output)
 
 

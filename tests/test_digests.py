@@ -819,13 +819,20 @@ def test_a_digest_mentions_the_papers_its_text_marks_besides_its_picks():
         candidates=frozenset({P.id}),
         picks_range=(1, 1),
     )
-    text = f"[Traces]({R.id}) and [Hidden steps]({P.id}) agree; [Traces]({R.id}) adds {TEXT}"
+    text = (
+        f"[Traces]({R.id}) and [Hidden steps]({P.id}) agree; [Traces]({R.id}) adds "
+        f"[Learning with [MASK] tokens]({Q.id}). {TEXT}"
+    )
     out = answer(area, text, picks=[P.id], gist=f"[Traces]({R.id}) " + "words " * 40)
-    assert out.mentioned == [R.id]  # once, without the pick
+    assert out.mentioned == [R.id, Q.id]  # once each, in order, without the pick
     assert out.gist.startswith("Traces words")  # a Gist names papers without marks
     assert plain(out.text).startswith("Traces and Hidden steps agree; Traces adds")
-    with pytest.raises(ValueError, match="not one of the digest's"):
-        answer(area, f"[Made up](2610.99999) {TEXT}", picks=[P.id])
+    for made_up in ("[Made up](2610.99999)", "[A [bracketed] one](2610.99999)"):
+        with pytest.raises(ValueError, match="not one of the digest's"):
+            answer(area, f"{made_up} {TEXT}", picks=[P.id])
+    assert plain("[the code](https://github.com/x/y), [old](cs/9901001)") == (
+        "[the code](https://github.com/x/y), old"  # only an arXiv id makes a mark
+    )
 
 
 def test_a_focus_weekly_brings_back_the_one_earlier_paper_its_text_marks():
@@ -835,7 +842,7 @@ def test_a_focus_weekly_brings_back_the_one_earlier_paper_its_text_marks():
     assert answer(weekly, f"[This week's]({P.id}) {TEXT}").recalled is None
     assert answer(weekly, f"[This week's]({P.id}) and [back]({Q.id}) {TEXT}").recalled == Q.id
     with pytest.raises(ValueError, match="more than one"):
-        answer(weekly, f"[One]({Q.id}) and [two]({R.id}) {TEXT}")
+        answer(weekly, f"[One [a]]({Q.id}) and [two [b]]({R.id}) {TEXT}")
 
 
 # -- the Digest tab --------------------------------------------------------------------------------
