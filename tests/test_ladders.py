@@ -247,6 +247,25 @@ async def test_a_call_that_costs_more_than_its_reservation_stops_the_run(tmp_pat
     assert len(providers["openrouter"].calls) == 1
 
 
+async def test_a_directory_with_a_call_of_unknown_cost_and_no_reservation_is_not_resumed(tmp_path):
+    found, out = ladder(tmp_path), tmp_path / "runs"
+    work = [t for t in todo(found, judged(P, Q), []) if t.candidate.name == "other"]
+
+    def down(role, request):
+        raise ProviderError("the completion has no choices", transient=True)
+
+    providers = {"openrouter": ScriptedProvider("openrouter", down)}
+    await ladders.run(work[:1], providers, out, ceiling=5.0)
+    # As recorded before reservations existed: the ceiling would count this call at nothing.
+    (row,) = ladders.rows(out)
+    legacy = row.model_dump(mode="json", exclude={"attempt", "reserved"})
+    (out / "judge.jsonl").write_text(json.dumps(legacy) + "\n")
+    (out / ladders.PENDING).unlink()
+    with pytest.raises(ValueError, match="no known cost and no reservation"):
+        await ladders.run(work[1:], providers, out, ceiling=5.0)
+    assert len(providers["openrouter"].calls) == 1
+
+
 class AsyncProvider:
     """A provider whose `complete` is the coroutine function given."""
 

@@ -20,7 +20,8 @@ what is reserved stays within the ceiling, and waits for calls in flight to end 
 not. A call whose charge is unknown, or that never recorded an end (a run killed while it was
 out), counts at its reservation. The run that reaches the ceiling, or makes a call that cost
 more than its reservation, starts no more and records why and the first call it did not make
-(`budget.jsonl`); after an overrun no run starts until the record is moved aside. Calls are made
+(`budget.jsonl`); after an overrun no run starts until the record is moved aside, nor in a
+directory holding a call of unknown cost recorded without a reservation. Calls are made
 once each, without the gateway's retries; a call that failed for want of the provider is asked
 again by the next run. A record cut off mid-write at the end of a file is left out.
 
@@ -474,8 +475,8 @@ async def run(
     """Make the calls in `work` not already made, in order, appending each to
     `out/<role>.jsonl` as it ends, while the budget allows (see the module's docstring).
     Refuses, before any call, a ceiling or concurrency that can't bound a run, work on a
-    provider without credentials (a call never sent would count against the ceiling), and a
-    directory another run holds."""
+    provider without credentials (a call never sent would count against the ceiling), a
+    directory another run holds, and one whose calls the ceiling can't count."""
     if not (math.isfinite(ceiling) and ceiling > 0) or concurrency < 1:
         raise ValueError("the ceiling is a positive amount, and the concurrency at least 1")
     if missing := {t.candidate.role.provider for t in work} - set(providers):
@@ -490,6 +491,11 @@ async def run(
             raise ValueError(
                 f"{OVERRUN} in an earlier run ({out / BUDGET}): correct its price_max and "
                 "max_output, then move that file aside"
+            )
+        if blind := sum(r.cost is None and not r.reserved for r in rows(out)):
+            raise ValueError(
+                f"{blind} calls in {out} have no known cost and no reservation (recorded before "
+                "reservations were), so the ceiling can't count them: start a new directory"
             )
         return await _run(work, providers, out, ceiling, concurrency, progress)
 

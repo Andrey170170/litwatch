@@ -30,7 +30,9 @@ $9.03 of $25. The harness now reserves each call at its true upper bound: input 
 most the model's endpoints can return (`max_output`), both at the dearest price its routing allows (`price_max`;
 [ladders.toml](2026-10-19-fallback-ladders/ladders.toml)). Calls still go out uncapped. No recorded call cost more
 than its reservation as reckoned now (the last line of tables.md). The later `field_grade` run (below) ran under
-that bound.
+that bound. Its ceiling counted the first run's 104 failed calls to MiniMax's free endpoint, recorded before
+reservations were, at nothing, which is the most they could cost at that endpoint's price ($0); the harness now
+refuses to resume a directory holding such a call.
 
 ## The cases
 
