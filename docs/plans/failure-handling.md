@@ -104,6 +104,9 @@ Prices per million tokens, input/output, from OpenRouter's catalogue on 2026-10-
 - **A service failure doesn't count.** The pass goes back to waiting, and the Deep worker pauses the whole queue for
   15 minutes before trying again, instead of moving on to the next paper. After an error following a job already
   accepted, the pass keeps its attempt and stays running, as it does today, and the next claim follows the job.
+- **Submissions are idempotent.** A submission carries its attempt as a key, and the Deep service answers a key it
+  already has with that key's job. A submission whose reply was lost keeps its attempt and is sent again after the
+  pause, so a lost `202` can't start a second hour-long job.
 - **`max_per_day` is removed**, the option and the cap. The owner's requests still go first.
 - **The `deep` component reads `/healthz`.** It is degraded while the sign-in state there is not `ok` or the check
   doesn't answer, and from any service failure litwatch sees until the next card is made.
@@ -176,7 +179,7 @@ One PR each, in order; P5 depends on nothing else and can be built alongside P1â
 | --- | --- | --- |
 | P1 | **Replay for the fallback lists.** Two sets. Quality: ordinary papers the owner labelled (Calibrate sessions and the evaluation labels in `evals/`), each role's real request sent to every candidate. Refusals: the 3 known refusals (2610.13116 and 2610.21200 for `judge`, 2610.17907 for `brief`) plus about 20 papers from the archive on biosecurity, chemical weapons, cyber offence and jailbreaks. A dry run, at most $25. | A report, `evals/2026-10-xx-fallback-ladders.md`: for each model and role, agreement with the owner's labels and with the role's own model, unusable answers, refusals and cost. It ends with the lists P2 uses, and the fallback answers on the refused papers for the owner to read. |
 | P2 | **Fallback lists in the gateway.** `fallbacks` in the configuration and the start-up rules (D1, D2); refusals stop at once; D4's step down; Focus grades from one lab and their Needs you group (D3); P1's lists as the defaults. | V1, V8, V2, and V3 on the sandbox. |
-| P3 | **Service failures and paper failures.** The `account` error kind, batch path included; the Deep service tags its failures; litwatch counts only paper failures and pauses the queue on service failures; `max_per_day` removed. | V4 and V5, with a real run against a dev Deep instance whose sign-in file is broken. |
+| P3 | **Service failures and paper failures.** The `account` error kind, batch path included; the Deep service tags its failures and takes an idempotency key per submission; litwatch counts only paper failures and pauses the queue on service failures; `max_per_day` removed. | V4 and V5, with a real run against a dev Deep instance whose sign-in file is broken. |
 | P4 | **The status document.** `pipeline` degraded only when many papers stop at once; `provider-<name>` components; `deep` reads its health check and its latest job. | V6, and `/status` read on the sandbox with the two stuck papers: `pipeline` healthy. |
 | P5 | **Acknowledge.** A migration, the API, Needs you and the run status. | V7. |
 
@@ -191,7 +194,7 @@ By the methods in [docs/agents/verification.md](../agents/verification.md).
 | V2. In a Focus grading, if every `judge` model refuses and `check` answers central, the grade stands as `one_lab` and the paper is listed on Needs you; if `check` times out instead, the grading stays pending without asking `judge` again; if both sides refuse, it is ungraded and stops at once. A Brief or Weight pass every model refused is terminal for the digest wait | pytest on real PostgreSQL (the grading tests) |
 | V3. The papers refused so far get graded, and their Brief written | The P1 report, and a nightly on a sandbox copied from production over 2610.13116, 2610.21200 and 2610.17907, read back through the API |
 | V4. A 401 or 402 counts against no paper and turns that provider's component degraded, in normal and batched calls alike | pytest with faked SDK errors; one real call with an invalid key (`litwatch ping`) |
-| V5. With no cap every due Deep pass is worked; a service failure counts against no paper and pauses the queue; a paper failure counts | pytest with the Deep service faked over HTTP; `npm test` in `deep/` for the tags; a dev Deep instance with a broken sign-in file reports `service` |
+| V5. With no cap every due Deep pass is worked; a service failure counts against no paper and pauses the queue; a paper failure counts; a submission retried with the same key gets the first job back | pytest with the Deep service faked over HTTP; `npm test` in `deep/` for the tags; a dev Deep instance with a broken sign-in file reports `service` |
 | V6. Each push case in the table above turns its component degraded, and a single stuck paper doesn't | pytest on the status document, one case per row |
 | V7. Acknowledge clears the run status, keeps the items' buttons in the folded section, and a new failure raises the count again | API tests; Needs you walked on the sandbox at 390 and 1440 px, dark and light, screenshots before and after |
 

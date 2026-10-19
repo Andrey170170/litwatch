@@ -50,7 +50,9 @@ where one is known, become links to paper pages. When a job ends, with a card or
 job's usage and records it with the attempt (unknown when the job was lost before reporting, never zero), for the cost figures in [models.md](models.md).
 A failed job says whose failure it was: the paper's (no card submitted within the job's budget, an invalid card) or
 the service's (its model call failed: a sign-in expired, a usage limit, the provider); an error submitting or following
-a job is the service's. Only the paper's counts against it; the service's pauses the queue and shows on the status
+a job is the service's. A submission carries its attempt as an idempotency key, which `deep` answers with the job it
+already started for it, so a submission retried after a lost reply never starts a second job. Only the paper's counts
+against it; the service's pauses the queue and shows on the status
 document ([pipeline.md](pipeline.md), section 6). Cards have no daily cap: the subscription's use by litwatch is small
 beside the owner's own, and a re-run's passes wait behind the night's. An integration acting on a grade checks the effective grade and the
 library when it handles the event (first v1).
