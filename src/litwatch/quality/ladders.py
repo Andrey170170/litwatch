@@ -40,7 +40,7 @@ import psycopg
 from pydantic import BaseModel, Field, model_validator
 
 from litwatch import analysis, grading
-from litwatch.archive import ArchiveClient, ArchiveError, stored_text
+from litwatch.archive import ArchiveClient, ArchiveError, listed, stored_text
 from litwatch.config import Models, RoleConfig
 from litwatch.core import Depth, Fit, Paper
 from litwatch.core.digests import DigestPeriod
@@ -156,11 +156,16 @@ def cases(path: Path) -> list[Case]:
 async def papers(
     conn: psycopg.AsyncConnection, archive: ArchiveClient | None, ids: list[str]
 ) -> dict[str, Paper]:
-    """The papers by id: the database's, else the archive catalog's."""
+    """The papers by id: the database's, else the archive catalog's, of the latest version the
+    catalog knows where its listing names none."""
     found = {p.id: p for p in await papers_store.get_many(conn, ids)}
     for pid in ids:
-        if pid not in found and archive is not None and (p := await archive.paper(pid)):
-            found[pid] = p
+        if pid in found or archive is None or (record := await archive.record(pid)) is None:
+            continue
+        p = listed(record.get("item") or {"id": pid})
+        if p.version is None and isinstance(record.get("latest_version"), int):
+            p = p.model_copy(update={"version": record["latest_version"]})
+        found[pid] = p
     return found
 
 

@@ -181,9 +181,13 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
     ).fetchall()
 
     fake = FakeArchive()
-    elsewhere = {"id": "2610.00099", "title": "Only in the archive", "abstract": "A.", "version": 2}
+    # The catalog's listing names no version: its record's latest is the one read.
+    elsewhere = {"id": "2610.00099", "title": "Only in the archive", "abstract": "A."}
     fake.records[elsewhere["id"]] = {"id": elsewhere["id"], "latest_version": 2, "item": elsewhere}
     fake.texts[first.id] = (1, "\\section{Method} Probes. " * 20)
+    fake.texts[elsewhere["id"]] = (2, "\\section{Setup} Two. " * 20)
+    unversioned = paper("2610.00032", title="No version known")
+    await papers_store.upsert(conn, [unversioned])
     archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
     chosen = [
         ladders.Case(set="quality", role="judge", paper=first.id, subject=FAITH.slug),
@@ -192,6 +196,7 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
         ladders.Case(set="quality", role="brief", paper=first.id, subject=FAITH.slug),
         ladders.Case(set="quality", role="brief", paper="2610.00099", subject=FAITH.slug),
         ladders.Case(set="quality", role="writer", subject=str(digest["id"])),
+        ladders.Case(set="quality", role="brief", paper=unversioned.id, subject=FAITH.slug),
         ladders.Case(set="quality", role="judge", paper="2610.00404", subject=FAITH.slug),
     ]
     built = await ladders.requests(conn, archive, chosen)
@@ -200,14 +205,17 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
     faith_name, interp_name = TREE.get(FAITH.slug).name, TREE.get(INTERP.slug).name
     assert built[keys[0]] == grading.request(stored, FAITH, faith_name)
     assert built[keys[1]].user.endswith("Title: Only in the archive\n\nAbstract:\nA.")
-    assert built[keys[1]] == grading.request(await archive.paper("2610.00099"), INTERP, interp_name)
+    catalog = (await archive.paper("2610.00099")).model_copy(update={"version": 2})
+    assert built[keys[1]] == grading.request(catalog, INTERP, interp_name)
     assert built[keys[2]] == analysis.request(stored, TREE.get(INTERP.slug))
     text = "\\section{Method} Probes. " * 20
     assert built[keys[3]] == brief.request(stored, TREE.get(FAITH.slug), text, "latex")
-    assert built[keys[4]] == "the archive holds no text of this version"
-    assert not any(j for j in fake.jobs)  # it only read: nothing was asked for
+    two = "\\section{Setup} Two. " * 20
+    assert built[keys[4]] == brief.request(catalog, TREE.get(FAITH.slug), two, "latex")
+    assert not fake.jobs  # it only read: nothing was asked for
     assert isinstance(built[keys[5]], Request) and built[keys[5]].user == w.asked[0]
-    assert built[keys[6]] == "the paper is in neither the database nor the archive"
+    assert built[keys[6]] == "the archive holds no text of this version"
+    assert built[keys[7]] == "the paper is in neither the database nor the archive"
 
 
 def row(case: str, candidate: str, outcome: str = "answered", **output) -> ladders.Row:
