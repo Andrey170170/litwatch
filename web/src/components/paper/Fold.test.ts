@@ -34,6 +34,8 @@ describe("the paper's topic rows", () => {
       ],
     });
     expect(foldCount([t("f", null)]).grades[0]!.colour).toBe("var(--r-rare)");
+    // grading failed: written in red, as the row writes it
+    expect(foldCount([t("g", "relevant", { state: "ungraded" })]).grades[0]!.colour).toBe("var(--sig)");
   });
 });
 

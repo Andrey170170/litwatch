@@ -119,6 +119,8 @@ export function PaperRow({ paperId, reaction }: { paperId: string; reaction: Pap
 
 /** A topic row's colour: its rarity's, grey while its grading failed or runs again. */
 export const rowColour = (t: PaperTopic): string => (t.state === "ungraded" || t.state === "grading_again" ? "var(--fg3)" : rc(t.rarity));
+/** The colour its grade is written in: the row's, red once grading failed. */
+export const gradeColour = (t: PaperTopic): string => (t.state === "ungraded" ? "var(--sig)" : rowColour(t));
 
 export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t: PaperTopic; weight: Weight | null | undefined; revision: number }) {
   const [pick, setPick] = useState<ReactionValue | null>(null);

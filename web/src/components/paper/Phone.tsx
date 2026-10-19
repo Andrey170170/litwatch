@@ -9,11 +9,11 @@ import { Badge } from "@/components/Badge";
 import { Sheet } from "@/components/Sheet";
 import { Fill } from "@/components/slots";
 import { placeOf } from "@/lib/listContext";
-import { gradeLine, rc } from "@/lib/rarity";
+import { gradeLine } from "@/lib/rarity";
 import type { ReactionValue } from "@/lib/reactions";
 import { DeepReadCell, linkCells, MissPicker, type Paper, passWord, ProcessCell } from "./Actions";
 import { Classes, Published } from "./Ladder";
-import { FitControl, Reasons, whoseFit, type PaperTopic } from "./TopicRow";
+import { FitControl, Reasons, rowColour, whoseFit, type PaperTopic } from "./TopicRow";
 import { FoldedTopics, type Topics } from "./Fold";
 
 /** The topic row a reaction sheet opens on: the one the paper was opened under, else its only one; none when it
@@ -56,7 +56,7 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
   const failed = t.state === "ungraded";
   const said = t.verdict ? Object.entries(t.verdict.opinions ?? {}).filter(([, o]) => o.fit).map(([role, o]) => `${role} ${o.fit}`) : [];
   return (
-    <div className={`slab${asks ? " ask" : ""}`} style={{ "--rc": failed ? "var(--fg3)" : rc(t.rarity) } as React.CSSProperties}>
+    <div className={`slab${asks ? " ask" : ""}`} style={{ "--rc": rowColour(t) } as React.CSSProperties}>
       <div className="sh">
         <Badge topic={t.topic} />
         <span className="nm">{t.topic.name}</span>
@@ -70,7 +70,7 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
           <b className="badt">ungraded · grading failed 3 runs</b>
         ) : (
           <>
-            <span className="gr">{gradeLine(t.grade, paper.weight?.weight)}</span>
+            <span className="gr">{t.state === "grading_again" ? "ungraded · grading again" : gradeLine(t.grade, paper.weight?.weight)}</span>
             {whoseFit(t) ? ` · ${whoseFit(t)}` : ""}
           </>
         )}

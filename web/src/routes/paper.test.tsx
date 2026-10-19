@@ -551,6 +551,22 @@ describe("a paper's topic rows", () => {
     expect(scrolled).toEqual(["nn"]);
   });
 
+  it("keep an open Label open when a third topic arrives and the fold appears", async () => {
+    viewport(true);
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => ({ ...many, topics: many.topics.slice(0, calls.some((c) => c.method === "PUT") ? 3 : 2) }),
+      "PUT /api/labels/aa/2610.00002": { saved: false },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await userEvent.click(screen.getAllByRole("button", { name: "Label" })[0]!);
+    await userEvent.click(within(screen.getByRole("group", { name: "Fit for Adj one" })).getByRole("button", { name: "related" }));
+    await screen.findByRole("button", { name: /\+1 ·/ });
+    expect(screen.getByRole("group", { name: "Fit for Adj one" })).toBeInTheDocument();
+  });
+
   it("have no fold with two rows", async () => {
     viewport(true);
     scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...many, topics: many.topics.slice(0, 2) } });
@@ -573,5 +589,18 @@ describe("a paper's topic rows", () => {
     expect(fold).toHaveTextContent("+4 · 2 adjacent, 1 none, 1 ungraded");
     await userEvent.click(fold);
     expect(names()).toEqual(["Must one", "Rel one", "Adj one", "Adj two", "None one", "Ungraded one"]);
+  });
+
+  it("say a topic grading again is ungraded on the phone, as the fold counts it", async () => {
+    viewport(false);
+    const again = { ...many, topics: many.topics.map((t) => (t.topic.slug === "rl" ? { ...t, state: "grading_again" } : t)) };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": again });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const sheet = screen.getByRole("dialog", { name: "The paper" });
+    expect(within(sheet).getByRole("button", { name: /\+4 · 1 adjacent, 1 none, 2 ungraded/ })).toBeInTheDocument();
+    await userEvent.click(within(sheet).getByRole("button", { name: /\+4 ·/ }));
+    expect(within(sheet).getByText("ungraded · grading again")).toBeInTheDocument();
   });
 });

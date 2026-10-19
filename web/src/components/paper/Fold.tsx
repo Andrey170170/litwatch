@@ -5,7 +5,7 @@
 import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/Badge";
 import { GRADE_NAME, type Grade } from "@/lib/rarity";
-import { rowColour, type PaperTopic } from "./TopicRow";
+import { gradeColour, type PaperTopic } from "./TopicRow";
 
 type Rank = Grade | "ungraded";
 const RANKS: Rank[] = ["must_read", "relevant", "adjacent", "none", "ungraded"];
@@ -36,12 +36,12 @@ export function useSettledTopics(topics: PaperTopic[] | undefined): PaperTopic[]
 /** The rows a fold hides: all after the first two, and only when there are more than two. */
 export const folded = (topics: PaperTopic[]): PaperTopic[] => (topics.length > 2 ? topics.slice(2) : []);
 
-/** "+4" and the hidden rows by grade, each in the colour its rows carry. */
+/** "+4" and the hidden rows by grade, each in the colour its rows' grade is written in. */
 export function foldCount(hidden: PaperTopic[]): { total: number; grades: { rank: Rank; name: string; n: number; colour: string }[] } {
   const grades = RANKS.flatMap((rank) => {
     const rows = hidden.filter((t) => rankOf(t) === rank);
     const first = rows[0];
-    return first ? [{ rank, name: RANK_NAME[rank], n: rows.length, colour: rowColour(first) }] : [];
+    return first ? [{ rank, name: RANK_NAME[rank], n: rows.length, colour: gradeColour(first) }] : [];
   });
   return { total: hidden.length, grades };
 }
@@ -52,30 +52,32 @@ export type Topics = { topics: PaperTopic[]; open: boolean; setOpen: (open: bool
 /** The first two rows, the fold line, and the rest once it is open. */
 export function FoldedTopics({ topics, open, setOpen, row }: Topics & { row: (t: PaperTopic) => ReactNode }) {
   const hidden = folded(topics);
-  if (!hidden.length) return <>{topics.map(row)}</>;
   const { total, grades } = foldCount(hidden);
+  // the first rows keep their place in the tree as the fold comes and goes, so their open controls stay open
   return (
     <>
       {topics.slice(0, 2).map(row)}
-      <button className="tpfold" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className={`car${open ? " open" : ""}`} aria-hidden />
-        <span className="bs">
-          {hidden.map((t) => (
-            <Badge key={t.topic.slug} topic={t.topic} size="sm" />
-          ))}
-        </span>
-        <span className="ct">
-          +{total} ·{" "}
-          {grades.map((g, i) => (
-            <span key={g.rank}>
-              {i > 0 && ", "}
-              <b style={{ color: g.colour }}>
-                {g.n} {g.name}
-              </b>
-            </span>
-          ))}
-        </span>
-      </button>
+      {total > 0 && (
+        <button className="tpfold" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <span className={`car${open ? " open" : ""}`} aria-hidden />
+          <span className="bs">
+            {hidden.map((t) => (
+              <Badge key={t.topic.slug} topic={t.topic} size="sm" />
+            ))}
+          </span>
+          <span className="ct">
+            +{total} ·{" "}
+            {grades.map((g, i) => (
+              <span key={g.rank}>
+                {i > 0 && ", "}
+                <b style={{ color: g.colour }}>
+                  {g.n} {g.name}
+                </b>
+              </span>
+            ))}
+          </span>
+        </button>
+      )}
       {open && hidden.map(row)}
     </>
   );
