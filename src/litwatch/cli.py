@@ -585,6 +585,11 @@ def eval_ladders(
         raise typer.BadParameter(f"--set is one of {', '.join(ladders.SETS)}")
     if unknown := set(role or []) - set(found):
         raise typer.BadParameter(f"no ladder for {', '.join(sorted(unknown))}")
+    names = {c.name for ladder in found.values() for c in ladder.candidates}
+    if unknown := set(only or []) - names:
+        raise typer.BadParameter(
+            f"no candidate {', '.join(sorted(unknown))}; the candidates: {', '.join(sorted(names))}"
+        )
     chosen = [
         c
         for c in ladders.cases(cases)

@@ -24,7 +24,6 @@ from tests.test_digests import TUE, Writer, day, focus, listed
 LADDERS = """
 [judge]
 output_tokens = 100
-reserve_output_tokens = 1000
 [[judge.candidates]]
 name = "own"
 price = [10.0, 10.0]
@@ -35,6 +34,7 @@ model = "lab-a/own"
 name = "other"
 price = [1.0, 1.0]
 price_max = [2.0, 2.0]
+max_output = 1000
 provider = "openrouter"
 model = "lab-b/other"
 effort = "high"
@@ -90,17 +90,19 @@ def test_ladders_and_cases_load_from_their_files(tmp_path):
 
 def test_the_budget_reserves_before_a_call_and_once_refused_starts_none():
     b = ladders.Budget(ceiling=1.0, spent=0.5)
-    assert b.reserve(0.3) and not b.reserve(0.3)
-    assert not b.reserve(0.01)  # stopped: a later, smaller call does not slip in
-    assert b.stopped == "the ceiling"
+    # A call that fits only once the call in flight ends waits for it.
+    assert b.reserve(0.3) == "start" and b.reserve(0.3) == "wait" and b.stopped is None
     b.settle(0.3, None)  # an unknown charge counts at its reservation
     assert b.spent == pytest.approx(0.8) and b.reserved == 0
+    assert b.reserve(0.3) == "stop"  # it can't fit with nothing in flight
+    assert b.reserve(0.01) == "stop"  # stopped: a later, smaller call does not slip in
+    assert b.stopped == "the ceiling"
     # A call that cost more than its reservation shows the reservation is no bound: none starts.
     b = ladders.Budget(ceiling=1.0, spent=0.0)
-    assert b.reserve(0.1)
+    assert b.reserve(0.1) == "start"
     b.settle(0.1, 0.2)
-    assert b.spent == pytest.approx(0.2) and b.stopped == "a call cost more than its reservation"
-    assert not b.reserve(0.01)
+    assert b.spent == pytest.approx(0.2) and b.stopped == ladders.OVERRUN
+    assert b.reserve(0.01) == "stop"
 
 
 async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want_of_a_provider(
@@ -129,9 +131,8 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
     }
     ran = await ladders.run(todo(found, chosen), providers, out, ceiling=5.0)
     assert len(providers["openrouter"].calls) == 2  # once a case: no retries inside a call
-    # Each call goes out capped: other's at the ladder's reserve, own's at Anthropic's default.
-    assert {q.max_output_tokens for _, q in providers["openrouter"].calls} == {1000}
-    assert {q.max_output_tokens for _, q in providers["anthropic"].calls} == {DEFAULT_MAX_TOKENS}
+    # Each call goes out as the pipeline's does: no cap of its own.
+    assert {q.max_output_tokens for p in providers.values() for _, q in p.calls} == {None}
     assert {r.attempt for r in ran.rows} == set(ladders.reservations(out))
     outcomes = {(r.case.split("/")[1], r.candidate): r.outcome for r in ran.rows}
     assert outcomes == {
@@ -172,14 +173,14 @@ async def test_the_ceiling_holds_across_runs_and_records_where_it_stopped(tmp_pa
         "openrouter": ScriptedProvider("openrouter", lambda role, request: FIT.model_dump_json()),
     }
     # A call reserves its input (prompts and schema) at a token a byte, plus the template's
-    # allowance, and its output at its cap: Anthropic's default for own, the ladder's 1,000 for
-    # other's, each at the candidate's dearest prices.
+    # allowance, and its most output: Anthropic's default cap for own, other's `max_output` for
+    # its uncapped OpenRouter call, each at the candidate's dearest prices.
     request = work[0].request
     texts = (request.system, request.user, json.dumps(request.output.model_json_schema()))
     tokens = sum(len(t.encode()) for t in texts) + ladders.TEMPLATE_TOKENS
-    hold = ladders.reservation(work[0].ladder, work[0].candidate, request)
+    hold = ladders.reservation(work[0].candidate, request)
     assert hold == pytest.approx((tokens + DEFAULT_MAX_TOKENS) * 10 / 1e6)
-    other = ladders.reservation(work[1].ladder, work[1].candidate, request)
+    other = ladders.reservation(work[1].candidate, request)
     assert other == pytest.approx((tokens + 1000) * 2 / 1e6)
     ran = await ladders.run(work[:1], providers, out, ceiling=hold * 1.5, concurrency=1)
     (first,) = ran.rows
@@ -204,14 +205,14 @@ async def test_a_call_cut_off_by_a_kill_still_counts_and_one_run_at_a_time_uses_
     work = todo(found, judged(P, Q), [])
 
     def killed(role, request):
-        raise asyncio.CancelledError  # the run is stopped while the call is out
+        raise RuntimeError("killed")  # the run is stopped while the call is out
 
     providers = {
         "anthropic": ScriptedProvider("anthropic", killed),
         "openrouter": ScriptedProvider("openrouter", lambda role, request: FIT.model_dump_json()),
     }
-    hold = ladders.reservation(work[0].ladder, work[0].candidate, work[0].request)
-    with pytest.raises(asyncio.CancelledError):
+    hold = ladders.reservation(work[0].candidate, work[0].request)
+    with pytest.raises(ExceptionGroup):
         await ladders.run(work[:1], providers, out, ceiling=hold * 1.5, concurrency=1)
     assert ladders.rows(out) == [] and list(ladders.reservations(out).values()) == [hold]
     assert ladders.spent([], ladders.reservations(out)) == pytest.approx(hold)
@@ -237,9 +238,65 @@ async def test_a_call_that_costs_more_than_its_reservation_stops_the_run(tmp_pat
     dear = Reply(FIT.model_dump_json(), Stop.COMPLETE, Usage(model="lab-b/other", cost=1.0))
     providers = {"openrouter": ScriptedProvider("openrouter", lambda role, request: dear)}
     ran = await ladders.run(work, providers, out, ceiling=5.0, concurrency=1)
-    assert len(ran.rows) == 1 and ran.why == "a call cost more than its reservation"
+    assert len(ran.rows) == 1 and ran.why == ladders.OVERRUN
     (stop,) = [json.loads(line) for line in (out / ladders.BUDGET).read_text().splitlines()]
     assert stop["why"] == ran.why and stop["first_not_run"]["case"] == work[1].case.key
+    # The bound is wrong until someone corrects it: no later run starts.
+    with pytest.raises(ValueError, match="move that file aside"):
+        await ladders.run(work[1:], providers, out, ceiling=5.0)
+    assert len(providers["openrouter"].calls) == 1
+
+
+class AsyncProvider:
+    """A provider whose `complete` is the coroutine function given."""
+
+    def __init__(self, name: str, complete) -> None:
+        self.name, self.complete = name, complete
+
+    def routing(self, role):
+        return role.routing
+
+
+async def test_a_failing_run_ends_every_call_before_letting_go_and_a_cut_off_record_is_mended(
+    tmp_path,
+):
+    found, out = ladder(tmp_path), tmp_path / "runs"
+    work = todo(found, judged(P, Q), [])
+    started, cancelled = asyncio.Event(), []
+
+    async def own(role, request):
+        await started.wait()
+        return Reply(FIT.model_dump_json(), Stop.COMPLETE, Usage(model=role.model, cost=0.01))
+
+    async def hangs(role, request):
+        started.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            cancelled.append(request)
+            raise
+
+    def broken(row):
+        raise RuntimeError("the progress line failed")
+
+    providers = {
+        "anthropic": AsyncProvider("anthropic", own),
+        "openrouter": AsyncProvider("openrouter", hangs),
+    }
+    with pytest.raises(ExceptionGroup):
+        await ladders.run(work[:2], providers, out, 5.0, concurrency=2, progress=broken)
+    assert len(cancelled) == 1  # the call still out was ended, not left running
+    with (out / ladders.LOCK).open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # and the directory let go after
+        fcntl.flock(held, fcntl.LOCK_UN)
+    # A kill mid-write leaves a record cut off at a file's end: it is left out, and mended
+    # before the next run appends.
+    with (out / "judge.jsonl").open("a") as f:
+        f.write('{"set": "qua')
+    assert len(ladders.rows(out)) == 1
+    providers["openrouter"] = ScriptedProvider("openrouter", lambda r, q: FIT.model_dump_json())
+    await ladders.run(work[1:2], providers, out, 5.0)
+    assert [r.candidate for r in ladders.rows(out)] == ["own", "other"]
 
 
 async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):

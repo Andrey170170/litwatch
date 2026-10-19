@@ -14,15 +14,15 @@ topic for the graders (`judge`, `check`, `field_grade`), a paper and its area fo
 with the owner's Fit) or the `refusals` set (papers likely to be refused).
 
 Spending is capped across every invocation into one directory, and one invocation at a time
-uses it. Each call is sent with an output cap (see `cap`), and before it the harness records a
-reservation (`pending.jsonl`) for the call's upper bound (see `reservation`), and starts it only
-while what the directory's calls have cost
-plus what is reserved stays within the ceiling; a call whose charge is unknown, or that never
-recorded an end (a run killed while it was out), counts at its reservation. The run that
-reaches the ceiling, or makes a call that cost more than its reservation, starts no more and
-records why and the first call it did not make (`budget.jsonl`). Calls are made once each,
-without the gateway's retries; a call that failed for want of the provider is asked again by
-the next run.
+uses it. Before each call the harness records a reservation (`pending.jsonl`) for the call's
+upper bound (see `reservation`); a call starts while what the directory's calls have cost plus
+what is reserved stays within the ceiling, and waits for calls in flight to end when it would
+not. A call whose charge is unknown, or that never recorded an end (a run killed while it was
+out), counts at its reservation. The run that reaches the ceiling, or makes a call that cost
+more than its reservation, starts no more and records why and the first call it did not make
+(`budget.jsonl`); after an overrun no run starts until the record is moved aside. Calls are made
+once each, without the gateway's retries; a call that failed for want of the provider is asked
+again by the next run. A record cut off mid-write at the end of a file is left out.
 
 A call's identity is its request and the candidate's configuration (`asked`); the report reads
 only calls to the requests the cases build now. A change to litwatch itself between runs into
@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import dataclasses
 import fcntl
 import hashlib
 import json
@@ -84,12 +83,15 @@ BUDGET, PENDING, LOCK = "budget.jsonl", "pending.jsonl", ".lock"
 class Candidate(BaseModel):
     """One model asked as a role, with its prices in USD per million input and output tokens:
     `price` what a call is expected to cost (the estimate), `price_max` its dearest endpoint
-    among those its routing allows (the reservation)."""
+    among those its routing allows (the reservation). `max_output` is the most output tokens
+    those endpoints can return, for an OpenRouter call, which goes out uncapped as the
+    pipeline's does."""
 
     name: str
     role: RoleConfig
     price: tuple[float, float]
     price_max: tuple[float, float]
+    max_output: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _alone(self) -> Candidate:
@@ -100,6 +102,8 @@ class Candidate(BaseModel):
             raise ValueError(f"{self.name}: prices are finite and not negative")
         if any(m < p for p, m in zip(self.price, self.price_max, strict=True)):
             raise ValueError(f"{self.name}: price_max is below price")
+        if self.role.provider == "openrouter" and self.max_output is None:
+            raise ValueError(f"{self.name}: an OpenRouter candidate needs its max_output")
         return self
 
 
@@ -108,7 +112,6 @@ class Ladder(BaseModel):
 
     role: str
     output_tokens: int = Field(gt=0)  # expected a call, for the estimate
-    reserve_output_tokens: int = Field(gt=0)  # a call's output, for the ceiling, where uncapped
     candidates: list[Candidate] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -126,19 +129,16 @@ class Ladder(BaseModel):
 
 
 def ladders(path: Path) -> dict[str, Ladder]:
-    """The ladders of a TOML file: a table per role, holding its `output_tokens`,
-    `reserve_output_tokens` and an array `candidates` of tables, each a role's configuration
-    with a `name`, a `price` and a `price_max`."""
+    """The ladders of a TOML file: a table per role, holding its `output_tokens` and an array
+    `candidates` of tables, each a role's configuration with a `name`, a `price`, a `price_max`
+    and, for OpenRouter, a `max_output`."""
+    own = ("name", "price", "price_max", "max_output")
     found = {}
     for role, table in tomllib.loads(path.read_text()).items():
         listed = [
             Candidate(
-                name=c["name"],
-                price=c["price"],
-                price_max=c["price_max"],
-                role=RoleConfig.model_validate(
-                    {k: v for k, v in c.items() if k not in ("name", "price", "price_max")}
-                ),
+                **{k: c[k] for k in own if k in c},
+                role=RoleConfig.model_validate({k: v for k, v in c.items() if k not in own}),
             )
             for c in table.get("candidates", [])
         ]
@@ -285,23 +285,41 @@ def asked(candidate: Candidate, request: Request) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
+def _lines(path: Path) -> list[str]:
+    """A JSON-lines file's records, but a last one cut off mid-write: each is written whole
+    with its newline, so one without is a write a kill interrupted."""
+    if not path.exists():
+        return []
+    text = path.read_text()
+    return [line for line in text[: text.rfind("\n") + 1].splitlines() if line]
+
+
+def _records(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in _lines(path)]
+
+
+def _mend(out: Path) -> None:
+    """Cut a record a kill interrupted off the end of each file, before more is appended. A call
+    whose row is cut off counts at its reservation; one whose reservation is was never sent."""
+    for path in out.glob("*.jsonl"):
+        text = path.read_text()
+        if text and not text.endswith("\n"):
+            path.write_text(text[: text.rfind("\n") + 1])
+
+
 def rows(out: Path) -> list[Row]:
     """Every call recorded in `out`, in order, those asked again included."""
     found = []
     for path in sorted(out.glob("*.jsonl")):
         if path.name in (BUDGET, PENDING):
             continue
-        found += [Row.model_validate_json(line) for line in path.read_text().splitlines() if line]
+        found += [Row.model_validate_json(line) for line in _lines(path)]
     return found
 
 
 def reservations(out: Path) -> dict[str, float]:
     """Every reservation recorded in `out`, by attempt."""
-    path = out / PENDING
-    if not path.exists():
-        return {}
-    found = [json.loads(line) for line in path.read_text().splitlines() if line]
-    return {r["attempt"]: r["reserved"] for r in found}
+    return {r["attempt"]: r["reserved"] for r in _records(out / PENDING)}
 
 
 def latest(found: list[Row]) -> dict[tuple[str, str], Row]:
@@ -337,50 +355,56 @@ def estimate(ladder: Ladder, candidate: Candidate, request: Request) -> float:
     return (tokens * price_in + ladder.output_tokens * price_out) / 1e6
 
 
-def cap(ladder: Ladder, candidate: Candidate, request: Request) -> int:
-    """The output tokens a call is sent with and its reservation holds: the request's or the
-    role's cap, else Anthropic's default, which the pipeline's call has too, else the ladder's
-    `reserve_output_tokens`. An OpenRouter call goes out uncapped from the pipeline; here the cap
-    bounds its cost, and one that reaches it is recorded as truncated."""
+def output_bound(candidate: Candidate, request: Request) -> int:
+    """The most output tokens a call can return: the cap it is sent with (the request's or the
+    role's, else Anthropic's default), else, for an OpenRouter call sent uncapped as the pipeline
+    sends it, the candidate's `max_output`."""
     if limit := request.max_output_tokens or candidate.role.max_output_tokens:
         return limit
     if candidate.role.provider == "anthropic":
         return DEFAULT_MAX_TOKENS
-    return ladder.reserve_output_tokens
+    assert candidate.max_output is not None  # Candidate requires it of OpenRouter
+    return candidate.max_output
 
 
-def reservation(ladder: Ladder, candidate: Candidate, request: Request) -> float:
-    """A call's upper bound: its `input_bound` and its `cap`, at the candidate's dearest
+def reservation(candidate: Candidate, request: Request) -> float:
+    """A call's upper bound: its `input_bound` and `output_bound`, at the candidate's dearest
     prices. A call that costs more (a price raised since `price_max` was read) stops the run."""
     price_in, price_out = candidate.price_max
     tokens = input_bound(request)
-    return (tokens * price_in + cap(ladder, candidate, request) * price_out) / 1e6
+    return (tokens * price_in + output_bound(candidate, request) * price_out) / 1e6
+
+
+OVERRUN = "a call cost more than its reservation"
 
 
 @dataclass
 class Budget:
     """The ceiling, what has been spent and what calls in flight have reserved; once a call
-    may not start, none may, and `stopped` says why."""
+    may never start, none may, and `stopped` says why."""
 
     ceiling: float
     spent: float
     reserved: float = 0.0
     stopped: str | None = None
 
-    def reserve(self, amount: float) -> bool:
-        """Whether a call of upper bound `amount` may start."""
-        if self.stopped is None and self.spent + self.reserved + amount > self.ceiling:
+    def reserve(self, amount: float) -> Literal["start", "wait", "stop"]:
+        """Whether a call of upper bound `amount` starts (and is reserved), waits for a call in
+        flight to end, or never starts: when it would pass the ceiling with nothing in flight."""
+        if self.stopped is None and self.spent + amount > self.ceiling:
             self.stopped = "the ceiling"
         if self.stopped is not None:
-            return False
+            return "stop"
+        if self.spent + self.reserved + amount > self.ceiling:
+            return "wait"
         self.reserved += amount
-        return True
+        return "start"
 
     def settle(self, amount: float, cost: float | None) -> None:
         self.reserved -= amount
         self.spent += amount if cost is None else cost
         if cost is not None and cost > amount and self.stopped is None:
-            self.stopped = "a call cost more than its reservation"
+            self.stopped = OVERRUN
 
 
 @dataclass(frozen=True)
@@ -462,6 +486,11 @@ async def run(
             fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError(f"another run is using {out}") from None
+        if any(r["why"] == OVERRUN for r in _records(out / BUDGET)):
+            raise ValueError(
+                f"{OVERRUN} in an earlier run ({out / BUDGET}): correct its price_max and "
+                "max_output, then move that file aside"
+            )
         return await _run(work, providers, out, ceiling, concurrency, progress)
 
 
@@ -473,6 +502,7 @@ async def _run(
     concurrency: int,
     progress: Callable[[Row], None] | None,
 ) -> Ran:
+    _mend(out)
     done = rows(out)
     last = latest(done)
     work = [
@@ -481,13 +511,16 @@ async def _run(
         if not _settled(last.get((t.case.key, t.candidate.name)), t.candidate, t.request)
     ]
     budget = Budget(ceiling, spent(done, reservations(out)))
-    gate = asyncio.Semaphore(concurrency)
+    gate, room = asyncio.Semaphore(concurrency), asyncio.Condition()
     ran = Ran()
 
     async def one(t: Todo) -> None:
         async with gate:
-            hold = reservation(t.ladder, t.candidate, t.request)
-            if not budget.reserve(hold):
+            hold = reservation(t.candidate, t.request)
+            async with room:
+                while (said := budget.reserve(hold)) == "wait":
+                    await room.wait()
+            if said == "stop":
                 if ran.stopped_at is None or work.index(t) < work.index(ran.stopped_at):
                     ran.stopped_at = t
                 return
@@ -499,14 +532,19 @@ async def _run(
             row = await _ask(t, providers)
             row.reserved, row.attempt = hold, attempt
             row.seconds = round(time.monotonic() - started, 2)
-            budget.settle(hold, row.cost)
+            async with room:
+                budget.settle(hold, row.cost)
+                room.notify_all()
             with (out / f"{t.case.role}.jsonl").open("a", encoding="utf-8") as f:
                 f.write(row.model_dump_json() + "\n")
             ran.rows.append(row)
             if progress:
                 progress(row)
 
-    await asyncio.gather(*(one(t) for t in work))
+    # A call that raises cancels the rest, and all have ended before the lock is let go.
+    async with asyncio.TaskGroup() as group:
+        for t in work:
+            group.create_task(one(t))
     ran.why = budget.stopped
     if ran.why is not None:
         t = ran.stopped_at
@@ -538,11 +576,9 @@ async def _ask(t: Todo, providers: Mapping[str, Provider]) -> Row:
             **rest,
         )
 
-    # Sent with its cap; its identity stays the request as built (`asked`).
-    sent = dataclasses.replace(t.request, max_output_tokens=cap(t.ladder, t.candidate, t.request))
     try:
         answer = await gateway(t.case.role, t.candidate, providers).ask(
-            t.case.role, sent, paper_id=t.case.paper
+            t.case.role, t.request, paper_id=t.case.paper
         )
     except CallError as exc:
         return row(exc.kind, exc.usage, detail=exc.detail)
@@ -649,15 +685,13 @@ def tables(
     ended = {r.attempt for r in found}
     unended = [v for k, v in (reserved or {}).items() if k not in ended]
     lines += ["", f"Calls that never ended: {len(unended)}, up to ${sum(unended):.2f} reserved."]
-    named = {
-        (role, c.name): (ladder, c) for role, ladder in ladders_.items() for c in ladder.candidates
-    }
+    named = {(role, c.name): c for role, ladder in ladders_.items() for c in ladder.candidates}
     over = 0
     for r in now:
-        ladder, candidate = named[(r.role, r.candidate)]
+        candidate = named[(r.role, r.candidate)]
         request = built[r.case]
         assert isinstance(request, Request)  # a current call's request was built
-        over += r.cost is not None and r.cost > reservation(ladder, candidate, request)
+        over += r.cost is not None and r.cost > reservation(candidate, request)
     lines += ["", f"Current calls that cost more than their reservation as reckoned now: {over}."]
     return "\n".join(lines).lstrip("\n") + "\n"
 
