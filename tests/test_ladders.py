@@ -69,7 +69,7 @@ def test_ladders_and_cases_load_from_their_files(tmp_path):
     assert found["judge"].own.role == RoleConfig(provider="anthropic", model="lab-a/own")
     assert found["judge"].candidates[1].role.effort == "high"
     with pytest.raises(ValueError, match="asked alone"):
-        ladder(tmp_path, LADDERS + 'fallback = "brief_fallback"\n')
+        ladder(tmp_path, LADDERS + 'fallbacks = [{ provider = "anthropic", model = "lab-a/x" }]\n')
     with pytest.raises(ValueError, match="below price"):
         ladder(tmp_path, LADDERS.replace("price_max = [2.0, 2.0]", "price_max = [0.5, 2.0]"))
     with pytest.raises(ValueError, match="not negative"):
@@ -117,7 +117,7 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
     down = {"other": True}
 
     def own(role, request):
-        assert role.fallback is None
+        assert role.fallbacks == ()
         # The call's reservation is on disk before it is sent.
         assert any(json.loads(line)["candidate"] == "own"
                    for line in (out / ladders.PENDING).read_text().splitlines())  # fmt: skip
