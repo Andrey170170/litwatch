@@ -651,7 +651,8 @@ class DigestCard(DigestMark):
 
 
 class Digest(DigestMark):
-    """A digest in full: its text and every paper by role; why it failed, when it did."""
+    """A digest in full: its text, which marks each paper it names as [the name](its arXiv
+    id), and every paper by role; why it failed, when it did."""
 
     gist: str | None = None
     text: str | None = None

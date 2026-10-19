@@ -1,9 +1,11 @@
 """The `writer` role's call (digests.md, writing): one call per digest, which writes its text, its
 Gist and, by depth, its picks. It asks and writes nothing.
 
-The answer names papers by the arXiv ids it was given; each request's answer model only takes
-the ids of that digest's papers (picks from its candidates), so a pick that is not one fails
-like any invalid answer."""
+The answer names papers by the arXiv ids it was given, its picks by id and its text by marks
+(`core.digests.MARK`); each request's answer model only takes the ids of that digest's papers
+(picks from its candidates), so a pick or a mark that is not one fails like any invalid answer.
+The papers a text names besides its picks, and the earlier paper a Focus weekly brings back, are
+read from its marks."""
 
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from litwatch import writing
 from litwatch.core import Depth, Topic
-from litwatch.core.digests import WEEKLY_PICKS
+from litwatch.core.digests import WEEKLY_PICKS, marked, plain
 from litwatch.llm import Request
 from litwatch.store.digests import Due
 
@@ -35,8 +37,12 @@ VOICE = f"""\
 Each paper comes with litwatch's standing for it in this topic (its grade and how close it is to \
 the topic) and why; use them to judge what matters, and never write them or any other of \
 litwatch's terms (grade, must read, Fit, Weight, rarity, verdict). Name a paper by its title, \
-shortened where it is long, never by its arXiv id. Plain prose in paragraphs; no headings, lists \
-or markdown."""
+shortened where it is long, never by its arXiv id. Where the text first speaks of one of the \
+papers, by its title or by what it does, mark it as [those words](its arXiv id, as given), as in \
+"[Attention Is All You Need](1706.03762) replaces recurrence with attention" or "[a study of \
+attention heads](1905.09418) finds most can be pruned": the reader sees only the words, which open \
+the paper. Mark only the papers you are given, and only in the text; the Gist names papers \
+without marks. Otherwise plain prose in paragraphs: no headings, lists or other markdown."""
 
 GIST = (
     "A short paragraph of 40 to 80 words that says what the digest says, read before opening it; "
@@ -58,24 +64,27 @@ class Pick(BaseModel):
 
 
 class Written(BaseModel):
-    """What every digest's answer holds. A subclass per request sets what it may name."""
+    """What every digest's answer holds. A subclass per request sets what it may name. A mark
+    in the Gist, which names papers without them, is taken out."""
 
     text: str
     gist: str = Field(description=GIST)
 
     text_words: ClassVar[tuple[int, int]] = TEXT_WORDS["week"]
-    papers: ClassVar[frozenset[str]] = frozenset()  # the ids the digest may name
+    papers: ClassVar[frozenset[str]] = frozenset()  # the ids its text may mark
     candidates: ClassVar[frozenset[str]] = frozenset()  # the ids it may pick
     picks_range: ClassVar[tuple[int, int]] = (0, 0)
 
     @field_validator("gist")
     @classmethod
     def _gist(cls, gist: str) -> str:
-        return _words(gist, GIST_WORDS, "Gist")
+        return _words(plain(gist), GIST_WORDS, "Gist")
 
     @model_validator(mode="after")
     def _text(self) -> Written:
         self.text = _words(self.text, self.text_words, "text")
+        if not set(marked(self.text)) <= self.papers:
+            raise ValueError("a paper named that is not one of the digest's")
         return self
 
 
@@ -91,34 +100,38 @@ class Picked(Written):
 
     text: str = Field(description="The digest's text")
     picks: list[Pick]
-    mentioned: list[str] = Field(
-        description="The arXiv ids of the papers the text names that are not picks"
-    )
+
+    @property
+    def mentioned(self) -> list[str]:
+        """The papers the text marks that are not picks, in the order it names them."""
+        ids = {p.paper for p in self.picks}
+        return [m for m in marked(self.text) if m not in ids]
 
     @model_validator(mode="after")
-    def _named(self) -> Picked:
+    def _picked(self) -> Picked:
         ids = [p.paper for p in self.picks]
         if len(set(ids)) != len(ids) or not set(ids) <= self.candidates:
             raise ValueError("a pick that is not one of the candidates, or picked twice")
         low, high = self.picks_range
         if not low <= len(ids) <= high:
             raise ValueError(f"{len(ids)} picks, not {low} to {high}")
-        self.mentioned = [m for m in dict.fromkeys(self.mentioned) if m not in ids]
-        if not set(self.mentioned) <= self.papers:
-            raise ValueError("a paper named that is not one of the digest's")
         return self
 
 
 class FocusWeek(Written):
     text: str = Field(description="The week in the topic: 150 to 300 words")
-    recalled: str | None = Field(
-        description="The arXiv id of the one earlier paper the text brings back, or null"
-    )
+
+    earlier: ClassVar[frozenset[str]] = frozenset()  # the earlier papers it may bring back
+
+    @property
+    def recalled(self) -> str | None:
+        """The earlier paper the text brings back, or None."""
+        return next((m for m in marked(self.text) if m in self.earlier), None)
 
     @model_validator(mode="after")
-    def _recalled(self) -> FocusWeek:
-        if self.recalled is not None and self.recalled not in self.papers:
-            raise ValueError("the paper brought back is not one of the earlier papers")
+    def _one_back(self) -> FocusWeek:
+        if len([m for m in marked(self.text) if m in self.earlier]) > 1:
+            raise ValueError("more than one earlier paper brought back")
         return self
 
 
@@ -191,7 +204,8 @@ def focus_day(topic: Topic, name: str, day: date, found: Sequence[Due]) -> Reque
     parts.append("Central papers:\n\n" + (_papers(central, day)[0] if central else "none"))
     if related:
         parts.append("Related papers:\n\n" + _papers(related, day)[0])
-    output = _answer(FocusDay, text_words=TEXT_WORDS["focus_day"])
+    papers = frozenset(d.paper_id for d in found)
+    output = _answer(FocusDay, text_words=TEXT_WORDS["focus_day"], papers=papers)
     return Request(system=FOCUS_DAY, user="\n\n".join(parts), output=output)
 
 
@@ -200,8 +214,7 @@ You write the daily digest of one research area for litwatch, which reads every 
 Write a short text, 80 to 180 words, on what happened in the area that day: its threads, naming \
 papers where they matter; it may name any of the day's papers. Then pick the one or two papers \
 that matter most, from the pick candidates only, each with one sentence why; keep it to one or \
-two, and pick none when there are no candidates. List in `mentioned` every other paper the text \
-names. Answer with the structured output only.
+two, and pick none when there are no candidates. Answer with the structured output only.
 
 {VOICE}"""
 
@@ -230,14 +243,16 @@ You write the weekly digest of one narrow research topic for litwatch, which rea
 arXiv paper. The digest lists the week's central papers itself; you write what the week was \
 about, 150 to 300 words: the thread through its papers, what moved and what is still open. You \
 are given the week's daily digests and papers, and earlier papers of the topic: when one of them \
-bears on this week's work and may have been forgotten, bring it back by name and say why, and \
-give its id in `recalled`; otherwise `recalled` is null. Answer with the structured output only.
+bears on this week's work and may have been forgotten, bring it back, marked like any paper, \
+and say why; bring back one at most. Answer with the structured output only.
 
 {VOICE}"""
 
 
 def _dailies(texts: Sequence[dict[str, Any]]) -> str:
-    return "\n\n".join(f"{_day(t['day'])}: {t['text']}" for t in texts) or "none written"
+    """Without their marks: the week's papers come with their ids below, and an id a daily
+    marked may be one the weekly is not given."""
+    return "\n\n".join(f"{_day(t['day'])}: {plain(t['text'])}" for t in texts) or "none written"
 
 
 def focus_week(
@@ -259,7 +274,8 @@ def focus_week(
         f"The week's papers ({len(found)}):\n\n{text}",
         f"Earlier papers of the topic:\n\n{back or 'none'}",
     ]
-    output = _answer(FocusWeek, papers=frozenset(e.paper_id for e in earlier))
+    ids = frozenset(e.paper_id for e in earlier)
+    output = _answer(FocusWeek, papers=frozenset(d.paper_id for d in found) | ids, earlier=ids)
     return Request(system=FOCUS_WEEK, user="\n\n".join(parts), output=output)
 
 
@@ -268,8 +284,7 @@ You write the weekly digest of one research {{scope}} for litwatch, which reads 
 paper. Write {{asked}}, 150 to 350 words, naming papers where they matter. Then pick exactly \
 {{picks}} papers that matter most from the week's papers, each with one sentence why; the \
 papers graded must read are the strongest candidates, but any of the week's papers may be \
-picked. List in `mentioned` every other paper the text names. Answer with the structured output \
-only.
+picked. Answer with the structured output only.
 
 {VOICE}"""
 

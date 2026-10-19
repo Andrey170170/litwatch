@@ -69,6 +69,12 @@ litwatch's prose ([pipeline.md](pipeline.md), section 3): objective, never addre
 builders", "required reading"), and clear to a reader who has not read the papers. Grades, model names,
 splits and other pipeline terms do not appear in digest text.
 
+The text names a paper by its title, shortened where it is long, and marks it where it first speaks of it, by its
+title or by what it does, as `[those words](its arXiv id)`; the Gist names papers without marks. The marks are how a digest knows the papers it
+mentions (and the earlier paper a Focus weekly brings back, one at most), so a mark of a paper the writer was not
+given fails the answer. The web app shows a marked name as the text runs, a link to the paper's page; whatever shows
+the text elsewhere, or gives it to the writer again (a weekly reads its week's dailies), shows the name alone.
+
 Topics' digests are written concurrently, each topic on its own database connection and in its own order (its failed digests tried again, the day's
 digest, Monday's weekly), so the nightly run's writer calls go out in a few batches ([models.md](models.md), batches)
 rather than one after another. When the wait runs to the nightly's deadline, the digests are written after it as

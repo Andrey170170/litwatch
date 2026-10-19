@@ -3605,7 +3605,7 @@
           "papers"
         ],
         "title": "Digest",
-        "description": "A digest in full: its text and every paper by role; why it failed, when it did."
+        "description": "A digest in full: its text, which marks each paper it names as [the name](its arXiv\nid), and every paper by role; why it failed, when it did."
       },
       "DigestCard": {
         "properties": {

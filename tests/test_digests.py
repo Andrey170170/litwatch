@@ -1,6 +1,6 @@
 """Digests: the arXiv listing a paper belongs to, which papers are due for each depth's digests,
 quiet days, a published digest as a record, the bounded wait before them, failed digests, the
-voice check, and the Digest tab's API. The `writer` role is scripted."""
+voice check, the papers a text marks, and the Digest tab's API. The `writer` role is scripted."""
 
 import asyncio
 import json
@@ -18,7 +18,7 @@ from litwatch.api.digests import today_run
 from litwatch.config import Config, Schedule
 from litwatch.core import Label, LabelValue, Status
 from litwatch.core.classification import Source
-from litwatch.core.digests import DigestPeriod, listing_day, voice_problems
+from litwatch.core.digests import DigestPeriod, listing_day, plain, voice_problems
 from litwatch.digests import writer
 from litwatch.feedback import word
 from litwatch.jobs import digests as digests_job
@@ -45,7 +45,8 @@ S = paper("2610.00004", title="Late to the party")
 
 class Writer:
     """The `writer` role, scripted: a valid answer built from the request's answer model (the
-    first candidates as picks), or each of `failures` raised in turn first."""
+    first candidates as picks, a Focus daily marking its first paper, a Focus weekly bringing
+    back the first earlier paper), or each of `failures` raised in turn first."""
 
     def __init__(self) -> None:
         self.failures: list[Exception] = []
@@ -61,9 +62,10 @@ class Writer:
             n = out.picks_range[1] if out.picks_range[0] else min(1, out.picks_range[1])
             picks = sorted(out.candidates)[:n]
             answer |= {"picks": [{"paper": p, "why": "It stands out."} for p in picks]}
-            answer["mentioned"] = []
-        if issubclass(out, writer.FocusWeek):
-            answer["recalled"] = next(iter(sorted(out.papers)), None)
+        if issubclass(out, writer.FocusDay):
+            answer["text"] += f" [The first]({min(out.papers)}) shows it."
+        if issubclass(out, writer.FocusWeek) and out.earlier:
+            answer["text"] += f" As [an earlier paper]({min(out.earlier)}) found."
         return json.dumps(answer)
 
     def gateway(self, config: Config, journal) -> Gateway:
@@ -298,6 +300,7 @@ async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_p
     ).fetchone()
     assert row["counts"]["papers"] == 2  # the paper brought back is not the week's
     assert P.title in w.asked[-1] and "Renamed since" not in w.asked[-1]  # as it was shown
+    assert "The first shows it" in w.asked[-1] and "](" not in w.asked[-1]  # dailies, unmarked
 
 
 async def test_the_owners_word_neither_makes_an_area_paper_due_nor_keeps_one(db):
@@ -794,6 +797,45 @@ def test_the_voice_check_names_each_rule_broken_and_spares_titles():
     assert voice_problems(shortened, ["Passing the Test You Trained On: Detector Rankings"]) == []
     question = "Do You Need a Bigger Probe? asks whether width or depth carries the signal."
     assert voice_problems(question, ["Do You Need a Bigger Probe? Width Versus Depth"]) == []
+    assert voice_problems("[Is It You?](2610.00001) finds a probe.") == []  # a marked name
+
+
+# -- the papers a text marks -----------------------------------------------------------------------
+
+TEXT = " ".join(["Probes recover hidden steps."] * 20)
+
+
+def answer(model, text: str, picks=(), gist: str = "words " * 40):
+    return model.model_validate_json(
+        json.dumps({"text": text, "gist": gist, "picks": [{"paper": p, "why": "."} for p in picks]})
+    )
+
+
+def test_a_digest_mentions_the_papers_its_text_marks_besides_its_picks():
+    area = writer._answer(
+        writer.Picked,
+        text_words=writer.TEXT_WORDS["area_day"],
+        papers=frozenset({P.id, Q.id, R.id}),
+        candidates=frozenset({P.id}),
+        picks_range=(1, 1),
+    )
+    text = f"[Traces]({R.id}) and [Hidden steps]({P.id}) agree; [Traces]({R.id}) adds {TEXT}"
+    out = answer(area, text, picks=[P.id], gist=f"[Traces]({R.id}) " + "words " * 40)
+    assert out.mentioned == [R.id]  # once, without the pick
+    assert out.gist.startswith("Traces words")  # a Gist names papers without marks
+    assert plain(out.text).startswith("Traces and Hidden steps agree; Traces adds")
+    with pytest.raises(ValueError, match="not one of the digest's"):
+        answer(area, f"[Made up](2610.99999) {TEXT}", picks=[P.id])
+
+
+def test_a_focus_weekly_brings_back_the_one_earlier_paper_its_text_marks():
+    weekly = writer._answer(
+        writer.FocusWeek, papers=frozenset({P.id, Q.id, R.id}), earlier=frozenset({Q.id, R.id})
+    )
+    assert answer(weekly, f"[This week's]({P.id}) {TEXT}").recalled is None
+    assert answer(weekly, f"[This week's]({P.id}) and [back]({Q.id}) {TEXT}").recalled == Q.id
+    with pytest.raises(ValueError, match="more than one"):
+        answer(weekly, f"[One]({Q.id}) and [two]({R.id}) {TEXT}")
 
 
 # -- the Digest tab --------------------------------------------------------------------------------
