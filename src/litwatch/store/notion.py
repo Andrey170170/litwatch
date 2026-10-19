@@ -102,6 +102,12 @@ async def save_page(conn: psycopg.AsyncConnection, integration: str, p: Page) ->
     )  # fmt: skip
 
 
+async def forget_page(conn: psycopg.AsyncConnection, integration: str, paper_id: str) -> None:
+    await conn.execute(
+        "DELETE FROM notion_pages WHERE integration = %s AND paper_id = %s", (integration, paper_id)
+    )
+
+
 async def rewrite_properties(conn: psycopg.AsyncConnection, integration: str) -> None:
     """Forget every page's properties hash, so each row is written again."""
     await conn.execute(

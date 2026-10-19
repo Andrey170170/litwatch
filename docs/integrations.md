@@ -255,17 +255,18 @@ start.
 
 **On start** (`setup`) it reconciles, safely again and again: it looks for, or makes, the database
 "litwatch papers", its columns, the page "How to read this" beside it, the view All papers, and per
-exported topic a grade column and a view; then it writes every paper that qualifies or already has
-a page. Anything it would make is looked for first (the database and the guide by title, views by
-name, pages by arXiv id, asking again for a moment after a lost reply), so nothing is made twice.
-A view is made once and is then the owner's: one deleted in Notion is not made again. A view
-is made showing Title, Grade, Topic, TL;DR, Published and Status; the other columns are in it,
-hidden, for the owner to show. A topic
-added gets its column, view and papers; a topic dropped keeps its column, view and values, no
-longer written; a renamed topic has its column renamed and its new name written to each row's
-Topic (Notion's API cannot rename an option, so the old one is removed). A raised minimum turns the
-papers below it No longer listed; a lowered one lists them again. A changed `parent_page` starts
-afresh under the new page and leaves the old database as it is.
+exported topic a grade column and a view; then it writes every paper that qualifies or already has a
+page. Anything it would make is looked for first (the database and the guide by title, views by
+name, pages by arXiv id, asking again for a moment after a lost reply), so nothing is made twice. A
+view is made once and is then the owner's: one deleted in Notion is not made again. A column
+litwatch writes that is deleted in Notion is put back under a new id, so a view grouped, filtered or
+sorted by the old one needs that set again by hand. A view is made showing Title, Grade, Topic,
+TL;DR, Published and Status; the other columns are in it, hidden, for the owner to show. A topic
+added gets its column, view and papers; a topic dropped keeps its column, view and values, no longer
+written; a renamed topic has its column renamed and its new name written to each row's Topic
+(Notion's API cannot rename an option, so the old one is removed). A raised minimum turns the papers
+below it No longer listed; a lowered one lists them again. A changed `parent_page` starts afresh
+under the new page and leaves the old database as it is.
 
 **Each page**: Title, Grade (the best over the exported topics), Topic, TL;DR (the Gist), Published,
 Authors, Venue (linked to the published version), arXiv, PDF, Added (the day it entered the list),

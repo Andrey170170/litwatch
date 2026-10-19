@@ -471,6 +471,19 @@ async def test_a_page_whose_reply_was_lost_is_delisted_if_its_paper_left_meanwhi
     assert "litwatch re-checked it" in fake.value(row, "Why")
 
 
+async def test_a_creation_that_never_happened_makes_no_page_once_its_paper_left(world):
+    conn, fake = world, FakeNotion(PARENT)
+    assert await start(conn, notion(fake))
+    listed = {"grade": "must_read", "shown": "Must read", "why": None, "since": None}
+    begun = state.Page(A.id, added=datetime(2026, 10, 19).date(), topics={FAITH.slug: listed})
+    await state.save_page(conn, "notion", begun)  # saved, then stopped before the request
+    await grade(conn, A, FAITH.slug, "adjacent")
+
+    assert await start(conn, notion(fake))
+    assert fake.rows() == []
+    assert await state.page(conn, "notion", A.id) is None
+
+
 async def test_a_column_put_back_is_filled_even_when_the_reply_was_lost(world):
     conn, fake = world, FakeNotion(PARENT)
     await texts(conn, A, gist="Probes catch hidden steps.")
@@ -672,6 +685,12 @@ async def test_a_topic_may_not_take_the_name_of_one_exported_before(world):
     assert await start(conn, notion(fake, topics={FAITH.slug: "Faith"}))
     assert not await start(conn, notion(fake, topics={MON.slug: "Faith"}))
     assert "Faith" in (await outbox.cursor(conn, "notion")).setup_error
+    # Nor that of one renamed in the same change.
+    renamed = {FAITH.slug: "Faithfulness", MON.slug: "Faith"}
+    assert not await start(
+        conn, notion(fake, topics=renamed), datetime.now(UTC) + timedelta(hours=1)
+    )
+    assert len({e["column"] for e in (await state.database(conn, "notion")).topics.values()}) == 1
 
 
 async def test_a_new_topic_never_takes_a_view_litwatch_made_for_another(world):

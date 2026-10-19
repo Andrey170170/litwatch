@@ -317,11 +317,12 @@ class Notion:
         if source.get("in_trash"):
             raise NotionError(TRASHED)
         props = source["properties"]
-        held = {e["name"] for s, e in db.topics.items() if s not in self.exported}
-        if clash := sorted(t.name for t in self.exported.values() if t.name in held):
+        # A name another topic's column is recorded under, renamed now or not, is that topic's.
+        held = {e["name"]: s for s, e in db.topics.items()}
+        if clash := sorted(t.name for s, t in self.exported.items() if held.get(t.name, s) != s):
             raise NotionError(
-                f"already the column of a topic exported before: {', '.join(clash)}; "
-                "give the topic another name"
+                f"already the column of another topic: {', '.join(clash)}; give the topic "
+                "another name, or rename the other first"
             )
         by_id = {unquote(p["id"]): p for p in props.values()}
         missing = [c for c in COLUMNS if c not in props and c not in (TITLE, READERS)]
@@ -500,7 +501,10 @@ class Notion:
         written = (page.page_id, page.properties_hash, page.body_hash, page.topics)
         if page.page_id is None:
             page.topics = topics  # kept with the creation: a lost reply is then known listed
-            await self._create(conn, page, properties, body, begun)
+            listed = any(topics[s]["shown"] != DROPPED for s in self.exported if s in topics)
+            if not await self._create(conn, page, properties, body, begun, make=listed):
+                await state.forget_page(conn, self.name, paper_id)  # it never got a page
+                return
         try:
             if page.properties_hash != (digest := _hash(properties)):
                 path = f"/pages/{page.page_id}"
@@ -527,10 +531,12 @@ class Notion:
         properties: dict[str, Any],
         body: list[dict[str, Any]],
         begun: bool,
-    ) -> None:
-        """Find the paper's page by its arXiv id, or make it. A creation `begun` before may have
-        happened with its reply lost: then the page is looked for again, a little later, before
-        another is made."""
+        *,
+        make: bool,
+    ) -> bool:
+        """Find the paper's page by its arXiv id, or make it when `make` (the paper is listed);
+        returns whether it has one. A creation `begun` before may have happened with its reply
+        lost: then the page is looked for again, a little later, before another is made."""
         for tried in range(self.adopt_tries if begun else 1):
             if tried:
                 await asyncio.sleep(self.adopt_wait)
@@ -543,7 +549,9 @@ class Notion:
                 page.page_id = found["results"][0]["id"]
                 page.properties_hash = page.body_hash = None  # what it holds is not known
                 log.info("%s: found the page of %s", self.name, page.paper_id)
-                return
+                return True
+        if not make:
+            return False
         await state.save_page(conn, self.name, page)  # begun: its reply may be lost
         made = await self.notion.request(
             "POST",
@@ -557,6 +565,7 @@ class Notion:
         page.page_id, page.properties_hash = made["id"], _hash(properties)
         page.body_hash = _hash(body) if len(body) <= BLOCKS else None
         await state.save_page(conn, self.name, page)
+        return True
 
     async def _replace_body(self, block: str, body: list[dict[str, Any]]) -> None:
         """Delete the page's blocks, then append the new ones."""
