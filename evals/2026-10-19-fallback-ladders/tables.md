@@ -94,6 +94,10 @@
 
 Every recorded call: 1548, ≥ $9.03.
 
+Calls that never ended: 0, up to $0.00 reserved.
+
+Current calls that cost more than their reservation as reckoned now: 0.
+
 ### Answers on the refusals set
 
 #### `judge` · 2610.13116 · alignment-and-safety · DRYLAB-Bench: Benchmarking the Biosecurity Risk of Agentic LLM Mutation Design

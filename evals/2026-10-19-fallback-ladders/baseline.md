@@ -100,3 +100,19 @@ From runs/ alone, each case's latest answer to its request as built now.
 - sonnet: solid 11, incremental 10; the overstatement line on 18 of 21
 - sol: solid 17, incremental 6; the overstatement line on 14 of 23; differing from sonnet: incremental → solid 4
 - kimi: solid 18, incremental 5; the overstatement line on 9 of 23; differing from sonnet: incremental → solid 5
+
+# Production's calls
+
+Every call in the copy's journal, to 2026-10-19 09:06 UTC, by role. Failed is a call that ended
+in an error: a refusal, an unusable answer or the provider's.
+
+| Role | Calls | Failed |
+| --- | --- | --- |
+| `analyse` | 5220 | 0 |
+| `area_check` | 960 | 0 |
+| `brief` | 335 | 2 |
+| `check` | 798 | 0 |
+| `classify` | 5220 | 0 |
+| `field_grade` | 4422 | 0 |
+| `judge` | 1750 | 6 |
+| `writer` | 38 | 0 |

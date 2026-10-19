@@ -18,9 +18,11 @@ and compared there with the role's own model re-asked and with each candidate
 ([baseline.md](2026-10-19-fallback-ladders/baseline.md)), which also counts what each candidate answered and where it
 differs from the role's own model.
 
-After the run, [ladders.toml](2026-10-19-fallback-ladders/ladders.toml) gained each candidate's dearest price
-(`price_max`) and larger output reserves, so that a reservation bounds what a call can cost; neither is part of a
-call's identity, and no recorded call cost more than its tokens at that price.
+The run's calls went out as the pipeline sends them, OpenRouter's uncapped. Since the run, the harness bounds a
+call's cost: it sends each OpenRouter call capped at the ladder's `reserve_output_tokens` (above every output the
+run's calls made), and reserves the input at a token a byte, at each candidate's dearest price (`price_max`, added
+to [ladders.toml](2026-10-19-fallback-ladders/ladders.toml)). None of these is part of a call's identity, and no
+recorded call cost more than its reservation as reckoned now (the last line of tables.md).
 
 ## The cases
 
@@ -100,17 +102,20 @@ call to the role's requests, refused ones included, over the usable answers.
   the two papers Haiku refused.
 - **`field_grade` is the weakest.** Luna and DeepSeek agree with Haiku on 30 and 34 Fits of 60 and 48 and 51 sides.
   Haiku re-asked agrees with its own nightly answer on 48 Fits and 55 sides, and the candidates with that nightly
-  answer on 29 and 35 Fits, 51 and 52 sides ([production.csv](2026-10-19-fallback-ladders/production.csv)). Both grade higher than Haiku: of the 60, Haiku's related became
-  central 17 times for Luna and 11 for DeepSeek, its adjacent central or related 11 and 5 times. On the refusals set
-  the shift goes the other way (Haiku's adjacent is their none, 14 and 19 times of 23), on the right side of the line.
-  A Field grade has no rubric, and there is no owner label to say which is right; a Field paper's level in mixed
-  lists is lowered by two, so the shift shows mostly on the Field's own page.
+  answer on 29 and 35 Fits, 51 and 52 sides ([production.csv](2026-10-19-fallback-ladders/production.csv)). Both
+  grade higher than Haiku: of the 60, Haiku's related became central 17 times for Luna and 11 for DeepSeek, its
+  adjacent central or related 11 and 5 times. On the refusals set the shift goes the other way (Haiku's adjacent is
+  their none, 14 and 19 times of 23), on the right side of the line. A Field grade has no rubric, and there is no
+  owner label to say which is right.
 
-  The standard a fallback grader is held to is the side of the line, the grade's decision of whether a paper is
-  in the Field's list at all: DeepSeek keeps production's side on 52 of 60, against 55 for Haiku re-asked, three
-  cases. The level is the stated cost: a fallback's papers sit higher on the Field's page than Haiku's would. Haiku
-  refused no `field_grade` case here, and none of production's 4,422 `field_grade` calls to 2026-10-19 failed, so
-  the fallback is rarely asked.
+  A Field grade does not decide whether a paper is on the Field's page (every paper in the Field's class is), but
+  how it shows there: its level, and two below it in mixed lists. On the exact Fit both candidates are clearly below
+  Haiku re-asked (35 and 29 of 60, against 48); read as R1's measure, that drops both and leaves the role no
+  fallback. The list instead holds a fallback grader to the side of the line, as the proxy for whether the grade
+  calls the paper relevant: DeepSeek keeps production's side on 52 of 60, against 55 for Haiku re-asked, three
+  cases. The cost is the level: a fallback's related papers often show as central. And it is rarely asked: Haiku
+  refused no `field_grade` case here, and none of production's 4,422 `field_grade` calls to 2026-10-19 failed
+  ([baseline.md](2026-10-19-fallback-ladders/baseline.md), "Production's calls").
 - **`brief`: Kimi is lenient.** It rated all 10 quality papers solid (Sonnet: 5 solid, 5 incremental) and drew the
   overstatement line on 1 of 10 (Sonnet: 6), and on 9 of the 23 refusals-set papers (Sonnet 18 of 21, Sol 14 of 23).
   Sol is closer (Weight 8 of 10, line 6 of 10; 17 and 15 of 21 on the refusals set) but also flags less than Sonnet:
@@ -139,18 +144,24 @@ call to the role's requests, refused ones included, over the usable answers.
   3, against 5 and 5 for Opus and Sonnet) and covered the fewest of interpretability's must-reads (7 of 14). Five
   digests and one reader can show a writer that fails outright, and none did; they can't rank Opus and Sonnet.
 
-  The standard a fallback writer is held to is the one the role's own model meets: faithfulness no lower than
-  Opus's lowest here (3 of 5), and no invented pick. Readability is the price, not the bar: a digest that fails
-  still goes out unwritten (the plan's failed digest pushes its list), so a hard-to-read digest is set against
-  none. Kimi meets the standard on all five and costs readability on the two largest days; it is also the one writer
-  outside Anthropic, the lab both models before it share.
+  Against Opus digest by digest (R1): Kimi's faithfulness is lower on three digests by a point each, higher on
+  one (21) and equal on one (23); its readability lower on three (by 1, 2 and 2) and equal on two. The losses
+  gather on the two largest days, 24 and 30, where the reader found Kimi dropping a qualification (a causal claim
+  the request makes only for minimal transformers; OwlSight called a faithfulness detector). Opus's own 3 is on
+  digest 23, where all three made the same error. With one reader and five digests, one point on three digests is
+  within what a second reader or another day could move, and Kimi was the best writer of digest 21: it leans worse
+  on large days, which this set does not show as clearly worse. The list keeps it last. It writes only after two
+  failed digests of a topic in a row, both from Anthropic models, and the alternative then is no digest: a failed
+  digest is retried every run and the last model is kept until one is published. Read as clearly worse, the list
+  is Opus → Sonnet, and a topic whose digest both refuse stays unwritten until one doesn't.
 
 ## For P2
 
-- **Gemini's filter is a provider error, and D4 never moves a provider error down.** If Gemini 3.8 Flash, last on
-  `check`'s list, filters a paper, the completion has no choices and the step waits on a provider error; a night of
-  it goes to Vergil as an OpenRouter outage. It did not happen in 23 papers here, so the list keeps Gemini, but P2's
-  tests should pin down which way that case goes.
+- **A Google filter has two shapes, and only one moves down.** A completion with no choices, the shape Gemini 4
+  Argon's filter took in the Sonnet replay, is a provider error, which D4 never moves down: the step waits, and a
+  night of it goes to Vergil as an OpenRouter outage. A `finish_reason` of `content_filter` is a refusal, which moves
+  down. Gemini 3.8 Flash, last on `check`'s list, filtered none of 23 papers here, so the list keeps it; P2's tests
+  should pin down both shapes.
 - **Haiku refuses in `analyse` too** (2 of 23 here, both `bio`); the refusals seen until now were `judge`'s and the
   Brief's.
 - **Opus is likely to refuse 2606.11150 in `judge`** when a Focus or Area topic next grades it.
@@ -165,9 +176,9 @@ OpenAI and Moonshot against Meta, DeepSeek and Google.
 | `judge` | Opus 5.5 → Sonnet 5.5 → GPT-6.1 Sol → Kimi K3 | Unchanged: all three answered every case, Opus's three refusals included, and match the owner as well as Opus does |
 | `check` | Muse Spark 1.3 → DeepSeek V4.1 Flash 1017 → Gemini 3.8 Flash | Unchanged: both answered all 104 and match the owner as Muse does; MiniMax has no structured output, DeepSeek V4 Pro adds no lab |
 | `analyse` | Haiku 5.5 → GPT-6 Luna → DeepSeek V4.1 Flash | Unchanged: both answered Haiku's two refusals and agree with it about equally; Luna costs less |
-| `field_grade` | Haiku 5.5 → **DeepSeek V4.1 Flash → GPT-6 Luna** | Swapped: DeepSeek is the closer of two generous graders (35 Fits of 60 against 29, by production's answers), a small margin; the cost of either is negligible |
+| `field_grade` | Haiku 5.5 → **DeepSeek V4.1 Flash → GPT-6 Luna** | Swapped: both keep production's side of the line about as Haiku re-asked does (52 and 51 of 60, against 55) and grade higher; DeepSeek is the closer on the Fit (35 against 29), a small margin; rarely asked |
 | `brief` | Sonnet 5.5, high → GPT-6.1 Sol, high | **Kimi K3 dropped** (R1): on ordinary papers it rated every paper solid and flagged 1 overstatement in 10; Sol answered both of Sonnet's refusals |
-| `writer` | Opus 5.5 → Sonnet 5.5 → Kimi K3 | Unchanged: every digest written; Kimi the weakest on large days, kept last because a digest late in the list beats no digest |
+| `writer` | Opus 5.5 → Sonnet 5.5 → Kimi K3 | Unchanged: every digest written; Kimi leans worse on the two largest days, not clearly worse in five digests; last, it writes only after two Anthropic failures in a row, when the alternative is no digest |
 
 ## The fallbacks' answers on the refused papers
 
