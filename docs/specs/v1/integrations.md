@@ -97,7 +97,8 @@ owner's word (the owner named as the configuration says), litwatch re-checking t
 definition; and it was judged off-topic or less important (its Fit fell, or only its Weight). The cause comes from
 the event: `grade.changed` gains a `cause` field (`verdict`, `weight`, `owner`, `taxonomy`), written by whatever
 changed the grade, while the integration still checks the present grade before writing. Pages are never deleted.
-A paper listed again for a topic loses that topic's line.
+A paper listed again for a topic loses that topic's line. The integration keeps each topic's line in its own
+table, so a rewrite for another event or after a restart keeps it, and a `grade.changed` touches only its topic's line.
 
 **Who owns what.** The integration creates the database, its columns and its views once, when it is set up, under a
 page the configuration names. After that it writes only its own properties and the page body; views, column widths
