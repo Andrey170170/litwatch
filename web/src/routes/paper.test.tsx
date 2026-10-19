@@ -32,6 +32,8 @@ const paper = {
   card_requestable: true,
 };
 const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
+/** Whether a text is on the page and not in the hidden half of the Brief rung's switch. */
+const shown = (text: string) => screen.queryAllByText(text).some((el) => !el.closest('[aria-hidden="true"]'));
 const brief = { id: 1, text: "The brief, from the full text.", overstatement: "The abstract overstates: the gain holds only for 7B models.", revision: 1, arxiv_version: 1, source: "latex", written_at: "2026-10-14T03:00:00Z" };
 
 describe("a paper's page", () => {
@@ -43,7 +45,7 @@ describe("a paper's page", () => {
     expect(screen.getByText("The brief, from the full text.")).toBeInTheDocument();
     const callout = screen.getByText("The abstract overstates: the gain holds only for 7B models.");
     expect(callout.compareDocumentPosition(screen.getByText("The brief, from the full text."))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(screen.queryByText("We study things.")).toBeNull();
+    expect(shown("We study things.")).toBe(false);
     expect(screen.queryByText(/No Brief yet/)).toBeNull();
     expect(screen.queryByText(/older revision/)).toBeNull();
   });
@@ -79,7 +81,7 @@ describe("a paper's page", () => {
     expect(screen.getByText(/Written for revision 1 of the text \(arXiv v1\); the current one, revision 2, waits for its full text/)).toBeInTheDocument();
     renderApp("/paper/2610.00003");
     await waitFor(() => expect(screen.getByText("The Brief waits for the paper's full text; the abstract stands in.")).toBeInTheDocument());
-    expect(screen.getByText("We study things.")).toBeInTheDocument();
+    expect(shown("We study things.")).toBe(true);
   });
 
   it("runs a stuck full-text pass now from its note, and says so when the page is behind", async () => {
@@ -458,5 +460,100 @@ describe("a paper's page", () => {
     expect(await screen.findByText("Asked for · queued")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deep read · queued" })).toBeDisabled();
     expect(reads).toBe(2);
+  });
+});
+
+describe("a paper's Brief and abstract", () => {
+  it("opens on the Brief, switches to the abstract in its place, and opens on the Brief again on the next paper", async () => {
+    viewport(true);
+    scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": { ...paper, brief },
+      "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", title: "Epic two", brief },
+    });
+    const { router } = renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    const show = screen.getByRole("group", { name: "Show" });
+    expect(within(show).getByRole("button", { name: "Brief" })).toHaveAttribute("aria-pressed", "true");
+    expect(shown("The brief, from the full text.")).toBe(true);
+    expect(shown("We study things.")).toBe(false);
+    await userEvent.click(within(show).getByRole("button", { name: "Abstract" }));
+    expect(shown("We study things.")).toBe(true);
+    // the overstatement and the revision belong to the Brief's view
+    expect(shown("The brief, from the full text.")).toBe(false);
+    expect(shown("The abstract overstates: the gain holds only for 7B models.")).toBe(false);
+    await router.navigate({ to: "/paper/$", params: { _splat: "2610.00003" } });
+    await screen.findByRole("heading", { name: "Epic two" });
+    expect(within(screen.getByRole("group", { name: "Show" })).getByRole("button", { name: "Brief" })).toHaveAttribute("aria-pressed", "true");
+    expect(shown("The brief, from the full text.")).toBe(true);
+  });
+
+  it("has no switch without a Brief", async () => {
+    viewport(false);
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.queryByRole("group", { name: "Show" })).toBeNull();
+    expect(screen.getByText("Abstract")).toBeInTheDocument();
+    expect(shown("We study things.")).toBe(true);
+  });
+});
+
+describe("a paper's topic rows", () => {
+  const topic = (slug: string, name: string, grade: string | null, rarity: string | null) => ({ topic: { ...badge, slug, name, monogram: slug.toUpperCase() }, fit: grade ? "related" : null, grade, rarity, verdict: null, missed: false });
+  // in the API's order: Focus, Area, Field
+  const many = {
+    ...paper,
+    topics: [topic("aa", "Adj one", "adjacent", "uncommon"), topic("nn", "None one", "none", "common"), topic("mr", "Must one", "must_read", "epic"), topic("ab", "Adj two", "adjacent", "uncommon"), topic("rl", "Rel one", "relevant", "rare"), topic("ug", "Ungraded one", null, null)],
+  };
+  const railNames = () => [...document.querySelectorAll("#rail-topics .tprow .nm")].map((n) => n.textContent);
+
+  it("go by grade, fold after two with the rest's badges and count, and hold still when a label regrades one", async () => {
+    viewport(true);
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      // labelling Must one none makes it a none
+      "GET /api/papers/2610.00002": () => (calls.some((c) => c.method === "PUT") ? { ...many, topics: many.topics.map((t) => (t.topic.slug === "mr" ? { ...t, grade: "none", rarity: "common", label: { value: "none" } } : t)) } : many),
+      "PUT /api/labels/mr/2610.00002": { saved: false },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(railNames()).toEqual(["Must one", "Rel one"]);
+    const fold = screen.getByRole("button", { name: /\+4 ·/ });
+    expect(fold).toHaveTextContent("+4 · 2 adjacent, 1 none, 1 ungraded");
+    expect(within(fold).getAllByTitle(/one|two/).map((b) => b.title)).toEqual(["Adj one", "Adj two", "None one", "Ungraded one"]);
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(fold);
+    expect(railNames()).toEqual(["Must one", "Rel one", "Adj one", "Adj two", "None one", "Ungraded one"]);
+    await userEvent.click(screen.getAllByRole("button", { name: "Label" })[0]!);
+    await userEvent.click(within(screen.getByRole("group", { name: "Fit for Must one" })).getByRole("button", { name: "none" }));
+    await waitFor(() => expect(document.querySelector('[data-topic="mr"] .gr')).toHaveTextContent("none"));
+    expect(railNames()).toEqual(["Must one", "Rel one", "Adj one", "Adj two", "None one", "Ungraded one"]);
+  });
+
+  it("have no fold with two rows", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...many, topics: many.topics.slice(0, 2) } });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(railNames()).toEqual(["Adj one", "None one"]);
+    expect(document.querySelector(".tpfold")).toBeNull();
+  });
+
+  it("go the same way in the phone's paper sheet", async () => {
+    viewport(false);
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": many });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const sheet = screen.getByRole("dialog", { name: "The paper" });
+    const names = () => [...sheet.querySelectorAll(".slab .nm")].map((n) => n.textContent);
+    expect(names()).toEqual(["Must one", "Rel one"]);
+    const fold = within(sheet).getByRole("button", { name: /\+4 ·/ });
+    expect(fold).toHaveTextContent("+4 · 2 adjacent, 1 none, 1 ungraded");
+    await userEvent.click(fold);
+    expect(names()).toEqual(["Must one", "Rel one", "Adj one", "Adj two", "None one", "Ungraded one"]);
   });
 });

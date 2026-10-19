@@ -1,11 +1,11 @@
-/** The ladder (DESIGN.md, "The ladder"): Gist, the Brief or the abstract standing in for it, the Deep card, the paper. */
+/** The ladder (DESIGN.md, "The ladder"): Gist, the Brief with a switch to the abstract, or the abstract standing in for it, the Deep card, the paper. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fullDate } from "@/lib/format";
 import { useDesktop } from "@/hooks/useDesktop";
 import { DoiForm, type Paper } from "./Actions";
 import { DeepCard } from "./DeepCard";
 
-export function Rung({ name, extra, className, children }: { name: string; extra?: ReactNode; className?: string; children: ReactNode }) {
+export function Rung({ name, extra, className, children }: { name: ReactNode; extra?: ReactNode; className?: string; children: ReactNode }) {
   return (
     <section className={`rung${className ? ` ${className}` : ""}`}>
       <div className="rl">
@@ -147,10 +147,34 @@ export function BriefBody({ paper, brief }: { paper: Paper; brief: Brief }) {
 /** Where a Brief, and the Gist written with it, came from: the paper's LaTeX source or its PDF. */
 const from = (brief: Brief) => (brief.source === "latex" ? "from the LaTeX" : "from the PDF");
 
+/** The Brief, with a switch to the abstract in its place. Both stay laid out in one cell, the unseen one hidden, so
+ * switching moves nothing else on the page; it opens on the Brief for every paper. */
 function BriefRung({ paper, brief }: { paper: Paper; brief: Brief }) {
+  const [abstract, setAbstract] = useState(false);
+  const pick = (label: string, on: boolean, to: boolean) => (
+    <button className={on ? "on" : ""} aria-pressed={on} onClick={() => setAbstract(to)}>
+      {label}
+    </button>
+  );
+  const name = (
+    <span className="rsw" role="group" aria-label="Show">
+      {pick("Brief", !abstract, false)}
+      <span className="sep" aria-hidden>
+        |
+      </span>
+      {pick("Abstract", abstract, true)}
+    </span>
+  );
   return (
-    <Rung name="Brief" extra={<span className="faint normal-case tracking-normal">{from(brief)}</span>}>
-      <BriefBody paper={paper} brief={brief} />
+    <Rung name={name} extra={<span className={`faint normal-case tracking-normal${abstract ? " invisible" : ""}`}>{from(brief)}</span>}>
+      <div className="swap">
+        <div className={abstract ? "invisible" : ""} aria-hidden={abstract}>
+          <BriefBody paper={paper} brief={brief} />
+        </div>
+        <div className={abstract ? "" : "invisible"} aria-hidden={!abstract}>
+          <p className="prose">{paper.abstract}</p>
+        </div>
+      </div>
     </Rung>
   );
 }

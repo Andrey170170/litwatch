@@ -554,6 +554,18 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .prose.gist { font-size: 16px; line-height: 1.5; color: var(--fg); }
 .overst { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--sig); background: color-mix(in srgb, var(--sig) 10%, transparent); font-size: 13.5px; font-weight: 600; }
 .why0 { font-size: 12px; color: var(--fg3); margin-bottom: 6px; }
+/* the Brief rung's switch to the abstract: the shown one in the rung's colour; both texts share one cell */
+.rsw { display: inline-flex; gap: 8px; }
+.rsw button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--fg3); }
+.rsw button:hover { color: var(--fg); }
+.rsw button.on { color: var(--sig); }
+.rsw .sep { color: var(--line); }
+@container (min-width: 900px) {
+  .rsw { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .rsw .sep { display: none; }
+}
+.swap { display: grid; }
+.swap > * { grid-area: 1 / 1; min-width: 0; }
 /* a Brief that found the abstract overstating says so first (DESIGN.md, "The ladder") */
 .overst { border-left: 3px solid var(--sig); background: color-mix(in srgb, var(--sig) 8%, transparent); padding: 7px 11px; margin: 0 0 10px; font-size: 13.5px; }
 .oldrev { display: inline-block; font-size: 12px; color: var(--fg3); margin-bottom: 6px; padding: 4px 8px; border: 1px dashed var(--line); }
@@ -619,6 +631,16 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 .tprow .th span { font-size: 11.5px; color: var(--fg); }
 .tprow .lb { font: 700 11.5px var(--font-name); text-transform: uppercase; letter-spacing: 0.06em; }
 .tprow :is(.th, .lb):active { transform: translateY(1px); background: var(--hover); }
+/* the fold after the first two topic rows: the hidden rows' badges and their count by grade, in their colours */
+.tpfold { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 10px; border-top: 1px solid var(--line2); border-left: 3px solid var(--line); font-size: 12px; color: var(--fg2); text-align: left; flex-wrap: wrap; }
+.tpfold:hover { background: var(--hover); color: var(--fg); }
+.tpfold .car { display: inline-flex; width: 10px; color: var(--fg3); }
+.tpfold .car::before { content: ""; border: 5px solid transparent; border-left: 6px solid currentColor; border-right: 0; transition: transform 0.12s ease; }
+.tpfold .car.open::before { transform: rotate(90deg); }
+.tpfold .bs { display: inline-flex; gap: 4px; }
+.tpfold .ct { font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; }
+.tpfold .ct b { font-weight: 600; }
+.sheet .tpfold { border-top: 0; margin: 0 0 16px; padding-left: 10px; min-height: 40px; }
 .why { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px 10px 17px; border-top: 1px dashed var(--line2); background: color-mix(in srgb, var(--fg) 3%, transparent); animation: lw-fade 0.15s ease-out; }
 .why button:not(.seg) { padding: 4px 10px; border: 1px solid var(--line); font-size: 12.5px; color: var(--fg2); }
 .why button:hover, .why button.on { border-color: var(--acc); color: var(--fg); }
