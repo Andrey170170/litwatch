@@ -22,6 +22,10 @@ No case answered by production.
 | haiku | 60 | 48/60 | 55/60 |
 | luna | 60 | 29/60 | 51/60 |
 | ds-flash | 60 | 35/60 | 52/60 |
+| sonnet | 60 | 30/60 | 49/60 |
+| sol | 59 | 28/59 | 50/59 |
+| gemini-flash | 60 | 30/60 | 49/60 |
+| ds-pro | 60 | 28/60 | 47/60 |
 
 ## `analyse`
 
@@ -70,12 +74,20 @@ From runs/ alone, each case's latest answer to its request as built now.
 - haiku: central 21, related 20, adjacent 16, none 3
 - luna: central 44, related 7, adjacent 5, none 4; differing from haiku: related → central 17, adjacent → central 6, adjacent → related 5, related → adjacent 1, adjacent → none 1
 - ds-flash: central 35, adjacent 12, related 7, none 6; differing from haiku: related → central 11, related → adjacent 4, adjacent → none 4, adjacent → central 4, adjacent → related 1, none → adjacent 1, central → related 1
+- sonnet: central 31, related 18, adjacent 9, none 2; differing from haiku: adjacent → related 10, related → central 9, related → adjacent 3, none → adjacent 1, adjacent → central 1
+- sol: central 48, none 5, adjacent 4, related 2; differing from haiku: related → central 17, adjacent → central 10, adjacent → none 2, related → adjacent 1, adjacent → related 1
+- gemini-flash: central 41, related 8, none 7, adjacent 4; differing from haiku: related → central 14, adjacent → central 6, adjacent → related 5, related → none 2, adjacent → none 2, related → adjacent 1
+- ds-pro: central 33, related 12, none 9, adjacent 6; differing from haiku: related → central 12, adjacent → central 6, adjacent → none 5, central → related 5, related → adjacent 4, adjacent → related 3, central → none 1
 
 ## `field_grade`, refusals set
 
 - haiku: adjacent 20, none 2, related 1
 - luna: none 16, central 4, adjacent 3; differing from haiku: adjacent → none 14, adjacent → central 3, related → central 1
 - ds-flash: none 22, related 1; differing from haiku: adjacent → none 19, adjacent → related 1, related → none 1
+- sonnet: adjacent 9, related 2, none 2; differing from haiku: adjacent → related 2
+- sol: none 11; differing from haiku: adjacent → none 9
+- gemini-flash: none 8, adjacent 5, related 1; differing from haiku: adjacent → none 6, adjacent → related 1
+- ds-pro: none 8, adjacent 3; differing from haiku: adjacent → none 6
 
 ## `analyse`, quality set
 
@@ -103,8 +115,8 @@ From runs/ alone, each case's latest answer to its request as built now.
 
 # Production's calls
 
-Every call in the copy's journal, to 2026-10-19 09:06 UTC, by role. Failed is a call that ended
-in an error: a refusal, an unusable answer or the provider's.
+Every call in the copy's journal, to 2026-10-19 09:06 UTC, by role. Failed is a call
+that ended in an error: a refusal, an unusable answer or the provider's.
 
 | Role | Calls | Failed |
 | --- | --- | --- |

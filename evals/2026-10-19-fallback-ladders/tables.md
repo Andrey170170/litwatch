@@ -59,6 +59,10 @@
 | haiku | `anthropic:claude-haiku-5-5` | 60 | 60 | 0 | 0 | 0 | 0 | – | – | $0.01 | $0.0002 |
 | luna | `openrouter:openai/gpt-6-luna` | 60 | 60 | 0 | 0 | 0 | 0 | 30/60 | 48/60 | $0.01 | $0.0001 |
 | ds-flash | `openrouter:deepseek/deepseek-v4.1-flash` | 60 | 60 | 0 | 0 | 0 | 0 | 34/60 | 51/60 | $0.04 | $0.0007 |
+| sonnet | `anthropic:claude-sonnet-5-5` | 60 | 60 | 0 | 0 | 0 | 0 | 36/60 | 46/60 | $0.14 | $0.0023 |
+| sol | `openrouter:openai/gpt-6.1-sol` | 60 | 59 | 0 | 0 | 0 | 1 | 28/59 | 47/59 | ≥ $0.13 | ≥ $0.0021 |
+| gemini-flash | `openrouter:google/gemini-3.8-flash` | 60 | 60 | 0 | 0 | 0 | 0 | 30/60 | 46/60 | $0.09 | $0.0015 |
+| ds-pro | `openrouter:deepseek/deepseek-v4-pro-0813` | 60 | 60 | 0 | 0 | 0 | 0 | 24/60 | 46/60 | $0.04 | $0.0007 |
 
 ### `field_grade`, refusals set
 
@@ -67,6 +71,10 @@
 | haiku | `anthropic:claude-haiku-5-5` | 23 | 23 | 0 | 0 | 0 | 0 | – | – | $0.01 | $0.0002 |
 | luna | `openrouter:openai/gpt-6-luna` | 23 | 23 | 0 | 0 | 0 | 0 | 5/23 | 20/23 | $0.00 | $0.0001 |
 | ds-flash | `openrouter:deepseek/deepseek-v4.1-flash` | 23 | 23 | 0 | 0 | 0 | 0 | 2/23 | 21/23 | $0.01 | $0.0004 |
+| sonnet | `anthropic:claude-sonnet-5-5` | 14 | 13 | 1 | 0 | 0 | 0 | 11/13 | 11/13 | $0.03 | $0.0025 |
+| sol | `openrouter:openai/gpt-6.1-sol` | 11 | 11 | 0 | 0 | 0 | 0 | 2/11 | 11/11 | $0.02 | $0.0021 |
+| gemini-flash | `openrouter:google/gemini-3.8-flash` | 14 | 14 | 0 | 0 | 0 | 0 | 7/14 | 13/14 | $0.03 | $0.0019 |
+| ds-pro | `openrouter:deepseek/deepseek-v4-pro-0813` | 11 | 11 | 0 | 0 | 0 | 0 | 5/11 | 11/11 | $0.01 | $0.0005 |
 
 ### `brief`, quality set
 
@@ -92,7 +100,7 @@
 | sonnet | `anthropic:claude-sonnet-5-5@medium` | 5 | 5 | 0 | 0 | 0 | 0 | $0.15 | $0.0290 |
 | kimi | `openrouter:moonshotai/kimi-k3@medium` | 5 | 5 | 0 | 0 | 0 | 0 | $0.06 | $0.0121 |
 
-Every recorded call: 1548, ≥ $9.03.
+Every recorded call: 1838, ≥ $9.52.
 
 Calls that never ended: 0, up to $0.00 reserved.
 
@@ -126,6 +134,10 @@ Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19
 - haiku: **adjacent**. The paper is a biosecurity benchmark that evaluates LLM agents' dangerous biological mutation design, so language models are the object of study but the main question is dual-use biological risk rather than the topic's subject of pretraining, tuning, or evaluating LMs as a research object in their own right; it sits closer to safety evaluation, which is out of scope.
 - luna: **adjacent**. The paper benchmarks LLMs’ biological design capabilities, but its main question is biosecurity risk assessment, an excluded safety research area.
 - ds-flash: **none**. The paper benchmarks the biosecurity risk of LLM agents designing hazardous mutations, which is safety research explicitly excluded from the topic rather than work on how language models are pretrained, tuned, evaluated for general capability, grounded, extended, or applied.
+- sonnet: *refused*: bio
+- sol: **none**. The paper benchmarks biosecurity risks from tool-augmented LLM mutation design, making safety evaluation its main subject and placing it outside this topic’s scope.
+- gemini-flash: **none**. The paper benchmarks the biosecurity risks of tool-augmented LLM agents, which falls under LLM safety and dual-use risk evaluation, an area explicitly out of scope for this topic.
+- ds-pro: **none**. The paper evaluates LLM agents for biosecurity risk in biological mutation design, which is a safety and alignment concern rather than research about language model pretraining, tuning, evaluation, grounding, or application to language tasks.
 
 #### `analyse` · 2610.13116 · safety-evaluations · DRYLAB-Bench: Benchmarking the Biosecurity Risk of Agentic LLM Mutation Design
 
@@ -169,6 +181,10 @@ Refused by `judge` (Opus 5.5), `refused: bio`, on the nights of 2026-10-17 to 19
 - haiku: **adjacent**. The paper studies data poisoning attacks on protein language models and retrieval corpora for protein design, which is a security study in biological sequence generation rather than a study of large language models as research objects in general text settings, so it only touches the subject through its use of autoregressive language models and retrieval augmentation.
 - luna: **adjacent**. The paper studies poisoning of protein-sequence foundation models rather than text foundation models, touching language-model pretraining and retrieval while focusing on protein-design security.
 - ds-flash: **none**. This paper studies poisoning attacks on protein language models and a protein design retrieval system, which is safety research on protein sequences rather than research on large language models or text foundation models.
+- sonnet: **related**. The paper studies data poisoning of pre-training corpora for autoregressive protein language models (ProtGPT2, ProGen2) and of retrieval corpora for a text-guided generator, which concerns pretraining and retrieval grounding of foundation models, but the models are protein sequence models and the work is framed as security research, which the topic scopes out of its core.
+- sol: **none**. The paper studies data-poisoning attacks on protein sequence models and retrieval-based protein generators, placing it in security research on biological foundation models rather than research on text foundation models.
+- gemini-flash: **adjacent**. The paper investigates pre-training and retrieval data poisoning in protein language models, which falls under safety research and focuses on biological sequences rather than text foundation models.
+- ds-pro: **none**. The paper studies protein language models as biological sequence generators and targets their data poisoning, which is a safety and integrity concern for protein design systems, not research on text foundation models.
 
 #### `analyse` · 2610.21200 · model-security · Poisoning the corpora of protein design systems during pre-training and retrieval
 
@@ -212,6 +228,10 @@ Refused by Opus 5.5 for the Brief in N6 (cyber); Sonnet 5.5 answered it then.
 - haiku: **adjacent**. The paper studies refusal and safety behavior of LLMs on harmful code requests, red-teaming and defense, which is safety research that the subject explicitly excludes as its own area, so it is at most adjacent to LLMs as objects of research.
 - luna: **none**. The paper studies refusal behavior, attacks, and defenses for harmful code generation, placing it in the excluded safety area rather than research on language models within this topic.
 - ds-flash: **none**. The paper studies refusal behavior, red-teaming attacks, and defenses for harmful code generation, which is safety research explicitly placed outside the topic's scope.
+- sonnet: **adjacent**. The paper studies LLM refusal behavior on harmful code generation, with jailbreak attacks and defenses, which is safety and red-teaming research that the topic excludes, though it does evaluate code-generation behavior of LLMs and uses representation analysis.
+- sol: **none**. The paper studies harmful-code jailbreaks, refusal mechanisms, and attack detection in LLMs, placing its main contributions in safety and interpretability research explicitly excluded from this topic.
+- gemini-flash: **none**. The paper focuses on safety refusal bypass and defense for malicious code generation, which falls squarely into alignment and safety research that is explicitly out of scope.
+- ds-pro: **none**. The paper targets safety and red-teaming of harmful code generation from LLMs, which is explicitly out of scope as alignment and safety research, not the pretraining, tuning, evaluation, grounding, extension, or application of language models as objects of research.
 
 #### `analyse` · 2610.17907 · jailbreaks · SpecCloak: Probing Harmful Code Generation through Engineering Specifications
 
@@ -255,6 +275,10 @@ From the archive's search, theme biosecurity.
 - haiku: **adjacent**. The paper builds an evaluation benchmark for LLM agents, which touches the subject's evaluation focus, but its main question is biosecurity risk, which falls under the excluded safety area rather than LLM research itself.
 - luna: **central**. The paper introduces a benchmark whose main purpose is to evaluate LLM agents’ capabilities on biological tasks, including biosecurity-relevant tasks.
 - ds-flash: **none**. The paper's main question is measuring LLM agents' biosecurity-relevant capabilities, which is safety research explicitly out of scope for the language models topic.
+- sonnet: **related**. The paper introduces a benchmark that evaluates LLM agents' biology and software capabilities, so LLM evaluation is its core, but its framing is biosecurity risk, which sits in the excluded safety area, making it a partial rather than central fit.
+- sol: **none**. The paper benchmarks LLM agents’ biological capabilities specifically to assess biosecurity risks, placing its main contribution in safety research rather than the topic’s scope.
+- gemini-flash: **adjacent**. The paper introduces a benchmark evaluating LLM agents on biosecurity and dual-use biology tasks, which places it primarily in AI safety research, an area explicitly out of scope for this topic.
+- ds-pro: **adjacent**. The paper uses large language models as agents in a biosecurity benchmark, treating them as tools in a security evaluation rather than studying language model pretraining, tuning, or application as its main object.
 
 #### `analyse` · 2606.11150 · safety-evaluations · ABC-Bench: An Agentic Bio-Capabilities Benchmark for Biosecurity
 
@@ -298,6 +322,10 @@ From the archive's search, theme biosecurity.
 - haiku: **adjacent**. The paper's main question is biosecurity risk, namely whether LLMs can be prompted to generate toxin-like sequences, which is safety research that the topic explicitly excludes, though it does evaluate 32 LLMs as objects.
 - luna: **none**. The paper’s main contribution is evaluating and mitigating LLM biosecurity risks, which falls under the topic’s excluded alignment and safety research.
 - ds-flash: **none**. The paper audits biosecurity and toxin-design risks in LLMs and offers a safety classifier as mitigation, which is alignment and safety research placed out of scope by the topic, even though it evaluates language models.
+- sonnet: **adjacent**. The paper evaluates 32 LLMs on a new biosecurity benchmark and proposes a safety classifier, but safety and alignment research is explicitly out of scope for this topic, though it is still evaluation of LLMs as the object of study.
+- sol: **none**. The paper benchmarks biological misuse risks in LLMs and develops a safety classifier, placing its main contributions in explicitly excluded safety and alignment research.
+- gemini-flash: **none**. The paper focuses specifically on biosecurity risk evaluation and safety guardrails for large language models, placing it squarely within safety and alignment research, which is explicitly out of scope.
+- ds-pro: **none**. This paper is a safety and alignment evaluation of large language models for biosecurity risks, which the topic explicitly places out of scope.
 
 #### `analyse` · 2608.02684 · safety-evaluations · A Blind Spot in Alignment: Quantifying Biosecurity Risks in Large Language Models
 
@@ -341,6 +369,10 @@ From the archive's search, theme cyber offence.
 - haiku: **related**. The paper studies whether open-weight LLMs adapted to PowerShell can produce malware, which evaluates and tunes language models as the object of study, but its main question is cybersecurity threat analysis, which falls under the excluded safety area.
 - luna: **central**. The paper directly evaluates adapted LLMs’ PowerShell malware-generation capabilities and introduces a dataset and framework for that evaluation.
 - ds-flash: **none**. The paper studies LLM-generated PowerShell malware and evaluates open-weight LLMs for offensive cybersecurity, which is safety/security research outside the topic's scope rather than work on pretraining, tuning, evaluating, or applying text foundation models as the object of research.
+- sonnet: *not asked*
+- sol: *not asked*
+- gemini-flash: *not asked*
+- ds-pro: *not asked*
 
 #### `analyse` · 2606.30819 · model-security · AI-Generated PowerShell Malware: An Experimental Framework and Dataset
 

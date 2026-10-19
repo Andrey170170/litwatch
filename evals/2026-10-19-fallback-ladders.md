@@ -5,9 +5,14 @@ from production that day) and the host archive, read only. Nothing was written t
 evaluation table: each call's answer went to a JSON-lines file in
 [2026-10-19-fallback-ladders/runs/](2026-10-19-fallback-ladders/runs/). Each role's request is the one its pipeline
 step sends, built by the step's own prompt builder, and was sent to the role's model and to every candidate alone.
-**$9.03 in all** (at least: the calls that failed have no known charge), over 1,548 calls, against an estimate of
-$12.49 printed before the run ([estimate.txt](2026-10-19-fallback-ladders/runs/estimate.txt)) and a $25 ceiling
-the run never reached.
+The first run cost **$9.03** (at least: the calls that failed have no known charge) over 1,548 calls, against an
+estimate of $12.49 printed before it ([estimate.txt](2026-10-19-fallback-ladders/runs/estimate.txt)). A second run
+asked `field_grade`'s cases of four more candidates, estimated at $1.20
+([estimate-field-grade.txt](2026-10-19-fallback-ladders/runs/estimate-field-grade.txt)), and made 290 of its 332 calls
+for $0.49. It stopped at the $25 ceiling by design: one GPT-6.1 Sol call ended in a rate-limit error with no known
+charge, so it counts at its whole reservation, $7.74 (128,000 output tokens at Sol's dearest endpoint), and the next
+Sol call no longer fit ([budget.jsonl](2026-10-19-fallback-ladders/runs/budget.jsonl)). The 42 calls not made are the
+last refusals-set papers of the four candidates. **At least $9.52 in all, over 1,838 calls.**
 
 The cases are [select.py](2026-10-19-fallback-ladders/select.py)'s ([cases.csv](2026-10-19-fallback-ladders/cases.csv)),
 the candidates [ladders.toml](2026-10-19-fallback-ladders/ladders.toml)'s. The tables are `litwatch eval
@@ -18,11 +23,13 @@ and compared there with the role's own model re-asked and with each candidate
 ([baseline.md](2026-10-19-fallback-ladders/baseline.md)), which also counts what each candidate answered and where it
 differs from the role's own model.
 
-The run's calls went out as the pipeline sends them, OpenRouter's uncapped. Since the run, the harness bounds a
-call's cost: it sends each OpenRouter call capped at the ladder's `reserve_output_tokens` (above every output the
-run's calls made), and reserves the input at a token a byte, at each candidate's dearest price (`price_max`, added
-to [ladders.toml](2026-10-19-fallback-ladders/ladders.toml)). None of these is part of a call's identity, and no
-recorded call cost more than its reservation as reckoned now (the last line of tables.md).
+The ceiling was not a hard bound in the first run. Its calls went out as the pipeline sends them, OpenRouter's
+uncapped, and each was reserved at an estimate of its output. What held the spending was what the calls cost,
+$9.03 of $25. The harness now reserves each call at its true upper bound: input at a token a byte, output at the
+most the model's endpoints can return (`max_output`), both at the dearest price its routing allows (`price_max`;
+[ladders.toml](2026-10-19-fallback-ladders/ladders.toml)). Calls still go out uncapped. No recorded call cost more
+than its reservation as reckoned now (the last line of tables.md). The later `field_grade` run (below) ran under
+that bound.
 
 ## The cases
 
@@ -53,7 +60,7 @@ answered; "as own" is agreement with the role's own model, over the cases both a
 central or related and the rest. Weight and the overstatement line (whether a Brief says the abstract overstates)
 are what a Brief is compared on.
 
-| Role | Candidate | Quality: answered | As owner: Fit, side | As own model | Refusals set: answered | Cost an answer |
+| Role | Candidate | Quality: answered | As owner: Fit, side | As own model | Refusals set: answered | Quality: cost an answer |
 | --- | --- | --- | --- | --- | --- | --- |
 | `judge` | Opus 5.5 | 81/81 | 62, 79 of 81 | – | 20/23, 3 refused | $0.0064 |
 | | Sonnet 5.5 | 81/81 | 64, 78 | Fit 74, side 78 of 81 | 23/23 | $0.0030 |
@@ -70,6 +77,10 @@ are what a Brief is compared on.
 | `field_grade` | Haiku 5.5 | 60/60 | – | – | 23/23 | $0.0002 |
 | | GPT-6 Luna | 60/60 | – | Fit 30, side 48 of 60 | 23/23 | $0.0001 |
 | | DeepSeek V4.1 Flash | 60/60 | – | 34, 51 | 23/23 | $0.0007 |
+| | Sonnet 5.5 (second run) | 60/60 | – | 36, 46 | 13/14, 1 refused | $0.0023 |
+| | GPT-6.1 Sol (second run) | 59/60, 1 rate-limited | – | 28, 47 of 59 | 11/11 | ≥ $0.0021 |
+| | Gemini 3.8 Flash (second run) | 60/60 | – | 30, 46 | 14/14 | $0.0015 |
+| | DeepSeek V4 Pro 0813 (second run) | 60/60 | – | 24, 46 | 11/11 | $0.0007 |
 | `brief` | Sonnet 5.5, high | 10/10 | – | – | 21/23, 2 refused | $0.1066 |
 | | GPT-6.1 Sol, high | 10/10 | – | Weight 8, line 6 of 10 | 23/23 | $0.0940 |
 | | Kimi K3, high | 10/10 | – | 5, 5 | 23/23 | $0.0310 |
@@ -78,13 +89,13 @@ are what a Brief is compared on.
 | | Kimi K3 | 5/5 | – | – | – | $0.0121 |
 
 Costs are as normal calls, not batched; production's batched calls cost half. Cost an answer is the cost of every
-call to the role's requests, refused ones included, over the usable answers.
+call to the role's quality-set requests, refused ones included, over its usable answers; tables.md gives it per set.
 
 - **Refusals.** Seven, all from Anthropic models: `judge` Opus on 2610.13116 and 2610.21200 again (`bio`) and on a
   third, 2606.11150 (ABC-Bench, `bio`); `brief` Sonnet on 2610.17907 and 2606.30819 (`cyber`); `analyse` Haiku on
-  2606.11150 and 2608.02684 (`bio`). No candidate from another lab refused anything, and every other candidate
-  answered each refused case. Muse returned one answer that was not JSON (2608.02684); everything else
-  answered.
+  2606.11150 and 2608.02684 (`bio`). No candidate from another lab refused anything, and every working candidate
+  answered each refused case (MiniMax, below, answered nothing). Muse returned one answer that was not JSON
+  (2608.02684); the other working candidates answered everything.
 - **`judge`.** The three candidates are as close to the owner as Opus is (64–65 of 81 on Fit against Opus's 62; 78–79
   on the side) and agree with Opus on 71–74 Fits and 78–79 sides. Nothing separates them.
 - **`check`.** The same: every working candidate is within two pairs of Muse against the owner. Gemini is the
@@ -100,22 +111,30 @@ call to the role's requests, refused ones included, over the usable answers.
   answer on 51 of 60 ([baseline.md](2026-10-19-fallback-ladders/baseline.md)), so the candidates are a few cases
   below the role's own noise. Both lean to solid (Haiku's incremental is their solid 10 and 9 times). Both answered
   the two papers Haiku refused.
-- **`field_grade` is the weakest.** Luna and DeepSeek agree with Haiku on 30 and 34 Fits of 60 and 48 and 51 sides.
-  Haiku re-asked agrees with its own nightly answer on 48 Fits and 55 sides, and the candidates with that nightly
-  answer on 29 and 35 Fits, 51 and 52 sides ([production.csv](2026-10-19-fallback-ladders/production.csv)). Both
-  grade higher than Haiku: of the 60, Haiku's related became central 17 times for Luna and 11 for DeepSeek, its
-  adjacent central or related 11 and 5 times. On the refusals set the shift goes the other way (Haiku's adjacent is
-  their none, 14 and 19 times of 23), on the right side of the line. A Field grade has no rubric, and there is no
-  owner label to say which is right.
+- **`field_grade` has no fallback that grades as Haiku does.** Against production's own answers
+  ([production.csv](2026-10-19-fallback-ladders/production.csv), [baseline.md](2026-10-19-fallback-ladders/baseline.md)),
+  Haiku re-asked keeps the same Fit on 48 of 60 and the same side on 55: that is the floor, how far two of Haiku's
+  own answers differ. No candidate comes near it on the Fit:
 
-  A Field grade does not decide whether a paper is on the Field's page (every paper in the Field's class is), but
-  how it shows there: its level, and two below it in mixed lists. On the exact Fit both candidates are clearly below
-  Haiku re-asked (35 and 29 of 60, against 48); read as R1's measure, that drops both and leaves the role no
-  fallback. The list instead holds a fallback grader to the side of the line, as the proxy for whether the grade
-  calls the paper relevant: DeepSeek keeps production's side on 52 of 60, against 55 for Haiku re-asked, three
-  cases. The cost is the level: a fallback's related papers often show as central. And it is rarely asked: Haiku
-  refused no `field_grade` case here, and none of production's 4,422 `field_grade` calls to 2026-10-19 failed
-  ([baseline.md](2026-10-19-fallback-ladders/baseline.md), "Production's calls").
+  | Against production's Haiku | Same Fit | Same side |
+  | --- | --- | --- |
+  | Haiku re-asked | 48/60 | 55/60 |
+  | DeepSeek V4.1 Flash | 35/60 | 52/60 |
+  | Sonnet 5.5 | 30/60 | 49/60 |
+  | Gemini 3.8 Flash | 30/60 | 49/60 |
+  | GPT-6 Luna | 29/60 | 51/60 |
+  | GPT-6.1 Sol | 28/59 | 50/59 |
+  | DeepSeek V4 Pro 0813 | 28/60 | 47/60 |
+
+  The best is 13 cases below the floor; the rest 18 to 20. All grade higher than Haiku does in this run: its related is
+  their central 9 to 17 times of 60, and Sonnet also lifts its adjacent to related 10 times. A Field grade sets how a
+  paper shows on the Field's page (its level, and two below it in mixed lists), so a fallback here would move most
+  papers it graded. Sol's one missing quality case can't close its gap. The four second-run candidates' refusals-set
+  answers stop where the ceiling did; that set measures answering, and no list is drawn from it here. Sonnet refused
+  one `field_grade` case (2610.13116, `bio`); Haiku refused none here, and none of production's 4,422 `field_grade`
+  calls to 2026-10-19 failed (baseline.md, "Production's calls"). R1 drops every candidate, and the role needs a
+  fallback rarely enough to do without one: **`field_grade` gets no fallback**. A Field grading Haiku can't answer
+  stops ungraded, as it does today.
 - **`brief`: Kimi is lenient.** It rated all 10 quality papers solid (Sonnet: 5 solid, 5 incremental) and drew the
   overstatement line on 1 of 10 (Sonnet: 6), and on 9 of the 23 refusals-set papers (Sonnet 18 of 21, Sol 14 of 23).
   Sol is closer (Weight 8 of 10, line 6 of 10; 17 and 15 of 21 on the refusals set) but also flags less than Sonnet:
@@ -150,35 +169,52 @@ call to the role's requests, refused ones included, over the usable answers.
   the request makes only for minimal transformers; OwlSight called a faithfulness detector). Opus's own 3 is on
   digest 23, where all three made the same error. With one reader and five digests, one point on three digests is
   within what a second reader or another day could move, and Kimi was the best writer of digest 21: it leans worse
-  on large days, which this set does not show as clearly worse. The list keeps it last. It writes only after two
-  failed digests of a topic in a row, both from Anthropic models, and the alternative then is no digest: a failed
-  digest is retried every run and the last model is kept until one is published. Read as clearly worse, the list
-  is Opus → Sonnet, and a topic whose digest both refuse stays unwritten until one doesn't.
+  on large days, which this set does not show as clearly worse. The list keeps it last. It writes only when both
+  Anthropic models failed the digest. After two refusals that is the same run, since a refusal moves down at once.
+  After unusable answers it is the run after two failed ones, since each failed digest of the topic in a row
+  starts one model further down. Either way the alternative is no digest: a failed digest is retried every run, with the last
+  model kept until one is published. Read as clearly worse, the list is Opus → Sonnet, and a topic whose digest
+  both refuse stays unwritten until one doesn't.
+
+## Limits
+
+- **The harness is a one-off evaluation tool.** Its run is done. These limits bear on running it again, not on
+  the numbers here:
+  - a price raised after `price_max` was read is found only once a call costs more than its reservation;
+  - a call's identity is its request and configuration (`asked`), so a change to litwatch itself between runs into
+    one directory goes unnoticed: start a new directory after one.
+- **The writer's blind reader** was given each digest's request but not the writer's own instructions, which ask for
+  80 to 180 words of selective synthesis. Its coverage bar is therefore stricter than the writer's brief; the
+  report sets that bar aside and compares the writers with each other.
+- **One reader, five digests** for `writer`, and ten papers for `brief`: they show large differences only.
 
 ## For P2
 
 - **A Google filter has two shapes, and only one moves down.** A completion with no choices, the shape Gemini 4
-  Argon's filter took in the Sonnet replay, is a provider error, which D4 never moves down: the step waits, and a
-  night of it goes to Vergil as an OpenRouter outage. A `finish_reason` of `content_filter` is a refusal, which moves
-  down. Gemini 3.8 Flash, last on `check`'s list, filtered none of 23 papers here, so the list keeps it; P2's tests
-  should pin down both shapes.
+  Argon's filter took in the Sonnet replay, is a provider error, which D4 never moves down: the step waits. The
+  plan's provider alert needs failed calls and no answered OpenRouter call all night, and other OpenRouter models
+  answer through the same night, so a paper stuck this way does not reach Vergil as an outage; it waits until its
+  provider error clears. A `finish_reason` of `content_filter` is a refusal, which moves down. Gemini 3.8 Flash,
+  last on `check`'s list, filtered none of 23 papers here, so the list keeps it; P2's tests should pin down both
+  shapes.
 - **Haiku refuses in `analyse` too** (2 of 23 here, both `bio`); the refusals seen until now were `judge`'s and the
   Brief's.
 - **Opus is likely to refuse 2606.11150 in `judge`** when a Focus or Area topic next grades it.
 
 ## The lists for P2
 
-Each list is the role's own model, then its fallbacks in order. `judge`'s and `check`'s share no lab (D2): Anthropic,
+Each list is the role's own model, then its fallbacks in order; `field_grade`'s has none, so P2's lists may be
+empty. `judge`'s and `check`'s share no lab (D2): Anthropic,
 OpenAI and Moonshot against Meta, DeepSeek and Google.
 
 | Role | List | Why |
 | --- | --- | --- |
 | `judge` | Opus 5.5 → Sonnet 5.5 → GPT-6.1 Sol → Kimi K3 | Unchanged: all three answered every case, Opus's three refusals included, and match the owner as well as Opus does |
-| `check` | Muse Spark 1.3 → DeepSeek V4.1 Flash 1017 → Gemini 3.8 Flash | Unchanged: both answered all 104 and match the owner as Muse does; MiniMax has no structured output, DeepSeek V4 Pro adds no lab |
+| `check` | Muse Spark 1.3 → DeepSeek V4.1 Flash 1017 → Gemini 3.8 Flash | Unchanged: both answered all 104 and match the owner as Muse does; MiniMax's free endpoint takes no strict JSON schema, DeepSeek V4 Pro adds no lab |
 | `analyse` | Haiku 5.5 → GPT-6 Luna → DeepSeek V4.1 Flash | Unchanged: both answered Haiku's two refusals and agree with it about equally; Luna costs less |
-| `field_grade` | Haiku 5.5 → **DeepSeek V4.1 Flash → GPT-6 Luna** | Swapped: both keep production's side of the line about as Haiku re-asked does (52 and 51 of 60, against 55) and grade higher; DeepSeek is the closer on the Fit (35 against 29), a small margin; rarely asked |
+| `field_grade` | Haiku 5.5, **no fallback** (an empty list) | Changed (R1): six candidates fall 13 to 20 cases below Haiku re-asked on the exact Fit (48 of 60); Haiku has not failed a `field_grade` call, so a refused grading stops ungraded as today |
 | `brief` | Sonnet 5.5, high → GPT-6.1 Sol, high | **Kimi K3 dropped** (R1): on ordinary papers it rated every paper solid and flagged 1 overstatement in 10; Sol answered both of Sonnet's refusals |
-| `writer` | Opus 5.5 → Sonnet 5.5 → Kimi K3 | Unchanged: every digest written; Kimi leans worse on the two largest days, not clearly worse in five digests; last, it writes only after two Anthropic failures in a row, when the alternative is no digest |
+| `writer` | Opus 5.5 → Sonnet 5.5 → Kimi K3 | Unchanged: every digest written; Kimi leans worse on the two largest days, not clearly worse in five digests; last, it writes only when both Anthropic models failed the digest, when the alternative is no digest |
 
 ## The fallbacks' answers on the refused papers
 

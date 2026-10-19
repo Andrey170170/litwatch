@@ -1,0 +1,5 @@
+field_grade ds-pro: 83 calls, estimated $0.12
+field_grade gemini-flash: 83 calls, estimated $0.19
+field_grade sol: 83 calls, estimated $0.45
+field_grade sonnet: 83 calls, estimated $0.45
+332 calls, estimated $1.20; spent so far $9.03 of the $25.00 ceiling
