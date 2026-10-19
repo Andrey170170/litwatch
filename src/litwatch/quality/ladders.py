@@ -456,6 +456,7 @@ def _usage(usage: Any) -> dict[str, Any]:
 # -- the report ------------------------------------------------------------------------------------
 
 POSITIVE = (Fit.CENTRAL.value, Fit.RELATED.value)
+UNUSABLE = ("refused", "invalid", "truncated")
 # What two answers to one case are compared on, by role.
 COMPARED: dict[str, tuple[str, ...]] = {
     **dict.fromkeys(GRADERS, ("Fit", "side")),
@@ -512,6 +513,7 @@ def tables(ladders_: dict[str, Ladder], chosen: list[Case], found: list[Row]) ->
             if mine:
                 lines += ["", f"### `{role}`, {which} set", ""]
                 lines += _role_table(ladder, mine, last, found)
+    lines += ["", f"Every recorded call: {len(found)}, {_dollars(found)}."]
     return "\n".join(lines).lstrip("\n") + "\n"
 
 
@@ -577,17 +579,22 @@ def answers(
     found: list[Row],
     titles: dict[str, str] | None = None,
 ) -> str:
-    """Every case of the refusals set with a note or a candidate that did not answer, each
-    candidate's latest answer to it, as markdown, from the recorded calls alone."""
+    """Every case of the refusals set whose paper drew a refused, invalid or truncated answer
+    in any role (a provider error or a timeout says nothing about the paper), each candidate's
+    latest answer to it, as markdown, from the recorded calls alone."""
     last = latest(found)
+    mine = [c for c in chosen if c.set == "refusals" and c.role in ladders_]
+    failed = {
+        c.paper
+        for c in mine
+        for cand in ladders_[c.role].candidates
+        if (r := last.get((c.key, cand.name))) and r.outcome in UNUSABLE
+    }
     lines: list[str] = []
-    for c in chosen:
-        ladder = ladders_.get(c.role)
-        if ladder is None or c.set != "refusals":
+    for c in mine:
+        if c.paper not in failed:
             continue
-        said = [(cand, last.get((c.key, cand.name))) for cand in ladder.candidates]
-        if not c.note and all(r is None or r.outcome == "answered" for _, r in said):
-            continue
+        said = [(cand, last.get((c.key, cand.name))) for cand in ladders_[c.role].candidates]
         title = (titles or {}).get(c.paper or "", "")
         lines += [
             "",

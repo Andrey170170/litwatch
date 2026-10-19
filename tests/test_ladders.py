@@ -280,9 +280,12 @@ def test_the_tables_compare_with_the_owner_and_the_own_model_over_what_both_answ
         "≥ $0.01",
         "$0.0100 |",
     ]
+    assert "Every recorded call: 4, ≥ $0.03." in text
     assert ladders.answers(found, chosen, calls) == "\n"  # the quality set is not listed
     refusals = [c.model_copy(update={"set": "refusals", "note": None}) for c in chosen]
     listed_ = ladders.answers(found, refusals, calls, {Q.id: Q.title})
     assert f"`judge` · {Q.id} · {FAITH.slug} · {Q.title}" in listed_
     assert "- own: **adjacent**. ." in listed_ and "- other: *refused*" in listed_
     assert P.id not in listed_  # every candidate answered it
+    failed = [*calls[:3], row(p, "other", "provider"), calls[3]]
+    assert P.id not in ladders.answers(found, refusals, failed)  # an error says nothing of P
