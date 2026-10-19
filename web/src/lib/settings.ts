@@ -45,7 +45,7 @@ export type Fit = Schemas["Fit"];
 export type LabelValue = Schemas["LabelValue"];
 export type Opinion = Schemas["Opinion"];
 
-/** A split or escalation from last night (`store.quality.splits_since`). */
+/** A split, escalation or central or related grade from one lab from last night (`store.quality.splits_since`). */
 export type Split = {
   paper_id: string;
   topic: string;
@@ -56,6 +56,8 @@ export type Split = {
   reason: string;
   split: boolean;
   escalated: boolean;
+  /** One Focus grader refused throughout; the other's Fit stands (`opinions` holds its answer alone). */
+  one_lab: boolean;
   opinions: Record<string, Opinion>;
   recorded_at: string;
   title: string;
@@ -64,12 +66,14 @@ export type Split = {
   settled?: string;
 };
 
-/** A paper stuck after three failed runs of a step (`store.failures.stuck`). `acknowledged_at`: when the owner
- * acknowledged it, as for passes and digests (it no longer counts in the run status, and folds away). */
-export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; acknowledged_at?: string | null; settled?: string };
+/** A paper stuck after three failed runs of a step, or one every model refused (`store.failures.stuck`; `refused`
+ * names the roles whose whole list refused). `acknowledged_at`: when the owner acknowledged it, as for passes and
+ * digests (it no longer counts in the run status, and folds away). */
+export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; refused?: string[]; acknowledged_at?: string | null; settled?: string };
 
-/** A full-text pass waiting on the owner (`store.fulltext.stuck`): failed three runs, or awaiting its text over
- * a week. `since`: since when it waits, which names this failure for Acknowledge. */
+/** A full-text pass waiting on the owner (`store.fulltext.stuck`): failed three runs or refused by every model
+ * (`refused`), or awaiting its text over a week. `since`: since when it waits, which names this failure for
+ * Acknowledge. */
 export type TextPassStuck = {
   id: number;
   paper_id: string;
@@ -79,6 +83,7 @@ export type TextPassStuck = {
   state: "failed" | "awaiting_text";
   failed_runs: number;
   last_error: string | null;
+  refused?: boolean;
   queued_at: string;
   since: string;
   acknowledged_at?: string | null;
@@ -281,13 +286,16 @@ export function noted(q: Quality, id: number, note: string): Quality {
   return { ...q, night: { ...q.night, digests: q.night.digests.map((d) => (d.id === id ? { ...d, note } : d)) } };
 }
 
-/** Last night's splits and escalations still waiting for a label, or settled on this visit, in their two groups.
- * An Area escalation whose graders also disagreed carries both flags; it is an escalation (the less inclusive Fit
- * stands), as the paper's page reads it. */
-export function openSplits(splits: Split[]): { splits: Split[]; escalations: Split[] } {
+/** Last night's splits, escalations and grades from one lab still waiting for a label, or settled on this visit, in
+ * their three groups. An Area escalation whose graders also disagreed carries both flags; it is an escalation (the
+ * less inclusive Fit stands), as the paper's page reads it. */
+export function openSplits(splits: Split[]): { splits: Split[]; escalations: Split[]; oneLab: Split[] } {
   const open = splits.filter((s) => !s.label || s.settled);
-  return { splits: open.filter((s) => s.split && !s.escalated), escalations: open.filter((s) => s.escalated) };
+  return { splits: open.filter((s) => s.split && !s.escalated), escalations: open.filter((s) => s.escalated), oneLab: open.filter((s) => s.one_lab && !s.split && !s.escalated) };
 }
+
+/** The paper page's open state for a split, escalation or grade from one lab. */
+const splitState = (s: Split) => (s.escalated ? "escalated" : s.split ? "split" : "one_lab");
 
 /** The quality page reconciled with the paper's own page after a write there: an item whose open state the
  * refetched paper no longer carries is marked settled in place (a split with the label it got), and one whose
@@ -311,7 +319,7 @@ export function settleFromPaper(q: Quality, paper: Schemas["Paper"]): Quality {
   // the label the page now carries, a changed one included, where the visit lists it.
   night.splits = night.splits.map((s) => {
     if (!mine(s)) return s;
-    if (has(s.escalated ? "escalated" : "split", s.topic)) return s.settled || s.label ? { ...s, settled: undefined, label: null } : s;
+    if (has(splitState(s), s.topic)) return s.settled || s.label ? { ...s, settled: undefined, label: null } : s;
     const label = labelOf(s.topic);
     return label && (!s.label || s.settled) && s.settled !== label ? { ...s, settled: label } : s;
   });

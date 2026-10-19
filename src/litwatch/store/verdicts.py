@@ -10,6 +10,10 @@ from psycopg.types.json import Jsonb
 from litwatch.core import Opinion, Verdict
 from litwatch.core.classification import Membership
 
+# A current verdict that waits for the owner's word, over its columns (pipeline.md, section 4):
+# a Focus split, an Area escalation, or a central or related grade from one lab.
+ASKS_WORD = "(split OR escalated OR (one_lab AND fit IN ('central', 'related')))"
+
 
 def _verdict(row: dict[str, Any]) -> Verdict:
     return Verdict(

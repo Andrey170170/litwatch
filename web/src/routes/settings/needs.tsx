@@ -19,11 +19,12 @@ import { Failed, FitSeg, Load, PageHead, PaperLink, useTopicCards } from "./part
 /** The groups: their name, the line under it, and for a stuck step the name of what failed. */
 const KIND = {
   split: { name: "Focus splits", line: "Judge and check disagree. The more inclusive Fit stands until it is labelled." },
+  one_lab: { name: "Graded by one lab", line: "One grader's lab refused the paper throughout and only the other answered. Its Fit stands until it is labelled." },
   escalated: { name: "Area escalations", line: "The check disagreed with the judge. The less inclusive Fit stands until it is labelled." },
   awaiting: { name: "Awaiting classification", line: "Classification failed three runs; the paper is in no class.", step: "Classification" },
-  ungraded: { name: "Ungraded", line: "Grading failed three runs; the paper shows ungraded on its topic.", step: "Grading" },
-  analysis: { name: "Analysis", line: "Analysis failed three runs; the paper has no Gist or Weight and shows its title alone.", step: "Analysis" },
-  fulltext: { name: "Full text", line: "A full-text pass failed three runs, or has waited for its text over a week; the abstract stands in for the Brief." },
+  ungraded: { name: "Ungraded", line: "Grading failed three runs or every model refused it; the paper shows ungraded on its topic.", step: "Grading" },
+  analysis: { name: "Analysis", line: "Analysis failed three runs or every model refused it; the paper has no Gist or Weight and shows its title alone.", step: "Analysis" },
+  fulltext: { name: "Full text", line: "A full-text pass failed three runs, every model refused it, or it has waited for its text over a week; the abstract stands in for the Brief." },
   digests: { name: "Digests", line: "A digest could not be written; its papers stay due and the next run writes it again." },
 } as const;
 
@@ -44,8 +45,9 @@ function Group<T>({ kind, items, acknowledge, children }: { kind: keyof typeof K
   );
 }
 
-/** A split or escalation: the opinions, the standing Fit underlined, and the Fit control until labelled. Tapping the
- * label's segment again takes the label back, and the item waits once more. */
+/** A split, escalation or grade from one lab: the opinions (for one lab, first the side that refused), the standing
+ * Fit underlined, and the Fit control until labelled. Tapping the label's segment again takes the label back, and
+ * the item waits once more. */
 function SplitItem({ s, badge }: { s: Split; badge: React.ReactNode }) {
   const label = useLabel(s.paper_id);
   const unlabel = useUnlabel(s.paper_id);
@@ -69,6 +71,7 @@ function SplitItem({ s, badge }: { s: Split; badge: React.ReactNode }) {
         </PaperLink>
       </div>
       <div className="nb">
+        {s.one_lab && <span>{s.opinions.judge ? "check" : "judge"} refused · </span>}
         {said}
         <span className="faint">{value ? <>labelled <b>{value}</b></> : <>{s.fit} stands</>}</span>
       </div>
@@ -87,9 +90,7 @@ function Stuck({ s, kind, badge, children }: { s: Stuck; kind: "awaiting" | "ung
         </PaperLink>
         {kind === "awaiting" && <span className="mono faint">{s.paper_id}</span>}
       </div>
-      <div className="nb">
-        {KIND[kind].step} failed {s.failed_runs} runs{s.last_error ? `: ${s.last_error}` : "."}
-      </div>
+      <div className="nb">{s.refused?.length ? `Refused by every ${s.refused.join(" and ")} model.` : `${KIND[kind].step} failed ${s.failed_runs} runs${s.last_error ? `: ${s.last_error}` : "."}`}</div>
       {s.settled ? <div className="nres">{s.settled}</div> : children}
     </div>
   );
@@ -226,7 +227,7 @@ function TextPass({ s }: { s: TextPassStuck }) {
         </PaperLink>
       </div>
       <div className="nb">
-        {s.state === "failed" ? `${what} failed ${s.failed_runs} runs${s.last_error ? `: ${s.last_error}` : "."}` : `${what} has waited for the paper's text since ${rowDate(s.queued_at)}; the archive has not delivered it.`}
+        {s.state !== "failed" ? `${what} has waited for the paper's text since ${rowDate(s.queued_at)}; the archive has not delivered it.` : s.refused ? `${what} refused by every model.` : `${what} failed ${s.failed_runs} runs${s.last_error ? `: ${s.last_error}` : "."}`}
       </div>
       {s.settled ? (
         <div className="nres">{s.settled}</div>
@@ -294,7 +295,7 @@ export function NeedsPage() {
   const badge = (slug: string | null | undefined) => (slug && cards[slug] ? <Badge topic={cards[slug]} /> : null);
   const open = q ? waiting(q) : 0;
   // A split labelled before this visit no longer waits; one labelled on it stays, settled.
-  const { splits, escalations } = openSplits(q?.night.splits ?? []);
+  const { splits, escalations, oneLab } = openSplits(q?.night.splits ?? []);
   const line = (q: Quality) => (q.night.error ? `Last night's run failed: ${q.night.error}` : open > 0 ? `${open} ${open === 1 ? "thing waits" : "things wait"} on the owner. Each also shows on its paper's page.` : "Nothing waits on the owner.");
   const button = (lists: Red[], label: string) => {
     const seen = q && toAcknowledge(q, lists);
@@ -338,8 +339,8 @@ export function NeedsPage() {
       <Load q={quality} />
       {q && (
         <>
-          {(["split", "escalated"] as const).map((kind) => (
-            <Group key={kind} kind={kind} items={kind === "split" ? splits : escalations}>
+          {(["split", "one_lab", "escalated"] as const).map((kind) => (
+            <Group key={kind} kind={kind} items={{ split: splits, one_lab: oneLab, escalated: escalations }[kind]}>
               {(s) => <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} />}
             </Group>
           ))}

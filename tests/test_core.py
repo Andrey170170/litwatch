@@ -6,7 +6,7 @@ from urllib.parse import unquote, urlsplit
 import pytest
 
 from litwatch import config
-from litwatch.config import Config, Models, RoleConfig
+from litwatch.config import Models, RoleConfig
 from litwatch.core import Depth, Fit, Status, Verdict, current_verdict
 from tests.conftest import FAITH, TREE
 

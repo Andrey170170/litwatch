@@ -19,7 +19,7 @@ from litwatch.config import Classification, Config, Models, RoleConfig
 from litwatch.core import FAILED_RUNS, Paper
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run, run_record
-from litwatch.llm import Gateway, ProviderError, Usage
+from litwatch.llm import Gateway, ProviderError, Reply, Stop, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
@@ -39,7 +39,20 @@ ROLES = {
     "field_grade": RoleConfig(provider="anthropic", model="test-field"),
 }
 CONFIG = Config(models=Models(**ROLES))
-BY_MODEL = {r.model: name for name, r in ROLES.items()}
+# The roles that write, each with two fallbacks named after it, for the list tests; `judge`'s and
+# `check`'s keep to their own labs.
+LISTS = {
+    name: ROLES[name].model_copy(
+        update={
+            "fallbacks": tuple(
+                ROLES[name].model_copy(update={"model": f"{ROLES[name].model}-{n}"}) for n in (2, 3)
+            )
+        }
+    )
+    for name in ("analyse", "judge", "check", "field_grade")
+}
+LISTED = Config(models=Models(**ROLES | LISTS))
+BY_MODEL = {m.model: name for name, r in (ROLES | LISTS).items() for m in r.models}
 NAMES = {c.slug: c.name for c in TREE.classes}
 GIST = (
     "Probes read a model's hidden steps from its activations and find that traces omit a third "
@@ -68,20 +81,30 @@ def decision(primary: str = "other", **probabilities: float) -> dict:
 
 class Scripted:
     """Scripted roles, answering by the paper's title: `classify` and `analyse`, and the
-    graders (`fits` by (role, title); related unless scripted, and `area_check` sure it holds)."""
+    graders (`fits` by (role, title); related unless scripted, and `area_check` sure it holds).
+    `said` by (model, title) comes first, for a model of a role's list; a `Reply` answers as
+    it is (a refusal)."""
 
     def __init__(self) -> None:
         self.decisions: dict[str, dict] = {}
         self.analyses: dict[str, dict] = {}
         self.fits: dict[tuple[str, str], dict | Exception] = {}
+        self.said: dict[tuple[str, str], dict | Exception | Reply] = {}
         self.asked: list[tuple[str, str]] = []  # (role, title)
+        self.models_asked: list[tuple[str, str]] = []  # (model, title)
         self.users: list[str] = []  # every request's user message
 
-    def respond(self, role: RoleConfig, request) -> str:
+    def respond(self, role: RoleConfig, request) -> str | Reply:
         title = request.user.split("Title: ", 1)[1].split("\n", 1)[0]
         step = BY_MODEL[role.model]
         self.asked.append((step, title))
+        self.models_asked.append((role.model, title))
         self.users.append(request.user)
+        if (role.model, title) in self.said:
+            answer = self.said[(role.model, title)]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer if isinstance(answer, Reply) else json.dumps(answer)
         match step:
             case "classify":
                 answer = self.decisions.get(title) or decision()
@@ -275,6 +298,76 @@ async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_a
         assert (await client.post(url.format(A.id), json=AT_1)).status_code == 204
     assert (await night(conn, models))["analysed"] == 1
     assert await failures.stuck(conn, "analysis", FAILED_RUNS) == []
+
+
+def refusal(model: str = "m") -> Reply:
+    return Reply("", Stop.REFUSED, Usage(model=model, cost=0.001), refusal="bio")
+
+
+async def calls_for(conn, paper_id: str, role: str) -> list[str]:
+    """The models the journal shows `role` asked about the paper, in order."""
+    found = await rows(
+        conn,
+        "SELECT usage->>'model' AS model FROM inference_calls "
+        "WHERE paper_id = %s AND operation = %s ORDER BY id",
+        paper_id,
+        role,
+    )
+    return [r["model"] for r in found]
+
+
+ANALYSE = [m.model for m in LISTED.models.analyse.models]
+
+
+async def test_an_unusable_answer_moves_one_model_down_each_run_one_call_a_run(conn, models):
+    for model in ANALYSE:
+        models.said[(model, A.title)] = ANALYSIS | {"gist": "Too short."}  # invalid
+    for _ in range(FAILED_RUNS):
+        assert (await night(conn, models, LISTED))["analysis_failed"] == 1
+    # One call a run, each run one model further down (D4), every one under the role's name.
+    assert await calls_for(conn, A.id, "analyse") == ANALYSE
+    (stuck,) = await failures.stuck(conn, "analysis", FAILED_RUNS)
+    assert (stuck["paper_id"], stuck["refused"]) == (A.id, [])
+    await night(conn, models, LISTED)
+    assert len(await calls_for(conn, A.id, "analyse")) == FAILED_RUNS  # left for the owner
+
+
+async def test_an_answer_further_down_is_kept_and_the_paper_settled(conn, models):
+    models.said[(ANALYSE[0], A.title)] = ANALYSIS | {"gist": "Too short."}
+    await night(conn, models, LISTED)
+    assert (await night(conn, models, LISTED))["analysed"] == 1
+    assert await calls_for(conn, A.id, "analyse") == ANALYSE[:2]
+    assert await rows(conn, "SELECT 1 FROM step_failures WHERE paper_id = %s", A.id) == []
+    (analysed,) = await rows(conn, "SELECT model FROM analyses WHERE paper_id = %s", A.id)
+    assert analysed["model"] == f"anthropic:{ANALYSE[1]}"
+
+
+async def test_a_call_with_no_answer_never_moves_down_nor_counts(conn, models):
+    models.said[(ANALYSE[0], A.title)] = ProviderError("APITimeoutError", timeout=True)
+    for _ in range(FAILED_RUNS + 1):
+        await night(conn, models, LISTED)
+    assert await calls_for(conn, A.id, "analyse") == [ANALYSE[0]] * (FAILED_RUNS + 1)
+    (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE paper_id = %s", A.id)
+    assert (failure["failed_runs"], failure["refused"]) == (0, [])
+
+
+async def test_a_paper_every_model_refused_stops_at_once_until_the_owner_tries_again(conn, models):
+    for model in ANALYSE:
+        models.said[(model, A.title)] = refusal(model)
+    assert (await night(conn, models, LISTED))["analysis_failed"] == 1
+    assert await calls_for(conn, A.id, "analyse") == ANALYSE  # down the list in one run
+    (stuck,) = await failures.stuck(conn, "analysis", FAILED_RUNS)  # after one run, not three
+    assert (stuck["failed_runs"], stuck["refused"]) == (FAILED_RUNS, ["analyse"])
+    assert stuck["last_error"] == "refused: bio"
+    await night(conn, models, LISTED)
+    assert len(await calls_for(conn, A.id, "analyse")) == 3  # nothing asked again
+    # The owner's Try again starts from the role's own model.
+    del models.said[(ANALYSE[0], A.title)]
+    async with api(conn) as client:
+        url = f"/api/settings/analysis/{A.id}/retry"
+        assert (await client.post(url, json=AT_1)).status_code == 204
+    assert (await night(conn, models, LISTED))["analysed"] == 1
+    assert (await calls_for(conn, A.id, "analyse"))[3:] == [ANALYSE[0]]
 
 
 async def test_a_result_for_text_that_changed_meanwhile_records_nothing(conn, models):

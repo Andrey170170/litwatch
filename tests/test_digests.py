@@ -654,6 +654,41 @@ async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db):
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"  # not written while paused
 
 
+async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each(db):
+    # models.md, roles: an unusable answer moves the next attempt one model down, per failed
+    # digest of the topic; no answer moves nothing; the last model is kept.
+    class Stepped(Writer):
+        def __init__(self, script: list[Exception | str | None]) -> None:
+            super().__init__()
+            self.script, self.models = script, []
+
+        def respond(self, role, request) -> str:
+            self.models.append(role.model)
+            said = self.script.pop(0) if self.script else None
+            if isinstance(said, Exception):
+                raise said
+            return said if said is not None else super().respond(role, request)
+
+    opus, sonnet, kimi = [m.model for m in Config().models.writer.models]
+    w = Stepped(["{not json", ProviderError("down"), "{not json", "{not json"])
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    tree = await taxonomy_store.load(db)
+    for _ in range(4):
+        async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+            await digests.retry_failed(db, run, tree)
+    assert w.models == [opus, sonnet, sonnet, kimi, kimi]
+    assert (await shown(db, FAITH.slug, "day", TUE))[0] == "written"
+    found = await db.execute("SELECT model FROM digests WHERE topic = %s", (FAITH.slug,))
+    assert (await found.fetchone())["model"] == Config().models.writer.models[2].label
+    # A written digest puts the topic's next one back on the role's own model.
+    await focus(db, Q, "central")
+    await listed(db, WED, Q)
+    await day(db, w, WED)
+    assert w.models[-1] == opus
+
+
 async def test_an_answer_naming_a_paper_that_is_not_a_candidate_fails_the_digest(db):
     class Wrong(Writer):
         def respond(self, role, request) -> str:

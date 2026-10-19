@@ -14,6 +14,7 @@ from litwatch.core.classification import keyword_hit, with_ancestors
 from litwatch.core.evaluation import recall
 from litwatch.store import evaluation
 from litwatch.store.reading import SHOWN_MEMBER
+from litwatch.store.verdicts import ASKS_WORD
 
 
 async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> list[dict]:
@@ -33,17 +34,18 @@ def splits_window(night: dict[str, Any] | None) -> datetime | date:
 
 
 async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[str, Any]]:
-    """Split or escalated verdicts recorded since `since` that are still current (Focus
-    splits, Area escalations, on the paper's current text: a verdict on an older revision
-    waits for the regrading, not the owner), with every grader's answer and the owner's label,
+    """Verdicts asking for the owner's word (`ASKS_WORD`) recorded since `since` that are still
+    current (Focus splits, Area escalations, central or related grades from one lab, on the
+    paper's current text: a verdict on an older revision waits for the regrading, not the
+    owner), with every grader's answer and the owner's label,
     for the owner to settle if they want to: followed topics only. `revision` is the text the
     verdict is on."""
     return await _all(
         conn,
-        """
+        f"""
         SELECT * FROM (
             SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic, t.depth, v.fit,
-                   v.reason, v.split, v.escalated, v.opinions, v.recorded_at, p.title,
+                   v.reason, v.split, v.escalated, v.one_lab, v.opinions, v.recorded_at, p.title,
                    v.paper_revision AS revision,
                    (SELECT row_to_json(l) FROM (SELECT value FROM labels
                     WHERE paper_id = v.paper_id AND topic = v.topic) l) AS label
@@ -52,7 +54,7 @@ async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[s
             WHERE v.paper_id IN (SELECT paper_id FROM verdicts WHERE recorded_at >= %s)
             ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.recorded_at DESC,
                      v.id DESC) current
-        WHERE (split OR escalated) AND recorded_at >= %s
+        WHERE {ASKS_WORD} AND recorded_at >= %s
         ORDER BY recorded_at DESC
         """,
         (since, since),

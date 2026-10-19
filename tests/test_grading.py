@@ -27,7 +27,19 @@ from litwatch.store import verdicts as verdicts_store
 from tests.conftest import FAITH, INTERP, TREE
 from tests.fakes_http import FakeArchive, mock
 from tests.test_intake import unavailable
-from tests.test_steps import ANALYSIS, CONFIG, A, B, Scripted, decision, night, rows
+from tests.test_steps import (
+    ANALYSIS,
+    CONFIG,
+    LISTED,
+    A,
+    B,
+    Scripted,
+    calls_for,
+    decision,
+    night,
+    refusal,
+    rows,
+)
 
 TOKEN = "s3cret"
 
@@ -206,9 +218,9 @@ async def test_a_grader_that_did_not_answer_is_retried_without_counting(conn, mo
 
 
 @asynccontextmanager
-async def api(conn, models):
+async def api(conn, models, config=CONFIG):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, CONFIG, gateway=models.gateway)
+    app = create_app(dsn, TOKEN, config, gateway=models.gateway)
     transport = httpx.ASGITransport(app=app)
     headers = {"authorization": f"Bearer {TOKEN}"}
     async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
@@ -453,3 +465,102 @@ async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(conn, mode
     result = await intake.collect(conn, ("cs.CL",), now - timedelta(days=3), run_id)
     assert result.rewritten == [B.id]
     await assert_settled_on_solid(conn)
+
+
+# -- the graders' lists (models.md, roles; pipeline.md, section 4) ---------------------------------
+
+JUDGES = [m.model for m in LISTED.models.judge.models]
+CHECKS = [m.model for m in LISTED.models.check.models]
+
+
+def refused_by(models: Scripted, listed: list[str], title: str) -> None:
+    for model in listed:
+        models.said[(model, title)] = refusal(model)
+
+
+async def test_a_focus_side_refused_throughout_leaves_the_others_fit_standing(conn, models):
+    refused_by(models, JUDGES, B.title)
+    models.fits[("check", B.title)] = fit("central")
+    assert (await night(conn, models, LISTED))["graded"] == 1
+    assert await calls_for(conn, B.id, "judge") == JUDGES  # down the list in one run
+    (v,) = await verdicts(conn, B.id)
+    assert (v["fit"], v["one_lab"], v["split"]) == ("central", True, False)
+    assert list(v["opinions"]) == ["check"]
+    (event,) = await rows(conn, "SELECT payload FROM outbox WHERE type = 'verdict.recorded'")
+    assert event["payload"]["one_lab"] is True
+    assert await rows(conn, "SELECT 1 FROM step_failures") == []
+    # Central from one lab waits on Needs you for the owner's word, as a split does.
+    async with api(conn, models, LISTED) as client:
+        quality = (await client.get("/api/settings/quality")).json()
+        (listed,) = quality["night"]["splits"]
+        assert (listed["paper_id"], listed["one_lab"], listed["fit"]) == (B.id, True, "central")
+        page = (await client.get(f"/api/papers/{B.id}")).json()
+        assert [(s["kind"], s["topic"]) for s in page["states"]] == [("one_lab", FAITH.slug)]
+
+
+async def test_a_one_lab_grade_below_related_waits_for_no_one(conn, models):
+    refused_by(models, CHECKS, B.title)
+    models.fits[("judge", B.title)] = fit("adjacent")
+    await night(conn, models, LISTED)
+    (v,) = await verdicts(conn, B.id)
+    assert (v["fit"], v["one_lab"], list(v["opinions"])) == ("adjacent", True, ["judge"])
+    async with api(conn, models, LISTED) as client:
+        assert (await client.get("/api/settings/quality")).json()["night"]["splits"] == []
+
+
+async def test_a_refused_side_is_not_asked_again_while_the_other_has_not_answered(conn, models):
+    refused_by(models, JUDGES, B.title)
+    models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
+    assert (await night(conn, models, LISTED))["grading_failed"] == 1
+    (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
+    assert (failure["failed_runs"], failure["refused"]) == (0, ["judge"])  # still pending
+    assert await failures.stuck(conn, "grading", FAILED_RUNS) == []
+    models.fits[("check", B.title)] = fit("related")
+    assert (await night(conn, models, LISTED))["graded"] == 1
+    assert await calls_for(conn, B.id, "judge") == JUDGES  # the first night's, and no more
+    (v,) = await verdicts(conn, B.id)
+    assert (v["fit"], v["one_lab"]) == ("related", True)
+
+
+async def test_both_sides_refused_throughout_is_ungraded_at_once(conn, models):
+    refused_by(models, JUDGES, B.title)
+    refused_by(models, CHECKS, B.title)
+    assert (await night(conn, models, LISTED))["grading_failed"] == 1
+    (stuck,) = await failures.stuck(conn, "grading", FAILED_RUNS)  # after one night
+    assert (stuck["failed_runs"], stuck["refused"]) == (FAILED_RUNS, ["check", "judge"])
+    assert await verdicts(conn, B.id) == []
+    models.models_asked.clear()
+    await night(conn, models, LISTED)
+    assert not [m for m, t in models.models_asked if t == B.title]  # it waits for the owner
+    # Grading it now starts each side from its role's own model.
+    del models.said[(JUDGES[0], B.title)], models.said[(CHECKS[0], B.title)]
+    async with api(conn, models, LISTED) as client:
+        done = await client.post(NOW, json={"revision": 1})
+    assert done.json() == {"graded": True, "fit": "related", "error": None}
+    (v,) = await verdicts(conn, B.id)
+    assert (v["one_lab"], v["opinions"]["judge"]["model"]) == (False, f"anthropic:{JUDGES[0]}")
+
+
+async def test_an_area_or_field_grading_refused_throughout_has_no_one_lab_rule(conn, models):
+    models.decisions[A.title] = decision("agents", agents=0.9, interpretability=0.9)
+    refused_by(models, JUDGES, A.title)
+    refused_by(models, [m.model for m in LISTED.models.field_grade.models], A.title)
+    assert (await night(conn, models, LISTED))["grading_failed"] == 2
+    stopped = await failures.stuck(conn, "grading", FAILED_RUNS)
+    assert {(f["topic"], tuple(f["refused"])) for f in stopped} == {
+        (INTERP.slug, ("judge",)),
+        ("agents", ("field_grade",)),
+    }
+    assert ("area_check", A.title) not in models.asked and ("check", A.title) not in models.asked
+    assert await verdicts(conn, A.id) == []
+
+
+async def test_an_answer_that_came_in_is_kept_while_the_other_side_steps_down(conn, models):
+    models.said[(CHECKS[0], B.title)] = fit("very central")  # invalid
+    assert (await night(conn, models, LISTED))["grading_failed"] == 1
+    assert (await night(conn, models, LISTED))["graded"] == 1
+    # The judge's answer is reused, at no call; check's next run starts one model down (D4).
+    assert await calls_for(conn, B.id, "judge") == JUDGES[:1]
+    assert await calls_for(conn, B.id, "check") == CHECKS[:2]
+    (v,) = await verdicts(conn, B.id)
+    assert v["opinions"]["check"]["model"] == f"openrouter:{CHECKS[1]}"

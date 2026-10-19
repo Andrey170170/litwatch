@@ -19,6 +19,7 @@ const split = {
   reason: "r",
   split: true,
   escalated: false,
+  one_lab: false,
   opinions: { judge: { fit: "adjacent", reason: "a" }, check: { fit: "none", reason: "b" } },
   recorded_at: "2026-10-14T03:00:00Z",
   title: "A split paper",
@@ -446,6 +447,26 @@ describe("Settings", () => {
     expect(screen.getByRole("link", { name: "A textless paper" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Acknowledged · 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Acknowledge all" })).toBeInTheDocument();
+  });
+
+  it("lists a grade from one lab in its own group, naming the side that refused, and says what every model refused", async () => {
+    viewport(true);
+    const oneLab = { ...split, paper_id: "2610.00009", title: "A one-lab paper", fit: "central", split: false, one_lab: true, opinions: { check: { fit: "central", reason: "b" } } };
+    const refused = { ...stuck, topic: "mi", refused: ["check", "judge"] };
+    const night = { ...quality.night, splits: [split, oneLab], ungraded: [refused], fulltext: [{ ...pass, refused: true }] };
+    const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night }, "PUT /api/labels/mi/2610.00009": { saved: true } });
+    renderApp("/settings/needs");
+    expect(await screen.findByText("Graded by one lab · 1")).toBeInTheDocument();
+    expect(screen.getByText("Focus splits · 1")).toBeInTheDocument();
+    const item = screen.getByText("A one-lab paper").closest(".need") as HTMLElement;
+    expect(item).toHaveTextContent("judge refused · check central · central stands");
+    const ungraded = screen.getByText("Refused by every check and judge model.").closest(".need") as HTMLElement;
+    expect(within(ungraded).getByRole("button", { name: "Grade it now" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "A textless paper" }).closest(".need")).toHaveTextContent("Brief refused by every model.");
+    // Settled with the Fit control, as a split is.
+    await userEvent.click(within(item).getByRole("button", { name: "related" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ value: "related" }));
+    await waitFor(() => expect(item).toHaveClass("settled"));
   });
 
   it("lists a full-text pass that failed three runs and runs it now, settling it in place", async () => {

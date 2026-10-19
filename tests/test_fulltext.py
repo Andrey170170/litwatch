@@ -41,6 +41,7 @@ from litwatch.fulltext import brief, trim
 from litwatch.jobs import nightly
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import analyses as analyses_store
+from litwatch.store import digests as digests_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import runs, verdicts
@@ -48,6 +49,7 @@ from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import FAITH, INTERP, TREE, paper
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
+from tests.test_steps import refusal
 
 P = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes.", version=1)
 BODY = "\\section{Method} We train a linear probe on every layer and read hidden steps. " * 40
@@ -419,6 +421,48 @@ async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_n
     assert (row["state"], row["failed_runs"]) == ("ready", 0)
     await work(db, ready(FakeArchive()), writer)
     assert (await passes(db))[0]["state"] == "done"
+
+
+async def test_a_pass_every_brief_model_refused_stops_at_once_and_runs_again_from_the_top(db):
+    # models.md, roles: a refusal goes down the list at once; the whole list refusing stops it.
+    fallback = RoleConfig(provider="openrouter", model="test-brief-2")
+    listed = Config(models=Models(brief=BRIEF_ROLE.model_copy(update={"fallbacks": (fallback,)})))
+    asked: list[str] = []
+    refusing = True
+
+    def respond(role: RoleConfig, request):
+        asked.append(role.model)
+        return refusal(role.model) if refusing else json.dumps(ANSWER)
+
+    def gateway(config: Config, journal) -> Gateway:
+        providers = {n: ScriptedProvider(n, respond) for n in ("anthropic", "openrouter")}
+        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+
+    await graded(db, "central")
+    fake = ready(FakeArchive())
+    assert await fulltext.work(db, listed, archive(fake), gateway=gateway) == {"fulltext_failed": 1}
+    assert asked == [BRIEF_ROLE.model, fallback.model]
+    (row,) = await passes(db)
+    assert (row["state"], row["failed_runs"], row["refused"]) == ("failed", FAILED_RUNS, True)
+    assert await fulltext_store.retry_failed(db, FAILED_RUNS) == 0  # not tried again
+    # Terminal at once: no digest waits for it (digests.md, which papers a digest covers).
+    waits = await db.execute(
+        f"SELECT {digests_store._RECHECKING} AS waits FROM papers p WHERE p.id = %(p)s",
+        {"p": P.id} | fulltext_store.stuck_params(FAILED_RUNS),
+    )
+    assert (await waits.fetchone())["waits"] is False
+    app, http = client(db)
+    async with http:
+        (listed_pass,) = (await http.get("/api/settings/quality")).json()["night"]["fulltext"]
+        page = (await http.get(f"/api/papers/{P.id}")).json()
+        assert (await http.post(f"/api/settings/fulltext/{row['id']}/now")).status_code == 204
+    assert listed_pass["refused"] is True
+    assert [(s["kind"], s["refused"]) for s in page["states"]] == [("fulltext_failed", True)]
+    (row,) = await passes(db)
+    assert (row["state"], row["failed_runs"], row["refused"]) == ("ready", 0, False)
+    refusing, asked[:] = False, []
+    assert await fulltext.work(db, listed, archive(fake), gateway=gateway) == {"briefs_written": 1}
+    assert asked == [BRIEF_ROLE.model]  # the owner's run starts from the role's own model
 
 
 async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(db, monkeypatch):

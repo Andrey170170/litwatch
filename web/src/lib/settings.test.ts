@@ -5,7 +5,7 @@ import { acknowledged, answerOf, differs, labelled, level, noted, openSplits, ru
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01", since: "2026-10-03T03:00:00Z" } as const;
 const stuck = { paper_id: "1", revision: 1, title: "t", failed_runs: 3, last_error: null, failed_at: "2026-10-15T03:00:00Z" };
-const split = { paper_id: "1", revision: 1, topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
+const split = { paper_id: "1", revision: 1, topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, one_lab: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
 
 describe("waiting", () => {
   const digest = { id: 4, topic: "a", period: "day", day: "2026-10-08", error: "timed out", written_at: "" } as const;
@@ -120,6 +120,11 @@ describe("settleFromPaper", () => {
     expect(settleFromPaper(both, paper("1", [{ kind: "escalated", topic: "a" }], [topic("a")])).night.splits[0]!.settled).toBeUndefined();
     expect(settleFromPaper(both, paper("1", [], [topic("a", "adjacent")])).night.splits[0]!.settled).toBe("adjacent");
   });
+  it("reads a grade from one lab by its own state", () => {
+    const one = { night: { ...night, splits: [{ ...split, split: false, one_lab: true }] } } as Quality;
+    expect(settleFromPaper(one, paper("1", [{ kind: "one_lab", topic: "a" }], [topic("a")])).night.splits[0]!.settled).toBeUndefined();
+    expect(settleFromPaper(one, paper("1", [], [topic("a", "central")])).night.splits[0]!.settled).toBe("central");
+  });
 });
 
 describe("openSplits", () => {
@@ -128,6 +133,11 @@ describe("openSplits", () => {
     const { splits, escalations } = openSplits([split, area, { ...split, paper_id: "3", label: { value: "none" } }, { ...split, paper_id: "4", label: { value: "none" }, settled: "none" }]);
     expect(splits.map((s) => s.paper_id)).toEqual(["1", "4"]);
     expect(escalations.map((s) => s.paper_id)).toEqual(["2"]);
+  });
+  it("puts a grade from one lab in its own group, not with the splits", () => {
+    const { splits, oneLab } = openSplits([split, { ...split, paper_id: "5", split: false, one_lab: true }]);
+    expect(splits.map((s) => s.paper_id)).toEqual(["1"]);
+    expect(oneLab.map((s) => s.paper_id)).toEqual(["5"]);
   });
 });
 

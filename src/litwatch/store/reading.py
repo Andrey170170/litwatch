@@ -21,6 +21,7 @@ from litwatch.core import FAILED_RUNS, Depth, Rarity, Taxonomy, Weight
 from litwatch.core.grading import NO_WEIGHT, WEIGHT_FLOORS
 from litwatch.store import failures, fulltext, runs
 from litwatch.store.analyses import CURRENT_GIST, CURRENT_GIST_SOURCE, CURRENT_WEIGHT
+from litwatch.store.verdicts import ASKS_WORD
 
 # A stored JSON null in `authors` reads as no authors.
 AUTHORS = "CASE WHEN jsonb_typeof(p.authors) = 'array' THEN p.authors ELSE '[]' END"
@@ -429,11 +430,12 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
                CASE WHEN p.dismissed_at IS NOT NULL THEN NULL  -- dismissal ended its work
                     WHEN EXISTS (
                         SELECT 1 FROM (
-                            SELECT DISTINCT ON (v.topic) v.topic, v.split, v.escalated
+                            SELECT DISTINCT ON (v.topic) v.topic, v.fit, v.split, v.escalated,
+                                   v.one_lab
                             FROM verdicts v WHERE v.paper_id = p.id AND v.topic = ANY(%(in_view)s)
                             ORDER BY v.topic, v.paper_revision DESC, v.recorded_at DESC, v.id DESC
                         ) cv
-                        WHERE (cv.split OR cv.escalated) AND NOT EXISTS (
+                        WHERE {ASKS_WORD} AND NOT EXISTS (
                             SELECT 1 FROM labels lb WHERE lb.paper_id = p.id
                             AND lb.topic = cv.topic AND NOT lb.provisional))
                     THEN 'word'
@@ -548,6 +550,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         "grades": "SELECT topic, fit, grade, rarity FROM effective_grades WHERE paper_id = %(p)s",
         # the current verdict per topic
         "verdicts": "SELECT DISTINCT ON (topic) topic, fit, reason, opinions, split, escalated, "
+        "one_lab, "
         "paper_revision, recorded_at FROM verdicts WHERE paper_id = %(p)s "
         "ORDER BY topic, paper_revision DESC, recorded_at DESC, id DESC",
         "labels": "SELECT topic, value, origin, provisional, labelled_at FROM labels "
@@ -557,7 +560,8 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         "misses": "SELECT topic, reported_at FROM misses WHERE paper_id = %(p)s",
         "memberships": "SELECT class, source, member, probability FROM memberships "
         "WHERE paper_id = %(p)s ORDER BY class, source",
-        "failures": "SELECT f.step, nullif(f.topic, '') AS topic, f.failed_runs, f.last_error "
+        "failures": "SELECT f.step, nullif(f.topic, '') AS topic, f.failed_runs, f.last_error, "
+        "f.refused "
         "FROM step_failures f JOIN papers p ON p.id = f.paper_id "
         f"WHERE f.paper_id = %(p)s AND {failures.ACTIONABLE}",
         "history": """
@@ -585,7 +589,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     found["text_pass"] = await fulltext.text_pass_for(conn, paper_id)
     found["stuck_passes"] = await _all(
         conn,
-        "SELECT f.id, f.kind, f.state, f.last_error FROM fulltext_passes f "
+        "SELECT f.id, f.kind, f.state, f.last_error, f.refused FROM fulltext_passes f "
         f"JOIN papers p ON p.id = f.paper_id WHERE f.paper_id = %(p)s AND {fulltext.STUCK}",
         p | fulltext.stuck_params(FAILED_RUNS),
     )
