@@ -942,6 +942,8 @@ button.car:hover { color: var(--fg); background: var(--line2); }
   .trow .grip, .crow .car { width: 40px; }
   .tin.sm { min-height: 40px; }
   .rseg { min-width: 40px; }
+  /* the Brief rung's switch sits in its name's line: a 40px hit area drawn around it, the line unmoved */
+  .rsw button { padding: 13px 0; margin: -13px 0; }
   .tf { min-width: 40px; }
   .pbar .ib { flex: none; }
   :is(.wkline, .qbox, .field) { min-height: 40px; }
