@@ -129,7 +129,9 @@ toward the three; a grader that did not answer (a timeout, a provider down, an `
 counting. A grader whose every model refused stops the grading at once, ungraded, with one exception on a Focus
 topic: when one side refused throughout, the other side decides alone. Its Fit stands, marked `one_lab`, and a
 `one_lab` grade of central or related is listed on Quality for the owner to settle, as a split is. Until the other
-side answers (a timeout, say) the grading stays pending and the refused side is not asked again; if the other side
+side answers (a timeout, say) the grading stays pending and the refused side is not asked again, while the question
+and its list are the ones every model refused (the journal says so; a reworded topic or a changed list asks it
+again); if the other side
 refuses throughout too, or fails three runs, the grading is ungraded. Grading it now runs at once, as a run of its own, and counts as the first of three more runs; until its result is
 recorded the grading stays pending, so a request cut short leaves it to the next run.
 

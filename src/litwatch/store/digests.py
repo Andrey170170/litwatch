@@ -372,7 +372,7 @@ class Outcome:
     counts: dict[str, int] = field(default_factory=dict)
     best_rarity: str | None = None
     error: str | None = None
-    # The writer model that wrote it or, failed, the one whose answer failed it (models.md, roles)
+    # The writer model that wrote it or, failed, the one its attempt started from (models.md, roles)
     model: str | None = None
 
 
@@ -472,9 +472,10 @@ async def failed(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
 
 
 async def failed_writer(conn: psycopg.AsyncConnection, topic: str) -> str | None:
-    """The writer model that failed the topic's latest digest attempt, while no digest of the
-    topic has been published since: the next attempt starts one model further down `writer`'s
-    list (models.md, roles). None when its latest digest is published, or it has none."""
+    """The writer model the topic's latest failed digest attempt started from, while no digest
+    of the topic has been published since: the next attempt starts one model further down
+    `writer`'s list (models.md, roles). None when its latest digest is published, or it has
+    none."""
     row = await (
         await conn.execute(
             "SELECT state, model FROM digests WHERE topic = %s "

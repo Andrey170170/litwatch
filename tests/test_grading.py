@@ -522,6 +522,24 @@ async def test_a_refused_side_is_not_asked_again_while_the_other_has_not_answere
     assert (v["fit"], v["one_lab"]) == ("related", True)
 
 
+async def test_a_refused_side_is_asked_again_once_the_question_changed(conn, models):
+    refused_by(models, JUDGES, B.title)
+    models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
+    await night(conn, models, LISTED)
+    # The owner rewords the topic before the next night; judge now answers it.
+    for table, key, column in (("topics", "class", "subject"), ("classes", "slug", "description")):
+        await conn.execute(
+            f"UPDATE {table} SET {column} = {column} || ' Reworded.' WHERE {key} = %s",
+            (FAITH.slug,),
+        )
+    del models.said[(JUDGES[0], B.title)]
+    models.fits[("check", B.title)] = fit("related")
+    assert (await night(conn, models, LISTED))["graded"] == 1
+    assert await calls_for(conn, B.id, "judge") == [*JUDGES, JUDGES[0]]
+    (v,) = await verdicts(conn, B.id)
+    assert (v["one_lab"], sorted(v["opinions"])) == (False, ["check", "judge"])
+
+
 async def test_both_sides_refused_throughout_is_ungraded_at_once(conn, models):
     refused_by(models, JUDGES, B.title)
     refused_by(models, CHECKS, B.title)

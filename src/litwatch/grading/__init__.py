@@ -195,7 +195,12 @@ async def _graded(d: Due, gateway: Gateway, settings: Grading, refused: set[str]
 
 
 async def _one(d: Due, gateway: Gateway, settings: Grading) -> Graded:
-    refused = set(d.refused)
+    # A side refused on an earlier run stays refused while its list refused this very question:
+    # a changed topic or list asks it again.
+    asked = request(d.paper, d.topic, d.name)
+    refused = {
+        r for r in d.refused if await gateway.refused_throughout(r, asked, paper_id=d.paper.id)
+    }
     try:
         return Graded(d, await _graded(d, gateway, settings, refused))
     except CallError as exc:

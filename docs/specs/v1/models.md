@@ -37,8 +37,9 @@ is journalled under the role's name, with the model it went to.
   says nothing about the paper and is not counted against it.
 - **`writer`** writes digests, which are retried every run until written rather than stopped after three
   ([digests.md](digests.md), a digest is a record). A refusal goes down the list at once, as above. Each failed digest of
-  the topic in a row starts the next attempt one model further down, and the last model in the list is kept until a
-  digest of the topic is published. A digest every model refused is failed like any other.
+  the topic in a row starts the next attempt one model further down from where the failed one started (a refusal
+  past the last model goes on to the top, but the next attempt still starts lower), and the last model in the list is
+  kept until a digest of the topic is published. A digest every model refused is failed like any other.
 
 A fallback may come from the same lab as the role's model (refusals follow a lab's policy, but a lab's models differ:
 Sonnet 5.5 answered all three papers Opus 5.5 refused,

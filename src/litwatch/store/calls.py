@@ -160,6 +160,17 @@ class CallJournal:
             (error, reply, call_id),
         )
 
+    async def refused(self, key: str, paper_id: str | None) -> bool:
+        """Whether a call of this identical request about the paper was refused, in any run."""
+        row = await (
+            await self.conn.execute(
+                "SELECT 1 FROM inference_calls WHERE paper_id IS NOT DISTINCT FROM %s "
+                "AND request_key = %s AND error LIKE 'refused%%' LIMIT 1",
+                (paper_id, key),
+            )
+        ).fetchone()
+        return row is not None
+
     async def total(self) -> float:
         row = await (
             await self.conn.execute(

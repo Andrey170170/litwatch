@@ -24,7 +24,7 @@ from litwatch.feedback import word
 from litwatch.jobs import digests as digests_job
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
-from litwatch.llm import Gateway, ProviderError
+from litwatch.llm import Gateway, ProviderError, Reply, Stop, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import digests as store_
 from litwatch.store import papers as papers_store
@@ -658,11 +658,11 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     # models.md, roles: an unusable answer moves the next attempt one model down, per failed
     # digest of the topic; no answer moves nothing; the last model is kept.
     class Stepped(Writer):
-        def __init__(self, script: list[Exception | str | None]) -> None:
+        def __init__(self, script: list[Exception | Reply | str | None]) -> None:
             super().__init__()
             self.script, self.models = script, []
 
-        def respond(self, role, request) -> str:
+        def respond(self, role, request) -> str | Reply:
             self.models.append(role.model)
             said = self.script.pop(0) if self.script else None
             if isinstance(said, Exception):
@@ -670,7 +670,9 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
             return said if said is not None else super().respond(role, request)
 
     opus, sonnet, kimi = [m.model for m in Config().models.writer.models]
-    w = Stepped(["{not json", ProviderError("down"), "{not json", "{not json"])
+    # Kimi refusing goes on to Opus, at the top, whose unusable answer still keeps Kimi next.
+    kimi_refuses = Reply("", Stop.REFUSED, Usage(model=kimi), refusal="bio")
+    w = Stepped(["{not json", ProviderError("down"), "{not json", kimi_refuses, "{not json"])
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, w, TUE)
@@ -678,7 +680,7 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     for _ in range(4):
         async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
             await digests.retry_failed(db, run, tree)
-    assert w.models == [opus, sonnet, sonnet, kimi, kimi]
+    assert w.models == [opus, sonnet, sonnet, kimi, opus, kimi]
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "written"
     found = await db.execute("SELECT model FROM digests WHERE topic = %s", (FAITH.slug,))
     assert (await found.fetchone())["model"] == Config().models.writer.models[2].label

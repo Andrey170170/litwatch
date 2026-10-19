@@ -84,8 +84,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   Focus and Area, a weekly one for Field), found from the database when a digest is written
   ([digests.md](digests.md)). `papers.announced` is the date of the arXiv listing that first showed the paper.
 - `digests` (topic, period day | week, day (a week's Monday), state written | nothing_new | failed, gist, text, counts,
-  best rarity, error, model (for a failed one, the writer model that failed: the next attempt's step down, models.md,
-  roles), acknowledged at (a failed one's), run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
+  best rarity, error, model (for a failed one, the writer model its attempt started from: the next attempt starts one
+  further down, models.md, roles), acknowledged at (a failed one's), run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
   role pick | listed | mentioned, position, why, and frozen at writing: paper revision, title, gist, fit, grade, rarity (a
   mixed list's), and the topic whose grade it showed).
 - `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`; a Gist rating

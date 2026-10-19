@@ -83,6 +83,7 @@ class Journal(Protocol):
     async def record(self, call_id: int, usage: Usage) -> None: ...
     async def accept(self, call_id: int, output: dict[str, Any]) -> None: ...
     async def reject(self, call_id: int, error: str, reply: str | None = None) -> None: ...
+    async def refused(self, key: str, paper_id: str | None) -> bool: ...
     async def in_batch(self, key: str) -> dict[str, Any] | None: ...
     async def open_batches(self) -> list[dict[str, Any]]: ...
     async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None: ...
@@ -274,6 +275,19 @@ class Gateway:
                 refusal = exc
         assert refusal is not None
         raise refusal
+
+    async def refused_throughout(
+        self, role_name: str, request: Request, *, paper_id: str | None = None
+    ) -> bool:
+        """Whether every model of the role's list, as it is now, refused this identical question,
+        by the journal: a refusal remembered from an earlier run holds only while the question
+        and the list are unchanged."""
+        if not self.journal:
+            return False
+        for model in self.models.role(role_name).models:
+            if not await self.journal.refused(self.request_key(model, request), paper_id):
+                return False
+        return True
 
     async def _reused[T: BaseModel](self, role: RoleConfig, request: Request) -> Answer[T] | None:
         """The validated answer of an identical earlier call to `role`, at no cost."""

@@ -80,13 +80,13 @@ def _covered(
 
 
 class _Writer:
-    """The topic's writer calls, from one model further down `writer`'s list than the one that
-    failed its latest digest (the last model is kept), and which model answered."""
+    """The topic's writer calls, from one model further down `writer`'s list than its latest
+    failed digest's (the last model is kept), and which model answered."""
 
     def __init__(self, run: ModelRun, failed: str | None) -> None:
-        labels = [m.label for m in run.gateway.models.role(writer.ROLE).models]
+        self.labels = [m.label for m in run.gateway.models.role(writer.ROLE).models]
         self.run, self.failed = run, failed
-        self.start = labels.index(failed) + 1 if failed in labels else 0
+        self.start = self.labels.index(failed) + 1 if failed in self.labels else 0
         self.model: str | None = None
 
     async def ask(self, request: Request) -> writer.Written:
@@ -95,9 +95,13 @@ class _Writer:
         return answer.value
 
     def failure(self, exc: CallError) -> str | None:
-        """The model a failed digest records: the one whose answer failed it, or the one before
-        when no model answered (a call with no answer moves nothing down)."""
-        return exc.model if exc.unusable else self.failed
+        """The model a failed digest records: the one its attempt started from when a model
+        answered unusably or refused (a refusal can go on past the last model to the top, so
+        the next attempt still starts further down), or the one before when no model answered
+        (a call with no answer moves nothing down)."""
+        if not exc.unusable:
+            return self.failed
+        return self.labels[min(self.start, len(self.labels) - 1)]
 
 
 async def compose(
