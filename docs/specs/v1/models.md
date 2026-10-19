@@ -12,20 +12,36 @@ Pipeline code names roles, never models; moving a role between providers or labs
 | `check` | chat | second-lab Fit for Focus topics and escalated Area disagreements | Muse Spark 1.3 (contributor) |
 | `area_check` | decision | "does this Fit hold?" for Area verdicts; a "no" or a low-confidence "yes" escalates | the N1 decision model |
 | `field_grade` | chat | Fit for Field topics | Haiku 5.5 |
-| `brief` | chat | Briefs, Weight and Gists from the full text | Sonnet 5.5 at high effort, its refusals asked of a fallback on OpenRouter (below) |
+| `brief` | chat | Briefs, Weight and Gists from the full text | Sonnet 5.5 at high effort |
 | `writer` | chat | digests and their Gists | Opus 5.5 |
 
 The first v1's `triage` and `review` roles are removed (`classify`, `analyse` and `writer` replace them). Deep cards are
 made by the `deep` service on its own subscription and are not a gateway role.
 
-A role may name a **fallback**, another role asked once, as a normal call, when the role's model refuses. The fallback
-must come from another lab (refusals follow a lab's policy, so a second model from the same lab tends to refuse the same
-paper); start-up refuses a configuration where it does not. `brief` runs at high effort and falls back to GPT-6.1 Sol
-on OpenRouter, at high effort too, both chosen by the model-spend plan's replay
-([`docs/plans/model-spend.md`](../../plans/model-spend.md), D5 and D6;
-[`evals/2026-10-16-sonnet-briefs.md`](../../../evals/2026-10-16-sonnet-briefs.md)). A paper the fallback refuses too
-fails as any refused call does. A question the fallback has answered is answered from the journal when it
-is asked again, without asking the role's model first, so an unchanged question costs nothing after a refusal either.
+Each role that writes (`analyse`, `judge`, `check`, `field_grade`, `brief`, `writer`) names its **fallbacks**: an
+ordered list of models, each with its provider, model and effort, asked in turn when the role's model fails for the
+paper ([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), which sets the starting lists from a
+replay). The decision roles (`classify`, `area_check`) have none. A call to a fallback is journalled under the role's
+name, with the model it went to.
+
+- **A refusal** goes to the next model at once, in the same run. When every model in the list has refused, the step
+  stops for that paper at once and waits for the owner ([pipeline.md](pipeline.md), section 9), without three runs of
+  asking the same models again.
+- **An unusable answer** (invalid or truncated) counts as one of the step's three failed runs, as before, and the next
+  run starts one model further down the list: the first run asks the role's model, the second the next, the third the
+  one after. One call per run, as many as without fallbacks.
+- **A call that got no answer** (a timeout, a provider error, an `account` error, below) never moves down the list: it
+  says nothing about the paper and is not counted against it.
+- **`writer`** writes digests, which are retried every run until written rather than stopped after three
+  ([digests.md](digests.md), a digest is a record). A refusal goes down the list at once, as above. Each failed digest of
+  the topic in a row starts the next attempt one model further down, and the last model in the list is kept until a
+  digest of the topic is published. A digest every model refused is failed like any other.
+
+A fallback may come from the same lab as the role's model (refusals follow a lab's policy, but a lab's models differ:
+Sonnet 5.5 answered all three papers Opus 5.5 refused,
+[`evals/2026-10-16-sonnet-briefs.md`](../../../evals/2026-10-16-sonnet-briefs.md)); each list is written out in order.
+An answer any model in the list has given is answered from the journal when the question is asked again, and the role
+starts from the model that gave it, so an unchanged question costs nothing after a refusal either.
 
 ## The gateway
 
@@ -33,6 +49,10 @@ Carried from the first v1: `Gateway.complete(role, request, *, paper_id)` resolv
 effort, applies retries and the timeout, journals the call with its cost, and reuses an identical earlier call
 (identical includes the resolved provider, model, effort and routing, so `judge` and `check` never share a reply).
 Providers: `anthropic` (prompt caching, cost from a price table) and `openrouter`.
+
+A provider's 401, 402 or 403 is an **`account` error** (a key revoked, credits used up, access withdrawn), in normal
+and batched calls alike: never retried, never counted against a paper, and shown on the provider's component of the
+status document until its next answered call ([data.md](data.md), configuration).
 
 Debug mode (`debug = true` in `litwatch.toml`, or `LITWATCH_DEBUG=1`; off by default) is for catching problems over a
 stretch of nights. A call whose reply could not be used (invalid, truncated or refused) keeps the reply's text in
@@ -63,7 +83,7 @@ service's workers, the CLI's other commands and a nightly started outside that w
   step whose calls are not batched, a deadline's leftovers or a burst of fallbacks never go out all at once.
 - **Answers.** Open batches are polled every minute. Every answer of a batch is journalled with its own usage at half
   price, whether or not a call still awaits it, so a batch is accounted for in full; an awaited answer is validated
-  and handled as in a normal call (a refusal goes to the fallback), and only a validated answer is reused. An answer
+  and handled as in a normal call (a refusal goes down the role's fallbacks), and only a validated answer is reused. An answer
   no call awaits has its usage on its journal row; the answer itself stays in the batch, which a run started again
   reads when it asks for it (below). A role's timeout bounds each request to the provider, not the wait for a batch. A
   request the batch could not answer (errored, expired, cancelled) is sent again as a normal call when it is asked.
@@ -99,9 +119,11 @@ service's workers, the CLI's other commands and a nightly started outside that w
 
 Unchanged where one model's error would be final:
 
-- **Focus grading.** `judge` and `check` must come from different labs; start-up refuses a configuration where they do
-  not. The lab is the organisation that trained the model, read from the OpenRouter prefix, and `anthropic` for the
-  direct API.
+- **Focus grading.** `judge` and `check` must come from different labs, fallbacks included: start-up refuses a
+  configuration where `judge`'s model and fallbacks share a lab with `check`'s model and fallbacks. The lab is the
+  organisation that trained the model, read from the OpenRouter prefix, and `anthropic` for the direct API. When
+  every model on one side refuses and the other side answers, the grade stands from one lab, marked `one_lab`
+  ([pipeline.md](pipeline.md), section 4).
 - **Classification** drops a paper silently if it is wrong, so three things stand behind it for Focus topics: the
   uncertain band, the keyword check, and classification recall on Quality ([feedback.md](feedback.md)).
 

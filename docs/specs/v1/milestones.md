@@ -43,7 +43,9 @@ policy. The model-spend plan ([`docs/plans/model-spend.md`](../../plans/model-sp
 the nightly under the owner's caps before the switch (#74, #75). N8, the switch
 ([`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md)): the telemetry (#77), and v1 in place of 0.14 on the night of
 2026-10-16, accepted by the owner on 10-17 ([`evals/2026-10-17-switch.md`](../../../evals/2026-10-17-switch.md)), when
-`v1` merged into `main`. Next: N8's P4, Zotero and WebDAV after a few stable nights and the removal of 0.14.
+`v1` merged into `main`. Next: N8's P4, Zotero and WebDAV after a few stable nights and the removal of 0.14. The failure-handling plan
+([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), decisions 68–72) is next beside it: fallback
+models per role, what reaches Vergil, Deep cards without a cap, Acknowledge.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).

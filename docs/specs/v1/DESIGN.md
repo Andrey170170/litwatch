@@ -54,7 +54,10 @@ with "‹ Back" at its top.
 **Run status**, in the wordmark on both: the papers read last night when the run went well ("530", a cyan square);
 the progress while it runs ("212/530", amber, pulsing); the problem when something failed ("2 failed", red); the spend when a provider's month is projected over its budget
 ("530 · $ over", amber, steady). Failed outranks running, running outranks over budget. It opens Settings: Needs you
-when something failed, Runs and cost when over budget, Overview otherwise. What counts as a problem is the spec's.
+when something failed, Runs and cost when over budget, Overview otherwise. What counts as a problem is the spec's:
+the red items on Needs you (stopped papers and passes, failed digests) and a failed nightly; the yellow groups, waiting
+for the owner's Fit, are not counted. Items the owner acknowledged don't count, so with all of them acknowledged it shows
+the night's papers again. A failed nightly run can't be acknowledged.
 
 ## Pages
 
@@ -218,10 +221,15 @@ the last Calibrate session. Then the spec's numbers: recall per Focus topic (cla
 to end, n; "Run replay"), precision at relevant (with "below, owner wanted it"), reactions over 30 days per topic and
 stage, and "Matters, no topic".
 
-**Needs you.** Only what waits on the owner, grouped by kind, each group with one line on what it means: Focus splits
+**Needs you.** Only what waits on the owner, grouped by kind, each group with one line on what it means: Focus splits,
+Graded by one lab (one grader's lab refused the paper throughout and only the other answered; the line names which)
 and Area escalations (yellow, settled with the Fit control, the standing Fit underlined); awaiting classification
 (Dismiss, Classify by hand, Fix the text), ungraded (Grade it now), analysis (the error, Try again), full text (Try
-again, Use the PDF) and digests (Write it again), red. A title opens its paper, where the same item shows (Paper, open states).
+again, Use the PDF) and digests (Write it again), red. A red item says why it stopped (refused by every model, or the
+last error). A title opens its paper, where the same item shows (Paper, open states). Each red group has Acknowledge,
+and the page "Acknowledge all": the owner has seen them and they stop counting in the run status. Acknowledged items
+move to a folded "Acknowledged" section at the foot, grouped as above and keeping their buttons; one that recovers and
+fails again comes back.
 
 **Calibrate.** A first page with "Start a session" and the past sessions (date, answered, seed, how many answers differ
 from the pipeline). A session draws its papers as the spec says (about 20 per Focus topic, half at relevant or

@@ -48,16 +48,21 @@ evaluation calls the same functions and writes only to evaluation tables.
 - `weights` (paper, paper revision, weight, source abstract | full_text, pass, reason, at): the current Weight is the
   one from the full-text pass queued last for the current revision, the same pass as the current Brief and Gist, else
   from the abstract.
-- `verdicts` (paper, topic, topic version, paper revision, fit, reason, opinions per grader, split, escalated, at),
+- `verdicts` (paper, topic, topic version, paper revision, fit, reason, opinions per grader, split, escalated,
+  one lab, at),
   one row per grading as before; the topic version is the topic's version hash, and opinions are keyed by role
-  (`judge`, `check`, `area_check` with its probability, `field_grade`). The grade is derived, not stored here.
+  (`judge`, `check`, `area_check` with its probability, `field_grade`), each naming the model that answered. One lab
+  marks a Focus grade one side refused throughout (pipeline.md, section 4). The grade is derived, not stored here.
 - `effective_grades` (paper, topic, fit, grade, rarity on the topic's page), a row for every followed topic with a
   verdict or the owner's word, and `rarities` (paper, mixed-list level, best topic, null when no topic graded the
   paper and its Weight's floor alone sets the level, and the current Weight the level was set with): kept current so every surface reads one answer and lists sort
   by it.
 - `step_failures` (paper, step classification | analysis | grading, topic for a grading, paper revision, failed
-  runs, last error): a step's failed runs on the paper's current text; three unusable answers in a row leave it for
-  the owner (pipeline.md, section 9).
+  runs, refused throughout (for a Focus grading, which side), last error, acknowledged at): a step's failed runs on the
+  paper's current text; three unusable answers in a row, or every model of the role refusing, leave it for the owner
+  (pipeline.md, section 9), except a Focus side refused while the other is still to answer (pipeline.md, section 4). The
+  failed runs also say how far down the role's fallbacks the next run starts (models.md, roles). Acknowledged at is
+  set by the owner's Acknowledge and cleared when the step fails again after recovering.
 - `grading_passes` (paper, paper revision, at): the revision's first grading pass is done; after it only failed
   gradings and reported misses are graded (pipeline.md, section 4).
 - `gists` (paper, paper revision, arXiv version or unknown, pass, text, source abstract | full_text, model, at): the
@@ -68,7 +73,7 @@ evaluation calls the same functions and writes only to evaluation tables.
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
   done | failed, priority, queued at, tried at, text arrived at, arXiv version read, text source latex | pdf, text
   hash, paper's update read for, lease until, failed runs, retry text, use the PDF (the owner's, for LaTeX that reads
-  badly), last error): one Brief or Weight re-check open per paper revision, and one
+  badly), last error, refused throughout, acknowledged at, as for `step_failures`): one Brief or Weight re-check open per paper revision, and one
   Deep pass open per paper (reason request | focus | pick; its revision is the one it read); a worker takes the least recently
   tried first. `weights` and `gists` name the pass a full-text row came from.
 - What a digest still has to cover is not stored: a paper is due for a topic while it is eligible there, was announced
@@ -76,7 +81,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   Focus and Area, a weekly one for Field), found from the database when a digest is written
   ([digests.md](digests.md)). `papers.announced` is the date of the arXiv listing that first showed the paper.
 - `digests` (topic, period day | week, day (a week's Monday), state written | nothing_new | failed, gist, text, counts,
-  best rarity, error, run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
+  best rarity, error, model (for a failed one, the writer model that failed: the next attempt's step down, models.md,
+  roles), acknowledged at (a failed one's), run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
   role pick | listed | mentioned, position, why, and frozen at writing: paper revision, title, gist, fit, grade, rarity (a
   mixed list's), and the topic whose grade it showed).
 - `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`; a Gist rating
@@ -96,8 +102,8 @@ class labels; the value is a Fit or unsure, and the grade column is gone: the gr
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
 `zotero_items`, `webdav_files`, `deep_cards` (plus what it was written from: paper revision, arXiv version, text
-source, pass; the job columns are gone), `deep_attempts` (plus pass, job, ended at, error, and the job's usage: tokens,
-turns, list cost, null when unknown), `eval_runs` (plus every run record a
+source, pass; the job columns are gone), `deep_attempts` (plus pass, job, ended at, error, whose failure it was,
+paper or service, and the job's usage: tokens, turns, list cost, null when unknown), `eval_runs` (plus every run record a
 resumed replay ran under, whose costs are its cost), `eval_results` (columns for classification instead of triage:
 whether the classifier alone and the uncertain band made the paper a member, the highest probability in the topic's
 subtree, and the graded Fit; the keyword hit, both opinions, split and the two errors as before), `eval_samples`,
@@ -159,12 +165,12 @@ model = "claude-haiku-5-5"
 provider = "anthropic"
 model = "claude-sonnet-5-5"
 effort = "high"
-fallback = "brief_fallback" # asked once when brief refuses (models.md, roles)
-
-[models.brief_fallback]    # another lab, chosen by the model-spend plan's replay
-provider = "openrouter"
-model = "openai/gpt-6.1-sol"
-effort = "high"
+fallbacks = [              # asked in order on refusals and unusable answers (models.md, roles); shown
+                           # here for brief only: every role that writes has its list, the defaults chosen
+                           # by the failure-handling replay (P1) and set in the configuration in P2
+  { provider = "openrouter", model = "openai/gpt-6.1-sol", effort = "high" },
+  { provider = "openrouter", model = "moonshotai/kimi-k3" },
+]
 
 [models.writer]
 provider = "anthropic"
@@ -206,6 +212,23 @@ that holds it: `LITWATCH_DATABASE_URL` (or `LITWATCH_DB_HOST` and its siblings),
 `LITWATCH_LOG_FORMAT=json` writes one JSON object per line (`ts`, `level`, `msg`, `component`); the image sets it.
 `LITWATCH_METRICS_PORT` (or `litwatch serve --metrics-port`) serves, without a token, `/metrics` in Prometheus' text
 format (the `homelab_job_*` family for the nightly and publications jobs, read from the run records, and litwatch's
-own gauges) and `/status` as a `homelab.status/v1` document (the nightly, the pipeline's stopped papers, digests, each
-integration, the archive, deep, the budget), for a monitoring system on an internal network. A run records the
+own gauges) and `/status` as a `homelab.status/v1` document (the nightly, the pipeline, digests, each integration,
+each model provider, the archive, deep, the budget), for a monitoring system on an internal network. A run records the
 database session of the process running it, so a run whose process died reads as failed rather than running.
+
+The status document says when litwatch cannot do its job; a paper's own failure is the app's (pipeline.md, section 9).
+All of these read the latest nightly run that has ended, unless said otherwise.
+
+- `pipeline` is degraded when, at one step, more distinct papers stopped during that run than max(5, 2 % of the
+  papers it classified). The steps are classification, analysis, grading (a paper counts once however many topics) and
+  the full-text passes (Brief and Weight re-check); a paper stopped when it became terminal there (three failed runs,
+  or refused by every model) between the run's start and its end, the digest wait included. Deep passes are not
+  counted: their service failures have `deep`. A single stopped paper never turns `pipeline`.
+- `provider-<name>`, one per model provider, is degraded from an `account` error (models.md, the gateway) until the
+  provider's next reply; and when, in that run, the provider had failed calls (provider errors, timeouts) and not one
+  reply. A reply is any answer the provider sent, a refusal or an invalid answer included; an answer reused from the
+  journal is not one.
+- `deep` is degraded while the service's health check reports a sign-in other than ok or does not answer, and from
+  any service failure litwatch sees (a job the service tagged `service`, an error submitting or following a job) until
+  the next card is made, whenever either happened.
+- `digests` is degraded by a failed digest, whatever the reason.
