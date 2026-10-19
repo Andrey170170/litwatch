@@ -91,7 +91,9 @@ TOPIC_COLOURS = ["purple", "green", "pink", "brown", "yellow", "red"]
 # The columns, in the layout's order. The title is written by its fixed id, `title`.
 TITLE = "Title"
 READERS = "Status"  # the reader's: made with the database, never written or put back
-HIDDEN = "arXiv id"  # what identifies a paper's page; hidden in every view
+HIDDEN = "arXiv id"  # what identifies a paper's page
+# What a row shows in a view as made; the other columns are there, hidden, for the owner to show.
+VISIBLE = (TITLE, "Grade", "Topic", "TL;DR", "Published", READERS)
 COLUMNS: dict[str, dict[str, Any]] = {
     TITLE: {"title": {}},
     "Grade": {"select": {"options": GRADE_OPTIONS}},
@@ -436,8 +438,8 @@ class Notion:
                     "sort": {"type": "manual"},
                     "hide_empty_groups": True,
                 },
-                # Every column: Notion hides those left out.
-                "properties": [{"property_id": columns[c], "visible": c != HIDDEN} for c in shown],
+                # Every column, in the layout's order, only the VISIBLE ones shown.
+                "properties": [{"property_id": columns[c], "visible": c in VISIBLE} for c in shown],
             },
         }
         if filtered:

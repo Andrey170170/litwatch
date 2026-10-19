@@ -256,7 +256,9 @@ paused); names must differ from each other and from the columns below.
 exported topic a grade column and a view; then it writes every paper that qualifies or already has
 a page. Anything it would make is looked for first (the database and the guide by title, views by
 name, pages by arXiv id, asking again for a moment after a lost reply), so nothing is made twice.
-A view is made once and is then the owner's: one deleted in Notion is not made again. A topic
+A view is made once and is then the owner's: one deleted in Notion is not made again. A view
+is made showing Title, Grade, Topic, TL;DR, Published and Status; the other columns are in it,
+hidden, for the owner to show. A topic
 added gets its column, view and papers; a topic dropped keeps its column, view and values, no
 longer written; a renamed topic has its column renamed and its new name written to each row's
 Topic (Notion's API cannot rename an option, so the old one is removed). A raised minimum turns the

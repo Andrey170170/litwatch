@@ -236,7 +236,7 @@ async def test_a_must_read_with_a_deep_card_gets_every_column_and_its_deep_read(
 
     # The views: All papers is the new database's own view, grouped by Grade; the topic's is
     # filtered to its grade column and grouped by it; both newest published first and listing
-    # every column, the arXiv id hidden.
+    # every column, only Title, Grade, Topic, TL;DR, Published and Status shown.
     source = fake.source()["properties"]
     ids = {name: unquote(p["id"]) for name, p in source.items()}
     everything, by_topic = fake.view_named("All papers"), fake.view_named(FAITHFUL)
@@ -247,7 +247,9 @@ async def test_a_must_read_with_a_deep_card_gets_every_column_and_its_deep_read(
     for view in (everything, by_topic):
         assert view["sorts"] == [{"property": ids["Published"], "direction": "descending"}]
         listed = {c["property_id"]: c["visible"] for c in view["configuration"]["properties"]}
-        assert listed == {i: name != "arXiv id" for name, i in ids.items()}
+        assert set(listed) == set(ids.values())
+        shown = {name for name, i in ids.items() if listed[i]}
+        assert shown == {"Title", "Grade", "Topic", "TL;DR", "Published", "Status"}
 
     # "How to read this" names the owner, the topics and the grades in plain words.
     guide_page = fake.body(db.guide_page)
