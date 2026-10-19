@@ -21,6 +21,7 @@ from litwatch.core import (
     LabelOrigin,
     LabelValue,
     Opinion,
+    Publication,
     Rarity,
     Taxonomy,
     TaxonomyClass,
@@ -34,6 +35,7 @@ from litwatch.store import integrations as integrations_store
 from litwatch.store import notion as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
+from litwatch.store import publications as publications_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, deliver, paper, settled
@@ -276,6 +278,18 @@ async def test_a_worth_a_look_without_a_brief_shows_its_abstract(world):
     assert [fake.value(r, "arXiv id") for r in fake.rows()] == [B.id]
 
 
+async def test_venue_links_to_the_published_version(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    async with conn.transaction():
+        record = Publication(venue="NeurIPS", year=2026, doi="10.5555/x")
+        await publications_store.put(conn, A.id, record)
+    assert await start(conn, notion(fake))
+    venue = created(fake, A.id)["properties"]["Venue"]["rich_text"]
+    assert plain(venue) == "NeurIPS 2026"
+    assert venue[0]["text"]["link"] == {"url": "https://doi.org/10.5555/x"}
+
+
 async def test_a_delisted_paper_says_why_and_listing_it_again_clears_that(world):
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, A, FAITH.slug, "relevant")
@@ -299,6 +313,48 @@ async def test_a_delisted_paper_says_why_and_listing_it_again_clears_that(world)
     assert fake.value(row, "Grade") == "Worth a look" and fake.value(row, "Why") == ""
     assert [b["callout"]["icon"]["emoji"] for b in fake.body(row["id"])[:1]] == ["💡"]
     assert len(fake.rows()) == 1  # never deleted, never made twice
+
+
+async def test_the_why_is_the_newest_change_that_took_it_off(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "relevant")
+    await grade(conn, B, FAITH.slug, "relevant")
+    n = notion(fake)
+    assert await start(conn, n)
+    verdicts = f"{FAITHFUL}, {{}}: litwatch re-checked it and judged it off-topic."
+
+    # Handled one by one: the owner takes A off; then it returns and a verdict takes it off.
+    await say(conn, A, FAITH.slug, LabelValue.NONE)
+    await deliver(conn, n)
+    assert "Andrei marked it" in fake.value(fake.row(A.id), "Why")
+    await word.unlabel(conn, A.id, FAITH.slug)
+    await grade(conn, A, FAITH.slug, "adjacent")
+    await deliver(conn, n)
+    assert fake.value(fake.row(A.id), "Why") == verdicts.format(await last_day(conn))
+
+    # Handed over together: every event finds B already off for the verdict's reason.
+    await say(conn, B, FAITH.slug, LabelValue.NONE)
+    await word.unlabel(conn, B.id, FAITH.slug)
+    await grade(conn, B, FAITH.slug, "adjacent")
+    await deliver(conn, n)
+    assert fake.value(fake.row(B.id), "Why") == verdicts.format(await last_day(conn))
+
+
+async def test_a_topic_exported_again_says_why_its_paper_left_meanwhile(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "relevant")
+    await grade(conn, A, MON.slug, "relevant")
+    assert await start(conn, notion(fake))
+    only = notion(fake, topics={MON.slug: MONITORING})
+    assert await start(conn, only)
+    await grade(conn, A, FAITH.slug, "adjacent")  # not wanted while FAITH is not exported
+    await deliver(conn, only)
+
+    assert await start(conn, notion(fake))
+    row = fake.row(A.id)
+    assert fake.value(row, FAITHFUL) == "No longer listed"
+    why = f"{FAITHFUL}, {await last_day(conn)}: litwatch re-checked it and judged it off-topic."
+    assert fake.value(row, "Why") == why
 
 
 async def test_an_event_from_before_causes_were_recorded_reads_as_a_verdict(world):
@@ -383,6 +439,48 @@ async def test_a_page_whose_creation_reply_was_lost_is_adopted_after_a_restart(w
     assert len(headings) == 1
 
 
+async def test_a_page_whose_reply_was_lost_is_delisted_if_its_paper_left_meanwhile(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    t0 = datetime(2026, 10, 19, 12, tzinfo=UTC)
+    fake.lose_answers = 1
+    assert not await start(conn, notion(fake), t0)
+    await grade(conn, A, FAITH.slug, "adjacent")
+
+    assert await start(conn, notion(fake), t0 + timedelta(minutes=1))
+    (row,) = fake.rows()
+    assert fake.value(row, "Grade") == "No longer listed"
+    assert "litwatch re-checked it" in fake.value(row, "Why")
+
+
+async def test_a_column_put_back_is_filled_even_when_the_reply_was_lost(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await texts(conn, A, gist="Probes catch hidden steps.")
+    await grade(conn, A, FAITH.slug, "must_read")
+    t0 = datetime(2026, 10, 19, 12, tzinfo=UTC)
+    assert await start(conn, notion(fake), t0)
+    del fake.source()["properties"]["TL;DR"]  # the owner deleted the column
+    fake.lose_patches = 1
+    assert not await start(conn, notion(fake), t0 + timedelta(minutes=1))
+
+    assert await start(conn, notion(fake), t0 + timedelta(minutes=2))
+    assert fake.value(fake.row(A.id), "TL;DR") == "Probes catch hidden steps."
+
+
+async def test_an_event_is_written_with_what_another_services_setup_made(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    n = notion(fake)
+    assert await start(conn, n)
+    del fake.source()["properties"][FAITHFUL]  # deleted, then made again by another service
+    assert await start(conn, notion(fake))
+
+    await say(conn, A, FAITH.slug, LabelValue.RELATED)
+    await deliver(conn, n)
+    assert (await outbox.cursor(conn, n.name)).failing is None
+    assert fake.value(fake.row(A.id), FAITHFUL) == "Worth a look"
+
+
 async def test_a_failing_setup_is_retried_after_backoff_and_shown(world):
     conn, fake = world, FakeNotion(PARENT)
     n = notion(fake)
@@ -420,6 +518,21 @@ async def test_a_failing_setup_is_retried_after_backoff_and_shown(world):
     (card,) = (await api.get("/api/settings/integrations")).json()
     assert card["setup_failing"] is None
     await api.aclose()
+
+
+async def test_an_implementation_without_setup_clears_its_predecessors_failure(world):
+    conn, fake = world, FakeNotion(PARENT)
+    fake.down = True
+    assert not await start(conn, notion(fake))
+
+    class Plain:
+        name = "notion"
+
+        def wants(self, event):
+            return False
+
+    assert await start(conn, Plain())
+    assert (await outbox.cursor(conn, "notion")).setup_failures == 0
 
 
 async def test_a_setup_while_another_holds_the_lock_makes_nothing(world):
@@ -534,6 +647,25 @@ async def test_a_renamed_topic_renames_its_column_and_option_but_not_its_view(wo
     assert fake.value(fake.row(A.id), "Topic") == ["Faithfulness"]
     assert fake.value(fake.row(A.id), "Faithfulness") == "Must read"
     assert fake.view_named("CoT faithfulness")  # the owner's title
+
+
+async def test_a_topic_may_not_take_the_name_of_one_exported_before(world):
+    conn, fake = world, FakeNotion(PARENT)
+    assert await start(conn, notion(fake, topics={FAITH.slug: "Faith"}))
+    assert not await start(conn, notion(fake, topics={MON.slug: "Faith"}))
+    assert "Faith" in (await outbox.cursor(conn, "notion")).setup_error
+
+
+async def test_a_new_topic_never_takes_a_view_litwatch_made_for_another(world):
+    conn, fake = world, FakeNotion(PARENT)
+    assert await start(conn, notion(fake, topics={MON.slug: MONITORING}))
+    db = await state.database(conn, "notion")
+    fake.views[db.all_view]["name"] = FAITHFUL  # the owner renamed All papers
+
+    assert await start(conn, notion(fake))
+    db = await state.database(conn, "notion")
+    view = fake.views[db.topics[FAITH.slug]["view"]]
+    assert view["id"] != db.all_view and "filter" in view
 
 
 # -- taken away: a dismissed paper, a page trashed in Notion ---------------------------------------

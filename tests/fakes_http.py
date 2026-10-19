@@ -287,7 +287,8 @@ class FakeNotion:
     gives them), views, page properties and body blocks. Only the token `notion-token` is let in.
 
     `limited` answers that many next requests 429 with a Retry-After of 7 seconds. `lose_answers`
-    makes the next row creations happen and then answer 502. `hidden` keeps that many next
+    makes the next row creations happen and then answer 502, `lose_patches` the next changes to the
+    data source's properties. `hidden` keeps that many next
     queries from finding the newest page, as a lagging index would. `down` answers 500 to all.
     `requests` holds every request as (method, path, body). `trash` and `delete` take an object
     away as a person in Notion would; what it holds reads as trashed too, and answers as Notion
@@ -302,6 +303,7 @@ class FakeNotion:
         self.requests: list[tuple[str, str, Any]] = []
         self.limited = 0
         self.lose_answers = 0
+        self.lose_patches = 0
         self.hidden = 0
         self.down = False
         self.made = 0
@@ -414,6 +416,9 @@ class FakeNotion:
                 return self._query(parts[1], body)
             if req.method == "PATCH":
                 self._properties(parts[1], body["properties"])
+                if self.lose_patches:
+                    self.lose_patches -= 1
+                    return httpx.Response(502, text="Bad Gateway")
             return httpx.Response(200, json=self.objects[parts[1]] | {"in_trash": trashed})
         if route == ("GET", "pages", None):
             return httpx.Response(200, json={"object": "page", "id": target, "in_trash": trashed})
@@ -472,7 +477,7 @@ class FakeNotion:
             name = next((n for n, p in props.items() if unquote(p["id"]) == key), key)
             if name not in props:
                 kind = next(k for k in change if k not in ("name", "description"))
-                pid = "title" if kind == "title" else quote(f"p:{len(props)}\\", safe="")
+                pid = "title" if kind == "title" else quote(f"{self._id('p')}\\", safe="")
                 props[name] = {"id": pid, "name": name, "type": kind, kind: {}}
             prop = props[name]
             if new := change.get("name"):

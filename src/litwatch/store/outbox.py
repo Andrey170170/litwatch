@@ -87,6 +87,18 @@ async def after(conn: psycopg.AsyncConnection, position: Position, limit: int) -
     return [Event(**r) for r in rows]
 
 
+async def of_paper(conn: psycopg.AsyncConnection, paper_id: str, type: str) -> list[Event]:
+    """The paper's events of one type, settled or not, in the order they were written: a
+    paper's changes take its lock, so their ids follow it."""
+    rows = await (
+        await conn.execute(
+            f"SELECT {_EVENT} FROM outbox WHERE paper_id = %s AND type = %s ORDER BY id",
+            (paper_id, type),
+        )
+    ).fetchall()
+    return [Event(**r) for r in rows]
+
+
 async def cursor(conn: psycopg.AsyncConnection, name: str) -> Cursor:
     """The integration's cursor, made at the last settled event the first time it is asked
     for: an integration enabled for the first time is not woken by what came before it."""

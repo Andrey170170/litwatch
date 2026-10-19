@@ -49,7 +49,8 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
 
 - **A plain `httpx` client on Notion API version `2026-03-11`, no SDK.** The views endpoint is new, the client needs
   only a handful of calls, and the sample used exactly these calls. It has the same shape as `zotero.py`'s client.
-- **It paces itself to about three requests a second.** On a 429 it waits as Retry-After says. Any other failure
+- **It paces itself to about three requests a second.** On a 429 it waits as Retry-After says, a minute at most per wait, up to five waits;
+  then the request fails like any other. Any other failure
   raises, so the dispatcher retries the event with backoff and shows it under Settings → Integrations.
 - **The outbox is the queue.** litwatch only writes events, each in the transaction of the data it describes. The `notion` loop publishes
   from its own cursor at Notion's pace and holds up no other integration.
@@ -121,8 +122,10 @@ A page is written only when one of its hashes changes, so restarts and repeated 
 
   `wants` drops every other event. `handle` reads the present state through the repositories, rebuilds the one page,
   and writes what changed, as the integration contract says.
-- **The Why line comes from the `grade.changed` that delisted the paper.** It is stored in `notion_pages`. Only that
-  event's topic line changes; a paper listed again for the topic loses the line. In plain words:
+- **The Why line comes from the newest `grade.changed` that took the paper off the topic's list**, read from the
+  paper's events in the outbox rather than from the event in hand, so events handed over late, or a topic exported
+  again after its paper left, still name the right cause. It is stored in `notion_pages`, with the newest change it
+  knew; a later change that takes the paper off again replaces it. Only that topic's line changes; a paper listed again for the topic loses the line. In plain words:
   - `owner`: "Andrei marked it off-topic" or "… less important" (the name is `owner_name`);
   - `verdict` and `weight`: "litwatch re-checked it and judged it off-topic" or "… less important";
   - `taxonomy`: "the topic's definition changed".
@@ -156,7 +159,7 @@ The layout is the approved sample's.
 - TL;DR.
 - Published.
 - Status: a select of To read, Read, Useful, Not useful. Ana owns it and litwatch never writes it.
-- Authors, Venue, arXiv (url), PDF (url), Added and Why.
+- Authors, Venue (linked to the published version: its URL, else its DOI), arXiv (url), PDF (url), Added and Why.
 - arXiv id: the paper's id as text, which identifies the page (see *Creation is adopted*). Hidden in the views.
 - One grade column per exported topic, a select with the same three options.
 

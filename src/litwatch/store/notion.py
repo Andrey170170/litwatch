@@ -29,7 +29,8 @@ class Database:
 @dataclass
 class Page:
     """What was last written to a paper's page. `page_id` is None while its creation is under
-    way; `topics` maps each topic it is or was listed for to `{grade, shown, why, since}`.
+    way; `topics` maps each topic it is or was listed for to `{grade, shown, why, since}`, a
+    Why with `by` and `seen` too (see the `notion` integration's `_topic`).
     `gone_at` is set once the page was found trashed or deleted in Notion."""
 
     paper_id: str

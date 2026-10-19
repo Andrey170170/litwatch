@@ -50,6 +50,7 @@ from litwatch.store import analyses as analyses_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import notion as state
+from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -231,9 +232,13 @@ class Notion:
         await self.notion.aclose()
 
     async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
-        if self._db is None:
+        # Read again, under the dispatch lock: another service's setup may have made something
+        # again since this one's.
+        db = await state.database(conn, self.name)
+        if self._db is None or db is None or db.parent_page != self.parent_page:
             raise NotionError("not set up")
-        await self._write(conn, event.paper_id, event)
+        self._db = db
+        await self._write(conn, event.paper_id)
 
     # -- reconcile ---------------------------------------------------------------------------------
 
@@ -254,7 +259,7 @@ class Notion:
         self._db = db
         grades = [g.value for g in Grade if g.at_least(self.minimum)]
         for paper_id in await state.papers(conn, self.name, list(self.exported), grades):
-            await self._write(conn, paper_id, None)
+            await self._write(conn, paper_id)
 
     async def _exported(self, conn: psycopg.AsyncConnection) -> dict[str, Exported]:
         """The exported topics, in the configuration's order, or the Focus topics in the
@@ -312,6 +317,12 @@ class Notion:
         if source.get("in_trash"):
             raise NotionError(TRASHED)
         props = source["properties"]
+        held = {e["name"] for s, e in db.topics.items() if s not in self.exported}
+        if clash := sorted(t.name for t in self.exported.values() if t.name in held):
+            raise NotionError(
+                f"already the column of a topic exported before: {', '.join(clash)}; "
+                "give the topic another name"
+            )
         by_id = {unquote(p["id"]): p for p in props.values()}
         missing = [c for c in COLUMNS if c not in props and c not in (TITLE, READERS)]
         change: dict[str, Any] = {c: COLUMNS[c] for c in missing}
@@ -344,13 +355,13 @@ class Notion:
                 for i, n in enumerate(wanted)
             ]
             change["Topic"] = {"multi_select": {"options": options}}
+        if restored:  # first: the repair's reply may be lost, and the column then looks whole
+            await state.rewrite_properties(conn, self.name)
         if change:
             props = (await self.notion.request("PATCH", path, {"properties": change}))["properties"]
         for slug in added:
             db.topics[slug]["column"] = unquote(props[db.topics[slug]["name"]]["id"])
         await state.save_database(conn, db)
-        if restored:
-            await state.rewrite_properties(conn, self.name)
         return {name: unquote(p["id"]) for name, p in props.items()}
 
     async def _guide(self, conn: psycopg.AsyncConnection, db: state.Database) -> None:
@@ -396,8 +407,12 @@ class Notion:
             view = await self.notion.request("GET", f"/views/{v['id']}")
             known.setdefault(view["name"], view["id"])
         fresh = list(known) == [DEFAULT_VIEW]  # a new database, with Notion's one view
+        # Views litwatch made, whatever the owner named them since: none is taken twice.
+        owned = {db.all_view, *(t["view"] for t in db.topics.values())} - {None}
         for slug, name, group in wanted:
             view = known.get(name)
+            if view in owned:
+                view = None
             if view is None:
                 body = self._view(db, name, group, columns, filtered=slug is not None)
                 if slug is None and fresh:
@@ -408,6 +423,7 @@ class Notion:
                         "POST", "/views", {**target, "type": "table", **body}
                     )
                 view = made["id"]
+            owned.add(view)
             if slug is None:
                 db.all_view = view
             else:
@@ -448,12 +464,9 @@ class Notion:
 
     # -- a paper's page --------------------------------------------------------------------------
 
-    async def _write(
-        self, conn: psycopg.AsyncConnection, paper_id: str, event: Event | None
-    ) -> None:
+    async def _write(self, conn: psycopg.AsyncConnection, paper_id: str) -> None:
         """Bring the paper's page in line with what litwatch holds now, writing nothing that did
-        not change. `event` is the one being handled: it may say why a topic delisted it. A
-        page someone took away in Notion is left alone from then on."""
+        not change. A page someone took away in Notion is left alone from then on."""
         page = await state.page(conn, self.name, paper_id)
         if page is not None and page.gone_at is not None:
             return
@@ -464,9 +477,13 @@ class Notion:
         effective = await word_store.effective_for(conn, paper_id)
         begun = page is not None and page.page_id is None
         topics = dict(page.topics) if page else {}
+        history: list[Event] | None = None  # its grade changes, read when one may say why it left
         for slug in self.exported:
             grade = effective[slug].grade.value if slug in effective else None
-            if (now := self._topic(slug, topics.get(slug), grade, event, dismissed)) is None:
+            if slug in topics and not self._qualifies(grade, dismissed) and history is None:
+                history = await outbox.of_paper(conn, paper_id, events.GRADE_CHANGED)
+            changes = [e for e in history or [] if e.payload.get("topic") == slug]
+            if (now := self._topic(topics.get(slug), grade, dismissed, changes)) is None:
                 topics.pop(slug, None)
             else:
                 topics[slug] = now
@@ -482,6 +499,7 @@ class Notion:
         body = self._body(paper, gist, brief["text"] if brief else None, card, topics)
         written = (page.page_id, page.properties_hash, page.body_hash, page.topics)
         if page.page_id is None:
+            page.topics = topics  # kept with the creation: a lost reply is then known listed
             await self._create(conn, page, properties, body, begun)
         try:
             if page.properties_hash != (digest := _hash(properties)):
@@ -569,32 +587,57 @@ class Notion:
             raise NotionError(TRASHED)
         return True
 
+    def _qualifies(self, grade: str | None, dismissed: datetime | None) -> bool:
+        return dismissed is None and grade is not None and Grade(grade).at_least(self.minimum)
+
     def _topic(
         self,
-        slug: str,
         before: dict[str, Any] | None,
         grade: str | None,
-        event: Event | None,
         dismissed: datetime | None,
+        changes: list[Event],
     ) -> dict[str, Any] | None:
         """What the page says for one topic, from its effective grade now, whether the owner
-        dismissed the paper, and what was written before; None while it was never listed."""
-        if dismissed is None and grade is not None and Grade(grade).at_least(self.minimum):
+        dismissed the paper, what was written before and the topic's grade changes (oldest
+        first); None while it was never listed. A Why records the newest change it had seen
+        (`seen`): a change after that which takes the paper off again replaces it."""
+        if self._qualifies(grade, dismissed):
             return {"grade": grade, "shown": SHOWN[Grade(grade)], "why": None, "since": None}
         if before is None:
             return None
-        if before["shown"] == DROPPED:
-            return {**before, "grade": grade}  # keeps its Why
+        dropped = before["shown"] == DROPPED
+        off = [e for e in changes if self._takes_off(e)]
+        newer = off and off[-1].id > before.get("seen", 0)
+
+        def gone(why: str, since: datetime, by: str) -> dict[str, Any]:
+            day = since.astimezone(self.zone).date().isoformat()
+            seen = changes[-1].id if changes else 0
+            return {
+                "grade": grade,
+                "shown": DROPPED,
+                "why": why,
+                "since": day,
+                "by": by,
+                "seen": seen,
+            }
+
+        if dropped and (dismissed is not None or (before.get("by") != "dismissed" and not newer)):
+            return {**before, "grade": grade}  # still why it is off
         if dismissed is not None:
-            why, since = f"{self.owner_name} set it aside.", dismissed
-        elif grade == before["grade"]:  # listed at this grade, and no longer: the minimum rose
-            why, since = f"the list now shows only {SHOWN[self.minimum]} papers.", self.now()
-        elif _delists(event, slug, self.minimum):
-            why, since = self._why(event.payload), event.created_at
-        else:
-            return before  # the change that delisted it is yet to be handed over, with its cause
-        day = since.astimezone(self.zone).date().isoformat()
-        return {"grade": grade, "shown": DROPPED, "why": why, "since": day}
+            return gone(f"{self.owner_name} set it aside.", dismissed, "dismissed")
+        if not dropped and grade == before["grade"]:  # listed at this grade, no longer: it rose
+            return gone(
+                f"the list now shows only {SHOWN[self.minimum]} papers.", self.now(), "minimum"
+            )
+        if off:
+            return gone(self._why(off[-1].payload), off[-1].created_at, "grade")
+        return gone(self._why({}), self.now(), "grade")  # no change on record says: a verdict's
+
+    def _takes_off(self, change: Event) -> bool:
+        """Whether the grade change took the paper from the list's minimum to below it."""
+        before, after = change.payload.get("before"), change.payload.get("after")
+        listed = before is not None and Grade(before).at_least(self.minimum)
+        return listed and (after is None or not Grade(after).at_least(self.minimum))
 
     def _why(self, payload: dict[str, Any]) -> str:
         """Who took the paper off the list, and why, in plain words. An event written before
@@ -634,6 +677,8 @@ class Notion:
     ) -> dict[str, Any]:
         named = [self._db.topics[s]["name"] for s in self._order(self._db) if s in topics]
         where = (record.venue or record.container, record.year) if record else ()
+        doi = f"https://doi.org/{record.doi}" if record and record.doi else None
+        published = record and (record.url or doi)
         return {
             "title": {"title": _rich(paper.title)},
             "Grade": {"select": {"name": self._shown(topics)}},
@@ -641,7 +686,7 @@ class Notion:
             "TL;DR": {"rich_text": _rich(gist or "")},
             "Published": {"date": {"start": paper.published[:10]} if paper.published else None},
             "Authors": {"rich_text": _rich(", ".join(paper.authors))},
-            "Venue": {"rich_text": _rich(" ".join(str(x) for x in where if x))},
+            "Venue": {"rich_text": _rich(" ".join(str(x) for x in where if x), link=published)},
             "arXiv": {"url": f"https://arxiv.org/abs/{paper.id}"},
             "PDF": {"url": f"https://arxiv.org/pdf/{paper.id}"},
             "Added": {"date": {"start": added.isoformat()}},
@@ -730,14 +775,6 @@ class Notion:
                 "its text: the text is replaced when it is rewritten, and comments on it go too."
             ),
         ]
-
-
-def _delists(event: Event | None, slug: str, minimum: Grade) -> bool:
-    """Whether the event is the grade change that took the paper off the list for the topic."""
-    if event is None or event.type != events.GRADE_CHANGED or event.payload.get("topic") != slug:
-        return False
-    after = event.payload.get("after")
-    return after is None or not Grade(after).at_least(minimum)
 
 
 def _day(iso: str) -> str:

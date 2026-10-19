@@ -124,6 +124,8 @@ async def start(
     await outbox.cursor(conn, integration.name)
     setup = getattr(integration, "setup", None)
     if setup is None:
+        # The section may have had another implementation, one whose setup failed.
+        await outbox.setup_done(conn, integration.name)
         return True
     async with _locked(conn, integration) as locked:
         if not locked:

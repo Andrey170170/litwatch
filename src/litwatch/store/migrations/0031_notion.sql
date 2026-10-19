@@ -18,7 +18,8 @@ CREATE TABLE notion_databases (
 -- notion: one Notion page per paper. `page_id` is null while a creation is under way: its reply
 -- may be lost, so the page is looked for before another is made. The hashes are of what was last
 -- written (null: write it again). `topics` holds, per topic the page is or was listed for, what
--- was last written: {grade (the effective grade), shown (the grade word), why, since}. `gone_at`
+-- was last written: {grade (the effective grade), shown (the grade word), why, since}, and for a
+-- Why also by (grade, minimum or dismissed) and seen (the newest grade change it knew). `gone_at`
 -- is when the page was found in Notion's trash or deleted: someone took it away, so it is never
 -- written or made again.
 CREATE TABLE notion_pages (
@@ -33,3 +34,6 @@ CREATE TABLE notion_pages (
     updated_at      timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (integration, paper_id)
 );
+
+-- notion reads a paper's grade changes to say why it left the list.
+CREATE INDEX outbox_paper_idx ON outbox (paper_id, type);
