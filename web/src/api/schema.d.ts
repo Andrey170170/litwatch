@@ -538,6 +538,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge
+         * @description Acknowledge on Needs you: the owner has seen these items, and they stop counting in the
+         *     run status. An item is marked only while it still waits on the owner as shown (a step on
+         *     the revision named); one that recovers and fails again comes back unacknowledged. It moves
+         *     no paper. A failed nightly run is not an item and is never acknowledged.
+         */
+        post: operations["acknowledge_api_settings_acknowledge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/misses": {
         parameters: {
             query?: never;
@@ -1021,6 +1044,27 @@ export interface components {
             grades?: {
                 [key: string]: components["schemas"]["Grade"] | null;
             };
+        };
+        /**
+         * AcknowledgeIn
+         * @description What the owner acknowledged: stopped steps, full-text passes and failed digests (by id).
+         */
+        AcknowledgeIn: {
+            /**
+             * Steps
+             * @default []
+             */
+            steps: components["schemas"]["StepSeen"][];
+            /**
+             * Passes
+             * @default []
+             */
+            passes: number[];
+            /**
+             * Digests
+             * @default []
+             */
+            digests: number[];
         };
         /**
          * AmongRow
@@ -2389,6 +2433,21 @@ export interface components {
          * @enum {string}
          */
         Status: "draft" | "active" | "paused";
+        /** @enum {string} */
+        Step: "classification" | "analysis" | "grading";
+        /**
+         * StepSeen
+         * @description A stopped step as Needs you showed it: the paper, its revision then, a grading's topic.
+         */
+        StepSeen: {
+            step: components["schemas"]["Step"];
+            /** Paper Id */
+            paper_id: string;
+            /** Revision */
+            revision: number;
+            /** Topic */
+            topic?: string | null;
+        };
         /**
          * StripDigest
          * @description One square of a topic's digest strip: a digest, coloured by its best rarity (none for
@@ -3741,6 +3800,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    acknowledge_api_settings_acknowledge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

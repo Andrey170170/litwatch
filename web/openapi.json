@@ -1721,6 +1721,38 @@
         }
       }
     },
+    "/api/settings/acknowledge": {
+      "post": {
+        "summary": "Acknowledge",
+        "description": "Acknowledge on Needs you: the owner has seen these items, and they stop counting in the\nrun status. An item is marked only while it still waits on the owner as shown (a step on\nthe revision named); one that recovers and fails again comes back unacknowledged. It moves\nno paper. A failed nightly run is not an item and is never acknowledged.",
+        "operationId": "acknowledge_api_settings_acknowledge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcknowledgeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/misses": {
       "get": {
         "summary": "Misses",
@@ -2699,6 +2731,37 @@
         ],
         "title": "Ack",
         "description": "What an action changed. The page shows the result where it was taken; `message` is set\nonly for what it cannot show (DESIGN.md, acknowledgement): a thumb that gives or takes back\nthe owner's word on a Focus topic, and a reported miss."
+      },
+      "AcknowledgeIn": {
+        "properties": {
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StepSeen"
+            },
+            "type": "array",
+            "title": "Steps",
+            "default": []
+          },
+          "passes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Passes",
+            "default": []
+          },
+          "digests": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Digests",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "AcknowledgeIn",
+        "description": "What the owner acknowledged: stopped steps, full-text passes and failed digests (by id)."
       },
       "AmongRow": {
         "properties": {
@@ -6235,6 +6298,48 @@
         ],
         "title": "Status",
         "description": "Whether a topic is in use."
+      },
+      "Step": {
+        "type": "string",
+        "enum": [
+          "classification",
+          "analysis",
+          "grading"
+        ]
+      },
+      "StepSeen": {
+        "properties": {
+          "step": {
+            "$ref": "#/components/schemas/Step"
+          },
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step",
+          "paper_id",
+          "revision"
+        ],
+        "title": "StepSeen",
+        "description": "A stopped step as Needs you showed it: the paper, its revision then, a grading's topic."
       },
       "StripDigest": {
         "properties": {

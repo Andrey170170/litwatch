@@ -126,30 +126,36 @@ async def _one(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> d
 # -- the status line -------------------------------------------------------------------------------
 
 
+async def stopped(conn: psycopg.AsyncConnection, *, unacknowledged: bool) -> dict[str, int]:
+    """What waits on the owner after a failure: papers awaiting classification, with analysis,
+    a grading or a full-text pass stopped, and digests that failed; with `unacknowledged`, only
+    what the owner has not acknowledged (the status line's count)."""
+    from litwatch.store import digests  # it reads this module's SCOPE
+
+    seen = {"unacknowledged": unacknowledged}
+    return {
+        "awaiting_classification": await failures.count_stuck(
+            conn, "classification", FAILED_RUNS, **seen
+        ),
+        "analysis_failed": await failures.count_stuck(conn, "analysis", FAILED_RUNS, **seen),
+        "ungraded": await failures.count_stuck(conn, "grading", FAILED_RUNS, **seen),
+        "fulltext_failed": await fulltext.count_stuck(conn, FAILED_RUNS, **seen),
+        "digests_failed": await digests.count_failed(conn, **seen),
+    }
+
+
 async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     """The latest nightly run: none yet, running, failed (or open with its process gone), or done;
     done with papers awaiting classification, with analysis, a grading or a full-text pass
-    stopped, or with a digest that failed, needs the owner's attention. What is stopped is
-    counted whether or not a night ran (a digest written by hand can fail before the first).
-    `papers` are those the run classified; while it runs, `waiting` are those still to
-    classify."""
-    from litwatch.store import digests  # it reads this module's SCOPE
-
-    awaiting = await failures.count_stuck(conn, "classification", FAILED_RUNS)
-    analysis = await failures.count_stuck(conn, "analysis", FAILED_RUNS)
-    ungraded = await failures.count_stuck(conn, "grading", FAILED_RUNS)
-    texts = await fulltext.count_stuck(conn, FAILED_RUNS)
-    failed_digests = await digests.count_failed(conn)
-    stopped = {
-        "awaiting_classification": awaiting,
-        "analysis_failed": analysis,
-        "ungraded": ungraded,
-        "fulltext_failed": texts,
-        "digests_failed": failed_digests,
-    }
+    stopped, or with a digest that failed, needs the owner's attention, until the owner
+    acknowledges them (a failed run is never acknowledged). What is stopped is counted whether
+    or not a night ran (a digest written by hand can fail before the first), and only what the
+    owner has not acknowledged. `papers` are those the run classified; while it runs, `waiting`
+    are those still to classify."""
+    counts = await stopped(conn, unacknowledged=True)
     run = await runs.latest(conn, "nightly")
     if run is None:
-        return {"state": "none", **stopped}
+        return {"state": "none", **counts}
     papers = await _one(
         conn,
         # The owner's classifications by hand (model `owner`) during the run are not its work.
@@ -162,7 +168,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         "started_at": run["started_at"],
         "finished_at": run["finished_at"],
         "papers": papers["n"],
-        **stopped,
+        **counts,
     }
     if run["finished_at"] is None and run["alive"]:
         waiting = await _one(
@@ -181,7 +187,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     if run["error"] or run["finished_at"] is None:
         error = run["error"] or "the run's process ended without closing it"
         return result | {"state": "failed", "error": error}
-    attention = awaiting or analysis or ungraded or texts or failed_digests
+    attention = any(counts.values())
     return result | {"state": "attention" if attention else "quiet"}
 
 

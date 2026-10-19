@@ -360,7 +360,10 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
                     state = EXCLUDED.state, gist = EXCLUDED.gist, text = EXCLUDED.text,
                     counts = EXCLUDED.counts, best_rarity = EXCLUDED.best_rarity,
                     error = EXCLUDED.error, run_id = EXCLUDED.run_id,
-                    written_at = clock_timestamp()
+                    written_at = clock_timestamp(),
+                    -- failed again, it stays as the owner saw it; published, there is none to see
+                    acknowledged_at = CASE WHEN EXCLUDED.state = 'failed'
+                                           THEN digests.acknowledged_at END
                 WHERE digests.state NOT IN {_PUBLISHED}
                 RETURNING id
                 """,
@@ -425,18 +428,33 @@ _FAILED = (
 
 
 async def failed(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
-    """The failed digests of active topics, oldest first, the days before the weeks."""
+    """The failed digests of active topics, oldest first, the days before the weeks, with when
+    the owner acknowledged them."""
     return await (
         await conn.execute(
-            "SELECT d.id, d.topic, d.period, d.day, d.error, d.written_at "
+            "SELECT d.id, d.topic, d.period, d.day, d.error, d.written_at, d.acknowledged_at "
             f"{_FAILED} ORDER BY d.day, d.period, d.topic"
         )
     ).fetchall()
 
 
-async def count_failed(conn: psycopg.AsyncConnection) -> int:
-    row = await (await conn.execute(f"SELECT count(*) AS n {_FAILED}")).fetchone()
+async def count_failed(conn: psycopg.AsyncConnection, *, unacknowledged: bool = False) -> int:
+    """How many digests failed; with `unacknowledged`, only those the owner has not acknowledged."""
+    seen = " AND d.acknowledged_at IS NULL" if unacknowledged else ""
+    row = await (await conn.execute(f"SELECT count(*) AS n {_FAILED}{seen}")).fetchone()
     return row["n"]
+
+
+async def acknowledge(conn: psycopg.AsyncConnection, ids: list[int]) -> int:
+    """The owner's Acknowledge on the named failed digests. Returns how many were marked."""
+    if not ids:
+        return 0
+    cur = await conn.execute(
+        "UPDATE digests d SET acknowledged_at = now() "
+        "WHERE d.id = ANY(%s) AND d.state = 'failed' AND d.acknowledged_at IS NULL",
+        (ids,),
+    )
+    return cur.rowcount
 
 
 async def get(conn: psycopg.AsyncConnection, digest_id: int) -> dict[str, Any] | None:

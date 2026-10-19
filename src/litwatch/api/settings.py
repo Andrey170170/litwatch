@@ -166,6 +166,36 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
     }
 
 
+class StepSeen(BaseModel):
+    """A stopped step as Needs you showed it: the paper, its revision then, a grading's topic."""
+
+    step: failures.Step
+    paper_id: str
+    revision: int
+    topic: str | None = None
+
+
+class AcknowledgeIn(BaseModel):
+    """What the owner acknowledged: stopped steps, full-text passes and failed digests (by id)."""
+
+    steps: list[StepSeen] = []
+    passes: list[int] = []
+    digests: list[int] = []
+
+
+@router.post("/acknowledge", status_code=204)
+async def acknowledge(body: AcknowledgeIn, c: Conn) -> None:
+    """Acknowledge on Needs you: the owner has seen these items, and they stop counting in the
+    run status. An item is marked only while it still waits on the owner as shown (a step on
+    the revision named); one that recovers and fails again comes back unacknowledged. It moves
+    no paper. A failed nightly run is not an item and is never acknowledged."""
+    steps = [(x.step, x.paper_id, x.topic or "", x.revision) for x in body.steps]
+    async with c.transaction():
+        await failures.acknowledge(c, steps, FAILED_RUNS)
+        await fulltext_store.acknowledge(c, body.passes, FAILED_RUNS)
+        await digests_store.acknowledge(c, body.digests)
+
+
 # -- misses ----------------------------------------------------------------------------------------
 
 
