@@ -140,3 +140,13 @@ _Avoid_: Semi-deep, summary
 An account of a paper thorough enough to stand in for reading most of it, placed among the papers around it; made
 for a selected few.
 _Avoid_: Deep, reading card
+
+## The Notion export
+
+**Notion export**:
+The Notion database the `notion` integration keeps for a reader who does not use litwatch. It uses its own plain
+words, and only there: **Must read** and **Worth a look** for the grades must read and relevant, **No longer
+listed** for a paper that fell below them, **TL;DR** for the Gist, **Summary** for the Brief, **Deep read** for the
+Deep card.
+_Avoid_: Worth a look, No longer listed and TL;DR anywhere else. Must read is the grade's own name everywhere; Summary
+and Deep read keep their web-app meanings elsewhere (a Deep card's section, the action that asks for a Deep card).

@@ -154,7 +154,7 @@ Integrations are configured in `litwatch.toml`; each section loads one:
 [integrations.zotero]          # a built-in, by its short name
 user_id = "1234567"
 
-[integrations.notion]          # several of one kind: name the module with `use`
+[integrations.n8n]             # several of one kind: name the module with `use`
 use = "webhook"
 url = "https://n8n.example.org/webhook/litwatch"
 events = ["grade.changed", "paper.unsaved"]
@@ -240,8 +240,7 @@ Headers: `X-Litwatch-Event: <id>`, so a receiver can drop a repeat; with `secret
 `X-Litwatch-Signature: sha256=<hex HMAC-SHA256 of the raw body, keyed by the secret>`. Any answer
 other than 2xx is a failure and the event is sent again after the backoff. The receiver reads
 anything else it needs from litwatch's API with the shared token, e.g. `GET /api/papers/<id>`.
-`integrations/n8n/` has a workflow that exports Watch papers to Notion this way. Answer only
-once the work is done: litwatch sends a webhook's events one at a time and waits for each
+Answer only once the work is done: litwatch sends a webhook's events one at a time and waits for each
 answer, so answering early turns a failed write into a lost event.
 
 ### The changes feed
