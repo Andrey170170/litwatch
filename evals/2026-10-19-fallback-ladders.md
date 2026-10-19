@@ -11,13 +11,20 @@ the run never reached.
 
 The cases are [select.py](2026-10-19-fallback-ladders/select.py)'s ([cases.csv](2026-10-19-fallback-ladders/cases.csv)),
 the candidates [ladders.toml](2026-10-19-fallback-ladders/ladders.toml)'s. The tables are `litwatch eval
-ladders-report`'s ([tables.md](2026-10-19-fallback-ladders/tables.md)); the noise floor is
-[baseline.py](2026-10-19-fallback-ladders/baseline.py)'s ([baseline.md](2026-10-19-fallback-ladders/baseline.md)),
-which also counts what each candidate answered and where it differs from the role's own model.
+ladders-report`'s ([tables.md](2026-10-19-fallback-ladders/tables.md)), over the calls to each case's request as
+it is built now. Production's own answers to the `field_grade` and `analyse` cases are exported by
+[baseline.py](2026-10-19-fallback-ladders/baseline.py) to [production.csv](2026-10-19-fallback-ladders/production.csv)
+and compared there with the role's own model re-asked and with each candidate
+([baseline.md](2026-10-19-fallback-ladders/baseline.md)), which also counts what each candidate answered and where it
+differs from the role's own model.
+
+After the run, [ladders.toml](2026-10-19-fallback-ladders/ladders.toml) gained each candidate's dearest price
+(`price_max`) and larger output reserves, so that a reservation bounds what a call can cost; neither is part of a
+call's identity, and no recorded call cost more than its tokens at that price.
 
 ## The cases
 
-**Quality set, 380 cases of ordinary papers.**
+**Quality set, 297 cases of ordinary papers** (299 drawn; the pair below is left out of `judge` and `check`).
 
 - `judge` and `check`: the owner's labels. Production has no Calibrate session and no label, so they are the owner
   cohort of [evals/labels/fit.csv](labels/fit.csv), on two Focus topics (cot-faithfulness, cot-monitoring). That is
@@ -68,7 +75,8 @@ are what a Brief is compared on.
 | | Sonnet 5.5 | 5/5 | – | – | – | $0.0290 |
 | | Kimi K3 | 5/5 | – | – | – | $0.0121 |
 
-Costs are as normal calls, not batched; production's batched calls cost half.
+Costs are as normal calls, not batched; production's batched calls cost half. Cost an answer is the cost of every
+call to the role's requests, refused ones included, over the usable answers.
 
 - **Refusals.** Seven, all from Anthropic models: `judge` Opus on 2610.13116 and 2610.21200 again (`bio`) and on a
   third, 2606.11150 (ABC-Bench, `bio`); `brief` Sonnet on 2610.17907 and 2606.30819 (`cyber`); `analyse` Haiku on
@@ -78,22 +86,31 @@ Costs are as normal calls, not batched; production's batched calls cost half.
 - **`judge`.** The three candidates are as close to the owner as Opus is (64–65 of 81 on Fit against Opus's 62; 78–79
   on the side) and agree with Opus on 71–74 Fits and 78–79 sides. Nothing separates them.
 - **`check`.** The same: every working candidate is within two pairs of Muse against the owner. Gemini is the
-  closest to Muse (77 of 81) and answered all 23 of the refusals set; Google's filter, which showed in the Sonnet
-  replay as a completion with no choices, did not show here.
-- **MiniMax M3.1 Flash is unusable.** OpenRouter answers each request with 404, "No endpoints found that can handle
-  the requested parameters": the free endpoint does not do structured output, which every role's request asks for
-  with `require_parameters`. A plain request to the same model answers. It costs nothing to try; it can't be listed.
+  closest to Muse (77 of 81) and answered all 23 of the refusals set. Google's filter, which showed in the Sonnet
+  replay as a completion with no choices from Gemini 4 Argon, did not show here.
+- **MiniMax M3.1 Flash is unusable.** OpenRouter answered each of the run's requests with 404, "No endpoints found
+  that can handle the requested parameters". One request per parameter
+  ([minimax-probe.md](2026-10-19-fallback-ladders/minimax-probe.md), by
+  [minimax_probe.py](2026-10-19-fallback-ladders/minimax_probe.py)) shows which: a plain request, reasoning effort
+  alone and `require_parameters` alone are answered; a strict JSON schema with `require_parameters`, which every
+  role's request carries, is not. It can't be listed.
 - **`analyse`.** Both candidates agree with Haiku on 47–50 Weights of 60. Haiku re-asked agrees with its own nightly
   answer on 51 of 60 ([baseline.md](2026-10-19-fallback-ladders/baseline.md)), so the candidates are a few cases
   below the role's own noise. Both lean to solid (Haiku's incremental is their solid 10 and 9 times). Both answered
   the two papers Haiku refused.
 - **`field_grade` is the weakest.** Luna and DeepSeek agree with Haiku on 30 and 34 Fits of 60 and 48 and 51 sides.
   Haiku re-asked agrees with its own nightly answer on 48 Fits and 55 sides, and the candidates with that nightly
-  answer on 29 and 35 Fits, 51 and 52 sides. Both grade higher than Haiku: of the 60, Haiku's related became
+  answer on 29 and 35 Fits, 51 and 52 sides ([production.csv](2026-10-19-fallback-ladders/production.csv)). Both grade higher than Haiku: of the 60, Haiku's related became
   central 17 times for Luna and 11 for DeepSeek, its adjacent central or related 11 and 5 times. On the refusals set
   the shift goes the other way (Haiku's adjacent is their none, 14 and 19 times of 23), on the right side of the line.
   A Field grade has no rubric, and there is no owner label to say which is right; a Field paper's level in mixed
   lists is lowered by two, so the shift shows mostly on the Field's own page.
+
+  The standard a fallback grader is held to is the side of the line, the grade's decision of whether a paper is
+  in the Field's list at all: DeepSeek keeps production's side on 52 of 60, against 55 for Haiku re-asked, three
+  cases. The level is the stated cost: a fallback's papers sit higher on the Field's page than Haiku's would. Haiku
+  refused no `field_grade` case here, and none of production's 4,422 `field_grade` calls to 2026-10-19 failed, so
+  the fallback is rarely asked.
 - **`brief`: Kimi is lenient.** It rated all 10 quality papers solid (Sonnet: 5 solid, 5 incremental) and drew the
   overstatement line on 1 of 10 (Sonnet: 6), and on 9 of the 23 refusals-set papers (Sonnet 18 of 21, Sol 14 of 23).
   Sol is closer (Weight 8 of 10, line 6 of 10; 17 and 15 of 21 on the refusals set) but also flags less than Sonnet:
@@ -121,6 +138,12 @@ Costs are as normal calls, not batched; production's batched calls cost half.
   day all three made the same overstatement. Kimi wrote the hardest prose on the two largest days (readability 3 and
   3, against 5 and 5 for Opus and Sonnet) and covered the fewest of interpretability's must-reads (7 of 14). Five
   digests and one reader can show a writer that fails outright, and none did; they can't rank Opus and Sonnet.
+
+  The standard a fallback writer is held to is the one the role's own model meets: faithfulness no lower than
+  Opus's lowest here (3 of 5), and no invented pick. Readability is the price, not the bar: a digest that fails
+  still goes out unwritten (the plan's failed digest pushes its list), so a hard-to-read digest is set against
+  none. Kimi meets the standard on all five and costs readability on the two largest days; it is also the one writer
+  outside Anthropic, the lab both models before it share.
 
 ## For P2
 

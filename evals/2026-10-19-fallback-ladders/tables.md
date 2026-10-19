@@ -11,7 +11,7 @@
 
 | Candidate | Model | Cases | Answered | Refused | Invalid | Truncated | No answer | Fit as opus | side as opus | Cost | Cost an answer |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| opus | `anthropic:claude-opus-5-5@medium` | 23 | 20 | 3 | 0 | 0 | 0 | – | – | $0.11 | $0.0046 |
+| opus | `anthropic:claude-opus-5-5@medium` | 23 | 20 | 3 | 0 | 0 | 0 | – | – | $0.11 | $0.0053 |
 | sonnet | `anthropic:claude-sonnet-5-5@medium` | 23 | 23 | 0 | 0 | 0 | 0 | 19/20 | 19/20 | $0.06 | $0.0025 |
 | sol | `openrouter:openai/gpt-6.1-sol@medium` | 23 | 23 | 0 | 0 | 0 | 0 | 16/20 | 19/20 | $0.05 | $0.0023 |
 | kimi | `openrouter:moonshotai/kimi-k3@medium` | 23 | 23 | 0 | 0 | 0 | 0 | 19/20 | 20/20 | $0.07 | $0.0029 |
@@ -30,7 +30,7 @@
 
 | Candidate | Model | Cases | Answered | Refused | Invalid | Truncated | No answer | Fit as muse | side as muse | Cost | Cost an answer |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| muse | `openrouter:meta/muse-spark-1.3-contributor@high` | 23 | 22 | 0 | 1 | 0 | 0 | – | – | ≥ $0.01 | $0.0005 |
+| muse | `openrouter:meta/muse-spark-1.3-contributor@high` | 23 | 22 | 0 | 1 | 0 | 0 | – | – | ≥ $0.01 | ≥ $0.0005 |
 | ds-flash-1017 | `openrouter:deepseek/deepseek-v4.1-flash-1017@high` | 23 | 23 | 0 | 0 | 0 | 0 | 16/22 | 19/22 | $0.00 | $0.0001 |
 | gemini-flash | `openrouter:google/gemini-3.8-flash@high` | 23 | 23 | 0 | 0 | 0 | 0 | 18/22 | 21/22 | $0.08 | $0.0035 |
 | ds-pro | `openrouter:deepseek/deepseek-v4-pro-0813@high` | 23 | 23 | 0 | 0 | 0 | 0 | 17/22 | 20/22 | $0.04 | $0.0017 |
@@ -80,7 +80,7 @@
 
 | Candidate | Model | Cases | Answered | Refused | Invalid | Truncated | No answer | Weight as sonnet | overstatement line as sonnet | Cost | Cost an answer |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| sonnet | `anthropic:claude-sonnet-5-5@high` | 23 | 21 | 2 | 0 | 0 | 0 | – | – | $1.90 | $0.0842 |
+| sonnet | `anthropic:claude-sonnet-5-5@high` | 23 | 21 | 2 | 0 | 0 | 0 | – | – | $1.90 | $0.0903 |
 | sol | `openrouter:openai/gpt-6.1-sol@high` | 23 | 23 | 0 | 0 | 0 | 0 | 17/21 | 15/21 | $1.68 | $0.0730 |
 | kimi | `openrouter:moonshotai/kimi-k3@high` | 23 | 23 | 0 | 0 | 0 | 0 | 16/21 | 9/21 | $0.54 | $0.0236 |
 
