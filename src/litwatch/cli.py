@@ -546,6 +546,130 @@ def eval_briefs_report(
     print(briefs.report(title, entries, papers, found, gists, briefs.spent(run)), end="")
 
 
+@eval_app.command("ladders")
+def eval_ladders(
+    role: Annotated[list[str] | None, typer.Argument(help="Only these roles.")] = None,
+    cases: Annotated[Path, typer.Option(help="The cases, a CSV file.")] = Path(
+        "evals/2026-10-19-fallback-ladders/cases.csv"
+    ),
+    candidates: Annotated[Path, typer.Option(help="TOML: each role's ladder.")] = Path(
+        "evals/2026-10-19-fallback-ladders/ladders.toml"
+    ),
+    out: Annotated[Path, typer.Option(help="One <role>.jsonl per role, and budget.jsonl.")] = Path(
+        "evals/2026-10-19-fallback-ladders/runs"
+    ),
+    ceiling: Annotated[float, typer.Option(help="USD that every run into --out may spend.")] = 25.0,
+    which: Annotated[
+        str | None, typer.Option("--set", help="Only this set: quality or refusals.")
+    ] = None,
+    only: Annotated[list[str] | None, typer.Option(help="Only these candidates.")] = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Spend without asking.")] = False,
+    concurrency: int = 8,
+    config: ConfigPath = None,
+) -> None:
+    """Ask each case's request, as the pipeline builds it, of every candidate on its role's
+    ladder (docs/plans/failure-handling.md, P1). A dry run: it reads papers, the taxonomy and
+    digests from the configured database and texts the archive already holds, and writes only to
+    `out`; a run resumes where it stopped. Shows what it would cost and asks first, and stops
+    at the ceiling."""
+    from litwatch.fulltext import archive_for  # noqa: PLC0415
+    from litwatch.llm.gateway import build  # noqa: PLC0415
+    from litwatch.quality import ladders  # noqa: PLC0415
+
+    cfg = configuration.load(config)
+    found = ladders.ladders(candidates)
+    if which is not None and which not in ladders.SETS:
+        raise typer.BadParameter(f"--set is one of {', '.join(ladders.SETS)}")
+    if unknown := set(role or []) - set(found):
+        raise typer.BadParameter(f"no ladder for {', '.join(sorted(unknown))}")
+    chosen = [
+        c
+        for c in ladders.cases(cases)
+        if c.role in (role or found) and (which is None or c.set == which)
+    ]
+    archive = archive_for(cfg)
+
+    async def prepare(conn: psycopg.AsyncConnection) -> dict[str, Any]:
+        try:
+            return await ladders.requests(conn, archive, chosen)
+        finally:
+            if archive is not None:
+                await archive.aclose()
+
+    built = _run(prepare, migrate=False)
+    for key, why in built.items():
+        if isinstance(why, str):
+            console.print(f"[yellow]left out: {key}: {why}[/yellow]")
+    done = ladders.rows(out)
+    work = ladders.todo(chosen, found, built, done, only)
+    by = Counter((t.case.role, t.candidate.name) for t in work)
+    for (r, name), n in sorted(by.items()):
+        cost = sum(ladders.estimate(t.ladder, t.candidate, t.request) for t in work
+                   if (t.case.role, t.candidate.name) == (r, name))  # fmt: skip
+        console.print(f"{r} {name}: {n} calls, estimated ${cost:.2f}")
+    expected = sum(ladders.estimate(t.ladder, t.candidate, t.request) for t in work)
+    console.print(
+        f"{len(work)} calls, estimated ${expected:.2f}; spent so far "
+        f"${ladders.spent(done):.2f} of the ${ceiling:.2f} ceiling"
+    )
+    if not work or (not yes and not typer.confirm("Spend it?")):
+        return
+    providers = build(cfg.models).providers
+
+    def progress(r: ladders.Row) -> None:
+        if r.outcome != "answered":
+            console.print(f"{r.case} {r.candidate}: {r.outcome} {r.detail or ''}")
+
+    ran = asyncio.run(
+        ladders.run(work, providers, out, ceiling, concurrency=concurrency, progress=progress)
+    )
+    kinds = Counter(r.outcome for r in ran.rows)
+    console.print(f"{len(ran.rows)} calls: {dict(kinds)}; ${ladders.spent(ran.rows):.2f}")
+    if ran.stopped_at is not None:
+        t = ran.stopped_at
+        console.print(
+            f"[red]stopped at the ceiling, first not run: {t.case.key} {t.candidate.name} "
+            f"(recorded in {out / ladders.BUDGET})[/red]"
+        )
+
+
+@eval_app.command("ladders-report")
+def eval_ladders_report(
+    cases: Annotated[Path, typer.Option(help="The cases, a CSV file.")] = Path(
+        "evals/2026-10-19-fallback-ladders/cases.csv"
+    ),
+    candidates: Annotated[Path, typer.Option(help="TOML: each role's ladder.")] = Path(
+        "evals/2026-10-19-fallback-ladders/ladders.toml"
+    ),
+    out: Annotated[Path, typer.Option(help="Where the runs are.")] = Path(
+        "evals/2026-10-19-fallback-ladders/runs"
+    ),
+    config: ConfigPath = None,
+) -> None:
+    """The runs' tables per role and set, then the answers on the refusals set's papers that a
+    candidate did not answer, as markdown: no model calls. Titles are read from the database,
+    else the archive's catalog."""
+    from litwatch.fulltext import archive_for  # noqa: PLC0415
+    from litwatch.quality import ladders  # noqa: PLC0415
+
+    found, chosen = ladders.ladders(candidates), ladders.cases(cases)
+    archive = archive_for(configuration.load(config))
+
+    async def work(conn: psycopg.AsyncConnection) -> dict[str, str]:
+        ids = sorted({c.paper for c in chosen if c.paper and c.set == "refusals"})
+        try:
+            return {p.id: p.title for p in (await ladders.papers(conn, archive, ids)).values()}
+        finally:
+            if archive is not None:
+                await archive.aclose()
+
+    titles = _run(work, migrate=False)
+    calls = ladders.rows(out)
+    print(ladders.tables(found, chosen, calls), end="")
+    print("\n### Answers on the refusals set\n")
+    print(ladders.answers(found, chosen, calls, titles), end="")
+
+
 # -- library ---------------------------------------------------------------------------------------
 
 

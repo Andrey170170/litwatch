@@ -74,6 +74,20 @@ def _usable(text: PaperText | None) -> PaperText | None:
     return text if text is not None and text.body.strip() else None
 
 
+async def stored_text(archive: ArchiveClient, paper: Paper) -> PaperText | None:
+    """The text of the paper's arXiv version that the archive already holds, its LaTeX source's
+    first and its PDF's when it has no usable source, or None when it holds neither. It only
+    reads: nothing is asked for, so nothing is fetched (an evaluation's read of the live
+    archive)."""
+    if paper.version is None:
+        return None
+    if found := _usable(await archive.latex(paper.id, paper.version)):
+        return found
+    body = await archive.available_pdf(paper.id, paper.version)
+    text = await asyncio.to_thread(pdf_to_markdown, body) if body else None
+    return _usable(PaperText(text, paper.version, "pdf") if text else None)
+
+
 def _why(job: dict) -> str:
     return str(job.get("error") or job.get("status"))[:200]
 

@@ -281,6 +281,35 @@ async def earlier_central(
     return _rows(rows)
 
 
+async def as_shown(conn: psycopg.AsyncConnection, digest_id: int, focus: bool) -> list[Due]:
+    """A published digest's papers as it showed them, in a writer's order (rarest first), each
+    with the Brief and Fit reason of the revision shown, and for a `focus` topic its abstract when
+    that revision is still current: what the writer would read to write it again (an
+    evaluation's request)."""
+    rows = await (
+        await conn.execute(
+            f"""
+            SELECT dp.paper_id, dp.paper_revision AS revision, dp.title, p.announced, dp.gist,
+                   dp.fit, dp.grade, dp.rarity, dp.graded_on,
+                   (SELECT v.reason FROM verdicts v
+                    WHERE v.paper_id = dp.paper_id AND v.topic = dp.graded_on
+                      AND v.paper_revision = dp.paper_revision
+                    ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) AS fit_reason,
+                   (SELECT b.text FROM briefs b
+                    WHERE b.paper_id = dp.paper_id AND b.paper_revision = dp.paper_revision
+                    ORDER BY b.pass_id DESC LIMIT 1) AS brief,
+                   CASE WHEN %(focus)s AND p.revision = dp.paper_revision THEN p.abstract END
+                       AS abstract
+            FROM digest_papers dp JOIN papers p ON p.id = dp.paper_id
+            WHERE dp.digest_id = %(digest)s
+            ORDER BY {_rank("dp.rarity")} DESC, p.announced, dp.paper_id
+            """,
+            {"digest": digest_id, "focus": focus},
+        )
+    ).fetchall()
+    return _rows(rows)
+
+
 async def daily_texts(conn: psycopg.AsyncConnection, topic: str, monday: date) -> list[dict]:
     """The texts of the topic's daily digests written in the week from `monday`."""
     return await (
