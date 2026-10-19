@@ -386,6 +386,9 @@ class Notion:
             await state.save_database(conn, db)
         blocks = self._guide_blocks()
         if (digest := _hash(blocks)) != db.guide_hash:
+            if db.guide_hash:  # forgotten first, as a page's hashes are (`_write`)
+                db.guide_hash = None
+                await state.save_database(conn, db)
             await self._replace_body(db.guide_page, blocks)
             db.guide_hash = digest
             await state.save_database(conn, db)
@@ -505,14 +508,23 @@ class Notion:
             if not await self._create(conn, page, properties, body, begun, make=listed):
                 await state.forget_page(conn, self.name, paper_id)  # it never got a page
                 return
+        wanted = (_hash(properties), _hash(body))
+        # A write that fails part way leaves the page unknown: its old hash must not match what
+        # a later undo would write, so it is forgotten first.
+        old = (page.properties_hash, page.body_hash)
+        page.properties_hash, page.body_hash = (
+            h if h in (None, w) else None for h, w in zip(old, wanted, strict=True)
+        )
+        if (page.properties_hash, page.body_hash) != old:
+            await state.save_page(conn, self.name, page)
         try:
-            if page.properties_hash != (digest := _hash(properties)):
+            if page.properties_hash != wanted[0]:
                 path = f"/pages/{page.page_id}"
                 await self.notion.request("PATCH", path, {"properties": properties})
-                page.properties_hash = digest
-            if page.body_hash != (digest := _hash(body)):
+                page.properties_hash = wanted[0]
+            if page.body_hash != wanted[1]:
                 await self._replace_body(page.page_id, body)
-                page.body_hash = digest
+                page.body_hash = wanted[1]
         except NotionError:
             if not await self._gone(page.page_id):
                 raise
@@ -646,9 +658,10 @@ class Notion:
         return gone(self._why({}), self.now(), "grade")  # no change on record says: a verdict's
 
     def _takes_off(self, change: Event) -> bool:
-        """Whether the grade change took the paper from the list's minimum to below it."""
+        """Whether the grade change took the paper from a listed grade to below the minimum."""
         before, after = change.payload.get("before"), change.payload.get("after")
-        listed = before is not None and Grade(before).at_least(self.minimum)
+        # Listed before under the lowest minimum: the minimum may have been raised since.
+        listed = before is not None and Grade(before).at_least(Grade.RELEVANT)
         return listed and (after is None or not Grade(after).at_least(self.minimum))
 
     def _why(self, payload: dict[str, Any]) -> str:

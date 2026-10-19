@@ -31,6 +31,7 @@ from litwatch.core import (
 from litwatch.events import dispatch
 from litwatch.feedback import word
 from litwatch.integrations.notion import Notion, NotionClient
+from litwatch.jobs.publications import store_record
 from litwatch.store import integrations as integrations_store
 from litwatch.store import notion as state
 from litwatch.store import outbox, verdicts
@@ -297,6 +298,52 @@ async def test_venue_links_to_the_published_version(world):
     assert venue["rich_text"][0]["text"]["link"] == {"url": "https://doi.org/10.5555/y"}
 
 
+async def test_new_texts_a_card_and_a_published_record_reach_the_page_as_they_come(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    n = notion(fake)
+    assert await start(conn, n)
+    row = fake.row(A.id)
+
+    def headings() -> list[str]:
+        return [
+            plain(b["heading_2"]["rich_text"])
+            for b in fake.body(row["id"])
+            if b["type"] == "heading_2"
+        ]
+
+    async def emit(kind: str) -> None:
+        async with conn.transaction():
+            await events.emit(conn, kind, A.id)
+
+    await texts(conn, A, gist="Probes catch hidden steps.")
+    await emit(events.GIST_WRITTEN)
+    await deliver(conn, n)
+    assert fake.value(row, "TL;DR") == "Probes catch hidden steps."
+    await texts(conn, A, brief="From the full text.")
+    await emit(events.BRIEF_WRITTEN)
+    await deliver(conn, n)
+    assert "From the full text." in [
+        plain(b["paragraph"]["rich_text"]) for b in fake.body(row["id"]) if b["type"] == "paragraph"
+    ]
+    await integrations_store.put_card(
+        conn, A.id, CARD, "deep", {}, [], revision=1, version=1, source="latex", pass_id=None
+    )
+    await emit(events.CARD_READY)
+    await deliver(conn, n)
+    assert headings() == ["TL;DR", "Summary", "Deep read"]
+    await store_record(conn, A.id, Publication(venue="ICLR", year=2027))  # emits its event
+    await deliver(conn, n)
+    assert fake.value(row, "Venue") == "ICLR 2027"
+    assert (await outbox.cursor(conn, n.name)).failing is None
+
+    asked = len(fake.requests)  # each again: nothing to write
+    for event in await outbox.after(conn, outbox.START, 1000):
+        if n.wants(event) and event.type != events.GRADE_CHANGED:
+            await n.handle(conn, event)
+    assert len(fake.requests) == asked
+
+
 async def test_a_delisted_paper_says_why_and_listing_it_again_clears_that(world):
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, A, FAITH.slug, "relevant")
@@ -512,6 +559,24 @@ async def test_an_event_is_written_with_what_another_services_setup_made(world):
     assert fake.value(fake.row(A.id), FAITHFUL) == "Worth a look"
 
 
+async def test_a_write_failing_part_way_and_then_undone_is_put_right(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "relevant")
+    n = notion(fake)
+    assert await start(conn, n)
+    row = fake.row(A.id)
+    await say(conn, A, FAITH.slug, LabelValue.NONE)
+    fake.refuse_deletes = 1  # its properties written, its body half replaced
+    await deliver(conn, n)
+    assert (await outbox.cursor(conn, n.name)).failing is not None
+
+    await word.unlabel(conn, A.id, FAITH.slug)  # undone before the retry
+    await outbox.retry(conn, n.name)
+    await deliver(conn, n)
+    assert fake.value(row, "Grade") == "Worth a look" and fake.value(row, "Why") == ""
+    assert [b["callout"]["icon"]["emoji"] for b in fake.body(row["id"])[:1]] == ["💡"]
+
+
 async def test_a_failing_setup_is_retried_after_backoff_and_shown(world):
     conn, fake = world, FakeNotion(PARENT)
     n = notion(fake)
@@ -622,6 +687,17 @@ async def test_a_raised_minimum_delists_with_its_why_and_a_lowered_one_lists_aga
     assert fake.value(fake.row(B.id), "Why") == ""
     assert fake.value(fake.row(C.id), "Why") == owners
     assert len(fake.rows()) == 3
+
+
+async def test_a_raised_minimum_keeps_the_cause_of_a_change_not_yet_handed_over(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "relevant")
+    assert await start(conn, notion(fake))
+    await say(conn, A, FAITH.slug, LabelValue.NONE)  # then a restart, before it is delivered
+
+    assert await start(conn, notion(fake, minimum=Grade.MUST_READ))
+    why = f"{FAITHFUL}, {await last_day(conn)}: Andrei marked it off-topic."
+    assert fake.value(fake.row(A.id), "Why") == why
 
 
 async def test_a_dropped_topic_keeps_its_fields_and_its_own_pages_are_not_written(world):

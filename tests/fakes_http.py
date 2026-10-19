@@ -288,12 +288,13 @@ class FakeNotion:
 
     `limited` answers that many next requests 429 with a Retry-After of 7 seconds. `lose_answers`
     makes the next row creations happen and then answer 502, `lose_patches` the next changes to the
-    data source's properties. `hidden` keeps that many next
-    queries from finding the newest page, as a lagging index would. `down` answers 500 to all.
-    `requests` holds every request as (method, path, body). `trash` and `delete` take an object
-    away as a person in Notion would; what it holds reads as trashed too, and answers as Notion
-    does (probed 2026-10-19): a trashed page reads `in_trash`, refuses edits with a 400 and its
-    blocks with a 404; a trashed data source reads `in_trash` and refuses changes and queries."""
+    data source's properties; `refuse_deletes` answers the next block deletions 500. `hidden` keeps
+    that many next queries from finding the newest page, as a lagging index would. `down` answers
+    500 to all. `requests` holds every request as (method, path, body). `trash` and `delete` take an
+    object away as a person in Notion would; what it holds reads as trashed too, and answers as
+    Notion does (probed 2026-10-19): a trashed page reads `in_trash`, refuses edits with a 400 and
+    its blocks with a 404; a trashed data source reads `in_trash` and refuses changes and
+    queries."""
 
     def __init__(self, *pages: str) -> None:
         self.objects: dict[str, dict[str, Any]] = {
@@ -304,6 +305,7 @@ class FakeNotion:
         self.limited = 0
         self.lose_answers = 0
         self.lose_patches = 0
+        self.refuse_deletes = 0
         self.hidden = 0
         self.down = False
         self.made = 0
@@ -403,6 +405,9 @@ class FakeNotion:
             for child in body["children"]:
                 self._block(parts[1], child)
             return httpx.Response(200, json={"results": []})
+        if req.method == "DELETE" and parts[0] == "blocks" and self.refuse_deletes:
+            self.refuse_deletes -= 1
+            return httpx.Response(500, json={"code": "internal_server_error"})
         if req.method == "DELETE" and parts[0] == "blocks":
             parent = self.objects.pop(parts[1])["parent"]
             self.objects[parent]["children"].remove(parts[1])
