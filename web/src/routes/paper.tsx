@@ -2,6 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { ApiError } from "@/api/client";
 import { useDeepRead, useProcess } from "@/api/mutations";
 import { paperQuery } from "@/api/queries";
@@ -19,8 +20,9 @@ import { Ladder } from "@/components/paper/Ladder";
 import { Notes } from "@/components/paper/Notes";
 import { PhoneBar } from "@/components/paper/Phone";
 import { PaperRow, TopicRow } from "@/components/paper/TopicRow";
+import { folded, FoldedTopics, type Topics, useSettledTopics } from "@/components/paper/Fold";
 
-function Rail({ paper, gistAway, asked, missOpen }: { paper: Paper; gistAway: boolean; asked: boolean; missOpen: boolean }) {
+function Rail({ paper, topics, gistAway, asked, missOpen }: { paper: Paper; topics: Topics; gistAway: boolean; asked: boolean; missOpen: boolean }) {
   const [miss, setMiss] = useState(missOpen);
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
   return (
@@ -35,9 +37,7 @@ function Rail({ paper, gistAway, asked, missOpen }: { paper: Paper; gistAway: bo
       )}
       {paper.in_collection && (
         <div className="tplist" id="rail-topics">
-          {paper.topics.map((t) => (
-            <TopicRow key={t.topic.slug} paperId={paper.id} t={t} weight={paper.weight?.weight} revision={paper.revision} />
-          ))}
+          <FoldedTopics {...topics} row={(t) => <TopicRow key={t.topic.slug} paperId={paper.id} t={t} weight={paper.weight?.weight} revision={paper.revision} />} />
           {!paper.topics.length && <PaperRow paperId={paper.id} reaction={paper.reaction} />}
         </div>
       )}
@@ -105,6 +105,9 @@ function PaperView({ id, under, miss }: { id: string; under: string | undefined;
   });
   const { data: paper, error, isPending } = read;
   const [gistAway, setGistAway] = useState(false);
+  const settled = useSettledTopics(paper?.topics);
+  const [open, setOpen] = useState(false);
+  const topics: Topics = { topics: settled, open, setOpen };
   const [sheet, setSheet] = useState<"more" | "up" | "down" | null>(miss ? "more" : null);
   // Report as a miss for a paper neither litwatch nor the archive has (the report fetches it), open at once
   // from the share target
@@ -115,6 +118,8 @@ function PaperView({ id, under, miss }: { id: string; under: string | undefined;
   }, [asked, paper, id]);
   const onGistAway = useCallback((away: boolean) => setGistAway(away), []);
   const onLabel = (topic: string) => {
+    // a folded topic's row is rendered before it is scrolled to
+    if (folded(settled).some((t) => t.topic.slug === topic)) flushSync(() => setOpen(true));
     if (!desktop) setSheet("more");
     else document.getElementById("rail-topics")?.querySelector<HTMLElement>(`[data-topic="${topic}"]`)?.scrollIntoView({ block: "nearest" });
   };
@@ -158,9 +163,9 @@ function PaperView({ id, under, miss }: { id: string; under: string | undefined;
       <Notes paper={paper} onLabel={onLabel} />
       <div className="pgcols">
         <Ladder paper={paper} asked={asked} deepRead={deepRead} onGistAway={onGistAway} />
-        {desktop && <Rail paper={paper} gistAway={gistAway} asked={asked} missOpen={miss && !paper.in_collection} />}
+        {desktop && <Rail paper={paper} topics={topics} gistAway={gistAway} asked={asked} missOpen={miss && !paper.in_collection} />}
       </div>
-      {!desktop && <PhoneBar paper={paper} under={under} asked={asked} sheet={sheet} setSheet={setSheet} missOpen={miss && !paper.in_collection} />}
+      {!desktop && <PhoneBar paper={paper} topics={topics} under={under} asked={asked} sheet={sheet} setSheet={setSheet} missOpen={miss && !paper.in_collection} />}
     </div>
   );
 }

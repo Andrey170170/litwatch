@@ -153,8 +153,10 @@ collection" in place of a rarity.
 **The ladder**, in the reading column, each rung with its name in a narrow side column:
 1. **Gist**, with ✓ and ✗ to say whether it is accurate.
 2. **Brief**, with ✓ ✗. A Brief that found the abstract overstating says so first, in a red-edged callout. A Brief
-   from an older revision says which, and that the current one waits for the text. Where a paper has no Brief, the
-   rung is **Abstract**, with one quiet line saying why there is none.
+   from an older revision says which, and that the current one waits for the text. The rung's name is a switch,
+   "Brief | Abstract": it opens on the Brief on every paper, not remembered, and swaps the abstract in place, nothing
+   else on the page moving; the callout and the revision line are the Brief's alone. Where a paper has no Brief, the
+   rung is **Abstract**, with no switch and one quiet line saying why there is none.
 3. **Deep card**: its claim in bold, then each section as a rung of its own under it: Summary, Setup (models and
    tasks as tags, and how far it transfers), the topic's own facts and text (for CoT faithfulness: mismatch, ground
    truth, monitor, signals, then detection, definition, generality), Limitations, Prior work (rows that open the paper
@@ -168,14 +170,18 @@ collection" in place of a rarity.
 **The rail** (desktop), beside the reading column:
 - The Gist, once the reading column's Gist has scrolled out of view; it moves in, and back out on scrolling up.
 - One row per topic the paper is in: badge, name, grade ("must read · landmark") and the verdict ("Fit central ·
-  Weight landmark", or "your label: related"), the two thumbs, and Label, which opens the **Fit control**.
+  Weight landmark", or "your label: related"), the two thumbs, and Label, which opens the **Fit control**. Rows go
+  by grade (must read, relevant, adjacent, none, ungraded; ties in Focus, Area, Field and the owner's topic order),
+  sorted when the page opens and held while it is open, so a label that regrades a topic does not move its row. Past
+  two rows the rest fold behind one line: their badges and a count by grade in the grades' colours ("+4 · 1 must
+  read, 3 adjacent"). It opens closed on every paper; a note's Label opens it when its topic is folded.
 - The quick actions as a 2×2 grid: Save, BibTeX ⧉, arXiv ↗, PDF ↗, with Deep read across the full width while the
   paper has no card. For a paper outside the collection: Process, BibTeX, Deep read, Report as a miss. Once
   fetched, Process reads "Fetched", and "Fetched · next run" while the next run will process it (not dismissed).
 
 **On the phone** the page is one column: the header and the ladder without its last rung. The bottom bar: ☆ Save, 👍,
 the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet: a label per topic (the topic's name, its
-grade and whose Fit it shows, then the Fit control), the actions and links as the same grid (arXiv, PDF, LaTeX, Code,
+grade and whose Fit it shows, then the Fit control; in the rail's order and fold), the actions and links as the same grid (arXiv, PDF, LaTeX, Code,
 Weights, BibTeX), then versions, published version and classes, and Done. A swipe steps to the previous or next paper
 of the list it was opened from.
 

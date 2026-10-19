@@ -9,11 +9,12 @@ import { Badge } from "@/components/Badge";
 import { Sheet } from "@/components/Sheet";
 import { Fill } from "@/components/slots";
 import { placeOf } from "@/lib/listContext";
-import { gradeLine, rc } from "@/lib/rarity";
+import { gradeLine } from "@/lib/rarity";
 import type { ReactionValue } from "@/lib/reactions";
 import { DeepReadCell, linkCells, MissPicker, type Paper, passWord, ProcessCell } from "./Actions";
 import { Classes, Published } from "./Ladder";
-import { FitControl, Reasons, whoseFit, type PaperTopic } from "./TopicRow";
+import { FitControl, Reasons, rowColour, whoseFit, type PaperTopic } from "./TopicRow";
+import { FoldedTopics, type Topics } from "./Fold";
 
 /** The topic row a reaction sheet opens on: the one the paper was opened under, else its only one; none when it
  * must ask. */
@@ -55,7 +56,7 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
   const failed = t.state === "ungraded";
   const said = t.verdict ? Object.entries(t.verdict.opinions ?? {}).filter(([, o]) => o.fit).map(([role, o]) => `${role} ${o.fit}`) : [];
   return (
-    <div className={`slab${asks ? " ask" : ""}`} style={{ "--rc": failed ? "var(--fg3)" : rc(t.rarity) } as React.CSSProperties}>
+    <div className={`slab${asks ? " ask" : ""}`} style={{ "--rc": rowColour(t) } as React.CSSProperties}>
       <div className="sh">
         <Badge topic={t.topic} />
         <span className="nm">{t.topic.name}</span>
@@ -69,7 +70,7 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
           <b className="badt">ungraded · grading failed 3 runs</b>
         ) : (
           <>
-            <span className="gr">{gradeLine(t.grade, paper.weight?.weight)}</span>
+            <span className="gr">{t.state === "grading_again" ? "ungraded · grading again" : gradeLine(t.grade, paper.weight?.weight)}</span>
             {whoseFit(t) ? ` · ${whoseFit(t)}` : ""}
           </>
         )}
@@ -79,16 +80,14 @@ function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
   );
 }
 
-export function PaperSheet({ paper, asked, onClose, missOpen }: { paper: Paper; asked: boolean; onClose: () => void; missOpen?: boolean }) {
+export function PaperSheet({ paper, topics, asked, onClose, missOpen }: { paper: Paper; topics: Topics; asked: boolean; onClose: () => void; missOpen?: boolean }) {
   const [miss, setMiss] = useState(!!missOpen);
   return (
     <Sheet open onClose={onClose} label="The paper">
       {paper.in_collection && paper.topics.length > 0 && (
         <>
           <div className="cap">Label</div>
-          {paper.topics.map((t) => (
-            <Slab key={t.topic.slug} paper={paper} t={t} />
-          ))}
+          <FoldedTopics {...topics} row={(t) => <Slab key={t.topic.slug} paper={paper} t={t} />} />
         </>
       )}
       <div className="cap">The paper</div>
@@ -131,7 +130,7 @@ export function PaperSheet({ paper, asked, onClose, missOpen }: { paper: Paper; 
   );
 }
 
-export function PhoneBar({ paper, under, asked, sheet, setSheet, missOpen }: { paper: Paper; under: string | undefined; asked: boolean; sheet: "more" | "up" | "down" | null; setSheet: (s: "more" | "up" | "down" | null) => void; missOpen?: boolean }) {
+export function PhoneBar({ paper, topics, under, asked, sheet, setSheet, missOpen }: { paper: Paper; topics: Topics; under: string | undefined; asked: boolean; sheet: "more" | "up" | "down" | null; setSheet: (s: "more" | "up" | "down" | null) => void; missOpen?: boolean }) {
   const save = useSave(paper.id);
   const deep = useDeepRead(paper.id);
   const listKey = useLocation({ select: (l) => l.state.list });
@@ -171,7 +170,7 @@ export function PhoneBar({ paper, under, asked, sheet, setSheet, missOpen }: { p
         </button>
       </div>
       {(sheet === "up" || sheet === "down") && <ReactSheet paper={paper} value={sheet} under={under} onClose={() => setSheet(null)} />}
-      {sheet === "more" && <PaperSheet paper={paper} asked={asked} onClose={() => setSheet(null)} missOpen={missOpen} />}
+      {sheet === "more" && <PaperSheet paper={paper} topics={topics} asked={asked} onClose={() => setSheet(null)} missOpen={missOpen} />}
     </Fill>
   );
 }
