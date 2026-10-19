@@ -10,8 +10,8 @@ import pytest
 from pydantic import BaseModel
 
 from litwatch import store
-from litwatch.config import Models, RoleConfig
-from litwatch.llm import CallError, Gateway, ProviderError, Request
+from litwatch.config import ROLES, Models, RoleConfig
+from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.openrouter import OpenRouterProvider
 from litwatch.store import runs
@@ -252,59 +252,173 @@ async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn, journal
     assert last["error"] == "provider: APIConnectionError" and last["usage"]["cost"] is None
 
 
-async def test_a_refusal_is_asked_once_of_the_roles_fallback_from_another_lab(conn, journal):
-    refused = SdkClient(anthropic_message("", stop_reason="refusal", category="cyber"))
-    answering = SdkClient(openrouter_completion(GOOD))
-    models = Models(brief_fallback=MUSE)
-    answer = await gateway(models, refused, answering, journal).ask("brief", REQUEST, paper_id="p")
+SONNET = RoleConfig(provider="anthropic", model="claude-sonnet-5-5", effort="medium")
+FLASH = RoleConfig(provider="openrouter", model="deepseek/deepseek-v4.1-flash-1017", effort="high")
+GEMINI = RoleConfig(provider="openrouter", model="google/gemini-3.8-flash", effort="high")
+# Opus, then Sonnet from the same lab (D1), then another lab's model.
+LISTED = Models(brief=OPUS.model_copy(update={"fallbacks": (SONNET, MUSE)}))
+
+
+def listed(script: dict[str, object], said: list[str]) -> dict[str, ScriptedProvider]:
+    """Providers answering each model as `script` says (a reply's text, a `Reply`, or an
+    exception), the answer `GOOD` when it says nothing; `said` gets each model asked."""
+
+    def respond(role, request):
+        said.append(role.model)
+        answer = script.get(role.model, GOOD)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return {n: ScriptedProvider(n, respond) for n in ("anthropic", "openrouter")}
+
+
+def refusal(model: str, category: str = "bio") -> Reply:
+    return Reply("", Stop.REFUSED, Usage(model=model, cost=0.001), refusal=category)
+
+
+async def test_a_refusal_goes_down_the_list_in_order_each_journalled_under_the_role(conn, journal):
+    said: list[str] = []
+    script = {OPUS.model: refusal(OPUS.model), SONNET.model: refusal(SONNET.model, "cyber")}
+    gw = Gateway(LISTED, listed(script, said), journal, retry_delays=())
+    answer = await gw.ask("brief", REQUEST, paper_id="p")
     assert answer.value.yes and answer.model == MUSE.label
-    assert (len(refused.sent), len(answering.sent)) == (1, 1)
+    assert said == [OPUS.model, SONNET.model, MUSE.model]  # in order, in the same run
     rows = await calls(conn)
-    assert [(r["operation"], r["error"]) for r in rows] == [
-        ("brief", "refused: cyber"),
-        ("brief_fallback", None),
+    assert [(r["operation"], r["usage"]["model"], r["error"]) for r in rows] == [
+        ("brief", OPUS.model, "refused: bio"),
+        ("brief", SONNET.model, "refused: cyber"),
+        ("brief", MUSE.model, None),
     ]
-    # Without the fallback's credentials, the role's model is still asked.
-    alone = Gateway(
-        models, {"anthropic": AnthropicProvider(client=SdkClient(anthropic_message(GOOD)))}, journal
-    )
-    assert (await alone.ask("brief", Request(system="s", user="alone", output=Answer))).value.yes
-    # Asked again unchanged, the fallback's answer is reused without asking the role's model.
-    again = await gateway(models, refused, answering, journal).ask("brief", REQUEST, paper_id="p")
+    # Asked again, the answer is reused, and the role starts from the model that gave it.
+    again = await gw.ask("brief", REQUEST, paper_id="p")
     assert again.value.yes and again.usage.cost == 0 and again.model == MUSE.label
-    assert (len(refused.sent), len(answering.sent)) == (1, 1)
-    # The fallback refusing too is the call's refusal; it is not asked again, nor is it asked
-    # for anything but a refusal.
-    refusing = SdkClient(openrouter_completion("", refusal="I cannot"))
-    with pytest.raises(CallError, match="refused: unspecified"):
-        await gateway(models, refused, refusing).ask(
-            "brief", Request(system="s", user="other", output=Answer)
-        )
-    assert len(refusing.sent) == 1
-    invalid = SdkClient(anthropic_message("not json"))
-    with pytest.raises(CallError, match="invalid"):
-        await gateway(models, invalid, refusing).ask(
-            "brief", Request(system="s", user="third", output=Answer)
-        )
-    assert len(refusing.sent) == 1
+    assert len(said) == 3
+    # Another question starts from the top.
+    await gw.ask("brief", Request(system="s", user="other", output=Answer))
+    assert said[3] == OPUS.model
+
+
+async def test_every_model_refusing_stops_at_once_with_the_last_refusal(conn, journal):
+    said: list[str] = []
+    script = {m.model: refusal(m.model) for m in LISTED.brief.models}
+    gw = Gateway(LISTED, listed(script, said), journal, retry_delays=())
+    with pytest.raises(CallError) as raised:
+        await gw.ask("brief", REQUEST, paper_id="p")
+    assert (raised.value.kind, raised.value.model) == ("refused", MUSE.label)
+    assert said == [OPUS.model, SONNET.model, MUSE.model]  # each once
+    assert [r["error"] for r in await calls(conn)] == ["refused: bio"] * 3
 
 
 @pytest.mark.parametrize(
-    ("fallback", "why"),
+    ("answer", "kind"),
     [
-        ("brief", "not another role"),
-        ("nobody", "not another role"),
-        ("writer", "different labs"),
+        ("not json", "invalid"),
+        (Reply('{"yes": tr', Stop.TRUNCATED, Usage(model="m")), "truncated"),
+        (ProviderError("APITimeoutError", timeout=True), "timeout"),
+        (ProviderError("InternalServerError", transient=True), "provider"),
     ],
 )
-def test_a_fallback_is_another_role_from_another_lab_without_its_own(fallback, why):
-    with pytest.raises(ValueError, match=why):
-        Models(brief=OPUS.model_copy(update={"fallback": fallback}))
-    chained = MUSE.model_copy(update={"fallback": "writer"})
-    with pytest.raises(ValueError, match="a fallback of its own"):
-        Models(brief_fallback=chained)
-    with pytest.raises(ValueError, match="Decisions or neither"):
-        Models(brief_fallback=MUSE.model_copy(update={"decisions": True}))
+async def test_an_unusable_answer_or_none_never_moves_down_in_the_run(answer, kind):
+    said: list[str] = []
+    gw = Gateway(LISTED, listed({OPUS.model: answer}, said), retry_delays=(0.0,))
+    with pytest.raises(CallError) as raised:
+        await gw.ask("brief", REQUEST)
+    assert (raised.value.kind, raised.value.model) == (kind, OPUS.label)
+    assert set(said) == {OPUS.model}  # a provider error is retried, on the same model
+
+
+async def test_start_asks_further_down_the_list_and_past_its_end_the_last():
+    said: list[str] = []
+    gw = Gateway(LISTED, listed({}, said), retry_delays=())
+    for start, model in ((1, SONNET), (2, MUSE), (7, MUSE)):
+        user = f"start {start}"
+        answer = await gw.ask("brief", Request(system="s", user=user, output=Answer), start=start)
+        assert answer.model == model.label and said[-1] == model.model
+    # A list of one: a refusal is the refusal of every model.
+    with pytest.raises(CallError, match="refused"):
+        await Gateway(
+            LISTED, listed({"claude-haiku-5-5": refusal("h")}, said), retry_delays=()
+        ).ask("field_grade", REQUEST, start=2)
+
+
+async def test_a_fallback_without_credentials_is_a_call_with_no_answer():
+    said: list[str] = []
+    models = Models(brief=OPUS.model_copy(update={"fallbacks": (MUSE, SONNET)}))
+    for script, outcome in (({}, None), ({OPUS.model: refusal(OPUS.model)}, "no credentials")):
+        anthropic_only = {"anthropic": listed(script, said)["anthropic"]}
+        gw = Gateway(models, anthropic_only, retry_delays=())
+        if outcome is None:  # what the role's own model answers needs nothing else
+            assert (await gw.ask("brief", REQUEST)).value.yes
+            continue
+        with pytest.raises(CallError, match="no credentials for openrouter"):
+            await gw.ask("brief", Request(system="s", user="refused", output=Answer))
+    assert said == [OPUS.model, OPUS.model]
+
+
+async def test_googles_filter_is_a_refusal_and_a_reply_without_choices_a_provider_error():
+    """Gemini's filter takes two shapes (evals/2026-10-19-fallback-ladders.md, "For P2"):
+    `content_filter`, a refusal, goes down the list; a completion with no choices is the
+    provider failing, which never does."""
+    models = Models(check=GEMINI.model_copy(update={"fallbacks": (FLASH,)}))
+    filtered = SdkClient(
+        openrouter_completion("", finish_reason="content_filter"), openrouter_completion(GOOD)
+    )
+    answer = await gateway(models, openrouter=filtered).ask("check", REQUEST)
+    assert answer.model == FLASH.label
+    assert [r["model"] for r in filtered.sent] == [GEMINI.model, FLASH.model]
+    empty = openrouter_completion(GOOD)
+    empty.choices = []
+    no_choices = SdkClient(empty)
+    with pytest.raises(CallError) as raised:
+        await gateway(models, openrouter=no_choices).ask("check", REQUEST)
+    assert raised.value.kind == "provider"
+    assert {r["model"] for r in no_choices.sent} == {GEMINI.model}
+
+
+def test_fallbacks_may_share_their_roles_lab_but_judge_and_check_share_none():
+    assert Models(judge=OPUS.model_copy(update={"fallbacks": (SONNET,)}))  # D1
+    for judge, check in (
+        (
+            OPUS.model_copy(update={"fallbacks": (MUSE.model_copy(update={"model": "meta/x"}),)}),
+            MUSE,
+        ),
+        (OPUS, MUSE.model_copy(update={"fallbacks": (SONNET,)})),
+    ):
+        with pytest.raises(ValueError, match="share no lab"):
+            Models(judge=judge, check=check)
+    assert {m.lab for m in Models().judge.models}.isdisjoint(m.lab for m in Models().check.models)
+
+
+def test_a_fallback_is_a_plain_chat_model_and_decision_roles_have_none():
+    chained = SONNET.model_copy(update={"fallbacks": (MUSE,)})
+    with pytest.raises(ValueError, match="without fallbacks of its own"):
+        Models(brief=OPUS.model_copy(update={"fallbacks": (chained,)}))
+    with pytest.raises(ValueError, match="without fallbacks of its own"):
+        Models(
+            brief=OPUS.model_copy(
+                update={"fallbacks": (MUSE.model_copy(update={"decisions": True}),)}
+            )
+        )
+    with pytest.raises(ValueError, match="listed twice"):
+        Models(brief=OPUS.model_copy(update={"fallbacks": (SONNET, SONNET)}))
+    decider = Models().classify
+    with pytest.raises(ValueError, match="decision role has no fallbacks"):
+        Models(classify=decider.model_copy(update={"fallbacks": (MUSE,)}))
+    with pytest.raises(ValueError, match="decision role has no fallbacks"):
+        Models(area_check=MUSE.model_copy(update={"fallbacks": (FLASH,)}))
+
+
+def test_the_default_lists_are_the_replays():
+    labels = {name: [m.label for m in Models().role(name).models] for name in ROLES}
+    assert labels["field_grade"] == ["anthropic:claude-haiku-5-5"]  # no fallback (P1, R1)
+    assert labels["brief"] == [
+        "anthropic:claude-sonnet-5-5@high",
+        "openrouter:openai/gpt-6.1-sol@high",
+    ]
+    assert len(labels["judge"]) == 4 and len(labels["check"]) == len(labels["analyse"]) == 3
+    assert labels["writer"][-1] == "openrouter:moonshotai/kimi-k3@medium"
+    assert labels["classify"] == labels["area_check"] == ["openrouter:typesafe/jev-1.13"]
 
 
 async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, journal):

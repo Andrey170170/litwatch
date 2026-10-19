@@ -51,13 +51,20 @@ def _without_nul(value: Any) -> Any:
 class CallError(Exception):
     """A call produced no usable answer. `kind` is `truncated`, `refused`, `invalid`,
     `timeout` or `provider`; the message carries the detail. `usage` is the reply's, when one
-    came back and was billed."""
+    came back and was billed; `model` the model asked last (`provider:model@effort`). From
+    `Gateway.ask`, `refused` means every model asked down the role's list refused."""
 
-    def __init__(self, kind: str, detail: str | None = None, usage: Usage | None = None) -> None:
+    def __init__(
+        self,
+        kind: str,
+        detail: str | None = None,
+        usage: Usage | None = None,
+        model: str | None = None,
+    ) -> None:
         # Provider text can carry a NUL, which Postgres text cannot hold; the message is
         # stored as a paper's last error.
         detail = detail.replace("\x00", "") if detail else detail
-        self.kind, self.detail, self.usage = kind, detail, usage
+        self.kind, self.detail, self.usage, self.model = kind, detail, usage, model
         super().__init__(f"{kind}: {detail}" if detail else kind)
 
     @property
@@ -189,12 +196,12 @@ class Gateway:
     async def complete(
         self,
         role_name: str,
+        role: RoleConfig,
         request: Request,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
     ) -> Reply:
-        """One reply from the role's model, after retries. Not journalled; `ask` is. `send`
-        replaces the chat call (a Decisions endpoint)."""
-        role = self.models.role(role_name)
+        """One reply from `role`, a model of the role's list, after retries. Not journalled;
+        `ask` is. `send` replaces the chat call (a Decisions endpoint)."""
         provider = self._provider(role)
         for delay in (*self.retry_delays, None):
             try:
@@ -237,29 +244,38 @@ class Gateway:
         *,
         paper_id: str | None = None,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
+        start: int = 0,
     ) -> Answer[T]:
-        """A validated answer, reusing an identical earlier call. Raises `CallError`. A refusal
-        is asked once of the role's fallback, another lab's model, journalled as its own call.
+        """A validated answer from the role's list: its model, then its fallbacks (models.md,
+        roles). An answer any of them gave to the identical question is reused. Otherwise the
+        model at `start` is asked (the step's failed runs, D4; past the end, the last): a
+        refusal goes to the next at once, each journalled under the role with its model, and
+        when every model from there refused, the last refusal is raised. Any other failure is
+        raised at once: an unusable answer moves down only with the next run's `start`, and a
+        call that got no answer never does.
 
         The reply is recorded before it is validated, so a rejected one still has its charge;
-        only validated outputs are reusable. The reply's text is kept only in debug mode. A
-        question the fallback answered is reused without asking the role's model again.
+        only validated outputs are reusable. The reply's text is kept only in debug mode.
         """
-        fallback = self.models.role(role_name).fallback
-        reachable = fallback and self.models.role(fallback).provider in self.providers
-        if reachable and (answer := await self._reused(fallback, request)):
-            return answer
-        try:
-            return await self._ask(role_name, request, paper_id=paper_id, send=send)
-        except CallError as exc:
-            if exc.kind != "refused" or fallback is None:
-                raise
-        log.info("role=%s paper=%s refused: asking %s", role_name, paper_id, fallback)
-        return await self._ask(fallback, request, paper_id=paper_id, send=send, batch=False)
+        models = self.models.role(role_name).models
+        for model in models:  # a model without credentials can have answered nothing
+            if model.provider in self.providers and (answer := await self._reused(model, request)):
+                return answer
+        refusal: CallError | None = None
+        for model in models[min(start, len(models) - 1) :]:
+            if refusal:
+                log.info("role=%s paper=%s refused: asking %s", role_name, paper_id, model.label)
+            try:
+                return await self._ask(role_name, model, request, paper_id=paper_id, send=send)
+            except CallError as exc:
+                if exc.kind != "refused":
+                    raise
+                refusal = exc
+        assert refusal is not None
+        raise refusal
 
-    async def _reused[T: BaseModel](self, role_name: str, request: Request) -> Answer[T] | None:
-        """The validated answer of an identical earlier call, at no cost."""
-        role = self.models.role(role_name)
+    async def _reused[T: BaseModel](self, role: RoleConfig, request: Request) -> Answer[T] | None:
+        """The validated answer of an identical earlier call to `role`, at no cost."""
         if not self.journal or not (
             hit := await self.journal.cached(self.request_key(role, request))
         ):
@@ -278,27 +294,31 @@ class Gateway:
     async def _ask[T: BaseModel](
         self,
         role_name: str,
+        role: RoleConfig,
         request: Request,
         *,
         paper_id: str | None = None,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
-        batch: bool = True,
     ) -> Answer[T]:
-        role = self.models.role(role_name)
+        """One model of the role's list, asked and journalled under the role's name."""
         key = self.request_key(role, request)
         journal = self.journal
-        if answer := await self._reused(role_name, request):
-            return answer
-        call_id, reply = await self._batched(role_name, role, key, request, paper_id, send, batch)
+        call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
         try:
             if reply is None:
-                reply = await self.complete(role_name, request, send)
+                reply = await self.complete(role_name, role, request, send)
             reply.usage.source_call_id = call_id
             if journal:
                 await journal.record(call_id, reply.usage)
             log.info("inference role=%s usage=%s", role_name, reply.usage.model_dump_json())
             if reply.stop == Stop.REFUSED:
-                log.warning("role=%s paper=%s refused: %s", role_name, paper_id, reply.refusal)
+                log.warning(
+                    "role=%s model=%s paper=%s refused: %s",
+                    role_name,
+                    role.label,
+                    paper_id,
+                    reply.refusal,
+                )
                 raise CallError("refused", reply.refusal, reply.usage)
             if reply.stop == Stop.TRUNCATED:
                 raise CallError("truncated", usage=reply.usage)
@@ -316,6 +336,7 @@ class Gateway:
                 detail = f"{exc.error_count()} validation errors: {said}"
                 raise CallError("invalid", detail, reply.usage) from exc
         except CallError as exc:
+            exc.model = role.label
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.
             if journal:
@@ -334,15 +355,14 @@ class Gateway:
         request: Request,
         paper_id: str | None,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None,
-        batch: bool,
     ) -> tuple[int | None, Reply | None]:
         """The call's journal row, and its reply when a batch gave one (None: send it as a
         normal call). A key a dead run left in an open batch waits on that batch, on its row,
         past the deadline too (the batch is cancelled then); one the batch did not answer is
         sent as a normal call. A normal call has a row of its own when the batch it was given
-        up on may still answer it on its row. Without `batch` (a fallback) it is a normal call."""
+        up on may still answer it on its row. A fallback is batched as the role's model is."""
         journal = self.journal
-        batcher = self.batchers.get(role.provider) if send is None and batch else None
+        batcher = self.batchers.get(role.provider) if send is None else None
         if batcher and journal and (row := await journal.in_batch(key)):
             if reply := await batcher.attach(row["batch_id"], key, row["id"]):
                 if reply.usage.reused:  # shared with a call on that row: a row of its own

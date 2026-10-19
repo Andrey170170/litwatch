@@ -9,8 +9,8 @@ Before anything is spent on a claimed pass, its paper is settled (`still_wanted`
 the database no longer wants is dropped unread, whatever trigger missed it. A pass is held by
 a lease while it runs; one whose lease ran out (its worker died) is tried
 again. A failed pass is tried again on the next nightly run (`retry_failed`), and the archive
-is asked to try again what it gave up on; after `FAILED_RUNS` failed runs, or a week awaiting
-text, it waits for the owner on Quality."""
+is asked to try again what it gave up on; after `FAILED_RUNS` failed runs, a refusal by every
+model of `brief`'s list, or a week awaiting text, it waits for the owner on Quality."""
 
 from __future__ import annotations
 
@@ -72,6 +72,7 @@ class Attempt:
     model: str | None = None
     error: str | None = None
     counts: bool = False  # a failure that counts: no text to be had, or an unusable answer
+    refused: bool = False  # every model of `brief` refused: the pass stops at once
     waiting: bool = False  # no text yet: the archive is fetching it, or cannot be reached
     retry_asked: bool = False  # the archive was asked to retry the downloads it gave up on
 
@@ -120,9 +121,10 @@ def _write(
                 brief.ROLE,
                 brief.request(c.paper, c.area, a.text.body, a.text.source),
                 paper_id=c.paper.id,
+                start=c.failed_runs,
             )
         except CallError as exc:
-            a.error, a.counts = str(exc), exc.unusable
+            a.error, a.counts, a.refused = str(exc), exc.unusable, exc.kind == "refused"
             return a
         a.output, a.model = answer.value, answer.model
         return a
@@ -167,7 +169,8 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
             a.waiting = True  # a dismissed paper's pass writes nothing; `claim` leaves it alone
             await store_.awaiting(conn, c, a.error)
         elif a.output is None or a.model is None or read is None:
-            await store_.failed(conn, c, a.error or "no answer", counts=a.counts, text=read)
+            error = a.error or "no answer"
+            await store_.failed(conn, c, error, counts=a.counts, text=read, refused=a.refused)
         else:
             await _add(conn, c, a, read)
     return True

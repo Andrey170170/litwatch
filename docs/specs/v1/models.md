@@ -20,9 +20,11 @@ made by the `deep` service on its own subscription and are not a gateway role.
 
 Each role that writes (`analyse`, `judge`, `check`, `field_grade`, `brief`, `writer`) names its **fallbacks**: an
 ordered list of models, each with its provider, model and effort, asked in turn when the role's model fails for the
-paper ([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), which sets the starting lists from a
-replay). The decision roles (`classify`, `area_check`) have none. A call to a fallback is journalled under the role's
-name, with the model it went to.
+paper. A list may be empty: `field_grade`'s is, as no candidate graded Field topics close to Haiku 5.5's own agreement
+and Haiku has not failed a Field grading, so one it cannot answer stops ungraded. The lists were chosen by a replay
+([`evals/2026-10-19-fallback-ladders.md`](../../../evals/2026-10-19-fallback-ladders.md), the failure-handling plan's
+P1) and are the configuration's defaults. The decision roles (`classify`, `area_check`) have none. A call to a fallback
+is journalled under the role's name, with the model it went to.
 
 - **A refusal** goes to the next model at once, in the same run. When every model in the list has refused, the step
   stops for that paper at once and waits for the owner ([pipeline.md](pipeline.md), section 9), without three runs of

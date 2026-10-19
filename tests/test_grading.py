@@ -83,6 +83,7 @@ async def test_a_focus_topic_is_graded_by_both_labs_and_the_more_inclusive_fit_s
         "grade": "must_read",
         "split": True,
         "escalated": False,
+        "one_lab": False,
     }
     # The verdict settles the paper in the same run: its effective grade, rarity and library.
     (g,) = await rows(conn, "SELECT * FROM effective_grades WHERE paper_id = %s", B.id)

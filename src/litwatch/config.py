@@ -25,9 +25,10 @@ ROLES = (
     "area_check",
     "field_grade",
     "brief",
-    "brief_fallback",
     "writer",
 )
+# The roles answered by a decision model with probabilities (models.md, roles): no fallbacks.
+DECISION_ROLES = ("classify", "area_check")
 
 
 class _Section(BaseModel):
@@ -48,14 +49,29 @@ class RoleConfig(_Section):
     # The model is served by OpenRouter's Decisions endpoint (Luna Decisions, Jev). A decision
     # role without it asks a chat model, with a strict schema.
     decisions: bool = False
-    # Another role, from another lab, asked once when this role's model refuses (models.md).
-    fallback: str | None = None
+    # The models asked in turn when this one fails for the paper, in order (models.md, roles):
+    # each with its provider, model and effort, and none with fallbacks of its own.
+    fallbacks: tuple[RoleConfig, ...] = ()
 
     @model_validator(mode="after")
     def _decisions_on_openrouter(self) -> RoleConfig:
         if self.decisions and self.provider != "openrouter":
             raise ValueError("only OpenRouter serves a Decisions endpoint")
         return self
+
+    @model_validator(mode="after")
+    def _plain_fallbacks(self) -> RoleConfig:
+        for f in self.fallbacks:
+            if f.fallbacks or f.decisions:
+                raise ValueError(f"fallback {f.label}: a chat model without fallbacks of its own")
+        if len({m.label for m in self.models}) < len(self.models):
+            raise ValueError(f"{self.label}: a model is listed twice")
+        return self
+
+    @property
+    def models(self) -> tuple[RoleConfig, ...]:
+        """The role's list: its own model, then its fallbacks, in the order asked."""
+        return (self, *self.fallbacks)
 
     @property
     def lab(self) -> str:
@@ -69,57 +85,88 @@ class RoleConfig(_Section):
         return f"{self.provider}:{self.model}" + (f"@{self.effort}" if self.effort else "")
 
 
+def _model(
+    provider: Literal["anthropic", "openrouter"], model: str, effort: str | None = None
+) -> RoleConfig:
+    return RoleConfig(provider=provider, model=model, effort=effort)
+
+
 class Models(_Section):
+    """Each role's model and its fallbacks. The fallbacks were chosen by the failure-handling
+    replay (evals/2026-10-19-fallback-ladders.md): `field_grade` has none, as no candidate grades
+    as Haiku does."""
+
     # Chosen in N1 (evals/2026-10-14-classifiers.md).
     classify: RoleConfig = RoleConfig(
         provider="openrouter", model="typesafe/jev-1.13", decisions=True
     )
-    analyse: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5")
-    judge: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
+    analyse: RoleConfig = RoleConfig(
+        provider="anthropic",
+        model="claude-haiku-5-5",
+        fallbacks=(
+            _model("openrouter", "openai/gpt-6-luna"),
+            _model("openrouter", "deepseek/deepseek-v4.1-flash"),
+        ),
+    )
+    judge: RoleConfig = RoleConfig(
+        provider="anthropic",
+        model="claude-opus-5-5",
+        effort="medium",
+        fallbacks=(
+            _model("anthropic", "claude-sonnet-5-5", "medium"),
+            _model("openrouter", "openai/gpt-6.1-sol", "medium"),
+            _model("openrouter", "moonshotai/kimi-k3", "medium"),
+        ),
+    )
     check: RoleConfig = RoleConfig(
-        provider="openrouter", model="meta/muse-spark-1.3-contributor", effort="high"
+        provider="openrouter",
+        model="meta/muse-spark-1.3-contributor",
+        effort="high",
+        fallbacks=(
+            _model("openrouter", "deepseek/deepseek-v4.1-flash-1017", "high"),
+            _model("openrouter", "google/gemini-3.8-flash", "high"),
+        ),
     )
     # A decision model asked whether an Area verdict's Fit holds.
     area_check: RoleConfig = RoleConfig(
         provider="openrouter", model="typesafe/jev-1.13", decisions=True
     )
     field_grade: RoleConfig = RoleConfig(provider="anthropic", model="claude-haiku-5-5")
-    # Briefs, Weight and Gists from the full text (pipeline.md, section 6), and who answers
-    # when Sonnet refuses: chosen in the Sonnet replay (evals/2026-10-16-sonnet-briefs.md).
+    # Briefs, Weight and Gists from the full text (pipeline.md, section 6): Sonnet chosen in the
+    # Sonnet replay (evals/2026-10-16-sonnet-briefs.md).
     brief: RoleConfig = RoleConfig(
-        provider="anthropic", model="claude-sonnet-5-5", effort="high", fallback="brief_fallback"
+        provider="anthropic",
+        model="claude-sonnet-5-5",
+        effort="high",
+        fallbacks=(_model("openrouter", "openai/gpt-6.1-sol", "high"),),
     )
-    brief_fallback: RoleConfig = RoleConfig(
-        provider="openrouter", model="openai/gpt-6.1-sol", effort="high"
+    writer: RoleConfig = RoleConfig(
+        provider="anthropic",
+        model="claude-opus-5-5",
+        effort="medium",
+        fallbacks=(
+            _model("anthropic", "claude-sonnet-5-5", "medium"),
+            _model("openrouter", "moonshotai/kimi-k3", "medium"),
+        ),
     )
-    writer: RoleConfig = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 
     @model_validator(mode="after")
     def _two_labs_grade(self) -> Models:
-        if self.judge.lab == self.check.lab:
+        # A Focus grade comes from two labs by fixed lists (D2); a fallback may share its own
+        # role's lab (D1).
+        shared = {m.lab for m in self.judge.models} & {m.lab for m in self.check.models}
+        if shared:
             raise ValueError(
-                f"judge and check must come from different labs; both are {self.judge.lab!r}"
+                f"judge's and check's lists must share no lab; both have {sorted(shared)}"
             )
         return self
 
     @model_validator(mode="after")
-    def _fallbacks(self) -> Models:
-        # Refusals follow a lab's policy, so a fallback from the same lab would refuse alike.
+    def _no_decision_fallbacks(self) -> Models:
         for name in ROLES:
             role = self.role(name)
-            if role.fallback is None:
-                continue
-            if role.fallback not in ROLES or role.fallback == name:
-                raise ValueError(f"{name}: fallback {role.fallback!r} is not another role")
-            other = self.role(role.fallback)
-            if other.fallback is not None:
-                raise ValueError(
-                    f"{name}: its fallback {role.fallback!r} has a fallback of its own"
-                )
-            if other.lab == role.lab:
-                raise ValueError(f"{name} and its fallback must come from different labs")
-            if other.decisions != role.decisions:  # the request is shaped for one endpoint
-                raise ValueError(f"{name} and its fallback must both use Decisions or neither")
+            if role.fallbacks and (name in DECISION_ROLES or role.decisions):
+                raise ValueError(f"{name}: a decision role has no fallbacks")
         return self
 
     def role(self, name: str) -> RoleConfig:

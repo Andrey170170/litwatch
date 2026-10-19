@@ -166,10 +166,9 @@ provider = "anthropic"
 model = "claude-sonnet-5-5"
 effort = "high"
 fallbacks = [              # asked in order on refusals and unusable answers (models.md, roles); shown
-                           # here for brief only: every role that writes has its list, the defaults chosen
-                           # by the failure-handling replay (P1) and set in the configuration in P2
+                           # here for brief only: every role that writes has its list, possibly empty
+                           # (field_grade's), the defaults chosen by the failure-handling replay
   { provider = "openrouter", model = "openai/gpt-6.1-sol", effort = "high" },
-  { provider = "openrouter", model = "moonshotai/kimi-k3" },
 ]
 
 [models.writer]

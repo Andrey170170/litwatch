@@ -372,6 +372,8 @@ class Outcome:
     counts: dict[str, int] = field(default_factory=dict)
     best_rarity: str | None = None
     error: str | None = None
+    # The writer model that wrote it or, failed, the one whose answer failed it (models.md, roles)
+    model: str | None = None
 
 
 async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) -> int | None:
@@ -383,13 +385,13 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
             await conn.execute(
                 f"""
                 INSERT INTO digests (topic, period, day, state, gist, text, counts, best_rarity,
-                                     error, run_id)
+                                     error, model, run_id)
                 VALUES (%(topic)s, %(period)s, %(day)s, %(state)s, %(gist)s, %(text)s,
-                        %(counts)s, %(best)s, %(error)s, %(run)s)
+                        %(counts)s, %(best)s, %(error)s, %(model)s, %(run)s)
                 ON CONFLICT (topic, period, day) DO UPDATE SET
                     state = EXCLUDED.state, gist = EXCLUDED.gist, text = EXCLUDED.text,
                     counts = EXCLUDED.counts, best_rarity = EXCLUDED.best_rarity,
-                    error = EXCLUDED.error, run_id = EXCLUDED.run_id,
+                    error = EXCLUDED.error, model = EXCLUDED.model, run_id = EXCLUDED.run_id,
                     written_at = clock_timestamp(),
                     -- failed again, it stays as the owner saw it; published, there is none to see
                     acknowledged_at = CASE WHEN EXCLUDED.state = 'failed'
@@ -407,6 +409,7 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
                     "counts": Jsonb(o.counts),
                     "best": o.best_rarity,
                     "error": o.error[:2000] if o.error else None,
+                    "model": o.model,
                     "run": run_id,
                 },
             )
@@ -466,6 +469,20 @@ async def failed(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
             f"{_FAILED} ORDER BY d.day, d.period, d.topic"
         )
     ).fetchall()
+
+
+async def failed_writer(conn: psycopg.AsyncConnection, topic: str) -> str | None:
+    """The writer model that failed the topic's latest digest attempt, while no digest of the
+    topic has been published since: the next attempt starts one model further down `writer`'s
+    list (models.md, roles). None when its latest digest is published, or it has none."""
+    row = await (
+        await conn.execute(
+            "SELECT state, model FROM digests WHERE topic = %s "
+            "ORDER BY written_at DESC, id DESC LIMIT 1",
+            (topic,),
+        )
+    ).fetchone()
+    return row["model"] if row and row["state"] == DigestState.FAILED else None
 
 
 async def count_failed(conn: psycopg.AsyncConnection, *, unacknowledged: bool = False) -> int:

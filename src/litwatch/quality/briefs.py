@@ -120,11 +120,9 @@ TEXTS: dict[str, Callable[[str, str], str]] = {
 
 
 def fingerprint(gateway: Gateway, text: str = "pass") -> str:
-    """The role's configuration and its fallback's, its instructions and the text variant,
+    """The role's configuration, its fallbacks included, its instructions and the text variant,
     hashed."""
-    role = gateway.models.role(brief.ROLE)
-    roles = [role] + ([gateway.models.role(role.fallback)] if role.fallback else [])
-    configured = "\n".join(r.model_dump_json() for r in roles)
+    configured = gateway.models.role(brief.ROLE).model_dump_json()
     return hashlib.sha256(f"{configured}\n{brief.SYSTEM}\n{text}".encode()).hexdigest()[:12]
 
 

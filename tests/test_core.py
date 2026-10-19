@@ -73,14 +73,13 @@ def test_judge_and_check_must_come_from_different_labs():
         judge=RoleConfig(provider="openrouter", model="openai/gpt-6-luna"),
         check=RoleConfig(provider="openrouter", model="meta/muse-spark-1.3"),
     )
-    with pytest.raises(ValueError, match="different labs"):
+    with pytest.raises(ValueError, match="share no lab"):
         Models(judge=opus, check=RoleConfig(provider="anthropic", model="claude-haiku-5-5"))
-    with pytest.raises(ValueError, match="different labs"):
+    with pytest.raises(ValueError, match="share no lab"):
         Models(
             judge=RoleConfig(provider="openrouter", model="anthropic/claude-opus-5-5"),
             check=opus,
         )
-    assert Config().models.judge.lab != Config().models.check.lab
 
 
 def test_a_database_password_with_url_characters_is_quoted(monkeypatch):

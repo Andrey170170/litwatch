@@ -76,7 +76,11 @@ Around that:
 
 ### Starting lists, for the replay (P1) to keep or change
 
-Prices per million tokens, input/output, from OpenRouter's catalogue on 2026-10-19.
+Prices per million tokens, input/output, from OpenRouter's catalogue on 2026-10-19. A list may come out of the
+replay empty (the owner's call of 2026-10-19: `field_grade` keeps Haiku alone unless a fallback comes close to
+Haiku's own agreement). The replay ([evals/2026-10-19-fallback-ladders.md](../../evals/2026-10-19-fallback-ladders.md))
+kept these lists but two: `field_grade` has no fallback, and `brief` drops Kimi K3 (Sonnet 5.5 → GPT-6.1 Sol). P2
+set its lists as the defaults.
 
 | Role | Model now | Then, in order | Why |
 | --- | --- | --- | --- |
