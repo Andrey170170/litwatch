@@ -10,7 +10,9 @@ from prometheus_client.parser import text_string_to_metric_families
 from litwatch.api import create_app
 from litwatch.api.monitor import Facts, Job, components, create_monitor, due_night, metrics
 from litwatch.config import Config, Schedule
-from litwatch.store import db, runs
+from litwatch.store import db, reading, runs
+from litwatch.store import taxonomy as taxonomy_store
+from tests.conftest import FAITH, TREE
 
 STOPPED = {
     "awaiting_classification": 0,
@@ -96,6 +98,19 @@ async def test_a_run_that_raised_reads_failed_with_its_error(conn, monitor):
     nightly = component((await monitor.get("/status")).json(), "nightly")
     assert nightly["status"] == "failed"
     assert "boom" in nightly["reason"] and "expected" in nightly["reason"]
+
+
+async def test_what_the_owner_acknowledged_still_reaches_the_status_document(conn, monitor):
+    # Acknowledge on Needs you clears the app's run status only (DESIGN.md, Needs you).
+    await taxonomy_store.save(conn, TREE)
+    await conn.execute(
+        "INSERT INTO digests (topic, period, day, state, acknowledged_at) "
+        "VALUES (%s, 'day', '2026-10-18', 'failed', now())",
+        (FAITH.slug,),
+    )
+    assert (await reading.status(conn))["digests_failed"] == 0
+    assert parsed((await monitor.get("/metrics")).text)[("litwatch_digests_failed", ())] == 1
+    assert component((await monitor.get("/status")).json(), "digests")["status"] == "degraded"
 
 
 SCHEDULED = Config(schedule=Schedule(enabled=True, timezone="America/Denver"))

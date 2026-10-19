@@ -2,16 +2,18 @@
  * Needs you (DESIGN.md, "Needs you"): only what waits on the owner, grouped by kind. A settled item turns cyan,
  * keeps its result in place and fades; nothing moves until the page is left. Each action's mutation writes the
  * mark into the cached quality page (`settleNeeds` in mutations.ts), so the row settles even when the page was left
- * before the write returned, the sidebar's count follows and the next fresh visit fetches afresh.
+ * before the write returned, the sidebar's count follows and the next fresh visit fetches afresh. Each red group has
+ * Acknowledge, and the page Acknowledge all: what the owner has seen folds into the Acknowledged section at the foot,
+ * grouped the same way and keeping its buttons, and stops counting in the run status.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
+import { useAcknowledge, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
 import type { Schemas } from "@/api/client";
 import { paperQuery, qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
-import { type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, type Split, type Stuck, type TextPassStuck, waiting } from "@/lib/settings";
+import { any, type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, RED, type Red, type Split, type Stuck, type TextPassStuck, toAcknowledge, waiting } from "@/lib/settings";
 import { Failed, FitSeg, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 /** The groups: their name, the line under it, and for a stuck step the name of what failed. */
@@ -25,12 +27,16 @@ const KIND = {
   digests: { name: "Digests", line: "A digest could not be written; its papers stay due and the next run writes it again." },
 } as const;
 
-function Group<T>({ kind, items, children }: { kind: keyof typeof KIND; items: T[]; children: (item: T) => React.ReactNode }) {
+/** A group of items with its name, count and line; `acknowledge`, for a red group with something still unseen. */
+function Group<T>({ kind, items, acknowledge, children }: { kind: keyof typeof KIND; items: T[]; acknowledge?: React.ReactNode; children: (item: T) => React.ReactNode }) {
   if (!items.length) return null;
   return (
     <div className="ngrp">
-      <div className="cap">
-        {KIND[kind].name} · {items.length}
+      <div className="caprow">
+        <div className="cap">
+          {KIND[kind].name} · {items.length}
+        </div>
+        {acknowledge}
       </div>
       <div className="nsub">{KIND[kind].line}</div>
       {items.map(children)}
@@ -282,15 +288,53 @@ function Analysis({ s }: { s: Stuck }) {
 export function NeedsPage() {
   const quality = useQuery(qualityQuery("needs"));
   const cards = useTopicCards();
+  const ack = useAcknowledge();
+  const [folded, setFolded] = useState(true);
   const q = quality.data;
   const badge = (slug: string | null | undefined) => (slug && cards[slug] ? <Badge topic={cards[slug]} /> : null);
   const open = q ? waiting(q) : 0;
   // A split labelled before this visit no longer waits; one labelled on it stays, settled.
   const { splits, escalations } = openSplits(q?.night.splits ?? []);
   const line = (q: Quality) => (q.night.error ? `Last night's run failed: ${q.night.error}` : open > 0 ? `${open} ${open === 1 ? "thing waits" : "things wait"} on the owner. Each also shows on its paper's page.` : "Nothing waits on the owner.");
+  const button = (lists: Red[], label: string) => {
+    const seen = q && toAcknowledge(q, lists);
+    return seen && any(seen) ? (
+      <button className="btn" disabled={ack.isPending} onClick={() => ack.mutate(seen)}>
+        {label}
+      </button>
+    ) : null;
+  };
+  /** The red groups' rows acknowledged or not: the page's groups, or the Acknowledged section's. */
+  const reds = (q: Quality, acknowledged: boolean) => {
+    const pick = <T extends { acknowledged_at?: string | null }>(xs: T[]) => xs.filter((x) => Boolean(x.acknowledged_at) === acknowledged);
+    const n = q.night;
+    const acknowledge = (list: Red) => (acknowledged ? undefined : button([list], "Acknowledge"));
+    return (
+      <>
+        <Group kind="awaiting" items={pick(n.awaiting_classification)} acknowledge={acknowledge("awaiting_classification")}>
+          {(s) => <Awaiting key={s.paper_id} s={s} />}
+        </Group>
+        <Group kind="ungraded" items={pick(n.ungraded)} acknowledge={acknowledge("ungraded")}>
+          {(s) => <Ungraded key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} />}
+        </Group>
+        <Group kind="analysis" items={pick(n.analysis_failed)} acknowledge={acknowledge("analysis_failed")}>
+          {(s) => <Analysis key={s.paper_id} s={s} />}
+        </Group>
+        <Group kind="fulltext" items={pick(n.fulltext)} acknowledge={acknowledge("fulltext")}>
+          {(s) => <TextPass key={s.id} s={s} />}
+        </Group>
+        <Group kind="digests" items={pick(n.digests)} acknowledge={acknowledge("digests")}>
+          {(d) => <FailedDigest key={d.id} d={d} badge={badge(d.topic)} />}
+        </Group>
+      </>
+    );
+  };
+  const seen = q ? RED.reduce((k, list) => k + q.night[list].filter((x) => x.acknowledged_at).length, 0) : 0;
   return (
     <>
-      <PageHead title="Needs you" sub={q ? line(q) : undefined} />
+      <PageHead title="Needs you" sub={q ? line(q) : undefined}>
+        {button(RED, "Acknowledge all")}
+      </PageHead>
       <Load q={quality} />
       {q && (
         <>
@@ -299,21 +343,18 @@ export function NeedsPage() {
               {(s) => <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} />}
             </Group>
           ))}
-          <Group kind="awaiting" items={q.night.awaiting_classification}>
-            {(s) => <Awaiting key={s.paper_id} s={s} />}
-          </Group>
-          <Group kind="ungraded" items={q.night.ungraded}>
-            {(s) => <Ungraded key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} />}
-          </Group>
-          <Group kind="analysis" items={q.night.analysis_failed}>
-            {(s) => <Analysis key={s.paper_id} s={s} />}
-          </Group>
-          <Group kind="fulltext" items={q.night.fulltext}>
-            {(s) => <TextPass key={s.id} s={s} />}
-          </Group>
-          <Group kind="digests" items={q.night.digests}>
-            {(d) => <FailedDigest key={d.id} d={d} badge={badge(d.topic)} />}
-          </Group>
+          {reds(q, false)}
+          {seen > 0 && (
+            <section className="nack" aria-label="Acknowledged">
+              <button className="tpfold" onClick={() => setFolded(!folded)} aria-expanded={!folded}>
+                <span className={`car${folded ? "" : " open"}`} aria-hidden />
+                <span className="ct">
+                  Acknowledged · <b>{seen}</b>
+                </span>
+              </button>
+              {!folded && reds(q, true)}
+            </section>
+          )}
         </>
       )}
     </>

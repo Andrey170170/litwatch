@@ -1721,6 +1721,45 @@
         }
       }
     },
+    "/api/settings/acknowledge": {
+      "post": {
+        "summary": "Acknowledge",
+        "description": "Acknowledge on Needs you: the owner has seen these items, and they stop counting in the\nrun status. An item is marked only while it still waits on the owner as shown (the same\nfailure, not a later one); one that recovers and fails again comes back unacknowledged. It\nmoves no paper. A failed nightly run is not an item and is never acknowledged. Answers with\nthe items marked, for the page to fold those and only those; naming one again (a retry,\nanother tab) answers it again and keeps the first mark.",
+        "operationId": "acknowledge_api_settings_acknowledge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Acknowledgement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/misses": {
       "get": {
         "summary": "Misses",
@@ -2699,6 +2738,37 @@
         ],
         "title": "Ack",
         "description": "What an action changed. The page shows the result where it was taken; `message` is set\nonly for what it cannot show (DESIGN.md, acknowledgement): a thumb that gives or takes back\nthe owner's word on a Focus topic, and a reported miss."
+      },
+      "Acknowledgement": {
+        "properties": {
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StepSeen"
+            },
+            "type": "array",
+            "title": "Steps",
+            "default": []
+          },
+          "passes": {
+            "items": {
+              "$ref": "#/components/schemas/PassSeen"
+            },
+            "type": "array",
+            "title": "Passes",
+            "default": []
+          },
+          "digests": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Digests",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "Acknowledgement",
+        "description": "Items of Needs you, each as shown: stopped steps, full-text passes and failed digests\n(by id). The owner's Acknowledge names them; the answer names those it marked."
       },
       "AmongRow": {
         "properties": {
@@ -5529,6 +5599,26 @@
         "title": "Papers",
         "description": "A page of Papers, the whole filter's total, and the papers per rarity under every filter\nbut the levels. A search also brings what search providers found that the collection lacks,\nas a band of its own on the first page; a provider that failed or was too slow is named in\n`left_out`."
       },
+      "PassSeen": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "since"
+        ],
+        "title": "PassSeen",
+        "description": "A full-text pass as Needs you showed it, and since when it waited, which names this\nfailure."
+      },
       "Publication": {
         "properties": {
           "dblp_key": {
@@ -6235,6 +6325,54 @@
         ],
         "title": "Status",
         "description": "Whether a topic is in use."
+      },
+      "Step": {
+        "type": "string",
+        "enum": [
+          "classification",
+          "analysis",
+          "grading"
+        ]
+      },
+      "StepSeen": {
+        "properties": {
+          "step": {
+            "$ref": "#/components/schemas/Step"
+          },
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "failed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Failed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step",
+          "paper_id",
+          "revision",
+          "failed_at"
+        ],
+        "title": "StepSeen",
+        "description": "A stopped step as Needs you showed it: the paper, its revision then, a grading's topic,\nand when it last failed, which names this failure."
       },
       "StripDigest": {
         "properties": {

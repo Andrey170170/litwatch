@@ -23,7 +23,7 @@ async def summary(request: Request, c: Conn) -> s.Summary:
     tree = await taxonomy_store.load(c)
     since = quality.splits_window(await quality.last_night(c))
     # What Needs you lists: last night's splits still unlabelled, and the stuck steps, passes
-    # and digests the status line counts.
+    # and digests the status line counts (those the owner has not acknowledged).
     splits = [v for v in await quality.splits_since(c, since) if v["label"] is None]
     stuck = (
         status.awaiting_classification

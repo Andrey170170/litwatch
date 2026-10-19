@@ -50,7 +50,9 @@ class Facts:
 
     now: datetime
     jobs: dict[str, Job]
-    status: dict[str, Any]  # the status line's (`store.reading.status`)
+    # the status line's (`store.reading.status`), but counting what is stopped whether or not
+    # the owner acknowledged it: the owner's Acknowledge is for the app's run status alone
+    status: dict[str, Any]
     passes: dict[tuple[str, str], int]
     cursors: dict[str, Cursor]  # of the loaded integrations
     spend: list[Spend]
@@ -72,7 +74,7 @@ async def facts(
     found = Facts(
         now=now,
         jobs=jobs,
-        status=await reading.status(conn),
+        status=await reading.status(conn) | await reading.stopped(conn, unacknowledged=False),
         passes=await fulltext.count_by_state(conn),
         cursors=await outbox.cursors(conn, [i.name for i in integrations]),
         spend=await budget_lines(conn, config.budget),
