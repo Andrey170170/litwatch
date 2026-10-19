@@ -17,14 +17,16 @@ from litwatch.core.grading import FIT_DEFINITIONS
 from litwatch.feedback import misses, word
 from litwatch.intake import atom, oai
 from litwatch.jobs import intake as intake_job
+from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
-from litwatch.llm import ProviderError
+from litwatch.llm import Gateway, ProviderError
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests.conftest import FAITH, INTERP, TREE
+from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
 from tests.test_intake import unavailable
 from tests.test_steps import (
@@ -538,6 +540,23 @@ async def test_a_refused_side_is_asked_again_once_the_question_changed(conn, mod
     assert await calls_for(conn, B.id, "judge") == [*JUDGES, JUDGES[0]]
     (v,) = await verdicts(conn, B.id)
     assert (v["one_lab"], sorted(v["opinions"])) == (False, ["check", "judge"])
+
+
+async def test_a_remembered_refusal_with_its_provider_gone_waits_without_counting(conn, models):
+    refused_by(models, JUDGES, B.title)
+    models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
+    await night(conn, models, LISTED)
+
+    def openrouter_only(config, journal) -> Gateway:  # judge's lab lost its credentials
+        providers = {"openrouter": ScriptedProvider("openrouter", models.respond)}
+        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+
+    models.fits[("check", B.title)] = fit("related")
+    run_id = await nightly.run(conn, LISTED, fetch=False, gateway=openrouter_only)
+    assert (await runs.get(conn, run_id))["counts"]["grading_failed"] == 1
+    (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
+    assert failure["failed_runs"] == 0 and "no credentials" in failure["last_error"]
+    assert await verdicts(conn, B.id) == []  # no grade from one lab on a side not asked
 
 
 async def test_both_sides_refused_throughout_is_ungraded_at_once(conn, models):

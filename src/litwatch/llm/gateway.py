@@ -281,11 +281,14 @@ class Gateway:
     ) -> bool:
         """Whether every model of the role's list, as it is now, refused this identical question,
         by the journal: a refusal remembered from an earlier run holds only while the question
-        and the list are unchanged."""
+        and the list are unchanged. A model without credentials now has not: asked, it is a
+        call with no answer."""
         if not self.journal:
             return False
         for model in self.models.role(role_name).models:
-            if not await self.journal.refused(self.request_key(model, request), paper_id):
+            if model.provider not in self.providers or not await self.journal.refused(
+                self.request_key(model, request), paper_id
+            ):
                 return False
         return True
 
