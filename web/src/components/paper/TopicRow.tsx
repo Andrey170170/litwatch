@@ -117,16 +117,18 @@ export function PaperRow({ paperId, reaction }: { paperId: string; reaction: Pap
   );
 }
 
+/** A topic row's colour: its rarity's, grey while its grading failed or runs again. */
+export const rowColour = (t: PaperTopic): string => (t.state === "ungraded" || t.state === "grading_again" ? "var(--fg3)" : rc(t.rarity));
+
 export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t: PaperTopic; weight: Weight | null | undefined; revision: number }) {
   const [pick, setPick] = useState<ReactionValue | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const gradeNow = useGradeNow(paperId);
   const asks = t.state === "split" || t.state === "escalated";
   const failed = t.state === "ungraded";
-  const colour = failed || t.state === "grading_again" ? "var(--fg3)" : rc(t.rarity);
   return (
     <>
-      <div className={`tprow${asks ? " ask" : ""}`} data-topic={t.topic.slug} style={{ "--rc": colour } as React.CSSProperties}>
+      <div className={`tprow${asks ? " ask" : ""}`} data-topic={t.topic.slug} style={{ "--rc": rowColour(t) } as React.CSSProperties}>
         <Badge topic={t.topic} />
         <span className="nm">{t.topic.name}</span>
         <span className={`gr${failed ? " fail" : ""}`}>{failed || t.state === "grading_again" ? "ungraded" : gradeLine(t.grade, weight)}</span>

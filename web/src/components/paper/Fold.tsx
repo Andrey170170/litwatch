@@ -4,8 +4,8 @@
  */
 import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/Badge";
-import { GRADE_NAME, rc, type Grade } from "@/lib/rarity";
-import type { PaperTopic } from "./TopicRow";
+import { GRADE_NAME, type Grade } from "@/lib/rarity";
+import { rowColour, type PaperTopic } from "./TopicRow";
 
 type Rank = Grade | "ungraded";
 const RANKS: Rank[] = ["must_read", "relevant", "adjacent", "none", "ungraded"];
@@ -23,16 +23,14 @@ export function arrange(topics: PaperTopic[], order: string[]): PaperTopic[] {
   return [...topics.filter((t) => at(t) >= 0).sort((a, b) => at(a) - at(b)), ...byGrade(topics.filter((t) => at(t) < 0))];
 }
 
-/** The page's topics in the grade order they had when it opened. Call it from a component keyed by the paper. */
+/** The page's topics in the grade order they had when it opened; a topic that arrives later keeps the place it
+ * first took. Call it from a component keyed by the paper. */
 export function useSettledTopics(topics: PaperTopic[] | undefined): PaperTopic[] {
-  const [order, setOrder] = useState<string[] | null>(null);
+  const [order, setOrder] = useState<string[]>([]);
   if (!topics) return [];
-  if (order === null) {
-    const sorted = byGrade(topics);
-    setOrder(sorted.map((t) => t.topic.slug));
-    return sorted;
-  }
-  return arrange(topics, order);
+  const shown = arrange(topics, order);
+  if (shown.some((t) => !order.includes(t.topic.slug))) setOrder([...order, ...shown.map((t) => t.topic.slug).filter((s) => !order.includes(s))]);
+  return shown;
 }
 
 /** The rows a fold hides: all after the first two, and only when there are more than two. */
@@ -43,7 +41,7 @@ export function foldCount(hidden: PaperTopic[]): { total: number; grades: { rank
   const grades = RANKS.flatMap((rank) => {
     const rows = hidden.filter((t) => rankOf(t) === rank);
     const first = rows[0];
-    return first ? [{ rank, name: RANK_NAME[rank], n: rows.length, colour: rank === "ungraded" ? "var(--fg3)" : rc(first.rarity) }] : [];
+    return first ? [{ rank, name: RANK_NAME[rank], n: rows.length, colour: rowColour(first) }] : [];
   });
   return { total: hidden.length, grades };
 }

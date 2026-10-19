@@ -637,7 +637,7 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 .tpfold .car { display: inline-flex; width: 10px; color: var(--fg3); }
 .tpfold .car::before { content: ""; border: 5px solid transparent; border-left: 6px solid currentColor; border-right: 0; transition: transform 0.12s ease; }
 .tpfold .car.open::before { transform: rotate(90deg); }
-.tpfold .bs { display: inline-flex; gap: 4px; }
+.tpfold .bs { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; max-width: calc(100% - 18px); }
 .tpfold .ct { font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; }
 .tpfold .ct b { font-weight: 600; }
 .sheet .tpfold { border-top: 0; margin: 0 0 16px; padding-left: 10px; min-height: 40px; }
