@@ -2,6 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { ApiError } from "@/api/client";
 import { useDeepRead, useProcess } from "@/api/mutations";
 import { paperQuery } from "@/api/queries";
@@ -117,7 +118,8 @@ function PaperView({ id, under, miss }: { id: string; under: string | undefined;
   }, [asked, paper, id]);
   const onGistAway = useCallback((away: boolean) => setGistAway(away), []);
   const onLabel = (topic: string) => {
-    if (folded(settled).some((t) => t.topic.slug === topic)) setOpen(true);
+    // a folded topic's row is rendered before it is scrolled to
+    if (folded(settled).some((t) => t.topic.slug === topic)) flushSync(() => setOpen(true));
     if (!desktop) setSheet("more");
     else document.getElementById("rail-topics")?.querySelector<HTMLElement>(`[data-topic="${topic}"]`)?.scrollIntoView({ block: "nearest" });
   };

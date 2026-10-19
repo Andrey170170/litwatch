@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 import type { Paper } from "@/components/paper/Actions";
 import { pollEvery } from "./paper";
@@ -531,6 +531,24 @@ describe("a paper's topic rows", () => {
     await userEvent.click(within(screen.getByRole("group", { name: "Fit for Must one" })).getByRole("button", { name: "none" }));
     await waitFor(() => expect(document.querySelector('[data-topic="mr"] .gr')).toHaveTextContent("none"));
     expect(railNames()).toEqual(["Must one", "Rel one", "Adj one", "Adj two", "None one", "Ungraded one"]);
+  });
+
+  it("open from a note's Label when its topic is folded, with the row in view", async () => {
+    viewport(true);
+    const scrolled: string[] = [];
+    const was = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.getAttribute("data-topic") ?? "");
+    };
+    onTestFinished(() => void (Element.prototype.scrollIntoView = was));
+    const split = { ...many, topics: many.topics.map((t) => (t.topic.slug === "nn" ? { ...t, state: "split" } : t)), states: [{ kind: "split", topic: "nn", revision: 1, error: null, pass_id: null }] };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": split });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(railNames()).toEqual(["Must one", "Rel one"]);
+    await userEvent.click(within(screen.getByText(/Split on None one/).closest(".note") as HTMLElement).getByRole("button", { name: "Label" }));
+    expect(railNames()).toContain("None one");
+    expect(scrolled).toEqual(["nn"]);
   });
 
   it("have no fold with two rows", async () => {
