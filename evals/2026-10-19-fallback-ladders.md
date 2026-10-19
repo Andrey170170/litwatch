@@ -91,11 +91,12 @@ are what a Brief is compared on.
 Costs are as normal calls, not batched; production's batched calls cost half. Cost an answer is the cost of every
 call to the role's quality-set requests, refused ones included, over its usable answers; tables.md gives it per set.
 
-- **Refusals.** Seven, all from Anthropic models: `judge` Opus on 2610.13116 and 2610.21200 again (`bio`) and on a
-  third, 2606.11150 (ABC-Bench, `bio`); `brief` Sonnet on 2610.17907 and 2606.30819 (`cyber`); `analyse` Haiku on
-  2606.11150 and 2608.02684 (`bio`). No candidate from another lab refused anything, and every working candidate
-  answered each refused case (MiniMax, below, answered nothing). Muse returned one answer that was not JSON
-  (2608.02684); the other working candidates answered everything.
+- **Refusals.** In the first run, seven, all from Anthropic models: `judge` Opus on 2610.13116 and 2610.21200 again
+  (`bio`) and on a third, 2606.11150 (ABC-Bench, `bio`); `brief` Sonnet on 2610.17907 and 2606.30819 (`cyber`);
+  `analyse` Haiku on 2606.11150 and 2608.02684 (`bio`). No candidate from another lab refused anything, and every
+  working candidate answered each refused case (MiniMax, below, answered nothing). Muse returned one answer that was
+  not JSON (2608.02684); the other working candidates answered everything. The second run adds an eighth: Sonnet
+  refused 2610.13116 in `field_grade` (`bio`), of the 14 refusals-set papers it was asked before the ceiling.
 - **`judge`.** The three candidates are as close to the owner as Opus is (64–65 of 81 on Fit against Opus's 62; 78–79
   on the side) and agree with Opus on 71–74 Fits and 78–79 sides. Nothing separates them.
 - **`check`.** The same: every working candidate is within two pairs of Muse against the owner. Gemini is the
@@ -126,15 +127,15 @@ call to the role's quality-set requests, refused ones included, over its usable 
   | GPT-6.1 Sol | 28/59 | 50/59 |
   | DeepSeek V4 Pro 0813 | 28/60 | 47/60 |
 
-  The best is 13 cases below the floor; the rest 18 to 20. All grade higher than Haiku does in this run: its related is
-  their central 9 to 17 times of 60, and Sonnet also lifts its adjacent to related 10 times. A Field grade sets how a
-  paper shows on the Field's page (its level, and two below it in mixed lists), so a fallback here would move most
-  papers it graded. Sol's one missing quality case can't close its gap. The four second-run candidates' refusals-set
-  answers stop where the ceiling did; that set measures answering, and no list is drawn from it here. Sonnet refused
-  one `field_grade` case (2610.13116, `bio`); Haiku refused none here, and none of production's 4,422 `field_grade`
-  calls to 2026-10-19 failed (baseline.md, "Production's calls"). R1 drops every candidate, and the role needs a
-  fallback rarely enough to do without one: **`field_grade` gets no fallback**. A Field grading Haiku can't answer
-  stops ungraded, as it does today.
+  The best is 13 cases below the floor; the rest 18 to 20. All grade higher than Haiku does in this run: its related
+  is their central 9 to 17 times of 60, and Sonnet also lifts its adjacent to related 10 times. A Field grade sets how
+  a paper shows on the Field's page (its level, and two below it in mixed lists), so a fallback here would move many
+  papers it graded: even the closest keeps production's Fit on only 35 of 60. Sol's one missing quality case can't
+  close its gap. The four second-run candidates' refusals-set answers stop where the ceiling did; that set measures
+  answering, and no list is drawn from it here. Sonnet refused one `field_grade` case (2610.13116, `bio`); Haiku
+  refused none here, and none of production's 4,422 `field_grade` calls to 2026-10-19 failed (baseline.md,
+  "Production's calls"). R1 drops every candidate, and the role needs a fallback rarely enough to do without one:
+  **`field_grade` gets no fallback**. A Field grading Haiku can't answer stops ungraded, as it does today.
 - **`brief`: Kimi is lenient.** It rated all 10 quality papers solid (Sonnet: 5 solid, 5 incremental) and drew the
   overstatement line on 1 of 10 (Sonnet: 6), and on 9 of the 23 refusals-set papers (Sonnet 18 of 21, Sol 14 of 23).
   Sol is closer (Weight 8 of 10, line 6 of 10; 17 and 15 of 21 on the refusals set) but also flags less than Sonnet:
