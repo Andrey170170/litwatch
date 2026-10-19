@@ -194,3 +194,24 @@ async def test_a_failed_nightly_run_is_not_acknowledged(client, conn):
         "archive down",
         0,
     )
+
+
+async def test_a_new_text_or_a_text_that_arrives_brings_a_failure_back(client, conn):
+    """No owner's retry in between: a rewrite fails classification afresh, and a pass that
+    waited for its text over a week gets it and then fails three runs."""
+    await stop(conn, P, "classification")
+    pass_id = await stop_pass(conn)
+    await conn.execute(
+        "UPDATE fulltext_passes SET state = 'awaiting_text', failed_runs = 0, "
+        "queued_at = now() - interval '8 days' WHERE id = %s",
+        (pass_id,),
+    )
+    await ack(client, steps=[step("classification", P)], passes=[pass_id])
+    assert (await status(client))["state"] == "quiet"
+
+    rewritten = paper(P.id, title=P.title, abstract="A wholly new abstract.", version=2)
+    await papers_store.upsert(conn, [rewritten])
+    await stop(conn, rewritten.model_copy(update={"revision": 2}), "classification")
+    await fail_pass(conn, pass_id)
+    back = await status(client)
+    assert (back["awaiting_classification"], back["fulltext_failed"]) == (1, 1)
