@@ -63,7 +63,8 @@ def answers_card_requests(integrations: list[events.Integration]) -> bool:
 @router.get("/settings/integrations")
 async def status(request: Request, c: Conn) -> list[s.IntegrationCard]:
     """One card per loaded integration, then one per configured section that is turned off
-    (its cursor kept, so its lag shows what turning it on again would hand it)."""
+    (its cursor kept, so its lag shows what turning it on again would hand it). A card shows
+    the event it is stuck on, or its failing setup."""
     found = {i.name: i for i in loaded(request)}
     off = [
         name
@@ -86,6 +87,14 @@ async def status(request: Request, c: Conn) -> list[s.IntegrationCard]:
                 retry_at=cursor.retry_at,
                 error=cursor.last_error,
             )
+        setup_failing = None
+        if cursor and cursor.setup_failures:
+            setup_failing = s.SetupFailing(
+                failures=cursor.setup_failures,
+                retry_at=cursor.setup_retry_at,
+                error=cursor.setup_error,
+                failed_at=cursor.setup_failed_at,
+            )
         cards.append(
             s.IntegrationCard(
                 name=name,
@@ -93,6 +102,7 @@ async def status(request: Request, c: Conn) -> list[s.IntegrationCard]:
                 enabled=integration is not None,
                 lag=cursor.lag if cursor else 0,
                 failing=failing,
+                setup_failing=setup_failing,
                 last_error=cursor.last_error if cursor else None,
                 failed_at=cursor.failed_at if cursor else None,
                 skipped=cursor.skipped if cursor else 0,
@@ -112,7 +122,7 @@ def _known(request: Request, name: str) -> None:
 
 # What retry and skip answer besides success, for the API schema.
 NOT_LOADED = {404: {"description": "No such integration is loaded"}}
-RETRY_REFUSED = NOT_LOADED | {409: {"description": "Nothing is failing"}}
+RETRY_REFUSED = NOT_LOADED | {409: {"description": "Neither an event nor the setup is failing"}}
 SKIP_REFUSED = NOT_LOADED | {
     409: {"description": "Nothing is failing, or another event than the one named is"}
 }
@@ -120,7 +130,8 @@ SKIP_REFUSED = NOT_LOADED | {
 
 @router.post("/settings/integrations/{name}/retry", status_code=204, responses=RETRY_REFUSED)
 async def retry(name: str, request: Request, c: Conn) -> None:
-    """Try the failing event again now, without waiting out its backoff."""
+    """Try the failing event, or the failing setup, again now, without waiting out its
+    backoff."""
     _known(request, name)
     if not await outbox.retry(c, name):
         raise HTTPException(status_code=409, detail="nothing is failing")

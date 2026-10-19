@@ -56,11 +56,16 @@ class Cursor:
     failed_at: datetime | None = None
     skipped: int = 0
     lag: int = 0  # events after the position, wanted or not
+    # While the integration's setup fails (no event is delivered meanwhile); 0 when it does not.
+    setup_failures: int = 0
+    setup_error: str | None = None
+    setup_failed_at: datetime | None = None
+    setup_retry_at: datetime | None = None
 
 
 _FIELDS = (
     "name, position_xid::text::bigint AS position_xid, position, failing, failures, retry_at, "
-    "last_error, failed_at, skipped"
+    "last_error, failed_at, skipped, setup_failures, setup_error, setup_failed_at, setup_retry_at"
 )
 
 
@@ -146,11 +151,38 @@ async def failed(
     return cur.rowcount > 0
 
 
+async def setup_failed(
+    conn: psycopg.AsyncConnection,
+    name: str,
+    failures: int,
+    error: str,
+    failed_at: datetime,
+    retry_at: datetime,
+) -> None:
+    """Record that the integration's setup failed for the `failures`th time in a row."""
+    await conn.execute(
+        "UPDATE integration_cursors SET setup_failures = %s, setup_error = %s, "
+        "setup_failed_at = %s, setup_retry_at = %s, updated_at = now() WHERE name = %s",
+        (failures, error, failed_at, retry_at, name),
+    )
+
+
+async def setup_done(conn: psycopg.AsyncConnection, name: str) -> None:
+    """The integration's setup succeeded: a failure before it is over."""
+    await conn.execute(
+        "UPDATE integration_cursors SET setup_failures = 0, setup_error = NULL, "
+        "setup_failed_at = NULL, setup_retry_at = NULL, updated_at = now() "
+        "WHERE name = %s AND setup_failures > 0",
+        (name,),
+    )
+
+
 async def retry(conn: psycopg.AsyncConnection, name: str) -> bool:
-    """Try the failing event again on the next pass, without waiting out the backoff."""
+    """Try the failing event, or the failing setup, again on the next pass, without waiting
+    out the backoff."""
     cur = await conn.execute(
-        "UPDATE integration_cursors SET retry_at = NULL, updated_at = now() "
-        "WHERE name = %s AND failing IS NOT NULL",
+        "UPDATE integration_cursors SET retry_at = NULL, setup_retry_at = NULL, "
+        "updated_at = now() WHERE name = %s AND (failing IS NOT NULL OR setup_failures > 0)",
         (name,),
     )
     return cur.rowcount > 0

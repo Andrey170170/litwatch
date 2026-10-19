@@ -870,7 +870,8 @@ export interface paths {
         /**
          * Status
          * @description One card per loaded integration, then one per configured section that is turned off
-         *     (its cursor kept, so its lag shows what turning it on again would hand it).
+         *     (its cursor kept, so its lag shows what turning it on again would hand it). A card shows
+         *     the event it is stuck on, or its failing setup.
          */
         get: operations["status_api_settings_integrations_get"];
         put?: never;
@@ -892,7 +893,8 @@ export interface paths {
         put?: never;
         /**
          * Retry
-         * @description Try the failing event again now, without waiting out its backoff.
+         * @description Try the failing event, or the failing setup, again now, without waiting out its
+         *     backoff.
          */
         post: operations["retry_api_settings_integrations__name__retry_post"];
         delete?: never;
@@ -1789,6 +1791,7 @@ export interface components {
              */
             lag: number;
             failing?: components["schemas"]["Failing"] | null;
+            setup_failing?: components["schemas"]["SetupFailing"] | null;
             /** Last Error */
             last_error?: string | null;
             /** Failed At */
@@ -2454,6 +2457,20 @@ export interface components {
             budget?: number | null;
             /** Failing */
             failing?: string[];
+        };
+        /**
+         * SetupFailing
+         * @description The integration's setup is failing: no event is handed to it until it succeeds.
+         */
+        SetupFailing: {
+            /** Failures */
+            failures: number;
+            /** Retry At */
+            retry_at?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Failed At */
+            failed_at?: string | null;
         };
         /** @enum {string} */
         Sort: "rarest" | "newest" | "added" | "title" | "best";
@@ -4508,7 +4525,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Nothing is failing */
+            /** @description Neither an event nor the setup is failing */
             409: {
                 headers: {
                     [name: string]: unknown;

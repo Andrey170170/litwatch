@@ -2405,7 +2405,7 @@
     "/api/settings/integrations": {
       "get": {
         "summary": "Status",
-        "description": "One card per loaded integration, then one per configured section that is turned off\n(its cursor kept, so its lag shows what turning it on again would hand it).",
+        "description": "One card per loaded integration, then one per configured section that is turned off\n(its cursor kept, so its lag shows what turning it on again would hand it). A card shows\nthe event it is stuck on, or its failing setup.",
         "operationId": "status_api_settings_integrations_get",
         "responses": {
           "200": {
@@ -2428,7 +2428,7 @@
     "/api/settings/integrations/{name}/retry": {
       "post": {
         "summary": "Retry",
-        "description": "Try the failing event again now, without waiting out its backoff.",
+        "description": "Try the failing event, or the failing setup, again now, without waiting out its\nbackoff.",
         "operationId": "retry_api_settings_integrations__name__retry_post",
         "parameters": [
           {
@@ -2449,7 +2449,7 @@
             "description": "No such integration is loaded"
           },
           "409": {
-            "description": "Nothing is failing"
+            "description": "Neither an event nor the setup is failing"
           },
           "422": {
             "description": "Validation Error",
@@ -4503,6 +4503,16 @@
               }
             ]
           },
+          "setup_failing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupFailing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "last_error": {
             "anyOf": [
               {
@@ -6316,6 +6326,55 @@
         ],
         "title": "SettingsHints",
         "description": "What the Settings sidebar says beside each page: how many things wait on the owner, the\nlast Calibrate session, the misses reported, the topics followed and the classes, the\nmonth's spend against its budget (the budgeted providers' spend, or every provider's when\nnone has a budget), and the integrations failing."
+      },
+      "SetupFailing": {
+        "properties": {
+          "failures": {
+            "type": "integer",
+            "title": "Failures"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "failures"
+        ],
+        "title": "SetupFailing",
+        "description": "The integration's setup is failing: no event is handed to it until it succeeds."
       },
       "Sort": {
         "type": "string",

@@ -9,6 +9,10 @@ events wait behind it, since they may depend on it. The owner can retry the even
 or skip it. A restart neither loses an event nor hands over one already done, apart from
 the one in hand when it stopped, which is why `handle` must be idempotent.
 
+An integration's `setup` runs when its loop starts, under the same lock, before any event is
+handed over. A failing setup is recorded for the API like a failing event, with no event
+attached, and tried again after the same backoff; the integration's events wait meanwhile.
+
 An integration with work of its own that no event brings (deep's papers waiting for their
 text) gets an `idle(conn)` call when it has nothing to be handed, at most once a minute,
 under the same lock. A failing `idle` is logged and changes nothing else.
@@ -19,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import psycopg
@@ -45,6 +50,23 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"[:500]
 
 
+@contextlib.asynccontextmanager
+async def _locked(conn: psycopg.AsyncConnection, integration: Integration) -> AsyncIterator[bool]:
+    """Hold the integration's dispatch lock for the block, if no other session holds it; yields
+    whether it is held."""
+    key = (DISPATCH_LOCK, integration.name)
+    row = await (
+        await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS locked", key)
+    ).fetchone()
+    if not row["locked"]:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", key)
+
+
 async def deliver(
     conn: psycopg.AsyncConnection, integration: Integration, now: datetime | None = None
 ) -> int:
@@ -52,13 +74,9 @@ async def deliver(
     first failure. Returns how many events the cursor moved past, wanted or not. `now` fixes
     the clock, for tests; otherwise a failure's backoff runs from the moment it failed."""
     clock = (lambda: now) if now else (lambda: datetime.now(UTC))
-    key = (DISPATCH_LOCK, integration.name)
-    row = await (
-        await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS locked", key)
-    ).fetchone()
-    if not row["locked"]:
-        return 0
-    try:
+    async with _locked(conn, integration) as locked:
+        if not locked:
+            return 0
         cursor = await outbox.cursor(conn, integration.name)
         if cursor.retry_at and cursor.retry_at > clock():
             return 0
@@ -93,16 +111,39 @@ async def deliver(
             position, passed = outbox.Position.of(event), passed + 1
         await outbox.advance(conn, integration.name, position)
         return passed
-    finally:
-        await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", key)
 
 
-async def start(conn: psycopg.AsyncConnection, integration: Integration) -> None:
+async def start(
+    conn: psycopg.AsyncConnection, integration: Integration, now: datetime | None = None
+) -> bool:
     """Make the integration's cursor (at the last settled event, the first time) and run its
-    setup."""
+    setup under the dispatch lock. Returns whether the integration is set up: False while
+    another session holds the lock, while a failed setup waits out its backoff, and after a
+    setup that failed, which is recorded. `now` fixes the clock, for tests."""
+    clock = (lambda: now) if now else (lambda: datetime.now(UTC))
     await outbox.cursor(conn, integration.name)
-    if setup := getattr(integration, "setup", None):
-        await setup(conn)
+    setup = getattr(integration, "setup", None)
+    if setup is None:
+        return True
+    async with _locked(conn, integration) as locked:
+        if not locked:
+            return False
+        cursor = await outbox.cursor(conn, integration.name)
+        if cursor.setup_failures and cursor.setup_retry_at and cursor.setup_retry_at > clock():
+            return False
+        try:
+            await setup(conn)
+        except Exception as exc:
+            failures, at = cursor.setup_failures + 1, clock()
+            await outbox.setup_failed(
+                conn, integration.name, failures, _describe(exc), at, at + backoff(failures)
+            )
+            log.warning(
+                "%s: setup failed %d time(s): %s", integration.name, failures, _describe(exc)
+            )
+            return False
+        await outbox.setup_done(conn, integration.name)
+        return True
 
 
 async def idle(conn: psycopg.AsyncConnection, integration: Integration) -> bool:
@@ -111,18 +152,13 @@ async def idle(conn: psycopg.AsyncConnection, integration: Integration) -> bool:
     hook = getattr(integration, "idle", None)
     if hook is None:
         return False
-    key = (DISPATCH_LOCK, integration.name)
-    row = await (
-        await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS locked", key)
-    ).fetchone()
-    if not row["locked"]:
-        return False
-    try:
-        await hook(conn)
-    except Exception:
-        log.exception("%s: idle work failed", integration.name)
-    finally:
-        await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", key)
+    async with _locked(conn, integration) as locked:
+        if not locked:
+            return False
+        try:
+            await hook(conn)
+        except Exception:
+            log.exception("%s: idle work failed", integration.name)
     return True
 
 
@@ -133,9 +169,9 @@ async def _loop(dsn: str, integration: Integration) -> None:
     while True:
         try:
             async with await store.connect(dsn) as conn:
-                if not started:
-                    await start(conn, integration)
-                    started = True
+                while not started:
+                    if not (started := await start(conn, integration)):
+                        await asyncio.sleep(IDLE_SECONDS)
                 while True:
                     if not await deliver(conn, integration):
                         if clock() - idled >= IDLE_HOOK_SECONDS:
@@ -145,7 +181,7 @@ async def _loop(dsn: str, integration: Integration) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            # A lost database or a failing setup: try again shortly, as the scheduler does.
+            # A lost database: try again shortly, as the scheduler does.
             log.exception("%s: dispatcher pass failed", integration.name)
             await asyncio.sleep(IDLE_SECONDS)
 
