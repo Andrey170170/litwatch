@@ -168,6 +168,26 @@ The plan is [`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md).
 67. **Notion stops at the switch** until the owner has talked to the PI; the export is then rewritten against v1's
     events or removed.
 
+## Decided 2026-10-19, failure handling
+
+The plan is [`docs/plans/failure-handling.md`](../../plans/failure-handling.md). Vergil had pushed "papers stopped: 2
+ungraded" for two biosecurity papers `judge` refused, and no new paper had a Deep card for days under the daily cap.
+
+68. **A failure's reason decides where it goes.** The status document (Vergil) says when litwatch cannot do its job:
+    a provider's account error or a night without one answered call, the Deep service failing, many papers stopped at
+    one step in one night, and the checks before. A paper's own failure stays in the app, on Needs you and the run
+    status.
+69. **Every role that writes has an ordered list of fallback models**, chosen per role by a replay. A refusal goes
+    down the list at once; an unusable answer one model per failed run; a call with no answer never. A fallback may
+    come from the same lab (replacing decision 61's "never again of an Anthropic model"); `judge`'s and `check`'s
+    lists share no lab. A step every model refused stops at once for the owner.
+70. **A Focus grade one side refused throughout stands from the other lab**, marked one lab; central and related go
+    to the owner.
+71. **Deep cards have no daily cap.** A job that fails because of the service does not count against the paper; it
+    pauses the queue and goes to Vergil. A re-run's passes are background work behind the night's.
+72. **The owner acknowledges Needs you items** they have seen; acknowledged items stop counting in the run status. A
+    failed nightly is not acknowledged.
+
 ## Open
 
 - The grade table and rarity offsets are starting points, tuned in N2.

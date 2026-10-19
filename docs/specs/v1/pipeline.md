@@ -114,11 +114,14 @@ abstract, the topic's subject and, for a Focus topic, its rubric. How it is chec
 | Field | `field_grade`, one cheap model | none |
 
 A verdict needs every grader it calls to answer validly (a Fit from the four, a reason; for `area_check`, a yes or no
-with its probability). If one fails, comes back truncated or invalid, or refuses, no verdict is made:
+with its probability). Each grader goes down its role's fallbacks ([models.md](models.md), roles), and an answer
+that came back is kept while the other is asked again. If one comes back truncated or invalid, no verdict is made:
 the grading stays pending, is retried next run, and after three failed runs is listed on Quality as ungraded with a
-button to grade it now (carried from the first v1). As in classification and analysis, only an unusable answer (truncated, invalid,
-refused) counts toward the three; a grader that did not answer (a timeout, a provider down) is retried without
-counting. Grading it now runs at once, as a run of its own, and counts as the first of three more runs; until its result is
+button to grade it now (carried from the first v1). As in classification and analysis, only an unusable answer counts
+toward the three; a grader that did not answer (a timeout, a provider down, an `account` error) is retried without
+counting. A grader whose every model refused stops the grading at once, ungraded, with one exception: on a Focus topic,
+when one side refused throughout and the other answered, the answering side's Fit stands, marked `one_lab`, and a
+`one_lab` grade of central or related is listed on Quality for the owner to settle, as a split is. Grading it now runs at once, as a run of its own, and counts as the first of three more runs; until its result is
 recorded the grading stays pending, so a request cut short leaves it to the next run.
 
 Grading runs nightly after analysis, once per paper revision: the first pass on a revision grades every active topic
@@ -256,12 +259,19 @@ A card takes most of an hour, so Deep passes have their own worker, one at a tim
 longest a job is followed (the job's timeout and a margin). Each submission is an attempt, recorded before it is sent
 and given its job once accepted: a pass whose worker died while its job ran is followed by its next claim, not
 submitted again, whatever the paper wants by then. The attempt records the job's usage when it ends, with a card or
-failed, or that it is unknown (the job was lost before it reported). At most `max_per_day` automatic submissions are
-made in any 24 hours; the owner's requests do not count.
+failed, or that it is unknown (the job was lost before it reported). Automatic submissions have no daily cap; the
+owner's requests go first.
+
+A Deep job fails either because of the paper (no card within the job's budget, an invalid card) or because of the
+service (its model call failed: a sign-in expired, a usage limit, the provider; or litwatch could not submit or follow
+the job). The `deep` service tags which. A paper failure counts as a failed run, as below; a service failure does not:
+the pass goes back to waiting, the Deep worker pauses the whole queue for 15 minutes, and the status document shows it
+([data.md](data.md), configuration).
 
 A pass that fails, including a model response that is truncated or invalid, is retried on the next run (a download
-the archive gave up on is asked for again with it); after three
-failed runs it is listed on Quality with the error and a button to run it now. A pass awaiting text for more than
+the archive gave up on is asked for again with it), and goes down `brief`'s fallbacks as [models.md](models.md) says;
+a pass every model refused stops at once. After three
+failed runs, or that refusal, it is listed on Quality with the error and a button to run it now. A pass awaiting text for more than
 seven days is listed there too. Both count as terminal for the digest wait ([digests.md](digests.md), timing).
 
 ## 7. The library
@@ -292,7 +302,14 @@ first v1's awaiting-triage: **dismiss** (litwatch drops it from processing; it s
 **classify by hand** (the owner names its classes; it goes on as usual with source `owner`), **fix the text** (the
 owner corrects title or abstract; this counts as a rewrite and classification runs again). A paper whose analysis
 fails three runs in a row is counted on the status line, listed on Quality and no longer tried, so it costs nothing until the owner acts: **try
-again** gives it three more runs. It has no Gist or Weight until then and shows its title alone.
+again** gives it three more runs. It has no Gist or Weight until then and shows its title alone. A step every model
+of its role refused ([models.md](models.md), roles) stops at once, without the three runs, and is listed the same way.
+
+These are a paper's own failures, and they stay in the app: counted on the status line and listed on Quality, where
+the owner can acknowledge them ([DESIGN.md](DESIGN.md), Needs you). None of them alone reaches the status document.
+What stops litwatch doing its job does: many papers stopped at one step in one night, a provider's account error or a
+night without one answered call from it, the Deep service failing ([data.md](data.md), configuration). Retrying a
+paper by Try again, Grade it now or a re-run asks its role's list from the top.
 
 ## 10. Edits to the taxonomy and to topics
 
@@ -301,6 +318,10 @@ depth, subject, rubric, interests and keywords. Records refer to the revision th
 app offers scoped re-runs, each with paper count and estimated cost: the owner's labels and reported misses (does the
 edit help), the topic's existing members, papers matching the topic's keywords, a date range. Nothing retroactive runs
 by itself (first v1, decision 7).
+
+A re-run is background work. Its full-text and Deep passes queue after the automatic ones, and a re-run still running
+when a nightly starts gives way to it: it makes no model calls until the nightly's papers are graded and their passes
+done, so the night's papers come first however large the re-run.
 
 Moving a class in the tree, splitting or merging classes, or following a different class changes at once how existing
 memberships resolve (below), but runs no classification or grading: papers are graded under the new shape only when
