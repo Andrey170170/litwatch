@@ -20,8 +20,8 @@ what is reserved stays within the ceiling, and waits for calls in flight to end 
 not. A call whose charge is unknown, or that never recorded an end (a run killed while it was
 out), counts at its reservation. The run that reaches the ceiling, or makes a call that cost
 more than its reservation, starts no more and records why and the first call it did not make
-(`budget.jsonl`); after an overrun no run starts until the record is moved aside, nor in a
-directory holding a call of unknown cost recorded without a reservation. Calls are made
+(`budget.jsonl`). No run starts in a directory holding a call that cost more than its
+reservation, or one of unknown cost recorded before reservations were. Calls are made
 once each, without the gateway's retries; a call that failed for want of the provider is asked
 again by the next run. A record cut off mid-write at the end of a file is left out.
 
@@ -404,8 +404,8 @@ class Budget:
     def settle(self, amount: float, cost: float | None) -> None:
         self.reserved -= amount
         self.spent += amount if cost is None else cost
-        if cost is not None and cost > amount and self.stopped is None:
-            self.stopped = OVERRUN
+        if cost is not None and cost > amount:
+            self.stopped = OVERRUN  # over a stop at the ceiling: the bound is what was wrong
 
 
 @dataclass(frozen=True)
@@ -487,15 +487,19 @@ async def run(
             fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError(f"another run is using {out}") from None
-        if any(r["why"] == OVERRUN for r in _records(out / BUDGET)):
+        # The rows are the evidence: each is written as its call ends, before any record of why
+        # a run stopped, and a reservation recorded before `attempt` existed is no bound.
+        found = rows(out)
+        if blind := sum(r.cost is None and r.attempt is None for r in found):
             raise ValueError(
-                f"{OVERRUN} in an earlier run ({out / BUDGET}): correct its price_max and "
-                "max_output, then move that file aside"
+                f"{blind} calls in {out} have no known cost and no reservation that bounds it "
+                "(recorded before reservations were), so the ceiling can't count them: "
+                "start a new directory"
             )
-        if blind := sum(r.cost is None and not r.reserved for r in rows(out)):
+        if any(r.attempt is not None and r.cost is not None and r.cost > r.reserved for r in found):
             raise ValueError(
-                f"{blind} calls in {out} have no known cost and no reservation (recorded before "
-                "reservations were), so the ceiling can't count them: start a new directory"
+                f"{OVERRUN} in an earlier run into {out}: correct its price_max and max_output, "
+                "then start a new directory"
             )
         return await _run(work, providers, out, ceiling, concurrency, progress)
 

@@ -103,6 +103,11 @@ def test_the_budget_reserves_before_a_call_and_once_refused_starts_none():
     b.settle(0.1, 0.2)
     assert b.spent == pytest.approx(0.2) and b.stopped == ladders.OVERRUN
     assert b.reserve(0.01) == "stop"
+    # It is the reason even when the ceiling had stopped the run while the call was out.
+    b = ladders.Budget(ceiling=1.0, spent=0.0)
+    assert b.reserve(0.6) == "start" and b.reserve(0.6) == "wait" and b.reserve(1.5) == "stop"
+    b.settle(0.6, 0.7)
+    assert b.stopped == ladders.OVERRUN
 
 
 async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want_of_a_provider(
@@ -241,8 +246,10 @@ async def test_a_call_that_costs_more_than_its_reservation_stops_the_run(tmp_pat
     assert len(ran.rows) == 1 and ran.why == ladders.OVERRUN
     (stop,) = [json.loads(line) for line in (out / ladders.BUDGET).read_text().splitlines()]
     assert stop["why"] == ran.why and stop["first_not_run"]["case"] == work[1].case.key
-    # The bound is wrong until someone corrects it: no later run starts.
-    with pytest.raises(ValueError, match="move that file aside"):
+    # The bound is wrong until someone corrects it: no later run starts, the row being the
+    # evidence even without the record of why the run stopped.
+    (out / ladders.BUDGET).unlink()
+    with pytest.raises(ValueError, match="start a new directory"):
         await ladders.run(work[1:], providers, out, ceiling=5.0)
     assert len(providers["openrouter"].calls) == 1
 
@@ -256,9 +263,10 @@ async def test_a_directory_with_a_call_of_unknown_cost_and_no_reservation_is_not
 
     providers = {"openrouter": ScriptedProvider("openrouter", down)}
     await ladders.run(work[:1], providers, out, ceiling=5.0)
-    # As recorded before reservations existed: the ceiling would count this call at nothing.
+    # As recorded before reservations were bounds: no attempt, and an estimate where the
+    # reservation is, which the ceiling would count instead of the call's most cost.
     (row,) = ladders.rows(out)
-    legacy = row.model_dump(mode="json", exclude={"attempt", "reserved"})
+    legacy = row.model_dump(mode="json", exclude={"attempt"}) | {"reserved": 1e-6}
     (out / "judge.jsonl").write_text(json.dumps(legacy) + "\n")
     (out / ladders.PENDING).unlink()
     with pytest.raises(ValueError, match="no known cost and no reservation"):

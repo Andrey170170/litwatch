@@ -30,9 +30,11 @@ $9.03 of $25. The harness now reserves each call at its true upper bound: input 
 most the model's endpoints can return (`max_output`), both at the dearest price its routing allows (`price_max`;
 [ladders.toml](2026-10-19-fallback-ladders/ladders.toml)). Calls still go out uncapped. No recorded call cost more
 than its reservation as reckoned now (the last line of tables.md). The later `field_grade` run (below) ran under
-that bound. Its ceiling counted the first run's 104 failed calls to MiniMax's free endpoint, recorded before
-reservations were, at nothing, which is the most they could cost at that endpoint's price ($0); the harness now
-refuses to resume a directory holding such a call.
+that bound, but for the first run's 105 calls of unknown charge, recorded before reservations were bounds: it
+counted 104 failed calls to MiniMax's free endpoint at nothing, which is the most they could cost at its price ($0),
+and one invalid Muse answer at its old estimate, $0.003, against a bound of at least $0.19 (its most output alone),
+far inside the $7.74 the ceiling had left when the run stopped. The harness now refuses to resume a directory
+holding such a call.
 
 ## The cases
 
@@ -152,7 +154,7 @@ call to the role's quality-set requests, refused ones included, over its usable 
   [writer-pairs.md](2026-10-19-fallback-ladders/writer-pairs.md)). Unblinded, faithfulness and readability out of 5
   per digest:
 
-  | Digest (papers) | Opus | Sonnet | Kimi |
+  | Digest, topic | Opus | Sonnet | Kimi |
   | --- | --- | --- | --- |
   | 23 circuits | 3, 4 | 3, 4 | 3, 4 |
   | 21 cot-faithfulness | 4, 5 | 3, 4 | 5, 5 |
@@ -174,11 +176,13 @@ call to the role's quality-set requests, refused ones included, over its usable 
   digest 23, where all three made the same error. With one reader and five digests, one point on three digests is
   within what a second reader or another day could move, and Kimi was the best writer of digest 21: it leans worse
   on large days, which this set does not show as clearly worse. The list keeps it last. It writes only when both
-  Anthropic models failed the digest. After two refusals that is the same run, since a refusal moves down at once.
-  After unusable answers it is the run after two failed ones, since each failed digest of the topic in a row
-  starts one model further down. Either way the alternative is no digest: a failed digest is retried every run, with the last
-  model kept until one is published. Read as clearly worse, the list is Opus → Sonnet, and a topic whose digest
-  both refuse stays unwritten until one doesn't.
+  Anthropic models failed the digest. After two refusals that is the same run, since a refusal moves down at once,
+  and the alternative is no digest: a failed digest is retried every run with the last model kept, and Sonnet,
+  having refused it, would likely refuse again. After unusable answers it is the run after two failed ones, since
+  each failed digest of the topic in a row starts one model further down, and the alternative is asking Sonnet
+  again each run, which may yet answer; the list takes Kimi there, not clearly worse on this set, over a third
+  try of Sonnet. Read as clearly worse, the list is Opus → Sonnet, and a topic whose digest both refuse stays
+  unwritten until one doesn't.
 
 ## Limits
 
@@ -218,7 +222,7 @@ OpenAI and Moonshot against Meta, DeepSeek and Google.
 | `analyse` | Haiku 5.5 → GPT-6 Luna → DeepSeek V4.1 Flash | Unchanged: both answered Haiku's two refusals and agree with it about equally; Luna costs less |
 | `field_grade` | Haiku 5.5, **no fallback** (an empty list) | Changed (R1): six candidates fall 13 to 20 cases below Haiku re-asked on the exact Fit (48 of 60); Haiku has not failed a `field_grade` call, so a refused grading stops ungraded as today |
 | `brief` | Sonnet 5.5, high → GPT-6.1 Sol, high | **Kimi K3 dropped** (R1): on ordinary papers it rated every paper solid and flagged 1 overstatement in 10; Sol answered both of Sonnet's refusals |
-| `writer` | Opus 5.5 → Sonnet 5.5 → Kimi K3 | Unchanged: every digest written; Kimi leans worse on the two largest days, not clearly worse in five digests; last, it writes only when both Anthropic models failed the digest, when the alternative is no digest |
+| `writer` | Opus 5.5 → Sonnet 5.5 → Kimi K3 | Unchanged: every digest written; Kimi leans worse on the two largest days, not clearly worse in five digests; last, it writes only when both Anthropic models failed the digest: after refusals in place of no digest, after unusable answers in place of asking Sonnet again |
 
 ## The fallbacks' answers on the refused papers
 
