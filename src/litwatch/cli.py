@@ -649,9 +649,9 @@ def eval_ladders_report(
     ),
     config: ConfigPath = None,
 ) -> None:
-    """The runs' tables per role and set, then the answers on the refusals set's papers that a
-    candidate did not answer, as markdown: no model calls. Titles are read from the database,
-    else the archive's catalog."""
+    """The runs' tables per role and set, then every answer on the refusals set's papers that a
+    candidate refused or answered unusably, as markdown: no model calls. Titles are read from
+    the database, else the archive's catalog."""
     from litwatch.fulltext import archive_for  # noqa: PLC0415
     from litwatch.quality import ladders  # noqa: PLC0415
 
