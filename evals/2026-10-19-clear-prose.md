@@ -2,7 +2,7 @@
 
 Run on 2026-10-19, branch `feat/clear-prose`, on `clear_prose`, a copy of production made with
 `scripts/refresh-sandbox.sh --production --db clear_prose`. Nothing was written to production; the replay deleted four
-digests from the copy to compose them again.
+digests from the copy to compose them again (it now rolls that back).
 
 **The question.** The owner found Briefs hard to read: VERITAS's (2610.23275) names five things the paper coins (a
 "layer-by-phase grid", "anchors", "Map, Profile and Dynamics", a "replay model") without saying what any of them is,

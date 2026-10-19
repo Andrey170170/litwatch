@@ -2,8 +2,9 @@
 
 Run from the repository root against `clear_prose`, a scratch copy of production
 (scripts/refresh-sandbox.sh --production --db clear_prose), never another database: to write a
-digest again it deletes that digest from the copy, so its papers are due once more, and composes
-it without storing. Production's text and the new one go to gists.jsonl and digests.jsonl.
+digest again it deletes that digest, so its papers are due once more, and composes it without
+storing, in a transaction that is always rolled back, so the copy is left as it was.
+Production's text and the new one go to gists.jsonl and digests.jsonl.
 
     uv run python evals/2026-10-19-clear-prose/replay.py
 """
@@ -79,14 +80,15 @@ async def main() -> None:
         run = SimpleNamespace(gateway=gateway)
         with (HERE / "digests.jsonl").open("w", encoding="utf-8") as out:
             for slug, period, day in DIGESTS:
-                old = await (
-                    await conn.execute(
-                        "DELETE FROM digests WHERE topic = %s AND period = %s AND day = %s "
-                        "RETURNING gist, text",
-                        (slug, period.value, day),
-                    )
-                ).fetchone()
-                o = await digests.compose(conn, run, tree, topics[slug], period, day)
+                async with conn.transaction(force_rollback=True):
+                    old = await (
+                        await conn.execute(
+                            "DELETE FROM digests WHERE topic = %s AND period = %s AND day = %s "
+                            "RETURNING gist, text",
+                            (slug, period.value, day),
+                        )
+                    ).fetchone()
+                    o = await digests.compose(conn, run, tree, topics[slug], period, day)
                 line = {
                     "topic": slug, "period": period.value, "day": day.isoformat(),
                     "old": {"gist": old["gist"], "text": old["text"]},
