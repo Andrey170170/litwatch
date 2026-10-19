@@ -115,7 +115,8 @@ const INTEG = [
   { n: "zotero", on: "library \"litwatch\"", d: "Keeps a Zotero item, tags and notes in step for every saved paper.", st: "1 event failed after 3 tries · last success 06:12", fail: "paper.saved 2610.04780 → 412 Precondition Failed: library version changed" },
   { n: "webdav", on: "Nextcloud", d: "Stores the PDF of must-read and saved papers for Zotero's file sync.", st: "Up to date · last file 06:11" },
   { n: "deep", on: "Pi", d: "Requests a Deep card for Focus must reads, Area picks and papers asked for.", st: "Up to date · 2 cards last night, 11 this month" },
-  { n: "webhook", d: "POSTs chosen events to a URL; n8n and the Notion export hang off it.", st: "Not loaded. Enable it in litwatch.toml under [integrations.webhook]." },
+  { n: "notion", on: "LitWatch page", d: "Keeps a Notion database of the Focus papers for a reader outside litwatch.", st: "Up to date · 3 pages updated last night" },
+  { n: "webhook", d: "POSTs chosen events to a URL, for n8n and the like.", st: "Not loaded. Enable it in litwatch.toml under [integrations.webhook]." },
 ];
 // per integration: [when, event, paper, ok | failed | waiting, what came of it]
 const EVENTS = {
