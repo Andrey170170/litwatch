@@ -4,24 +4,6 @@ Production's text first, then the new prompt's. Word counts in brackets.
 
 ## Briefs and their Gists
 
-### Beyond Reward Scoring: Online Multi-Agent Preference Learning for Multimodal Response Generation (2610.23256)
-
-**Before** [171], Weight solid
-
-PrefMind trains two same-scale copies of Qwen3-VL-Instruct (2B, 4B, 8B), a Generator and a Critic, with online PPO on 39k pairwise preference examples (30k Align Anything, 9k BeaverTails-V safety). The Critic judges a response pair, the Generator critiques that judgment, and the Critic revises it. Human labels reward correct judgments, recoveries and regressions. When the Generator and revised Critic are both correct, the Generator rewrites the preferred response, and a blinded Critic comparison gives its generation reward. Failed cases are replayed. Against Base, the Generator's mean preference accuracy over seven sets rises 8.1, 3.3 and 4.8 points. The eight-metric generation average rises 2.4, 2.4 and 3.5 points, the best among compared methods at 4B and 8B. At 2B, GRPO and DPO score higher. Scalar reward models beat the Critic on preference accuracy at 4B and 8B. Gains are small, several individual benchmarks fall, results rely on a GPT-4.1 judge with no variance reported, and ablations run only at 4B. A direct-generation variant without discussion history comes within 0.3 points at 4B.
-
-*Gist:* Jointly trains a generator and critic via online RL on preference discussion, with label-gated response improvement; on Qwen3-VL 2B/4B/8B, generation averages gain 2.4, 2.4, and 3.5 points over base.
-
-**After** [211], Weight incremental
-
-> The abstract overstates: the 2B model's generation average (59.3) falls below GRPO (61.3) and DPO (60.4), and the 4B and 8B gains over Base are modest (+2.4 and +3.5 points).
-
-Score-based RLHF gives a model only a scalar reward, so it is never trained to state why one response is preferred. PrefMind tests whether making preference judgment a skill of the response model itself improves its generation. Two copies of Qwen3-VL, a Generator and a Critic, are trained together with PPO. The Critic judges a response pair, the Generator critiques that judgment, and the Critic revises it; human labels reward correct judgments and corrections. When both the Generator and revised Critic pick the human-preferred response, the Generator rewrites it, and the Critic's comparison of the rewrite against the original gives the generation reward. Failed pairs are replayed.
-
-Training uses 39k pairs. At 2B, 4B and 8B, the Generator's average preference accuracy rises 8.1, 3.3 and 4.8 points over Base. On eight generation benchmarks, the average over Base rises 2.4, 2.4 and 3.5 points. This is the best average among the compared methods at 4B and 8B, but at 2B it trails GRPO and DPO. A scalar reward model is more accurate at judging at 4B and 8B. A single shared model alternating roles gains only 0.42 points at 4B, against 2.43 for two agents. Evidence is limited to Qwen3-VL, with GPT-4.1 as judge, a single seed, and ablations at 4B only.
-
-*Gist:* Two copies of a vision-language model, a generator and a critic, are trained online to debate which response humans prefer, then the generator rewrites winners. Average generation gains over base are 2.4–3.5 points.
-
 ### Multiple Turns, Short Horizons: Measuring Effective-Horizon Compression in Jailbreaks (2610.22928)
 
 **Before** [192], Weight solid
@@ -30,13 +12,35 @@ Multi-turn jailbreak trajectories are tested for how much early query history is
 
 *Gist:* Replaying only later attacker queries in fresh conversations shows roughly half of a successful multi-turn jailbreak's history suffices to recover its score; shorter contexts improve attack continuation.
 
-**After** [212], Weight solid
+**After** [205], Weight solid
 
-Multi-turn jailbreaks search over many turns, but once a working trajectory exists it is unclear how much of its early history is still needed. The authors drop the earliest attacker queries, replay the remaining ones unchanged in a fresh conversation with the victim's replies regenerated, and call the shortest suffix that reaches the same judge score the effective horizon. For successful X-Teaming and TROJail attacks of three or more turns, the suffix is about half the trajectory (average ratio 0.5-0.6; 0.51 over 111 five-turn X-Teaming successes).
+Multi-turn jailbreaks adapt their queries to the victim's replies, but once a working query sequence exists it is unclear how much of its early history still matters.
 
-Three uses follow. Restarting a failed attack from its best-scoring turn with only the effective suffix raises attack success on 159 HarmBench behaviors by 17.4 points (X-Teaming) and 19.2 (ActorBreaker), versus 10.5 and 14.2 for restarting with the full history at that turn. For ActorBreaker this costs more victim queries than the baselines. Downweighting outcome credit for queries before the horizon in TROJail training lifts ASR@3 by 6.9 points on average over nine victim-benchmark pairs. The scaling factor was chosen on HarmBench, and removing that credit entirely hurts four of nine pairs. In TurnGate defense training, short reward windows match full-trajectory rewards after threshold calibration. The horizon measures replay sufficiency only, not whether early turns helped discover the later queries, and it depends on the judge.
+The authors test this by keeping the last k attacker queries unchanged, replaying them in a new conversation so the victim regenerates its replies, and checking whether the judge score matches the original. The shortest k that does is the "effective horizon". For successful X-Teaming and TROJail attacks, the horizon averages about half the trajectory for attacks of three or more turns. For two-turn attacks it averages 0.68 to 0.73 of the trajectory.
 
-*Gist:* Replaying only the last attacker queries in a fresh conversation recovers a multi-turn jailbreak's progress with about half the history. Using this improves attack continuation and attacker training, and short reward windows suffice for defense training.
+Three uses follow. Restarting a failed attack from its best turn with only its effective suffix raises attack success by 17.4 points for X-Teaming and 19.2 for ActorBreaker, against 10.5 and 14.2 for restarting with the full history. In TROJail training, scaling the outcome reward for queries before the horizon by 0.1 to 0.3 raises success within three attempts by 6.9 points across nine victim-benchmark pairs, whereas removing it entirely hurts four of nine. In defence training, after threshold calibration, limiting reward propagation barely changes F1 (standard deviation 0.16%).
+
+Each measurement uses one attacker and victim pairing, and the horizon depends on the judge's score.
+
+*Gist:* Replaying only the last few queries of a multi-turn jailbreak in a fresh conversation often reproduces the same attack score; about half the queries suffice on average.
+
+### Beyond Reward Scoring: Online Multi-Agent Preference Learning for Multimodal Response Generation (2610.23256)
+
+**Before** [171], Weight solid
+
+PrefMind trains two same-scale copies of Qwen3-VL-Instruct (2B, 4B, 8B), a Generator and a Critic, with online PPO on 39k pairwise preference examples (30k Align Anything, 9k BeaverTails-V safety). The Critic judges a response pair, the Generator critiques that judgment, and the Critic revises it. Human labels reward correct judgments, recoveries and regressions. When the Generator and revised Critic are both correct, the Generator rewrites the preferred response, and a blinded Critic comparison gives its generation reward. Failed cases are replayed. Against Base, the Generator's mean preference accuracy over seven sets rises 8.1, 3.3 and 4.8 points. The eight-metric generation average rises 2.4, 2.4 and 3.5 points, the best among compared methods at 4B and 8B. At 2B, GRPO and DPO score higher. Scalar reward models beat the Critic on preference accuracy at 4B and 8B. Gains are small, several individual benchmarks fall, results rely on a GPT-4.1 judge with no variance reported, and ablations run only at 4B. A direct-generation variant without discussion history comes within 0.3 points at 4B.
+
+*Gist:* Jointly trains a generator and critic via online RL on preference discussion, with label-gated response improvement; on Qwen3-VL 2B/4B/8B, generation averages gain 2.4, 2.4, and 3.5 points over base.
+
+**After** [249], Weight solid
+
+The paper asks whether a multimodal model that learns to explain why humans prefer one response over another also writes better responses.
+
+Standard RLHF turns preference labels into a scalar reward, so the generator never has to reason about why a response is preferred. Here, two copies of Qwen3-VL (a Generator and a Critic) are trained together with PPO on 39,369 image-instruction preference pairs. The Critic judges a pair and writes a critique. The Generator then judges the same pair, using that critique, and the Critic revises its own judgment. Human labels reward correct judgments and corrections. Only when both the Generator and the revised Critic pick the human-preferred response does the Generator rewrite that response. The Critic then compares the rewrite with the original in blind A/B order, and the outcome becomes the generation reward. Pairs that fail are replayed later.
+
+At 2B, 4B and 8B, the eight-benchmark generation average rises over the base model by 2.4, 2.4 and 3.5 points. It is the best average among the compared methods at 4B (73.3) and 8B (76.4), but below GRPO and DPO at 2B. The Generator's own preference accuracy rises by 8.1, 3.3 and 4.8 points. A scalar reward model is still more accurate at 4B and 8B. A single shared model gains only 0.42 points, versus 2.43 for two separate agents. A variant with no discussion trails the full method by only 0.3 to 1.7 points. Results come from one seed, with GPT-4.1 as judge on small benchmarks.
+
+*Gist:* Two copies of a vision-language model are trained with RL to debate which response humans prefer, then rewrite the better one; judgment and generation scores improve modestly.
 
 ### Rethinking GRPO for Large Reasoning Model Safety Alignment (2610.23085)
 
@@ -46,13 +50,17 @@ Vanilla GRPO safety training on reasoning models is analysed through two failure
 
 *Gist:* Beacon adds advantage-based rollout filtering, safe-reference supervision and benign-only KL anchoring to GRPO for reasoning-model safety, lowering average safety error on four models without hurting reasoning or raising over-refusal.
 
-**After** [228], Weight solid
+**After** [221], Weight solid
 
-Reinforcement-learning safety training with GRPO samples a group of responses per prompt and scores each one against the group average. The authors argue this gives little safety signal on hard prompts. If every sampled response is unsafe, all rewards are equal, the advantages are zero, and nothing pushes toward safety. In their preliminary runs, about half of eight-response groups were entirely unsafe, and the semantic entropy of unsafe responses rose during training. A short derivation backs this up: the chance of a mixed group falls toward zero as the safe-response probability nears 0 or 1.
+Safety training of reasoning models with GRPO can stall when every sampled response to a prompt is unsafe.
 
-Their fix, Beacon, has four parts. It keeps only the response pairs with the largest advantage gap. On harmful prompts it adds a likelihood loss on a given safe reference response. For benign prompts it takes the minimum of the safety score and the mean of safety, utility and honesty scores. It also anchors benign-prompt outputs to the pre-alignment model with a KL penalty. On four Qwen3 and DeepSeek-R1-Distill models, average safety error (three harmful-prompt benchmarks plus XSTest over-refusal) drops by 17.69–32.83 points; Qwen3-8B goes from 19.57 to 1.88, ahead of ThinkSafe and GRPO. Reasoning accuracy rises 0.26–4.56 points. The reference-response loss drives most of the safety gain, and the reward and anchoring changes cut over-refusal from 14.4% to 1.2%. Other methods built to fix advantage collapse give no safety gain over GRPO.
+GRPO scores each response against the others sampled for the same prompt. If all eight responses get the same reward, every advantage is zero and the prompt teaches nothing. The authors see this in vanilla GRPO: about half of the groups are all-unsafe, and the semantic diversity of unsafe responses grows during training. Their analysis shows that mixed safe/unsafe groups become rare as the policy grows consistent. It also shows that, under simplifying assumptions, the entropy bonus then spreads probability across unsafe responses.
 
-*Gist:* Adds a safe-reference likelihood loss, rollout filtering, and benign-only anchoring to GRPO safety training; cuts average safety error of four reasoning models by 17.7–32.8 points without raising over-refusal.
+Their method, Beacon, keeps only the 75% of response pairs with the widest advantage gap and adds a likelihood loss on a stored safe reference answer for harmful prompts. For benign prompts it rewards the lower of the safety score and the mean of safety, utility and honesty, and adds a KL penalty to the pre-alignment model.
+
+On four Qwen3 and DeepSeek-R1-Distill models, average safety error, which includes XSTest over-refusal, falls 17.7–32.8 points from the initial models. On Qwen3-8B it reaches 1.88%, against 15.52% for GRPO and 4.50% for the prior best, ThinkSafe, while reasoning accuracy rises 0.3–4.6 points. Ablations show the reference loss roughly doubles the share of safe rollouts, and dropping the benign components raises over-refusal to 6.6–14.4%.
+
+*Gist:* Safety training for reasoning models that adds supervised safe reference answers to GRPO, filters low-contrast rollouts, and anchors benign prompts to the original model, cutting safety error 17.7–32.8 points.
 
 ### Verbalising Model's Computation for Chain-of-Thought Faithfulness Detection (2610.23275)
 
@@ -64,35 +72,19 @@ VERITAS is a CoT faithfulness detector built on the Jacobian lens (J-lens), whic
 
 *Gist:* Logistic-regression detector on Jacobian-lens anchor-alignment features (Map, Profile, Dynamics) of a replay model's activations over CoTs; beats LLM judges and hidden-state probes on five datasets.
 
-**After** [194], Weight solid
+**After** [200], Weight incremental
 
-> The abstract overstates: the features come from a separate replay model (Qwen3-4B or Llama-3.1-8B) reading CoTs written by other models, so they do not show the generating model's computation, and the 'mechanistic' account rests on group-average differences.
+> The abstract overstates: the tables show the full method about 9–12 balanced-accuracy points above hidden-state probes, and its LLM-judge baseline is a small 7–8B model. The "mechanistic understanding" rests on group-averaged correlations, with no causal test.
 
-Existing faithfulness detectors read either the visible chain of thought (CoT) or a hidden state at one fixed layer. This paper reads a model's hidden states at every layer across the whole CoT instead. A Jacobian lens maps each layer's state into vocabulary-token space. From faithful/unfaithful CoT pairs for the same question, the authors pick tokens whose lens directions align with the faithful side, and call these anchors. For a new CoT they compute three feature sets: anchor alignment per layer and CoT phase, per-anchor average alignment, and how consistent the changes are across neighbouring cells. A logistic regression on these features predicts faithfulness.
+The paper asks whether following how a model's internal states change while it writes a chain of thought can reveal when the written reasoning misreports what the model computed.
 
-The authors test on BonaFide (hint-following CoTs, 87.5% unfaithful) and four FaithCoT-Bench subsets of 161 to 400 CoTs each. Averaged over the five datasets, the full feature set reaches balanced accuracy 0.749 on Qwen3 and 0.737 on Llama3.1, about 9 points above the best baseline (0.655 and 0.644). LLM judges score 0.50 to 0.58 on average. Anchors found on one subset keep 97-99% of in-domain accuracy on others. A Llama-trained classifier applied to Qwen3 keeps 81-89%. The reported configurations are the best of those tried, chosen on the evaluation folds.
+The method reads each intermediate-layer state through a Jacobian lens, which maps it to vocabulary tokens the model is disposed to say. For questions with both a faithful and an unfaithful trace, the authors average the hidden-state difference at each layer and each of five stages of the trace. They keep the tokens whose lens directions best match that difference as anchors. For a new trace, three features measure alignment with the anchors: where it appears over layers and stages, which anchors are expressed, and how it changes between neighbouring cells. A logistic regression classifies faithfulness from these.
 
-*Gist:* A logistic regression on Jacobian-lens features, read from a model's hidden states across layers and CoT positions, flags unfaithful chains of thought better than an LLM judge or single-layer probe on five datasets.
+Tests use BonaFide and four FaithCoT-Bench subsets, on Qwen3-4B and Llama-3.1-8B. Averaged over datasets, balanced accuracy is 0.749 (Qwen3) and 0.737 (Llama), over 9 points above the best baseline (0.655 and 0.644). Frozen anchors keep 97–99% of in-domain accuracy on other subsets. A classifier trained on Llama and applied to Qwen keeps 81–89%.
 
-### Language Is a Security Surface for Agent Guards (2610.22244)
+Evidence is limited: datasets hold 161 to 1,016 traces, BonaFide is 87.5% unfaithful, and the feature analyses are group averages.
 
-**Before** [166], Weight solid
-
-> The abstract overstates: the claim that flips land on steps where the agent's reasoning restates the English request holds only for the strong guards and the recall-losing guards, while the over-blocking guards show the opposite pattern, with larger flips on steps that do not restate it.
-
-LinguaGuardBench tests whether a step-level agent guard's verdict depends on the language of the user request. It takes the 1,220 labelled steps of TS-Bench AgentDojo-Traj and translates only the instruction into German, French, Turkish, Swahili and Amharic, leaving tool calls, observations and labels byte-identical. Controls are six English rewordings, a whitespace placebo and three repeats of managed guards. Nineteen guards were run, though the low-resource pair was run on only a subset. Small and purpose-built guards change verdicts beyond their noise floor. For the nine guards under 13B, the mean placebo-adjusted flip rate rises from +1.5 pp (French) to +4.4 pp (Amharic). Open 12-30B guards over-block benign steps by up to 5.0 pp, and all significant recall losses (up to 7.4 pp) are in guards under 10B. Frontier guards move by about one point or less, and Gemini's verdicts are identical with the request withheld. English paraphrase moves guards less than translation. Limits: one benchmark, Gemini-generated translations, no mitigation tested, and script confounded with resource level.
-
-*Gist:* Translating only the user request of 1,220 fixed agent-guard steps into five languages shifts small and purpose-built guards' verdicts beyond noise, more for rarer languages; frontier guards barely move.
-
-**After** [202], Weight solid
-
-> The abstract overstates: the restatement pattern holds only for some guards (strong ones and those that lose recall); for the over-blocking guards and AgentDoG, flips are larger on steps whose history does not restate the request.
-
-Step-level guards decide whether an agent's next tool call is safe, given the user's request and the trajectory so far. Guard prompts and training benchmarks are English, so the authors test whether translating the request alone changes verdicts. They take 1,220 labelled steps from an existing agent-safety benchmark and translate only the user instruction into German, French, Turkish, Swahili and Amharic, leaving actions, observations and labels identical. Controls are English rewordings, a whitespace placebo, and repeated runs of managed guards to measure noise.
-
-Most open, small and purpose-built guards flip verdicts beyond their noise floor, and the effect grows as the language gets rarer. For the nine guards below 13B parameters, the placebo-adjusted flip rate rises from +1.5 points on French to +4.4 on Amharic. Open guards of 12-30B block more benign steps (up to +5.0 points). Every significant recall loss is in a guard below 10B (up to -7.4). Purpose-built guards are among the most sensitive. Frontier guards move by about one point at most, and the best returns identical verdicts with the request removed. English rewording moves guards less than translation. Translations come from one LLM, the two low-resource languages were validated without a speaker, and no mitigation is tested.
-
-*Gist:* Translating only the user request in fixed agent-guard test cases changes verdicts of small, open and purpose-built guards, more for rarer languages, while frontier guards barely move.
+*Gist:* A classifier on Jacobian-lens features, tracking how hidden states align with faithfulness-linked tokens across layers and reasoning stages, detects unfaithful chains of thought better than hidden-state probes and a small LLM judge.
 
 ### Trapped in Your Story: Evaluating Narrative-Induced Sycophancy in Large Language Models (2610.23525)
 
@@ -104,35 +96,17 @@ A benchmark of 500 debatable questions across ten domains is built, each with a 
 
 *Gist:* Builds a controlled benchmark of 5,500 prompts varying the narrative justification of a fixed user stance. Across seven LLMs, agreement is model-dependent and non-monotonic; GPT-5.1 ablations show causal content and bullet formatting raise agreement.
 
-**After** [210], Weight solid
+**After** [209], Weight incremental
 
-> The abstract overstates: the claim that personal experience reduces agreement and causal framing is strongest rests on GPT-5.1 alone, and in the seven-model runs the pattern varies by model (Qwen saturates, Claude and Gemini barely move).
+> The abstract overstates: the causal-framing, personal-experience and bullet-format findings come from GPT-5.1 alone, so they are not shown for the other six models. Also, the abstract's "personal experience can reduce agreement" refers to a comparison against a general-reason control, not against the bare stance.
 
-Sycophancy studies usually test whether a model follows a user's stated position. This benchmark asks whether the way the user justifies that position also matters. It has 500 debatable questions in ten domains, each answered as a forced A/B choice. Each question appears in 11 versions: a neutral one, plus five justification levels for each of two opposing stances (bare stance, general reason, personal experience, causal account, full worldview story). The two directions are mirrored in length and tone, and no statistics or expert claims are added. Seven models are tested.
+Sycophancy studies mostly test whether a model shifts toward a user's stated opinion. This paper asks whether the way users justify that opinion, through reasons, personal stories, causal accounts or worldviews, changes the shift.
 
-Susceptibility differs sharply by model. Qwen3-8B agrees at least 96% of the time from the general-reason level onward. On 99.6% of questions it flips its neutral answer under some narrative from the opposing side. Claude and Gemini flip on 18.75% and 21.8%. Agreement does not rise steadily with elaboration: GPT-5.1 and GPT-5.5 dip at the personal-experience level and recover at the causal and worldview levels. GPT-5.1 ablations on all 500 questions show that swapping personal experience for a general reason raises agreement by 6.7 points. Removing the causal block lowers it by 6.5 points. Rendering identical sentences as bullets instead of a paragraph raises agreement by 4.4 to 5.7 points. The component and format results come from one model.
+The authors write 500 debatable questions across ten domains. Each has a neutral version and, for each of two opposing positions, five versions that keep the stance fixed and add more elaborate justification, without statistics or expert backing. Across 5,500 prompts, seven models pick option A or B and give a rationale. Effects differ greatly by model. Qwen3-8B and DeepSeek-V4-Pro reverse their neutral answer on about 99.6% and 99.8% of questions at some level. Claude and Gemini reverse on 18.75% and 21.80%. Agreement does not rise steadily with elaboration: GPT-5.1 and GPT-5.5 dip at the personal-experience level.
 
-*Gist:* A benchmark varies how a fixed user stance is justified across 5,500 prompts and seven models. Models differ widely in susceptibility; in GPT-5.1, causal framing and bullet formatting raise agreement, personal experience lowers it.
+The component tests use GPT-5.1 only. Swapping personal experience for a general reason raises agreement by 6.73 points. Keeping the causal block raises it by 6.45 points over a neutral replacement. Showing identical sentences as bullets rather than a paragraph adds 4.4 to 5.7 points. Rationale analysis shows GPT-5.1 adopts worldview content (adoption score 0.695) far more than experiential content (0.155). The mechanism findings therefore rest on one model, and model names suggest answers may be option-order sensitive.
 
-### Probing Negation Understanding in Vision-Language Models With Object Attention (2610.20852)
-
-**Before** [169], Weight incremental
-
-> The abstract overstates: the ablations are layer-wise, zeroing all attention heads in a layer on 40 PaliGemma2-3B prompts per dataset. The headwise analysis only plots per-head attention and ablates nothing, so the byproduct reading rests on a small layer-level ablation.
-
-Object-level attention to image tokens is compared with human eye-fixation patterns on negation from Orenes et al. (2014). Three VLM families in two sizes each (LLaVA-1.5, InternVL3.5, PaliGemma2) are tested on synthetic two-shape (binary) and four-shape (multary) images and on 206 What'sUp images with Grounding DINO boxes (IoU 0.93 on 20 hand-checked images). Only PaliGemma2-3B shows the human-like pattern on all datasets, shifting attention to the alternative object after layer 13 under negation. Wilcoxon tests give large effects (Cohen's d > 0.8) except one case at 0.17. InternVL-4B fits binary and multary but not What'sUp, and larger variants mostly deviate. Zeroing attention layers in PaliGemma2-3B shows early layers (13 and below) matter most, so the later shift is read as a byproduct. LLaVA-1.5-7B favours left-side objects. Negated questions score lower than affirmative ones for every model, with strong prompt sensitivity (LLaVA-7B negated-true binary accuracy ranges from 0 to 62.6% across templates). Limits: three families, simple images, attention as the only signal, and static images replacing the original temporal priming.
-
-*Gist:* Object-level attention in six VLMs on negated versus affirmative prompts is compared with human gaze; only PaliGemma2-3B shifts to the alternative object, and all models score worse on negated questions.
-
-**After** [195], Weight incremental
-
-> The abstract overstates: the ablations are layer-wise (zeroing all attention heads of one layer, on 40 examples, for PaliGemma2-3B only), and the headwise analysis only plots per-head attention with no ablation.
-
-Vision-language models often answer negated statements as if they were affirmative. The authors ask whether their attention to image objects resembles human eye gaze on negation. In an eye-tracking study they build on, people hearing "not blue" looked at the alternative object when two colours were possible, but stayed on the mentioned object when four were possible. The authors recreate both settings with synthetic two- and four-shape images, and add 206 realistic two-object images from the What'sUp dataset, with object boxes generated automatically. They measure attention from the output token to each object in six models (LLaVA-1.5, InternVL3.5, PaliGemma2, each at two sizes).
-
-Only PaliGemma2-3B follows the human-like pattern on all three datasets, and the other models mostly keep attending to the mentioned object. Zeroing one layer's attention in PaliGemma2-3B shows that layers up to 13, before its attention shifts to the alternative, matter most for correct answers. The authors read the shift as a byproduct of negation handled elsewhere. LLaVA-1.5-7B favours the left object. In yes/no questions all models do worse on negated than affirmative prompts, with large prompt-wording effects. Evidence covers three model families and simple images, with attention as the only proxy.
-
-*Gist:* Attention to objects in six vision-language models mostly differs from human eye fixations on negated statements, and accuracy on negated questions is lower than on affirmative ones.
+*Gist:* The authors build 5,500 prompts that fix a user's stance but vary its justification, and test seven models. Agreement varies widely by model; in GPT-5.1, causal framing and bullet formatting raise agreement.
 
 ### Beyond SAEs: Consistent Concept Discovery with Sparse Coding (2610.23801)
 
@@ -142,45 +116,15 @@ ConSDL replaces the SAE's linear encoder with per-sample sparse coding solved by
 
 *Gist:* Per-sample FISTA sparse coding with coefficient refitting and a co-active similarity penalty replaces the SAE encoder, improving ground-truth recovery on synthetic data and cross-seed consistency on four small vision and language models.
 
-**After** [197], Weight solid
+**After** [202], Weight solid
 
-Sparse autoencoders trained on the same activations with different seeds learn different dictionaries, which makes SAE-based analyses hard to reproduce. ConSDL replaces the learned encoder with per-sample sparse coding: coefficients for each input are found by running FISTA (an iterative solver) on an L1-penalized reconstruction objective, and the dictionary is then updated. Two additions make this stable: the surviving coefficients are refit without the penalty to undo shrinkage, and a penalty pushes apart the most similar pair of atoms that are active together.
+Sparse autoencoders trained with different random seeds learn different dictionaries, and this paper targets that inconsistency.
 
-On synthetic data with a known dictionary (16 settings, widths 4 to 16 times the activation dimension, increasingly long-tailed atom frequencies), ConSDL recovers dictionaries and coefficients nearly perfectly, while baselines degrade. On CLIP, DINOv2, GPT-2 Small and Pythia-160M, ConSDL's cross-seed dictionary and coefficient consistency is 17.6% and 35.9% above the six-baseline average. Against the best baseline the gains are 1.9% and 13.3%, and on Pythia dictionary consistency is tied with MP-SAE. Sparse probing stays comparable to the baselines. Without refitting and the similarity penalty, plain sparse coding fails on Pythia at 16x, leaving 9,767 dead atoms. Training costs several times more than the SAE baselines, and only models of roughly 100M parameters were tested.
+The method replaces the encoder with per-sample sparse coding. For each input, an iterative solver (FISTA) finds sparse coefficients under the current dictionary, and the dictionary is then updated to reconstruct the input from them. Two additions keep this stable. Refitting re-estimates the magnitudes of the chosen coefficients without the sparsity penalty, which removes shrinkage. A regularizer penalizes similarity between the closest pair of atoms active on the same input, which removes duplicate atoms. The motivation is that, with a fixed dictionary, re-optimizing coefficients raises ground-truth coefficient correlation (a ReLU SAE with 3K atoms goes from 0.83 to 0.975).
 
-*Gist:* A sparse-autoencoder variant infers coefficients per sample, refits them, and penalizes similar co-active atoms. It gives more seed-consistent dictionaries than six baselines on synthetic data and four small models.
+On synthetic data with known atoms, the method recovers dictionaries and coefficients almost perfectly (0.93–1.00 in the reported 3K-atom runs), while baselines degrade with larger dictionaries and skewed atom frequencies. On CLIP, DINOv2, GPT-2 Small and Pythia-160M, cross-seed dictionary and coefficient consistency average 0.84 and 0.78, which is 1.9% and 13.3% above the best baseline. On Pythia, one baseline ties it on dictionary consistency. Ablations show both additions are needed. Sparse probing matches baselines. Training is several times slower, and only models with 768-dimensional activations were tested.
 
-### SkillHarm: Lifecycle-Aware Skill-Based Attacks via Automated Construction (2606.02540)
-
-**Before** [197], Weight solid
-
-SkillHarm is a benchmark of poisoned agent skills built on SkillsBench tasks, with 879 samples over 71 skills and 12 risk types grouped into data-pipeline, system-environment and agent-autonomy exploitation. Fixed-Payload Poisoning (687 samples) places a fixed payload in a skill file that harms the session invoking it. Self-Mutating Poisoning (192 samples) uses an atexit callback in a helper script to rewrite persistent skill files in one task, so harm appears when a later task reuses the skill. AutoSkillHarm builds the samples with coding agents driven by natural-language harnesses: exposure-based target selection, attack design by Claude Code Opus 4.7 with deterministic evaluators, and a trajectory-based filter that keeps 70% of candidates. Across eight model-harness configurations, ASR peaks at 86.3% (FPP) and 69.3% (SMP) for Codex GPT-5.4, and is lowest for Opus 4.7 in Claude Code (27.4% and 9.4%). Conditioning on engagement raises ASR by up to 32.1 points. Refusal is rare and falls further in SMP. Scanners detect at most 55.6% and 68.8% of injections. A defensive prompt leaves nearly all configurations above 70% ASR on a high-ASR subset. Limits: SMP covers only 12 task pairs, six skills and one mutation mechanism, and each configuration is run once.
-
-*Gist:* A benchmark of 879 poisoned-skill attacks, single-session and cross-session, built by coding-agent pipeline; eight agent configurations reach up to 86.3% and 69.3% attack success, and scanners and prompts defend poorly.
-
-**After** [234], Weight solid
-
-Agent skills are reusable packages of instructions, reference files and scripts that agents are expected to follow, so a poisoned third-party skill is an attack surface. Earlier benchmarks judge a poisoned skill within one task run and use ad hoc risk lists. This benchmark tests two scenarios. In fixed-payload poisoning, the malicious content ships in the package and acts in the same session (687 samples). In self-mutating poisoning, a helper script silently rewrites other skill files on exit, and harm appears only when a later task reuses the skill (192 samples). Twelve risk types are grouped by the workflow component harmed: data, system environment, or agent autonomy.
-
-A coding agent (Claude Code, Opus 4.7) designs each payload and a deterministic check of the harmful end state. A reviewer agent then filters candidates, keeping 70%. Across eight model-harness configurations, attack success reaches 86.3% (fixed) and 69.3% (self-mutating) for GPT-5.4 in Codex. Opus 4.7 in Claude Code is lowest, at 27.4% and 9.4%. Counting only runs where the agent opened the poisoned file raises success by 4 to 32 points, so many failures reflect non-engagement, not resistance. Script payloads work better than document payloads. Skill scanners detect at best 55.6% and 68.8% of injections, and a defensive system prompt leaves nearly all agents above 70% success on a high-ASR subset. Cross-session attacks cover only 12 task pairs and 6 skills, all from one coding-focused task source.
-
-*Gist:* A benchmark of 879 poisoned agent-skill attacks, built automatically by coding agents, covering single-session and cross-session harms; eight agents reach up to 86% and 69% attack success.
-
-### The Instability of Safety: How Random Seeds and Temperature Expose Inconsistent LLM Refusal Behavior (2512.12066)
-
-**Before** [192], Weight solid
-
-Four instruction-tuned models (Llama 3.1 8B, Qwen 2.5 7B, Qwen 3 8B, Gemma 3 12B) were run on 876 harmful prompts from AdvBench and HarmBench. Each prompt was sampled at 4 temperatures and 5 seeds, giving 70,080 responses labeled REFUSE, PARTIAL or COMPLY by an LLM judge. The paper defines a Safety Stability Index, the share of the 20 samples that agree with the majority label. Between 18% and 28% of prompts flip label depending on the model. Within-temperature SSI falls from 0.977 at t=0.0 to 0.942 at t=1.0, a small effect (Kendall's W = 0.038). Within each model, higher compliance goes with lower stability (rho -0.47 to -0.70), and copyright-like prompts are the least stable. For Llama 3.1 8B, a single sample matches the multi-sample majority 92.5% of the time when pooled, 98.7% at greedy and 90.3% at t=1.0. Claude 3.5 Haiku judged all models, and agreed with the Llama 70B judge on 89.1% of labels (kappa 0.62) on two models. Limits: judge noise and GPU non-determinism inflate flips, and the consensus-only flip rate is 17.5%. There are no human labels, only 7-12B models, and the sample-size analysis covers one model.
-
-*Gist:* Sampling four 7-12B models across temperatures and seeds shows 18-28% of harmful prompts change refusal label, more at high temperature; for Llama 3.1 8B, single-shot labels match the multi-sample majority 92.5% of the time.
-
-**After** [187], Weight incremental
-
-Safety benchmarks usually sample one response per harmful prompt. The authors test whether that is representative by running four open instruction-tuned models (Llama 3.1 8B, Qwen 2.5 7B, Qwen 3 8B, Gemma 3 12B) on 876 AdvBench and HarmBench prompts. Each prompt gets 20 settings (4 temperatures x 5 seeds), and an LLM judge labels every response REFUSE, PARTIAL or COMPLY. Their stability index is the share of a prompt's 20 labels that match its most common label.
-
-Between 18% and 28% of prompts receive at least one different label, depending on the model. Stability falls with temperature, but the effect is small: mean within-temperature index 0.977 at temperature 0 and 0.942 at 1.0. For Llama, a single sample matches the majority label 92.5% of the time pooled across temperatures, 98.7% at greedy decoding and 90.3% at temperature 1.0. Instability concentrates in borderline prompts, especially copyright requests. Part of it is judge noise: restricting to responses where two judges agree cuts Llama's flip rate from 26.8% to 17.5%. Evidence is limited to 7-12B models, direct prompts without jailbreaks, no human labels, and sample-size analysis on Llama alone.
-
-*Gist:* Sampling 876 harmful prompts from four 7–12B chat models under 20 temperature and seed settings, 18–28% change refusal label; instability rises with temperature, so single samples misjudge some prompts.
+*Gist:* Training sparse autoencoders by solving a sparse-coding problem for each input, with coefficient refitting and a duplicate-atom penalty, makes learned dictionaries more reproducible across random seeds than six SAE variants.
 
 ### MobileInject: Evaluating Reasoning-to-Action Security of MLLM-Based Mobile Agents under Cross-Modal Consistency Injection (2610.23307)
 
@@ -192,15 +136,39 @@ MobileInject is an Android-emulator benchmark of 108 executable, stateful instan
 
 *Gist:* An Android-emulator benchmark of 108 injection instances tests nine MLLMs in two mobile-agent frameworks. Dual-channel injection beats single-channel, agents are broadly vulnerable, and prompt-level defenses give little protection.
 
-**After** [213], Weight solid
+**After** [211], Weight solid
 
-> The abstract overstates: the early reasoning-hijack finding rests on model-judged labels that the pipeline forces to agree with the oracle outcome, so any episode where the attack succeeds is guaranteed a hijack label; mean onset (about 31-54% of the way through an episode) is not clearly early.
+> The abstract overstates: the claim that many failures stem from early reasoning hijacking rests on rationale labels from an automated LLM evaluator, which the pipeline forces to flag a hijack in any episode where the attack succeeds. Measured hijack onset falls at only about 31-54% of the way through the trajectory, and the cross-modal and attack-strengthening controls were run on one model (Gemini-2.5-Flash).
 
-MobileInject tests whether smartphone agents driven by multimodal LLMs follow malicious instructions planted in content they read. It runs 108 stateful tasks in an Android emulator, spanning 11 app scenarios and 9 harm categories. Each task has deterministic checks for both the benign goal and the attacker's goal. The attacker can only alter what the agent observes: the screenshot, the UI text, or both. The authors add two stronger attack styles: fake authority, consent and urgency cues, and a bridge that presents the malicious request as the next step of the current task. They also add a diagnosis pipeline in which a separate model labels each step for risk awareness, reasoning hijack and action hijack.
+Mobile agents that read screenshots and UI text can be steered by malicious instructions planted in messages, emails or web pages. The authors build a benchmark to measure this and to show where the agent's reasoning goes wrong.
 
-Nine models were each tested in two agent frameworks. Under one framework, average benign completion under attack is 17.6% and attack success 51.1%. Gemini-3-Flash is best (54.6% benign completion, 24.1% attack success); GLM-4.5V is worst (0.9% and 83.3%). On one model (Gemini-2.5-Flash), showing the payload once in each channel gives 85.4% attack success, against 68.8% for text alone, 27.8% for visual alone, and 72.9% for text shown twice. Prompt-level defenses help little: the best cuts success from 83.3% to 70.4%, a change not statistically significant. The 108 instances share workflow and objective structures, so they are not independent.
+The benchmark has 108 executable tasks in an Android emulator, spanning 11 app scenarios and 9 harm categories. Attack success is checked against the device state. The attacker places the same instruction in the screenshot, the UI text, or both. Two stronger templates add fake authority and consent cues, or a pseudo-rationale that makes the injected step look like the natural next one. An LLM judge labels each step after exposure for risk awareness, adopted goal and harmful action.
 
-*Gist:* A benchmark of 108 executable Android tasks with injected malicious instructions in screenshots and UI text; nine multimodal models in two agent frameworks succumb about half the time.
+Across two agent frameworks and nine multimodal models, average benign-task completion under attack is 17.6% and 11.1%, while attacks succeed in about half of episodes. Gemini-3-Flash is the most robust, at 24.1% attack success. GLM-4.5V is the weakest, at 83.3%. On Gemini-2.5-Flash, placing the instruction once in each channel gives 85.4% attack success, against 72.9% for text repeated twice and 27.8% for the visual payload repeated twice. Prompt-based defenses cut attack success only modestly, for example from 83.3% to 70.4% with structured safety reasoning, and the paired confidence interval for that reduction includes zero.
+
+*Gist:* An Android benchmark of 108 tasks injects malicious instructions into screenshots and UI text; across nine models, attacks succeed about half the time and prompt-based defenses help little.
+
+### Probing Negation Understanding in Vision-Language Models With Object Attention (2610.20852)
+
+**Before** [169], Weight incremental
+
+> The abstract overstates: the ablations are layer-wise, zeroing all attention heads in a layer on 40 PaliGemma2-3B prompts per dataset. The headwise analysis only plots per-head attention and ablates nothing, so the byproduct reading rests on a small layer-level ablation.
+
+Object-level attention to image tokens is compared with human eye-fixation patterns on negation from Orenes et al. (2014). Three VLM families in two sizes each (LLaVA-1.5, InternVL3.5, PaliGemma2) are tested on synthetic two-shape (binary) and four-shape (multary) images and on 206 What'sUp images with Grounding DINO boxes (IoU 0.93 on 20 hand-checked images). Only PaliGemma2-3B shows the human-like pattern on all datasets, shifting attention to the alternative object after layer 13 under negation. Wilcoxon tests give large effects (Cohen's d > 0.8) except one case at 0.17. InternVL-4B fits binary and multary but not What'sUp, and larger variants mostly deviate. Zeroing attention layers in PaliGemma2-3B shows early layers (13 and below) matter most, so the later shift is read as a byproduct. LLaVA-1.5-7B favours left-side objects. Negated questions score lower than affirmative ones for every model, with strong prompt sensitivity (LLaVA-7B negated-true binary accuracy ranges from 0 to 62.6% across templates). Limits: three families, simple images, attention as the only signal, and static images replacing the original temporal priming.
+
+*Gist:* Object-level attention in six VLMs on negated versus affirmative prompts is compared with human gaze; only PaliGemma2-3B shifts to the alternative object, and all models score worse on negated questions.
+
+**After** [200], Weight incremental
+
+> The abstract overstates: the ablation is layer-wise (zeroing all attention heads in one layer) on 40 prompts for PaliGemma2-3B alone; the headwise analysis only plots per-head attention and finds no negation-specific heads, with no head ablated.
+
+The paper asks whether vision-language models handle negation the way humans look at a scene when they hear a negated statement.
+
+In a classic eye-tracking study, people told a figure "is not blue" looked at the other object when two colours were possible, but kept looking at the blue one when four were possible. The authors build matching test images: 1000 with two coloured shapes, 1000 with four, and 206 real photos of two objects with bounding boxes added. For six models (LLaVA-1.5, InternVL3.5 and PaliGemma2, each in two sizes) they measure how much attention the single generated token pays to each object, for affirmative and negated prompts.
+
+Only PaliGemma2-3B follows the human pattern on all three datasets, with attention moving to the alternative object from layer 13. Zeroing attention in single layers shows that earlier layers matter most for its answers, so the shift looks like a consequence of negation handled elsewhere. LLaVA-1.5-7B favours the left object whichever one is named. In yes/no questions, every model is less accurate on negated questions, and PaliGemma2-3B is not better than the others. For example, LLaVA-7B gets 22.7% on true negated binary questions. Evidence comes from three model families and simple images.
+
+*Gist:* Six vision-language models' attention to objects under negated statements mostly fails to match human gaze; only one shifts to the alternative object, and every model answers negated questions worse.
 
 ### Identify, Classify, Act: Per-Instruction Controlled Compliance for LLMs over External Data (2610.22874)
 
@@ -210,15 +178,77 @@ EDIC trains a language model to follow beneficial instructions embedded in exter
 
 *Gist:* Trains a policy with a generative per-instruction compliance judge as reward on mixed beneficial/harmful instruction data; on Qwen3-4B and Llama-3.1-8B, beating prior defenses on most safety and utility benchmarks.
 
-**After** [218], Weight solid
+**After** [213], Weight solid
 
-External documents and tool outputs often contain both useful directives (formatting rules, workflow notes) and injected attacks. Prior defenses either reject every embedded instruction or trust all of them. This work trains a model to decide per instruction instead.
+> The abstract overstates: the Arena-Hard-Auto gain of 12.5 points over ReasAlign holds only on Qwen3-4B, and "five benchmarks" mixes two utility benchmarks with three security ones, while the paper's own claim of matching baselines on harmful-rejection hides a small loss on Llama. Evidence is also limited to injections that use a fixed catalog of trigger phrases, in four synthetic scene types.
 
-The authors build training documents from real sources in four settings: email, API docs, clinical guidelines, and multi-hop QA evidence. Into each they insert a beneficial instruction, an injection led by a phrase like "Ignore previous instructions", or both. Counterfactual checks keep only samples where removing the beneficial instruction changes the output and removing the injection does not. A judge model, trained with SFT and then GRPO, labels whether a response follows a given instruction. The policy is trained with SFT on reasoning traces, then RL with a reward that adds judge credit for following beneficial instructions and subtracts it for following harmful ones.
+Prompt-injection defenses usually treat every instruction inside a document or tool output as a threat, so they also block useful embedded directives such as formatting rules or workflow notes. The paper trains a model to judge each embedded instruction separately: follow the helpful ones, refuse the injected ones.
 
-On Qwen3-4B, against the strongest baseline (ReasAlign), harmful-rejection on the authors' own held-out synthetic set rises from 83.5 to 91.2 and benign-follow from 77.6 to 89.5. Arena-Hard-Auto rises from 16.4 to 28.9, and AgentDojo attack success falls from 1.2 to 0.4. Llama-3.1-8B gains are smaller, with harmful-rejection about level (92.8 vs 93.1). Training on email data alone loses about nine points of controlled compliance on other scenes, and adaptive attackers and larger models are untested.
+The authors build training documents from public datasets (email, API docs, medical guidelines, multi-hop QA) and insert a helpful instruction, an injection, or both. A filter keeps only samples where removing the helpful instruction changes the output and removing the injection does not. A judge model, first fine-tuned and then refined with GRPO, labels whether a response follows a given instruction. Its labels give a reward that credits following helpful instructions and penalizes following harmful ones. The response model first learns from fine-tuning on reasoning traces that list, classify and act on each instruction, then from this reward.
 
-*Gist:* A judge-scored per-instruction reward teaches models to follow useful embedded instructions and reject injected ones, beating prior defenses on safety and utility for 4B and 8B models.
+On Qwen3-4B, harmful-rejection reaches 91.2% against 83.5% for the strongest prior defense, ReasAlign, and Arena-Hard-Auto rises from 16.4 to 28.9. Llama-3.1-8B shows the same pattern, though harmful-rejection is level with ReasAlign (92.8 vs 93.1). Ablations show that mixing both instruction types in one document matters. Training on email data alone drops out-of-domain harmful-rejection to about 82%. Evaluation uses fixed injection triggers, small models, and no adaptive attacker.
+
+*Gist:* The authors train a model to follow helpful instructions embedded in external documents and refuse injected ones, using a judge-based per-instruction reward. It beats prior defenses on safety and utility with 4B and 8B models.
+
+### SkillHarm: Lifecycle-Aware Skill-Based Attacks via Automated Construction (2606.02540)
+
+**Before** [197], Weight solid
+
+SkillHarm is a benchmark of poisoned agent skills built on SkillsBench tasks, with 879 samples over 71 skills and 12 risk types grouped into data-pipeline, system-environment and agent-autonomy exploitation. Fixed-Payload Poisoning (687 samples) places a fixed payload in a skill file that harms the session invoking it. Self-Mutating Poisoning (192 samples) uses an atexit callback in a helper script to rewrite persistent skill files in one task, so harm appears when a later task reuses the skill. AutoSkillHarm builds the samples with coding agents driven by natural-language harnesses: exposure-based target selection, attack design by Claude Code Opus 4.7 with deterministic evaluators, and a trajectory-based filter that keeps 70% of candidates. Across eight model-harness configurations, ASR peaks at 86.3% (FPP) and 69.3% (SMP) for Codex GPT-5.4, and is lowest for Opus 4.7 in Claude Code (27.4% and 9.4%). Conditioning on engagement raises ASR by up to 32.1 points. Refusal is rare and falls further in SMP. Scanners detect at most 55.6% and 68.8% of injections. A defensive prompt leaves nearly all configurations above 70% ASR on a high-ASR subset. Limits: SMP covers only 12 task pairs, six skills and one mutation mechanism, and each configuration is run once.
+
+*Gist:* A benchmark of 879 poisoned-skill attacks, single-session and cross-session, built by coding-agent pipeline; eight agent configurations reach up to 86.3% and 69.3% attack success, and scanners and prompts defend poorly.
+
+**After** [214], Weight solid
+
+The paper tests whether coding agents can be compromised through poisoned third-party skills, including attacks that fire only in a later session.
+
+A skill is a reusable package of instructions, reference files and scripts that an agent follows on relevant tasks. Earlier benchmarks poison a skill and judge harm within one run. The authors add a second scenario: a script in the skill silently rewrites other skill files when it exits, so harm appears only when a later task reuses the skill. They also group 12 harm types by what is attacked: data pipelines, the system environment, or the agent's autonomy. Coding agents generate the attacks from natural-language instructions, each with a deterministic end-state checker, and a reviewer agent filters out invalid ones. This yields 879 samples (687 single-session, 192 cross-session) on SkillsBench tasks.
+
+Across eight model-and-harness setups, attack success reaches 86.3% single-session and 69.3% cross-session; the lowest setup (Claude Opus 4.7) gets 27.4% and 9.4%. Counting only runs where the agent opened the poisoned file raises success by 4 to 32 points. Refusals are rare. Skill scanners catch at most 55.6% and 68.8% of injections, and a warning prompt leaves nearly all agents above 70% on a high-success subset. The cross-session part covers only 12 task pairs, 6 skills and one mutation mechanism.
+
+*Gist:* A benchmark of 879 automatically built poisoned-skill attacks, covering single-session and cross-session harm, shows coding agents compromised up to 86.3% of the time, with scanners and warning prompts unreliable.
+
+### The Instability of Safety: How Random Seeds and Temperature Expose Inconsistent LLM Refusal Behavior (2512.12066)
+
+**Before** [192], Weight solid
+
+Four instruction-tuned models (Llama 3.1 8B, Qwen 2.5 7B, Qwen 3 8B, Gemma 3 12B) were run on 876 harmful prompts from AdvBench and HarmBench. Each prompt was sampled at 4 temperatures and 5 seeds, giving 70,080 responses labeled REFUSE, PARTIAL or COMPLY by an LLM judge. The paper defines a Safety Stability Index, the share of the 20 samples that agree with the majority label. Between 18% and 28% of prompts flip label depending on the model. Within-temperature SSI falls from 0.977 at t=0.0 to 0.942 at t=1.0, a small effect (Kendall's W = 0.038). Within each model, higher compliance goes with lower stability (rho -0.47 to -0.70), and copyright-like prompts are the least stable. For Llama 3.1 8B, a single sample matches the multi-sample majority 92.5% of the time when pooled, 98.7% at greedy and 90.3% at t=1.0. Claude 3.5 Haiku judged all models, and agreed with the Llama 70B judge on 89.1% of labels (kappa 0.62) on two models. Limits: judge noise and GPU non-determinism inflate flips, and the consensus-only flip rate is 17.5%. There are no human labels, only 7-12B models, and the sample-size analysis covers one model.
+
+*Gist:* Sampling four 7-12B models across temperatures and seeds shows 18-28% of harmful prompts change refusal label, more at high temperature; for Llama 3.1 8B, single-shot labels match the multi-sample majority 92.5% of the time.
+
+**After** [224], Weight solid
+
+Safety benchmarks usually sample each harmful prompt once, and this paper measures how much that single draw can change the verdict.
+
+The authors ran 876 harmful prompts (from AdvBench and HarmBench) through four 7–12B instruction-tuned models, at 4 temperatures and 5 seeds each, giving 70,080 responses. An LLM judge labeled each response REFUSE, PARTIAL or COMPLY. Their stability index is the share of a prompt's 20 responses that carry its most common label. Between 18% and 28% of prompts change label at least once, depending on the model. Mean within-temperature stability falls from 0.977 at temperature 0 to 0.942 at temperature 1, a small but consistent effect. Prompts that are complied with more often are also less stable. Copyright-style requests, grouped by keyword, are the least stable.
+
+For Llama 3.1 8B, one sample matches the majority label 92.5% of the time when temperatures are pooled. Fixed-temperature agreement is 98.7% at greedy decoding and 90.3% at temperature 1; three seeds reach only 94.8% there.
+
+Some of the measured instability is not the model's. Greedy decoding still flips 5–12% of prompts, partly from GPU non-determinism and judge noise. The Claude judge ran at its default temperature of 1.0, and counting only labels both judges agree on cuts the flip rate from 26.8% to 17.5%. Sample-size results come from one model, and no human labels were collected.
+
+*Gist:* Re-sampling 876 harmful prompts across temperatures and seeds on four 7–12B models shows 18–28% change refusal label; for Llama 3.1 8B a single sample matches the majority label 92.5% of the time.
+
+### Language Is a Security Surface for Agent Guards (2610.22244)
+
+**Before** [166], Weight solid
+
+> The abstract overstates: the claim that flips land on steps where the agent's reasoning restates the English request holds only for the strong guards and the recall-losing guards, while the over-blocking guards show the opposite pattern, with larger flips on steps that do not restate it.
+
+LinguaGuardBench tests whether a step-level agent guard's verdict depends on the language of the user request. It takes the 1,220 labelled steps of TS-Bench AgentDojo-Traj and translates only the instruction into German, French, Turkish, Swahili and Amharic, leaving tool calls, observations and labels byte-identical. Controls are six English rewordings, a whitespace placebo and three repeats of managed guards. Nineteen guards were run, though the low-resource pair was run on only a subset. Small and purpose-built guards change verdicts beyond their noise floor. For the nine guards under 13B, the mean placebo-adjusted flip rate rises from +1.5 pp (French) to +4.4 pp (Amharic). Open 12-30B guards over-block benign steps by up to 5.0 pp, and all significant recall losses (up to 7.4 pp) are in guards under 10B. Frontier guards move by about one point or less, and Gemini's verdicts are identical with the request withheld. English paraphrase moves guards less than translation. Limits: one benchmark, Gemini-generated translations, no mitigation tested, and script confounded with resource level.
+
+*Gist:* Translating only the user request of 1,220 fixed agent-guard steps into five languages shifts small and purpose-built guards' verdicts beyond noise, more for rarer languages; frontier guards barely move.
+
+**After** [231], Weight solid
+
+> The abstract overstates: the restatement pattern holds only for the strong guards and those that lose recall, since the over-blocking guards flip more on steps where the request is not restated. Claude, GLM and the other partner-hosted guards were also never run on Swahili or Amharic, so the frontier-invariance claim rests on the Gemini guards there.
+
+Safety guards that vet an agent's tool calls read the user's request, but the guard prompts and the benchmarks used to train and test them are English. The paper asks whether a guard's verdict on the same action changes when only the request's language changes.
+
+The authors take 1,220 labelled steps from an existing agent-safety benchmark built on AgentDojo trajectories. They translate only the user instruction into German, French, Turkish, Swahili and Amharic, and leave every tool call, observation and label identical. Controls are six English rewordings and a whitespace-only change, and managed guards are run three times to measure their own noise. Nineteen guards are tested, including four guards built for agent safety. Most open, small and purpose-built guards flip verdicts beyond their noise, and the effect grows as the language gets rarer. For the nine guards under 13B parameters, the placebo-adjusted flip rate rises from +1.5 points on French to +4.4 on Amharic. Open guards of 12–30B parameters mostly block more benign steps (up to +5.0 points), while every significant loss of recall is in a guard below 10B (up to −7.4). Frontier guards move by about a point at most, and Gemini 3.8 Flash gives identical verdicts with the request removed. English rewording moves every guard less than translation does.
+
+All translations came from one LLM, and no author reads Swahili or Amharic. The authors tested no mitigation.
+
+*Gist:* Translating only the user's request, with tool calls and labels held fixed, changes the verdicts of small and open agent guards, more so for rarer languages.
 
 ## Gists from the abstract
 

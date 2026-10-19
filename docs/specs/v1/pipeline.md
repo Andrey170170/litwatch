@@ -230,7 +230,9 @@ a Brief uses), and PDF text as read, as its headings mark the references too une
 first 160,000 characters. The appendix stays: it carries numbers and limits a Brief uses
 ([`evals/2026-10-16-sonnet-briefs.md`](../../../evals/2026-10-16-sonnet-briefs.md)).
 
-**The Brief** is one or two paragraphs (about 120–200 words in all), in litwatch's prose (section 3): what the work
+**The Brief** is an opening line, then one or two paragraphs (about 120–200 words in all), in litwatch's prose
+(section 3). The opening line starts from the title and the Gist above it and says what the paper takes on, so the
+reader can get started; the paragraphs give the setup it needs, what the work
 is and why it was done, what it found with the numbers that carry it, and how far its evidence goes, in whatever order
 makes the paper clearest. When the full text does not support the abstract's claim, the Brief opens with one line saying so, for example
 "The abstract overstates: the gain holds only for 7B models on GSM8K." A paper without a Brief shows its abstract in

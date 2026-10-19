@@ -838,14 +838,14 @@ def test_an_overstatement_is_one_line_saying_so_and_lengths_are_guarded():
             brief.Output.model_validate(ANSWER | wrong)
 
 
-def test_a_brief_keeps_its_paragraphs_up_to_three():
+def test_a_brief_keeps_its_paragraphs_up_to_four():
     first, second = " ".join(BRIEF.split()[:70]), " ".join(BRIEF.split()[70:])
     wrapped = first.replace(" layer ", " layer\n", 1)  # a line break inside a paragraph
     out = brief.Output.model_validate(ANSWER | {"brief": f" {wrapped} \n\n\n {second}\n"})
     assert out.brief == f"{first}\n\n{second}"
-    four = "\n\n".join([first, second, "A third paragraph.", "A fourth."])
-    with pytest.raises(ValueError, match="4 paragraphs"):
-        brief.Output.model_validate(ANSWER | {"brief": four})
+    five = "\n\n".join([first, second, "A third paragraph.", "A fourth.", "A fifth."])
+    with pytest.raises(ValueError, match="5 paragraphs"):
+        brief.Output.model_validate(ANSWER | {"brief": five})
 
 
 def test_a_long_text_is_cut_and_an_unknown_area_said():
