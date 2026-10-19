@@ -1,11 +1,11 @@
 """Production's own answers to the quality cases against the re-run, and what each candidate
 answered, into production.csv (production's answer to each case, with where it came from) and
-baseline.md. Production's answer is the nightly's latest at the paper's current revision, given
-by the role's model under the code of its night, so the role's own model re-asked shows how far
-two of its answers to one case differ (`re-asked`); a candidate is read against that. Only the
-calls to the requests the cases build now are read. No model calls; reads the scratch sandbox
-copied from production on 2026-10-19 (`fh_p1_sandbox`) and the archive's held texts (the
-`brief` cases' requests):
+baseline.md, which ends with production's calls by role and how many failed. Production's
+answer is the nightly's latest at the paper's current revision, given by the role's model under
+the code of its night, so the role's own model re-asked shows how far two of its answers to one
+case differ (`re-asked`); a candidate is read against that. Only the calls to the requests the
+cases build now are read. No model calls; reads the scratch sandbox copied from production on
+2026-10-19 (`fh_p1_sandbox`) and the archive's held texts (the `brief` cases' requests):
 
     LITWATCH_DATABASE_URL=<dev DSN for fh_p1_sandbox> uv run python \
         evals/2026-10-19-fallback-ladders/baseline.py
@@ -68,6 +68,7 @@ async def main() -> None:
             if archive is not None:
                 await archive.aclose()
         said = {c.key: await production(conn, c) for c in chosen}
+        journal = await calls(conn)
     with (HERE / "production.csv").open("w", newline="") as f:
         out = csv.DictWriter(f, COLUMNS)
         out.writeheader()
@@ -103,7 +104,34 @@ async def main() -> None:
                 row.append(f"{side}/{len(pairs)}")
             lines.append("| " + " | ".join(str(x) for x in row) + " |")
     lines += answered(found, every, last)
+    lines += [
+        "",
+        "# Production's calls",
+        "",
+        f"Every call in the copy's journal, to {journal['to']}, by role. Failed is a call",
+        "that ended in an error: a refusal, an unusable answer or the provider's.",
+        "",
+        "| Role | Calls | Failed |",
+        "| --- | --- | --- |",
+    ]
+    lines += [f"| `{r}` | {n} | {e} |" for r, n, e in journal["rows"]]
     (HERE / "baseline.md").write_text("\n".join(lines) + "\n")
+
+
+async def calls(conn: psycopg.AsyncConnection) -> dict:
+    """Production's journal in the copy: each operation's calls and how many ended in an error,
+    and when the last one started."""
+    rows = await (
+        await conn.execute(
+            """SELECT operation, count(*) AS n, count(*) FILTER (WHERE error IS NOT NULL) AS e
+               FROM inference_calls GROUP BY operation ORDER BY operation"""
+        )
+    ).fetchall()
+    to = await (await conn.execute("SELECT max(started_at) AS at FROM inference_calls")).fetchone()
+    return {
+        "to": f"{to['at']:%Y-%m-%d %H:%M} UTC",
+        "rows": [(r["operation"], r["n"], r["e"]) for r in rows],
+    }
 
 
 def answered(

@@ -7,7 +7,9 @@
 # OpenRouter's endpoint list on 2026-10-19 among those the candidate's routing allows. Every
 # recorded cost is the provider's own. `output_tokens` is about a call's mean in production's
 # journal (a reasoning candidate's own thinking is not known before the run);
-# `reserve_output_tokens` bounds an OpenRouter call's output, which is sent uncapped.
+# `reserve_output_tokens` is an OpenRouter call's output cap, sent with it and held by its
+# reservation; the pipeline sends these calls uncapped, and the cap is above every output the
+# run's calls made (6,713 at most, `field_grade`'s DeepSeek V4.1 Flash).
 # A candidate's effort is its role's own model's, where the model takes one.
 
 [judge]
@@ -117,7 +119,7 @@ model = "deepseek/deepseek-v4.1-flash"
 
 [field_grade]
 output_tokens = 300
-reserve_output_tokens = 8000
+reserve_output_tokens = 16000
 
 [[field_grade.candidates]]
 name = "haiku"

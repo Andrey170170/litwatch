@@ -120,7 +120,7 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
 
     def other(role, request):
         if down["other"]:
-            raise ProviderError("the completion has no choices")
+            raise ProviderError("the completion has no choices", transient=True)
         return FIT.model_dump_json()
 
     providers = {
@@ -129,6 +129,9 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
     }
     ran = await ladders.run(todo(found, chosen), providers, out, ceiling=5.0)
     assert len(providers["openrouter"].calls) == 2  # once a case: no retries inside a call
+    # Each call goes out capped: other's at the ladder's reserve, own's at Anthropic's default.
+    assert {q.max_output_tokens for _, q in providers["openrouter"].calls} == {1000}
+    assert {q.max_output_tokens for _, q in providers["anthropic"].calls} == {DEFAULT_MAX_TOKENS}
     assert {r.attempt for r in ran.rows} == set(ladders.reservations(out))
     outcomes = {(r.case.split("/")[1], r.candidate): r.outcome for r in ran.rows}
     assert outcomes == {
@@ -168,16 +171,16 @@ async def test_the_ceiling_holds_across_runs_and_records_where_it_stopped(tmp_pa
         ),
         "openrouter": ScriptedProvider("openrouter", lambda role, request: FIT.model_dump_json()),
     }
-    # A call reserves its input (prompts and schema) at half a token a character and its
-    # output at its cap: Anthropic's default for own, the ladder's 1,000 for other's uncapped
-    # OpenRouter call, each at the candidate's dearest prices.
+    # A call reserves its input (prompts and schema) at a token a byte, plus the template's
+    # allowance, and its output at its cap: Anthropic's default for own, the ladder's 1,000 for
+    # other's, each at the candidate's dearest prices.
     request = work[0].request
-    chars = len(request.system) + len(request.user)
-    chars += len(json.dumps(request.output.model_json_schema()))
+    texts = (request.system, request.user, json.dumps(request.output.model_json_schema()))
+    tokens = sum(len(t.encode()) for t in texts) + ladders.TEMPLATE_TOKENS
     hold = ladders.reservation(work[0].ladder, work[0].candidate, request)
-    assert hold == pytest.approx((chars / 2 + DEFAULT_MAX_TOKENS) * 10 / 1e6)
+    assert hold == pytest.approx((tokens + DEFAULT_MAX_TOKENS) * 10 / 1e6)
     other = ladders.reservation(work[1].ladder, work[1].candidate, request)
-    assert other == pytest.approx((chars / 2 + 1000) * 2 / 1e6)
+    assert other == pytest.approx((tokens + 1000) * 2 / 1e6)
     ran = await ladders.run(work[:1], providers, out, ceiling=hold * 1.5, concurrency=1)
     (first,) = ran.rows
     assert first.outcome == "invalid" and first.cost is None and first.reserved == hold
@@ -331,7 +334,8 @@ def test_the_tables_compare_with_the_owner_and_the_own_model_over_what_both_answ
         row(p, "own", request="stale", fit="none", reason="."),
     ]
     calls[3].cost = None
-    text = ladders.tables(found, chosen, calls, built)
+    calls[0].attempt = "ended"
+    text = ladders.tables(found, chosen, calls, built, {"ended": 0.3, "cut off": 0.5})
     lines = [
         line for line in text.splitlines() if line.startswith("| own") or line.startswith("| other")
     ]
@@ -365,6 +369,9 @@ def test_the_tables_compare_with_the_owner_and_the_own_model_over_what_both_answ
         "≥ $0.0100 |",
     ]
     assert "Every recorded call: 5, ≥ $0.04." in text
+    assert "Calls that never ended: 1, up to $0.50 reserved." in text
+    # other's answered call ($0.01) is dearer than its bound at $2 a million tokens; own's are not.
+    assert "cost more than their reservation as reckoned now: 1." in text
     assert ladders.answers(found, chosen, calls, built) == "\n"  # the quality set is not listed
     refusals = [c.model_copy(update={"set": "refusals", "note": None}) for c in chosen]
     listed_ = ladders.answers(found, refusals, calls, built, {Q.id: Q.title})

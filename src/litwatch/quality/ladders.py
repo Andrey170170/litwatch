@@ -14,8 +14,9 @@ topic for the graders (`judge`, `check`, `field_grade`), a paper and its area fo
 with the owner's Fit) or the `refusals` set (papers likely to be refused).
 
 Spending is capped across every invocation into one directory, and one invocation at a time
-uses it. Before each call the harness records a reservation (`pending.jsonl`) for the call's
-upper bound (see `reservation`), and starts it only while what the directory's calls have cost
+uses it. Each call is sent with an output cap (see `cap`), and before it the harness records a
+reservation (`pending.jsonl`) for the call's upper bound (see `reservation`), and starts it only
+while what the directory's calls have cost
 plus what is reserved stays within the ceiling; a call whose charge is unknown, or that never
 recorded an end (a run killed while it was out), counts at its reservation. The run that
 reaches the ceiling, or makes a call that cost more than its reservation, starts no more and
@@ -33,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import dataclasses
 import fcntl
 import hashlib
 import json
@@ -66,8 +68,11 @@ from litwatch.store import taxonomy as taxonomy_store
 ROLES = ("analyse", "judge", "check", "field_grade", "brief", "writer")
 GRADERS = ("judge", "check", "field_grade")
 SETS = ("quality", "refusals")
-# What a token is in characters: an estimate, and the reservation's upper bound.
-CHARS_PER_TOKEN, RESERVE_CHARS_PER_TOKEN = 3.0, 2.0
+# What a token is in characters, for the estimate.
+CHARS_PER_TOKEN = 3.0
+# A reservation's input: a byte-level tokenizer makes no more tokens than the text has bytes,
+# and the chat template and the schema's rendering add no more than this.
+TEMPLATE_TOKENS = 1000
 # An answer that failed for want of the provider says nothing of the model: asked again.
 RETRIED = ("timeout", "provider")
 BUDGET, PENDING, LOCK = "budget.jsonl", "pending.jsonl", ".lock"
@@ -312,9 +317,17 @@ def spent(found: list[Row], reserved: Mapping[str, float] | None = None) -> floa
     return sum(r.reserved if r.cost is None else r.cost for r in found) + unended
 
 
+def _texts(request: Request) -> tuple[str, str, str]:
+    return request.system, request.user, json.dumps(request.output.model_json_schema())
+
+
 def _chars(request: Request) -> int:
-    schema = json.dumps(request.output.model_json_schema())
-    return len(request.system) + len(request.user) + len(schema)
+    return sum(len(t) for t in _texts(request))
+
+
+def input_bound(request: Request) -> int:
+    """The most input tokens a call of `request` can take (see `TEMPLATE_TOKENS`)."""
+    return sum(len(t.encode()) for t in _texts(request)) + TEMPLATE_TOKENS
 
 
 def estimate(ladder: Ladder, candidate: Candidate, request: Request) -> float:
@@ -325,9 +338,10 @@ def estimate(ladder: Ladder, candidate: Candidate, request: Request) -> float:
 
 
 def cap(ladder: Ladder, candidate: Candidate, request: Request) -> int:
-    """The output tokens a call's reservation holds: the cap the call is sent with (the
-    request's or the role's, else Anthropic's default), or, for an OpenRouter call sent without
-    one as the pipeline sends it, the ladder's `reserve_output_tokens`."""
+    """The output tokens a call is sent with and its reservation holds: the request's or the
+    role's cap, else Anthropic's default, which the pipeline's call has too, else the ladder's
+    `reserve_output_tokens`. An OpenRouter call goes out uncapped from the pipeline; here the cap
+    bounds its cost, and one that reaches it is recorded as truncated."""
     if limit := request.max_output_tokens or candidate.role.max_output_tokens:
         return limit
     if candidate.role.provider == "anthropic":
@@ -336,12 +350,10 @@ def cap(ladder: Ladder, candidate: Candidate, request: Request) -> int:
 
 
 def reservation(ladder: Ladder, candidate: Candidate, request: Request) -> float:
-    """A call's upper bound: its input (prompts and schema) at half a token per character and
-    its `cap`, at the candidate's dearest prices. An OpenRouter call has no cap of its own, so
-    its bound holds while its output stays within the ladder's; one that costs more stops the
-    run."""
+    """A call's upper bound: its `input_bound` and its `cap`, at the candidate's dearest
+    prices. A call that costs more (a price raised since `price_max` was read) stops the run."""
     price_in, price_out = candidate.price_max
-    tokens = _chars(request) / RESERVE_CHARS_PER_TOKEN
+    tokens = input_bound(request)
     return (tokens * price_in + cap(ladder, candidate, request) * price_out) / 1e6
 
 
@@ -526,9 +538,11 @@ async def _ask(t: Todo, providers: Mapping[str, Provider]) -> Row:
             **rest,
         )
 
+    # Sent with its cap; its identity stays the request as built (`asked`).
+    sent = dataclasses.replace(t.request, max_output_tokens=cap(t.ladder, t.candidate, t.request))
     try:
         answer = await gateway(t.case.role, t.candidate, providers).ask(
-            t.case.role, t.request, paper_id=t.case.paper
+            t.case.role, sent, paper_id=t.case.paper
         )
     except CallError as exc:
         return row(exc.kind, exc.usage, detail=exc.detail)
@@ -613,12 +627,15 @@ def tables(
     chosen: list[Case],
     found: list[Row],
     built: Mapping[str, Request | str],
+    reserved: Mapping[str, float] | None = None,
 ) -> str:
     """Per role and set, each candidate's outcomes, its agreement with the owner's Fit (over
     the labelled cases it answered) and with the role's own model (over the cases both
     answered), and its cost, as markdown, from the `current` calls alone. Outcomes are each
     case's latest call; costs are every call's, and a cost an answer is all of them over the
-    answers. The last line totals every recorded call, current or not."""
+    answers. The last lines total every recorded call, current or not; the calls of `reserved`
+    (by attempt) no row ended, at what they reserved; and the current calls that cost more than
+    their `reservation` as reckoned now."""
     now = current(found, ladders_, built)
     last = latest(now)
     lines: list[str] = []
@@ -629,6 +646,19 @@ def tables(
                 lines += ["", f"### `{role}`, {which} set", ""]
                 lines += _role_table(ladder, mine, last, now)
     lines += ["", f"Every recorded call: {len(found)}, {_dollars(found)}."]
+    ended = {r.attempt for r in found}
+    unended = [v for k, v in (reserved or {}).items() if k not in ended]
+    lines += ["", f"Calls that never ended: {len(unended)}, up to ${sum(unended):.2f} reserved."]
+    named = {
+        (role, c.name): (ladder, c) for role, ladder in ladders_.items() for c in ladder.candidates
+    }
+    over = 0
+    for r in now:
+        ladder, candidate = named[(r.role, r.candidate)]
+        request = built[r.case]
+        assert isinstance(request, Request)  # a current call's request was built
+        over += r.cost is not None and r.cost > reservation(ladder, candidate, request)
+    lines += ["", f"Current calls that cost more than their reservation as reckoned now: {over}."]
     return "\n".join(lines).lstrip("\n") + "\n"
 
 

@@ -672,7 +672,7 @@ def eval_ladders_report(
 
     built, titles = _run(work, migrate=False)
     calls = ladders.rows(out)
-    print(ladders.tables(found, chosen, calls, built), end="")
+    print(ladders.tables(found, chosen, calls, built, ladders.reservations(out)), end="")
     print("\n### Answers on the refusals set\n")
     print(ladders.answers(found, chosen, calls, built, titles), end="")
 
