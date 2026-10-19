@@ -1,0 +1,15 @@
+# The clear-prose replay's Briefs: the seven read on 2026-10-19 (VERITAS and the six newest), then five more
+# production Sonnet Briefs in md5(paper_id) order, each with the area its analysis judged Weight in.
+papers:
+  - {id: "2610.23275", area: cot-faithfulness}
+  - {id: "2610.22928", area: jailbreaks}
+  - {id: "2610.23085", area: alignment-and-safety}
+  - {id: "2610.23256", area: preference-training}
+  - {id: "2610.23307", area: model-security}
+  - {id: "2610.23525", area: alignment-and-safety}
+  - {id: "2610.23801", area: sparse-autoencoders}
+  - {id: "2610.20852", area: interpretability}
+  - {id: "2606.02540", area: model-security}
+  - {id: "2610.22244", area: alignment-and-safety}
+  - {id: "2512.12066", area: safety-evaluations}
+  - {id: "2610.22874", area: model-security}
