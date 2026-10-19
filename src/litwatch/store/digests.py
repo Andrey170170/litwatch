@@ -447,14 +447,16 @@ async def count_failed(conn: psycopg.AsyncConnection, *, unacknowledged: bool = 
 
 async def acknowledge(conn: psycopg.AsyncConnection, ids: list[int]) -> list[int]:
     """The owner's Acknowledge on the named failed digests, of active topics (a failed digest
-    stays the same failure until it is published). Returns the ids marked."""
+    stays the same failure until it is published); one marked already keeps its time. Returns
+    the ids marked."""
     if not ids:
         return []
     rows = await (
         await conn.execute(
-            "UPDATE digests d SET acknowledged_at = now() FROM topics t "
+            "UPDATE digests d SET acknowledged_at = coalesce(d.acknowledged_at, now()) "
+            "FROM topics t "
             "WHERE d.id = ANY(%s) AND t.class = d.topic AND t.status = 'active' "
-            "AND d.state = 'failed' AND d.acknowledged_at IS NULL RETURNING d.id",
+            "AND d.state = 'failed' RETURNING d.id",
             (ids,),
         )
     ).fetchall()

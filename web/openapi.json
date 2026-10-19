@@ -1724,7 +1724,7 @@
     "/api/settings/acknowledge": {
       "post": {
         "summary": "Acknowledge",
-        "description": "Acknowledge on Needs you: the owner has seen these items, and they stop counting in the\nrun status. An item is marked only while it still waits on the owner as shown (the same\nfailure, not a later one); one that recovers and fails again comes back unacknowledged. It\nmoves no paper. A failed nightly run is not an item and is never acknowledged. Answers with\nthe items marked, for the page to fold those and only those.",
+        "description": "Acknowledge on Needs you: the owner has seen these items, and they stop counting in the\nrun status. An item is marked only while it still waits on the owner as shown (the same\nfailure, not a later one); one that recovers and fails again comes back unacknowledged. It\nmoves no paper. A failed nightly run is not an item and is never acknowledged. Answers with\nthe items marked, for the page to fold those and only those; naming one again (a retry,\nanother tab) answers it again and keeps the first mark.",
         "operationId": "acknowledge_api_settings_acknowledge_post",
         "requestBody": {
           "content": {

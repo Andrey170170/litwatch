@@ -137,17 +137,19 @@ async def acknowledge(
     conn: psycopg.AsyncConnection, items: list[Item], runs: int
 ) -> list[dict[str, Any]]:
     """The owner's Acknowledge on the named failures: each that still waits for them after at
-    least `runs` runs, as named, is marked seen. Returns those marked, as named."""
+    least `runs` runs, as named, is marked seen (one marked already keeps its time). Returns
+    those marked, as named."""
     if not items:
         return []
     return await (
         await conn.execute(
-            "UPDATE step_failures f SET acknowledged_at = now() FROM papers p, "
+            "UPDATE step_failures f SET acknowledged_at = coalesce(f.acknowledged_at, now()) "
+            "FROM papers p, "
             "unnest(%s::text[], %s::text[], %s::text[], %s::int[], %s::timestamptz[]) "
             "AS x (step, paper_id, topic, rev, failed_at) "
             "WHERE f.step = x.step AND f.paper_id = x.paper_id AND f.topic = x.topic "
             "AND f.paper_revision = x.rev AND f.failed_at = x.failed_at AND p.id = f.paper_id "
-            f"AND f.failed_runs >= %s AND f.acknowledged_at IS NULL AND {ACTIONABLE} "
+            f"AND f.failed_runs >= %s AND {ACTIONABLE} "
             "RETURNING f.step, f.paper_id, nullif(f.topic, '') AS topic, "
             "f.paper_revision AS revision, f.failed_at",
             (*map(list, zip(*items, strict=True)), runs),

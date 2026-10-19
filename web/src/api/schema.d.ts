@@ -553,7 +553,8 @@ export interface paths {
          *     run status. An item is marked only while it still waits on the owner as shown (the same
          *     failure, not a later one); one that recovers and fails again comes back unacknowledged. It
          *     moves no paper. A failed nightly run is not an item and is never acknowledged. Answers with
-         *     the items marked, for the page to fold those and only those.
+         *     the items marked, for the page to fold those and only those; naming one again (a retry,
+         *     another tab) answers it again and keeps the first mark.
          */
         post: operations["acknowledge_api_settings_acknowledge_post"];
         delete?: never;

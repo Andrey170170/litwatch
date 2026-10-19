@@ -730,16 +730,18 @@ async def acknowledge(
     conn: psycopg.AsyncConnection, items: list[tuple[int, datetime]], runs: int
 ) -> list[dict[str, Any]]:
     """The owner's Acknowledge on the named passes, each by its id and since when it waits
-    (`SINCE`): each still waiting on them as named is marked seen. Returns those marked."""
+    (`SINCE`): each still waiting on them as named is marked seen (one marked already keeps its
+    time). Returns those marked."""
     if not items:
         return []
     ids, since = map(list, zip(*items, strict=True))
     return await (
         await conn.execute(
-            "UPDATE fulltext_passes f SET acknowledged_at = now() FROM papers p, "
+            "UPDATE fulltext_passes f SET acknowledged_at = coalesce(f.acknowledged_at, now()) "
+            "FROM papers p, "
             "unnest(%(ids)s::bigint[], %(since)s::timestamptz[]) AS x (id, since) "
             f"WHERE f.id = x.id AND {SINCE} = x.since AND p.id = f.paper_id "
-            f"AND f.acknowledged_at IS NULL AND {STUCK} RETURNING f.id, {SINCE} AS since",
+            f"AND {STUCK} RETURNING f.id, {SINCE} AS since",
             {"ids": ids, "since": since} | stuck_params(runs),
         )
     ).fetchall()

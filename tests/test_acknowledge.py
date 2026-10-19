@@ -153,6 +153,11 @@ async def test_acknowledge_per_group_then_all_clears_the_run_status(client, conn
     rest = await shown(client, *ALL)
     marked = await ack(client, rest)
     assert [len(marked[k]) for k in ("steps", "passes", "digests")] == [2, 1, 1]
+    # The same again (its answer lost, or from another tab) answers the same, keeping the mark.
+    first = await (await conn.execute("SELECT acknowledged_at FROM digests")).fetchone()
+    assert await ack(client, rest) == marked
+    again = await (await conn.execute("SELECT acknowledged_at FROM digests")).fetchone()
+    assert again == first
     quiet = await status(client)
     assert quiet["state"] == "quiet"
     assert [quiet[k] for k in (*STOPPED, "digests_failed")] == [0, 0, 0, 0, 0]
