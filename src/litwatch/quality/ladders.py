@@ -428,9 +428,9 @@ def todo(
     done: list[Row],
     only: list[str] | None = None,
 ) -> list[Todo]:
-    """The calls left, case by case so that a run stopped early leaves whole cases: every
-    case with a request, of every candidate (or those named in `only`), not yet answered or
-    failed in a way that asking again would only repeat."""
+    """The calls left, in case order, so that a run stopped early has asked the earlier cases:
+    every case with a request, of every candidate (or those named in `only`), not yet answered
+    or failed in a way that asking again would only repeat."""
     last = latest(done)
     found = []
     for c in chosen:

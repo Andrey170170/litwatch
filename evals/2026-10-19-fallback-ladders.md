@@ -5,8 +5,9 @@ from production that day) and the host archive, read only. Nothing was written t
 evaluation table: each call's answer went to a JSON-lines file in
 [2026-10-19-fallback-ladders/runs/](2026-10-19-fallback-ladders/runs/). Each role's request is the one its pipeline
 step sends, built by the step's own prompt builder, and was sent to the role's model and to every candidate alone.
-The first run cost **$9.03** (at least: the calls that failed have no known charge) over 1,548 calls, against an
-estimate of $12.49 printed before it ([estimate.txt](2026-10-19-fallback-ladders/runs/estimate.txt)). A second run
+The first run cost **$9.03** (at least: the calls that failed have no known charge) over 1,548 calls: the 15
+`writer` calls first, for $0.50, then 1,533 calls for $8.53 against an estimate of $12.49 printed before them
+([estimate.txt](2026-10-19-fallback-ladders/runs/estimate.txt)). A second run
 asked `field_grade`'s cases of four more candidates, estimated at $1.20
 ([estimate-field-grade.txt](2026-10-19-fallback-ladders/runs/estimate-field-grade.txt)), and made 290 of its 332 calls
 for $0.49. It stopped at the $25 ceiling by design: one GPT-6.1 Sol call ended in a rate-limit error with no known
@@ -185,8 +186,8 @@ call to the role's quality-set requests, refused ones included, over its usable 
   - a call's identity is its request and configuration (`asked`), so a change to litwatch itself between runs into
     one directory goes unnoticed: start a new directory after one.
 - **The writer's blind reader** was given each digest's request but not the writer's own instructions, which ask for
-  80 to 180 words of selective synthesis. Its coverage bar is therefore stricter than the writer's brief; the
-  report sets that bar aside and compares the writers with each other.
+  selective synthesis in 80 to 180 words for an Area's day and 40 to 120 for a Focus topic's. Its coverage bar is
+  therefore stricter than the writer's brief; the report sets that bar aside and compares the writers with each other.
 - **One reader, five digests** for `writer`, and ten papers for `brief`: they show large differences only.
 
 ## For P2
