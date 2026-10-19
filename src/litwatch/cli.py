@@ -620,9 +620,12 @@ def eval_ladders(
         if r.outcome != "answered":
             console.print(f"{r.case} {r.candidate}: {r.outcome} {r.detail or ''}")
 
-    ran = asyncio.run(
-        ladders.run(work, providers, out, ceiling, concurrency=concurrency, progress=progress)
-    )
+    try:
+        ran = asyncio.run(
+            ladders.run(work, providers, out, ceiling, concurrency=concurrency, progress=progress)
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     kinds = Counter(r.outcome for r in ran.rows)
     console.print(f"{len(ran.rows)} calls: {dict(kinds)}; ${ladders.spent(ran.rows):.2f}")
     if ran.stopped_at is not None:

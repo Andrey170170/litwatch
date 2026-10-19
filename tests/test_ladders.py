@@ -128,6 +128,10 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
     assert todo(found, chosen, ladders.rows(out)) == []
     last = ladders.latest(ladders.rows(out))
     assert last[(f"judge/{Q.id}/{FAITH.slug}", "other")].output == FIT.model_dump(mode="json")
+    # A provider without credentials stops the run before any call.
+    with pytest.raises(ValueError, match="no credentials for openrouter"):
+        await ladders.run(left, {"anthropic": providers["anthropic"]}, tmp_path / "none", 5.0)
+    assert not (tmp_path / "none").exists()
     # Another request, or another configuration of a candidate, is asked afresh.
     moved = [c.model_copy(update={"subject": INTERP.slug}) for c in chosen]
     built = {c.key: grading.request(paper(c.paper), INTERP, "Interp") for c in moved}

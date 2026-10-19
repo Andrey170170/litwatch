@@ -377,7 +377,10 @@ async def run(
     progress: Callable[[Row], None] | None = None,
 ) -> Ran:
     """Make the calls in `work`, in order, appending each to `out/<role>.jsonl` as it ends,
-    while the ceiling allows (see the module's docstring)."""
+    while the ceiling allows (see the module's docstring). Refuses, before any call, work on a
+    provider without credentials: a call never sent would count against the ceiling."""
+    if missing := {t.candidate.role.provider for t in work} - set(providers):
+        raise ValueError(f"no credentials for {', '.join(sorted(missing))}")
     out.mkdir(parents=True, exist_ok=True)
     budget = Budget(ceiling, spent(rows(out)))
     gate = asyncio.Semaphore(concurrency)
