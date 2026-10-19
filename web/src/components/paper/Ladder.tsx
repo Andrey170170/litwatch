@@ -1,5 +1,6 @@
 /** The ladder (DESIGN.md, "The ladder"): Gist, the Brief with a switch to the abstract, or the abstract standing in for it, the Deep card, the paper. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Prose } from "@/components/Prose";
 import { fullDate } from "@/lib/format";
 import { useDesktop } from "@/hooks/useDesktop";
 import { DoiForm, type Paper } from "./Actions";
@@ -139,7 +140,7 @@ export function BriefBody({ paper, brief }: { paper: Paper; brief: Brief }) {
           Written for revision {brief.revision} of the text{brief.arxiv_version ? ` (arXiv v${brief.arxiv_version})` : ""}; the current one, revision {paper.revision}, waits for its full text.
         </div>
       )}
-      <p className="prose">{brief.text}</p>
+      <Prose text={brief.text} />
     </>
   );
 }

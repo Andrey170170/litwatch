@@ -4,6 +4,7 @@ Weight. It asks and writes nothing."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from pydantic import BaseModel, Field, field_validator
@@ -13,11 +14,14 @@ from litwatch.core import Paper, TaxonomyClass, Weight
 from litwatch.core.analysis import WEIGHT_DEFINITIONS
 from litwatch.fulltext import trim
 from litwatch.llm import Request
+from litwatch.writing import READER, VOICE
 
 ROLE = "brief"
-# The Brief asked for is 120–200 words; as with the Gist, the accepted range only guards against
-# a broken answer.
-BRIEF_WORDS = (90, 240)
+# The Brief asked for is 120–200 words: an opening line, then one or two paragraphs. As with the
+# Gist, the accepted ranges only guard against a broken answer; saying what a paper's terms are
+# runs some Briefs past 240 words, and some split once more (evals/2026-10-19-clear-prose.md).
+BRIEF_WORDS = (90, 280)
+BRIEF_PARAGRAPHS = 4
 # A longer text is cut: about 70k tokens of LaTeX text (some 2.2 characters a token), which keeps
 # the main body and drops the tail of long appendices, at about $0.30 a paper on Opus 5.5; most
 # papers are half that.
@@ -29,10 +33,10 @@ SYSTEM = f"""\
 You read the full text of one arXiv paper, with its title and abstract, and write about it for \
 litwatch, which reads every new paper in a field. Answer with the structured output only.
 
-Write about the paper, never to a reader: no "you", no audience ("for practitioners", "for \
-anyone building agents"), and no advice on whether to read it ("must read", "worth reading"). \
-State what the paper does and finds, in its own terms. Do not hype and do not hedge. Rely on the \
-full text: where it and the abstract differ, the full text is what the paper shows.
+{VOICE} Rely on the full text: where it and the abstract differ, the full text is what the \
+paper shows.
+
+{READER}
 
 overstatement: check each claim of the abstract against what the full text shows. When the \
 text does not support one (a gain that holds only in a narrower setting than claimed, a result \
@@ -41,9 +45,17 @@ beginning "{OVERSTATES}", for example "{OVERSTATES} the gain holds only for 7B m
 GSM8K." Otherwise null. Most papers get null: a claim put more briefly in the abstract than in \
 the text is not overstated, and a limit the abstract itself states is not hidden.
 
-brief: one paragraph of 120 to 200 words: what was done, the main result with its numbers, and \
-the main limit. State results as the full text supports them, never as an overstatement line \
-corrects. Do not start with "This paper" and do not repeat the title.
+brief: an opening line, then one or two paragraphs, 120 to 200 words in all, a blank line \
+between each. From it the \
+reader understands what the work is and why it was done, what it found, with the numbers that \
+carry it, and how far its evidence goes, in whatever order makes this paper clearest. Saying \
+what things are takes words: make room by leaving out secondary results, settings and names, not \
+by running long; a reader who wants them opens the paper. A second paragraph is for a text that \
+reads better split, not for more detail. State results as the full text supports them, never as \
+an overstatement line corrects. The reader comes to the Brief from the title and the Gist, \
+shown above it. The opening line is one short, plain sentence that starts from them and says \
+what the paper takes on, so the reader can get started; the setup it needs follows in the \
+paragraphs. Do not start with "This paper", and do not repeat the title or the Gist.
 
 weight: how much the paper matters in its own area, which is given with the paper. Judge it \
 against that area alone: what is a landmark in one area can be incremental in another. Judge \
@@ -67,11 +79,14 @@ class Output(BaseModel):
         description=f'One line beginning "{OVERSTATES}", or null when the text supports the '
         "abstract"
     )
-    brief: str = Field(description="One paragraph, 120 to 200 words")
+    brief: str = Field(
+        description="An opening line, then one or two paragraphs, 120 to 200 words in all"
+    )
     gist: str = Field(
         description="What the paper does and its main result, as the full text shows them, in "
         "one or two short sentences of 20 to 30 words in all; 30 words is a hard limit. About "
-        "the paper, not any area or topic. Never repeat a claim the overstatement line "
+        "the paper, not any area or topic, and in plain words: a name the reader cannot know is "
+        "the first detail to cut. Never repeat a claim the overstatement line "
         'corrects. Do not start with "This paper" and do not repeat the title.'
     )
     weight_reason: str = Field(description="One sentence")
@@ -90,7 +105,13 @@ class Output(BaseModel):
     @field_validator("brief")
     @classmethod
     def _brief_length(cls, brief: str) -> str:
-        return _words(brief, BRIEF_WORDS, "Brief")
+        """A blank line ends a paragraph, a single line break does not; the paragraphs are kept,
+        a blank line between them."""
+        paragraphs = [" ".join(p.split()) for p in re.split(r"\n\s*\n", brief) if p.strip()]
+        if len(paragraphs) > BRIEF_PARAGRAPHS:
+            raise ValueError(f"a Brief of {len(paragraphs)} paragraphs")
+        _words(" ".join(paragraphs), BRIEF_WORDS, "Brief")
+        return "\n\n".join(paragraphs)
 
     @field_validator("gist")
     @classmethod

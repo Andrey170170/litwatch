@@ -20,6 +20,7 @@ from litwatch.llm import CallError, Gateway, Request, Usage
 from litwatch.store import analyses as store
 from litwatch.store import failures
 from litwatch.store import papers as papers_store
+from litwatch.writing import READER, VOICE
 
 ROLE = "analyse"
 # The Gist asked for is 20–30 words. The accepted range is a guard against a broken answer (a
@@ -33,14 +34,14 @@ SYSTEM = f"""\
 You read the title and abstract of one arXiv paper and describe it for litwatch, which reads \
 every new paper in a field. Answer with the structured output only.
 
-Write about the paper, never to a reader: no "you", no audience ("for practitioners", "for \
-anyone building agents"), and no advice on whether to read it ("must read", "worth reading"). \
-State what the paper does and finds, in its own terms. Do not hype and do not hedge.
+{VOICE}
+
+{READER}
 
 gist: what the paper does and its main result, in one or two short sentences of 20 to 30 words \
 in all. 30 words is a hard limit: count the words before answering, and cut detail rather than \
-go over. It is about the paper, not about any area or topic. Do not start with "This paper" and \
-do not repeat the title.
+go over; a name the reader cannot know is the first detail to cut. It is about the paper, not \
+about any area or topic. Do not start with "This paper" and do not repeat the title.
 
 contribution: the main kind of contribution the paper makes.
 - method: a new method, model, algorithm or system

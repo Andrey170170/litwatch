@@ -11,6 +11,7 @@ import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain } from "@/api/mutations";
 import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
+import { Prose } from "@/components/Prose";
 import { Sheet } from "@/components/Sheet";
 import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
@@ -539,12 +540,7 @@ export function DigestView({ id }: { id: number }) {
         </div>
       )}
       {d.state === "nothing_new" && <p className="prose faint">Nothing was due for this topic. The run looked and found nothing new.</p>}
-      {d.text?.trim() &&
-        d.text.split(/\n\s*\n/).map((p, i) => (
-          <p key={i} className="prose">
-            {p}
-          </p>
-        ))}
+      {d.text && <Prose text={d.text} />}
       {secs.map((s) => (
         <Fragment key={s.name}>
           <div className="cap">{s.name}</div>

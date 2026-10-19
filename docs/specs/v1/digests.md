@@ -64,8 +64,9 @@ are in the next day's digests.
 ## Writing
 
 One call per digest to the `writer` role, Opus 5.5 by default (first v1, decision 21). The writer reads, per paper,
-its Gist, grade, Fit reason and Brief where one exists, and for a weekly digest the week's daily digests. The voice is
-objective and does not address the reader: no "for you", "for X builders", "required reading". Grades, model names,
+its Gist, grade, Fit reason and Brief where one exists, and for a weekly digest the week's daily digests. It writes in
+litwatch's prose ([pipeline.md](pipeline.md), section 3): objective, never addressing the reader (no "for you", "for X
+builders", "required reading"), and clear to a reader who has not read the papers. Grades, model names,
 splits and other pipeline terms do not appear in digest text.
 
 Topics' digests are written concurrently, each topic on its own database connection and in its own order (its failed digests tried again, the day's

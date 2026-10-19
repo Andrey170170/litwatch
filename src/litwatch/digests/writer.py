@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from litwatch import writing
 from litwatch.core import Depth, Topic
 from litwatch.core.digests import WEEKLY_PICKS
 from litwatch.llm import Request
@@ -26,10 +27,11 @@ MAX_PAPERS = 150
 GIST_WORDS = (20, 120)
 TEXT_WORDS = {"focus_day": (15, 220), "area_day": (30, 300), "week": (60, 500)}
 
-VOICE = """\
-Write about the papers and the work, never to a reader: no "you", no audience ("for \
-practitioners", "for anyone building agents"), and no advice on what to read ("required reading", \
-"must read", "worth reading"). State what the papers do and find. Do not hype and do not hedge. \
+VOICE = f"""\
+{writing.VOICE}
+
+{writing.READER}
+
 Each paper comes with litwatch's standing for it in this topic (its grade and how close it is to \
 the topic) and why; use them to judge what matters, and never write them or any other of \
 litwatch's terms (grade, must read, Fit, Weight, rarity, verdict). Name a paper by its title, \
@@ -148,7 +150,7 @@ def _paper(d: Due, day: date | None = None) -> str:
     if d.gist:
         lines.append(f"  Gist: {d.gist}")
     if d.brief:
-        lines.append(f"  Brief: {d.brief}")
+        lines.append(f"  Brief: {' '.join(d.brief.split())}")  # its paragraphs on one line
     elif d.abstract:  # a Focus paper whose Brief is not written yet
         lines.append(f"  Abstract: {d.abstract}")
     return "\n".join(lines)
