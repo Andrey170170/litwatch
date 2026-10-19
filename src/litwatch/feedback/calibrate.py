@@ -15,7 +15,18 @@ from typing import Any, Literal
 import psycopg
 from pydantic import BaseModel
 
-from litwatch.core import Depth, Fit, Grade, Label, LabelOrigin, LabelValue, Status, Weight, grade
+from litwatch.core import (
+    Cause,
+    Depth,
+    Fit,
+    Grade,
+    Label,
+    LabelOrigin,
+    LabelValue,
+    Status,
+    Weight,
+    grade,
+)
 from litwatch.feedback import word
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.analyses import CURRENT_WEIGHT
@@ -199,7 +210,7 @@ async def answer(
         raise LookupError("no such item")
     if item["topic"] not in given.fit and item["answered_at"] is None:
         raise ValueError(f"fit for {item['topic']} is required")
-    async with word.change(conn, item["paper_id"]):
+    async with word.change(conn, item["paper_id"], cause=Cause.OWNER):
         focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
         if unknown := sorted(set(given.fit) - focus):
             raise ValueError(f"not Focus topics: {', '.join(unknown)}")

@@ -7,7 +7,17 @@ import zipfile
 import pytest
 
 from litwatch import events
-from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Opinion, Publication, Verdict
+from litwatch.core import (
+    Cause,
+    Fit,
+    Hand,
+    Label,
+    LabelOrigin,
+    LabelValue,
+    Opinion,
+    Publication,
+    Verdict,
+)
 from litwatch.feedback import word
 from litwatch.integrations import webdav as webdav_mod
 from litwatch.integrations.webdav import WebDav, WebDAVWriter
@@ -70,7 +80,7 @@ async def grade(conn, g: str) -> None:
             opinions={"judge": Opinion(fit=fit, reason="r", model="anthropic:x")},
         ),
     )
-    await word.settle(conn, P.id)
+    await word.settle(conn, P.id, cause=Cause.VERDICT)
 
 
 async def say(conn, value: LabelValue) -> None:

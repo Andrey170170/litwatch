@@ -19,7 +19,7 @@ from litwatch import events
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn
 from litwatch.archive import ArchiveError
-from litwatch.core import SearchFilters, SearchHit, SearchProvider
+from litwatch.core import Cause, SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
@@ -194,7 +194,7 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    async with word.change(c, paper_id):
+    async with word.change(c, paper_id, cause=Cause.OWNER):
         await misses.keep(c, paper_id, fetched)
         pass_id = await deep_passes.request(c, paper_id)
         if pass_id is None:

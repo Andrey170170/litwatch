@@ -13,7 +13,17 @@ from litwatch import events, store
 from litwatch.api import create_app
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
-from litwatch.core import FAILED_RUNS, Fit, Hand, Label, LabelOrigin, LabelValue, Status, Verdict
+from litwatch.core import (
+    FAILED_RUNS,
+    Cause,
+    Fit,
+    Hand,
+    Label,
+    LabelOrigin,
+    LabelValue,
+    Status,
+    Verdict,
+)
 from litwatch.core.fulltext import (
     FOCUS,
     PICK,
@@ -97,7 +107,7 @@ async def grade(conn, fit: Fit, pid: str = P.id) -> None:
             opinions={},
         ),
     )
-    await word.settle(conn, pid)
+    await word.settle(conn, pid, cause=Cause.VERDICT)
 
 
 async def deep_rows(conn, pid: str = P.id) -> list[dict]:
@@ -151,7 +161,7 @@ async def test_a_saved_focus_must_read_gets_one_deep_pass_and_unsave_or_a_pause_
     await grade(db, Fit.CENTRAL)  # must read, and so saved
     (row,) = await deep_rows(db)
     assert (row["reason"], row["state"], row["priority"]) == ("focus", "awaiting_text", 1)
-    await word.settle(db, P.id)
+    await word.settle(db, P.id, cause=Cause.VERDICT)
     assert len(await deep_rows(db)) == 1  # one open per paper
 
     await word.toggle(db, P.id, Hand.UNSAVE)
@@ -198,7 +208,9 @@ async def test_a_must_read_whose_settle_was_missed_gets_its_pass_on_the_nightly_
         ),
     )  # and no settle
     assert await deep_rows(db) == []
-    await word.settle_all(db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK))
+    await word.settle_all(
+        db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
+    )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
 
 
@@ -218,7 +230,9 @@ async def test_a_missed_settle_is_swept_up_though_the_paper_has_its_brief(db):
             opinions={},
         ),
     )  # and no settle
-    await word.settle_all(db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK))
+    await word.settle_all(
+        db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
+    )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
 
 
@@ -235,7 +249,9 @@ async def test_a_missed_settle_of_an_unsure_label_is_swept_up(db):
     assert await deep_rows(db) == []
     unsure = said.model_copy(update={"value": LabelValue.UNSURE})
     await feedback_store.set_label(db, unsure)  # the central verdict counts again; no settle
-    await word.settle_all(db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK))
+    await word.settle_all(
+        db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
+    )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
 
 
@@ -265,7 +281,7 @@ async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db):
     ready = await outbox_of(db, events.CARD_READY)
     assert ready == [{"paper": P.id, "model": "deep-model", "pass_id": row["id"]}]
 
-    await word.settle(db, P.id)  # a card is remade only on request
+    await word.settle(db, P.id, cause=Cause.VERDICT)  # a card is remade only on request
     assert len(await deep_rows(db)) == 1
 
 
@@ -476,7 +492,9 @@ async def test_a_card_says_the_revision_it_read_and_is_remade_only_on_request(db
     d = make(fake)
     await work(db, with_text(P), d)
     rewrite = P.model_copy(update={"version": 3, "title": "Entirely different words now"})
-    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).rewritten)
+    await word.settle_all(
+        db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+    )
     assert [r["state"] for r in await deep_rows(db)] == ["done"]  # nothing new by itself
     assert (await cards.card(db, P.id))["revision"] == 1
 
@@ -547,7 +565,7 @@ async def test_an_area_pick_gets_its_deep_card_when_its_digest_is_published_and_
     (sent,) = fake.requests
     assert [s["name"] for s in sent["selections"]] == ["Interpretability"]
     assert [a["automatic"] for a in await attempts(db)] == [True]
-    await word.settle(db, P.id)  # a card already made is not made again
+    await word.settle(db, P.id, cause=Cause.VERDICT)  # a card already made is not made again
     assert [r["state"] for r in await deep_rows(db)] == ["done"]
 
 
@@ -606,7 +624,9 @@ async def test_an_unsave_a_pause_or_a_rewrite_drops_a_pick_pass_not_started(db):
 
     # A rewrite: the pick judged text that no longer exists.
     rewrite = P.model_copy(update={"version": 3, "title": "Entirely different words now"})
-    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).rewritten)
+    await word.settle_all(
+        db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+    )
     assert await deep_rows(db) == []
 
 
@@ -623,7 +643,7 @@ async def test_a_dismissed_pick_is_never_worked(db):
 async def test_a_pick_pass_once_for_a_focus_must_read_says_it_is_for_the_pick(db):
     await picked(db)
     await db.execute("UPDATE fulltext_passes SET reason = 'focus' WHERE kind = 'deep'")
-    await word.settle(db, P.id)
+    await word.settle(db, P.id, cause=Cause.VERDICT)
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
 
@@ -704,7 +724,7 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
         "primary_class, model) VALUES (%s, 1, 'x', 'interpretability', 'm')",
         (Q.id,),
     )
-    await word.settle(db, Q.id)  # in the collection now, with a rarity
+    await word.settle(db, Q.id, cause=Cause.VERDICT)  # in the collection now, with a rarity
     _, bare = client(db, [])
     async with bare:
         page = (await bare.get(f"/api/papers/{P.id}")).json()

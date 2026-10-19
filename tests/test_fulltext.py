@@ -15,6 +15,7 @@ from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import (
     FAILED_RUNS,
     Analysis,
+    Cause,
     Contribution,
     Facets,
     Fit,
@@ -123,7 +124,7 @@ async def graded(conn, fit: str, topic: str = FAITH.slug) -> None:
             paper_id=P.id, topic=topic, topic_version="v", fit=Fit(fit), reason="r", opinions={}
         ),
     )
-    await word.settle(conn, P.id)
+    await word.settle(conn, P.id, cause=Cause.VERDICT)
 
 
 async def analysed(conn, weight: str, paper_id: str = P.id) -> None:
@@ -137,7 +138,7 @@ async def analysed(conn, weight: str, paper_id: str = P.id) -> None:
     )
     current = await papers_store.get(conn, paper_id)
     await analyses_store.add(conn, current, "interpretability", found, "m")
-    await word.settle(conn, paper_id)
+    await word.settle(conn, paper_id, cause=Cause.VERDICT)
 
 
 async def passes(conn) -> list[dict]:
@@ -534,7 +535,9 @@ async def test_a_pass_whose_paper_was_rewritten_after_its_claim_is_dropped_unrea
 
     async def claim_then_rewrite(conn, *args, **kwargs):
         claimed = await claim(conn, *args, **kwargs)
-        await word.settle_all(conn, (await papers_store.upsert(conn, [rewrite])).rewritten)
+        await word.settle_all(
+            conn, (await papers_store.upsert(conn, [rewrite])).rewritten, cause=Cause.VERDICT
+        )
         return claimed
 
     monkeypatch.setattr(fulltext_store, "claim", claim_then_rewrite)
@@ -634,7 +637,7 @@ async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db):
         opinions={},
     )
     await verdicts.add(db, found)
-    await word.settle(db, other.id)
+    await word.settle(db, other.id, cause=Cause.VERDICT)
     fake = FakeArchive(status="pending")
     assert await work(db, fake, Writer(), limit=1) == {"awaiting_text": 1}
     assert await work(db, fake, Writer(), limit=1) == {"awaiting_text": 1}
@@ -655,7 +658,7 @@ async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(db, monkeyp
             opinions={},
         )
         await verdicts.add(db, found)
-        await word.settle(db, other.id)
+        await word.settle(db, other.id, cause=Cause.VERDICT)
 
     class Fetching(FakeArchive):
         def handle(self, req):
@@ -702,7 +705,7 @@ async def test_a_new_version_with_the_same_text_is_answered_from_the_journal(db,
     writer = Writer()
     await work(db, ready(FakeArchive()), writer)
     await papers_store.upsert(db, [P.model_copy(update={"version": 2})])
-    await word.settle_all(db, await fulltext_store.outdated(db))
+    await word.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
     fake = FakeArchive()
     fake.texts[P.id] = (2, BODY + " Revised." if changed else BODY)
     await work(db, fake, writer)
@@ -721,13 +724,13 @@ async def test_a_new_update_of_unknown_version_is_read_again_once(db):
     later = P.model_copy(update={"version": None, "updated": "2026-10-20T00:00:00+00:00"})
     assert (await papers_store.upsert(db, [later])).rewritten == []
     assert await fulltext_store.outdated(db) == [P.id]
-    await word.settle_all(db, await fulltext_store.outdated(db))
+    await word.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
     assert [r["state"] for r in await passes(db)] == ["done", "awaiting_text"]
     fake = FakeArchive()
     fake.texts[P.id] = (None, BODY)  # the archive cannot say either: its historical LaTeX
     assert await work(db, fake, Writer()) == {"briefs_written": 1}
     assert await fulltext_store.outdated(db) == []  # once, not again
-    await word.settle(db, P.id)
+    await word.settle(db, P.id, cause=Cause.VERDICT)
     assert len(await passes(db)) == 2
     # The archive then says which version it was: the version the first pass read, not the
     # one the last pass read, which is unknown, so it is read again.
@@ -740,7 +743,9 @@ async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revisi
     await graded(db, "central")
     (claimed,) = await fulltext_store.claim(db, LEASE)
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
-    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).rewritten)
+    await word.settle_all(
+        db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+    )
     # The running pass is kept; the old verdict still stands, so revision 2 has one queued.
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [
         (1, "running"),
@@ -768,7 +773,7 @@ async def test_a_rewrite_whose_settle_was_cut_short_is_settled_by_the_nightly_sw
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
     assert (await papers_store.upsert(db, [rewrite])).rewritten == [P.id]  # and no settle
     assert await fulltext_store.outdated(db) == [P.id]
-    await word.settle_all(db, await fulltext_store.outdated(db))
+    await word.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
     assert await fulltext_store.outdated(db) == []
 
@@ -803,7 +808,9 @@ async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(
 async def test_a_pass_not_started_before_a_rewrite_is_dropped(db):
     await graded(db, "central")
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
-    await word.settle_all(db, (await papers_store.upsert(db, [rewrite])).rewritten)
+    await word.settle_all(
+        db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+    )
     # The pass for revision 1 is gone; the old verdict still stands, so revision 2 has one.
     (row,) = await passes(db)
     assert row["paper_revision"] == 2

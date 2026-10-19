@@ -71,6 +71,8 @@ async def test_a_focus_topic_is_graded_by_both_labs_and_the_more_inclusive_fit_s
         "check": "adjacent",
     }
     assert v["opinions"]["check"]["model"] == "openrouter:test/check"
+    (moved,) = await rows(conn, "SELECT payload FROM outbox WHERE type = 'grade.changed'")
+    assert (moved["payload"]["after"], moved["payload"]["cause"]) == ("must_read", "verdict")
     (event,) = await rows(conn, "SELECT payload FROM outbox WHERE type = 'verdict.recorded'")
     assert event["payload"] == {
         "topic": FAITH.slug,

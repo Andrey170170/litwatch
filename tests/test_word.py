@@ -5,6 +5,7 @@ import pytest
 
 from litwatch.core import (
     Analysis,
+    Cause,
     Contribution,
     Depth,
     Facets,
@@ -88,7 +89,7 @@ async def graded(conn, fit: str, topic=FAITH.slug) -> None:
             opinions={},
         ),
     )
-    await word.settle(conn, P.id)
+    await word.settle(conn, P.id, cause=Cause.VERDICT)
 
 
 async def weighed(conn, weight: Weight) -> None:
@@ -102,7 +103,7 @@ async def weighed(conn, weight: Weight) -> None:
     )
     current = await papers_store.get(conn, P.id)
     await analyses_store.add(conn, current, "other", analysis, "m")
-    await word.settle(conn, P.id)
+    await word.settle(conn, P.id, cause=Cause.VERDICT)
 
 
 async def outbox(conn) -> list[tuple[str, dict]]:
@@ -125,6 +126,7 @@ async def test_a_central_verdict_saves_the_paper_and_says_so(db):
                 "after": "must_read",  # no Weight yet: solid
                 "fit_before": None,
                 "fit_after": "central",
+                "cause": "verdict",
             },
         ),
         ("paper.saved", {}),
@@ -132,13 +134,13 @@ async def test_a_central_verdict_saves_the_paper_and_says_so(db):
     (row,) = await stored(db, "effective_grades")
     assert (row["fit"], row["grade"], row["rarity"]) == ("central", "must_read", "epic")
     # Settling again changes nothing and says nothing.
-    await word.settle(db, P.id)
+    await word.settle(db, P.id, cause=Cause.VERDICT)
     assert len(await outbox(db)) == 2
 
 
 async def test_weight_moves_the_grade_and_the_rarity(db):
     await graded(db, "related")
-    assert (await word.settle(db, P.id)).saved  # related and solid: relevant
+    assert (await word.settle(db, P.id, cause=Cause.VERDICT)).saved  # related and solid: relevant
     await weighed(db, Weight.INCREMENTAL)
     (row,) = await stored(db, "effective_grades")
     assert (row["grade"], row["rarity"]) == ("adjacent", "uncommon")
@@ -177,19 +179,19 @@ async def test_a_rewrite_drops_the_old_weight_until_the_new_text_is_analysed(db)
     rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
     await papers_store.upsert(db, [rewritten])
     assert (await papers_store.get(db, P.id)).revision == 2
-    await word.settle(db, P.id)
+    await word.settle(db, P.id, cause=Cause.VERDICT)
     (row,) = await stored(db, "effective_grades")
     # The old verdict stands until the new text is graded, but its Weight went with the text.
     assert (row["fit"], row["grade"]) == ("related", "relevant")
 
 
 async def test_only_a_paper_in_the_collection_has_a_rarity(db):
-    await word.settle(db, P.id)
+    await word.settle(db, P.id, cause=Cause.VERDICT)
     (rarity,) = await stored(db, "rarities")  # classified, nothing else: solid's floor
     assert (rarity["level"], rarity["best_topic"]) == ("uncommon", None)
     unprocessed = paper("2610.00009")
     await papers_store.upsert(db, [unprocessed])
-    await word.settle(db, unprocessed.id)
+    await word.settle(db, unprocessed.id, cause=Cause.VERDICT)
     assert [r["paper_id"] for r in await stored(db, "rarities")] == [P.id]
 
 
@@ -267,7 +269,7 @@ async def test_unsave_holds_against_a_later_regrade_until_saved_again(db):
     settled = (await word.toggle(db, P.id, Hand.UNSAVE)).settled[P.id]
     assert (settled.was_saved, settled.saved) == (True, False)
     await graded(db, "central")
-    assert (await word.settle(db, P.id)).saved is False
+    assert (await word.settle(db, P.id, cause=Cause.VERDICT)).saved is False
     assert (await word.toggle(db, P.id, Hand.SAVE)).settled[P.id].saved is True
     types = [t for t, _ in await outbox(db)]
     assert types.count("paper.saved") == 2 and types.count("paper.unsaved") == 1
@@ -312,7 +314,7 @@ def central() -> Verdict:
 
 async def test_a_change_settles_its_papers_at_its_end_even_after_an_early_return(db):
     async def leaves_early():
-        async with word.change(db, P.id) as change:
+        async with word.change(db, P.id, cause=Cause.OWNER) as change:
             await verdicts.add(db, central())  # written, not settled
             assert await stored(db, "effective_grades") == []
             return change
@@ -324,7 +326,7 @@ async def test_a_change_settles_its_papers_at_its_end_even_after_an_early_return
 
 async def test_a_change_that_fails_rolls_back_unsettled(db):
     with pytest.raises(RuntimeError, match="the action failed"):
-        async with word.change(db, P.id):
+        async with word.change(db, P.id, cause=Cause.OWNER):
             await verdicts.add(db, central())
             raise RuntimeError("the action failed")
     assert await stored(db, "verdicts") == [] and await outbox(db) == []
@@ -334,7 +336,7 @@ async def test_words_inside_one_change_settle_once_at_its_end(db):
     """Two words that cancel out leave no trace of the step between them."""
     await graded(db, "central")
     before = await outbox(db)
-    async with word.change(db, P.id) as change:
+    async with word.change(db, P.id, cause=Cause.OWNER) as change:
         _, inner = await word.react(db, thumb("wrong_topic"))  # alone, it would unsave
         assert inner is change and change.settled == {}
         await word.label(db, said("central"))
@@ -349,7 +351,7 @@ async def test_a_rewrite_stored_inside_a_change_is_settled_once_by_it(db):
     await graded(db, "related")  # related and incremental: adjacent, not saved
     before = await outbox(db)
     rewrite = P.model_copy(update={"abstract": "An entirely different abstract."})
-    async with word.change(db, P.id) as change:
+    async with word.change(db, P.id, cause=Cause.OWNER) as change:
         assert (await batch.store(db, [rewrite], source="arxiv")).rewritten == [P.id]
         await word.label(db, said("central"))
     after = [e for e in await outbox(db) if e not in before]
@@ -360,9 +362,9 @@ async def test_a_rewrite_stored_inside_a_change_is_settled_once_by_it(db):
 
 async def test_a_nested_change_names_only_papers_the_outer_one_locked(db):
     other = paper("2610.00002")
-    async with word.change(db, P.id):
+    async with word.change(db, P.id, cause=Cause.OWNER):
         with pytest.raises(RuntimeError, match="did not lock"):
-            async with word.change(db, P.id, other.id):
+            async with word.change(db, P.id, other.id, cause=Cause.OWNER):
                 pass
 
 
@@ -379,3 +381,51 @@ async def test_a_topic_no_longer_followed_at_focus_leaves_the_library(db, unfoll
     if unfollow:
         _, after = (await outbox(db))[-2]  # the grade's event, then the unsave
         assert (after["topic"], after["before"], after["after"]) == (FAITH.slug, "relevant", None)
+
+
+async def causes(conn) -> list[str]:
+    return [e["cause"] for t, e in await outbox(conn) if t == "grade.changed"]
+
+
+async def test_grade_changed_says_what_changed_the_grade(db):
+    """`verdict` for a new verdict, `weight` when only the Weight moved the grade (the Fit
+    stayed), `owner` for the owner's word and for taking it back, though the grade it leaves
+    is the verdict's."""
+    await graded(db, "related")
+    await weighed(db, Weight.INCREMENTAL)  # still related: relevant, then adjacent
+    await graded(db, "central")
+    await word.label(db, said("related"))
+    await word.unlabel(db, P.id, FAITH.slug)  # back to the verdict's central
+    await word.react(db, thumb("wrong_topic"))
+    assert await causes(db) == ["verdict", "weight", "verdict", "owner", "owner", "owner"]
+
+
+async def test_a_topic_edit_is_the_cause_of_the_grades_it_moves(db):
+    await graded(db, "related")
+    await word.save_taxonomy(db, TREE.model_copy(update={"topics": [INTERP]}))  # unfollowed
+    assert await causes(db) == ["verdict", "taxonomy"]
+
+
+async def test_a_nested_change_settles_for_the_outer_cause(db):
+    await graded(db, "related")
+    async with word.change(db, P.id, cause=Cause.VERDICT):
+        await word.label(db, said("central"))
+    assert await causes(db) == ["verdict", "verdict"]
+
+
+async def test_the_owners_word_stays_the_cause_when_the_fit_does_not_move(db):
+    """A label that agrees with the verdict still moves the grade (the owner's word outweighs
+    the Weight), and it is the owner's, not the Weight's."""
+    await weighed(db, Weight.INCREMENTAL)
+    await graded(db, "related")  # related and incremental: adjacent
+    await word.label(db, said("related"))
+    await word.unlabel(db, P.id, FAITH.slug)
+    moves = [
+        (e["fit_before"], e["fit_after"], e["after"], e["cause"])
+        for t, e in await outbox(db)
+        if t == "grade.changed"
+    ][1:]
+    assert moves == [
+        ("related", "related", "relevant", "owner"),
+        ("related", "related", "adjacent", "owner"),
+    ]

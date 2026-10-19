@@ -481,7 +481,7 @@ async def test_a_correction_that_cannot_settle_is_not_kept(client, conn, monkeyp
     """The new text and the grades without the old text's Weight are stored together, so a
     failed settle leaves the old text current and the correction can be made again."""
 
-    async def broken(*_):
+    async def broken(*_, **__):
         raise RuntimeError("settle failed")
 
     monkeypatch.setattr(settings_api.word, "settle", broken)

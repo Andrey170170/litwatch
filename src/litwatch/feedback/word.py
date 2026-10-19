@@ -3,7 +3,8 @@
 Every change that can move a paper (a verdict, a Weight, a label, a thumb, the Save toggle, an
 edit of the followed topics, a new arXiv version) ends in `settle`, which recomputes the paper's
 effective Fit and grade per followed topic, its rarity and whether it is in the library, stores
-them, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the same transaction. It
+them, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the same transaction.
+Whoever settles names the `Cause`, which `grade.changed` carries. It
 also queues the paper's full-text passes when it qualifies for them (its Brief or Weight
 re-check, its Deep card), so the owner's word can queue one too, and drops one not started that
 it no longer qualifies for.
@@ -25,6 +26,7 @@ import psycopg
 
 from litwatch import events
 from litwatch.core import (
+    Cause,
     Depth,
     Effective,
     Fit,
@@ -102,15 +104,18 @@ _open: weakref.WeakKeyDictionary[psycopg.AsyncConnection, Change] = weakref.Weak
 
 
 @asynccontextmanager
-async def change(conn: psycopg.AsyncConnection, *paper_ids: str) -> AsyncIterator[Change]:
+async def change(
+    conn: psycopg.AsyncConnection, *paper_ids: str, cause: Cause
+) -> AsyncIterator[Change]:
     """Change the papers in one transaction: their locks first (`lock_many`), then the block's
-    checks and writes, then a settle of each paper, in id order, before commit. The block may
-    return early with nothing to record: the papers are settled all the same, which changes
-    nothing then. An exception rolls the change back, unsettled.
+    checks and writes, then a settle of each paper, in id order, before commit, for `cause`. The
+    block may return early with nothing to record: the papers are settled all the same, which
+    changes nothing then. An exception rolls the change back, unsettled.
 
     Inside another change on the connection, it joins that one, in a savepoint: the outermost
-    change settles once at its exit, and only then is `settled` filled. A nested change names
-    only papers the outer one locked; a lock taken late would break the order, so it raises.
+    change settles once at its exit, for its own cause, and only then is `settled` filled. A
+    nested change names only papers the outer one locked; a lock taken late would break the
+    order, so it raises.
     """
     outer = _open.get(conn)
     if outer is not None:
@@ -126,7 +131,7 @@ async def change(conn: psycopg.AsyncConnection, *paper_ids: str) -> AsyncIterato
         try:
             yield current
             for paper_id in current.paper_ids:
-                current.settled[paper_id] = await settle(conn, paper_id)
+                current.settled[paper_id] = await settle(conn, paper_id, cause=cause)
         finally:
             del _open[conn]
 
@@ -136,11 +141,13 @@ def _value(e: Effective | None) -> dict[str, str | None]:
 
 
 async def settle(
-    conn: psycopg.AsyncConnection, paper_id: str, *, claimed: int | None = None
+    conn: psycopg.AsyncConnection, paper_id: str, *, cause: Cause, claimed: int | None = None
 ) -> Settled:
     """Recompute and store the paper's effective Fits and grades, its rarity and its library
-    state, with their events, and its text pass. `claimed` is a pass the caller holds and has
-    not worked yet: it is judged as one not started, so it may be dropped or relabelled.
+    state, with their events, and its text pass. `cause` is what changed them, for
+    `grade.changed`; a `verdict` that left the Fit where it was is reported as `weight`.
+    `claimed` is a pass the caller holds and has not worked yet: it is judged as one not
+    started, so it may be dropped or relabelled.
 
     Settles of one paper are serialized and read only after the lock is held, so the last to
     run sees every committed change and leaves the stored state right.
@@ -179,6 +186,9 @@ async def settle(
             if _value(new) != _value(old):
                 result.grades[topic] = (old.grade if old else None, new.grade if new else None)
                 b, a = _value(old), _value(new)
+                moved = cause
+                if cause == Cause.VERDICT and b["fit"] == a["fit"]:
+                    moved = Cause.WEIGHT
                 await events.emit(
                     conn,
                     events.GRADE_CHANGED,
@@ -188,6 +198,7 @@ async def settle(
                     after=a["grade"],
                     fit_before=b["fit"],
                     fit_after=a["fit"],
+                    cause=moved.value,
                 )
 
         # Rarity, for a paper in the collection: the followed topics' page levels in the owner's
@@ -301,33 +312,33 @@ async def _deep_pass(
 
 
 async def label(conn: psycopg.AsyncConnection, given: Label) -> tuple[Label, Change]:
-    async with change(conn, given.paper_id) as done:
+    async with change(conn, given.paper_id, cause=Cause.OWNER) as done:
         stored = await feedback_store.set_label(conn, given)
     return stored, done
 
 
 async def unlabel(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> Change:
-    async with change(conn, paper_id) as done:
+    async with change(conn, paper_id, cause=Cause.OWNER) as done:
         await feedback_store.delete_label(conn, paper_id, topic)
     return done
 
 
 async def react(conn: psycopg.AsyncConnection, given: Reaction) -> tuple[Reaction, Change]:
-    async with change(conn, given.paper_id) as done:
+    async with change(conn, given.paper_id, cause=Cause.OWNER) as done:
         stored = await word_store.set_reaction(conn, given)
     return stored, done
 
 
 async def unreact(conn: psycopg.AsyncConnection, paper_id: str, topic: str | None) -> Change:
     """Clear a thumb. It takes back its own word and nothing else."""
-    async with change(conn, paper_id) as done:
+    async with change(conn, paper_id, cause=Cause.OWNER) as done:
         await word_store.clear_reaction(conn, paper_id, topic)
     return done
 
 
 async def toggle(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> Change:
     """Save or unsave by hand. The newest use outranks every other reason, until the next."""
-    async with change(conn, paper_id) as done:
+    async with change(conn, paper_id, cause=Cause.OWNER) as done:
         await word_store.set_hand(conn, paper_id, hand)
     return done
 
@@ -364,19 +375,19 @@ async def settle_ties(conn: psycopg.AsyncConnection) -> int:
     the only papers a new order changes. Call it after `taxonomy.lock`."""
     papers = await word_store.tied(conn)
     for paper_id in papers:
-        await settle(conn, paper_id)
+        await settle(conn, paper_id, cause=Cause.TAXONOMY)
     return len(papers)
 
 
-async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
-    """Settle each paper in turn (`settle`), but one a change open on the connection holds: that
-    change settles it at its exit, once (a paper an owner's action fetched and stored inside
-    its change, say)."""
+async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str], *, cause: Cause) -> None:
+    """Settle each paper in turn (`settle`) for `cause`, but one a change open on the
+    connection holds: that change settles it at its exit, once, for its own cause (a paper an
+    owner's action fetched and stored inside its change, say)."""
     outer = _open.get(conn)
     held = set(outer.paper_ids) if outer else set()
     for paper_id in paper_ids:
         if paper_id not in held:
-            await settle(conn, paper_id)
+            await settle(conn, paper_id, cause=cause)
 
 
 async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
@@ -385,17 +396,18 @@ async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
     `taxonomy.lock`."""
     papers = await word_store.topic_papers(conn, slug)
     for paper_id in papers:
-        await settle(conn, paper_id)
+        await settle(conn, paper_id, cause=Cause.TAXONOMY)
     return len(papers)
 
 
 async def sync(conn: psycopg.AsyncConnection) -> dict[str, int]:
     """Settle every paper in the collection or with a verdict, a word or a library row: after
-    anything that wrote verdicts, Weights or labels around `settle`."""
+    anything that wrote verdicts, Weights or labels around `settle`. What it finds changed is
+    reported as the verdict's (a Weight's, when the Fit did not move)."""
     counts = {"papers": 0, "grades_changed": 0, "saved": 0, "unsaved": 0}
     touched = await word_store.touched(conn)
     for paper_id in touched:
-        settled = await settle(conn, paper_id)
+        settled = await settle(conn, paper_id, cause=Cause.VERDICT)
         counts["papers"] += 1
         if counts["papers"] % SYNC_PROGRESS == 0:
             log.info("settled %s of %s papers", counts["papers"], len(touched))

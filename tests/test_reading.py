@@ -10,7 +10,7 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Analysis, Facets, Fit, Opinion, Status, Verdict, Weight
+from litwatch.core import Analysis, Cause, Facets, Fit, Opinion, Status, Verdict, Weight
 from litwatch.core.classification import Membership, Source
 from litwatch.feedback import word
 from litwatch.store import analyses as analyses_store
@@ -49,14 +49,14 @@ async def classify(conn, p, *classes, keyword=()) -> None:
     ]
     found += [Membership(slug=k, source=Source.KEYWORD) for k in keyword]
     await classifications_store.replace(conn, p, found, VERSIONS)
-    await word.settle(conn, p.id)
+    await word.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def analyse(conn, p, weight="solid", *, code=False, gist="Probes find hidden steps.") -> None:
     facets = Facets(contribution="method", releases_code=code, releases_weights=False)
     found = Analysis(gist=gist, weight=Weight(weight), weight_reason="Sound work.", facets=facets)
     await analyses_store.add(conn, p, "other", found, "test")
-    await word.settle(conn, p.id)
+    await word.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) -> None:
@@ -79,7 +79,7 @@ async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) 
             escalated=escalated,
         ),
     )
-    await word.settle(conn, p.id)
+    await word.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def stop(conn, p, step: str, topic: str = "") -> None:
@@ -478,6 +478,12 @@ async def test_a_label_is_a_fit_or_unsure_on_any_topic(client, conn):
     url = f"/api/labels/{INTERP.slug}/{P.id}"
     said = await client.put(url, json={"value": "central"})
     assert said.json() == {"message": None, "saved": False, "grades": {INTERP.slug: "must_read"}}
+    last = await (
+        await conn.execute(
+            "SELECT payload FROM outbox WHERE type = 'grade.changed' ORDER BY id DESC"
+        )
+    ).fetchone()
+    assert last["payload"]["cause"] == "owner"
     topic = await rail()
     assert (topic["word"], topic["fit"], topic["state"]) == ("central", "central", None)
     assert topic["label"] == {"value": "central", "origin": "reader", "provisional": False}

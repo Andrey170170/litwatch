@@ -27,6 +27,7 @@ import psycopg
 
 from litwatch import events, store
 from litwatch.archive import ArchiveClient
+from litwatch.core import Cause
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
 from litwatch.fulltext import TICK_SECONDS, judged, read, record, still_wanted
@@ -43,7 +44,7 @@ async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
     included ("Write again"): their request takes over the open Deep pass or queues one, with
     `card.requested`, under the paper's lock. Returns the pass's id; None for a paper that is
     not there or dismissed, whose passes are never worked."""
-    async with word.change(conn, paper_id):
+    async with word.change(conn, paper_id, cause=Cause.OWNER):
         found = await store_.deep_facts(conn, paper_id)
         if found is None or found.dismissed:
             return None
@@ -105,7 +106,7 @@ async def _work_one(
             await record(conn, a)
             return "awaiting_text" if a.waiting else "card_failed"
         text = TextRead(a.text.version, a.text.source, a.text.sha256)
-        async with word.change(conn, c.paper.id):
+        async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
             # Under the paper's lock, judged again as at its claim: the paper may have been
             # dismissed or unsaved during the read, and nothing is spent then. The owner's
             # request may have taken the pass over since its claim, and then the submission and
@@ -136,7 +137,7 @@ async def _work_one(
         return await _ended(
             conn, c, attempt["id"], outcome.usage, outcome.error or "no card", outcome.trace
         )
-    async with word.change(conn, c.paper.id):
+    async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
         if not await store_.held(conn, c):
             return "lost"
         revision, text = await store_.read_of(conn, c.id)
@@ -177,7 +178,7 @@ async def _ended(
     """An attempt that made no card: its usage (None, unknown) and the error, and the pass
     failed for this run, a run that counts."""
     log.warning("%s: deep card failed: %s", c.paper.id, error)
-    async with word.change(conn, c.paper.id):
+    async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
         await cards.attempt_ended(conn, attempt_id, usage, error)
         if not await store_.held(conn, c):
             return "lost"

@@ -17,6 +17,7 @@ from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, budget_lines, set_token_cookie, token_ok
 from litwatch.archive import ArchiveError
 from litwatch.core import (
+    Cause,
     Depth,
     Effective,
     Hand,
@@ -740,7 +741,7 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    async with word.change(c, paper_id) as change:
+    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
         await _known(c, paper_id)
         name, topic = await _topic(c, body.topic) if body.topic else (None, None)
         await word_store.set_reaction(c, reaction)
@@ -756,7 +757,7 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
 async def unreact(paper_id: str, c: Conn, topic: str | None = None) -> s.Ack:
     """Clear a thumb: it takes back its own word and nothing else. A thumb on a topic no longer
     shown can be cleared too; it carried no word, so nothing is said."""
-    async with word.change(c, paper_id) as change:
+    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
         thumbs = await word_store.reactions_for(c, paper_id)
         thumb = next((r for r in thumbs if r.topic == topic), None)
         shown = await _shown(c, topic) if thumb and topic else None
@@ -770,7 +771,7 @@ async def unreact(paper_id: str, c: Conn, topic: str | None = None) -> s.Ack:
 @router.put("/library/{paper_id:path}", responses=NOT_FOUND)
 async def save(paper_id: str, body: s.SaveIn, c: Conn) -> s.Ack:
     """Save or unsave by hand; the newest use outranks every other reason."""
-    async with word.change(c, paper_id) as change:
+    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
         await _known(c, paper_id)
         await word_store.set_hand(c, paper_id, Hand.SAVE if body.saved else Hand.UNSAVE)
     return _ack(change.settled[paper_id])
@@ -781,7 +782,7 @@ async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn) -> s.Ack:
     """The Fit control on a paper's page: the owner's own word on any shown topic (origin
     `reader`). Unsure is stored and counts nowhere."""
     given = Label(paper_id=paper_id, topic=topic, value=body.value, origin=LabelOrigin.READER)
-    async with word.change(c, paper_id) as change:
+    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
         await _topic(c, topic)
         await _known(c, paper_id)
         await feedback_store.set_label(c, given)
@@ -807,7 +808,7 @@ async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    async with word.change(c, paper_id) as change:
+    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
         name, topic = await _topic(c, body.topic)
         if topic.depth != Depth.FOCUS:
             raise HTTPException(status_code=409, detail="not a Focus topic")

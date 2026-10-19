@@ -16,7 +16,7 @@ import psycopg
 
 from litwatch import analysis, classification, digests, fulltext, grading, intake
 from litwatch.config import Config
-from litwatch.core import FAILED_RUNS
+from litwatch.core import FAILED_RUNS, Cause
 from litwatch.core.fulltext import LEASE, RECONCILE_LOOKBACK
 from litwatch.feedback import word
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
@@ -96,7 +96,7 @@ async def text_passes(
     # Only one nightly runs at a time, so a lease longer than a worker's is a dead run's.
     run.add("fulltext_taken_back", await fulltext_store.take_back(conn, LEASE))
     reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK)
-    await word.settle_all(conn, reconciled)
+    await word.settle_all(conn, reconciled, cause=Cause.VERDICT)
     run.add("fulltext_reconciled", len(reconciled))
     run.add("fulltext_retried", await fulltext_store.retry_failed(conn, FAILED_RUNS))
     archive = fulltext.archive_for(config)

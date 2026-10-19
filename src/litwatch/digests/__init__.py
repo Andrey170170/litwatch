@@ -19,7 +19,7 @@ from datetime import date, timedelta
 import psycopg
 
 from litwatch import store
-from litwatch.core import FAILED_RUNS, Depth, Rarity, Status, Taxonomy, Topic
+from litwatch.core import FAILED_RUNS, Cause, Depth, Rarity, Status, Taxonomy, Topic
 from litwatch.core.digests import DAILY, PUBLISHED, DigestPeriod, DigestRole, DigestState
 from litwatch.digests import writer
 from litwatch.feedback import word
@@ -146,7 +146,7 @@ async def write(
         return None
     o = await compose(conn, run, tree, topic, period, day)
     picks = {s.due.paper_id for s in o.papers if s.role == DigestRole.PICK}
-    async with word.change(conn, *picks):  # locked together, in id order
+    async with word.change(conn, *picks, cause=Cause.VERDICT):  # locked together, in id order
         if await store_.record(conn, o, run.run_id) is None:
             return None
     if o.error:

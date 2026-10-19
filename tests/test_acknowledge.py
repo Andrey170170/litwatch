@@ -10,7 +10,7 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import FAILED_RUNS, Fit, Verdict
+from litwatch.core import FAILED_RUNS, Cause, Fit, Verdict
 from litwatch.core.digests import DigestPeriod, DigestState
 from litwatch.feedback import word
 from litwatch.store import digests as digests_store
@@ -69,7 +69,7 @@ async def stop_pass(conn) -> int:
         opinions={},
     )  # fmt: skip
     await verdicts.add(conn, central)
-    await word.settle(conn, R.id)
+    await word.settle(conn, R.id, cause=Cause.VERDICT)
     (row,) = await (
         await conn.execute("SELECT id FROM fulltext_passes WHERE kind = 'brief'")
     ).fetchall()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import psycopg
 
-from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Paper
+from litwatch.core import Cause, Fit, Hand, Label, LabelOrigin, LabelValue, Paper
 from litwatch.core.classification import Source
 from litwatch.feedback import word
 from litwatch.feedback.word import Change
@@ -81,7 +81,7 @@ async def report(
     )
     # The paper's lock first, so looking for a standing label and giving the word again are one
     # step against any label being written meanwhile.
-    async with word.change(conn, paper_id) as done:
+    async with word.change(conn, paper_id, cause=Cause.OWNER) as done:
         row = await (
             await conn.execute(
                 "INSERT INTO misses (paper_id, topic) VALUES (%s, %s) "

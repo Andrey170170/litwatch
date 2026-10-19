@@ -3,6 +3,7 @@
 import pytest
 
 from litwatch.core import (
+    Cause,
     Depth,
     Fit,
     Label,
@@ -31,7 +32,7 @@ async def db(conn):
     await papers_store.upsert(conn, ABOVE + BELOW)
     for p, fit in [(p, "related") for p in ABOVE] + [(p, "none") for p in BELOW]:
         await verdicts.add(conn, verdict(p.id, Fit(fit)))
-        await word.settle(conn, p.id)
+        await word.settle(conn, p.id, cause=Cause.VERDICT)
     return conn
 
 
