@@ -504,6 +504,19 @@ async def awaiting(client) -> list[str]:
     return [r["paper_id"] for r in quality["night"]["awaiting_classification"]]
 
 
+async def test_a_classifier_refusal_stops_at_once(conn, models):
+    # The decision roles have no fallbacks (models.md, roles): its model refusing is every model.
+    classify = CONFIG.models.classify.model
+    models.said[(classify, A.title)] = refusal(classify)
+    await night(conn, models)
+    (stuck,) = await failures.stuck(conn, "classification", FAILED_RUNS)  # after one night
+    assert (stuck["paper_id"], stuck["refused"], stuck["stopped_by_refusal"]) == (
+        A.id,
+        ["classify"],
+        True,
+    )
+
+
 async def test_a_paper_awaiting_classification_is_counted_and_listed(client):
     status = (await client.get("/api/status")).json()
     assert status["state"] == "attention" and status["awaiting_classification"] == 1

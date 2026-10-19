@@ -21,7 +21,7 @@ const KIND = {
   split: { name: "Focus splits", line: "Judge and check disagree. The more inclusive Fit stands until it is labelled." },
   one_lab: { name: "Graded by one lab", line: "One grader's lab refused the paper throughout and only the other answered. Its Fit stands until it is labelled." },
   escalated: { name: "Area escalations", line: "The check disagreed with the judge. The less inclusive Fit stands until it is labelled." },
-  awaiting: { name: "Awaiting classification", line: "Classification failed three runs; the paper is in no class.", step: "Classification" },
+  awaiting: { name: "Awaiting classification", line: "Classification failed three runs or the classifier refused it; the paper is in no class.", step: "Classification" },
   ungraded: { name: "Ungraded", line: "Grading failed three runs or every model refused it; the paper shows ungraded on its topic.", step: "Grading" },
   analysis: { name: "Analysis", line: "Analysis failed three runs or every model refused it; the paper has no Gist or Weight and shows its title alone.", step: "Analysis" },
   fulltext: { name: "Full text", line: "A full-text pass failed three runs, every model refused it, or it has waited for its text over a week; the abstract stands in for the Brief." },

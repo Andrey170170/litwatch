@@ -154,7 +154,7 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
       return (
         <div className="note fail">
           <div>
-            <b>Awaiting classification:</b> it failed three runs in a row, so nothing after it has run.
+            <b>Awaiting classification:</b> {state.refused ? "the classifier refused it" : "it failed three runs in a row"}, so nothing after it has run.
             {state.error && <div className="err">{state.error}</div>}
           </div>
           {form === "classes" ? (

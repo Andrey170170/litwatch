@@ -87,6 +87,7 @@ class Classification:
     # The model answered and the answer could not be used: a failed run toward awaiting
     # classification. Any other error (a timeout, a provider down) is retried without counting.
     unusable: bool = False
+    refused: bool = False  # the classifier refused: its role has no other model, so it stops
 
 
 async def _one(
@@ -101,6 +102,7 @@ async def _one(
         # Every question answered, every probability in [0, 1], the choice a class of the tree:
         # anything less is a failed call (pipeline.md, section 2).
         found.error, found.usage, found.unusable = str(exc), exc.usage, exc.unusable
+        found.refused = exc.kind == "refused"
         return found
     found.classified = classified(tree, answer.value)
     found.memberships = memberships(tree, found.classified, paper.title, paper.abstract, thresholds)
@@ -152,7 +154,15 @@ async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
             return False
         if c.error is not None or c.classified is None or c.model is None:
             error = c.error or "no answer"
-            await failures.failed(conn, c.paper, "classification", error, counts=c.unusable)
+            await failures.failed(
+                conn,
+                c.paper,
+                "classification",
+                error,
+                counts=c.unusable,
+                refused=[ROLE] if c.refused else [],
+                stops=c.refused,
+            )
             return True
         primary = c.classified.primary
         await store.add(conn, c.paper, c.taxonomy_revision, primary, c.response, c.model)

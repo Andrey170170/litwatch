@@ -48,9 +48,10 @@ starts from the model that gave it, so an unchanged question costs nothing after
 
 ## The gateway
 
-Carried from the first v1: `Gateway.complete(role, request, *, paper_id)` resolves the role to a provider, model and
-effort, applies retries and the timeout, journals the call with its cost, and reuses an identical earlier call
-(identical includes the resolved provider, model, effort and routing, so `judge` and `check` never share a reply).
+Carried from the first v1: `Gateway.ask(role, request, *, paper_id)` resolves the role to its list of models (above),
+each a provider, model and effort; for each it applies retries and the timeout, journals the call with its cost, and
+reuses an identical earlier call (identical includes the resolved provider, model, effort and routing, so `judge` and
+`check` never share a reply).
 Providers: `anthropic` (prompt caching, cost from a price table) and `openrouter`.
 
 A provider's 401, 402 or 403 is an **`account` error** (a key revoked, credits used up, access withdrawn), in normal

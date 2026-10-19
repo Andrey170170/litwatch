@@ -168,9 +168,10 @@ model = "claude-haiku-5-5"
 provider = "anthropic"
 model = "claude-sonnet-5-5"
 effort = "high"
-fallbacks = [              # asked in order on refusals and unusable answers (models.md, roles); shown
-                           # here for brief only: every role that writes has its list, possibly empty
-                           # (field_grade's), the defaults chosen by the failure-handling replay
+fallbacks = [              # asked in order on refusals and unusable answers (models.md, roles). A
+                           # role written here replaces its default, list included, so the other
+                           # roles above, as written, have none; leave a role out to keep its
+                           # default list (the failure-handling replay's; field_grade's is empty)
   { provider = "openrouter", model = "openai/gpt-6.1-sol", effort = "high" },
 ]
 
