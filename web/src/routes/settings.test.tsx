@@ -449,11 +449,13 @@ describe("Settings", () => {
     expect(screen.getByRole("button", { name: "Acknowledge all" })).toBeInTheDocument();
   });
 
-  it("lists a grade from one lab in its own group, naming the side that refused, and says what every model refused", async () => {
+  it("lists a grade from one lab in its own group, naming the side that refused, and says what every model refused, or what stopped it", async () => {
     viewport(true);
     const oneLab = { ...split, paper_id: "2610.00009", title: "A one-lab paper", fit: "central", split: false, one_lab: true, opinions: { check: { fit: "central", reason: "b" } } };
-    const refused = { ...stuck, topic: "mi", refused: ["check", "judge"] };
-    const night = { ...quality.night, splits: [split, oneLab], ungraded: [refused], fulltext: [{ ...pass, refused: true }] };
+    const refused = { ...stuck, topic: "mi", refused: ["check", "judge"], stopped_by_refusal: true };
+    // One side refused throughout while the other failed three runs: the runs stopped it.
+    const halfRefused = { ...stuck, paper_id: "2610.00010", title: "A half-refused paper", topic: "mi", refused: ["judge"] };
+    const night = { ...quality.night, splits: [split, oneLab], ungraded: [refused, halfRefused], fulltext: [{ ...pass, refused: true }] };
     const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night }, "PUT /api/labels/mi/2610.00009": { saved: true } });
     renderApp("/settings/needs");
     expect(await screen.findByText("Graded by one lab · 1")).toBeInTheDocument();
@@ -462,6 +464,7 @@ describe("Settings", () => {
     expect(item).toHaveTextContent("judge refused · check central · central stands");
     const ungraded = screen.getByText("Refused by every check and judge model.").closest(".need") as HTMLElement;
     expect(within(ungraded).getByRole("button", { name: "Grade it now" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "A half-refused paper" }).closest(".need")).toHaveTextContent("judge refused · Grading failed 3 runs: invalid");
     expect(screen.getByRole("link", { name: "A textless paper" }).closest(".need")).toHaveTextContent("Brief refused by every model.");
     // Settled with the Fit control, as a split is.
     await userEvent.click(within(item).getByRole("button", { name: "related" }));

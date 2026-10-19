@@ -301,7 +301,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
                 kind=kind,
                 revision=found["revision"],
                 error=f["last_error"],
-                refused=bool(f["refused"]),
+                refused=f["stopped_by_refusal"],
             )
             for f in found["failures"]
             for step, kind in (
@@ -316,7 +316,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
                 revision=found["revision"],
                 topic=t.topic.slug,
                 error=failed["last_error"] if failed else None,
-                refused=bool(failed and failed["refused"]),
+                refused=bool(failed and failed["stopped_by_refusal"]),
             )
             for t in rail
             if t.state in ("split", "escalated", "one_lab", "ungraded")

@@ -465,6 +465,35 @@ async def test_a_pass_every_brief_model_refused_stops_at_once_and_runs_again_fro
     assert asked == [BRIEF_ROLE.model]  # the owner's run starts from the role's own model
 
 
+async def test_only_an_unusable_answer_starts_the_next_try_further_down_the_list(db):
+    # models.md, roles: a run that found no text counts, but asked no model.
+    fallback = RoleConfig(provider="openrouter", model="test-brief-2")
+    listed = Config(models=Models(brief=BRIEF_ROLE.model_copy(update={"fallbacks": (fallback,)})))
+    asked: list[str] = []
+
+    def respond(role: RoleConfig, request):
+        asked.append(role.model)
+        return "{not json" if role.model == BRIEF_ROLE.model else json.dumps(ANSWER)
+
+    def gateway(config: Config, journal) -> Gateway:
+        providers = {n: ScriptedProvider(n, respond) for n in ("anthropic", "openrouter")}
+        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+
+    await graded(db, "central")
+    fake = FakeArchive(status="failed")
+    assert await fulltext.work(db, listed, archive(fake), gateway=gateway) == {"fulltext_failed": 1}
+    fake.status = "complete"
+    ready(fake)
+    await fulltext_store.retry_failed(db, FAILED_RUNS)
+    assert await fulltext.work(db, listed, archive(fake), gateway=gateway) == {"fulltext_failed": 1}
+    assert asked == [BRIEF_ROLE.model]  # after the run without text, the role's own model
+    (row,) = await passes(db)
+    assert (row["failed_runs"], row["unusable_runs"]) == (2, 1)
+    await fulltext_store.retry_failed(db, FAILED_RUNS)
+    assert await fulltext.work(db, listed, archive(fake), gateway=gateway) == {"briefs_written": 1}
+    assert asked == [BRIEF_ROLE.model, fallback.model]
+
+
 async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(db, monkeypatch):
     # DESIGN.md, Needs you: "Try again, Use the PDF" on a full-text failure.
     monkeypatch.setattr("litwatch.archive.text.pdf_to_markdown", lambda pdf: "From the PDF. " * 40)

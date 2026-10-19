@@ -248,11 +248,11 @@ class Gateway:
     ) -> Answer[T]:
         """A validated answer from the role's list: its model, then its fallbacks (models.md,
         roles). An answer any of them gave to the identical question is reused. Otherwise the
-        model at `start` is asked (the step's failed runs, D4; past the end, the last): a
-        refusal goes to the next at once, each journalled under the role with its model, and
-        when every model from there refused, the last refusal is raised. Any other failure is
-        raised at once: an unusable answer moves down only with the next run's `start`, and a
-        call that got no answer never does.
+        model at `start` is asked (the step's unusable answers in a row, D4; past the end, the
+        last): a refusal goes to the next at once, past the end to the top, each journalled under
+        the role with its model, and when every model in the list refused, the last refusal is
+        raised. Any other failure is raised at once: an unusable answer moves down only with the
+        next run's `start`, and a call that got no answer never does.
 
         The reply is recorded before it is validated, so a rejected one still has its charge;
         only validated outputs are reusable. The reply's text is kept only in debug mode.
@@ -262,7 +262,8 @@ class Gateway:
             if model.provider in self.providers and (answer := await self._reused(model, request)):
                 return answer
         refusal: CallError | None = None
-        for model in models[min(start, len(models) - 1) :]:
+        start = min(start, len(models) - 1)
+        for model in models[start:] + models[:start]:
             if refusal:
                 log.info("role=%s paper=%s refused: asking %s", role_name, paper_id, model.label)
             try:

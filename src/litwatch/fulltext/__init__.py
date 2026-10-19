@@ -72,6 +72,7 @@ class Attempt:
     model: str | None = None
     error: str | None = None
     counts: bool = False  # a failure that counts: no text to be had, or an unusable answer
+    unusable: bool = False  # an unusable answer: the next try starts one model further down
     refused: bool = False  # every model of `brief` refused: the pass stops at once
     waiting: bool = False  # no text yet: the archive is fetching it, or cannot be reached
     retry_asked: bool = False  # the archive was asked to retry the downloads it gave up on
@@ -121,10 +122,11 @@ def _write(
                 brief.ROLE,
                 brief.request(c.paper, c.area, a.text.body, a.text.source),
                 paper_id=c.paper.id,
-                start=c.failed_runs,
+                start=c.unusable_runs,
             )
         except CallError as exc:
             a.error, a.counts, a.refused = str(exc), exc.unusable, exc.kind == "refused"
+            a.unusable = exc.unusable
             return a
         a.output, a.model = answer.value, answer.model
         return a
@@ -170,7 +172,15 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
             await store_.awaiting(conn, c, a.error)
         elif a.output is None or a.model is None or read is None:
             error = a.error or "no answer"
-            await store_.failed(conn, c, error, counts=a.counts, text=read, refused=a.refused)
+            await store_.failed(
+                conn,
+                c,
+                error,
+                counts=a.counts,
+                text=read,
+                unusable=a.unusable,
+                refused=a.refused,
+            )
         else:
             await _add(conn, c, a, read)
     return True

@@ -561,7 +561,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         "memberships": "SELECT class, source, member, probability FROM memberships "
         "WHERE paper_id = %(p)s ORDER BY class, source",
         "failures": "SELECT f.step, nullif(f.topic, '') AS topic, f.failed_runs, f.last_error, "
-        "f.refused "
+        "f.stopped_by_refusal "
         "FROM step_failures f JOIN papers p ON p.id = f.paper_id "
         f"WHERE f.paper_id = %(p)s AND {failures.ACTIONABLE}",
         "history": """

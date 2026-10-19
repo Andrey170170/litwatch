@@ -26,12 +26,13 @@ and Haiku has not failed a Field grading, so one it cannot answer stops ungraded
 P1) and are the configuration's defaults. The decision roles (`classify`, `area_check`) have none. A call to a fallback
 is journalled under the role's name, with the model it went to.
 
-- **A refusal** goes to the next model at once, in the same run. When every model in the list has refused, the step
-  stops for that paper at once and waits for the owner ([pipeline.md](pipeline.md), section 9), without three runs of
-  asking the same models again.
+- **A refusal** goes to the next model at once, in the same run; past the last, to the top of the list, for a run that
+  started further down. When every model in the list has refused, the step stops for that paper at once and waits for
+  the owner ([pipeline.md](pipeline.md), section 9), without three runs of asking the same models again.
 - **An unusable answer** (invalid or truncated) counts as one of the step's three failed runs, as before, and the next
   run starts one model further down the list: the first run asks the role's model, the second the next, the third the
-  one after. One call per run, as many as without fallbacks.
+  one after. One call per run, as many as without fallbacks. Only unusable answers move it: a full-text pass that found
+  no text to read counts a failed run but asks the same model next time.
 - **A call that got no answer** (a timeout, a provider error, an `account` error, below) never moves down the list: it
   says nothing about the paper and is not counted against it.
 - **`writer`** writes digests, which are retried every run until written rather than stopped after three

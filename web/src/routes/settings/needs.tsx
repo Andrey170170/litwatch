@@ -90,7 +90,7 @@ function Stuck({ s, kind, badge, children }: { s: Stuck; kind: "awaiting" | "ung
         </PaperLink>
         {kind === "awaiting" && <span className="mono faint">{s.paper_id}</span>}
       </div>
-      <div className="nb">{s.refused?.length ? `Refused by every ${s.refused.join(" and ")} model.` : `${KIND[kind].step} failed ${s.failed_runs} runs${s.last_error ? `: ${s.last_error}` : "."}`}</div>
+      <div className="nb">{s.stopped_by_refusal ? `Refused by every ${s.refused?.join(" and ")} model.` : `${s.refused?.length ? `${s.refused.join(" and ")} refused · ` : ""}${KIND[kind].step} failed ${s.failed_runs} runs${s.last_error ? `: ${s.last_error}` : "."}`}</div>
       {s.settled ? <div className="nres">{s.settled}</div> : children}
     </div>
   );

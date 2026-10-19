@@ -310,6 +310,22 @@ async def test_every_model_refusing_stops_at_once_with_the_last_refusal(conn, jo
     assert [r["error"] for r in await calls(conn)] == ["refused: bio"] * 3
 
 
+async def test_a_run_started_down_the_list_goes_on_from_the_top_on_refusals():
+    """So a stop for every model refusing means every model of the list: the models above
+    `start` answered unusably before, not refused."""
+    said: list[str] = []
+    script = {SONNET.model: refusal(SONNET.model), MUSE.model: refusal(MUSE.model)}
+    gw = Gateway(LISTED, listed(script, said), retry_delays=())
+    answer = await gw.ask("brief", REQUEST, start=1)
+    assert answer.model == OPUS.label
+    assert said == [SONNET.model, MUSE.model, OPUS.model]
+    said.clear()
+    script[OPUS.model] = refusal(OPUS.model)
+    with pytest.raises(CallError, match="refused"):
+        await gw.ask("brief", Request(system="s", user="all refuse", output=Answer), start=2)
+    assert said == [MUSE.model, OPUS.model, SONNET.model]  # each once
+
+
 @pytest.mark.parametrize(
     ("answer", "kind"),
     [

@@ -227,7 +227,7 @@ class Claimed:
     lease_until: datetime
     retry_text: bool = False  # the archive is to retry the downloads it gave up on
     use_pdf: bool = False  # the owner's "Use the PDF": read its PDF, not its LaTeX
-    failed_runs: int = 0  # how far down `brief`'s list it starts (models.md, roles)
+    unusable_runs: int = 0  # how far down `brief`'s list it starts (models.md, roles)
 
 
 # Held by the worker that works the Deep passes, so the service's and a terminal's never run
@@ -295,10 +295,10 @@ async def claim(
                                              lease_until = now() + %(lease)s
                 FROM taken WHERE f.id = taken.id
                 RETURNING f.id, f.kind, f.reason, f.paper_revision, f.lease_until, f.paper_id,
-                          f.retry_text, f.use_pdf, f.failed_runs
+                          f.retry_text, f.use_pdf, f.unusable_runs
             )
             SELECT {COLUMNS}, x.id AS pass_id, x.kind, x.reason, x.paper_revision AS pass_revision,
-                   x.lease_until, x.retry_text, x.use_pdf, x.failed_runs,
+                   x.lease_until, x.retry_text, x.use_pdf, x.unusable_runs,
                    k.slug, k.name, k.description, k.parent, k.threshold
             FROM claimed x JOIN papers p ON p.id = x.paper_id
             LEFT JOIN LATERAL (SELECT primary_class FROM classifications
@@ -326,7 +326,7 @@ async def claim(
             lease_until=r["lease_until"],
             retry_text=r["retry_text"],
             use_pdf=r["use_pdf"],
-            failed_runs=r["failed_runs"],
+            unusable_runs=r["unusable_runs"],
         )
         for r in rows
     ]
@@ -428,10 +428,12 @@ async def failed(
     *,
     counts: bool,
     text: TextRead | None = None,
+    unusable: bool = False,
     refused: bool = False,
 ) -> None:
     """The pass failed this run; it is tried again on the next. Only a failure that `counts`
-    (no text to be had, an unusable answer) adds a failed run; one every model of `brief`
+    (no text to be had, an unusable answer) adds a failed run, and only an `unusable` answer
+    starts the next try one model further down `brief`'s list; one every model of `brief`
     `refused` stops at once, counted as `FAILED_RUNS`. A pass left for the owner is not run
     again but on their word, or while it awaits its text, so a failure here is a new one: it
     clears the owner's Acknowledge. Call it in a transaction that `held` the pass."""
@@ -440,6 +442,7 @@ async def failed(
         UPDATE fulltext_passes SET state = 'failed', lease_until = NULL, last_error = %(error)s,
             failed_runs = greatest(failed_runs + %(counts)s,
                                    CASE WHEN %(refused)s THEN %(floor)s ELSE 0 END),
+            unusable_runs = unusable_runs + %(unusable)s,
             refused = %(refused)s, acknowledged_at = NULL,
             text_arrived_at = CASE WHEN %(arrived)s THEN coalesce(text_arrived_at, now())
                                    ELSE text_arrived_at END,
@@ -452,6 +455,7 @@ async def failed(
             "id": c.id,
             "error": error[:2000],
             "counts": int(counts),
+            "unusable": int(unusable),
             "refused": refused,
             "floor": FAILED_RUNS,
             **_read(text),
@@ -778,7 +782,8 @@ async def run_now(
     With `pdf` ("Use the PDF"), it reads the paper's PDF from then on, not its LaTeX. Returns
     False when it does not wait for the owner."""
     cur = await conn.execute(
-        "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, refused = false, "
+        "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, unusable_runs = 0, "
+        "refused = false, "
         "tried_at = NULL, acknowledged_at = NULL, "
         "queued_at = now(), retry_text = true, use_pdf = f.use_pdf OR %(pdf)s, "
         "reason = CASE WHEN f.kind = 'deep' THEN %(requested)s ELSE f.reason END, "

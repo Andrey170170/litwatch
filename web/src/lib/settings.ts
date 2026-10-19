@@ -67,9 +67,10 @@ export type Split = {
 };
 
 /** A paper stuck after three failed runs of a step, or one every model refused (`store.failures.stuck`; `refused`
- * names the roles whose whole list refused). `acknowledged_at`: when the owner acknowledged it, as for passes and
+ * names the roles whose whole list refused, `stopped_by_refusal` whether that stopped it: a Focus side can refuse
+ * throughout while the other fails three runs). `acknowledged_at`: when the owner acknowledged it, as for passes and
  * digests (it no longer counts in the run status, and folds away). */
-export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; refused?: string[]; acknowledged_at?: string | null; settled?: string };
+export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; refused?: string[]; stopped_by_refusal?: boolean; acknowledged_at?: string | null; settled?: string };
 
 /** A full-text pass waiting on the owner (`store.fulltext.stuck`): failed three runs or refused by every model
  * (`refused`), or awaiting its text over a week. `since`: since when it waits, which names this failure for

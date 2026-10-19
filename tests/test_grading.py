@@ -528,6 +528,7 @@ async def test_both_sides_refused_throughout_is_ungraded_at_once(conn, models):
     assert (await night(conn, models, LISTED))["grading_failed"] == 1
     (stuck,) = await failures.stuck(conn, "grading", FAILED_RUNS)  # after one night
     assert (stuck["failed_runs"], stuck["refused"]) == (FAILED_RUNS, ["check", "judge"])
+    assert stuck["stopped_by_refusal"] is True
     assert await verdicts(conn, B.id) == []
     models.models_asked.clear()
     await night(conn, models, LISTED)
@@ -539,6 +540,40 @@ async def test_both_sides_refused_throughout_is_ungraded_at_once(conn, models):
     assert done.json() == {"graded": True, "fit": "related", "error": None}
     (v,) = await verdicts(conn, B.id)
     assert (v["one_lab"], v["opinions"]["judge"]["model"]) == (False, f"anthropic:{JUDGES[0]}")
+
+
+async def test_a_side_refused_throughout_while_the_other_fails_three_runs_is_said_as_such(
+    conn, models
+):
+    refused_by(models, JUDGES, B.title)
+    for model in CHECKS:
+        models.said[(model, B.title)] = fit("very central")  # invalid
+    for _ in range(FAILED_RUNS):
+        await night(conn, models, LISTED)
+    (stuck,) = await failures.stuck(conn, "grading", FAILED_RUNS)
+    assert (stuck["failed_runs"], stuck["refused"]) == (FAILED_RUNS, ["judge"])
+    assert stuck["stopped_by_refusal"] is False  # the runs stopped it, not the refusal
+    assert await calls_for(conn, B.id, "check") == CHECKS  # one model down each run
+    async with api(conn, models, LISTED) as client:
+        page = (await client.get(f"/api/papers/{B.id}")).json()
+    assert [(s["kind"], s["refused"]) for s in page["states"]] == [("ungraded", False)]
+
+
+async def test_a_refusal_after_a_failed_run_stops_at_three_runs(conn, models):
+    models.decisions[A.title] = decision("agents", agents=0.9)
+    fields = [m.model for m in LISTED.models.field_grade.models]
+    models.said[(fields[0], A.title)] = fit("very central")  # invalid: one failed run
+    await night(conn, models, LISTED)
+    refused_by(models, fields, A.title)
+    await night(conn, models, LISTED)
+    # Started one model down, the run went on to the top: every model refused.
+    assert await calls_for(conn, A.id, "field_grade") == [*fields[:1], *fields[1:], *fields[:1]]
+    (stuck,) = await failures.stuck(conn, "grading", FAILED_RUNS)
+    assert (stuck["topic"], stuck["failed_runs"], stuck["stopped_by_refusal"]) == (
+        "agents",
+        FAILED_RUNS,
+        True,
+    )
 
 
 async def test_an_area_or_field_grading_refused_throughout_has_no_one_lab_rule(conn, models):

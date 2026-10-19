@@ -34,20 +34,22 @@ async def failed(
     (the model answered, unusably) adds a failed run; any other keeps the count and records
     the error. `refused` are the roles whose every model refused on this text (a Focus side
     stays refused while the other side is asked); with `stops`, that refusal stops the step at
-    once, for the owner. Returns the failed runs in a row."""
+    once, for the owner, and the failure says so (`stopped_by_refusal`). Returns the failed runs
+    in a row."""
     row = await (
         await conn.execute(
             """
             INSERT INTO step_failures (paper_id, step, topic, paper_revision, failed_runs,
-                                       last_error, refused)
+                                       last_error, refused, stopped_by_refusal)
             VALUES (%(paper)s, %(step)s, %(topic)s, %(revision)s,
-                    greatest(%(counts)s, %(floor)s), %(error)s, %(refused)s)
+                    greatest(%(counts)s, %(floor)s), %(error)s, %(refused)s, %(stops)s)
             ON CONFLICT (paper_id, step, topic) DO UPDATE SET
-                failed_runs = greatest(EXCLUDED.failed_runs
+                failed_runs = greatest(%(counts)s
                     + CASE WHEN step_failures.paper_revision = EXCLUDED.paper_revision
                            THEN step_failures.failed_runs ELSE 0 END, %(floor)s),
                 paper_revision = EXCLUDED.paper_revision, last_error = EXCLUDED.last_error,
-                refused = EXCLUDED.refused, failed_at = now(), acknowledged_at = NULL
+                refused = EXCLUDED.refused, stopped_by_refusal = EXCLUDED.stopped_by_refusal,
+                failed_at = now(), acknowledged_at = NULL
             RETURNING failed_runs
             """,
             {
@@ -59,6 +61,7 @@ async def failed(
                 "floor": FAILED_RUNS if stops else 0,
                 "error": error,
                 "refused": sorted(refused),
+                "stops": stops,
             },
         )
     ).fetchone()
@@ -79,7 +82,8 @@ async def reset(conn: psycopg.AsyncConnection, paper_id: str, step: Step, topic:
     on the paper, and the next run tries it again, from the role's own model, if nothing
     records it first."""
     await conn.execute(
-        "UPDATE step_failures SET failed_runs = 0, refused = '{}', acknowledged_at = NULL "
+        "UPDATE step_failures SET failed_runs = 0, refused = '{}', stopped_by_refusal = false, "
+        "acknowledged_at = NULL "
         "WHERE paper_id = %s AND step = %s AND topic = %s",
         (paper_id, step, topic),
     )
@@ -98,11 +102,13 @@ ACTIONABLE = (
 async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[dict[str, Any]]:
     """The failures of `step` that wait for the owner (`ACTIONABLE`) after at least `runs` runs
     in a row, with the last error (and the topic, for grading), the roles whose every model
-    refused, and when the owner acknowledged it. Most failed first."""
+    refused, whether that refusal stopped it, and when the owner acknowledged it. Most failed
+    first."""
     return await (
         await conn.execute(
             "SELECT f.paper_id, f.paper_revision AS revision, p.title, f.failed_runs, "
-            "f.last_error, f.refused, f.failed_at, nullif(f.topic, '') AS topic, "
+            "f.last_error, f.refused, f.stopped_by_refusal, f.failed_at, "
+            "nullif(f.topic, '') AS topic, "
             "f.acknowledged_at "
             "FROM step_failures f JOIN papers p ON p.id = f.paper_id "
             f"WHERE f.step = %s AND f.failed_runs >= %s AND {ACTIONABLE} "
