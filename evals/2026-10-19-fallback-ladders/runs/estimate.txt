@@ -1,0 +1,22 @@
+# The estimate litwatch eval ladders printed before the run of 2026-10-19 13:13 (the writer cases ran before it, $0.50).
+left out: judge/2609.18985/cot-faithfulness: the paper is in neither the database nor the archive
+left out: check/2609.18985/cot-faithfulness: the paper is in neither the database nor the archive
+analyse ds-flash: 83 calls, estimated $0.01
+analyse haiku: 83 calls, estimated $0.04
+analyse luna: 83 calls, estimated $0.04
+brief kimi: 33 calls, estimated $0.92
+brief sol: 33 calls, estimated $2.63
+brief sonnet: 33 calls, estimated $2.63
+check ds-flash-1017: 104 calls, estimated $0.15
+check ds-pro: 104 calls, estimated $0.53
+check gemini-flash: 104 calls, estimated $1.02
+check minimax-free: 104 calls, estimated $0.00
+check muse: 104 calls, estimated $0.06
+field_grade ds-flash: 83 calls, estimated $0.00
+field_grade haiku: 83 calls, estimated $0.02
+field_grade luna: 83 calls, estimated $0.02
+judge kimi: 104 calls, estimated $0.78
+judge opus: 104 calls, estimated $1.83
+judge sol: 104 calls, estimated $0.91
+judge sonnet: 104 calls, estimated $0.91
+1533 calls, estimated $12.49; spent so far $0.50 of the $25.00 ceiling
