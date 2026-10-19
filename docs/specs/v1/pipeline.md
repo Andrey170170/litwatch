@@ -71,12 +71,19 @@ so a threshold change can be replayed without new calls.
 
 One call per paper to the `analyse` role, a small LLM (Haiku 5.5 class), from title and abstract:
 
-- the **Gist**, 20–30 words, about the paper and not about any class, in litwatch's objective voice (no "for you",
-  no reader-directed wording);
+- the **Gist**, 20–30 words, about the paper and not about any class, in litwatch's prose (below);
 - **Weight** (landmark, solid, incremental; defined in section 4) with one sentence why, judged from the abstract
   against the paper's own area, its primary class from classification, and recorded with source `abstract`;
 - **facets**: contribution kind (method, analysis, benchmark or dataset, theory, position, survey), and whether the
   abstract announces released code and released weights.
+
+**litwatch's prose.** Every text written for the owner to read (the Gists, the Brief and its overstatement line, the
+digests) shares one voice and one reader, set out once in `litwatch.writing`. The voice is objective: about the work,
+never to a reader, no hype and no hedging. The reader is a researcher fluent in machine learning who reads widely,
+often outside their specialty, and has not read the paper. The text is written so that reader follows every sentence on
+first reading: a term the paper coins is said in plain words or left out, each sentence starts from what the reader
+already has, purpose comes before mechanism, and a number comes with what it is compared with. These are principles,
+not an order of content (after Gopen and Swan, "The Science of Scientific Writing").
 
 Facets are facts, not scores, and are not combined into anything. No other dimension (writing quality, rigour,
 novelty) is scored: each would need its own calibration against the owner's word, and an abstract cannot show most of
@@ -223,8 +230,9 @@ a Brief uses), and PDF text as read, as its headings mark the references too une
 first 160,000 characters. The appendix stays: it carries numbers and limits a Brief uses
 ([`evals/2026-10-16-sonnet-briefs.md`](../../../evals/2026-10-16-sonnet-briefs.md)).
 
-**The Brief** is one paragraph (about 120–200 words): what was done, the main result with its numbers, and the main
-limit. When the full text does not support the abstract's claim, the Brief opens with one line saying so, for example
+**The Brief** is one or two paragraphs (about 120–200 words in all), in litwatch's prose (section 3): what the work
+is and why it was done, what it found with the numbers that carry it, and how far its evidence goes, in whatever order
+makes the paper clearest. When the full text does not support the abstract's claim, the Brief opens with one line saying so, for example
 "The abstract overstates: the gain holds only for 7B models on GSM8K." A paper without a Brief shows its abstract in
 the Brief's place (a Field paper, an Area paper that is not a pick candidate, an adjacent Focus paper, or a pass
 still awaiting text).

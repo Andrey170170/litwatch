@@ -838,6 +838,15 @@ def test_an_overstatement_is_one_line_saying_so_and_lengths_are_guarded():
             brief.Output.model_validate(ANSWER | wrong)
 
 
+def test_a_brief_keeps_up_to_two_paragraphs():
+    first, second = " ".join(BRIEF.split()[:70]), " ".join(BRIEF.split()[70:])
+    out = brief.Output.model_validate(ANSWER | {"brief": f" {first} \n\n\n {second}\n"})
+    assert out.brief == f"{first}\n\n{second}"
+    three = "\n".join([first, second, "A third paragraph."])
+    with pytest.raises(ValueError, match="3 paragraphs"):
+        brief.Output.model_validate(ANSWER | {"brief": three})
+
+
 def test_a_long_text_is_cut_and_an_unknown_area_said():
     request = brief.request(P, None, "x" * (brief.MAX_TEXT_CHARS + 10), "pdf")
     assert request.user.endswith(brief.CUT)
