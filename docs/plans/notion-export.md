@@ -90,14 +90,21 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
   `setup` and tries again every five seconds, out of sight. P2 changes that for every integration: a failing setup
   is retried after `backoff()`, and its error is recorded where Settings → Integrations shows an integration's
   failure, with no event attached. Events wait behind a setup that has not finished, as they do today.
+- **Setup runs under the integration's dispatch lock**, as delivery and `idle` do. Two services starting at once (a
+  restart overlapping, say) cannot both find the database missing and both create it; the one without the lock
+  waits and tries again.
 
 ### State
 
-The integration keeps its state in its own tables, created by one migration:
+The integration keeps its state in its own tables, created by one migration. Every row is keyed by the
+integration's name (its configuration section), and the database row records the `parent_page` it was built
+under. A start whose `parent_page` differs from the recorded one drops that name's state and builds afresh, so a
+sandbox copied from production, run with the development token and the scratch page, never reuses production's
+ids or hashes.
 
-- **`notion_pages`**: paper → page id, a hash of the properties last written, a hash of the body last written, and
+- **`notion_pages`**: (integration, paper) → page id, a hash of the properties last written, a hash of the body last written, and
   for each topic the effective grade last written and its Why line.
-- **A small table for the database itself**: database and data source ids, the "How to read this" page id, and the
+- **A small table for the database itself**, one row per integration: `parent_page`, database and data source ids, the "How to read this" page id, and the
   view id and column for each topic.
 
 A page is written only when one of its hashes changes, so restarts and repeated events cost no requests.
@@ -227,7 +234,7 @@ then a real run against a test target on the sandbox. For the sandbox runs, buil
 | Claim | Evidence |
 | --- | --- |
 | V1. `grade.changed` carries the cause of the change | pytest on PostgreSQL, one case each: a label, a cleared label, a reaction, a new verdict, a new Weight alone (`weight`), and a topic edit (`taxonomy`), and a nested change (the outer cause) |
-| V2. Pages, properties, Why lines and bodies are built and written as specified, and only when they changed | pytest with Notion faked over HTTP. Request bodies for: a must read with a Deep card, a worth-a-look, a delisted paper. A repeated event sends no request. A 429 is waited out. A page creation whose reply is lost, then a restart: the page is adopted, not duplicated. A failing setup is retried after backoff and its error is shown by the integrations API |
+| V2. Pages, properties, Why lines and bodies are built and written as specified, and only when they changed | pytest with Notion faked over HTTP. Request bodies for: a must read with a Deep card, a worth-a-look, a delisted paper. A repeated event sends no request. A 429 is waited out. A page creation whose reply is lost, then a restart: the page is adopted, not duplicated. A failing setup is retried after backoff and its error is shown by the integrations API. A second setup while the lock is held creates nothing. A changed `parent_page` drops the old state |
 | V3. A first start builds the database, its columns, the views, "How to read this", and a page for every qualifying paper | A real run on the sandbox against the scratch page. The page count equals the sandbox's count of papers at relevant or above for the exported topics. Screenshot |
 | V4. A grade that falls shows No longer listed with the right Why, and listing again clears it | On the sandbox: label a listed paper off-topic, run the dispatcher, read the page; remove the label, read it again |
 | V5. New text reaches the page | On the sandbox: an event for a paper whose Brief changed rewrites its body; an event for a paper whose text did not change makes no write |
