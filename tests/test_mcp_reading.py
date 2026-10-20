@@ -23,7 +23,7 @@ from litwatch.archive.pages import MAX_SIDE
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import TREE, paper
-from tests.fakes_http import FakeArchive
+from tests.fakes_http import FakeArchive, mock
 from tests.test_archive_text import pages_pdf
 from tests.test_mcp import Flaky, _app, call, ok, rpc, serving
 
@@ -246,6 +246,22 @@ async def test_an_optional_argument_may_hold_a_bracket_inside_braces(conn, shelf
     assert [title for _, _, title, _ in entries(outline)] == ["Setup", "Method", "Lemma"]
 
 
+async def test_a_heading_in_verbatim_text_is_an_example_not_a_heading(conn, shelf):
+    method = (
+        "\\section{Method}\nWe run:\n\\begin{verbatim}\n\\section{Results}\n% not a comment\n"
+        "\\end{verbatim}\nand \\verb|\\section{Inline}| too.\n"
+        "\\begin{lstlisting}\n\\subsection{Listed}\n\\end{lstlisting}\n"
+        "\\begin{minted*}{latex}\n\\section{Minted}\n\\end{minted*}\n"
+    )
+    fake = FakeArchive()
+    fake.texts[HELD.id] = (2, method + "\\section{Results}\nDone.\n")
+    async with serving(reading_app(conn, fake)) as http:
+        outline = await ok(http, "paper_outline", paper_id=HELD.id)
+        whole = await ok(http, "read_paper", paper_id=HELD.id, section=1)
+    assert [(n, title) for _, n, title, _ in entries(outline)] == [(1, "Method"), (2, "Results")]
+    assert chunk(whole) == method  # the example stays inside its section
+
+
 # -- V6: the bounded urgent fetch ------------------------------------------------------------------
 
 
@@ -386,6 +402,29 @@ async def test_a_complete_pdf_job_with_no_pdf_served_is_an_error(conn, shelf):
     assert page_failed and "serves no PDF" in page
     assert component["status"] == "degraded"
     assert 'litwatch_mcp_calls_total{tool="read_paper",outcome="error"} 1' in metrics
+
+
+async def test_a_job_answer_of_no_known_status_is_an_error_not_fetching(conn, shelf):
+    """Only the archive's own waiting states are "fetching"; an answer without one says nothing
+    of the file, so it is an error the monitor sees."""
+
+    class Statusless(FakeArchive):
+        def handle(self, req: httpx.Request) -> httpx.Response:
+            answer = super().handle(req)
+            if req.url.path.startswith("/v1/jobs"):
+                return httpx.Response(200, json={"id": 1})
+            return answer
+
+    app = reading_app(conn, Statusless(), wait=0.2)
+    async with serving(app) as http:
+        text, failed = await call(http, "read_paper", paper_id=HELD.id)
+        assert failed and "unknown status 'None'" in text, text
+        app.state.archive.http = mock(FakeArchive(status="queued").handle)
+        page, page_failed = await call(http, "view_pdf_page", paper_id=HELD.id, page=1)
+        component, metrics = await _component(app)
+    assert page_failed and "unknown status 'queued'" in page, page
+    assert component["status"] == "degraded"
+    assert 'outcome="fetching"} 1' not in metrics
 
 
 # -- V7: a page as an image ------------------------------------------------------------------------
@@ -544,3 +583,37 @@ async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(conn
     assert failed and "No entry 651: the outline numbers 0–650." in past
     assert 'tool="paper_outline",outcome="error"} 0' in metrics
     assert component["status"] == "healthy"
+
+
+async def test_a_caption_line_wins_however_its_label_is_set_off(conn, shelf):
+    fake = FakeArchive()
+    fake.pdfs[PDF_ONLY.id] = pages_pdf(
+        ["As Figure 2 shows, and Figure 3 too."],
+        ["Figure 2 | Accuracy by layer."],
+        ["Figure 3 Loss curves by step."],
+    )
+    async with serving(reading_app(conn, fake)) as http:
+        two = _image(await view(http, paper_id=PDF_ONLY.id, caption="Figure 2"))[0]
+        three = _image(await view(http, paper_id=PDF_ONLY.id, caption="Figure 3"))[0]
+    assert two.endswith("page 2 of 3: Figure 2's caption is on it")
+    assert three.endswith("page 3 of 3: Figure 3's caption is on it")
+
+
+async def test_roman_and_single_letter_captions_match_whole(conn, shelf):
+    fake = FakeArchive()
+    fake.pdfs[PDF_ONLY.id] = pages_pdf(
+        ["Tables I, II and IV are below; see Figure A."],
+        ["TABLE I: Setup."],
+        ["TABLE II: Data."],
+        ["TABLE IV: Results."],
+        ["Figure A.1: Detail."],
+        ["Figure A: Overview."],
+    )
+    async with serving(reading_app(conn, fake)) as http:
+        found = {
+            asked: _image(await view(http, paper_id=PDF_ONLY.id, caption=asked))[0]
+            for asked in ("TABLE IV", "Table I", "table ii", "Figure A", "Figure A.1")
+        }
+    for asked, page in [("TABLE IV", 4), ("Table I", 2), ("table ii", 3), ("Figure A", 6),
+                        ("Figure A.1", 5)]:  # fmt: skip
+        assert f"page {page} of 6: " in found[asked] and "caption is on it" in found[asked], asked

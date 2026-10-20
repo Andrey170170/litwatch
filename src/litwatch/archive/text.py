@@ -24,6 +24,16 @@ from litwatch.core import Paper
 log = logging.getLogger(__name__)
 
 DONE = ("failed", "unavailable")  # a job the archive has given up on
+WAITING = ("pending", "held", "running")  # a job the archive is still working on
+
+
+def job_status(job: dict) -> str:
+    """The status of the archive's job: "complete", one of `WAITING` or one of `DONE`. Any other,
+    or none, raises `ArchiveError`: such an answer says nothing of the file."""
+    status = job.get("status")
+    if status == "complete" or status in WAITING or status in DONE:
+        return status
+    raise ArchiveError(f"archive job of unknown status {str(status)[:40]!r}")
 
 
 class TextUnavailable(ArchiveError):  # noqa: N818 - an outcome, as ArchiveUnavailable
@@ -190,16 +200,16 @@ async def read_text(
     why = "source not read (Use the PDF)"
     if not pdf:
         source = await archive.request(paper, "source", priority)
-        if source.get("status") == "complete":
+        if (status := job_status(source)) == "complete":
             if found := _usable(await archive.latex(paper.id, paper.version)):
                 return found
-        elif source.get("status") not in DONE:
+        elif status in WAITING:
             return None
         why = f"source {_why(source)}"
     job = await archive.request(paper, "pdf", priority)
-    if job.get("status") in DONE:
+    if (status := job_status(job)) in DONE:
         raise TextUnavailable(f"{paper.id}v{paper.version}: {why}; PDF {_why(job)}")
-    if job.get("status") != "complete":
+    if status in WAITING:
         return None
     body = await archive.available_pdf(paper.id, paper.version)
     if body is None:  # the archive's inconsistency, not a paper without text

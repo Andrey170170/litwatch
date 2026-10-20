@@ -21,7 +21,7 @@ from litwatch.archive import (
     TextUnavailable,
     read_text,
 )
-from litwatch.archive.text import DONE
+from litwatch.archive.text import DONE, WAITING, job_status
 from litwatch.core import Paper
 
 WAIT_SECONDS = 30.0  # how long a call waits on the archive for a paper it is fetching
@@ -89,9 +89,9 @@ async def pdf_of(archive: ArchiveClient, paper: Paper, *, wait: float) -> tuple[
         job = await (
             archive.request(known, "pdf", URGENT) if job is None else archive.job(job["id"])
         )
-        if job.get("status") in DONE:
-            raise Unobtainable(f"its PDF {str(job.get('error') or job.get('status'))[:200]}")
-        if job.get("status") != "complete":
+        if (status := job_status(job)) in DONE:
+            raise Unobtainable(f"its PDF {str(job.get('error') or status)[:200]}")
+        if status in WAITING:
             return None
         body = await archive.available_pdf(known.id, known.version)
         if body is None:
@@ -133,6 +133,13 @@ _HEADING = re.compile(r"\\(" + "|".join(LEVELS) + r")(?![A-Za-z@])\*?\s*")
 _BIBLIOGRAPHY = re.compile(r"\\begin\s*\{thebibliography\}")
 # A TeX comment: `%` after an even run of backslashes (`\%` is a per cent sign), to the line's end.
 _COMMENT = re.compile(r"(?<!\\)(?:\\\\)*%.*")
+# What no heading is read in, whichever opens first: a comment, or literal text where a heading
+# is an example (a verbatim-like environment, `\verb`).
+_MASKED = re.compile(
+    r"(?<!\\)(?:\\\\)*%[^\n]*"
+    r"|\\begin\s*\{(verbatim|Verbatim|lstlisting|minted)(\*?)\}[\s\S]*?\\end\s*\{\1\2\}"
+    r"|\\verb\*?([^A-Za-z\s*])[^\n]*?\3"
+)
 TITLE_CHARS = 200  # the most of a heading's title an outline shows
 _TITLE_SCAN = 2_000  # how far a title's closing brace is looked for
 
@@ -182,28 +189,28 @@ def _title(text: str, start: int) -> str | None:
 
 def outline(text: PaperText) -> list[Part]:
     """The text's outline: a PDF's text by page, every page as the PDF numbers them; LaTeX by
-    its sectioning commands, `\\part` to `\\subparagraph` (starred too, none inside a comment),
-    and its bibliography."""
+    its sectioning commands, `\\part` to `\\subparagraph` (starred too; none in a comment or
+    in verbatim text), and its bibliography."""
     body = text.body
     if text.source == "pdf":
         spans = text.pages if text.pages is not None else ((0, len(body)),)
         return [Part(n, f"Page {n}", 0, a, b) for n, (a, b) in enumerate(spans, 1)]
-    comments = [(m.start(), m.end()) for m in _COMMENT.finditer(body)]
-    starts = [a for a, _ in comments]
+    masked = [(m.start(), m.end()) for m in _MASKED.finditer(body)]  # in order, apart
+    starts = [a for a, _ in masked]
 
-    def commented(at: int) -> bool:
+    def masked_at(at: int) -> bool:
         i = bisect.bisect_right(starts, at) - 1
-        return i >= 0 and comments[i][0] <= at < comments[i][1]
+        return i >= 0 and masked[i][0] <= at < masked[i][1]
 
     found: list[tuple[int, int, str]] = []  # (offset, level, title)
     for m in _HEADING.finditer(body):
-        if commented(m.start()) or (opens := _group(body, m.end())) is None:
+        if masked_at(m.start()) or (opens := _group(body, m.end())) is None:
             continue
         if (title := _title(body, opens)) is not None:
             found.append((m.start(), LEVELS[m[1]], title))
     top = min((level for _, level, _ in found), default=LEVELS["section"])
     for m in _BIBLIOGRAPHY.finditer(body):
-        if not commented(m.start()):
+        if not masked_at(m.start()):
             found.append((m.start(), top, "References (the bibliography)"))
     found.sort()
     parts = []
