@@ -117,11 +117,15 @@ async def test_the_schedule_says_when_each_job_next_fires_in_its_zone(conn):
 
 async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secrets(client, conn):
     await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
-    opinions = {
-        "judge": Opinion(fit=Fit.CENTRAL, reason="yes", model="a"),
-        "check": Opinion(fit=Fit.NONE, reason="no", model="b"),
+    judge = Opinion(fit=Fit.CENTRAL, reason="yes", model="a")
+    disagrees = {"judge": judge, "check": Opinion(fit=Fit.NONE, reason="no", model="b")}
+    agrees = {"judge": judge, "check": Opinion(fit=Fit.CENTRAL, reason="yes", model="b")}
+    # An Area escalation asks only when its graders disagreed: one where they agreed is not listed.
+    marks = {
+        FAITH.slug: {"split": True, "opinions": disagrees},
+        "interpretability": {"split": True, "escalated": True, "opinions": disagrees},
+        "agents": {"escalated": True, "opinions": agrees},
     }
-    marks = {FAITH.slug: {"split": True}, "interpretability": {"escalated": True}, "agents": {}}
     for topic, marked in marks.items():
         await verdicts.add(
             conn,
@@ -131,7 +135,6 @@ async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secret
                 topic_version="v",
                 fit=Fit.CENTRAL,
                 reason="yes",
-                opinions=opinions,
                 **marked,
             ),
         )

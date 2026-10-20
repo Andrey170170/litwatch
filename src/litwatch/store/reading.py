@@ -429,9 +429,10 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
     """The rows of a page, in its order: each paper with its current Gist, Weight and facets,
     its mixed-list rarity, its effective grades and the classes it stands in on a page
     (`grades`, `members`: what its badges come from), whether it is saved, and its open state
-    on an `in_view` topic or its own: `word` (a split or escalated verdict the owner has not
-    labelled), else `failure` (a step stopped after `FAILED_RUNS` failed runs: classification,
-    analysis, a grading or a full-text pass; or a full-text pass awaiting text over a week)."""
+    on an `in_view` topic or its own: `word` (a verdict asking for the owner's word,
+    `ASKS_WORD`, they have not labelled), else `failure` (a step stopped after `FAILED_RUNS`
+    failed runs: classification, analysis, a grading or a full-text pass; or a full-text pass
+    awaiting text over a week)."""
     if not ids:
         return []
     found = await _all(

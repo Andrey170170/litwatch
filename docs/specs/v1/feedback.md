@@ -65,8 +65,8 @@ newest use of it outranks every other reason, including a later re-grade, until 
 
 Quality, behind the settings gear, holds what needs the owner and how well the pipeline is doing:
 
-- Focus splits, Area escalations, papers awaiting classification, ungraded topic memberships, failed or stuck
-  full-text passes, failed digests, with actions;
+- Focus splits, Area escalations whose two graders disagreed, papers awaiting classification, ungraded topic
+  memberships, failed or stuck full-text passes, failed digests, with actions;
 - recall per Focus topic from the latest `replay`, and precision from Calibrate's draws (both defined below); collected reactions per topic and stage;
 - the "matters, no topic" list (papers the owner said matter that fit no followed topic: a missing topic or a narrow
   class);

@@ -460,7 +460,7 @@ def _members(tree: Taxonomy | None, rows: list[dict[str, Any]]) -> set[str]:
 
 def _asks_word(v: dict[str, Any]) -> bool:
     """`verdicts.ASKS_WORD` on a current verdict's row."""
-    return v["split"] or v["escalated"] or (v["one_lab"] and v["fit"] in ("central", "related"))
+    return v["split"] or (v["one_lab"] and v["fit"] in ("central", "related"))
 
 
 def _rail(
