@@ -117,7 +117,7 @@ abstract, the topic's subject and, for a Focus topic, its rubric. How it is chec
 | Depth | Graders | Disagreement |
 | --- | --- | --- |
 | Focus | `judge` and `check`, from different labs, concurrently | the more inclusive Fit stands; the verdict is marked split and shown on Quality |
-| Area | `judge`, then the `area_check` decision model asked whether the Fit holds | on a "no", or a "yes" below `[grading] area_check_min_confidence` (default 0.7), `check` (the other lab) grades too; if the two Fits differ, the less inclusive stands and the verdict is marked split, since an Area's risk is a false pick, not a miss |
+| Area | `judge`, then the `area_check` decision model asked whether the Fit holds | on a "no", or a "yes" below `[grading] area_check_min_confidence` (default 0.7), `check` (the other lab) grades too; if the two Fits differ, the less inclusive stands and the verdict is marked split, since an Area's risk is a false pick, not a miss; only such a split escalation is listed on Quality, and one where the two agree asks nothing |
 | Field | `field_grade`, one cheap model | none |
 
 A verdict needs every grader it calls to answer validly (a Fit from the four, a reason; for `area_check`, a yes or no

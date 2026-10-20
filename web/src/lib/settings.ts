@@ -288,8 +288,8 @@ export function noted(q: Quality, id: number, note: string): Quality {
 }
 
 /** Last night's splits, escalations and grades from one lab still waiting for a label, or settled on this visit, in
- * their three groups. An Area escalation whose graders also disagreed carries both flags; it is an escalation (the
- * less inclusive Fit stands), as the paper's page reads it. */
+ * their three groups. A listed Area escalation carries both flags, since only one whose graders disagreed asks; it is
+ * an escalation (the less inclusive Fit stands), as the paper's page reads it. */
 export function openSplits(splits: Split[]): { splits: Split[]; escalations: Split[]; oneLab: Split[] } {
   const open = splits.filter((s) => !s.label || s.settled);
   return { splits: open.filter((s) => s.split && !s.escalated), escalations: open.filter((s) => s.escalated), oneLab: open.filter((s) => s.one_lab && !s.split && !s.escalated) };

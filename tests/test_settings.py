@@ -121,7 +121,12 @@ async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secret
         "judge": Opinion(fit=Fit.CENTRAL, reason="yes", model="a"),
         "check": Opinion(fit=Fit.NONE, reason="no", model="b"),
     }
-    marks = {FAITH.slug: {"split": True}, "interpretability": {"escalated": True}, "agents": {}}
+    # An Area escalation asks only when its graders disagreed: one where they agreed is not listed.
+    marks = {
+        FAITH.slug: {"split": True},
+        "interpretability": {"split": True, "escalated": True},
+        "agents": {"escalated": True},
+    }
     for topic, marked in marks.items():
         await verdicts.add(
             conn,
