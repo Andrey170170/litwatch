@@ -240,8 +240,9 @@ Graded by one lab (one grader's lab refused the paper throughout and only the ot
 and Area escalations (yellow, settled with the Fit control, the standing Fit underlined); awaiting classification
 (Dismiss, Classify by hand, Fix the text), ungraded (Grade it now), analysis (the error, Try again), full text (Try
 again, Use the PDF) and digests (Write it again), red; and Deep notes, neutral (a paper whose Deep card carries
-process notes: its title, then the notes, one line each), which counts nowhere, neither in the run status nor in
-the page's count, and is there only to look at. A red item says why it stopped (refused by every model, or the
+process notes: its title, then the notes, one line each), which says nothing waits: it counts in neither the run status nor
+the page's count, and is there only to look at; Acknowledge holds for the card it was given for, so a newer card's
+notes come back. A red item says why it stopped (refused by every model, or the
 last error). A title opens its paper, where the same item shows (Paper, open states). Each red group has Acknowledge,
 and the page "Acknowledge all": the owner has seen them and they stop counting in the run status. Acknowledged items
 move to a folded "Acknowledged" section at the foot, grouped as above and keeping their buttons; one that recovers and
