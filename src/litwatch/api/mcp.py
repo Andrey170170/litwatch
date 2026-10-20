@@ -496,7 +496,7 @@ def build(state: State) -> MCPServer:
         ] = None,
     ) -> str:
         """A part of the paper's text: one of paper_outline's sections, a character range, or
-        the whole text from an offset, at most 40,000 characters an answer. Each answer ends
+        the whole text from an offset, at most 40,000 characters of it an answer. Each answer ends
         saying the offset to go on from, or that the part or the text ends there."""
         paper, text, use_pdf = await _text(paper_id)
         parts = mcp_reading.outline(text)
@@ -866,7 +866,7 @@ def _source(paper: Paper, text: PaperText, use_pdf: bool) -> str:
 
 READ_HOW = (
     "Read an entry with read_paper(paper_id, section=its number), or any range with offset and "
-    "length; an answer holds at most 40,000 characters and says where to go on."
+    "length; an answer holds at most 40,000 characters of the text and says where to go on."
 )
 
 
