@@ -249,10 +249,10 @@ class FakeDeep:
     """The deep service's job protocol: a job that needs two polls to finish, ending as
     `outcome` (its result, stats and model, or its error and whose failure it was). A
     submission's key it has (`keys`) is answered with that key's job, not started again
-    (`started` counts those started). It can fail the next submissions (`fail_submits`) or
-    polls (`fail_polls`), keep a job running (`hold`), forget its jobs (`vanish`, as a restart
-    does), or accept a submission and then lose the answer (`lose_answers`), as a dropped
-    connection would."""
+    (`started` counts those started), and found by `GET /keys/<key>`. It can fail the next
+    submissions (`fail_submits`) or polls and lookups (`fail_polls`), keep a job running
+    (`hold`), forget its jobs (`vanish`, as a restart does), or accept a submission and then
+    lose the answer (`lose_answers`), as a dropped connection would."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         self.outcome = outcome
@@ -282,6 +282,12 @@ class FakeDeep:
                 self.lose_answers -= 1
                 raise httpx.ReadTimeout("the answer never came", request=req)
             return httpx.Response(202, json={"id": "job-1", "status": "queued"})
+        if req.method == "GET" and req.url.path.startswith("/keys/"):
+            job = self.keys.get(unquote(req.url.path.removeprefix("/keys/")))
+            if self.fail_polls:
+                self.fail_polls -= 1
+                return httpx.Response(503)
+            return httpx.Response(200, json={"id": job}) if job else httpx.Response(404)
         if req.url.path == "/jobs/job-1" and not self.vanish:
             if self.fail_polls:
                 self.fail_polls -= 1

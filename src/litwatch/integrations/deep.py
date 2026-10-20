@@ -23,6 +23,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 import psycopg
@@ -85,6 +86,14 @@ class DeepClient:
         resp = await self.http.post(
             f"{self.base_url}/process", json=submission, headers={"Idempotency-Key": key}
         )
+        resp.raise_for_status()
+        return str(resp.json()["id"])
+
+    async def job_for(self, key: str) -> str | None:
+        """The job a submission with `key` started, if the service still has it."""
+        resp = await self.http.get(f"{self.base_url}/keys/{quote(key, safe='')}")
+        if resp.status_code == 404:
+            return None
         resp.raise_for_status()
         return str(resp.json()["id"])
 

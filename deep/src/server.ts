@@ -1,6 +1,7 @@
 /**
  * Stack-internal HTTP surface: start a job, watch it, read the outcome. No auth by design. A submission's
- * `Idempotency-Key` header names it: a key the service already has is answered (200) with that key's job.
+ * `Idempotency-Key` header names it: a key the service already has is answered (200) with that key's job, and
+ * `GET /keys/<key>` finds that job (404 when the service has none).
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -39,6 +40,12 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
   const path = url.pathname.replace(/\/+$/, "") || "/";
   if (req.method === "GET" && path === "/healthz") return json(res, 200, { ...(await deps.health()), ...deps.jobs.active });
   if (req.method === "GET" && path === "/jobs") return json(res, 200, deps.jobs.list());
+  const keyed = /^\/keys\/([^/]+)$/.exec(path);
+  if (req.method === "GET" && keyed) {
+    const job = deps.jobs.byKey(decodeURIComponent(keyed[1]));
+    if (!job) throw new HttpError(404, "no job for that key");
+    return json(res, 200, { id: job.id, status: job.status });
+  }
   const one = /^\/jobs\/([0-9a-f-]{36})$/.exec(path);
   if (req.method === "GET" && one) {
     const job = deps.jobs.get(one[1]);

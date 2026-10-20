@@ -33,7 +33,10 @@ class CallJournal:
             )
         ).fetchone()
 
-    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
+    async def start(
+        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+    ) -> int:
+        """A call about to be sent, to `model` by provider `via`: its row, before any reply."""
         row = await (
             await self.conn.execute(
                 "INSERT INTO inference_calls (run_id, operation, request_key, usage, paper_id) "
@@ -42,7 +45,7 @@ class CallJournal:
                     self.run_id,
                     role,
                     key,
-                    Jsonb(Usage(model=model).model_dump(mode="json")),
+                    Jsonb(Usage(model=model, via=via).model_dump(mode="json")),
                     paper_id,
                 ),
             )

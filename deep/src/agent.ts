@@ -44,7 +44,8 @@ export interface Stats extends TurnUsage {
 
 /**
  * Whose failure a job's was: the service's when the model call failed (the sign-in, a usage limit, the provider), the
- * paper's when no valid card was submitted within the budget. litwatch counts only the paper's against it.
+ * paper's when no valid card was submitted within the budget or the provider's content filter stopped the model.
+ * litwatch counts only the paper's against it.
  */
 export type Failure = "service" | "paper";
 
@@ -190,7 +191,8 @@ export async function processPaper(
     // An aborted turn is the wall clock's, which has said why already.
     if (m.stopReason === "error" && failure === undefined) {
       failure = m.errorMessage ?? m.stopReason;
-      failedBy = "service";
+      // A filtered response is about what the paper says, and would be filtered again.
+      failedBy = m.rawStopReason?.endsWith("content_filter") ? "paper" : "service";
     } else if (m.stopReason === "aborted") failure ??= m.errorMessage ?? m.stopReason;
   });
 

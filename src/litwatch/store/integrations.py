@@ -145,6 +145,13 @@ async def add_attempt(
     return row["id"]
 
 
+async def attempt_by(conn: psycopg.AsyncConnection, attempt_id: int, *, automatic: bool) -> None:
+    """Whose an attempt sent again is: the owner's request may have taken its pass over."""
+    await conn.execute(
+        "UPDATE deep_attempts SET automatic = %s WHERE id = %s", (automatic, attempt_id)
+    )
+
+
 async def job_started(conn: psycopg.AsyncConnection, attempt_id: int, job_id: str) -> None:
     """The service accepted the attempt's job, now: it is followed until it ends, across a failed
     poll or a worker's death, and never submitted again meanwhile. A submission sent again

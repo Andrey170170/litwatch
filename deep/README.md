@@ -6,10 +6,12 @@ for the result (`GET /jobs/<id>`).
 
 A submission may carry an `Idempotency-Key` header (litwatch sends its attempt): a key the
 service still has is answered `200` with that key's job instead of starting another, so a
-submission sent again after a lost reply never runs twice. A failed job (`status: "error"`)
+submission sent again after a lost reply never runs twice; `GET /keys/<key>` finds that job
+(404 when the service has none). A failed job (`status: "error"`)
 says whose failure it was in `failure`: `service` when the model call failed (the sign-in, a
 usage limit, the provider) or the job could not start, `paper` when no valid card was submitted
-within the budget. Jobs and keys live in memory: a restart forgets them.
+within the budget or the content filter stopped the model. Jobs and keys live in memory: a
+restart forgets them.
 
 The card places the paper among litwatch's collection (`among_collection`): papers it agrees with,
 contradicts, extends or supersedes. `submit` takes only ids a `store.search` in the same session

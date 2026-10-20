@@ -201,6 +201,7 @@ async def test_an_account_error_is_never_retried_and_journalled_as_its_kind(
     assert len(client.sent) == 1
     (row,) = await calls(conn)
     assert row["error"].startswith("account: ")
+    assert row["usage"]["via"] == provider  # whose account, though no reply came
 
 
 async def test_a_role_without_credentials_fails_as_a_call_error():

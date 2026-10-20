@@ -80,7 +80,9 @@ class Journal(Protocol):
     """Where calls are recorded and found again. `store.calls.CallJournal` implements it."""
 
     async def cached(self, key: str) -> dict[str, Any] | None: ...
-    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int: ...
+    async def start(
+        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+    ) -> int: ...
     async def record(self, call_id: int, usage: Usage) -> None: ...
     async def accept(self, call_id: int, output: dict[str, Any]) -> None: ...
     async def reject(self, call_id: int, error: str, reply: str | None = None) -> None: ...
@@ -367,7 +369,8 @@ class Gateway:
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all.
             if journal:
-                kept = _without_nul(reply.raw or reply.text) if self.debug and reply else None
+                answered = self.debug and isinstance(reply, Reply)
+                kept = _without_nul(reply.raw or reply.text) if answered else None
                 await journal.reject(call_id, str(exc), kept)
             raise
         if journal:
@@ -390,23 +393,30 @@ class Gateway:
         was given up on may still answer it on its row. A fallback is batched as the role's
         model is."""
         journal = self.journal
+
+        async def row_of_its_own() -> int:
+            assert journal is not None
+            return await journal.start(role_name, role.model, key, paper_id, role.provider)
+
         batcher = self.batchers.get(role.provider) if send is None else None
         if batcher and journal and (row := await journal.in_batch(key)):
-            if reply := await batcher.attach(row["batch_id"], key, row["id"]):
-                if isinstance(reply, ProviderError):
-                    return row["id"], reply
+            reply = await batcher.attach(row["batch_id"], key, row["id"])
+            if row["id"] in batcher.unsettled:  # the batch may still answer it on that row
+                return await row_of_its_own(), reply
+            if isinstance(reply, ProviderError):
+                return row["id"], reply
+            if reply:
                 if reply.usage.reused:  # shared with a call on that row: a row of its own
-                    return await journal.start(role_name, role.model, key, paper_id), reply
+                    return await row_of_its_own(), reply
                 return row["id"], _of_role(reply, role)
-            if row["id"] not in batcher.unsettled:
-                await journal.reject(row["id"], "provider: the batch did not answer it")
-            return await journal.start(role_name, role.model, key, paper_id), None
-        call_id = await journal.start(role_name, role.model, key, paper_id) if journal else None
+            await journal.reject(row["id"], "provider: the batch did not answer it")
+            return await row_of_its_own(), None
+        call_id = await row_of_its_own() if journal else None
         if batcher is None or not batcher.open():
             return call_id, None
         reply = await batcher.ask(key, role, request, call_id)
-        if reply is None and journal and call_id in batcher.unsettled:
-            return await journal.start(role_name, role.model, key, paper_id), None
+        if not isinstance(reply, Reply) and journal and call_id in batcher.unsettled:
+            return await row_of_its_own(), reply
         return call_id, _of_role(reply, role) if isinstance(reply, Reply) else reply
 
 

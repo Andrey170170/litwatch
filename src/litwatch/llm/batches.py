@@ -225,12 +225,16 @@ class Batcher:
             batch_id = await self._bounded(
                 self.provider.submit([(h.key, h.role, h.request) for h in held])
             )
-        except Exception:
-            log.exception(
-                "a batch of %d calls could not be sent; they go as normal calls", len(held)
-            )
+        except Exception as exc:
+            account = isinstance(exc, ProviderError) and exc.account
+            if account:  # never asked again: the calls fail on the account
+                log.error("a batch of %d calls was refused for the account: %s", len(held), exc)
+            else:
+                log.exception(
+                    "a batch of %d calls could not be sent; they go as normal calls", len(held)
+                )
             for h in held:
-                self._resolve(h.key, None)
+                self._resolve(h.key, exc if account else None)
             return
         log.info("batch %s sent with %d calls", batch_id, len(held))
         if self.journal:
@@ -283,8 +287,17 @@ class Batcher:
                 return
             if status == "ended":
                 replies = await self._bounded(self.provider.results(batch_id))
-        except Exception:
-            log.exception("batch %s could not be read; trying again", batch_id)
+        except Exception as exc:
+            if not (isinstance(exc, ProviderError) and exc.account):
+                log.exception("batch %s could not be read; trying again", batch_id)
+                return
+            # Not read again this run: its calls fail on the account, and the batch is left
+            # open on its rows for a later run to account for.
+            log.error("batch %s could not be read for the account: %s", batch_id, exc)
+            del self._open[batch_id]
+            self._give_up(batch)
+            for key in batch.waiting:
+                self._resolve(key, exc)
             return
         if status == "gone":  # deleted, or another workspace's: it never answers
             log.warning("batch %s is gone from its provider", batch_id)

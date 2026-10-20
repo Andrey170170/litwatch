@@ -157,8 +157,10 @@ async def test_a_batch_that_cannot_be_sent_goes_as_normal_calls(monkeypatch):
     await gw.close()
 
 
-async def test_an_account_error_in_a_batch_is_never_asked_again_nor_down_the_list(conn):
+@pytest.mark.parametrize("debug", [False, True])
+async def test_an_account_error_in_a_batch_is_never_asked_again_nor_down_the_list(conn, debug):
     gw, anthropic, openrouter, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")))
+    gw.debug = debug  # which keeps the text of a reply it could not use, and here there is none
     asked = await asyncio.gather(
         gw.ask("brief", ask("account")), gw.ask("brief", ask(0)), return_exceptions=True
     )
@@ -175,16 +177,41 @@ async def test_an_account_error_in_a_batch_is_never_asked_again_nor_down_the_lis
 async def test_a_batch_the_account_kept_from_being_sent_fails_its_calls_on_the_account(
     monkeypatch,
 ):
-    gw, anthropic, _, _ = batching()
+    gw, anthropic, openrouter, _ = batching()
 
     async def unauthorized(requests):
         raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
 
     monkeypatch.setattr(anthropic, "submit", unauthorized)
+    asked = await asyncio.gather(
+        gw.ask("brief", ask(0)), gw.ask("brief", ask(1)), return_exceptions=True
+    )
+    assert [(type(a), a.kind) for a in asked] == [(CallError, "account")] * 2
+    assert (anthropic.calls, openrouter.calls) == ([], [])  # never asked again
+    await gw.close()
+
+
+async def test_a_batch_the_account_can_no_longer_read_fails_its_calls_and_stays_open(
+    conn, monkeypatch
+):
+    gw, anthropic, _, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")), hold=True)
+    asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await until(lambda: anthropic.batches)
+    reads = []
+
+    async def unauthorized(batch_id):
+        reads.append(batch_id)
+        raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+    monkeypatch.setattr(anthropic, "status", unauthorized)
     with pytest.raises(CallError) as found:
-        await gw.ask("brief", ask("account"))  # sent as a normal call, which fails alike
-    assert found.value.kind == "account"
-    assert len(anthropic.calls) == 1  # never tried again
+        await asked
+    assert found.value.kind == "account" and reads == ["msgbatch_1"] and anthropic.calls == []
+    # The batch stays open on its row, for a later run to account for; the call has its own.
+    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
+        ("msgbatch_1", None),
+        (None, "account: AuthenticationError: invalid x-api-key"),
+    ]
     await gw.close()
 
 
@@ -432,8 +459,10 @@ class Together(CallJournal):
         super().__init__(conn, run_id)
         self._together, self._left = asyncio.Barrier(n), n
 
-    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
-        call_id = await super().start(role, model, key, paper_id)
+    async def start(
+        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+    ) -> int:
+        call_id = await super().start(role, model, key, paper_id, via)
         if self._left > 0:
             self._left -= 1
             await self._together.wait()

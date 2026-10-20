@@ -91,6 +91,8 @@ test("a submission's key answers with the job it started, and a runner that thro
     const again = await submit("7:a");
     assert.equal(again.status, 200);
     assert.equal(((await again.json()) as { id: string }).id, id);
+    assert.equal(((await (await fetch(`${base}/keys/${encodeURIComponent("7:a")}`)).json()) as { id: string }).id, id);
+    assert.equal((await fetch(`${base}/keys/${encodeURIComponent("9:a")}`)).status, 404);
     const other = (await (await submit("8:a")).json()) as { id: string };
     assert.notEqual(other.id, id);
     let job: Record<string, unknown> = {};

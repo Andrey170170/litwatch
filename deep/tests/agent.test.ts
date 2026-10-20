@@ -27,6 +27,16 @@ test("a failed model call is the service's failure", async () => {
   assert.equal(outcome.failure, "service");
 });
 
+test("a response the content filter stopped is the paper's failure", async () => {
+  const { models: m, faux } = models();
+  const filtered = fauxAssistantMessage("", { stopReason: "error", errorMessage: "Response incomplete: content_filter" });
+  filtered.rawStopReason = "incomplete.content_filter";
+  faux.setResponses([filtered]);
+  const outcome = await run(m);
+  assert.equal(outcome.error, "Response incomplete: content_filter");
+  assert.equal(outcome.failure, "paper");
+});
+
 test("no card submitted is the paper's failure", async () => {
   const { models: m, faux } = models();
   faux.setResponses([fauxAssistantMessage("I read it."), fauxAssistantMessage("Done."), fauxAssistantMessage("Done.")]);
