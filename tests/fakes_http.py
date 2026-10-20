@@ -288,7 +288,7 @@ class FakeNotion:
 
     `limited` answers that many next requests 429 with a Retry-After of 7 seconds. `lose_answers`
     makes the next row creations happen and then answer 502, `lose_patches` the next changes to the
-    data source's properties; `refuse_deletes` answers the next block deletions 500. `hidden` keeps
+    data source's properties; `refuse_appends` answers the next block appends 500. `hidden` keeps
     that many next queries from finding the newest page, as a lagging index would. `down` answers
     500 to all. `requests` holds every request as (method, path, body). `trash` and `delete` take an
     object away as a person in Notion would; what it holds reads as trashed too, and answers as
@@ -305,7 +305,7 @@ class FakeNotion:
         self.limited = 0
         self.lose_answers = 0
         self.lose_patches = 0
-        self.refuse_deletes = 0
+        self.refuse_appends = 0
         self.hidden = 0
         self.down = False
         self.made = 0
@@ -401,13 +401,13 @@ class FakeNotion:
             return httpx.Response(400, json={"code": "validation_error", "message": "archived"})
         if route == ("GET", "blocks", "children"):
             return self._list([b for b in self.body(parts[1]) if not b.get("in_trash")])
+        if route == ("PATCH", "blocks", "children") and self.refuse_appends:
+            self.refuse_appends -= 1
+            return httpx.Response(500, json={"code": "internal_server_error"})
         if route == ("PATCH", "blocks", "children"):
             for child in body["children"]:
                 self._block(parts[1], child)
             return httpx.Response(200, json={"results": []})
-        if req.method == "DELETE" and parts[0] == "blocks" and self.refuse_deletes:
-            self.refuse_deletes -= 1
-            return httpx.Response(500, json={"code": "internal_server_error"})
         if req.method == "DELETE" and parts[0] == "blocks":
             parent = self.objects.pop(parts[1])["parent"]
             self.objects[parent]["children"].remove(parts[1])

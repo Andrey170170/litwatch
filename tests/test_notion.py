@@ -565,16 +565,19 @@ async def test_a_write_failing_part_way_and_then_undone_is_put_right(world):
     n = notion(fake)
     assert await start(conn, n)
     row = fake.row(A.id)
+    body = [b["type"] for b in fake.body(row["id"])]
     await say(conn, A, FAITH.slug, LabelValue.NONE)
-    fake.refuse_deletes = 1  # its properties written, its body half replaced
+    fake.refuse_appends = 1  # its properties written, its body deleted and not yet replaced
     await deliver(conn, n)
     assert (await outbox.cursor(conn, n.name)).failing is not None
+    assert fake.body(row["id"]) == []
 
     await word.unlabel(conn, A.id, FAITH.slug)  # undone before the retry
     await outbox.retry(conn, n.name)
     await deliver(conn, n)
     assert fake.value(row, "Grade") == "Worth a look" and fake.value(row, "Why") == ""
     assert [b["callout"]["icon"]["emoji"] for b in fake.body(row["id"])[:1]] == ["💡"]
+    assert [b["type"] for b in fake.body(row["id"])] == body
 
 
 async def test_a_failing_setup_is_retried_after_backoff_and_shown(world):
@@ -699,6 +702,22 @@ async def test_a_raised_minimum_keeps_the_cause_of_a_change_not_yet_handed_over(
     why = f"{FAITHFUL}, {await last_day(conn)}: Andrei marked it off-topic."
     assert fake.value(fake.row(A.id), "Why") == why
 
+    # A change that moves the Fit but not the grade (a Weight holding it) says nothing new.
+    async with conn.transaction():
+        await events.emit(
+            conn,
+            events.GRADE_CHANGED,
+            A.id,
+            topic=FAITH.slug,
+            before="relevant",
+            after="relevant",
+            fit_before="related",
+            fit_after="central",
+            cause=Cause.VERDICT.value,
+        )
+    assert await start(conn, notion(fake, minimum=Grade.MUST_READ))
+    assert fake.value(fake.row(A.id), "Why") == why
+
 
 async def test_a_dropped_topic_keeps_its_fields_and_its_own_pages_are_not_written(world):
     conn, fake = world, FakeNotion(PARENT)
@@ -754,6 +773,22 @@ async def test_a_renamed_topic_renames_its_column_and_option_but_not_its_view(wo
     assert fake.value(fake.row(A.id), "Topic") == ["Faithfulness"]
     assert fake.value(fake.row(A.id), "Faithfulness") == "Must read"
     assert fake.view_named("CoT faithfulness")  # the owner's title
+
+
+async def test_a_rename_failing_part_way_and_then_undone_puts_topic_back(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    t0 = datetime(2026, 10, 19, 12, tzinfo=UTC)
+    assert await start(conn, notion(fake, topics={FAITH.slug: "Research"}), t0)
+    fake.refuse_appends = 1  # the old option goes from the rows, then the guide's rewrite fails
+    later = t0 + timedelta(minutes=1)
+    assert not await start(conn, notion(fake, topics={FAITH.slug: "Faith"}), later)
+    assert fake.value(fake.row(A.id), "Topic") == []
+
+    assert await start(
+        conn, notion(fake, topics={FAITH.slug: "Research"}), later + timedelta(hours=1)
+    )
+    assert fake.value(fake.row(A.id), "Topic") == ["Research"]
 
 
 async def test_a_topic_may_not_take_the_name_of_one_exported_before(world):

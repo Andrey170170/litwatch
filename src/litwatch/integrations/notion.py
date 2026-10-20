@@ -356,6 +356,7 @@ class Notion:
                 for i, n in enumerate(wanted)
             ]
             change["Topic"] = {"multi_select": {"options": options}}
+            restored |= bool(set(have) - set(wanted))  # an option removed comes off the rows
         if restored:  # first: the repair's reply may be lost, and the column then looks whole
             await state.rewrite_properties(conn, self.name)
         if change:
@@ -658,11 +659,15 @@ class Notion:
         return gone(self._why({}), self.now(), "grade")  # no change on record says: a verdict's
 
     def _takes_off(self, change: Event) -> bool:
-        """Whether the grade change took the paper from a listed grade to below the minimum."""
+        """Whether the grade change took the paper down from a listed grade to below the
+        minimum."""
         before, after = change.payload.get("before"), change.payload.get("after")
         # Listed before under the lowest minimum: the minimum may have been raised since.
-        listed = before is not None and Grade(before).at_least(Grade.RELEVANT)
-        return listed and (after is None or not Grade(after).at_least(self.minimum))
+        if before is None or not Grade(before).at_least(Grade.RELEVANT):
+            return False
+        return after is None or (
+            not Grade(after).at_least(self.minimum) and not Grade(after).at_least(Grade(before))
+        )
 
     def _why(self, payload: dict[str, Any]) -> str:
         """Who took the paper off the list, and why, in plain words. An event written before
