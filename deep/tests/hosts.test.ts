@@ -133,6 +133,7 @@ before(async () => {
     served.push(req.url ?? "");
     agents.push(req.headers["user-agent"]);
     if (req.url?.startsWith("/slow/")) return void setTimeout(() => res.end('{"rows":[]}'), 300);
+    if (req.url?.startsWith("/busy/")) return void res.writeHead(429).end();
     const to = (location: string) => res.writeHead(302, { location }).end();
     switch (req.url) {
       case "/page":
@@ -272,17 +273,39 @@ test("when a paper's session ends, its requests under way are aborted and its qu
   assert.equal(served.length, 1, "the queued search never reached the server");
 });
 
-test("an ended session's lanes drain at once instead of at the pace", async () => {
+test("an ended session's lanes stop waiting, whether on work under way or on a pace", async () => {
   const session = new AbortController();
   const pace = pacer(session.signal);
   const ran: string[] = [];
-  const underWay = pace("slow.test", () => new Promise((_, reject) => session.signal.addEventListener("abort", () => reject(new Error("aborted")))), 10_000);
-  const queued = [1, 2].map((n) => pace("slow.test", async () => ran.push(`queued ${n}`), 10_000));
+  let entered!: () => void;
+  const inside = new Promise<void>((r) => (entered = r));
+  const underWay = pace("busy.test", () => {
+    entered();
+    return new Promise((_, reject) => session.signal.addEventListener("abort", () => reject(new Error("aborted"))));
+  }, 10_000);
+  const queued = [1, 2].map((n) => pace("busy.test", async () => ran.push(`queued ${n}`), 10_000));
+  await pace("paced.test", async () => "done", 10_000);
+  const behindPace = pace("paced.test", async () => ran.push("behind the pace"), 10_000);
+  await inside;
   const started = Date.now();
   session.abort();
-  for (const call of [underWay, ...queued]) await assert.rejects(call, /abort/i);
+  for (const call of [underWay, ...queued, behindPace]) await assert.rejects(call, /abort/i);
   assert.deepEqual(ran, []);
   assert.ok(Date.now() - started < 1000, "not ten seconds a call");
+});
+
+test("a retry's backoff ends with the session", async () => {
+  const session = new AbortController();
+  const hosts = buildHosts({ litwatchUrl: `http://127.0.0.1:${port}/busy`, maxFetchChars: 100, maxFetches: 60, maxFetchBytes: 1000 }, session.signal);
+  served = [];
+  const search = hosts["store.search"]!(["a"]);
+  await until(() => served.length === 1);
+  // The 429 is answered at once; 300 ms in, the search is inside its first 1 s backoff.
+  await new Promise((r) => setTimeout(r, 300));
+  const started = Date.now();
+  session.abort();
+  await assert.rejects(search, /abort/i);
+  assert.ok(Date.now() - started < 500, "the 1 s backoff was not waited out");
 });
 
 test("a paper's session stops fetching once its budget is used", async () => {

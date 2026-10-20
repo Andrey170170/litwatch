@@ -6,6 +6,7 @@
 
 import dns, { type LookupAddress, type LookupOptions } from "node:dns";
 import { isIP } from "node:net";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { ReadableStream } from "node:stream/web";
 import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
@@ -83,35 +84,38 @@ const FETCH_PACING_MS = 1000;
 type Pace = <T>(host: string, work: () => Promise<T>, fallbackMs?: number) => Promise<T>;
 
 /** One request at a time per host, spaced by that host's pacing (else `fallbackMs`). Each paper's
- * session gets its own lanes; once `ended` aborts, work still queued in them never starts, and the
- * lanes drain at once instead of at the pace. */
+ * session gets its own lanes; once `ended` aborts, work still queued in them stops waiting and never
+ * starts. */
 export function pacer(ended?: AbortSignal): Pace {
   const lanes = new Map<string, Promise<void>>();
+  const end = new Promise<void>((r) => {
+    if (ended?.aborted) r();
+    else ended?.addEventListener("abort", () => r(), { once: true });
+  });
   return async (host, work, fallbackMs = 0) => {
     const wait = PACING_MS[host] ?? fallbackMs;
     const previous = lanes.get(host) ?? Promise.resolve();
     let release!: () => void;
     const mine = new Promise<void>((r) => (release = r));
     lanes.set(host, previous.then(() => mine));
-    await previous;
+    await Promise.race([previous, end]);
     try {
       ended?.throwIfAborted();
       return await work();
     } finally {
-      if (ended?.aborted) release();
-      else setTimeout(release, wait);
+      setTimeout(release, wait);
     }
   };
 }
 
-async function withRetry<T>(attempt: () => Promise<T>, retries = 5): Promise<T> {
+async function withRetry<T>(attempt: () => Promise<T>, ended?: AbortSignal, retries = 5): Promise<T> {
   let delay = 1000;
   for (let i = 0; ; i++) {
     try {
       return await attempt();
     } catch (e) {
       if (i >= retries || !(e instanceof RetryableError)) throw e;
-      await new Promise((r) => setTimeout(r, delay));
+      await sleep(delay, undefined, { signal: ended });
       delay *= 2;
     }
   }
@@ -139,7 +143,7 @@ async function getJson(pace: Pace, url: string, headers: Record<string, string> 
         throw new RetryableError(`${host} answered ${resp.status}`);
       if (!resp.ok) throw new Error(`${url}: HTTP ${resp.status}`);
       return resp.json();
-    }),
+    }, ended),
   );
 }
 
