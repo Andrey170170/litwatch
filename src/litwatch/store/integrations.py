@@ -234,3 +234,51 @@ async def usage_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[st
             (since,),
         )
     ).fetchone()
+
+
+async def attempts(conn: psycopg.AsyncConnection, paper_id: str) -> list[dict[str, Any]]:
+    """The paper's Deep attempts, oldest first, without their traces: when each was submitted
+    and ended, its job, error, whose failure it was and usage, whether it kept a trace
+    (`traced`), and whether it wrote the paper's card (`wrote_card`)."""
+    return await (
+        await conn.execute(
+            """
+            SELECT a.id, a.at, a.ended_at, a.job_id, a.error, a.failure, a.usage, a.automatic,
+                   a.trace IS NOT NULL AS traced,
+                   coalesce(a.ended_at IS NOT NULL AND a.error IS NULL
+                            AND a.pass_id = c.pass_id, false) AS wrote_card
+            FROM deep_attempts a
+            LEFT JOIN deep_cards c ON c.paper_id = a.paper_id AND c.card IS NOT NULL
+            WHERE a.paper_id = %s ORDER BY a.id
+            """,
+            (paper_id,),
+        )
+    ).fetchall()
+
+
+async def attempt_trace(conn: psycopg.AsyncConnection, attempt_id: int) -> list[Any] | None:
+    """The attempt's trace; None when it kept none."""
+    row = await (
+        await conn.execute("SELECT trace FROM deep_attempts WHERE id = %s", (attempt_id,))
+    ).fetchone()
+    return row["trace"] if row else None
+
+
+async def process_notes(
+    conn: psycopg.AsyncConnection, since: datetime | None = None
+) -> list[dict[str, Any]]:
+    """The cards with process notes, newest first, written since `since` if given: the paper,
+    its title, when the card was written and its notes."""
+    return await (
+        await conn.execute(
+            """
+            SELECT c.paper_id, p.title, c.written_at, c.card->'process_notes' AS notes
+            FROM deep_cards c JOIN papers p ON p.id = c.paper_id
+            WHERE jsonb_typeof(c.card->'process_notes') = 'array'
+              AND jsonb_array_length(c.card->'process_notes') > 0
+              AND (%(since)s::timestamptz IS NULL OR c.written_at >= %(since)s)
+            ORDER BY c.written_at DESC, c.paper_id
+            """,
+            {"since": since},
+        )
+    ).fetchall()
