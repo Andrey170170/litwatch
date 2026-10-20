@@ -7,10 +7,10 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import HTTPException, Query, Request
 
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn
+from litwatch.api.deps import Conn, protected
 from litwatch.api.reading import _looks
 from litwatch.config import Schedule
 from litwatch.core.digests import DigestPeriod, week_of
@@ -21,7 +21,7 @@ from litwatch.store import digests as store_
 from litwatch.store import reading
 from litwatch.store import taxonomy as taxonomy_store
 
-router = APIRouter(prefix="/api/digests")
+router = protected("/api/digests")
 
 NO_DIGEST = {404: {"description": "No such digest, or its topic is no longer shown"}}
 WRITE_AGAIN = NO_DIGEST | {

@@ -17,13 +17,8 @@ from fastapi.routing import APIRoute, iter_route_contexts
 from litwatch import api
 from litwatch.api import create_app
 
-# Answered outside any route's own code: `authorised` for every protected route; and outside
-# the schema: the web app's fallback, and the monitoring app on its own port.
-APP_WIDE = {
-    "litwatch.api.deps.authorised",
-    "litwatch.api.app._serve_web",
-    "litwatch.api.monitor.create_monitor",
-}
+# Answered outside the schema: the web app's fallback, and the monitoring app on its own port.
+OUTSIDE_SCHEMA = {"litwatch.api.app._serve_web", "litwatch.api.monitor.create_monitor"}
 
 
 def _target(fn: types.FunctionType, node: ast.expr) -> object:
@@ -87,7 +82,7 @@ def test_every_answered_status_is_documented():
         seen: dict[str, set[int]] = {}
         for fn in code:
             _raised(fn, seen)
-        answered = set().union(*(s for f, s in seen.items() if f not in APP_WIDE))
+        answered = set().union(*seen.values())
         if undocumented := sorted(answered - {int(status) for status in documented}):
             missing.append(f"{sorted(route.methods)} {route.path_format}: {undocumented}")
     assert not missing
@@ -96,7 +91,7 @@ def test_every_answered_status_is_documented():
 def test_the_walk_reaches_every_status():
     """A status the walk cannot reach from a route (a helper called some other way, an
     exception built ahead) would go unchecked: every API function that answers with one is
-    reached, or is app-wide, and no module holds a ready-made exception or response."""
+    reached, or is outside the schema, and no module holds a ready-made exception or response."""
     reached: dict[str, set[int]] = {}
     for _, code, _ in _routes():
         for fn in code:
@@ -110,4 +105,4 @@ def test_the_walk_reaches_every_status():
             if isinstance(fn, types.FunctionType) and fn.__module__ == info.name:
                 _raised(fn, answering)
     unreached = {f for f, statuses in answering.items() if statuses and f not in reached}
-    assert unreached == APP_WIDE
+    assert unreached == OUTSIDE_SCHEMA

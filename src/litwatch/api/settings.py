@@ -11,12 +11,12 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ValidationError
 
 from litwatch import classification, grading, seeds
-from litwatch.api.deps import Conn, budget_lines
+from litwatch.api.deps import Conn, budget_lines, protected
 from litwatch.core import FAILED_RUNS, Cause, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.core.budget import month_start
 from litwatch.core.classification import thresholds
@@ -31,7 +31,7 @@ from litwatch.store import integrations as integrations_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 
-router = APIRouter(prefix="/api/settings")
+router = protected("/api/settings")
 
 SECRET_WORDS = ("key", "token", "password", "secret", "authorization", "credential")
 

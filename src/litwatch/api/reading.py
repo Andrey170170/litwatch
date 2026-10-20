@@ -14,7 +14,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from litwatch import store
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, budget_lines, set_token_cookie, token_ok
+from litwatch.api.deps import Conn, budget_lines, protected, set_token_cookie, token_ok
 from litwatch.archive import ArchiveError
 from litwatch.core import (
     Cause,
@@ -52,7 +52,7 @@ from litwatch.store import reading
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
-router = APIRouter(prefix="/api")
+router = protected("/api")
 
 NOT_FOUND = {404: {"description": "No such paper or topic"}}
 # An owner action that fetches a paper from arXiv, when arXiv does not answer in time.

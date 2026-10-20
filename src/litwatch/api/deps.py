@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 import psycopg
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from litwatch import store
 from litwatch.config import Budget
@@ -52,6 +52,16 @@ def authorised(request: Request) -> None:
 
 
 Conn = Annotated[psycopg.AsyncConnection, Depends(_conn)]
+
+UNAUTHORISED = {
+    401: {"description": "Missing or wrong token"},
+    403: {"description": "The read token, outside reading papers"},
+}
+
+
+def protected(prefix: str) -> APIRouter:
+    """A router whose every route asks for the token (`authorised`) and documents its refusals."""
+    return APIRouter(prefix=prefix, dependencies=[Depends(authorised)], responses=UNAUTHORISED)
 
 
 def set_token_cookie(request: Request, response: Response, token: str) -> None:

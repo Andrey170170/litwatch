@@ -13,11 +13,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import HTTPException, Query, Request
 
 from litwatch import events
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn
+from litwatch.api.deps import Conn, protected
 from litwatch.archive import ArchiveError
 from litwatch.core import Cause, SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
@@ -31,7 +31,7 @@ from litwatch.store import integrations as integrations_store
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 
-router = APIRouter(prefix="/api")
+router = protected("/api")
 
 # Searches run on a pool of their own: a provider whose thread hangs past its timeout (the
 # thread cannot be stopped) ties up a worker here, never the default pool `to_thread` uses.
