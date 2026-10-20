@@ -299,6 +299,14 @@ class Schedule(_Section):
         return (fired, deadline) if now < deadline else None
 
 
+class Mcp(_Section):
+    """The MCP server at `/mcp` (mcp.md), served while `LITWATCH_MCP_TOKEN` is set."""
+
+    # The `Host` headers it answers (anything else gets 421, the SDK's DNS-rebinding check):
+    # the name it is reached by behind a proxy, and `name:*` for any port.
+    allowed_hosts: tuple[str, ...] = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+
+
 class Config(_Section):
     # Debug mode keeps what a model replied when the reply could not be used, and the
     # validator's messages with it (`inference_calls.reply`). `LITWATCH_DEBUG=1` turns it on too.
@@ -310,6 +318,7 @@ class Config(_Section):
     digests: Digests = Digests()
     budget: Budget = Budget()
     schedule: Schedule = Schedule()
+    mcp: Mcp = Mcp()
     integrations: dict[str, dict] = Field(default_factory=dict)
 
 

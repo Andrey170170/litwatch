@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 import psycopg
 
-from litwatch.core import FAILED_RUNS, Depth, Rarity, Taxonomy, Weight
+from litwatch.core import FAILED_RUNS, Depth, Rarity, ReactionValue, Taxonomy, Weight
 from litwatch.core.grading import NO_WEIGHT, WEIGHT_FLOORS
 from litwatch.store import failures, fulltext, runs
 from litwatch.store.analyses import CURRENT_GIST, CURRENT_GIST_SOURCE, CURRENT_WEIGHT
@@ -89,7 +89,8 @@ GRADE_LEVELS: tuple[str, ...] = ("must_read", "relevant", "adjacent", "none", UN
 class Query:
     """What a list shows. Papers: the whole collection, or the pages of `topics` (each with its
     subtree) or of every topic at `depth`. Rarity and grade are the levels, which the counts
-    leave out. `ids` keeps the list to those papers."""
+    leave out. `ids` keeps the list to those papers. `reaction` and `processed` are the MCP
+    server's alone (mcp.md, Search): the web app has no such filters."""
 
     q: str | None = None
     topics: list[str] = field(default_factory=list)
@@ -101,8 +102,18 @@ class Query:
     weight: list[Weight] = field(default_factory=list)
     since: date | None = None  # published on or after, a UTC day
     until: date | None = None  # published on or before
+    reaction: ReactionValue | None = None  # the owner gave it this thumb, on any topic or none
+    processed: bool = False  # only papers litwatch processed: classified, in the collection
     sort: Sort = "rarest"
     ids: list[str] | None = None
+
+    @property
+    def collection_only(self) -> bool:
+        """Whether a filter only the collection can answer is set: a paper outside it has no
+        topic, level, Weight, analysis or thumb, was not processed, and is not saved, so search
+        leaves out the papers its providers find outside it."""
+        ours = (self.topics, self.depth, self.rarity, self.grade, self.weight, self.reaction)
+        return any(ours) or self.code is not None or self.saved is True or self.processed
 
 
 @dataclass
@@ -227,6 +238,13 @@ def _filters(query: Query) -> tuple[list[str], dict[str, Any]]:
             "AND a.paper_revision = p.revision AND a.releases_code) = %(code)s"
         )
         params["code"] = query.code
+    if query.reaction:
+        where.append(
+            "EXISTS (SELECT 1 FROM reactions x WHERE x.paper_id = p.id AND x.value = %(reaction)s)"
+        )
+        params["reaction"] = query.reaction.value
+    if query.processed:
+        where.append("EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = p.id)")
     if query.weight:
         where.append("r.weight = ANY(%(weight)s)")
         params["weight"] = [w.value for w in query.weight]

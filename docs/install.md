@@ -60,6 +60,7 @@ Compose reads `.env` beside `compose.yaml`. Fill in:
 | `LITWATCH_API_TOKEN` | yes | The web app's and the API's token: the only sign-in | generate |
 | `LITWATCH_ARCHIVE_TOKEN` | yes | The token litwatch and the archive share | generate |
 | `LITWATCH_READ_TOKEN` | with deep | A second token that may only search and read papers; `deep` uses it for a card's "Among the collection" | generate |
+| `LITWATCH_MCP_TOKEN` | no | The MCP server's token, for research agents; unset, `/mcp` is not served (step 10) | generate |
 | `ANTHROPIC_API_KEY` | for the nightly run | Anthropic API key | from the Anthropic console |
 | `OPENROUTER_API_KEY` | for the nightly run | OpenRouter API key | from openrouter.ai |
 | `ARXIV_CONTACT` | yes | An address arXiv can write to, sent by the archive worker's downloads and by `deep`'s fetches | a real, monitored address |
@@ -331,13 +332,28 @@ Notion export.
 `secret_env` (the variable holding the signing secret), `timeout`. A client that polls reads `GET /api/events`
 instead. See [`docs/integrations.md`](integrations.md).
 
+**The MCP server.** Research agents (Claude Code, Codex) search the archive and the collection and read what
+litwatch made of a paper or wrote in a digest, read-only, at `/mcp` (streamable HTTP, plain JSON answers). Set
+`LITWATCH_MCP_TOKEN` in `.env` and `docker compose up -d litwatch`; agents send it as `Authorization: Bearer …`, and
+neither the web app's token nor the read token opens it. Behind a proxy, add the host name it is reached by to
+`[mcp] allowed_hosts` in `litwatch.toml` (commented there): any other `Host` gets 421. Check, on the host:
+
+```sh
+M=$(grep '^LITWATCH_MCP_TOKEN=' .env | cut -d= -f2-)
+curl -s -H "Authorization: Bearer $M" -H 'Accept: application/json, text/event-stream' \
+  -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  http://127.0.0.1:8080/mcp
+```
+
+answers JSON listing `search_papers`, `get_paper`, `list_digests` and `read_digest`.
+
 **Your own integration.** A Python module named with `use`; [`docs/integrations.md`](integrations.md) is the guide.
 
 ## 11. Monitoring
 
 `LITWATCH_METRICS_PORT` has litwatch also serve, without a token, `/metrics` in Prometheus' text format and
 `/status` as a `homelab.status/v1` document (the nightly, the pipeline, digests, each integration, each model
-provider, the archive, deep, the budget; [`docs/specs/v1/data.md`](specs/v1/data.md), Configuration). Set it in
+provider, the archive, deep, the budget, and the MCP server while it is served; [`docs/specs/v1/data.md`](specs/v1/data.md), Configuration). Set it in
 `compose.override.yaml`, publishing the port only where your monitoring reaches it:
 
 ```yaml

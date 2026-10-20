@@ -2,11 +2,13 @@
 `/metrics` in Prometheus' text format and `/status` as a `homelab.status/v1` document, following
 the owner's homelab telemetry convention (docs/plans/v1-deploy.md). Neither asks for a token,
 so the port is never routed through a public proxy. Both read the database when asked, so a
-job run by another process (`litwatch nightly` in a terminal) shows as well as the scheduler's."""
+job run by another process (`litwatch nightly` in a terminal) shows as well as the scheduler's;
+the MCP server's calls are counted in this process, where it runs."""
 
 from __future__ import annotations
 
 import asyncio
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -68,6 +70,52 @@ class Night:
     calls: dict[str, dict[str, int]]  # by provider: calls `failed` without an answer, `replied`
 
 
+# How a call to the MCP server ended: answered, nothing found, still being fetched (ask again),
+# or failed with a server error. Only the last is a failure.
+MCP_OUTCOMES = ("ok", "not_found", "fetching", "error")
+# How far back the `mcp` component looks for failed calls.
+MCP_WINDOW = timedelta(hours=1)
+
+
+@dataclass
+class McpCalls:
+    """The MCP server's calls in this process (it runs inside `serve`), for `/metrics` and the
+    `mcp` component: counts by tool and outcome, time spent per tool, the failures of the last
+    `MCP_WINDOW` and the newest call that did not fail."""
+
+    tools: tuple[str, ...]
+    counts: Counter[tuple[str, str]] = field(default_factory=Counter)
+    seconds: dict[str, float] = field(default_factory=dict)
+    failed: deque[tuple[datetime, str]] = field(default_factory=deque)  # oldest first
+    answered_at: datetime | None = None
+
+    def record(self, tool: str, outcome: str, seconds: float, now: datetime | None = None) -> None:
+        now = now or datetime.now(UTC)
+        self.counts[tool, outcome] += 1
+        self.seconds[tool] = self.seconds.get(tool, 0.0) + seconds
+        if outcome == "error":
+            self.failed.append((now, tool))
+        else:
+            self.answered_at = now
+        while self.failed and self.failed[0][0] < now - MCP_WINDOW:
+            self.failed.popleft()
+
+    def component(self, now: datetime) -> dict[str, Any]:
+        """Degraded when calls in the last `MCP_WINDOW` failed and none answered since the last
+        of them; a paper not found or still being fetched is an answer (decision 68)."""
+        failed = [(at, tool) for at, tool in self.failed if at >= now - MCP_WINDOW]
+        last = failed[-1][0] if failed else None
+        if last is None or (self.answered_at is not None and self.answered_at > last):
+            return _component("mcp", "healthy", None, now)
+        by_tool = Counter(tool for _, tool in failed)
+        tools = ", ".join(f"{tool} {n}" for tool, n in sorted(by_tool.items()))
+        reason = (
+            f"{len(failed)} calls failed in the last hour ({tools}), the last at "
+            f"{last.isoformat()}, none answered since; expected an answer after a failure"
+        )
+        return _component("mcp", "degraded", reason, now)
+
+
 @dataclass
 class Facts:
     """What both endpoints are built from, read once per request."""
@@ -86,6 +134,7 @@ class Facts:
     signin: dict[str, Any] | None = None  # the Deep service's, as its health check reported it
     deep_failure: dict[str, Any] | None = None  # `integrations.service_failure`
     unkeyed: dict[str, str] = field(default_factory=dict)  # provider: why it has no key
+    mcp: McpCalls | None = None  # while /mcp is served
 
 
 async def facts(
@@ -280,7 +329,31 @@ def metrics(f: Facts) -> str:
         "1 when a service litwatch depends on answers.",
         [({"dependency": n}, float(err is None)) for n, err in sorted(f.probes.items())],
     )
+    if f.mcp is not None:
+        out.extend(_mcp_metrics(f.mcp))
     return "\n".join(out) + "\n"
+
+
+def _mcp_metrics(calls: McpCalls) -> list[str]:
+    """The MCP server's counter and summary, every tool and outcome listed from zero."""
+    out = [
+        "# HELP litwatch_mcp_calls_total MCP tool calls, by tool and how they ended.",
+        "# TYPE litwatch_mcp_calls_total counter",
+    ]
+    for tool in calls.tools:
+        for outcome in MCP_OUTCOMES:
+            n = calls.counts[tool, outcome]
+            out.append(f'litwatch_mcp_calls_total{{tool="{tool}",outcome="{outcome}"}} {n}')
+    out += [
+        "# HELP litwatch_mcp_call_seconds Time spent answering MCP tool calls, by tool.",
+        "# TYPE litwatch_mcp_call_seconds summary",
+    ]
+    for tool in calls.tools:
+        n = sum(calls.counts[tool, outcome] for outcome in MCP_OUTCOMES)
+        spent = repr(calls.seconds.get(tool, 0.0))
+        out.append(f'litwatch_mcp_call_seconds_sum{{tool="{tool}"}} {spent}')
+        out.append(f'litwatch_mcp_call_seconds_count{{tool="{tool}"}} {n}')
+    return out
 
 
 # -- /status ---------------------------------------------------------------------------------------
@@ -379,6 +452,8 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
         for x in over
     )
     out.append(_component("budget", "degraded" if over else "healthy", reason or None, now))
+    if f.mcp is not None:
+        out.append(f.mcp.component(now))
     return out
 
 
@@ -459,7 +534,9 @@ def create_monitor(app: FastAPI) -> FastAPI:
     async def read() -> Facts:
         st = app.state
         async with await store.connect(st.dsn) as conn:
-            return await facts(conn, st.config, st.integrations, st.archive)
+            found = await facts(conn, st.config, st.integrations, st.archive)
+        found.mcp = st.mcp_calls
+        return found
 
     @monitor.get("/metrics", response_class=PlainTextResponse)
     async def get_metrics() -> PlainTextResponse:

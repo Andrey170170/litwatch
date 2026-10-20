@@ -199,15 +199,20 @@ async def status(request: Request, c: Conn) -> s.RunStatus:
 
 
 def _shows_outside(query: s.PaperQuery) -> bool:
-    """Whether a Papers filter keeps the outside band: a paper outside the collection has no
-    topic, level, Weight or analysis, and is not saved, so a filter on any of those leaves
-    it out."""
-    ours = (query.topic, query.depth, query.rarity, query.grade, query.weight)
-    return (
-        query.source != "collection"
-        and not any(ours)
-        and query.code is None
-        and query.saved is not True
+    """Whether a Papers filter keeps the outside band: none of its filters is one only the
+    collection has (`reading.Query.collection_only`), and it does not ask for the collection's
+    band alone."""
+    return query.source != "collection" and not _query(query).collection_only
+
+
+def outside_filters(params: s.PapersIn) -> SearchFilters:
+    """What a search asks the providers for the outside band. They rank by relevance whatever
+    the collection's sort; a date sort asks them for their newest."""
+    return SearchFilters(
+        since=params.since,
+        until=params.until,
+        limit=params.limit,
+        sort="newest" if params.sort == "newest" else "relevance",
     )
 
 
@@ -228,14 +233,7 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
         answer.rows = [_row(tree, looks, r, s.Row) for r in listed.rows]
         answer.total, answer.counts = listed.total, s.RarityCounts(**listed.rarities)
     if params.q and params.offset == 0 and _shows_outside(params):
-        # The providers rank by relevance whatever the collection's sort; a date sort asks them
-        # for their newest.
-        filters = SearchFilters(
-            since=params.since,
-            until=params.until,
-            limit=params.limit,
-            sort="newest" if params.sort == "newest" else "relevance",
-        )
+        filters = outside_filters(params)
         st = request.app.state
         answer.outside, answer.left_out = await integrations_api.search_outside(
             c,

@@ -38,14 +38,20 @@ async def _shown(c: psycopg.AsyncConnection) -> list[str]:
     return list(_looks(await taxonomy_store.load(c)))
 
 
-async def _marks(
-    c: psycopg.AsyncConnection, period: DigestPeriod, first: date, last: date
+async def marks(
+    c: psycopg.AsyncConnection,
+    period: DigestPeriod,
+    first: date,
+    last: date,
+    topic: str | None = None,
 ) -> list[tuple[dict[str, Any], s.Badge]]:
-    """The digests of `period` from `first` to `last`, of shown topics only, newest day first
-    and each day's in the fixed topic order, with their topic's badge."""
+    """The digests of `period` from `first` to `last`, of shown topics only (of `topic` alone
+    when given), newest day first and each day's in the fixed topic order, with their topic's
+    badge."""
     looks = _looks(await taxonomy_store.load(c))
     order = {slug: i for i, slug in enumerate(looks)}
-    rows = [r for r in await store_.digests_on(c, period, first, last) if r["topic"] in looks]
+    found = await store_.digests_on(c, period, first, last, topic)
+    rows = [r for r in found if r["topic"] in looks]
     rows.sort(key=lambda r: (-r["day"].toordinal(), order[r["topic"]]))
     return [(r, looks[r["topic"]]) for r in rows]
 
@@ -63,7 +69,7 @@ def _mark(row: dict[str, Any], badge: s.Badge) -> dict[str, Any]:
 
 
 async def _cards(c: psycopg.AsyncConnection, period: DigestPeriod, day: date) -> list[s.DigestCard]:
-    found = await _marks(c, period, day, day)
+    found = await marks(c, period, day, day)
     shown: dict[int, list[s.DigestPaper]] = {r["id"]: [] for r, _ in found}
     for p in await store_.card_papers(c, list(shown)):
         shown[p["digest_id"]].append(_paper(p))
@@ -123,7 +129,7 @@ async def day(day: date, request: Request, c: Conn) -> s.Day:
     now = datetime.now(UTC)
     today = schedule.enabled and now.astimezone(schedule.zone).date() == day
     monday = day - timedelta(days=7)
-    if day.weekday() == 0 and await _marks(c, DigestPeriod.WEEK, monday, monday):
+    if day.weekday() == 0 and await marks(c, DigestPeriod.WEEK, monday, monday):
         weekly = monday
     # The run before the cards: it is closed only once its digests are written, so a run read as
     # done never comes with the cards from before its last digest (the reads are not one snapshot).
@@ -159,10 +165,10 @@ async def history(params: Annotated[s.HistoryIn, Query()], c: Conn) -> s.History
     weekly Marks."""
     first, last = params.since, params.until
     days: dict[date, list[s.DigestMark]] = {}
-    for r, badge in await _marks(c, DigestPeriod.DAY, first, last):
+    for r, badge in await marks(c, DigestPeriod.DAY, first, last):
         days.setdefault(r["day"], []).append(s.DigestMark(**_mark(r, badge)))
     weeks: dict[date, list[s.DigestMark]] = {}
-    for r, badge in await _marks(c, DigestPeriod.WEEK, week_of(first), last):
+    for r, badge in await marks(c, DigestPeriod.WEEK, week_of(first), last):
         weeks.setdefault(r["day"], []).append(s.DigestMark(**_mark(r, badge)))
     released = await store_.released_days(c, first, last)
     span = [last - timedelta(days=i) for i in range((last - first).days + 1)]
@@ -175,10 +181,19 @@ async def history(params: Annotated[s.HistoryIn, Query()], c: Conn) -> s.History
 
 
 async def _digest(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest:
+    found = await in_full(c, digest_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such digest")
+    return found
+
+
+async def in_full(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest | None:
+    """A digest in full, as /api and /mcp both show it; None when there is none or its topic is
+    no longer shown."""
     row = await store_.get(c, digest_id)
     looks = _looks(await taxonomy_store.load(c))
     if row is None or row["topic"] not in looks:
-        raise HTTPException(status_code=404, detail="no such digest")
+        return None
     return s.Digest(
         **_mark(row, looks[row["topic"]]),
         gist=row["gist"],

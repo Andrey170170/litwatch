@@ -208,6 +208,10 @@ openrouter_monthly = 25
 nightly = "0 2 * * *"
 deadline = "07:30"         # the nightly's batches end here (models.md, batches)
 timezone = "America/Denver" # the owner's; none is the server's own zone
+
+[mcp]                      # the MCP server (mcp.md), served while LITWATCH_MCP_TOKEN is set
+allowed_hosts = ["litwatch.andrei-homelab.com", "127.0.0.1:*", "localhost:*"]  # the Host headers
+                           # it answers, others 421; the default is localhost's alone
 ```
 
 The models are proposals until N1 and N2 measure them. The taxonomy and topics live in the database, edited in
@@ -218,12 +222,13 @@ The archive is required: texts, PDFs and search come from it. Its storage policy
 
 Secrets and the service's process settings come from the environment, each secret also as `NAME_FILE` naming a file
 that holds it: `LITWATCH_DATABASE_URL` (or `LITWATCH_DB_HOST` and its siblings), `LITWATCH_API_TOKEN`,
-`LITWATCH_READ_TOKEN`, the provider keys, the archive's token; the archive's URL is `LITWATCH_ARCHIVE_URL`.
+`LITWATCH_READ_TOKEN`, `LITWATCH_MCP_TOKEN` (the MCP server's, which alone opens `/mcp`; unset, it is not served),
+the provider keys, the archive's token; the archive's URL is `LITWATCH_ARCHIVE_URL`.
 `LITWATCH_LOG_FORMAT=json` writes one JSON object per line (`ts`, `level`, `msg`, `component`); the image sets it.
 `LITWATCH_METRICS_PORT` (or `litwatch serve --metrics-port`) serves, without a token, `/metrics` in Prometheus' text
 format (the `homelab_job_*` family for the nightly and publications jobs, read from the run records, and litwatch's
 own gauges) and `/status` as a `homelab.status/v1` document (the nightly, the pipeline, digests, each integration,
-each model provider, the archive, deep, the budget), for a monitoring system on an internal network. A run records the
+each model provider, the archive, deep, the budget, the MCP server), for a monitoring system on an internal network. A run records the
 database session of the process running it, so a run whose process died reads as failed rather than running.
 
 The status document says when litwatch cannot do its job; a paper's own failure is the app's (pipeline.md, section 9).
@@ -245,3 +250,7 @@ known end, and `nightly` already reads it failed).
   any service failure litwatch sees (a job the service tagged `service`, an error submitting or following a job) until
   the next card is made, whenever either happened.
 - `digests` is degraded by a failed digest, whatever the reason.
+- `mcp`, while the MCP server is served, is degraded when calls in the last hour failed with a server error and
+  none has been answered since the last of them; a paper not found, or one still being fetched, is an answer. Its
+  calls are counted in the process (`litwatch_mcp_calls_total{tool,outcome}`, `litwatch_mcp_call_seconds{tool}`) and
+  each is logged as one line: the tool, how it ended and how long it took, never its arguments.

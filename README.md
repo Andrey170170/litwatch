@@ -61,7 +61,9 @@ litwatch publications                # look up published versions
 ```
 
 `LITWATCH_READ_TOKEN`, when set, is a second token that may only search and read papers
-(`GET /api/papers` and `/api/papers/{id}`); the deep service uses it.
+(`GET /api/papers` and `/api/papers/{id}`); the deep service uses it. `LITWATCH_MCP_TOKEN`, when set,
+serves the MCP server at `/mcp` behind it alone, for research agents
+([`docs/specs/v1/mcp.md`](docs/specs/v1/mcp.md)).
 
 Evaluation runs never write to verdicts or the outbox. Results are in `evals/`. A replay reads its
 papers from the database (labelled papers it lacks are left out and counted) and writes only

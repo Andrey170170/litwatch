@@ -48,6 +48,7 @@ services:
       LITWATCH_DB_PASSWORD: ${LITWATCH_DB_PASSWORD}
       LITWATCH_API_TOKEN: ${LITWATCH_API_TOKEN:?set LITWATCH_API_TOKEN in .env}
       LITWATCH_READ_TOKEN: ${LITWATCH_READ_TOKEN:-}
+      LITWATCH_MCP_TOKEN: ${LITWATCH_MCP_TOKEN:-}
       LITWATCH_ARCHIVE_URL: http://archive:8787
       # Intake's arXiv requests and the archive worker's downloads share one pacing.
       ARXIV_PACING_DIR: /var/lib/arxiv-pacing
