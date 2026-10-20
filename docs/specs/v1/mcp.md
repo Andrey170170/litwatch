@@ -20,11 +20,11 @@ asking the archive for a paper's files at urgent priority, as opening a PDF in t
 
 - **Search.** The archive's lexical search, in its order (exact title and phrase first), over the whole archive by
   default, as the web app's search box is (decision 87). Optional filters from litwatch: a topic, a date range, papers
-  litwatch processed, a minimum grade, papers the owner reacted to. A result gives a paper's id, title, authors and
-  date and, where litwatch processed it, its Gist and grade per topic.
+  litwatch processed, a minimum grade, a Weight, papers the owner reacted to. A result gives a paper's id, title,
+  authors and date and, where litwatch processed it, its Gist, Weight and grade per topic.
 - **A paper.** Its metadata and abstract, and what litwatch has on it: Gist, Brief and Deep card where they exist,
-  the effective Fit and grade per topic, the owner's word and reactions, and its citation (the published version
-  where litwatch found one).
+  its Weight, the effective Fit and grade per topic, the owner's word and reactions, and its citation (the published
+  version where litwatch found one).
 - **Digests.** A topic's digests over a date range, and one digest read in full: its text, the papers it puts
   forward and the updated papers listed under them.
 - **Reading.** Outline first (decision 85): the paper's sections with their sizes and where the text comes from
