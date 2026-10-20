@@ -388,10 +388,17 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
     assert "- Key claim: Probes predict unfaithful reasoning." in held
     assert "  - Models:\n    - Qwen3-8B" in held and "- Code available: yes" in held
     assert "Weight: solid (from the abstract): Sound work." in held
-    faith = next(line for line in held.splitlines() if line.startswith("- **Chain-of-thought"))
-    assert "verdict central" in faith and "the owner's word: related" in faith
-    assert "labelled related" in faith and "grade " in faith
-    assert f"- up on Chain-of-thought faithfulness ({FAITH.slug}), " in held
+    topics, owners = held.split("## Topics\n")[1].split("## The owner's word and reactions\n")
+    faith = next(line for line in topics.splitlines() if line.startswith("- **Chain-of-thought"))
+    assert "verdict central" in faith and "grade " in faith
+    said = owners.split("\n\n")[0].splitlines()
+    assert len(said) == 1 and said[0].startswith(
+        f"- **Chain-of-thought faithfulness** ({FAITH.slug}): the owner's word: related; "
+    )
+    assert sorted(x.rsplit(", ", 1)[0] for x in said[0].split(": ", 1)[1].split("; ")[1:]) == [
+        "labelled related",
+        "thumb up",
+    ]
     assert "@inproceedings{" in held and "NeurIPS" in held and "Published: NeurIPS 2026" in held
     assert "Only in the archive" in only and "Ada Lovelace" in only and ONLY.id in only
     assert "```bibtex\n@" in only
@@ -399,25 +406,63 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
     assert no_id[1] is False and "No arXiv id" in no_id[0]
 
 
-async def test_a_thumb_on_a_topic_no_longer_followed_still_shows_with_its_reason(conn, shelves):
-    fake, _, agents, _ = shelves
+def _owners(page: str) -> dict[str, list[str]]:
+    """The owner's section, by line head: each record without its date, sorted."""
+    section = page.split("## The owner's word and reactions\n")[1].split("\n\n")[0]
+    return {
+        head: sorted(x.rsplit(", ", 1)[0] for x in said.split("; "))
+        for head, said in (line.split(": ", 1) for line in section.splitlines())
+    }
+
+
+async def test_the_owners_records_on_a_topic_no_longer_followed_all_still_show(conn, shelves):
+    fake, landmark, _, _ = shelves
     async with serving(_app(conn, fake)) as http:
-        for thumb in (
-            {"topic": AGENTS.slug, "value": "down", "reason": "already_knew"},
-            {"value": "up", "reason": "great_find"},
-        ):
-            answer = await http.put(f"/api/reactions/{agents.id}", json=thumb, headers=AUTH)
+        for method, path, body in [
+            ("PUT", f"/api/reactions/{landmark.id}", {"topic": FAITH.slug, "value": "up",
+                                                      "reason": "great_find"}),
+            ("PUT", f"/api/reactions/{landmark.id}", {"value": "down", "reason": "already_knew"}),
+            ("POST", "/api/misses", {"paper_id": landmark.id, "topic": FAITH.slug}),
+            ("PUT", f"/api/labels/{FAITH.slug}/{landmark.id}", {"value": "central"}),
+        ]:  # fmt: skip
+            answer = await http.request(method, path, json=body, headers=AUTH)
             assert answer.status_code == 200, answer.text
-    await taxonomy_store.save(conn, Taxonomy(classes=TREE.classes, topics=[FAITH, INTERP]))
+        followed = _owners(await ok(http, "get_paper", paper_id=landmark.id))
+    await taxonomy_store.save(conn, Taxonomy(classes=TREE.classes, topics=[INTERP, AGENTS]))
     async with serving(_app(conn, fake)) as http:
-        assert agents.id in ids(await ok(http, "search_papers", reaction="down"))
-        assert agents.id in ids(await ok(http, "search_papers", reaction="up"))
-        page = await ok(http, "get_paper", paper_id=agents.id)
-    thumbs = page.split("## The owner's thumbs\n")[1].split("\n\n")[0].splitlines()
-    assert [line.rsplit(", ", 1)[0] for line in thumbs] == [
-        f"- down on Agents and tool use ({AGENTS.slug}), no longer followed (already knew)",
-        "- up on no topic (great find)",
-    ]
+        assert landmark.id in ids(await ok(http, "search_papers", reaction="up"))
+        unfollowed = _owners(await ok(http, "get_paper", paper_id=landmark.id))
+    records = ["labelled central", "reported as a miss", "thumb up (great find)"]
+    on_no_topic = ["thumb down (already knew)"]
+    assert followed == {
+        f"- **Chain-of-thought faithfulness** ({FAITH.slug})": [
+            *records[:2], "the owner's word: central", records[2]
+        ],
+        "- On no topic": on_no_topic,
+    }  # fmt: skip
+    assert unfollowed == {
+        f"- **Chain-of-thought faithfulness** ({FAITH.slug}, no longer followed)": records,
+        "- On no topic": on_no_topic,
+    }
+
+
+async def test_the_library_says_whether_the_owner_or_the_grades_chose(conn, shelves):
+    fake, _, _, unread = shelves
+    async with serving(_app(conn, fake)) as http:
+        by_grades = await ok(http, "get_paper", paper_id=P.id)
+        for paper_id, saved in [(unread.id, True), (P.id, False)]:
+            answer = await http.put(f"/api/library/{paper_id}", json={"saved": saved}, headers=AUTH)
+            assert answer.status_code == 200, answer.text
+        saved = await ok(http, "get_paper", paper_id=unread.id)
+        unsaved = await ok(http, "get_paper", paper_id=P.id)
+        only = await ok(http, "get_paper", paper_id=ONLY.id)
+    assert "Saved in the owner's library: saved automatically, by its grades." in by_grades
+    assert (
+        "Fetched by litwatch, not processed yet.\nSaved in the owner's library: saved by the owner."
+        in saved
+    )
+    assert "Not in the owner's library: unsaved by the owner." in unsaved
+    assert "library" not in only
 
 
 async def test_a_paper_the_archive_cannot_be_asked_for_is_an_error_not_a_missing_paper(conn):
@@ -542,7 +587,8 @@ async def test_a_date_out_of_range_is_an_argument_error_not_a_server_error(conn)
         assert component[0]["status"] == "healthy"
         assert 'outcome="error"} 1' not in (await m.get("/metrics")).text
         # The bounds themselves are days a tool takes.
-        await ok(http, "list_digests", since="1991-01-01", until="2100-12-31")
+        bounds = await ok(http, "list_digests", since="1991-01-01", until="2100-12-31")
+        assert "(The range is cut to a 92-day span, ending on its last day.)" in bounds
 
 
 async def test_arguments_no_query_can_take_are_refused_and_not_counted_as_failures(conn):

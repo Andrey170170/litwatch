@@ -38,7 +38,7 @@ from litwatch.api import reading as reading_api
 from litwatch.api import schemas as s
 from litwatch.api.deps import _same
 from litwatch.api.monitor import McpCalls
-from litwatch.core import Grade, ReactionValue, Taxonomy, Weight
+from litwatch.core import Grade, Hand, ReactionValue, Taxonomy, Weight
 from litwatch.core.digests import DigestPeriod, DigestRole, week_of
 from litwatch.intake.search import id_from_url
 from litwatch.publications.bibtex import Cited
@@ -167,20 +167,20 @@ def _counted(calls: McpCalls, tool: Callable[..., Awaitable[str]]) -> Callable[.
         try:
             answer = await tool(*args, **kwargs)
         except NotFoundError as exc:
-            _record(calls, tool.__name__, "not_found", started)
+            _count(calls, tool.__name__, "not_found", started)
             return str(exc)
         except ArgumentError:
             raise
         except Exception:
-            _record(calls, tool.__name__, "error", started)
+            _count(calls, tool.__name__, "error", started)
             raise
-        _record(calls, tool.__name__, "partial" if isinstance(answer, Partial) else "ok", started)
+        _count(calls, tool.__name__, "partial" if isinstance(answer, Partial) else "ok", started)
         return str(answer)
 
     return call
 
 
-def _record(calls: McpCalls, tool: str, outcome: str, started: float) -> None:
+def _count(calls: McpCalls, tool: str, outcome: str, started: float) -> None:
     spent = time.monotonic() - started
     calls.record(tool, outcome, spent)
     fields = {"event": "mcp.call", "tool": tool, "outcome": outcome, "duration_seconds": spent}
@@ -285,8 +285,9 @@ def build(state: State) -> MCPServer:
         paper_id: Annotated[Text, Field(description="An arXiv id or link, e.g. 2610.01234.")],
     ) -> str:
         """Everything litwatch has on one arXiv paper: its metadata and abstract; where litwatch
-        processed it, its Gist, Brief, Deep card, Weight, grade and Fit per topic, the owner's
-        word and thumbs; and its citation as BibTeX (the published version where one is known).
+        processed it, its Gist, Brief, Deep card, Weight, grade and Fit per topic; whether it is
+        in the owner's library, and the owner's word, labels, misses and thumbs, on topics no
+        longer followed too; and its citation as BibTeX (the published version where one is known).
         A paper litwatch has not processed shows the archive's record."""
         try:
             pid = id_from_url(paper_id)
@@ -438,24 +439,55 @@ def _topic_line(t: s.PaperTopic) -> str:
         said.append(f"Fit {t.fit}")
     if t.verdict:
         said.append(f"verdict {t.verdict.fit}: {t.verdict.reason}")
-    if t.word:
-        said.append(f"the owner's word: {t.word}")
-    if t.label:
-        said.append(f"labelled {t.label.value}")
-    if t.missed:
-        said.append("reported as a miss")
     look = t.topic
     return f"- **{look.name}** ({look.slug}, {look.depth.value.capitalize()}): " + "; ".join(said)
 
 
-def _thumb_line(h: s.HistoryItem) -> str:
-    """A thumb as it stands, on whatever topic it was given: one no longer followed says so."""
-    if h.topic is None:
-        on = "on no topic"
+# What the owner said of a paper, as its history keeps it: labels, misses and thumbs as they stand.
+OWNERS = ("labelled", "missed", "reacted")
+
+
+def _record(h: s.HistoryItem) -> str:
+    if h.what == "labelled":
+        said = f"labelled {h.value}"
+    elif h.what == "missed":
+        said = "reported as a miss"
     else:
-        on = f"on {h.name or h.topic} ({h.topic})" + ("" if h.followed else ", no longer followed")
-    why = f" ({_words(h.reason)})" if h.reason else ""
-    return f"- {h.value} {on}{why}, {_day(h.at)}"
+        said = f"thumb {h.value}" + (f" ({_words(h.reason)})" if h.reason else "")
+    return f"{said}, {_day(h.at)}"
+
+
+def _owners_lines(p: s.Paper) -> list[str]:
+    """Every label, miss and thumb, by the topic it names: the rail's topics first, in its order,
+    then those no longer followed, marked so (the rail holds every followed topic with a
+    record). A followed topic leads with the owner's word. Thumbs on no topic come last."""
+    rail = {t.topic.slug: t for t in p.topics}
+    records = [h for h in p.history if h.what in OWNERS]
+    named = {h.topic: h.name for h in records if h.topic}
+    slugs = [x for x in rail if x in named] + [x for x in named if x not in rail]
+    out = []
+    for slug in slugs:
+        topic = rail.get(slug)
+        said = [f"the owner's word: {topic.word}"] if topic and topic.word else []
+        said += [_record(h) for h in records if h.topic == slug]
+        name = topic.topic.name if topic else named[slug] or slug
+        followed = "" if topic else ", no longer followed"
+        out.append(f"- **{name}** ({slug}{followed}): " + "; ".join(said))
+    if loose := [h for h in records if h.topic is None]:
+        out.append("- On no topic: " + "; ".join(_record(h) for h in loose))
+    return out
+
+
+def _library(p: s.Paper) -> str:
+    """Whether the paper is in the library, and who put it there or took it out: the owner's
+    newest Save or Unsave outranks every other reason."""
+    if p.hand == Hand.SAVE:
+        return "Saved in the owner's library: saved by the owner."
+    if p.hand == Hand.UNSAVE:
+        return "Not in the owner's library: unsaved by the owner."
+    if p.saved:
+        return "Saved in the owner's library: saved automatically, by its grades."
+    return "Not in the owner's library."
 
 
 def _paper_answer(p: s.Paper, citation: str) -> str:
@@ -466,12 +498,13 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
     out = [f"# {p.title}", f"arXiv:{p.id}{version} · {dates} · {', '.join(p.authors)}"]
     if p.in_collection:
         rarity = f", rarity {p.rarity}" if p.rarity else ""
-        saved = " Saved in the owner's library." if p.saved else ""
-        out.append(f"In litwatch's collection{rarity}.{saved}")
+        out.append(f"In litwatch's collection{rarity}.")
     elif p.stored:
         out.append("Fetched by litwatch, not processed yet.")
     else:
         out.append("Only in the archive: litwatch has not processed it.")
+    if p.stored:
+        out.append(_library(p))
     if p.weight:
         out.append(
             f"Weight: {p.weight.weight} (from the {_words(p.weight.source)}): {p.weight.reason}"
@@ -488,8 +521,8 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
         )
     if p.topics:
         out += ["", "## Topics", *(_topic_line(t) for t in p.topics)]
-    if thumbs := [h for h in p.history if h.what == "reacted"]:
-        out += ["", "## The owner's thumbs", *(_thumb_line(h) for h in thumbs)]
+    if owners := _owners_lines(p):
+        out += ["", "## The owner's word and reactions", *owners]
     if p.gist:
         out += ["", f"## Gist (from the {_words(p.gist.source)})", p.gist.text]
     if p.brief:
@@ -534,7 +567,7 @@ def _digests_answer(
 ) -> str:
     out = [f"# Digests from {first} to {last}"]
     if clipped:
-        out.append(f"(The range is cut to its last {DIGEST_SPAN.days} days.)")
+        out.append(f"(The range is cut to a {DIGEST_SPAN.days}-day span, ending on its last day.)")
     for name, found in (("Daily", daily), ("Weekly, by Monday", weekly)):
         if found:
             out += ["", f"## {name}"]
