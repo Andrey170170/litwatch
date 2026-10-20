@@ -202,6 +202,8 @@ async def read_text(
     if job.get("status") != "complete":
         return None
     body = await archive.available_pdf(paper.id, paper.version)
-    if body and (found := await _from_pdf(body, paper.version, executor)):
+    if body is None:  # the archive's inconsistency, not a paper without text
+        raise ArchiveError(f"{paper.id}v{paper.version}: PDF job complete, but no PDF served")
+    if found := await _from_pdf(body, paper.version, executor):
         return found
     raise TextUnavailable(f"{paper.id}v{paper.version}: no usable text in its source or PDF")

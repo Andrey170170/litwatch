@@ -211,6 +211,41 @@ async def test_a_pdfs_text_is_outlined_by_page_as_the_pdf_numbers_them(conn, she
     assert chunk(blank) == "(blank)" and blank.endswith("[The end of 2. Page 2.]")
 
 
+async def test_paragraphs_are_outlined_below_subsubsections(conn, shelf):
+    method = (
+        "\\section{Method}\nWe train.\n\\paragraph{Training setup}\nAdam.\n"
+        "\\subparagraph*{Batch size}\n512.\n\\paragraph{Evaluation}\nThree tasks.\n"
+    )
+    fake = FakeArchive()
+    fake.texts[HELD.id] = (2, method + "\\section{Results}\nIt works.\n")
+    async with serving(reading_app(conn, fake)) as http:
+        outline = await ok(http, "paper_outline", paper_id=HELD.id)
+        setup = await ok(http, "read_paper", paper_id=HELD.id, section=2)
+        whole = await ok(http, "read_paper", paper_id=HELD.id, section=1)
+    assert [(indent, n, title) for indent, n, title, _ in entries(outline)] == [
+        ("", 1, "Method"),
+        ("      ", 2, "Training setup"),
+        ("        ", 3, "Batch size"),
+        ("      ", 4, "Evaluation"),
+        ("", 5, "Results"),
+    ]
+    assert chunk(setup) == "\\paragraph{Training setup}\nAdam.\n\\subparagraph*{Batch size}\n512.\n"
+    assert chunk(whole) == method  # a section holds its paragraphs
+
+
+async def test_an_optional_argument_may_hold_a_bracket_inside_braces(conn, shelf):
+    fake = FakeArchive()
+    fake.texts[HELD.id] = (
+        2,
+        "\\section{Setup}\nData.\n"
+        "\\section[{Analysis of $\\mathbb{E}[X]$}]{Method}\nWe bound it.\n"
+        "\\subsection [short] {Lemma}\nProof.\n",
+    )
+    async with serving(reading_app(conn, fake)) as http:
+        outline = await ok(http, "paper_outline", paper_id=HELD.id)
+    assert [title for _, _, title, _ in entries(outline)] == ["Setup", "Method", "Lemma"]
+
+
 # -- V6: the bounded urgent fetch ------------------------------------------------------------------
 
 
@@ -329,6 +364,28 @@ async def test_an_archive_that_stops_answering_after_pending_is_an_error_not_fet
     assert component["status"] == "degraded"
     assert 'litwatch_mcp_calls_total{tool="read_paper",outcome="error"} 1' in metrics
     assert 'outcome="fetching"} 0' in metrics and 'outcome="fetching"} 1' not in metrics
+
+
+async def test_a_complete_pdf_job_with_no_pdf_served_is_an_error(conn, shelf):
+    """The archive's inconsistency, not a paper without text: it degrades the component."""
+
+    class NoFile(FakeArchive):
+        def handle(self, req: httpx.Request) -> httpx.Response:
+            if req.url.path.endswith("/pdf"):
+                return httpx.Response(404)
+            return super().handle(req)
+
+    fake = NoFile()
+    fake.statuses["source"] = "unavailable"
+    app = reading_app(conn, fake)
+    async with serving(app) as http:
+        text, failed = await call(http, "read_paper", paper_id=PDF_ONLY.id)
+        page, page_failed = await call(http, "view_pdf_page", paper_id=PDF_ONLY.id, page=1)
+        component, metrics = await _component(app)
+    assert failed and "no PDF served" in text and "try again in a minute" in text
+    assert page_failed and "serves no PDF" in page
+    assert component["status"] == "degraded"
+    assert 'litwatch_mcp_calls_total{tool="read_paper",outcome="error"} 1' in metrics
 
 
 # -- V7: a page as an image ------------------------------------------------------------------------
@@ -453,8 +510,17 @@ async def test_an_appendix_or_supplement_caption_renders_dotted_or_not(conn, she
     assert none[1] is False and "none of its 4 pages names Table A.10" in none[0]
 
 
-async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(conn, shelf):
-    many = "Front matter.\n" + "".join(f"\\subsection{{Lemma {k}}}\nProof.\n" for k in range(650))
+# A heading's title as long as an outline shows one, math-heavy.
+LONG_TITLE = r": a bound on $\sum_{i=1}^{n} \alpha_i \|W_\ell x\|_2 \le \sigma_{\max}(W_\ell)$" * 4
+
+
+@pytest.mark.parametrize("title", ["", LONG_TITLE], ids=["short titles", "long titles"])
+async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(conn, shelf, title):
+    """By at most 300 entries an answer, and no more than 40,000 characters: with long titles,
+    the characters end a part before the count does."""
+    many = "Front matter.\n" + "".join(
+        f"\\subsection{{Lemma {k}" + title + "}\nProof.\n" for k in range(650)
+    )
     fake = FakeArchive()
     fake.texts[HELD.id] = (2, many)
     app = reading_app(conn, fake)
@@ -465,7 +531,7 @@ async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(conn
             answer = await ok(http, "paper_outline", paper_id=HELD.id, **asked)
             answers += 1
             shown = [n for _, n, _, _ in entries(answer)]
-            assert len(shown) <= mcp_server.MAX_LISTED
+            assert len(shown) <= mcp_server.MAX_LISTED and len(answer) <= PAGE
             listed += shown
             found = re.search(r"call paper_outline again with start=(\d+)\.\]$", answer)
             if found is None:
@@ -473,7 +539,8 @@ async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(conn
             start = int(found[1])
         past, failed = await call(http, "paper_outline", paper_id=HELD.id, start=651)
         component, metrics = await _component(app)
-    assert listed == list(range(651)) and answers == 3
+    assert listed == list(range(651))
+    assert answers == 3 if not title else answers > 3
     assert failed and "No entry 651: the outline numbers 0–650." in past
     assert 'tool="paper_outline",outcome="error"} 0' in metrics
     assert component["status"] == "healthy"

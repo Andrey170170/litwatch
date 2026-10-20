@@ -96,6 +96,7 @@ MAX_TEXT = 100_000_000  # a character offset
 MAX_PART = 100_000  # an outline entry, or a PDF page
 CAPTION_CHARS = 40
 MAX_LISTED = 300  # outline entries an answer lists
+OUTLINE_FOOTER = 200  # the room an outline's answer keeps for the line saying where to go on
 RENDER_SECONDS = 20.0  # the bound on rendering one page, waiting for the executor included
 
 
@@ -876,15 +877,22 @@ def _numbers(parts: list[mcp_reading.Part]) -> str:
 def _outline_answer(
     paper: Paper, text: PaperText, use_pdf: bool, parts: list[mcp_reading.Part], first: int
 ) -> str:
-    """The outline's entries from `parts[first]`, at most `MAX_LISTED` of them."""
+    """The outline's entries from `parts[first]`: at most `MAX_LISTED` of them, and no more
+    than fit in `mcp_reading.PAGE_CHARS` with room left for the line saying where to go on."""
     out = [f"# {_one_line(paper.title)}", _source(paper, text, use_pdf), READ_HOW, ""]
     if first > 0:
         out.append(f"(Entries {_numbers(parts[:first])} come before these.)")
-    shown = parts[first : first + MAX_LISTED]
-    for p in shown:
+    used = sum(len(line) + 1 for line in out)
+    after = first
+    for p in parts[first : first + MAX_LISTED]:
         size = f"{p.end - p.start:,} characters" if p.end > p.start else "blank"
-        out.append(f"{'  ' * p.depth}{p.index}. {p.title} · {size} · offset {p.start}")
-    if rest := parts[first + MAX_LISTED :]:
+        line = f"{'  ' * p.depth}{p.index}. {p.title} · {size} · offset {p.start}"
+        if after > first and used + len(line) + 1 > mcp_reading.PAGE_CHARS - OUTLINE_FOOTER:
+            break
+        out.append(line)
+        used += len(line) + 1
+        after += 1
+    if rest := parts[after:]:
         out.append(
             f"[{len(rest)} more entries, numbered {_numbers(rest)}: call paper_outline again "
             f"with start={rest[0].index}.]"

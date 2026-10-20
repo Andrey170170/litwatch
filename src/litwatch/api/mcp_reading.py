@@ -119,10 +119,17 @@ class Part:
     end: int
 
 
-LEVELS = {"part": 0, "chapter": 1, "section": 2, "subsection": 3, "subsubsection": 4}
-_HEADING = re.compile(
-    r"\\(part|chapter|section|subsection|subsubsection)(?![A-Za-z@])\*?\s*(?:\[[^\]]*\]\s*)?\{"
-)
+LEVELS = {
+    "part": 0,
+    "chapter": 1,
+    "section": 2,
+    "subsection": 3,
+    "subsubsection": 4,
+    "paragraph": 5,
+    "subparagraph": 6,
+}
+# A sectioning command, its optional argument and title read after it (`_group`).
+_HEADING = re.compile(r"\\(" + "|".join(LEVELS) + r")(?![A-Za-z@])\*?\s*")
 _BIBLIOGRAPHY = re.compile(r"\\begin\s*\{thebibliography\}")
 # A TeX comment: `%` after an even run of backslashes (`\%` is a per cent sign), to the line's end.
 _COMMENT = re.compile(r"(?<!\\)(?:\\\\)*%.*")
@@ -130,30 +137,53 @@ TITLE_CHARS = 200  # the most of a heading's title an outline shows
 _TITLE_SCAN = 2_000  # how far a title's closing brace is looked for
 
 
-def _title(text: str, start: int) -> str | None:
-    """The braced group opening at `start`, comments dropped and spaces collapsed; None when it
-    does not close within `_TITLE_SCAN` characters."""
-    depth, i = 0, start
+def _close(text: str, start: int, closer: str) -> int | None:
+    """Where the group opening at `start` closes with `closer` (`}` or `]`), past brace groups
+    and escaped characters; None when it does not within `_TITLE_SCAN` characters."""
+    depth, i = 0, start + 1
     stop = min(len(text), start + _TITLE_SCAN)
     while i < stop:
         ch = text[i]
         if ch == "\\":
             i += 2
             continue
+        if ch == closer and depth == 0:
+            return i
         if ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
-            if depth == 0:
-                inner = _COMMENT.sub("", text[start + 1 : i])
-                return " ".join(inner.split())[:TITLE_CHARS] or "(untitled)"
         i += 1
     return None
 
 
+def _group(text: str, at: int) -> int | None:
+    """Where a heading's title opens, at `at` or past an optional argument there (`[...]`, which
+    may hold `]` inside braces); None when no title follows."""
+    if text.startswith("[", at):
+        end = _close(text, at, "]")
+        if end is None:
+            return None
+        at = end + 1
+        while at < len(text) and text[at].isspace():
+            at += 1
+    return at if text.startswith("{", at) else None
+
+
+def _title(text: str, start: int) -> str | None:
+    """The braced group opening at `start`, comments dropped and spaces collapsed; None when it
+    does not close within `_TITLE_SCAN` characters."""
+    end = _close(text, start, "}")
+    if end is None:
+        return None
+    inner = _COMMENT.sub("", text[start + 1 : end])
+    return " ".join(inner.split())[:TITLE_CHARS] or "(untitled)"
+
+
 def outline(text: PaperText) -> list[Part]:
     """The text's outline: a PDF's text by page, every page as the PDF numbers them; LaTeX by
-    its sectioning commands (starred too, none inside a comment) and its bibliography."""
+    its sectioning commands, `\\part` to `\\subparagraph` (starred too, none inside a comment),
+    and its bibliography."""
     body = text.body
     if text.source == "pdf":
         spans = text.pages if text.pages is not None else ((0, len(body)),)
@@ -167,7 +197,9 @@ def outline(text: PaperText) -> list[Part]:
 
     found: list[tuple[int, int, str]] = []  # (offset, level, title)
     for m in _HEADING.finditer(body):
-        if not commented(m.start()) and (title := _title(body, m.end() - 1)) is not None:
+        if commented(m.start()) or (opens := _group(body, m.end())) is None:
+            continue
+        if (title := _title(body, opens)) is not None:
             found.append((m.start(), LEVELS[m[1]], title))
     top = min((level for _, level, _ in found), default=LEVELS["section"])
     for m in _BIBLIOGRAPHY.finditer(body):
