@@ -9,10 +9,22 @@ and the terms in `GLOSSARY.md`. The nightly run is intake, classification, analy
 full-text queue and the digests; the web app serves the papers, the topics, a paper's page and the
 digests.
 
-## Running it
+## Installing it
 
 `deploy/` holds the stack: litwatch, its Postgres, the archive and, optionally, the deep service, with
-`docker compose` (see `deploy/README.md`). The setup below is for development.
+`docker compose`. In short:
+
+```sh
+git clone https://github.com/Andrey170170/litwatch.git && cd litwatch/deploy
+cp env.example .env                  # the tokens, the model keys, ARXIV_CONTACT
+$EDITOR litwatch.toml                # categories, the schedule and its timezone
+docker compose up -d --build
+docker compose exec litwatch litwatch taxonomy import    # the seed taxonomy and topics
+```
+
+The web app is then at `http://127.0.0.1:8080`; sign in with `LITWATCH_API_TOKEN`. The full guide, with the choices,
+checks, optional parts, backups and upgrades, is [`docs/install.md`](docs/install.md). The setup below is for
+development.
 
 ## Setup
 
