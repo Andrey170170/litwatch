@@ -434,14 +434,17 @@ def _of_role(reply: Reply, role: RoleConfig) -> Reply:
     return reply
 
 
+# Each provider's key, read with `secret` (the variable or its `_FILE`).
+KEYS = {"anthropic": "ANTHROPIC_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
+
+
 def build(models: Models, journal: Journal | None = None, *, debug: bool = False) -> Gateway:
     """A gateway over the providers that have credentials in the environment."""
     from litwatch.llm.anthropic import AnthropicProvider  # noqa: PLC0415
     from litwatch.llm.openrouter import OpenRouterProvider  # noqa: PLC0415
 
-    providers: dict[str, Provider] = {}
-    if key := secret("ANTHROPIC_API_KEY"):
-        providers["anthropic"] = AnthropicProvider(key)
-    if key := secret("OPENROUTER_API_KEY"):
-        providers["openrouter"] = OpenRouterProvider(key)
+    kinds = {"anthropic": AnthropicProvider, "openrouter": OpenRouterProvider}
+    providers: dict[str, Provider] = {
+        name: kinds[name](key) for name, variable in KEYS.items() if (key := secret(variable))
+    }
     return Gateway(models, providers, journal, debug=debug)

@@ -235,11 +235,12 @@ known end, and `nightly` already reads it failed).
   the full-text passes (Brief and Weight re-check); a paper stopped when it became terminal there (three failed runs,
   or refused by every model) between the run's start and its end, the digest wait included. Deep passes are not
   counted: their service failures have `deep`. A single stopped paper never turns `pipeline`.
-- `provider-<name>`, one per model provider, is degraded from an `account` error (models.md, the gateway) until the
-  provider's next reply; and when, in that run, the provider had failed calls (provider errors, timeouts) and not one
-  reply. A reply is any answer the provider sent, a refusal or an invalid answer included; an answer reused from the
-  journal is not one. Evaluation runs write their own tables only, so an account error or a reply only an evaluation
-  saw does not reach it.
+- `provider-<name>`, one per model provider a configured role uses (its fallbacks included), is degraded while its key
+  is not in the environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or their `_FILE`); from an `account` error
+  (models.md, the gateway) until the provider's next reply; and when, in that run, the provider had failed calls
+  (provider errors, timeouts) and not one reply. A reply is any answer the provider sent, a refusal or an invalid answer
+  included; an answer reused from the journal is not one. Evaluation runs write their own tables only, so an account
+  error or a reply only an evaluation saw does not reach it.
 - `deep` is degraded while the service's health check reports a sign-in other than ok or does not answer, and from
   any service failure litwatch sees (a job the service tagged `service`, an error submitting or following a job) until
   the next card is made, whenever either happened.
