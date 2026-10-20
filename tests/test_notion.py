@@ -781,6 +781,23 @@ async def test_a_topic_option_deleted_in_notion_is_put_back_on_its_rows(world):
     assert fake.value(fake.row(A.id), "Topic") == [FAITHFUL]
 
 
+async def test_a_grade_option_deleted_in_notion_is_put_back_on_its_rows(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    n = notion(fake)
+    assert await start(conn, n)
+    column = (await state.database(conn, n.name)).topics[FAITH.slug]["column"]
+    kept = {"options": [{"name": "Worth a look"}, {"name": "No longer listed"}]}
+    fake._properties(fake.source()["id"], {"Grade": {"select": kept}, column: {"select": kept}})
+    assert fake.value(fake.row(A.id), "Grade") is None  # the owner deleted Must read
+
+    assert await start(conn, notion(fake))
+    assert fake.value(fake.row(A.id), "Grade") == "Must read"
+    assert fake.value(fake.row(A.id), FAITHFUL) == "Must read"
+    options = fake.source()["properties"]["Grade"]["select"]["options"]
+    assert {o["name"]: o["color"] for o in options}["Must read"] == "orange"
+
+
 async def test_a_rename_failing_part_way_and_then_undone_puts_topic_back(world):
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, A, FAITH.slug, "must_read")

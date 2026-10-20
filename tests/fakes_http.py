@@ -503,18 +503,22 @@ class FakeNotion:
                         value["multi_select"] = [
                             o for o in value["multi_select"] if o["name"] in names
                         ]
+                    elif value and kind == "select":
+                        chosen = value["select"]
+                        value["select"] = chosen if chosen and chosen["name"] in names else None
 
     def _write(self, row: dict[str, Any], properties: dict[str, Any]) -> None:
         props = self.objects[row["source"]]["properties"]
         for key, value in properties.items():
             prop = props.get(key) or next(p for p in props.values() if unquote(p["id"]) == key)
             kind = prop["type"]
-            if kind == "multi_select":  # a name not yet an option becomes one
+            if kind in ("select", "multi_select"):  # a name not yet an option becomes one
                 have = prop[kind].setdefault("options", [])
+                chosen = value[kind] if kind == "multi_select" else [value[kind] or {}]
                 have += [
                     {"name": o["name"]}
-                    for o in value[kind]
-                    if o["name"] not in [h["name"] for h in have]
+                    for o in chosen
+                    if o and o["name"] not in [h["name"] for h in have]
                 ]
             row["properties"][unquote(prop["id"])] = value
 

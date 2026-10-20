@@ -307,9 +307,10 @@ class Notion:
         await state.save_database(conn, db)
 
     async def _columns(self, conn: psycopg.AsyncConnection, db: state.Database) -> dict[str, str]:
-        """Put back the columns litwatch writes, add or rename each exported topic's grade
-        column, and give Topic an option per topic exported so far. Returns the columns'
-        property ids by name. Once a column was put back, every row is written again."""
+        """Put back the columns litwatch writes and their grade options, add or rename each
+        exported topic's grade column, and give Topic an option per topic exported so far.
+        Returns the columns' property ids by name. Once a column or option was put back, every
+        row is written again."""
         path = f"/data_sources/{db.data_source_id}"
         source = await self.notion.request("GET", path)
         if source.get("in_trash"):
@@ -343,6 +344,15 @@ class Notion:
                 "column": unquote(column["id"]) if column else None,
                 "view": entry["view"] if entry else None,
             }
+        # The grade options are litwatch's too: one the owner deleted or renamed is put back,
+        # which takes any other off the rows, and they are written again.
+        grades = [props.get("Grade"), *(by_id.get(db.topics[s]["column"]) for s in self.exported)]
+        for column in (c for c in grades if c and c["type"] == "select"):
+            names = {o["name"] for o in column["select"].get("options", [])}
+            if names != {o["name"] for o in GRADE_OPTIONS}:
+                options = [{"name": o["name"]} if o["name"] in names else o for o in GRADE_OPTIONS]
+                change.setdefault(unquote(column["id"]), {})["select"] = {"options": options}
+                restored = True
         have = [
             o["name"] for o in props.get("Topic", {}).get("multi_select", {}).get("options", [])
         ]
