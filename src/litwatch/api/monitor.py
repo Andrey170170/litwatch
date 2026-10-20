@@ -193,8 +193,11 @@ def metrics(f: Facts) -> str:
     )
     gauge(
         "litwatch_integration_failing",
-        "1 while an integration is stopped on a failing event.",
-        [({"integration": n}, float(c.failing is not None)) for n, c in sorted(f.cursors.items())],
+        "1 while an integration is stopped on a failing event or a failing setup.",
+        [
+            ({"integration": n}, float(c.failing is not None or c.setup_failures > 0))
+            for n, c in sorted(f.cursors.items())
+        ],
     )
     gauge(
         "litwatch_spend_month_dollars",
@@ -295,7 +298,12 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
         )
     )
     for name, c in sorted(f.cursors.items()):
-        if c.failing is not None:
+        if c.setup_failures:
+            reason = (
+                f"setup failed {c.setup_failures} times: {c.setup_error}; expected it to succeed"
+            )
+            out.append(_component(f"integration-{name}", "degraded", reason, now))
+        elif c.failing is not None:
             reason = (
                 f"stopped on event {c.failing} after {c.failures} failures: {c.last_error}; "
                 "expected no failing event"

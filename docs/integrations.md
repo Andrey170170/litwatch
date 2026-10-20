@@ -27,7 +27,8 @@ its own **cursor**, in order:
   is tried again after a backoff (30 seconds, doubling, at most an hour). That integration's
   later events wait behind it; every other integration goes on. The owner can retry the event
   at once or skip it, under Settings → Integrations (`POST /api/settings/integrations/<name>/retry`
-  and `/skip`).
+  and `/skip`). A failing `setup` is retried the same way, and Retry tries it again at once; the
+  integrations API reports it as `setup_failing`, apart from a failing event.
 - After a failure or a restart, the event in hand is handed over again. **`handle` must be
   idempotent.**
 
@@ -59,8 +60,10 @@ class Integration(Protocol):
   group writes with `async with conn.transaction():`. The connection is the integration's own
   and serves one event at a time.
 - Optional, used when present:
-  - `async def setup(self, conn)`: awaited once whenever the dispatcher starts, before any event.
-    It must be safe to run again.
+  - `async def setup(self, conn)`: awaited whenever the dispatcher starts, before any event, under
+    the same lock as `handle`. It must be safe to run again. When it raises, no event is handed
+    over; the error is shown under Settings → Integrations and setup is tried again after the
+    same backoff as a failed event (or at once, on Retry).
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.
@@ -221,9 +224,73 @@ The built-in `archive` integration is a search provider.
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source), unless intake read it from the archive; answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers |
 | `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) | Asks the deep service for a reading card and records each attempt's usage; emits `card.ready`. Loads only with an archive to read papers from |
+| `notion` | `grade.changed` for an exported topic, `gist.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the papers listed for the exported topics, for a reader who does not use litwatch; never deletes a page. See below |
 | `webhook` | any, by pattern | POSTs the event as JSON to a URL |
 
 Each module's docstring lists its options and environment variables.
+
+### The Notion export
+
+`notion` keeps one Notion database under a page of the owner's choosing: one row per paper whose
+effective grade for an exported topic is at least the minimum grade (docs/specs/v1/integrations.md,
+The Notion export; its words are in GLOSSARY.md). Its state is in `notion_databases` and
+`notion_pages` (`store.notion`).
+
+```toml
+[integrations.notion]
+parent_page = "3fe89c45-f79d-8064-be60-f7588e2f34b7"   # the page holding the database
+owner_name = "Andrei"                                  # who Why lines name for the owner's word
+minimum_grade = "relevant"                             # or "must_read"
+
+[integrations.notion.topics]                           # slug = name in Notion; the Focus topics by default
+cot-faithfulness = "CoT faithfulness"
+cot-monitoring = "CoT monitoring"
+```
+
+The token is a Notion internal integration's, from `NOTION_TOKEN` or the file `NOTION_TOKEN_FILE`
+names; share the parent page with that integration. An exported topic must be followed (active or
+paused); names must differ from each other, from the columns below and from a topic exported
+before. The topics are read on start: without `topics`, a topic made Focus is exported from the next
+start.
+
+**On start** (`setup`) it reconciles, safely again and again: it looks for, or makes, the database
+"litwatch papers", its columns, the page "How to read this" beside it, the view All papers, and per
+exported topic a grade column and a view; then it writes every paper that qualifies or already has a
+page. Anything it would make is looked for first (the database and the guide by title, views by
+name, pages by arXiv id, asking again for a moment after a lost reply), so nothing is made twice. A
+view is made once and is then the owner's: one deleted in Notion is not made again. A column
+litwatch writes that is deleted in Notion is put back under a new id, so a view grouped, filtered or
+sorted by the old one needs that set again by hand. A column litwatch writes that is turned into
+another type is turned back, and its rows are rewritten. Title may be renamed. A topic may not
+take the name of a column litwatch keeps, of one the reader made, or of another topic's. A grade or Topic option deleted in Notion
+is put back with its colour at the next start, and every row written again; a page written before
+then brings the option back by itself, uncoloured, and the other rows stay blank there until they
+change, so leave the options alone. A view is made showing Title, Grade, Topic,
+TL;DR, Published and Status; the other columns are in it, hidden, for the owner to show. A topic
+added gets its column, view and papers; a topic dropped keeps its column, view and values, no longer
+written; a renamed topic has its column renamed and its new name written to each row's Topic
+(Notion's API cannot rename an option, so the old one is removed). A raised minimum turns the papers
+below it No longer listed; a lowered one lists them again. A changed `parent_page` starts afresh
+under the new page and leaves the old database as it is.
+
+**Each page**: Title, Grade (the best over the exported topics), Topic, TL;DR (the Gist), Published,
+Authors, Venue (linked to the published version), arXiv, PDF, Added (the day it entered the list),
+Why, one grade column per exported topic, and a hidden arXiv id used to find the row. Status is the
+reader's and never written. The body is a callout pointing to "How to read this", the TL;DR, the
+Abstract and, with a Deep card, a collapsed Deep read with one callout
+per section. A paper that falls below the minimum for a topic says No longer listed there, with a
+dated Why line from the newest `grade.changed` that took it off (a missing `cause` reads as
+`verdict`). A dismissed paper that has a page is No longer listed for every topic, "set it aside" by
+the owner, from the next write of it (dismissal emits no event, so in practice the next start; a
+published record the owner clears is likewise taken off at the next start); one with no page gets
+none. A page is written only when its properties or body changed; requests are paced to about three
+a second, and a 429 is waited out.
+
+**Taken away in Notion.** A paper's page that Notion says is in its trash or deleted was removed on
+purpose: it is recorded as gone (`notion_pages.gone_at`), never written or made again, and the
+event goes on. "How to read this" is checked on every start and made again when gone. When the
+database itself is in the trash, or the page holding it is (its rows then read as trashed too),
+the event fails and setup fails, shown under Settings, and no page is taken for gone.
 
 ### The webhook's request
 

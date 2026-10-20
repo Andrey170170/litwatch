@@ -49,7 +49,8 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
 
 - **A plain `httpx` client on Notion API version `2026-03-11`, no SDK.** The views endpoint is new, the client needs
   only a handful of calls, and the sample used exactly these calls. It has the same shape as `zotero.py`'s client.
-- **It paces itself to about three requests a second.** On a 429 it waits as Retry-After says. Any other failure
+- **It paces itself to about three requests a second.** On a 429 it waits as Retry-After says, a minute at most per wait, up to five waits;
+  then the request fails like any other. Any other failure
   raises, so the dispatcher retries the event with backoff and shows it under Settings → Integrations.
 - **The outbox is the queue.** litwatch only writes events, each in the transaction of the data it describes. The `notion` loop publishes
   from its own cursor at Notion's pace and holds up no other integration.
@@ -71,12 +72,14 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
 - **A topic no longer exported** keeps its column and view. On each page its fields keep their last values: its
   grade column, its Topic option and its Why line. The page's other fields go on being written: Grade is the best
   grade over the topics still exported, and a page with no exported topic left is not written at all.
-- **A renamed topic** gets its Topic option and its grade column renamed. Its view keeps its title, which is the
-  owner's.
+- **A renamed topic** gets its grade column renamed and its new name on each row's Topic. Notion's API cannot rename
+  a select option, so the new option is added, the old one removed and the rows written again. Its view keeps its
+  title, which is the owner's. A name another topic's column carries is refused: rename that one first.
 - **A changed minimum grade** is applied per topic from the state recorded for each page: the topic's effective
   grade last written. A topic that was listed under the old minimum, whose grade is unchanged and now falls below the
   new one, becomes No longer listed with a Why such as "19 Oct 2026: the list now shows only Must read papers." A
-  topic already No longer listed keeps its Why. A lowered minimum lists papers again and removes their line.
+  topic already No longer listed keeps its Why, unless a later fall in its grade took it off under the new minimum;
+  then that change is its Why. A lowered minimum lists papers again and removes their line.
 - **Views are created once and recorded in the integration's state.** A view the owner rearranges or deletes is
   never touched again. Columns the integration writes are added back if missing, and the property hashes of every
   page are then cleared so the rows are filled again.
@@ -114,22 +117,23 @@ A page is written only when one of its hashes changes, so restarts and repeated 
 - **Events handled:**
   - `grade.changed`, for an exported topic;
   - `gist.written`;
-  - `brief.written`;
   - `card.ready`;
   - `publication.found`;
   - `paper.revised`.
 
   `wants` drops every other event. `handle` reads the present state through the repositories, rebuilds the one page,
   and writes what changed, as the integration contract says.
-- **The Why line comes from the `grade.changed` that delisted the paper.** It is stored in `notion_pages`. Only that
-  event's topic line changes; a paper listed again for the topic loses the line. In plain words:
+- **The Why line comes from the newest `grade.changed` that took the paper off the topic's list**, read from the
+  paper's events in the outbox rather than from the event in hand, so events handed over late, or a topic exported
+  again after its paper left, still name the right cause. It is stored in `notion_pages`, with the newest change it
+  knew; a later change that takes the paper off again replaces it. Only that topic's line changes; a paper listed again for the topic loses the line. In plain words:
   - `owner`: "Andrei marked it off-topic" or "… less important" (the name is `owner_name`);
   - `verdict` and `weight`: "litwatch re-checked it and judged it off-topic" or "… less important";
   - `taxonomy`: "the topic's definition changed".
 
   "Off-topic" means the Fit fell. "Less important" means only the grade fell, the Fit staying the same.
-- **The body is replaced whole when its hash changes**: delete litwatch's blocks, then append the new ones. TL;DR,
-  Summary and Deep read change only with new text, so this is rare.
+- **The body is replaced whole when its hash changes**: delete litwatch's blocks, then append the new ones. TL;DR
+  and Deep read change only with new text, so this is rare.
 
 ### Options
 
@@ -156,17 +160,17 @@ The layout is the approved sample's.
 - TL;DR.
 - Published.
 - Status: a select of To read, Read, Useful, Not useful. Ana owns it and litwatch never writes it.
-- Authors, Venue, arXiv (url), PDF (url), Added and Why.
+- Authors, Venue (linked to the published version: its URL, else its DOI), arXiv (url), PDF (url), Added and Why.
 - arXiv id: the paper's id as text, which identifies the page (see *Creation is adopted*). Hidden in the views.
 - One grade column per exported topic, a select with the same three options.
 
-**Views:** All papers, grouped by Grade; one view per exported topic, filtered to that topic and grouped by its grade
-column. Every view is sorted by Published, newest first.
+**Views:** All papers, grouped by Grade; one view per exported topic, filtered to the rows with a grade in that topic's
+column and grouped by it. Every view is sorted by Published, newest first.
 
 **The page body:**
 1. A 💡 callout pointing to "How to read this".
 2. Heading TL;DR, then the Gist.
-3. Heading Summary, then the Brief, or the abstract when there is no Brief.
+3. Heading Abstract, then the abstract. Briefs are not exported for now: their writing was weak until recently.
 4. When the paper has a Deep card, a collapsed toggle heading "Deep read" holding one callout per section of the
    card:
    - 💬 gray: Key claim
@@ -237,7 +241,7 @@ then a real run against a test target on the sandbox. For the sandbox runs, buil
 | V2. Pages, properties, Why lines and bodies are built and written as specified, and only when they changed | pytest with Notion faked over HTTP. Request bodies for: a must read with a Deep card, a worth-a-look, a delisted paper. A repeated event sends no request. A 429 is waited out. A page creation whose reply is lost, then a restart: the page is adopted, not duplicated. A failing setup is retried after backoff and its error is shown by the integrations API. A second setup while the lock is held creates nothing. A changed `parent_page` drops the old state |
 | V3. A first start builds the database, its columns, the views, "How to read this", and a page for every qualifying paper | A real run on the sandbox against the scratch page. The page count equals the sandbox's count of papers at relevant or above for the exported topics. Screenshot |
 | V4. A grade that falls shows No longer listed with the right Why, and listing again clears it | On the sandbox: label a listed paper off-topic, run the dispatcher, read the page; remove the label, read it again |
-| V5. New text reaches the page | On the sandbox: an event for a paper whose Brief changed rewrites its body; an event for a paper whose text did not change makes no write |
+| V5. New text reaches the page | On the sandbox: an event for a paper whose Gist or Deep card changed rewrites its body; an event for a paper whose text did not change makes no write |
 | V6. The owner's view arrangement survives a restart | In the scratch database: rearrange one view and hide columns in it, delete another view, restart, compare |
 | V7. Reconcile follows the configuration | Restart with `minimum_grade = "must_read"`: listed worth-a-look papers become No longer listed with the minimum-grade Why, and a paper V4 delisted keeps its owner's Why. Restart with one topic dropped and another added: on a page of the dropped topic alone nothing is written; on a page shared with a kept topic the dropped topic's fields keep their values while the rest is written; the new topic gets its column, view and papers |
 | V8. Ana's database matches what litwatch holds | After P3: the listed pages and their per-topic grades, compared with production's papers at relevant or above for the exported topics (a read-only query) |

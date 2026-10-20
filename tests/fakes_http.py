@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote, unquote
 
 import httpx
 
@@ -279,3 +279,296 @@ class FakeDeep:
             status = "error" if self.outcome.get("error") else "done"
             return httpx.Response(200, json={"status": status, **self.outcome})
         return httpx.Response(404)
+
+
+class FakeNotion:
+    """Enough of api.notion.com at version 2026-03-11 for the `notion` integration: pages under a
+    parent page, a database with its data source (properties with percent-encoded ids, as Notion
+    gives them), views, page properties and body blocks. Only the token `notion-token` is let in.
+
+    `limited` answers that many next requests 429 with a Retry-After of 7 seconds. `lose_answers`
+    makes the next row creations happen and then answer 502, `lose_patches` the next changes to the
+    data source's properties; `refuse_appends` answers the next block appends 500. `hidden` keeps
+    that many next queries from finding the newest page, as a lagging index would. `down` answers
+    500 to all. `requests` holds every request as (method, path, body). `trash` and `delete` take an
+    object away as a person in Notion would; what it holds reads as trashed too, and answers as
+    Notion does (probed 2026-10-19): a trashed page reads `in_trash`, refuses edits with a 400 and
+    its blocks with a 404; a trashed data source reads `in_trash` and refuses changes and
+    queries."""
+
+    def __init__(self, *pages: str) -> None:
+        self.objects: dict[str, dict[str, Any]] = {
+            p: {"object": "page", "children": []} for p in pages
+        }
+        self.views: dict[str, dict[str, Any]] = {}
+        self.requests: list[tuple[str, str, Any]] = []
+        self.limited = 0
+        self.lose_answers = 0
+        self.lose_patches = 0
+        self.refuse_appends = 0
+        self.hidden = 0
+        self.down = False
+        self.made = 0
+        self.newest: str | None = None
+
+    def _id(self, kind: str) -> str:
+        self.made += 1
+        return f"{kind}-{self.made:04d}"
+
+    # -- reading it back ----------------------------------------------------------------------
+
+    def kept(self, method: str | None = None, prefix: str = "") -> list[tuple[str, str, Any]]:
+        """The requests made, of a method and under a path when given."""
+        return [r for r in self.requests if (method in (None, r[0])) and r[1].startswith(prefix)]
+
+    def writes(self) -> list[tuple[str, str, Any]]:
+        return [r for r in self.requests if r[0] != "GET" and not r[1].endswith("/query")]
+
+    def source(self) -> dict[str, Any]:
+        (found,) = [o for o in self.objects.values() if o["object"] == "data_source"]
+        return found
+
+    def rows(self) -> list[dict[str, Any]]:
+        return [o for o in self.objects.values() if o["object"] == "page" and "source" in o]
+
+    def row(self, arxiv_id: str) -> dict[str, Any]:
+        (found,) = [r for r in self.rows() if self.value(r, "arXiv id") == arxiv_id]
+        return found
+
+    def value(self, row: dict[str, Any], name: str) -> Any:
+        """A row's property by its column's name: plain text, a select's name, a multi-select's
+        names, a date's start or a URL."""
+        column = self.source()["properties"][name]
+        value = row["properties"].get(unquote(column["id"]))
+        if value is None:
+            return None
+        kind = column["type"]
+        if kind in ("title", "rich_text"):
+            return "".join(t["text"]["content"] for t in value[kind])
+        if kind == "select":
+            return value["select"]["name"] if value["select"] else None
+        if kind == "multi_select":
+            return [o["name"] for o in value["multi_select"]]
+        if kind == "date":
+            return value["date"]["start"] if value["date"] else None
+        return value[kind]
+
+    def body(self, block_id: str) -> list[dict[str, Any]]:
+        return [self.objects[b] for b in self.objects[block_id]["children"]]
+
+    def trash(self, key: str) -> None:
+        self.objects[key]["in_trash"] = True
+
+    def delete(self, key: str) -> None:
+        del self.objects[key]
+
+    def in_trash(self, key: str) -> bool:
+        """Whether the object or anything holding it (data source, database, page) is trashed."""
+        obj: dict[str, Any] | None = self.objects[key]
+        while obj is not None:
+            if obj.get("in_trash"):
+                return True
+            up = obj.get("source") or obj.get("database") or obj.get("parent")
+            obj = self.objects.get(up) if up else None
+        return False
+
+    def view_named(self, name: str) -> dict[str, Any]:
+        (found,) = [v for v in self.views.values() if v["name"] == name]
+        return found
+
+    # -- the API ------------------------------------------------------------------------------
+
+    def handle(self, req: httpx.Request) -> httpx.Response:
+        assert req.headers["Authorization"] == "Bearer notion-token"
+        assert req.headers["Notion-Version"] == "2026-03-11"
+        path = req.url.path.removeprefix("/v1")
+        body = json.loads(req.content) if req.content else None
+        self.requests.append((req.method, path, body))
+        if self.limited:
+            self.limited -= 1
+            return httpx.Response(429, headers={"Retry-After": "7"}, json={"code": "rate_limited"})
+        if self.down:
+            return httpx.Response(500, json={"code": "internal_server_error"})
+        parts = path.strip("/").split("/")
+        route = (req.method, parts[0], parts[2] if len(parts) > 2 else None)
+        target = parts[1] if len(parts) > 1 and parts[0] != "views" else None
+        if target is not None and target not in self.objects:
+            return httpx.Response(404, json={"code": "object_not_found"})
+        trashed = target is not None and self.in_trash(target)
+        if trashed and (req.method != "GET" or parts[0] == "blocks"):
+            if parts[0] == "blocks" and req.method == "GET" or parts[0] == "data_sources":
+                return httpx.Response(404, json={"code": "object_not_found"})
+            return httpx.Response(400, json={"code": "validation_error", "message": "archived"})
+        if route == ("GET", "blocks", "children"):
+            return self._list([b for b in self.body(parts[1]) if not b.get("in_trash")])
+        if route == ("PATCH", "blocks", "children") and self.refuse_appends:
+            self.refuse_appends -= 1
+            return httpx.Response(500, json={"code": "internal_server_error"})
+        if route == ("PATCH", "blocks", "children"):
+            for child in body["children"]:
+                self._block(parts[1], child)
+            return httpx.Response(200, json={"results": []})
+        if req.method == "DELETE" and parts[0] == "blocks":
+            parent = self.objects.pop(parts[1])["parent"]
+            self.objects[parent]["children"].remove(parts[1])
+            return httpx.Response(200, json={"id": parts[1]})
+        if route == ("POST", "databases", None):
+            return self._database(body)
+        if route == ("GET", "databases", None):
+            return httpx.Response(200, json=self.objects[parts[1]])
+        if parts[0] == "data_sources":
+            if len(parts) == 3:
+                return self._query(parts[1], body)
+            if req.method == "PATCH":
+                self._properties(parts[1], body["properties"])
+                if self.lose_patches:
+                    self.lose_patches -= 1
+                    return httpx.Response(502, text="Bad Gateway")
+            return httpx.Response(200, json=self.objects[parts[1]] | {"in_trash": trashed})
+        if route == ("GET", "pages", None):
+            return httpx.Response(200, json={"object": "page", "id": target, "in_trash": trashed})
+        if route == ("POST", "pages", None):
+            return self._page(body)
+        if route == ("PATCH", "pages", None):
+            self._write(self.objects[parts[1]], body["properties"])
+            return httpx.Response(200, json={"id": parts[1]})
+        if parts[0] == "views":
+            return self._view(
+                req.method, parts[1] if len(parts) > 1 else None, body, req.url.params
+            )
+        return httpx.Response(404, json={"code": "object_not_found"})
+
+    def _list(self, items: list[dict[str, Any]]) -> httpx.Response:
+        return httpx.Response(200, json={"results": items, "has_more": False, "next_cursor": None})
+
+    def _block(self, parent: str, block: dict[str, Any]) -> str:
+        key = self._id("block")
+        kind = block["type"]
+        children = block[kind].get("children", [])
+        content = {k: v for k, v in block[kind].items() if k != "children"}
+        self.objects[key] = {
+            "object": "block",
+            "id": key,
+            "type": kind,
+            kind: content,
+            "parent": parent,
+            "children": [],
+        }
+        self.objects[parent]["children"].append(key)
+        for child in children:
+            self._block(key, child)
+        return key
+
+    def _database(self, body: dict[str, Any]) -> httpx.Response:
+        parent = body["parent"]["page_id"]
+        db, ds, view = self._id("db"), self._id("ds"), self._id("view")
+        title = body["title"][0]["text"]["content"]
+        self.objects[db] = {
+            "object": "database", "id": db, "data_sources": [{"id": ds, "name": title}],
+            "parent": parent, "children": [],
+        }  # fmt: skip
+        self.objects[ds] = {"object": "data_source", "id": ds, "properties": {}, "database": db}
+        self._properties(ds, body["initial_data_source"]["properties"])
+        self.views[view] = {"id": view, "name": "Default view", "database": db}
+        self.objects[parent]["children"].append(db)
+        self.objects[db] |= {"type": "child_database", "child_database": {"title": title}}
+        return httpx.Response(200, json=self.objects[db])
+
+    def _properties(self, ds: str, changes: dict[str, Any]) -> None:
+        """Add, rename and reconfigure properties, by name or (decoded) id. Options left out of
+        a select's list are removed, from the pages too."""
+        props = self.objects[ds]["properties"]
+        for key, change in changes.items():
+            name = next((n for n, p in props.items() if unquote(p["id"]) == key), key)
+            if name not in props:
+                kind = next(k for k in change if k not in ("name", "description"))
+                pid = "title" if kind == "title" else quote(f"{self._id('p')}\\", safe="")
+                props[name] = {"id": pid, "name": name, "type": kind, kind: {}}
+            prop = props[name]
+            if new := change.get("name"):
+                props[new] = props.pop(name) | {"name": new}
+                prop = props[new]
+            kind = next((k for k in change if k not in ("name", "description")), prop["type"])
+            if kind != prop["type"]:  # converted: the values go
+                prop.pop(prop["type"])
+                prop.update(type=kind, **{kind: {}})
+                for row in self.rows():
+                    row["properties"].pop(unquote(prop["id"]), None)
+            if "options" in change.get(kind, {}):
+                kept = [
+                    {"name": o["name"], "color": o.get("color", "default")}
+                    for o in change[kind]["options"]
+                ]
+                old = {o["name"]: o for o in prop[kind].get("options", [])}
+                prop[kind]["options"] = [old.get(o["name"], o) for o in kept]
+                names = {o["name"] for o in kept}
+                for row in self.rows():
+                    value = row["properties"].get(unquote(prop["id"]))
+                    if value and kind == "multi_select":
+                        value["multi_select"] = [
+                            o for o in value["multi_select"] if o["name"] in names
+                        ]
+                    elif value and kind == "select":
+                        chosen = value["select"]
+                        value["select"] = chosen if chosen and chosen["name"] in names else None
+
+    def _write(self, row: dict[str, Any], properties: dict[str, Any]) -> None:
+        props = self.objects[row["source"]]["properties"]
+        for key, value in properties.items():
+            prop = props.get(key) or next(p for p in props.values() if unquote(p["id"]) == key)
+            kind = prop["type"]
+            if kind in ("select", "multi_select"):  # a name not yet an option becomes one
+                have = prop[kind].setdefault("options", [])
+                chosen = value[kind] if kind == "multi_select" else [value[kind] or {}]
+                have += [
+                    {"name": o["name"]}
+                    for o in chosen
+                    if o and o["name"] not in [h["name"] for h in have]
+                ]
+            row["properties"][unquote(prop["id"])] = value
+
+    def _page(self, body: dict[str, Any]) -> httpx.Response:
+        key = self._id("page")
+        parent = body["parent"]
+        if parent["type"] == "page_id":
+            title = body["properties"]["title"]["title"][0]["text"]["content"]
+            self.objects[key] = {
+                "object": "page", "id": key, "type": "child_page",
+                "child_page": {"title": title}, "parent": parent["page_id"], "children": [],
+            }  # fmt: skip
+            self.objects[parent["page_id"]]["children"].append(key)
+        else:
+            self.objects[key] = {
+                "object": "page", "id": key, "source": parent["data_source_id"],
+                "properties": {}, "children": [],
+            }  # fmt: skip
+            self._write(self.objects[key], body["properties"])
+            self.newest = key
+        for child in body.get("children", []):
+            self._block(key, child)
+        if self.lose_answers and parent["type"] == "data_source_id":
+            self.lose_answers -= 1
+            return httpx.Response(502, text="Bad Gateway")
+        return httpx.Response(200, json={"object": "page", "id": key})
+
+    def _query(self, ds: str, body: dict[str, Any]) -> httpx.Response:
+        wanted = body["filter"]["rich_text"]["equals"]
+        name = body["filter"]["property"]
+        rows = [r for r in self.rows() if r["source"] == ds and self.value(r, name) == wanted]
+        if self.hidden:
+            self.hidden -= 1
+            rows = [r for r in rows if r["id"] != self.newest]
+        return self._list([{"object": "page", "id": r["id"]} for r in rows])
+
+    def _view(self, method: str, key: str | None, body: Any, params: Any) -> httpx.Response:
+        if method == "GET" and key is None:
+            db = params["database_id"]
+            return self._list(
+                [{"object": "view", "id": v} for v, x in self.views.items() if x["database"] == db]
+            )
+        if method == "POST":
+            key = self._id("view")
+            self.views[key] = {"id": key, "database": body["database_id"]}
+        if method in ("POST", "PATCH"):
+            self.views[key] |= {k: v for k, v in body.items() if k not in ("database_id", "type")}
+        return httpx.Response(200, json=self.views[key])

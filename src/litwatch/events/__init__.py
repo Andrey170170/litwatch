@@ -58,9 +58,11 @@ class Integration(Protocol):
     retry the event later; the integration's later events wait behind it, nobody else's do.
 
     Optional hooks, used when present: `setup(conn)`, awaited once whenever the dispatcher
-    starts; `aclose()`, awaited when it stops; `requires`, names of integrations that must
-    be loaded too; `idle(conn)`, awaited when it has no event to be handed, at most about once
-    a minute, for work no event brings (a failure there is logged and changes nothing else).
+    starts, before any event and under the same lock as `handle` (a failure is shown and tried
+    again after a backoff, and events wait for it); `aclose()`, awaited when it stops;
+    `requires`, names of integrations that must be loaded too; `idle(conn)`, awaited when it
+    has no event to be handed, at most about once a minute, for work no event brings (a
+    failure there is logged and changes nothing else).
     """
 
     name: str

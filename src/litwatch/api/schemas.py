@@ -750,6 +750,15 @@ class Failing(BaseModel):
     error: str | None = None
 
 
+class SetupFailing(BaseModel):
+    """The integration's setup is failing: no event is handed to it until it succeeds."""
+
+    failures: int
+    retry_at: datetime | None = None  # tried again then, or at once on retry
+    error: str | None = None
+    failed_at: datetime | None = None
+
+
 class SearchStats(BaseModel):
     """How a search provider has answered since the service started."""
 
@@ -767,6 +776,7 @@ class IntegrationCard(BaseModel):
     enabled: bool  # loaded now; a configured but disabled one keeps its cursor
     lag: int = 0  # outbox events after its cursor, wanted or not
     failing: Failing | None = None
+    setup_failing: SetupFailing | None = None
     last_error: str | None = None  # kept after a recovery
     failed_at: datetime | None = None
     skipped: int = 0

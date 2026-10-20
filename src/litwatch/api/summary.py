@@ -48,6 +48,8 @@ async def summary(request: Request, c: Conn) -> s.Summary:
             classes=len(tree.classes) if tree else 0,
             spent=sum(line.spent for line in budgeted or spend),
             budget=sum(line.budget for line in budgeted) if budgeted else None,
-            failing=[card.name for card in cards if card.enabled and card.failing],
+            failing=[
+                card.name for card in cards if card.enabled and (card.failing or card.setup_failing)
+            ],
         ),
     )

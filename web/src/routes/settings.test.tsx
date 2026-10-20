@@ -260,6 +260,27 @@ describe("Settings", () => {
     }
   });
 
+  it("shows a failing setup with its error and Retry, not Skip, and clears it once setup succeeds", async () => {
+    viewport(true);
+    const setup = { failures: 2, retry_at: "2026-10-19T12:01:30Z", error: "NotionError: GET /data_sources/x: 404", failed_at: "2026-10-19T12:00:30Z" };
+    const card = (s: typeof setup | null) => ({ name: "notion", description: "The export", enabled: true, lag: 3, failing: null, setup_failing: s, last_error: null, skipped: 0 });
+    let reads = 0;
+    const retried: string[] = [];
+    scriptFetch({
+      ...common,
+      "GET /api/settings/integrations": () => [card(reads++ > 0 && retried.length ? null : setup)],
+      "POST /api/settings/integrations/notion/retry": () => (retried.push("notion"), new Response(null, { status: 204 })),
+    });
+    renderApp("/settings/integrations");
+    expect(await screen.findByText(/^Setup failed after 2 tries · next try /)).toBeInTheDocument();
+    expect(screen.getByText("setup → NotionError: GET /data_sources/x: 404")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip this event" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Retry now" }));
+    expect(retried).toEqual(["notion"]);
+    expect(await screen.findByText("3 events waiting")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry now" })).toBeNull();
+  });
+
   it("keeps a list as left on the way back from its subpage, and opens Overview afresh from /settings", async () => {
     viewport(true);
     const items = [{ position: 1, paper_id: "2610.00001", topic: "mi", why: "above", verdict: "related", answer: "related", answered_at: "2026-10-14T10:00:00Z", title: "Drawn 1", abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }];

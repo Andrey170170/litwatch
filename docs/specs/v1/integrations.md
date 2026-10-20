@@ -30,7 +30,7 @@ carries Fit, Weight and the derived grade; new `digest.written` (topic, period, 
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `gist.written`, `brief.written`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step; on unsave it tags the item as dropped and never deletes it |
 | `webdav` | `grade.changed` to must read, `paper.saved` | Stores the PDF for Zotero's file sync, read from the archive |
 | `deep` | see below | Requests a Deep card; emits `card.ready` |
-| `notion` | `grade.changed`, `gist.written`, `brief.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the Focus papers for a reader outside litwatch (below) |
+| `notion` | `grade.changed`, `gist.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the Focus papers for a reader outside litwatch (below) |
 | `webhook` | any, by filter | POSTs the event to a URL, for n8n and the like |
 
 **Changed: `archive` is no longer an integration.** It is part of the stack ([archive.md](archive.md)); the archive
@@ -80,7 +80,7 @@ links into it; it links to arXiv, the PDF and the published version.
 
 **Its words.** None of litwatch's internal terms reach Notion. Grades read **Must read** and **Worth a look**
 (relevant); a paper taken off the list reads **No longer listed**. The detail levels read **TL;DR** (the Gist),
-**Summary** (the Brief, or the abstract when there is none) and **Deep read** (the Deep card). Topics carry short
+**Abstract** (the paper's own; Briefs are not exported yet) and **Deep read** (the Deep card). Topics carry short
 names. A "How to read this" page beside the database explains the topics, the grades, the text on each paper and
 which column is the reader's. The words are recorded in the glossary under *Notion export*.
 
@@ -92,7 +92,7 @@ topic, showing its papers grouped by that topic's grade; each sorted newest publ
 coloured from Notion's palette: Must read orange, Worth a look blue, No longer listed grey. Rarity, the web app's
 colour, is not exported: it spans all followed classes, and the PI reads only these topics.
 
-**The page.** A short callout pointing to "How to read this", the TL;DR, the Summary, and the Deep read when there is
+**The page.** A short callout pointing to "How to read this", the TL;DR, the Abstract, and the Deep read when there is
 one: a collapsed toggle holding one coloured callout per section of the card, as 0.14's reading card had them (key
 claim, summary, the faithfulness and monitoring sections when the card has them, evaluation, closest prior work with
 arXiv links, limitations, code). litwatch owns the body and rewrites it when its text changes.
@@ -104,7 +104,8 @@ owner's word (the owner named as the configuration says), litwatch re-checking t
 definition; and it was judged off-topic or less important (its Fit fell, or only its Weight). The cause comes from
 the event: `grade.changed` gains a `cause` field (`verdict`, `weight`, `owner`, `taxonomy`), written by whatever
 changed the grade, while the integration still checks the present grade before writing. Pages are never deleted.
-A paper listed again for a topic loses that topic's line. The integration keeps each topic's line in its own
+A paper listed again for a topic loses that topic's line. A paper the owner dismisses is No longer listed for every
+topic it was listed for, with a line saying the owner set it aside; a dismissed paper with no page gets none. The integration keeps each topic's line in its own
 table, so a rewrite for another event or after a restart keeps it, and a `grade.changed` touches only its topic's line.
 
 **Who owns what.** The integration creates the database, its columns and its views once, when it is set up, under a
@@ -114,7 +115,9 @@ exported topics with the database: a topic newly exported gets its grade column 
 papers are filled in; a topic no longer exported keeps its column, view and rows, which are no longer written; a
 changed name renames that topic's option and column. A raised minimum grade turns the papers below it No longer listed, with a Why
 that says so; a lowered one lists them again. **Status** (To read, Read, Useful, Not useful) is the reader's and is never written; comments on a page
-are not part of its body and survive rewrites. Nothing flows back from Notion into litwatch.
+are not part of its body and survive rewrites. A paper's page moved to Notion's trash or deleted was removed on purpose:
+it is never written or made again. "How to read this" is litwatch's and is made again; a database in the trash stops
+the integration, shown under Settings. Nothing flows back from Notion into litwatch.
 
 **First fill and after.** When it is set up the integration fills the database with every paper that qualifies at
 that moment, the papers v1 already holds included; from then on it follows the events above from its cursor. It
