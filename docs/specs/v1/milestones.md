@@ -44,11 +44,15 @@ the nightly under the owner's caps before the switch (#74, #75). N8, the switch
 ([`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md)): the telemetry (#77), and v1 in place of 0.14 on the night of
 2026-10-16, accepted by the owner on 10-17 ([`evals/2026-10-17-switch.md`](../../../evals/2026-10-17-switch.md)), when
 `v1` merged into `main`. Next: N8's P4, Zotero and WebDAV after a few stable nights and the removal of 0.14. The failure-handling plan
-([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), decisions 68–72) is built, on 2026-10-20, and
-goes live with the next deployment: Acknowledge (#91), fallback models per role chosen by replay (#94, #97), service
-failures that don't count against a paper and Deep cards without a cap (#98), and a status document that says only
-when litwatch can't do its job (#102). Next after it: Deep's open web, traces and process notes
-([`docs/plans/deep-open-web.md`](../../plans/deep-open-web.md), decisions 80–82), in three stages; a week after
+([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), decisions 68–72) is built and live since
+2026-10-20: Acknowledge (#91), fallback models per role chosen by replay (#94, #97), service failures that don't count
+against a paper and Deep cards without a cap (#98), and a status document that says only when litwatch can't do its
+job (#102). Updated papers ([`docs/plans/updated-papers.md`](../../plans/updated-papers.md), decisions 77–79) are
+built and live since 2026-10-20: an old paper back with a new arXiv version is listed once per topic, folded under a
+digest's papers (#112, #115), and Needs you's groups fold (#106); follow-ups in
+[`docs/notes/updated-papers-follow-ups.md`](../../notes/updated-papers-follow-ups.md). Next: Deep's open web, traces
+and process notes ([`docs/plans/deep-open-web.md`](../../plans/deep-open-web.md), decisions 80–82), in three stages,
+the first (#111) live since 2026-10-20; a week after
 its process notes are deployed, the owner's agent reads `litwatch deep notes` and tunes the prompt or the triggers. The `deep` image and litwatch deploy together from #98 on. The Notion export
 ([`docs/plans/notion-export.md`](../../plans/notion-export.md)) is on since 2026-10-20: `cause` on `grade.changed`
 (#95) and the `notion` integration (#96, #101). On the owner's instance it built the PI's database of 83 papers, its
