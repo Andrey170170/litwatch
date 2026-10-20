@@ -445,6 +445,11 @@ html[data-theme="dark"] .tonight .hd::before { box-shadow: 0 0 6px currentColor;
 .row.dpr.aside .ti { text-decoration: line-through; color: var(--fg2); }
 .row.dpr .gs { grid-column: 1 / -1; font-size: 13px; color: var(--fg2); line-height: 1.45; margin-top: 2px; }
 .row.dpr .wy { grid-column: 1 / -1; font-size: 12.5px; color: var(--fg3); font-style: italic; margin-top: 2px; }
+/* an updated paper's row: one line, the title cut short, so a long list keeps one row height */
+.row.dpr.up { grid-template-columns: minmax(0, 1fr) auto; }
+.row.dpr.up .ti { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* phone: the title takes the row's width, its version line under it, so every row is two lines */
+.phone .row.dpr.up { grid-template-columns: minmax(0, 1fr); row-gap: 1px; }
 .row.drow { grid-template-columns: auto 1fr auto; align-items: center; padding: 6px 10px 6px 14px; font-size: 13px; }
 .row.drow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.drow.quiet, .row.drow.quiet:hover { color: var(--fg3); box-shadow: none; background-image: none; }
@@ -500,6 +505,9 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .dghead .h1 a:hover { color: var(--acc); }
 .dghead .sub { font: 12.5px var(--font-mono); color: var(--fg2); margin-top: 3px; text-transform: uppercase; }
 .dgfull .cap { font: 700 11px var(--font-name); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg3); margin: 18px 0 6px; }
+/* the folded updated papers: the fold's head in place of a section name */
+.dgfull .dfold { margin-top: 18px; }
+.dgfull .dfold > .tpfold { border-top: 0; }
 .over {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(720px, 92%); overflow-y: auto; background: var(--bg); padding: 18px 24px 40px;
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35), inset 2px 0 0 var(--acc); animation: lw-from-right 0.24s var(--ease);
@@ -953,7 +961,7 @@ button.car:hover { color: var(--fg); background: var(--line2); }
   :is(.row.dpr, .row.drow) { min-height: 40px; align-content: center; }
   .sws button { width: 40px; height: 40px; }
   .trow .grip, .crow .car { width: 40px; }
-  .ngrp > .caprow > .tpfold { min-height: 40px; }
+  .ngrp > .caprow > .tpfold, .dgfull .dfold > .tpfold { min-height: 40px; }
   .tin.sm { min-height: 40px; }
   .rseg { min-width: 40px; }
   /* the Brief rung's switch sits in its name's line: a 40px hit area drawn around it, the line unmoved */

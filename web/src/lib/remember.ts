@@ -1,11 +1,11 @@
 /**
  * What the app remembers for the session so the way back lands where the reader was: the shelves opened or folded
- * on a list, and Needs you's groups the same way; and the papers a Deep card was asked for (the API has no queued
+ * on a list, Needs you's groups and a digest's updated papers the same way; and the papers a Deep card was asked for (the API has no queued
  * state to read back).
  */
 import { useSyncExternalStore } from "react";
 
-// shelf or Needs you group key → open, only for those the reader toggled; the rest keep the shelf's own default
+// shelf, Needs you group or updated list key → open, only for those the reader toggled; the rest keep the shelf's own default
 const shelves = new Map<string, boolean>();
 // paper id → when the card it already had was written (null for none), so a Write again is told from its old card
 const askedCards = new Map<string, string | null>();
