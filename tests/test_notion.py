@@ -798,6 +798,39 @@ async def test_a_grade_option_deleted_in_notion_is_put_back_on_its_rows(world):
     assert {o["name"]: o["color"] for o in options}["Must read"] == "orange"
 
 
+async def test_a_column_turned_into_another_type_is_put_back(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    n = notion(fake)
+    assert await start(conn, n)
+    column = (await state.database(conn, n.name)).topics[FAITH.slug]["column"]
+    text = {"rich_text": {}}
+    fake._properties(fake.source()["id"], {"Grade": text, column: text, "Topic": text})
+
+    assert await start(conn, notion(fake))
+    props = fake.source()["properties"]
+    assert [props[c]["type"] for c in ("Grade", FAITHFUL, "Topic")] == [
+        "select",
+        "select",
+        "multi_select",
+    ]
+    row = fake.row(A.id)
+    assert fake.value(row, "Grade") == fake.value(row, FAITHFUL) == "Must read"
+    assert fake.value(row, "Topic") == [FAITHFUL]
+
+
+async def test_a_renamed_title_is_still_shown_first_in_a_view_made_later(world):
+    conn, fake = world, FakeNotion(PARENT)
+    assert await start(conn, notion(fake, topics={FAITH.slug: "Faith"}))
+    fake._properties(fake.source()["id"], {"title": {"name": "Paper"}})
+
+    n = notion(fake, topics={FAITH.slug: "Faith", MON.slug: "Monitoring"})
+    assert await start(conn, n)
+    view = (await state.database(conn, n.name)).topics[MON.slug]["view"]
+    first = fake.views[view]["configuration"]["properties"][0]
+    assert first == {"property_id": "title", "visible": True}
+
+
 async def test_a_rename_failing_part_way_and_then_undone_puts_topic_back(world):
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, A, FAITH.slug, "must_read")

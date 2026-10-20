@@ -488,7 +488,12 @@ class FakeNotion:
             if new := change.get("name"):
                 props[new] = props.pop(name) | {"name": new}
                 prop = props[new]
-            kind = prop["type"]
+            kind = next((k for k in change if k not in ("name", "description")), prop["type"])
+            if kind != prop["type"]:  # converted: the values go
+                prop.pop(prop["type"])
+                prop.update(type=kind, **{kind: {}})
+                for row in self.rows():
+                    row["properties"].pop(unquote(prop["id"]), None)
             if "options" in change.get(kind, {}):
                 kept = [
                     {"name": o["name"], "color": o.get("color", "default")}

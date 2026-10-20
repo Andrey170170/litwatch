@@ -307,10 +307,10 @@ class Notion:
         await state.save_database(conn, db)
 
     async def _columns(self, conn: psycopg.AsyncConnection, db: state.Database) -> dict[str, str]:
-        """Put back the columns litwatch writes and their grade options, add or rename each
-        exported topic's grade column, and give Topic an option per topic exported so far.
-        Returns the columns' property ids by name. Once a column or option was put back, every
-        row is written again."""
+        """Put back the columns litwatch writes, their types and their grade options, add or
+        rename each exported topic's grade column, and give Topic an option per topic exported
+        so far. Returns the columns' property ids by name. Once a column, type or option was put
+        back, every row is written again."""
         path = f"/data_sources/{db.data_source_id}"
         source = await self.notion.request("GET", path)
         if source.get("in_trash"):
@@ -324,9 +324,11 @@ class Notion:
                 "another name, or rename the other first"
             )
         by_id = {unquote(p["id"]): p for p in props.values()}
-        missing = [c for c in COLUMNS if c not in props and c not in (TITLE, READERS)]
-        change: dict[str, Any] = {c: COLUMNS[c] for c in missing}
-        restored, added = bool(missing), []
+        # A column deleted, or turned into another type, is put back as litwatch makes it.
+        mine = [c for c in COLUMNS if c not in (TITLE, READERS)]
+        broken = [c for c in mine if props.get(c, {}).get("type") != next(iter(COLUMNS[c]))]
+        change: dict[str, Any] = {c: COLUMNS[c] for c in broken}
+        restored, added = bool(broken), []
         recorded = set(db.topics)  # the topics exported before this pass
         for slug, topic in self.exported.items():
             entry = db.topics.get(slug)
@@ -337,8 +339,13 @@ class Notion:
                 change[topic.name] = {"select": {"options": GRADE_OPTIONS}}
                 added.append(slug)
                 restored |= entry is not None
-            elif entry and entry["name"] != topic.name and column["name"] != topic.name:
-                change[unquote(column["id"])] = {"name": topic.name}  # renamed in the config
+            else:
+                key = unquote(column["id"])
+                if entry and entry["name"] != topic.name and column["name"] != topic.name:
+                    change.setdefault(key, {})["name"] = topic.name  # renamed in the config
+                if column["type"] != "select":
+                    change.setdefault(key, {})["select"] = {"options": GRADE_OPTIONS}
+                    restored = True
             db.topics[slug] = {
                 "name": topic.name,
                 "column": unquote(column["id"]) if column else None,
@@ -357,7 +364,7 @@ class Notion:
             o["name"] for o in props.get("Topic", {}).get("multi_select", {}).get("options", [])
         ]
         wanted = [db.topics[s]["name"] for s in self._order(db)]
-        if "Topic" in missing or set(have) != set(wanted):
+        if "Topic" in broken or set(have) != set(wanted):
             # The API renames no option: a renamed topic's old one goes, which takes it off the
             # pages, and they are written again with the new name.
             options = [
@@ -376,7 +383,10 @@ class Notion:
         for slug in added:
             db.topics[slug]["column"] = unquote(props[db.topics[slug]["name"]]["id"])
         await state.save_database(conn, db)
-        return {name: unquote(p["id"]) for name, p in props.items()}
+        # The title is the reader's to rename, and is still Title to the views.
+        return {
+            TITLE if p["id"] == "title" else name: unquote(p["id"]) for name, p in props.items()
+        }
 
     async def _guide(self, conn: psycopg.AsyncConnection, db: state.Database) -> None:
         """ "How to read this", beside the database, rewritten when what it says changed, and

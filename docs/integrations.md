@@ -260,7 +260,8 @@ page. Anything it would make is looked for first (the database and the guide by 
 name, pages by arXiv id, asking again for a moment after a lost reply), so nothing is made twice. A
 view is made once and is then the owner's: one deleted in Notion is not made again. A column
 litwatch writes that is deleted in Notion is put back under a new id, so a view grouped, filtered or
-sorted by the old one needs that set again by hand. A grade or Topic option deleted in Notion
+sorted by the old one needs that set again by hand; one turned into another type is turned back,
+and its rows written again. Title may be renamed. A grade or Topic option deleted in Notion
 is put back with its colour at the next start, and every row written again; a page written before
 then brings the option back by itself, uncoloured, and the other rows stay blank there until they
 change, so leave the options alone. A view is made showing Title, Grade, Topic,
