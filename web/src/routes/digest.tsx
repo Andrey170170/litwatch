@@ -6,7 +6,7 @@
  */
 import { useInfiniteQuery, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearch, type LinkProps } from "@tanstack/react-router";
-import { Fragment, useEffect, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain } from "@/api/mutations";
 import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
@@ -17,7 +17,7 @@ import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
-import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, tonight, unsettled, weekRange, type Card, type DigestPaper, type Mark, type TodayRun } from "@/lib/digests";
+import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, tonight, unsettled, updatedLine, weekRange, type Card, type DigestPaper, type Mark, type Section, type TodayRun } from "@/lib/digests";
 import { openedFrom } from "@/lib/listContext";
 import { useSteps } from "@/lib/steps";
 import { rowDate } from "@/lib/format";
@@ -97,17 +97,19 @@ const countStyle = (m: Mark) => ({ color: m.state === "written" && m.best_rarity
 type List = { key: string; ids: string[]; total: number };
 
 /** A paper as a digest lists it: the stripe and glow, the title, the date; with `gist`, its Gist and a pick's reason
- * under them. Set aside since, it is struck through (digests.md). The row carries the list it is in, so the paper's
- * page knows its place (`listContext`). */
+ * under them. An updated paper is one line, its version and first-out month in place of the date. Set aside since,
+ * it is struck through (digests.md). The row carries the list it is in, so the paper's page knows its place
+ * (`listContext`). */
 function PaperRow({ p, topic, gist, list }: { p: DigestPaper; topic: string; gist?: boolean; list: List }) {
+  const updated = p.role === "updated";
   const onClick = (e: MouseEvent) => {
     stop(e);
     openedFrom(list.key, list.ids, list.total);
   };
   return (
-    <Link to="/paper/$" params={{ _splat: p.id }} search={{ topic }} state={{ list: list.key }} className={`row dpr${gist ? " g" : ""}${p.set_aside ? " aside" : ""}`} style={rarityStyle(p.rarity)} onClick={onClick} title={p.set_aside ? "Set aside since" : undefined}>
+    <Link to="/paper/$" params={{ _splat: p.id }} search={{ topic }} state={{ list: list.key }} className={`row dpr${gist ? " g" : ""}${updated ? " up" : ""}${p.set_aside ? " aside" : ""}`} style={rarityStyle(p.rarity)} onClick={onClick} title={p.set_aside ? "Set aside since" : updated ? p.title : undefined}>
       <span className="ti">{p.title}</span>
-      <span className="dt">{rowDate(p.announced)}</span>
+      <span className="dt">{updated ? updatedLine(p) : rowDate(p.announced)}</span>
       {gist && p.gist && <span className="gs">{p.gist}</span>}
       {gist && p.why && <span className="wy">{p.why}</span>}
     </Link>
@@ -499,6 +501,39 @@ export function HistoryPage() {
 
 // -- a digest ------------------------------------------------------------------------------------------------------
 
+/** A section of a digest's papers: its name over the rows, or, for the updated papers, a head that folds or opens
+ * them, folded until opened (DESIGN.md, "A digest"; the Acknowledged section on Needs you). The updated rows are a
+ * list of their own for the paper's page. */
+function Papers({ s, digest, topic, list }: { s: Section; digest: number; topic: string; list: List }) {
+  const [open, setOpen] = useState(false);
+  const rows = (l: List) => (
+    <div className="dlist">
+      {s.papers.map((p) => (
+        <PaperRow key={p.id} p={p} topic={topic} gist={s.gist} list={l} />
+      ))}
+    </div>
+  );
+  if (!s.fold)
+    return (
+      <>
+        <div className="cap">{s.name}</div>
+        {rows(list)}
+      </>
+    );
+  const ids = s.papers.map((p) => p.id);
+  return (
+    <section className="dfold" aria-label={s.name}>
+      <button className="tpfold" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className={`car${open ? " open" : ""}`} aria-hidden />
+        <span className="ct">
+          {s.name} · <b>{s.papers.length}</b>
+        </span>
+      </button>
+      {open && rows({ key: `digest:${digest}:updated`, ids, total: ids.length })}
+    </section>
+  );
+}
+
 /** A digest in full: the head, the text, then its papers by role. A failed one offers Write again; the answer lands
  * in the digest's cache (`useWriteAgain`). Keyed by id where it is placed, so one digest's pending write is not
  * another's. */
@@ -508,7 +543,7 @@ export function DigestView({ id }: { id: number }) {
   const d = q.data;
   if (!d) return q.isError ? q.error instanceof ApiError && q.error.status === 404 ? <div className="empty">No such digest.</div> : <Failed q={q} what="the digest" /> : <Load q={q} />;
   const secs = sections(d.topic.depth, d.period, d.papers);
-  const ids = secs.flatMap((s) => s.papers.map((p) => p.id));
+  const ids = secs.filter((s) => !s.fold).flatMap((s) => s.papers.map((p) => p.id));
   const list = { key: `digest:${d.id}:full`, ids, total: ids.length };
   return (
     <div className="dgfull" style={rarityStyle(d.best_rarity)}>
@@ -539,17 +574,10 @@ export function DigestView({ id }: { id: number }) {
           </div>
         </div>
       )}
-      {d.state === "nothing_new" && <p className="prose faint">Nothing was due for this topic. The run looked and found nothing new.</p>}
+      {d.state === "nothing_new" && <p className="prose faint">No new paper was due for this topic. The run looked and found nothing new.</p>}
       {d.text && <Prose text={d.text} marks topic={d.topic.slug} />}
       {secs.map((s) => (
-        <Fragment key={s.name}>
-          <div className="cap">{s.name}</div>
-          <div className="dlist">
-            {s.papers.map((p) => (
-              <PaperRow key={p.id} p={p} topic={d.topic.slug} gist={s.gist} list={list} />
-            ))}
-          </div>
-        </Fragment>
+        <Papers key={s.name} s={s} digest={d.id} topic={d.topic.slug} list={list} />
       ))}
     </div>
   );

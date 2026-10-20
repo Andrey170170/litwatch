@@ -54,9 +54,14 @@ export const monthLabel = (iso: string) => MONTH.format(parseDay(iso));
 
 // -- marks -----------------------------------------------------------------------------------------------------------
 
-/** The count line of a Mark ("2 new · 1 must read", "11 new · 1 pick", "Week · 3 picks", "Nothing new"). */
+/** The count line of a Mark ("2 new · 1 must read", "11 new · 1 pick", "Week · 3 picks", "Nothing new"), then
+ * "· 3 updated" when the digest has updated papers. */
 export function markLine(m: Mark): string {
   if (m.state === "failed") return "Could not be written";
+  const updated = m.counts.updated ? ` · ${m.counts.updated} updated` : "";
+  return newLine(m) + updated;
+}
+function newLine(m: Mark): string {
   if (m.state === "nothing_new") return "Nothing new";
   const c = m.counts;
   if (m.period === "week") return `Week · ${m.topic.depth === "focus" || !c.picks ? plural(c.papers, "paper") : plural(c.picks, "pick")}`;
@@ -103,25 +108,40 @@ export function tonight(run: TodayRun): { tag: string; tone: "cy" | "warn" | "si
 /** A Day is read again every minute while today's run is still to settle. */
 export const unsettled = (d: { run?: TodayRun | null } | undefined) => !!d?.run && d.run.state !== "done";
 
+export type Section = { name: string; papers: DigestPaper[]; gist: boolean; fold: boolean };
+
 /** The sections a digest's papers fall into, in order (DESIGN.md, "A digest"): picks, then the papers its text
- * names, then the rest, which a Focus digest splits by Fit (Related rows have no Gist). */
-export function sections(depth: Schemas["Depth"], period: Schemas["DigestPeriod"], papers: DigestPaper[]): { name: string; papers: DigestPaper[]; gist: boolean }[] {
+ * names, then the rest, which a Focus digest splits by Fit (Related rows have no Gist); last the updated papers,
+ * folded. Every role has its place: a role the switch lacks fails the type check. Rows keep the API's order. */
+export function sections(depth: Schemas["Depth"], period: Schemas["DigestPeriod"], papers: DigestPaper[]): Section[] {
   const weekly = period === "week";
-  const by = (f: (p: DigestPaper) => boolean) => papers.filter(f);
-  const out =
-    depth === "focus"
-      ? [
-          { name: "Picks", papers: by((p) => p.role === "pick"), gist: true },
-          { name: "Mentioned", papers: by((p) => p.role === "mentioned"), gist: true },
-          { name: weekly ? "Central this week" : "Central", papers: by((p) => p.role === "listed" && p.fit !== "related"), gist: true },
-          { name: weekly ? "Related this week" : "Related", papers: by((p) => p.role === "listed" && p.fit === "related"), gist: false },
-        ]
-      : [
-          { name: "Picks", papers: by((p) => p.role === "pick"), gist: true },
-          { name: "Mentioned", papers: by((p) => p.role === "mentioned"), gist: true },
-          { name: weekly ? "Also this week" : "Also due", papers: by((p) => p.role === "listed"), gist: true },
-        ];
-  return out.filter((s) => s.papers.length);
+  const focus = depth === "focus";
+  const central = weekly ? "Central this week" : "Central";
+  const related = weekly ? "Related this week" : "Related";
+  const also = weekly ? "Also this week" : "Also due";
+  const names = focus ? ["Picks", "Mentioned", central, related, "Updated"] : ["Picks", "Mentioned", also, "Updated"];
+  const place = (p: DigestPaper): string => {
+    switch (p.role) {
+      case "pick":
+        return "Picks";
+      case "mentioned":
+        return "Mentioned";
+      case "listed":
+        return focus ? (p.fit === "related" ? related : central) : also;
+      case "updated":
+        return "Updated";
+    }
+  };
+  return names
+    .map((name) => ({ name, papers: papers.filter((p) => place(p) === name), gist: name !== related && name !== "Updated", fold: name === "Updated" }))
+    .filter((s) => s.papers.length);
+}
+
+const MONTH_YEAR = new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" });
+
+/** An updated row's line in place of its date: "v3 · first out May 2026". */
+export function updatedLine(p: Pick<DigestPaper, "version" | "announced">): string {
+  return [p.version ? `v${p.version}` : null, p.announced ? `first out ${MONTH_YEAR.format(parseDay(p.announced))}` : null].filter(Boolean).join(" · ");
 }
 
 // -- History ---------------------------------------------------------------------------------------------------------

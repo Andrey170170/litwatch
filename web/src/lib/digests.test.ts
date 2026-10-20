@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, slotted, tonight, unsettled, weekRange, type HistoryPage, type Mark, type TodayRun } from "./digests";
+import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, sections, slotted, tonight, unsettled, updatedLine, weekRange, type HistoryPage, type Mark, type TodayRun } from "./digests";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" } as const;
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" } as const;
@@ -15,6 +15,11 @@ describe("a Mark's count line", () => {
     expect(markLine(mark({ period: "week", topic: area, counts: { ...counts, papers: 64, picks: 5 } }))).toBe("Week · 5 picks");
     expect(markLine(mark({ state: "nothing_new" }))).toBe("Nothing new");
     expect(markLine(mark({ state: "failed" }))).toBe("Could not be written");
+  });
+  it("adds the updated papers, on a written digest and on a quiet one", () => {
+    expect(markLine(mark({ counts: { ...counts, papers: 2, must_read: 1, updated: 3 } }))).toBe("2 new · 1 must read · 3 updated");
+    expect(markLine(mark({ period: "week", topic: area, counts: { ...counts, papers: 64, picks: 5, updated: 1 } }))).toBe("Week · 5 picks · 1 updated");
+    expect(markLine(mark({ state: "nothing_new", counts: { ...counts, updated: 3 } }))).toBe("Nothing new · 3 updated");
   });
 });
 
@@ -69,6 +74,16 @@ describe("a digest's sections", () => {
       ["Also due", ["a"]],
     ]);
     expect(sections("field", "week", [paper({ id: "b", role: "pick" })]).map((s) => s.name)).toEqual(["Picks"]);
+  });
+  it("puts the updated papers last, folded and without Gists, in the order they came", () => {
+    const rows = [paper({ id: "u1", role: "updated" }), paper({ id: "a", fit: "central" }), paper({ id: "u2", role: "updated", fit: "related" }), paper({ id: "b", fit: "related" })];
+    expect(sections("focus", "week", rows).map((s) => [s.name, s.papers.map((p) => p.id), s.gist, s.fold])).toEqual([
+      ["Central this week", ["a"], true, false],
+      ["Related this week", ["b"], false, false],
+      ["Updated", ["u1", "u2"], false, true],
+    ]);
+    // A Field weekly or a "Nothing new" digest may have nothing but updated papers.
+    expect(sections("field", "week", [paper({ id: "u", role: "updated" })]).map((s) => [s.name, s.fold])).toEqual([["Updated", true]]);
   });
 });
 
@@ -139,5 +154,13 @@ describe("History as a calendar", () => {
     expect(nextSpan([page()])).toBeUndefined();
     expect(nextSpan([{ ...page(), start: "2026-06-01" }])).toBe("2026-09-30");
     expect(nextSpan([{ ...page(), start: null }])).toBeUndefined();
+  });
+});
+
+describe("an updated paper's line", () => {
+  it("says its version and the month it first came out", () => {
+    expect(updatedLine({ version: 3, announced: "2026-05-12" })).toBe("v3 · first out May 2026");
+    expect(updatedLine({ version: 2, announced: null })).toBe("v2");
+    expect(updatedLine({ version: null, announced: "2025-12-01" })).toBe("first out Dec 2025");
   });
 });

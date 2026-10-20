@@ -108,6 +108,48 @@ describe("the Digest", () => {
     expect(screen.getByText("Two measurement papers.")).toBeInTheDocument();
   });
 
+  it("folds a digest's updated papers under its papers, opens and closes them, each row one line with its version", async () => {
+    viewport(true);
+    const updated = (n: number, over: object = {}) => ({ ...paper, id: `2605.0000${n}`, title: `Updated ${n}`, announced: "2026-05-12", role: "updated", version: 3, gist: `Gist ${n}.`, ...over });
+    const withUpdated = { ...digest, counts: { ...counts, updated: 2 }, papers: [paper, related, updated(1), updated(2, { rarity: "rare" })] };
+    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/7": withUpdated });
+    renderApp("/digests/7");
+    const head = await screen.findByRole("button", { name: "Updated · 2" });
+    expect(screen.getByText(/2 new · 1 must read · 2 updated/)).toBeInTheDocument();
+    expect(head).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Updated 1")).toBeNull();
+    // last, under the digest's papers
+    expect(screen.getByText("Related").compareDocumentPosition(head)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    await userEvent.click(head);
+    expect(head).toHaveAttribute("aria-expanded", "true");
+    const rows = within(screen.getByRole("region", { name: "Updated" })).getAllByRole("link");
+    expect(rows.map((r) => r.textContent)).toEqual(["Updated 1v3 · first out May 2026", "Updated 2v3 · first out May 2026"]);
+    expect(rows[1]).toHaveStyle({ "--rc": "var(--r-rare)" });
+    expect(screen.queryByText("Gist 1.")).toBeNull();
+    await userEvent.click(head);
+    expect(head).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Updated 1")).toBeNull();
+  });
+
+  it("shows a quiet digest's updated papers under its one line, and its card's count", async () => {
+    viewport(true);
+    const up = { ...paper, id: "2605.00009", title: "An old paper again", announced: "2026-04-02", role: "updated", version: 2 };
+    const quietUp = { ...quiet, counts: { ...quiet.counts, updated: 3 } };
+    scriptFetch({
+      "GET /api/summary": summary,
+      "GET /api/status": status,
+      "GET /api/digests/days/2026-10-14": { ...day, digests: [{ ...card, counts: { ...counts, updated: 1 } }, quietUp] },
+      "GET /api/digests/8": { ...quietUp, text: null, error: null, written_at: null, papers: [up] },
+    });
+    renderApp("/");
+    expect(await screen.findByText("2 new · 1 must read · 1 updated")).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Nothing new · 3 updated"));
+    const over = await screen.findByRole("dialog");
+    expect(within(over).getByText(/No new paper was due/)).toBeInTheDocument();
+    await userEvent.click(within(over).getByRole("button", { name: "Updated · 1" }));
+    expect(within(over).getByRole("link", { name: /An old paper again/ })).toHaveTextContent("v2 · first out Apr 2026");
+  });
+
   it("on the phone opens a digest as its own page, and puts the stepper in the bottom bar", async () => {
     viewport(false);
     scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-14": day, "GET /api/digests/7": digest });
