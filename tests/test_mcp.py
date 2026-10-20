@@ -406,6 +406,21 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
     assert no_id[1] is False and "No arXiv id" in no_id[0]
 
 
+async def test_a_deep_card_from_an_older_text_says_which_text_it_read(conn, shelves):
+    fake, *_ = shelves
+    await conn.execute("UPDATE papers SET version = 1, revision = 1 WHERE id = %s", (P.id,))
+    await integrations_store.put_card(
+        conn, P.id, CARD, "deep-model", {}, [], revision=1, version=1, source="latex", pass_id=None
+    )
+    async with serving(_app(conn, fake)) as http:
+        current = await ok(http, "get_paper", paper_id=P.id)
+        await conn.execute("UPDATE papers SET version = 3, revision = 2 WHERE id = %s", (P.id,))
+        older = await ok(http, "get_paper", paper_id=P.id)
+    for page in (current, older):
+        assert "## Deep card (latex, read arXiv v1, revision 1" in page
+    assert mcp_api.OLDER_CARD not in current and mcp_api.OLDER_CARD in older
+
+
 def _owners(page: str) -> dict[str, list[str]]:
     """The owner's section, by line head: each record without its date, sorted."""
     section = page.split("## The owner's word and reactions\n")[1].split("\n\n")[0]

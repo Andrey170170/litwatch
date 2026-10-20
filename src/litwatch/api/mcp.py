@@ -533,11 +533,21 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
         out.append(b.text)
     out += ["", "## Abstract", p.abstract]
     if p.card:
-        written = f", {_day(p.card.written_at)}" if p.card.written_at else ""
+        c = p.card
+        read = [
+            f"arXiv v{c.arxiv_version}" if c.arxiv_version is not None else "arXiv version unknown",
+            f"revision {c.revision}" if c.revision is not None else "revision unknown",
+        ]
+        # A card from an older text is kept and labelled until a new one exists (pipeline.md 8).
+        older = (c.revision is not None and c.revision != p.revision) or (
+            c.arxiv_version is not None and p.version is not None and c.arxiv_version != p.version
+        )
+        written = f", {_day(c.written_at)}" if c.written_at else ""
         out += [
             "",
-            f"## Deep card ({p.card.source or 'source unknown'}{written})",
-            *_card(p.card.card),
+            f"## Deep card ({c.source or 'source unknown'}, read {', '.join(read)}{written})",
+            *([OLDER_CARD] if older else []),
+            *_card(c.card),
         ]
     if p.publication and (p.publication.venue or p.publication.doi):
         pub = p.publication
@@ -546,6 +556,9 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
             out[-1] += f", doi:{pub.doi}"
     out += ["", "## Citation", "```bibtex", citation.strip(), "```"]
     return "\n".join(out)
+
+
+OLDER_CARD = "(Written from an older text of this paper than the one above.)"
 
 
 def _mark_line(row: dict[str, Any], badge: s.Badge) -> list[str]:
