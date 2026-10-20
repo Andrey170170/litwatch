@@ -8,9 +8,11 @@ import ast
 import importlib
 import inspect
 import pkgutil
+import re
 import textwrap
 import types
 
+import httpx
 from fastapi import HTTPException, Response
 from fastapi.routing import APIRoute, iter_route_contexts
 
@@ -106,3 +108,19 @@ def test_the_walk_reaches_every_status():
                 _raised(fn, answering)
     unreached = {f for f, statuses in answering.items() if statuses and f not in reached}
     assert unreached == OUTSIDE_SCHEMA
+
+
+async def test_every_route_but_signing_in_refuses_without_the_token():
+    """The token check rides on each router (`deps.protected`), so one built without it
+    would open its routes. Refused before the connection: the database here is fake."""
+    app = create_app("postgresql://unused", "unused")
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    open_ = []
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for route, _, _ in _routes():
+            path = re.sub(r"\{[^}]+\}", "x", route.path_format)
+            for method in route.methods or ():
+                answer = await client.request(method, path)
+                if answer.status_code != 401:
+                    open_.append(f"{method} {route.path_format}: {answer.status_code}")
+    assert open_ == ["POST /api/session: 422"]
