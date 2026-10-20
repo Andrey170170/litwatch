@@ -165,6 +165,10 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
     card's notes stay unseen even from a stale page. `put_card` clears the mark.
 - **Out of Zotero and Notion.** Their whitelists leave `process_notes` out: the notes describe the process, not the
   paper.
+- **As built.** A model note is also at most 400 characters and has no other fields; a service note gives its count
+  in its text and the first URL concerned as `url`. A fetch failed once the paper's session has ended is the
+  session's, not the network's, and makes no note. A dismissed paper's notes leave Needs you, as its other items do.
+  Needs you shows each note's kind and text; its link is on the card.
 
 ### Shipping
 
