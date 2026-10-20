@@ -5,28 +5,19 @@ its acquisition worker and its search indexer ([`docs/specs/v1/archive.md`](../d
 service, which writes Deep cards, runs under the `deep` profile. A fresh stack starts with an empty database and an
 empty archive; intake fills both.
 
-## Setup
-
-From this directory:
+A first install, step by step with its checks, is [`docs/install.md`](../docs/install.md); it also covers deep,
+the other integrations, exposure, backups and upgrades. From this directory, the short form:
 
 ```sh
 cp env.example .env                # fill in the tokens, the API keys and ARXIV_CONTACT
-$EDITOR litwatch.toml              # categories and the schedule
+$EDITOR litwatch.toml              # categories, the schedule and its timezone
 docker compose up -d --build
 docker compose exec litwatch litwatch taxonomy import    # the seed tree and topics
 ```
 
 The web app is at `http://127.0.0.1:8080` (`LITWATCH_BIND`, `LITWATCH_PORT`); sign in with `LITWATCH_API_TOKEN`.
-`docker compose exec litwatch litwatch …` runs any other command, such as `intake --days 1` for a first night.
-
-Deep cards: set `LITWATCH_READ_TOKEN` in `.env` (deep searches litwatch with it for a card's "Among the
-collection"), uncomment `[integrations.deep]` in `litwatch.toml`, then
-
-```sh
-docker compose --profile deep run --rm deep login    # sign in once; the session stays in its volume
-docker compose --profile deep up -d
-docker compose restart litwatch    # litwatch reads its integrations when it starts
-```
+`docker compose exec litwatch litwatch …` runs any other command. The compose file passes `litwatch` only its own
+variables: anything else (an integration's secret, `LITWATCH_METRICS_PORT`) goes in `compose.override.yaml` beside it.
 
 ## The archive
 

@@ -30,7 +30,8 @@ evaluation calls the same functions and writes only to evaluation tables.
 **New tables:**
 
 - `classes` (id, parent, name, description, threshold, position, version) and `class_versions` (class, revision, hash,
-  content, saved at): the taxonomy, edited in Settings.
+  content, saved at): the taxonomy. Topics are edited in Settings; classes, until the taxonomy write API, by a YAML
+  import.
 - `topics` is reshaped: (class, depth focus|area|field, subject, rubric, interests, keywords, monogram, colour,
   position, status, version). A topic points at one class; the class's description is what the classifier reads, the
   topic's subject and rubric are what the graders read. Unfollowing a class deletes its topic row; its versions stay in
