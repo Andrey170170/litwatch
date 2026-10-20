@@ -22,7 +22,7 @@ from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
-from litwatch.llm.batches import DRAIN, MAX_REQUESTS
+from litwatch.llm.batches import DRAIN, MAX_REQUESTS, Batcher
 from litwatch.llm.prices import anthropic_cost
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
@@ -55,8 +55,10 @@ def ask(n: int | str) -> Request:
     return Request(system="rubric", user=f"paper {n}", output=Answer)
 
 
-def respond(role: RoleConfig, request: Request) -> str | Reply:
+def respond(role: RoleConfig, request: Request) -> str | Reply | ProviderError:
     usage = Usage(model=role.model, via=role.provider, cost=0.001)
+    if request.user == "paper account" and role.provider == "anthropic":
+        return ProviderError("authentication_error in batch", account=True)
     if request.user == "paper refuse" and role.provider == "anthropic":
         return Reply("", Stop.REFUSED, usage, refusal="cyber")
     if request.user == "paper truncate":
@@ -153,6 +155,133 @@ async def test_a_batch_that_cannot_be_sent_goes_as_normal_calls(monkeypatch):
     await asyncio.gather(gw.ask("brief", ask(0)), gw.ask("brief", ask(1)))
     assert len(anthropic.calls) == 2
     await gw.close()
+
+
+@pytest.mark.parametrize("debug", [False, True])
+async def test_an_account_error_in_a_batch_is_never_asked_again_nor_down_the_list(conn, debug):
+    gw, anthropic, openrouter, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")))
+    gw.debug = debug  # which keeps the text of a reply it could not use, and here there is none
+    asked = await asyncio.gather(
+        gw.ask("brief", ask("account")), gw.ask("brief", ask(0)), return_exceptions=True
+    )
+    assert isinstance(asked[0], CallError) and asked[0].kind == "account"
+    assert asked[1].value.yes
+    assert (anthropic.calls, openrouter.calls) == ([], [])
+    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
+        ("msgbatch_1", "account: authentication_error in batch"),
+        ("msgbatch_1", None),
+    ]
+    await gw.close()
+
+
+async def test_a_batch_the_account_kept_from_being_sent_fails_its_calls_on_the_account(
+    monkeypatch,
+):
+    gw, anthropic, openrouter, _ = batching()
+
+    async def unauthorized(requests):
+        raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+    monkeypatch.setattr(anthropic, "submit", unauthorized)
+    asked = await asyncio.gather(
+        gw.ask("brief", ask(0)), gw.ask("brief", ask(1)), return_exceptions=True
+    )
+    assert [(type(a), a.kind) for a in asked] == [(CallError, "account")] * 2
+    assert (anthropic.calls, openrouter.calls) == ([], [])  # never asked again
+    await gw.close()
+
+
+async def test_a_batch_the_account_can_no_longer_read_fails_its_calls_and_stays_open(
+    conn, monkeypatch
+):
+    gw, anthropic, _, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")), hold=True)
+    asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await until(lambda: anthropic.batches)
+    reads = []
+
+    async def unauthorized(batch_id):
+        reads.append(batch_id)
+        raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+    monkeypatch.setattr(anthropic, "status", unauthorized)
+    with pytest.raises(CallError) as found:
+        await asked
+    assert found.value.kind == "account" and reads == ["msgbatch_1"] and anthropic.calls == []
+    # The batch stays open on its row, for a later run to account for; the call has its own.
+    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
+        ("msgbatch_1", None),
+        (None, "account: AuthenticationError: invalid x-api-key"),
+    ]
+    # The account works again and the call is asked again: the batch's answer settles its own
+    # row, charged once there, and nothing is left open for a later run to charge again.
+    monkeypatch.undo()
+    anthropic.end("msgbatch_1")
+    await gw.ask("brief", ask(0))
+    assert [(c["batch_id"], c["answered"], c["error"]) for c in await calls(conn)] == [
+        ("msgbatch_1", True, None),
+        (None, False, "account: AuthenticationError: invalid x-api-key"),
+    ]
+    assert await CallJournal(conn, await runs.start(conn, "nightly")).open_batches() == []
+    await gw.close()
+
+
+async def test_a_batch_given_up_on_for_the_account_settles_its_row_with_the_answer_it_gave(
+    conn, monkeypatch
+):
+    gw, anthropic, _, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")), hold=True)
+    asked = asyncio.create_task(gw.ask("brief", ask("account")))
+    await until(lambda: anthropic.batches)
+
+    async def unauthorized(batch_id):
+        raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+    monkeypatch.setattr(anthropic, "status", unauthorized)
+    with pytest.raises(CallError):
+        await asked
+    # Readable again, the batch answered the request with an account error: on the batch's row,
+    # settled for good, and on the call's own, as the row was given up on.
+    monkeypatch.undo()
+    anthropic.end("msgbatch_1")
+    with pytest.raises(CallError) as found:
+        await gw.ask("brief", ask("account"))
+    assert found.value.kind == "account"
+    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
+        ("msgbatch_1", "account: authentication_error in batch"),
+        (None, "account: AuthenticationError: invalid x-api-key"),
+        (None, "account: authentication_error in batch"),
+    ]
+    assert await CallJournal(conn, await runs.start(conn, "nightly")).open_batches() == []
+    await gw.close()
+
+
+async def test_a_call_attached_to_a_batch_read_meanwhile_is_answered_past_the_drain():
+    clock = Clock()
+    clock.now = DEADLINE + DRAIN
+    other_read = asyncio.Event()
+    reads = {"A": 0}
+
+    class Provider:
+        async def status(self, batch_id):
+            if batch_id == "B":
+                await other_read.wait()
+                return "ended"
+            reads["A"] += 1
+            raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+        async def results(self, batch_id):
+            return {}
+
+    batcher = Batcher(Provider(), None, DEADLINE, now=clock, **FAST)
+    batcher.watch("A")
+    batcher.watch("B")
+    await until(lambda: reads["A"])  # A given up on for the account, B still being read
+    attached = asyncio.create_task(batcher.attach("A", "key", 1))
+    await asyncio.sleep(0.05)
+    other_read.set()
+    reply = await asyncio.wait_for(attached, 1)
+    assert isinstance(reply, ProviderError) and reply.account
+    assert batcher.unsettled == {1}
+    await batcher.close()
 
 
 async def test_at_the_deadline_a_batch_is_cancelled_its_answers_kept_and_the_rest_sent_normally():
@@ -335,6 +464,32 @@ class Batches:
         return lines()
 
 
+async def test_anthropic_batch_requests_the_account_kept_unanswered_are_account_errors():
+    provider = AnthropicProvider(client=SimpleNamespace(messages=SimpleNamespace(batches=None)))
+
+    def errored(kind: str):
+        error = SimpleNamespace(error=SimpleNamespace(type=kind))
+        return SimpleNamespace(type="errored", error=error)
+
+    lines = [
+        SimpleNamespace(custom_id=kind, result=errored(kind))
+        for kind in ("authentication_error", "billing_error", "permission_error", "api_error")
+    ]
+
+    async def results(batch_id):
+        async def each():
+            for line in lines:
+                yield line
+
+        return each()
+
+    provider.client.messages.batches = SimpleNamespace(results=results)
+    found = await provider.results("msgbatch_1")
+    assert found["api_error"] is None  # asked again as a normal call
+    for kind in ("authentication_error", "billing_error", "permission_error"):
+        assert isinstance(found[kind], ProviderError) and found[kind].account
+
+
 async def test_anthropic_batches_carry_the_request_key_and_are_priced_at_half():
     haiku = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
     message = anthropic_message(GOOD)
@@ -373,8 +528,10 @@ class Together(CallJournal):
         super().__init__(conn, run_id)
         self._together, self._left = asyncio.Barrier(n), n
 
-    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
-        call_id = await super().start(role, model, key, paper_id)
+    async def start(
+        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+    ) -> int:
+        call_id = await super().start(role, model, key, paper_id, via)
         if self._left > 0:
             self._left -= 1
             await self._together.wait()
@@ -445,6 +602,33 @@ async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_agai
     anthropic.end("msgbatch_1")
     await settling
     assert [(c["answered"], c["cost"]) for c in await calls(conn)] == [(False, 0.0005)] * 2
+    await gw.close()
+
+
+async def test_an_account_error_a_dead_runs_batch_gave_is_journalled_as_one(conn):
+    dead = await runs.start(conn, "nightly")
+    gw, anthropic, _, clock = batching(Together(conn, dead, 2), hold=True)
+    asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in ("account", 0)]
+
+    async def recorded():
+        return all(c["batch_id"] for c in await calls(conn)) and len(await calls(conn)) == 2
+
+    await until(recorded)
+    for t in asked:
+        t.cancel()
+    await asyncio.gather(*asked, return_exceptions=True)
+    await gw.close()
+
+    gw, _, _, _ = batching(
+        CallJournal(conn, await runs.start(conn, "nightly")), provider=anthropic, clock=clock
+    )
+    await gw.recover()
+    anthropic.end("msgbatch_1")
+    await gw.settle()
+    assert [(c["error"], c["cost"]) for c in await calls(conn)] == [
+        ("account: authentication_error in batch", None),
+        (None, 0.0005),
+    ]
     await gw.close()
 
 

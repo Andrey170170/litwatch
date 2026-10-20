@@ -5,14 +5,15 @@ module is how one is asked for: what a submission carries (the paper's text from
 the topics the card is for and the card extensions they ask for), and the service's job
 protocol, followed to the job's end with its usage.
 
-The service is a stateless job runner that does not deduplicate, so the queue records each
-submission as an attempt before it is sent and the job once accepted, and never submits twice
-for one job. It reacts to no event: `card.requested` is the owner's request already queued, and
-`card.ready` is emitted when the card is stored.
+The queue records each submission as an attempt before it is sent and the job once accepted,
+and sends the attempt as the submission's key, by which the service finds the job it
+started for that key while it keeps it; so a submission whose answer was lost is looked up,
+never sent again. A failed job says whose failure it was, the paper's or the service's. It
+reacts to no event: `card.requested` is the owner's request already queued, and `card.ready` is
+emitted when the card is stored.
 
-Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `max_per_day`
-(10: automatic submissions in any 24 hours, to protect the subscription from a loose rubric;
-the owner's requests do not count), `poll_seconds` (15) and `timeout_minutes` (45).
+Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `poll_seconds`
+(15) and `timeout_minutes` (45). There is no daily cap: `max_per_day` is refused.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 import psycopg
@@ -45,13 +47,38 @@ LEASE_MARGIN = timedelta(minutes=15)
 @dataclass
 class Outcome:
     """How a job ended. `usage` is the job's usage as the service reported it (turns, tokens,
-    list cost); None when it never reported (the job was lost, or litwatch gave up waiting)."""
+    list cost); None when it never reported (the job was lost, or litwatch gave up waiting).
+    `failure` says whose a failed job's failure was, as the service tagged it, or the service's
+    when the job was lost or never ended. `still_running`: litwatch stopped waiting at the
+    job's deadline, but the job may yet run: followed again after each pause until it ends,
+    or until it has run past the deadline by the service's own clock (`DeepClient.follow`)."""
 
     result: dict[str, Any] | None
     trace: list[dict[str, Any]]
     usage: dict[str, Any] | None
     model: str
     error: str | None = None
+    failure: Literal["paper", "service"] | None = None
+    still_running: bool = False
+
+
+# A 4xx the service answers a submission with that is not about the submission: a wrong
+# address (404), its own timeout (408) or load (429). Any other 4xx turns the submission down
+# for what it is (400, 413, 422 today), and it would be turned down again.
+NOT_REJECTIONS = frozenset({404, 408, 429})
+
+
+class RejectedError(Exception):
+    """The service turned a submission down for what it is, in its own words; no job started."""
+
+
+def _said(resp: httpx.Response) -> str:
+    """What the service said in its error answer (`{"error": ...}`)."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return resp.text[:500]
+    return str(body.get("error", body)) if isinstance(body, dict) else str(body)
 
 
 class DeepClient:
@@ -74,29 +101,48 @@ class DeepClient:
         resp = await self.http.get(f"{self.base_url}/healthz", timeout=10.0)
         resp.raise_for_status()
 
-    async def submit(self, submission: dict[str, Any]) -> str:
-        """Submit one paper; returns the job's id. The service does not deduplicate, so a
-        caller records the attempt before and the job after, and never submits twice."""
-        resp = await self.http.post(f"{self.base_url}/process", json=submission)
+    async def submit(self, submission: dict[str, Any], *, key: str) -> str:
+        """Submit one paper; returns the job's id. `key` names the submission: the service
+        answers a key it has with that key's job, so one sent again after a lost answer never
+        starts a second. Raises `RejectedError` when the service turns it down for what it is."""
+        resp = await self.http.post(
+            f"{self.base_url}/process", json=submission, headers={"Idempotency-Key": key}
+        )
+        if 400 <= resp.status_code < 500 and resp.status_code not in NOT_REJECTIONS:
+            raise RejectedError(f"{resp.status_code} {_said(resp)}")
+        resp.raise_for_status()
+        return str(resp.json()["id"])
+
+    async def job_for(self, key: str) -> str | None:
+        """The job a submission with `key` started, if the service still has it."""
+        resp = await self.http.get(f"{self.base_url}/keys/{quote(key, safe='')}")
+        if resp.status_code == 404:
+            return None
         resp.raise_for_status()
         return str(resp.json()["id"])
 
     async def follow(self, job_id: str, since: datetime, label: str = "") -> Outcome:
         """Poll a job until it ends, or until `timeout_seconds` after `since` (when it was
-        submitted). A failed poll raises, and the job can be followed again later, until then."""
-        deadline = since + timedelta(seconds=self.timeout_seconds)
-        gave_up = Outcome(None, [], None, "", "litwatch gave up waiting for the deep job")
+        submitted). A failed poll raises, and the job can be followed again later, until then.
+        Past the deadline the job is `still_running`, to be followed again later (one poll),
+        unless it has been running longer than `timeout_seconds` by the service's own clock,
+        whose wall clock is shorter: the service is stuck, and litwatch gives up on the job. A
+        job queued behind another, or unreachable, may yet run, so it is never given up on."""
+        deadline = since + self.limit
+        error = "litwatch stopped waiting for the deep job, to follow it again"
+        kept = Outcome(None, [], None, "", error, "service", still_running=True)
         seen = ""
         while True:
             await asyncio.sleep(self.poll_seconds)
             try:
                 resp = await self.http.get(f"{self.base_url}/jobs/{job_id}")
                 if resp.status_code == 404:
-                    return Outcome(None, [], None, "", "deep job vanished (service restarted?)")
+                    error = "deep job vanished (service restarted?)"
+                    return Outcome(None, [], None, "", error, "service")
                 resp.raise_for_status()
             except httpx.HTTPError:
                 if datetime.now(UTC) > deadline:
-                    return gave_up  # what it spent was never reported
+                    return kept
                 raise
             job = resp.json()
             stats = job.get("stats") or {}
@@ -120,9 +166,20 @@ class DeepClient:
                     job.get("stats"),
                     job.get("model") or "",
                     job.get("error"),
+                    job.get("failure"),
                 )
             if datetime.now(UTC) > deadline:
-                return gave_up  # the job may go on spending; what it spent was never reported
+                started = job.get("started_at")
+                running = started and datetime.now(UTC) - datetime.fromisoformat(started)
+                if job["status"] == "running" and running and running > self.limit:
+                    # It may go on spending; what it spent was never reported.
+                    error = "litwatch gave up on the deep job: running past its deadline"
+                    return Outcome(None, [], None, "", error, "service")
+                return kept
+
+    @property
+    def limit(self) -> timedelta:
+        return timedelta(seconds=self.timeout_seconds)
 
 
 class Deep:
@@ -138,12 +195,10 @@ class Deep:
         *,
         name: str = "deep",
         extensions: dict[str, str] | None = None,
-        max_per_day: int = 10,
     ) -> None:
         self.name = name
         self.client = client
         self.extensions = EXTENSIONS if extensions is None else extensions
-        self.max_per_day = max_per_day
 
     @property
     def lease(self) -> timedelta:
@@ -210,9 +265,9 @@ class Deep:
 
 
 def load(name: str, options: dict[str, Any], config: Config) -> Deep:
-    max_per_day = int(options.get("max_per_day", 10))
-    if max_per_day < 0:
-        raise IntegrationError("max_per_day cannot be negative")
+    # A cap the owner set is not dropped without a word.
+    if "max_per_day" in options:
+        raise IntegrationError("max_per_day is gone: Deep cards have no daily cap; remove it")
     # The Deep worker reads each paper's text from the archive; without one it never starts,
     # and a card the owner asks for would wait for ever.
     try:
@@ -225,4 +280,4 @@ def load(name: str, options: dict[str, Any], config: Config) -> Deep:
         poll_seconds=float(options.get("poll_seconds", 15.0)),
         timeout_seconds=float(options.get("timeout_minutes", 45)) * 60,
     )
-    return Deep(client, name=name, extensions=options.get("extensions"), max_per_day=max_per_day)
+    return Deep(client, name=name, extensions=options.get("extensions"))

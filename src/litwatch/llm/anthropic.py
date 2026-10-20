@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from typing import Any
 
 import anthropic
@@ -10,10 +12,12 @@ from anthropic import AsyncAnthropic, transform_schema
 
 from litwatch.config import RoleConfig
 from litwatch.llm.prices import anthropic_cost
-from litwatch.llm.types import ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm.types import ACCOUNT_STATUSES, ProviderError, Reply, Request, Stop, Usage
 
 # Non-streaming requests stay under the SDK's timeout at this ceiling.
 DEFAULT_MAX_TOKENS = 16000
+# A batch's request errors that are the account's (401, 402, 403), by their error type.
+BATCH_ACCOUNT = frozenset({"authentication_error", "billing_error", "permission_error"})
 
 
 def messages_request(role: RoleConfig, request: Request) -> dict[str, Any]:
@@ -70,6 +74,17 @@ def reply_of(message: Any, role: RoleConfig | None, *, batch: bool = False) -> R
     return Reply(text, stop, usage)
 
 
+@contextlib.contextmanager
+def _account_errors() -> Iterator[None]:
+    """A batch operation's 401, 402 or 403 as an account error; anything else as it came."""
+    try:
+        yield
+    except anthropic.APIStatusError as exc:
+        if exc.status_code in ACCOUNT_STATUSES:
+            raise ProviderError(f"{type(exc).__name__}: {exc}", account=True) from exc
+        raise
+
+
 class AnthropicProvider:
     name = "anthropic"
 
@@ -95,37 +110,50 @@ class AnthropicProvider:
         ) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except anthropic.APIError as exc:
-            raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
+            account = getattr(exc, "status_code", None) in ACCOUNT_STATUSES
+            raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc
         return reply_of(message, role)
 
     # Message Batches (models.md, batches): `custom_id` is the gateway's request key.
 
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str:
-        batch = await self.client.messages.batches.create(
-            requests=[
-                {"custom_id": key, "params": messages_request(role, request)}
-                for key, role, request in requests
-            ]
-        )
+        with _account_errors():
+            batch = await self.client.messages.batches.create(
+                requests=[
+                    {"custom_id": key, "params": messages_request(role, request)}
+                    for key, role, request in requests
+                ]
+            )
         return batch.id
 
     async def status(self, batch_id: str) -> str:
         """`in_progress`, `canceling` or `ended`; `gone` when the API no longer has it (deleted,
         or the key is another workspace's)."""
         try:
-            return (await self.client.messages.batches.retrieve(batch_id)).processing_status
+            with _account_errors():
+                return (await self.client.messages.batches.retrieve(batch_id)).processing_status
         except anthropic.NotFoundError:
             return "gone"
 
     async def cancel(self, batch_id: str) -> None:
-        await self.client.messages.batches.cancel(batch_id)
+        with _account_errors():
+            await self.client.messages.batches.cancel(batch_id)
 
-    async def results(self, batch_id: str) -> dict[str, Reply | None]:
-        """Each request's reply, by its key; None for one the batch did not answer (errored,
-        cancelled, expired), which is asked again as a normal call."""
-        found: dict[str, Reply | None] = {}
-        async for line in await self.client.messages.batches.results(batch_id):
-            result = line.result
-            ok = result.type == "succeeded"
-            found[line.custom_id] = reply_of(result.message, None, batch=True) if ok else None
+    async def results(self, batch_id: str) -> dict[str, Reply | ProviderError | None]:
+        """Each request's reply, by its key; an account error for one the account kept the
+        batch from answering, never asked again; None for one the batch did not answer
+        otherwise (errored, cancelled, expired), which is asked again as a normal call."""
+        found: dict[str, Reply | ProviderError | None] = {}
+        with _account_errors():
+            async for line in await self.client.messages.batches.results(batch_id):
+                result = line.result
+                if result.type == "succeeded":
+                    found[line.custom_id] = reply_of(result.message, None, batch=True)
+                elif (
+                    result.type == "errored" and (kind := result.error.error.type) in BATCH_ACCOUNT
+                ):
+                    error = ProviderError(f"{kind} in batch {batch_id}", account=True)
+                    found[line.custom_id] = error
+                else:
+                    found[line.custom_id] = None
         return found

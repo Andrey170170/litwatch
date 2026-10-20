@@ -19,6 +19,7 @@ from openai.lib._pydantic import to_strict_json_schema
 
 from litwatch.config import RoleConfig
 from litwatch.llm.types import (
+    ACCOUNT_STATUSES,
     Choice,
     DecisionRequest,
     Predicate,
@@ -173,6 +174,23 @@ def reply_of(completion: Any, role: RoleConfig) -> Reply:
     return Reply(text, Stop.TRUNCATED if finish == "length" else Stop.COMPLETE, usage)
 
 
+def declined(body: object) -> str | None:
+    """The refusal category of a 403 about the request's content rather than the account
+    (OpenRouter's API reference, errors): a moderation flag, a guardrail's block, a filter's
+    content-policy violation, a model's refusal sent as an error. None for any other 403, a
+    budget used up or a permission denied included, which is an `account` error."""
+    meta = body.get("metadata") if isinstance(body, dict) else None
+    if not isinstance(meta, dict) or meta.get("limit_source"):
+        return None
+    if (kind := meta.get("error_type")) in ("content_policy_violation", "refusal"):
+        return kind
+    if meta.get("reasons") or meta.get("flagged_input"):
+        return "moderation"
+    if meta.get("patterns"):  # what a guardrail matched; its type is permission_denied
+        return "guardrail"
+    return None
+
+
 class OpenRouterProvider:
     name = "openrouter"
 
@@ -185,16 +203,17 @@ class OpenRouterProvider:
 
     async def complete(self, role: RoleConfig, request: Request) -> Reply:
         body = chat_request(role, request, self.routing(role))
-        completion = await self._call(self.client.chat.completions.create(**body))
-        return reply_of(completion, role)
+        completion = await self._call(self.client.chat.completions.create(**body), role)
+        return completion if isinstance(completion, Reply) else reply_of(completion, role)
 
     async def decide(self, role: RoleConfig, request: DecisionRequest) -> Reply:
         body = decisions_request(role, request, self.routing(role))
-        raw = await self._call(self.client.post(DECISIONS_URL, body=body, cast_to=object))
-        return decision_reply(raw, request, role)
+        raw = await self._call(self.client.post(DECISIONS_URL, body=body, cast_to=object), role)
+        return raw if isinstance(raw, Reply) else decision_reply(raw, request, role)
 
-    async def _call(self, pending: Any) -> Any:
-        """The SDK's failures as provider errors."""
+    async def _call(self, pending: Any, role: RoleConfig) -> Any:
+        """The SDK's failures as provider errors, and a request OpenRouter declined for its
+        content as the refusal it is (a 403 like the account's own)."""
         try:
             return await pending
         except openai.APITimeoutError as exc:
@@ -211,5 +230,12 @@ class OpenRouterProvider:
             openai.APIConnectionError,
         ) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
+        except openai.PermissionDeniedError as exc:
+            if category := declined(exc.body):
+                usage = Usage(model=role.model, via="openrouter", effort=role.effort)
+                said = json.dumps(exc.body, default=str)
+                return Reply("", Stop.REFUSED, usage, refusal=category, raw=said)
+            raise ProviderError(f"{type(exc).__name__}: {exc}", account=True) from exc
         except openai.APIError as exc:
-            raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
+            account = getattr(exc, "status_code", None) in ACCOUNT_STATUSES
+            raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc

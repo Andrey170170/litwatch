@@ -57,7 +57,11 @@ Providers: `anthropic` (prompt caching, cost from a price table) and `openrouter
 
 A provider's 401, 402 or 403 is an **`account` error** (a key revoked, credits used up, access withdrawn), in normal
 and batched calls alike: never retried, never counted against a paper, and shown on the provider's component of the
-status document until its next answered call ([data.md](data.md), configuration).
+status document until its next answered call ([data.md](data.md), configuration). OpenRouter also answers 403 for
+the request's content: a moderation flag, a guardrail's block, a filter's `content_policy_violation`, a model's
+`refusal` sent as an error. Told by the error's type and metadata, such a 403 is **a refusal** (above), with that
+category; a budget used up or a permission denied is the account's, and so is a 403 that can't be told apart, which
+shows on the status document rather than passing quietly down the list.
 
 Debug mode (`debug = true` in `litwatch.toml`, or `LITWATCH_DEBUG=1`; off by default) is for catching problems over a
 stretch of nights. A call whose reply could not be used (invalid, truncated or refused) keeps the reply's text in

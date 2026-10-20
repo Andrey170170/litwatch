@@ -84,7 +84,8 @@ class SdkClient:
 class ScriptedProvider:
     """A provider whose answer is computed from the request by `respond`.
 
-    `respond(role, request)` returns the JSON text of the reply, a `Reply`, or raises.
+    `respond(role, request)` returns the JSON text of the reply, a `Reply` or a
+    `ProviderError` (raised, and in a batch given as the request's error), or raises.
     """
 
     def __init__(self, name: str, respond) -> None:
@@ -97,6 +98,8 @@ class ScriptedProvider:
     async def complete(self, role: RoleConfig, request: Request) -> Reply:
         self.calls.append((role, request))
         answer = self.respond(role, request)
+        if isinstance(answer, ProviderError):
+            raise answer
         if isinstance(answer, Reply):
             return answer
         usage = Usage(model=role.model, via=self.name, effort=role.effort, cost=0.001)
@@ -131,7 +134,7 @@ class BatchingProvider(ScriptedProvider):
                 continue
             self.batched.append((role, request))
             answer = self.respond(role, request)
-            if not isinstance(answer, Reply):
+            if not isinstance(answer, Reply | ProviderError):
                 usage = Usage(model=role.model, via=self.name, cost=0.0005, service_tier="batch")
                 answer = Reply(answer, Stop.COMPLETE, usage)
             replies[key] = answer
@@ -154,7 +157,7 @@ class BatchingProvider(ScriptedProvider):
         if self.batches[batch_id]["status"] == "in_progress":
             self.batches[batch_id]["status"] = "canceling"
 
-    async def results(self, batch_id: str) -> dict[str, Reply | None]:
+    async def results(self, batch_id: str) -> dict[str, Reply | ProviderError | None]:
         b = self.batches[batch_id]
         assert b["status"] == "ended", "results are read only once a batch has ended"
         return {key: b["replies"].get(key) for key, _, _ in b["requests"]}

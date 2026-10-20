@@ -74,7 +74,7 @@ CHARS_PER_TOKEN = 3.0
 # and the chat template and the schema's rendering add no more than this.
 TEMPLATE_TOKENS = 1000
 # An answer that failed for want of the provider says nothing of the model: asked again.
-RETRIED = ("timeout", "provider")
+RETRIED = ("timeout", "provider", "account")
 BUDGET, PENDING, LOCK = "budget.jsonl", "pending.jsonl", ".lock"
 
 
@@ -721,7 +721,7 @@ def _role_table(
         kinds = Counter(r.outcome for r in outcome.values())
         row: list[object] = [cand.name, f"`{cand.role.label}`", len(outcome)]
         row += [kinds[k] for k in ("answered", "refused", "invalid", "truncated")]
-        row.append(kinds["timeout"] + kinds["provider"])
+        row.append(sum(kinds[k] for k in RETRIED))
         answered = {k: r for k, r in outcome.items() if r.outcome == "answered"}
         if owner:
             pairs = [

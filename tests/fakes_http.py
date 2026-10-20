@@ -247,35 +247,65 @@ class FakeArchive:
 
 class FakeDeep:
     """The deep service's job protocol: a job that needs two polls to finish, ending as
-    `outcome` (its result, stats and model, or its error). It can fail the next polls
-    (`fail_polls`), keep a job running (`hold`), forget its jobs (`vanish`, as a restart does),
-    or accept a submission and then lose the answer (`lose_answers`), as a dropped connection
-    would."""
+    `outcome` (its result, stats and model, or its error and whose failure it was). A
+    submission's key it has (`keys`) is answered with that key's job, not started again
+    (`started` counts those started), and found by `GET /keys/<key>`. It can fail the next
+    submissions (`fail_submits`) or polls and lookups (`fail_polls`), answer every submission
+    with a status and its error (`answer_submits`, as it turns one down), keep a job running
+    (`hold`) since `started_at`, or queued (`queued`), forget its jobs (`vanish`, as a restart
+    does), or accept a submission and then lose the answer (`lose_answers`), as a dropped
+    connection would."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         self.outcome = outcome
         self.polls = 0
         self.requests: list[dict[str, Any]] = []
+        self.keys: dict[str, str] = {}
+        self.keys_sent: list[str | None] = []
+        self.started = 0
+        self.fail_submits = 0
+        self.answer_submits: tuple[int, str] | None = None
         self.fail_polls = 0
         self.hold = False
+        self.started_at: str | None = None
+        self.queued = False
         self.vanish = False
         self.lose_answers = 0
 
     def handle(self, req: httpx.Request) -> httpx.Response:
         if req.method == "POST" and req.url.path == "/process":
             self.requests.append(json.loads(req.content))
-            self.polls = 0
+            self.keys_sent.append(req.headers.get("idempotency-key"))
+            if self.fail_submits:
+                self.fail_submits -= 1
+                return httpx.Response(503)
+            if self.answer_submits:
+                status, error = self.answer_submits
+                return httpx.Response(status, json={"error": error})
+            key = self.keys_sent[-1]
+            if key in self.keys:
+                return httpx.Response(200, json={"id": self.keys[key], "status": "running"})
+            self.keys[key], self.started, self.polls = "job-1", self.started + 1, 0
             if self.lose_answers:
                 self.lose_answers -= 1
                 raise httpx.ReadTimeout("the answer never came", request=req)
             return httpx.Response(202, json={"id": "job-1", "status": "queued"})
+        if req.method == "GET" and req.url.path.startswith("/keys/"):
+            job = self.keys.get(unquote(req.url.path.removeprefix("/keys/")))
+            if self.fail_polls:
+                self.fail_polls -= 1
+                return httpx.Response(503)
+            return httpx.Response(200, json={"id": job}) if job else httpx.Response(404)
         if req.url.path == "/jobs/job-1" and not self.vanish:
             if self.fail_polls:
                 self.fail_polls -= 1
                 return httpx.Response(503)
             self.polls += 1
+            if self.queued:
+                return httpx.Response(200, json={"status": "queued", "stats": {}})
             if self.polls < 2 or self.hold:
-                return httpx.Response(200, json={"status": "running", "stats": {"cells": 3}})
+                job = {"status": "running", "stats": {"cells": 3}, "started_at": self.started_at}
+                return httpx.Response(200, json=job)
             status = "error" if self.outcome.get("error") else "done"
             return httpx.Response(200, json={"status": status, **self.outcome})
         return httpx.Response(404)

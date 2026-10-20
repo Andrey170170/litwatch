@@ -52,7 +52,7 @@ def test_built_ins_load_by_short_name_and_a_section_may_name_its_module(secrets)
             "zotero": {"user_id": "1"},
             "webdav": {"url": "https://dav.test/zotero", "username": "u"},
             "archive": {"url": "http://archive.test"},
-            "deep": {"url": "http://deep.test", "max_per_day": 3},
+            "deep": {"url": "http://deep.test"},
             "notion": {"use": "webhook", "url": "http://n8n.test/hook", "events": ["paper.*"]},
             "slack": {"use": "webhook", "url": "http://slack.test", "enabled": False},
         }
@@ -61,7 +61,7 @@ def test_built_ins_load_by_short_name_and_a_section_may_name_its_module(secrets)
     assert [i.name for i in loaded] == ["zotero", "webdav", "archive", "deep", "notion"]
     assert all(isinstance(i, events.Integration) for i in loaded)
     # webdav reads PDFs through the archive once it is configured.
-    assert loaded[1].archive is not None and loaded[3].max_per_day == 3
+    assert loaded[1].archive is not None
 
 
 def test_a_configuration_that_cannot_work_is_refused_with_its_section(secrets, monkeypatch):
@@ -85,6 +85,13 @@ def test_deep_is_refused_without_an_archive_to_read_papers_from(secrets, monkeyp
     monkeypatch.delenv("LITWATCH_ARCHIVE_URL", raising=False)
     with pytest.raises(IntegrationError, match="deep reads papers from the archive"):
         integrations.load(Config(integrations={"deep": {"url": "http://deep.test"}}))
+
+
+def test_a_deep_daily_cap_set_in_the_configuration_is_refused_not_dropped(secrets):
+    deep = {"url": "http://deep.test", "max_per_day": 3}
+    archive = {"url": "http://archive.test"}
+    with pytest.raises(IntegrationError, match="max_per_day is gone"):
+        integrations.load(Config(integrations={"archive": archive, "deep": deep}))
 
 
 def test_webdav_finds_its_zotero_by_module_whatever_the_section_is_called(secrets):

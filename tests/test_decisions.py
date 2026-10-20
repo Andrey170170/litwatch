@@ -3,6 +3,7 @@ validated the same way, and journalled and reused like any call."""
 
 import json
 
+import openai
 import pytest
 
 from litwatch.config import Models, RoleConfig
@@ -12,7 +13,7 @@ from litwatch.llm.decisions import Chosen
 from litwatch.llm.openrouter import DECISIONS_URL, OpenRouterProvider
 from litwatch.llm.types import Choice, DecisionRequest, Predicate
 from tests.fakes import SdkClient, anthropic_message, decisions_reply
-from tests.test_llm import calls, journal  # noqa: F401
+from tests.test_llm import _status, calls, journal  # noqa: F401
 
 REQUEST = DecisionRequest(
     "Title: Circuits in a small transformer",
@@ -104,6 +105,13 @@ async def test_a_missing_or_malformed_decisions_reply_is_invalid(answers):
         await gateway(JEV, client).decide("classify", REQUEST)
     assert caught.value.kind == "invalid"
     assert caught.value.usage.cost == 0.00005  # billed, though unusable
+
+
+async def test_a_decisions_endpoint_declining_the_content_is_a_refusal():
+    client = SdkClient(_status(openai, 403, {"code": 403, "metadata": {"error_type": "refusal"}}))
+    with pytest.raises(CallError) as caught:
+        await gateway(JEV, client).decide("classify", REQUEST)
+    assert (caught.value.kind, str(caught.value)) == ("refused", "refused: refusal")
 
 
 async def test_a_decision_is_journalled_and_reused(conn, journal):  # noqa: F811

@@ -33,7 +33,10 @@ class CallJournal:
             )
         ).fetchone()
 
-    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
+    async def start(
+        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+    ) -> int:
+        """A call about to be sent, to `model` by provider `via`: its row, before any reply."""
         row = await (
             await self.conn.execute(
                 "INSERT INTO inference_calls (run_id, operation, request_key, usage, paper_id) "
@@ -42,7 +45,7 @@ class CallJournal:
                     self.run_id,
                     role,
                     key,
-                    Jsonb(Usage(model=model).model_dump(mode="json")),
+                    Jsonb(Usage(model=model, via=via).model_dump(mode="json")),
                     paper_id,
                 ),
             )
@@ -94,16 +97,19 @@ class CallJournal:
             (batch_id,),
         )
 
-    async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None:
+    async def answered(
+        self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
+    ) -> None:
         """An answer of batch `batch_id` that no call awaited: its charge, on the calls that
         asked for it and have none yet, so the batch is accounted for in full. None: the batch
-        did not answer it, and its call is settled with that."""
+        did not answer it, and its call is settled with that, or with `error` (an account
+        error)."""
         if usage is None:
             await self.conn.execute(
-                "UPDATE inference_calls SET error = 'provider: the batch did not answer it' "
+                "UPDATE inference_calls SET error = %s "
                 "WHERE batch_id = %s AND request_key = %s AND output IS NULL AND error IS NULL "
                 "AND usage->>'cost' IS NULL",
-                (batch_id, key),
+                (error or "provider: the batch did not answer it", batch_id, key),
             )
             return
         cur = await self.conn.execute(

@@ -7,11 +7,24 @@ urgent priority, and the `deep` integration's service is given it.
 
 Each submission is an attempt, recorded before it is sent and given its job once accepted, so a
 worker that dies while a job runs leaves the job to the next claim to follow, never paid for
-twice. When a job ends, with a card or failed, the attempt records the job's usage, or that it
-is unknown (the job was lost before it reported, the submission's answer never came). A
-failed job fails the pass: it is tried again on the next nightly run, and after `FAILED_RUNS`
-failed runs it waits for the owner on Quality, as every pass does. At most `max_per_day`
-automatic submissions are made in any 24 hours; the owner's requests do not count, and go first.
+twice. A submission carries its attempt as a key, by which the service finds the job it
+started for it: one whose answer never came is followed if the service has its job, and
+otherwise ends, its pass tried again as a first try is. When a
+job ends, with a card or failed, the attempt records the job's usage, or that it is unknown
+(the job was lost before it reported), and whose failure it was.
+
+A job that failed because of the paper (no card within its budget, an invalid card) fails the
+pass: it is tried again on the next nightly run, and after `FAILED_RUNS` failed runs it waits
+for the owner on Quality, as every pass does. One that failed because of the service (the
+service tagged it so, lost it, or never ended it) counts against nothing: the pass goes back in
+the queue. Nor does an error submitting or following a job, after which the attempt and the
+pass stay as they are: the job is followed, found by its key if its submission's answer was
+lost, or, when the service has none, the attempt ends and the pass is tried afresh. A job not
+ended by its deadline is kept too and followed again after each pause until it ends; one
+running past the deadline by the service's own clock, which is shorter, is given up on as
+the service's failure. Any
+service failure pauses the whole queue for `PAUSE`. There is no daily cap; the owner's
+requests go first.
 """
 
 from __future__ import annotations
@@ -21,6 +34,7 @@ import contextlib
 import logging
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import httpx
 import psycopg
@@ -31,12 +45,19 @@ from litwatch.core import Cause
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
 from litwatch.fulltext import TICK_SECONDS, judged, read, record, still_wanted
-from litwatch.integrations.deep import Deep
+from litwatch.integrations.deep import Deep, RejectedError
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
 from litwatch.store.fulltext import Claimed
 
 log = logging.getLogger(__name__)
+
+# After a service failure the queue waits this long before its next try.
+PAUSE = timedelta(minutes=15)
+# The usage of a submission the service turned down: nothing ran, so it is known, and zero.
+NOTHING_RAN = dict.fromkeys(
+    ("turns", "cells", "seconds", "input", "output", "reasoning", "cache_read", "list_cost"), 0
+)
 
 
 async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
@@ -71,9 +92,10 @@ async def _work(
     counts: Counter[str] = Counter()
     tried: set[int] = set()
     while limit is None or len(tried) < limit:
-        day_ago = datetime.now(UTC) - timedelta(days=1)
-        automatic = await cards.automatic_attempts_since(conn, day_ago) < deep.max_per_day
-        claimed = await store_.claim(conn, deep.lease, 1, tried, deep=True, automatic=automatic)
+        if until := await cards.paused_until(conn, PAUSE):
+            log.debug("the deep queue waits after a service failure, until %s", until)
+            break
+        claimed = await store_.claim(conn, deep.lease, 1, tried, deep=True)
         if not claimed:
             break
         (c,) = claimed
@@ -95,11 +117,25 @@ async def _work_one(
     c: Claimed,
     attempt: dict | None,
 ) -> str:
-    """Follow the pass's job, one left running by a failed poll or a dead worker, or read the
-    paper's text and submit it; then record how the job ended."""
+    """Follow the pass's job, one left running by a failed poll or a dead worker, or one a
+    submission whose answer never came started, found by its key; else read the paper's text
+    and submit it. Then record how the job ended."""
     if attempt is not None and attempt["job_id"] is None:
-        # Sent, but its answer never came before the worker died: it may have run.
-        return await _ended(conn, c, attempt["id"], None, "the submission's answer never came")
+        try:
+            job_id = await deep.client.job_for(_key(attempt["id"], c))
+        except httpx.HTTPError as exc:
+            return await _service_failed(conn, c, attempt["id"], f"finding the deep job: {exc}")
+        if job_id is not None:
+            await cards.job_started(conn, attempt["id"], job_id)
+            attempt = {**attempt, "job_id": job_id}  # followed from when it was submitted
+        else:
+            # Its submission started no job the service has: nothing runs, so the attempt ends
+            # (its usage unknown, should a restarted service have lost one) and the pass is
+            # tried as a first try is.
+            await cards.attempt_ended(conn, attempt["id"], None, "its submission started no job")
+            attempt = None
+            if why := await still_wanted(conn, c):
+                return why
     if attempt is None:
         a = await read(archive, c)
         if a.text is None:  # awaiting text, or none to be had
@@ -120,22 +156,35 @@ async def _work_one(
             submission = await deep.submission(conn, c.paper, a.text, requested)
             attempt_id = await cards.add_attempt(conn, c.paper.id, c.id, automatic=not requested)
         try:
-            job_id = await deep.client.submit(submission)
+            job_id = await deep.client.submit(submission, key=_key(attempt_id, c))
+        except RejectedError as exc:
+            # Sent again it would be turned down again: the paper's failure, which counts. A
+            # wrong extension name in the configuration shows so too, as its topic's papers stop.
+            error = f"the deep service rejected the submission: {exc}"
+            return await _ended(conn, c, attempt_id, NOTHING_RAN, error, "paper", ran=False)
         except httpx.HTTPError as exc:
-            # The service may have taken it all the same: it counts, its usage unknown.
-            return await _ended(conn, c, attempt_id, None, f"submitting failed: {exc}")
+            # The service may have taken it all the same: found by its key after the pause.
+            return await _service_failed(conn, c, attempt_id, f"submitting failed: {exc}")
         await cards.job_started(conn, attempt_id, job_id)
         attempt = {"id": attempt_id, "job_id": job_id, "at": datetime.now(UTC)}
     try:
         outcome = await deep.client.follow(attempt["job_id"], attempt["at"], label=c.paper.id)
     except httpx.HTTPError as exc:
-        # The job goes on: the pass is let go, still running, and its next claim follows it.
-        log.warning("%s: following the deep job failed: %s", c.paper.id, exc)
-        await store_.let_go(conn, c, f"following the deep job: {exc}")
-        return "card_following"
+        # The job goes on: followed again by the pass's next claim, after the pause.
+        return await _service_failed(conn, c, attempt["id"], f"following the deep job: {exc}")
+    if outcome.still_running:
+        # Past its deadline the job may still run: kept, and followed again after the pause,
+        # never submitted again while it may.
+        return await _service_failed(conn, c, attempt["id"], outcome.error or "")
     if outcome.error or outcome.result is None:
         return await _ended(
-            conn, c, attempt["id"], outcome.usage, outcome.error or "no card", outcome.trace
+            conn,
+            c,
+            attempt["id"],
+            outcome.usage,
+            outcome.error or "no card",
+            "service" if outcome.failure == "service" else "paper",
+            outcome.trace,
         )
     async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
         if not await store_.held(conn, c):
@@ -167,25 +216,51 @@ async def _work_one(
     return "cards_written"
 
 
+def _key(attempt_id: int, c: Claimed) -> str:
+    """A submission's idempotency key: its attempt, and the paper, which no other database's
+    attempt of the same id is likely to share."""
+    return f"{attempt_id}:{c.paper.id}"
+
+
 async def _ended(
     conn: psycopg.AsyncConnection,
     c: Claimed,
     attempt_id: int,
     usage: dict | None,
     error: str,
+    failure: Literal["paper", "service"],
     trace: list | None = None,
+    *,
+    ran: bool = True,
 ) -> str:
-    """An attempt that made no card: its usage (None, unknown) and the error, and the pass
-    failed for this run, a run that counts."""
-    log.warning("%s: deep card failed: %s", c.paper.id, error)
+    """An attempt that made no card: its usage (None, unknown), the error and whose `failure` it
+    was. The paper's fails the pass for this run, a run that counts; the service's puts it back
+    in the queue, which pauses. A job that never `ran` leaves the card's last stats as they
+    were."""
+    log.warning("%s: deep card failed (%s): %s", c.paper.id, failure, error)
     async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
-        await cards.attempt_ended(conn, attempt_id, usage, error)
+        await cards.attempt_ended(conn, attempt_id, usage, error, failure)
         if not await store_.held(conn, c):
             return "lost"
-        await cards.card_failed(conn, c.paper.id, error, usage, trace)
+        await cards.card_failed(conn, c.paper.id, error, usage if ran else None, trace)
+        if failure == "service":
+            await store_.wait_again(conn, c, error)
+            return "card_service_failed"
         revision, text = await store_.read_of(conn, c.id)
         await store_.failed(conn, c, error, counts=True, text=text)
     return "card_failed"
+
+
+async def _service_failed(
+    conn: psycopg.AsyncConnection, c: Claimed, attempt_id: int, error: str
+) -> str:
+    """Submitting or following the attempt's job failed: the attempt goes on, and the pass,
+    let go still running, is taken by its next claim once the queue's pause is over."""
+    log.warning("%s: the deep service failed: %s; the queue waits %s", c.paper.id, error, PAUSE)
+    async with conn.transaction():
+        await cards.service_failed(conn, attempt_id, error)
+        await store_.let_go(conn, c, error)
+    return "card_service_failed"
 
 
 async def run_forever(

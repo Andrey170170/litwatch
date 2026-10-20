@@ -142,7 +142,9 @@ class _Spent:
     async def cached(self, key: str) -> None:
         return None
 
-    async def start(self, role: str, model: str, key: str, paper_id: str | None) -> int:
+    async def start(
+        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+    ) -> int:
         self.calls.append((paper_id, None))
         return len(self.calls) - 1
 

@@ -278,14 +278,24 @@ owner's requests go first.
 
 A Deep job fails either because of the paper (no card within the job's budget, an invalid card) or because of the
 service (its model call failed: a sign-in expired, a usage limit, the provider; or litwatch could not submit the job).
-The `deep` service tags which. A paper failure counts as a failed run, as below; a service failure does not: the pass
-goes back to waiting, the Deep worker pauses the whole queue for 15 minutes, and the status document shows it
-([data.md](data.md), configuration). An error following a job already accepted is a service failure too, but the job
-may still be running: the pass keeps its attempt and stays running, to be followed by its next claim after the pause,
-as when a worker dies. A submission whose answer never came may have started a job all the same, so each submission
-carries its attempt as a key, and the service answers a key it already has with that key's job: the pass keeps its
-attempt, and after the pause the same attempt is submitted again and follows whatever job it names. A job started
-twice for one attempt is not possible while the service runs; a service restarted in between has lost the job anyway.
+The `deep` service tags which. A submission the service turns down for what it is, a 4xx other than 404, 408 and 429 (an
+unknown extension, a body too large, missing fields), starts no job and would be turned down again: it is the paper's
+failure, with the service's message. An unknown extension is the configuration's mistake, not the paper's, but counted
+so the topic's papers stop after three runs and wait on Quality, where the owner sees it; passed off as the service's it
+would pause the queue every 15 minutes and never show. A paper failure counts as a failed run, as below; a service
+failure does not: the pass goes back to waiting, the Deep worker pauses the whole queue for 15 minutes, and the status
+document shows it ([data.md](data.md), configuration). An error following a job already accepted is a service failure
+too, but the job may still be running: the pass keeps its attempt and stays running, to be followed by its next claim
+after the pause, as when a worker dies. A submission whose answer never came may have started a job all the same, so
+each submission carries its attempt as a key, and the service answers a key it already has with that key's job: the pass
+keeps its attempt, and after the pause the service is asked for the job its key names, which is followed. When the
+service has none, nothing runs for the attempt: it ends, its usage unknown, and the pass is tried again as a first try
+is. A job litwatch has followed to its timeout (45 minutes from the submission) is a service failure that keeps its
+attempt too: it is followed again after each pause and taken as it ends, a card or its failure. It may be queued behind
+another job, or the service unreachable, and may yet run, so it is not given up on; but one that has been running longer
+than the timeout by the service's own clock has outlived the service's 30-minute wall clock, so the service is stuck:
+the attempt ends as the service's failure, its usage unknown, and the next try is a new submission. A job started twice
+for one attempt is not possible while the service runs; a service restarted in between has lost the job anyway.
 
 A pass that fails, including a model response that is truncated or invalid, is retried on the next run (a download
 the archive gave up on is asked for again with it), and goes down `brief`'s fallbacks as [models.md](models.md) says;

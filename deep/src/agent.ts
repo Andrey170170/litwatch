@@ -42,12 +42,20 @@ export interface Stats extends TurnUsage {
   seconds: number;
 }
 
+/**
+ * Whose failure a job's was: the service's when the model call failed (the sign-in, a usage limit, the provider), the
+ * paper's when no valid card was submitted within the budget or the provider's content filter stopped the model.
+ * litwatch counts only the paper's against it.
+ */
+export type Failure = "service" | "paper";
+
 export interface Outcome {
   result: Result | null;
   trace: TraceEvent[];
   stats: Stats;
   model: string;
   error?: string;
+  failure?: Failure; // set with `error`
 }
 
 export type Progress = (event: TraceEvent, stats: Stats) => void;
@@ -87,6 +95,7 @@ export async function processPaper(
 
   let submitted: Result | null = null;
   let failure: string | undefined;
+  let failedBy: Failure = "paper";
 
   const traced = (name: string, fn: HostFn): HostFn => async (args) => {
     const t0 = Date.now();
@@ -179,7 +188,12 @@ export async function processPaper(
     const text = m.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
     const thinking = m.content.filter((c) => c.type === "thinking").map((c) => c.thinking).join("\n");
     record({ t: now(), type: "assistant", text, thinking, stop: m.stopReason, usage });
-    if (m.stopReason === "error" || m.stopReason === "aborted") failure = m.errorMessage ?? m.stopReason;
+    // An aborted turn is the wall clock's, which has said why already.
+    if (m.stopReason === "error" && failure === undefined) {
+      failure = m.errorMessage ?? m.stopReason;
+      // A filtered response is about what the paper says, and would be filtered again.
+      failedBy = m.rawStopReason?.endsWith("content_filter") ? "paper" : "service";
+    } else if (m.stopReason === "aborted") failure ??= m.errorMessage ?? m.stopReason;
   });
 
   const clock = setTimeout(() => {
@@ -194,14 +208,17 @@ export async function processPaper(
       await agent.prompt(NUDGE);
     }
   } catch (e) {
-    failure ??= e instanceof Error ? e.message : String(e);
+    if (failure === undefined) {
+      failure = e instanceof Error ? e.message : String(e);
+      failedBy = "service";
+    }
   } finally {
     clearTimeout(clock);
     repl.dispose();
   }
   stats.seconds = Math.round((Date.now() - started) / 1000);
   const error = submitted ? undefined : (failure ?? (stats.cells >= opts.maxCells ? "cell budget exhausted without a submit" : "the model stopped without submitting"));
-  return { result: submitted, trace, stats, model: `${PROVIDER}/${opts.model}`, error };
+  return { result: submitted, trace, stats, model: `${PROVIDER}/${opts.model}`, error, failure: error === undefined ? undefined : failedBy };
 }
 
 function short(args: unknown[]): string {

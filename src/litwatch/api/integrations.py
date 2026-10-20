@@ -236,7 +236,7 @@ async def card(
     if not answers_card_requests(loaded(request)):
         return found, None, False
     # The owner may ask unless they already have: their request takes an automatic pass over,
-    # one held back by the daily cap or failed included.
+    # a failed one included.
     open_pass = await fulltext_store.open_deep(c, paper_id)
     requestable = open_pass is None or open_pass["reason"] != REQUESTED
     return found, s.CardPass(**open_pass) if open_pass else None, requestable

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Literal
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -146,8 +146,9 @@ async def add_attempt(
 
 
 async def job_started(conn: psycopg.AsyncConnection, attempt_id: int, job_id: str) -> None:
-    """The service accepted the attempt's job: it is followed until it ends, across a failed
-    poll or a worker's death, and never submitted again meanwhile."""
+    """The service accepted the attempt's job, or was found to have it after its answer was
+    lost: it is followed until it ends, across a failed poll or a worker's death, and never
+    submitted again meanwhile."""
     await conn.execute("UPDATE deep_attempts SET job_id = %s WHERE id = %s", (job_id, attempt_id))
 
 
@@ -164,25 +165,48 @@ async def open_attempt(conn: psycopg.AsyncConnection, pass_id: int) -> dict[str,
 
 
 async def attempt_ended(
-    conn: psycopg.AsyncConnection, attempt_id: int, usage: dict[str, Any] | None, error: str | None
+    conn: psycopg.AsyncConnection,
+    attempt_id: int,
+    usage: dict[str, Any] | None,
+    error: str | None,
+    failure: Literal["paper", "service"] | None = None,
 ) -> None:
-    """The attempt's job ended, with a card or failed: its usage, or None when it is unknown
-    (never zero for that)."""
+    """The attempt's job ended, with a card or failed, and whose `failure` it was: its usage,
+    or None when it is unknown (never zero for that)."""
     await conn.execute(
-        "UPDATE deep_attempts SET ended_at = now(), usage = %s, error = %s "
-        "WHERE id = %s AND ended_at IS NULL",
-        (Jsonb(usage) if usage is not None else None, error and error[:2000], attempt_id),
+        "UPDATE deep_attempts SET ended_at = now(), usage = %(usage)s, error = %(error)s, "
+        "failure = %(failure)s, service_failed_at = CASE WHEN %(failure)s = 'service' "
+        "THEN now() ELSE service_failed_at END WHERE id = %(id)s AND ended_at IS NULL",
+        {
+            "usage": Jsonb(usage) if usage is not None else None,
+            "error": error and error[:2000],
+            "failure": failure,
+            "id": attempt_id,
+        },
     )
 
 
-async def automatic_attempts_since(conn: psycopg.AsyncConnection, since: datetime) -> int:
-    """Automatic submissions for any paper since then: what the daily cap counts."""
+async def service_failed(conn: psycopg.AsyncConnection, attempt_id: int, error: str) -> None:
+    """The service failed the attempt, which goes on: its submission's answer never came, or
+    following its job failed."""
+    await conn.execute(
+        "UPDATE deep_attempts SET error = %s, service_failed_at = now() "
+        "WHERE id = %s AND ended_at IS NULL",
+        (error[:2000], attempt_id),
+    )
+
+
+async def paused_until(conn: psycopg.AsyncConnection, pause: timedelta) -> datetime | None:
+    """When the Deep queue's pause ends: `pause` after the latest service failure, if that is
+    still to come."""
     row = await (
         await conn.execute(
-            "SELECT count(*) AS n FROM deep_attempts WHERE automatic AND at >= %s", (since,)
+            "SELECT until FROM (SELECT max(service_failed_at) + %s AS until FROM deep_attempts) x "
+            "WHERE until > now()",
+            (pause,),
         )
     ).fetchone()
-    return row["n"]
+    return row["until"] if row else None
 
 
 async def usage_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[str, Any]:

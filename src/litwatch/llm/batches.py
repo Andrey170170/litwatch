@@ -1,6 +1,7 @@
 """Message Batches inside the gateway (docs/specs/v1/models.md, batches). A batching gateway hands
 each call it cannot reuse to its provider's `Batcher`, which holds the calls until none has joined
-for a while, sends them as one batch, polls it, and answers each held call with its reply. A call
+for a while, sends them as one batch, polls it, and answers each held call with its reply, or with
+the account error the provider gave the request instead, which is never asked again. A call
 it cannot answer from a batch (the deadline passed, the batch did not answer it, the provider
 failed) gets None, and the gateway sends it as a normal call. A batch given up on while still open
 (the drain ran out, the gateway closed) may still answer: the journal rows its requests are on
@@ -21,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
 from litwatch.config import RoleConfig
-from litwatch.llm.types import Reply, Request, Usage
+from litwatch.llm.types import ProviderError, Reply, Request, Usage
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ POLL_SECONDS = 60.0
 OPERATION_SECONDS = 600.0  # a submission, status, cancel or results read, as a whole
 DRAIN = timedelta(minutes=30)  # how long cancelled batches are waited for after the deadline
 
+# What a batch gives a call: its reply, the account error it got instead, or None (not answered).
+type Answered = Reply | ProviderError | None
+
 
 @runtime_checkable
 class BatchProvider(Protocol):
@@ -40,12 +44,14 @@ class BatchProvider(Protocol):
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str: ...
     async def status(self, batch_id: str) -> str: ...  # in_progress, canceling, ended or gone
     async def cancel(self, batch_id: str) -> None: ...
-    async def results(self, batch_id: str) -> dict[str, Reply | None]: ...
+    async def results(self, batch_id: str) -> dict[str, Answered]: ...
 
 
 class BatchJournal(Protocol):
     async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None: ...
-    async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None: ...
+    async def answered(
+        self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
+    ) -> None: ...
     async def gone(self, batch_id: str) -> None: ...
 
 
@@ -70,7 +76,7 @@ class _Open:
     """A batch sent: the futures awaiting its answers, and the journal rows its requests are
     on, by request key."""
 
-    waiting: dict[str, asyncio.Future[Reply | None]] = field(default_factory=dict)
+    waiting: dict[str, asyncio.Future[Answered]] = field(default_factory=dict)
     rows: dict[str, int] = field(default_factory=dict)
     cancelled: bool = False
 
@@ -96,7 +102,7 @@ class Batcher:
         self.quiet, self.poll, self.drain, self.now = quiet, poll, drain, now
         self.max_requests, self.max_bytes, self.operation = max_requests, max_bytes, operation
         self._held: list[_Held] = []
-        self._futures: dict[str, asyncio.Future[Reply | None]] = {}  # held or sent, by key
+        self._futures: dict[str, asyncio.Future[Answered]] = {}  # held or sent, by key
         self._open: dict[str, _Open] = {}
         self._joined = 0.0  # when the last call joined the held ones (monotonic)
         self.unsettled: set[int] = set()  # journal rows of requests given up on, batch open
@@ -108,9 +114,9 @@ class Batcher:
 
     async def ask(
         self, key: str, role: RoleConfig, request: Request, call_id: int | None
-    ) -> Reply | None:
-        """The reply from a batch, or None: send it as a normal call. An identical call held
-        or sent already shares its request, and its reply at no cost."""
+    ) -> Answered:
+        """The reply from a batch, its account error, or None: send it as a normal call. An
+        identical call held or sent already shares its request, and its reply at no cost."""
         if not self.open():
             return None
         if key in self._futures:
@@ -124,7 +130,7 @@ class Batcher:
             self._flusher = self._supervised(self._flush_when_quiet())
         return await asyncio.shield(future)
 
-    async def attach(self, batch_id: str, key: str, call_id: int) -> Reply | None:
+    async def attach(self, batch_id: str, key: str, call_id: int) -> Answered:
         """The reply of a call a dead run sent in batch `batch_id`, on journal row `call_id`."""
         if key in self._futures:
             return await self._shared(self._futures[key])
@@ -136,10 +142,10 @@ class Batcher:
         return await asyncio.shield(future)
 
     @staticmethod
-    async def _shared(future: asyncio.Future[Reply | None]) -> Reply | None:
+    async def _shared(future: asyncio.Future[Answered]) -> Answered:
         reply = await asyncio.shield(future)
-        if reply is None:
-            return None
+        if not isinstance(reply, Reply):
+            return reply
         usage = reply.usage.model_copy(
             update={"cost": 0.0, "reused": True, "original_cost": reply.usage.cost}
         )
@@ -219,12 +225,16 @@ class Batcher:
             batch_id = await self._bounded(
                 self.provider.submit([(h.key, h.role, h.request) for h in held])
             )
-        except Exception:
-            log.exception(
-                "a batch of %d calls could not be sent; they go as normal calls", len(held)
-            )
+        except Exception as exc:
+            account = isinstance(exc, ProviderError) and exc.account
+            if account:  # never asked again: the calls fail on the account
+                log.error("a batch of %d calls was refused for the account: %s", len(held), exc)
+            else:
+                log.exception(
+                    "a batch of %d calls could not be sent; they go as normal calls", len(held)
+                )
             for h in held:
-                self._resolve(h.key, None)
+                self._resolve(h.key, exc if account else None)
             return
         log.info("batch %s sent with %d calls", batch_id, len(held))
         if self.journal:
@@ -253,7 +263,8 @@ class Batcher:
             if failed := next((e for e in ended if isinstance(e, BaseException)), None):
                 raise failed
             if self.now() >= self.deadline + self.drain:  # each given up looked at first
-                left = [(i, b) for i, b in looked if i in self._open]
+                # A batch read meanwhile is gone, or open again for a call attached since.
+                left = [(i, b) for i, b in looked if self._open.get(i) is b]
                 if left:
                     log.warning("%d batches still open after the deadline's drain", len(left))
                 for batch_id, batch in left:
@@ -266,7 +277,7 @@ class Batcher:
                 await asyncio.sleep(self.poll)
 
     async def _check(self, batch_id: str, batch: _Open, now: datetime) -> None:
-        replies: dict[str, Reply | None] = {}
+        replies: dict[str, Answered] = {}
         try:
             status = await self._bounded(self.provider.status(batch_id))
             if status not in ("ended", "gone"):
@@ -277,8 +288,17 @@ class Batcher:
                 return
             if status == "ended":
                 replies = await self._bounded(self.provider.results(batch_id))
-        except Exception:
-            log.exception("batch %s could not be read; trying again", batch_id)
+        except Exception as exc:
+            if not (isinstance(exc, ProviderError) and exc.account):
+                log.exception("batch %s could not be read; trying again", batch_id)
+                return
+            # Not read again this run: its calls fail on the account, and the batch is left
+            # open on its rows for a later run to account for.
+            log.error("batch %s could not be read for the account: %s", batch_id, exc)
+            del self._open[batch_id]
+            self._give_up(batch)
+            for key in batch.waiting:
+                self._resolve(key, exc)
             return
         if status == "gone":  # deleted, or another workspace's: it never answers
             log.warning("batch %s is gone from its provider", batch_id)
@@ -286,7 +306,15 @@ class Batcher:
             if status == "gone":
                 await self.journal.gone(batch_id)
             for key, reply in replies.items():
-                if key not in batch.waiting:
+                # A call settles its row with the answer, but for a row given up on before: a
+                # reply settles it still, anything else is its call's on a row of its own.
+                if key in batch.waiting and (
+                    isinstance(reply, Reply) or batch.rows.get(key) not in self.unsettled
+                ):
+                    continue
+                if isinstance(reply, ProviderError):
+                    await self.journal.answered(batch_id, key, None, f"account: {reply}")
+                else:
                     await self.journal.answered(batch_id, key, reply and reply.usage)
         del self._open[batch_id]
         for key in batch.waiting:  # None too for a request the results did not name
@@ -300,7 +328,7 @@ class Batcher:
         """Its waiting calls go as normal calls while it may still answer them."""
         self.unsettled.update(batch.rows[key] for key in batch.waiting if key in batch.rows)
 
-    def _resolve(self, key: str, reply: Reply | None) -> None:
+    def _resolve(self, key: str, reply: Answered) -> None:
         future = self._futures.pop(key, None)
         if future is not None and not future.done():
             future.set_result(reply)

@@ -96,13 +96,23 @@ class Reply:
     raw: str | None = None  # what the provider sent, when `text` does not carry all of it
 
 
-class ProviderError(Exception):
-    """A provider did not answer. `transient` failures are worth another attempt."""
+# What a provider answers when the account, not the request, is the trouble: a key revoked
+# (401), credits used up (402), access withdrawn (403). OpenRouter's 403 about the request's
+# content is a refusal instead (openrouter.declined).
+ACCOUNT_STATUSES = frozenset({401, 402, 403})
 
-    def __init__(self, message: str, *, transient: bool = False, timeout: bool = False) -> None:
+
+class ProviderError(Exception):
+    """A provider did not answer. `transient` failures are worth another attempt; an `account`
+    one (models.md, the gateway) never is."""
+
+    def __init__(
+        self, message: str, *, transient: bool = False, timeout: bool = False, account: bool = False
+    ) -> None:
         super().__init__(message)
         self.transient = transient
         self.timeout = timeout
+        self.account = account
 
 
 class Provider(Protocol):
