@@ -76,8 +76,10 @@ owner's dotfiles.
   for up to 30 s. Past that, it answers that the paper is being fetched and to ask again in a minute. A paper the
   archive cannot get says so.
 - **Pages.** `pypdfium2` (a base dependency, not the AGPL `pdf` extra) renders the page, and **Pillow** (added)
-  encodes the PNG, with the long side at most 1568 px. The PDF comes from `ArchiveClient.pdf`, which asks for it at
-  priority 0 when it is not stored. A caption is found by searching each page's text for "Figure N" or "Table N".
+  encodes the PNG, with the long side at most 1568 px. A PDF that is not stored is fetched as a text is (Waiting): asked
+  for at urgent priority, its job polled up to the same 30 s, keeping "still fetching, ask again" apart from "the
+  archive cannot get it". `ArchiveClient.pdf` is not used: it waits its own `wait_seconds` (60 s by default) and
+  answers `None` for both. A caption is found by searching each page's text for "Figure N" or "Table N".
 - **The work stays off the web app's requests.** PDF reads and page renders run in a small executor of the MCP's
   own, under the existing `_PDF_LOCK`. `read_text` converts a PDF with `asyncio.to_thread`, the loop's default pool,
   so the reading path takes the executor as a parameter rather than relying on it.
@@ -164,7 +166,7 @@ end on the sandbox before production. No model spend.
 | **V3.** No tool writes: no rows, no outbox events. The only side effect is an archive request. | pytest: the MCP's connection refuses a write (a store write through it raises); every tool built so far called against seeded rows succeeds on it, and the outbox is unchanged; the fake archive records the requests. P1 covers its four tools, P2 reruns it for all seven. |
 | **V4.** A paper carries its Gist, Brief, Deep card, Weight, grades, the owner's word, reactions and citation; digests list by topic and read in full. | pytest with seeded rows. The existing API tests pass after the D2 extraction. |
 | **V5.** Reading is outline first, by section or range, untrimmed (the bibliography and text past 160,000 characters are there), paged under the cap, and follows "Use the PDF". A PDF's outline numbers its pages as the PDF does. | pytest with LaTeX and PDF fixtures (`a_pdf`), one long math-heavy paper, and a multipage PDF with an empty page. |
-| **V6.** A paper that is not stored is asked for urgently, waited on for a bounded time, then answered "ask again". | pytest with a delayed `FakeArchive`; a real fetch of a few papers from the disposable archive. |
+| **V6.** A paper or a PDF page that is not stored is asked for urgently, waited on for a bounded time, then answered "ask again"; one the archive cannot get says so. | pytest with a delayed and a failing `FakeArchive`, for `read_paper` and `view_pdf_page`; a real fetch of a few papers from the disposable archive. |
 | **V7.** A page renders by number and by caption, without the AGPL extra. | pytest on a generated PDF in an environment without `pymupdf4llm`; a real paper's figure on dev. |
 | **V8.** The milestone's check: from another machine, an agent given only a vague memory of a digest finds the paper, reads the section asked for and shows a figure, without the web. | The owner's run on production after P3, with Claude Code and with Codex. |
 | **V9.** Vergil sees the MCP: call counts and durations per tool, and an `mcp` component that degrades when the server fails, and only then. | pytest on the monitor's `/metrics` and `/status`: a failing tool degrades the component, a success clears it, a "not found" or "ask again" leaves it healthy. After P3, the component shows in Vergil. |
