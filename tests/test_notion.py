@@ -882,6 +882,12 @@ async def test_a_new_topic_adopts_its_column_made_with_a_lost_reply_but_not_the_
         later += timedelta(hours=1)
     assert fake.source()["properties"]["Notes"]["type"] == "rich_text"
 
+    # Nor that of another topic's column, renamed in Notion.
+    faith = (await state.database(conn, "notion")).topics[FAITH.slug]["column"]
+    fake._properties(fake.source()["id"], {faith: {"name": "Circuits"}})
+    assert not await start(conn, notion(fake, topics=both | {INTERP.slug: "Circuits"}), later)
+    assert "Circuits" in (await outbox.cursor(conn, "notion")).setup_error
+
 
 async def test_a_new_topic_never_takes_a_view_litwatch_made_for_another(world):
     conn, fake = world, FakeNotion(PARENT)
