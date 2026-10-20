@@ -20,8 +20,8 @@ asking the archive for a paper's files at urgent priority, as opening a PDF in t
 
 - **Search.** The archive's lexical search, in its order (exact title and phrase first), over the whole archive by
   default, as the web app's search box is (decision 87). Optional filters from litwatch: a topic, a date range, papers
-  litwatch processed, a minimum grade, papers the owner reacted to. A result is a paper's Mark: its id, title,
-  authors, date and, where litwatch processed it, its Gist and grade per topic.
+  litwatch processed, a minimum grade, papers the owner reacted to. A result gives a paper's id, title, authors and
+  date and, where litwatch processed it, its Gist and grade per topic.
 - **A paper.** Its metadata and abstract, and what litwatch has on it: Gist, Brief and Deep card where they exist,
   the effective Fit and grade per topic, the owner's word and reactions, and its citation (the published version
   where litwatch found one).
@@ -29,7 +29,9 @@ asking the archive for a paper's files at urgent priority, as opening a PDF in t
   forward and the updated papers listed under them.
 - **Reading.** Outline first (decision 85): the paper's sections with their sizes and where the text comes from
   (LaTeX or the PDF), then a section, a range or the whole text, so an agent after the method does not spend its
-  context on the related work. The text is what the full-text queue reads: the LaTeX first, the PDF's text otherwise.
+  context on the related work. The text comes from where the full-text queue's does, the LaTeX first and the PDF's
+  text otherwise, but whole: none of the Brief's trimming ([pipeline.md](pipeline.md), section 6), so the references
+  and the end of a long appendix are there to read.
 - **Pages.** A PDF page as an image, named by its number or by a caption ("Figure 3"), for figures and tables the
   LaTeX text does not show. It works without the AGPL `pdf` extra, as a PDF read already does.
 
