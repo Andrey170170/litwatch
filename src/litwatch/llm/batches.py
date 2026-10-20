@@ -131,9 +131,11 @@ class Batcher:
         return await asyncio.shield(future)
 
     async def attach(self, batch_id: str, key: str, call_id: int) -> Answered:
-        """The reply of a call a dead run sent in batch `batch_id`, on journal row `call_id`."""
+        """The reply of a call a dead run sent in batch `batch_id`, on journal row `call_id`. A
+        row given up on before waits on its batch again, until it is given up on again."""
         if key in self._futures:
             return await self._shared(self._futures[key])
+        self.unsettled.discard(call_id)
         future = asyncio.get_running_loop().create_future()
         self._futures[key] = future
         batch = self._open.setdefault(batch_id, _Open())
@@ -263,7 +265,8 @@ class Batcher:
             if failed := next((e for e in ended if isinstance(e, BaseException)), None):
                 raise failed
             if self.now() >= self.deadline + self.drain:  # each given up looked at first
-                left = [(i, b) for i, b in looked if i in self._open]
+                # A batch read meanwhile is gone, or open again for a call attached since.
+                left = [(i, b) for i, b in looked if self._open.get(i) is b]
                 if left:
                     log.warning("%d batches still open after the deadline's drain", len(left))
                 for batch_id, batch in left:

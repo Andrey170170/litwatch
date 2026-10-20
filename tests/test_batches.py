@@ -22,7 +22,7 @@ from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
-from litwatch.llm.batches import DRAIN, MAX_REQUESTS
+from litwatch.llm.batches import DRAIN, MAX_REQUESTS, Batcher
 from litwatch.llm.prices import anthropic_cost
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
@@ -223,6 +223,62 @@ async def test_a_batch_the_account_can_no_longer_read_fails_its_calls_and_stays_
     ]
     assert await CallJournal(conn, await runs.start(conn, "nightly")).open_batches() == []
     await gw.close()
+
+
+async def test_a_batch_given_up_on_for_the_account_settles_its_row_with_the_answer_it_gave(
+    conn, monkeypatch
+):
+    gw, anthropic, _, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")), hold=True)
+    asked = asyncio.create_task(gw.ask("brief", ask("account")))
+    await until(lambda: anthropic.batches)
+
+    async def unauthorized(batch_id):
+        raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+    monkeypatch.setattr(anthropic, "status", unauthorized)
+    with pytest.raises(CallError):
+        await asked
+    # Readable again, the batch answered the request with an account error: on its own row.
+    monkeypatch.undo()
+    anthropic.end("msgbatch_1")
+    with pytest.raises(CallError) as found:
+        await gw.ask("brief", ask("account"))
+    assert found.value.kind == "account"
+    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
+        ("msgbatch_1", "account: authentication_error in batch"),
+        (None, "account: AuthenticationError: invalid x-api-key"),
+    ]
+    await gw.close()
+
+
+async def test_a_call_attached_to_a_batch_read_meanwhile_is_answered_past_the_drain():
+    clock = Clock()
+    clock.now = DEADLINE + DRAIN
+    other_read = asyncio.Event()
+    reads = {"A": 0}
+
+    class Provider:
+        async def status(self, batch_id):
+            if batch_id == "B":
+                await other_read.wait()
+                return "ended"
+            reads["A"] += 1
+            raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+        async def results(self, batch_id):
+            return {}
+
+    batcher = Batcher(Provider(), None, DEADLINE, now=clock, **FAST)
+    batcher.watch("A")
+    batcher.watch("B")
+    await until(lambda: reads["A"])  # A given up on for the account, B still being read
+    attached = asyncio.create_task(batcher.attach("A", "key", 1))
+    await asyncio.sleep(0.05)
+    other_read.set()
+    reply = await asyncio.wait_for(attached, 1)
+    assert isinstance(reply, ProviderError) and reply.account
+    assert batcher.unsettled == {1}
+    await batcher.close()
 
 
 async def test_at_the_deadline_a_batch_is_cancelled_its_answers_kept_and_the_rest_sent_normally():
