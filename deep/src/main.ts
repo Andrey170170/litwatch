@@ -15,6 +15,14 @@ import type { PaperInput, SelectionContext } from "./prompt.ts";
 import { buildServer } from "./server.ts";
 
 const env = (name: string, fallback: string) => process.env[name] ?? fallback;
+/** A numeric setting, refused at start unless it is a finite number above zero: a limit set to
+ * Infinity, a negative or a typo would quietly lift it. */
+const positive = (name: string, fallback: number): number => {
+  const raw = env(name, String(fallback));
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a number above zero, not ${JSON.stringify(raw)}`);
+  return value;
+};
 const secret = (name: string): string | undefined => {
   if (process.env[name]) return process.env[name];
   const file = process.env[`${name}_FILE`];
@@ -22,23 +30,23 @@ const secret = (name: string): string | undefined => {
 };
 
 const config = {
-  port: Number(env("DEEP_PORT", "8081")),
+  port: positive("DEEP_PORT", 8081),
   authFile: env("DEEP_AUTH_FILE", "/var/lib/litwatch-deep/auth.json"),
   hosts: {
     litwatchUrl: env("LITWATCH_URL", "http://litwatch:8080"),
     litwatchToken: secret("LITWATCH_TOKEN"),
     s2ApiKey: secret("S2_API_KEY"),
-    maxFetchChars: Number(env("DEEP_MAX_FETCH_CHARS", "200000")),
-    maxFetches: Number(env("DEEP_MAX_FETCHES", "60")),
-    maxFetchBytes: Number(env("DEEP_MAX_FETCH_MB", "2")) * 1024 * 1024,
+    maxFetchChars: positive("DEEP_MAX_FETCH_CHARS", 200000),
+    maxFetches: positive("DEEP_MAX_FETCHES", 60),
+    maxFetchBytes: Math.max(1, Math.floor(positive("DEEP_MAX_FETCH_MB", 2) * 1024 * 1024)),
   } satisfies HostConfig,
   run: {
     model: env("DEEP_MODEL", "gpt-6.1-sol"),
     effort: env("DEEP_EFFORT", "medium") as RunOptions["effort"],
-    maxCells: Number(env("DEEP_MAX_CELLS", "40")),
-    cellTimeoutMs: Number(env("DEEP_CELL_TIMEOUT_S", "90")) * 1000,
-    wallClockMs: Number(env("DEEP_WALL_CLOCK_MIN", "30")) * 60_000,
-    maxOutputChars: Number(env("DEEP_MAX_OUTPUT_CHARS", "8000")),
+    maxCells: positive("DEEP_MAX_CELLS", 40),
+    cellTimeoutMs: positive("DEEP_CELL_TIMEOUT_S", 90) * 1000,
+    wallClockMs: positive("DEEP_WALL_CLOCK_MIN", 30) * 60_000,
+    maxOutputChars: positive("DEEP_MAX_OUTPUT_CHARS", 8000),
   } satisfies RunOptions,
 };
 

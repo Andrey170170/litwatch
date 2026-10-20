@@ -47,8 +47,10 @@ A secret may also be given as a file: `LITWATCH_TOKEN_FILE`, `S2_API_KEY_FILE`.
 The agent's `fetch` reaches any public site and never a private one (litwatch decision 80). It is a GET with
 the service's own user-agent, no cookies, and no headers the agent sets. Every address a name resolves to must
 be public unicast, checked where the socket connects, and a literal address in the URL is checked up front, so
-loopback, the LAN, link-local (cloud metadata), unique-local and the IPv6 forms that embed an IPv4 address are
-all refused. Redirects are followed by hand, at most five, each hop checked again. Each site is paced at one
+loopback, the LAN, link-local (cloud metadata) and unique-local addresses are refused, and so are the IPv6
+transition ranges that embed an IPv4 address (NAT64, 6to4, Teredo). An IPv4-mapped IPv6 address
+(`::ffff:a.b.c.d`) is judged as the IPv4 address it carries. Numeric settings must be finite and above zero, or
+the service refuses to start. Redirects are followed by hand, at most five, each hop checked again. Each site is paced at one
 request a second at most (arXiv and Semantic Scholar slower). anonymous.4open.science links are read through
 its JSON API, since its pages are built in the browser. `store.search` and `s2.lookup` don't go through this
 guard: litwatch itself is on a private address.
