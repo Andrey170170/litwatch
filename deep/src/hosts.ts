@@ -172,9 +172,11 @@ export function buildHosts(cfg: HostConfig, ended?: AbortSignal): Record<string,
       const found = (await getJson(pace, `${S2}/paper/search?${params}`, s2Headers, ended)) as { data?: unknown[] };
       return found.data ?? [];
     },
-    fetch: async ([url]) => {
+    fetch: async ([url], detail) => {
       if (++fetches > cfg.maxFetches) throw new Error(`the fetch budget of ${cfg.maxFetches} per paper is used up`);
-      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, contact: cfg.contact, pace, ended });
+      const record: FetchRecord = { hops: [] };
+      if (detail) detail.fetch = record;
+      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, contact: cfg.contact, pace, ended, record });
     },
   };
 }
@@ -277,12 +279,25 @@ export interface FetchOptions {
   /** Aborts when the paper's session ends. */
   ended?: AbortSignal;
   guard?: Guard;
+  /** Filled in as the fetch goes, for the trace. */
+  record?: FetchRecord;
+}
+
+/** What one fetch did: each redirect it was answered with, then the URL that answered with a page,
+ * its status and the body bytes read (0 for a PDF, never read). A fetch refused or failed on the
+ * way keeps the hops it made. */
+export interface FetchRecord {
+  hops: { url: string; status: number }[];
+  url?: string;
+  status?: number;
+  bytes?: number;
 }
 
 /** GET a public page: each hop's scheme and address checked (a literal here, a name where the
  * socket resolves it), at most five redirects, the body read only up to `maxBytes`. */
 export async function fetchPublic(url: string, opts: FetchOptions): Promise<unknown> {
   const { publicOnly, dispatcher } = opts.guard ?? guard();
+  const record = opts.record ?? { hops: [] };
   const pace = opts.pace ?? pacer();
   let current: URL;
   try {
@@ -312,15 +327,18 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
         const location = resp.headers.get("location");
         if (REDIRECTS.has(resp.status) && location !== null) {
           await resp.body?.cancel();
+          record.hops.push({ url: at.href, status: resp.status });
           return { next: new URL(location, at) };
         }
+        Object.assign(record, { url: at.href, status: resp.status, bytes: 0 });
         const contentType = resp.headers.get("content-type") ?? "";
         const media = contentType.toLowerCase();
         if (media.includes("pdf")) {
           await resp.body?.cancel();
           return { page: { status: resp.status, contentType, url: at.href, text: "", note: "PDF bodies are not fetched; use the arXiv HTML or abstract page" } };
         }
-        const { raw, cut } = await readCapped(resp.body, opts.maxBytes);
+        const { raw, cut, bytes } = await readCapped(resp.body, opts.maxBytes);
+        record.bytes = bytes;
         const text = media.includes("html") ? htmlToText(raw) : raw;
         return {
           page: {
@@ -342,8 +360,8 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
 
 /** A body as text, read only up to `maxBytes`: reading stops once that many have come, so a body
  * left open past the cap is never waited on. */
-async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<{ raw: string; cut: boolean }> {
-  if (!body) return { raw: "", cut: false };
+async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<{ raw: string; cut: boolean; bytes: number }> {
+  if (!body) return { raw: "", cut: false, bytes: 0 };
   // A whole number of bytes, or a fractional setting (DEEP_MAX_FETCH_MB=0.1) would never be reached.
   const limit = Math.floor(maxBytes);
   const reader = body.getReader();
@@ -362,7 +380,7 @@ async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: num
       break;
     }
   }
-  return { raw: new TextDecoder().decode(Buffer.concat(chunks)), cut };
+  return { raw: new TextDecoder().decode(Buffer.concat(chunks)), cut, bytes: size };
 }
 
 /** Readable text from HTML: scripts, styles and comments dropped, block boundaries kept as newlines.

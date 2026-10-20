@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type Models } from "@earendil-works/pi-ai";
-import { processPaper, type RunOptions } from "../src/agent.ts";
+import { detailedSummaries, processPaper, type RunOptions } from "../src/agent.ts";
 import { PROVIDER } from "../src/auth.ts";
 
 const OPTS: RunOptions = { model: "faux-1", effort: "low", maxCells: 4, cellTimeoutMs: 5000, wallClockMs: 60_000, maxOutputChars: 2000 };
@@ -62,4 +62,38 @@ test("the wall clock ends the paper without waiting on its host calls", async ()
     server.closeAllConnections();
     server.close();
   }
+});
+
+test("the trace keeps why a host call failed, what a fetch did, and which cell timed out", async () => {
+  const { models: m, faux } = models();
+  const cell = (code: string) => fauxAssistantMessage(fauxToolCall("run_code", { code }), { stopReason: "toolUse" });
+  faux.setResponses([
+    cell(`await fetch("${"x".repeat(500)}")`),
+    cell('await fetch("http://10.0.0.1/")'),
+    cell("while (true) {}"),
+    cell("1"),
+  ]);
+  const outcome = await processPaper(PAPER, { extensions: [], selections: [] }, m, HOSTS, { ...OPTS, cellTimeoutMs: 200 });
+  const hosts = outcome.trace.filter((e) => e.type === "host");
+  assert.equal(hosts.length, 2);
+  assert.equal(hosts[0]!.ok, false);
+  assert.equal(hosts[0]!.error, `not a URL: ${"x".repeat(500)}`.slice(0, 300), "the reason, cut to 300 characters");
+  assert.equal(hosts[1]!.error, "10.0.0.1 is not a public address");
+  assert.deepEqual(hosts[1]!.fetch, { hops: [] }, "a fetch refused before any answer has no hops and no page");
+  const cells = outcome.trace.filter((e) => e.type === "cell");
+  assert.deepEqual(cells.map((c) => c.timedOut), [undefined, undefined, true, undefined], "only the cell that ran too long");
+});
+
+test("the provider is asked for detailed reasoning summaries", async () => {
+  const { models: m, faux } = models();
+  let asked: unknown;
+  faux.setResponses([
+    async (_context, options) => {
+      asked = await options?.onPayload?.({ reasoning: { effort: "medium", summary: "auto" } }, m.getModel(PROVIDER, OPTS.model)!);
+      return fauxAssistantMessage("Done.");
+    },
+  ]);
+  await run(m);
+  assert.deepEqual(asked, { reasoning: { effort: "medium", summary: "detailed" } });
+  assert.deepEqual(detailedSummaries({ reasoning: { effort: "none" } }), { reasoning: { effort: "none" } }, "no summary where none is asked for");
 });

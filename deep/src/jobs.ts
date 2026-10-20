@@ -148,7 +148,7 @@ export class JobQueue {
 function describe(event: TraceEvent): string {
   switch (event.type) {
     case "cell":
-      return `cell ${event.n}${event.error ? " (error)" : ""} ${event.ms}ms`;
+      return `cell ${event.n}${event.timedOut ? " (timed out)" : event.error ? " (error)" : ""} ${event.ms}ms`;
     case "host":
       return `${event.name}${event.ok ? "" : " failed"} ${event.ms}ms`;
     case "submit":

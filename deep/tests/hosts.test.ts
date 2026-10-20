@@ -4,7 +4,7 @@ import dns from "node:dns";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
-import { buildHosts, fetchPublic, guardedLookup, htmlToText, isPublic, pacer, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
+import { buildHosts, fetchPublic, type FetchRecord, guardedLookup, htmlToText, isPublic, pacer, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -194,6 +194,24 @@ test("a public page is fetched as text through redirects, with the URL it ended 
   assert.equal(page.truncated, false);
   const missing = (await fetchPublic(`http://site.test:${port}/nothing`, local)) as Record<string, unknown>;
   assert.equal(missing.status, 404, "an HTTP status is a value for the agent, not an error");
+});
+
+test("a fetch records its hops, the URL and status that answered, and the bytes read", async () => {
+  const record: FetchRecord = { hops: [] };
+  await fetchPublic(`http://site.test:${port}/hop`, { ...local, record });
+  const page = "<p>Code</p><script>x()</script><p>here</p>";
+  assert.deepEqual(record, {
+    hops: [{ url: `http://site.test:${port}/hop`, status: 302 }],
+    url: `http://site.test:${port}/page`,
+    status: 200,
+    bytes: page.length,
+  });
+  const cut: FetchRecord = { hops: [] };
+  await fetchPublic(`http://site.test:${port}/open-at-cap`, { ...local, maxBytes: 600, record: cut });
+  assert.equal(cut.bytes, 600, "the bytes read, not the body's size");
+  const refused: FetchRecord = { hops: [] };
+  await assert.rejects(fetchPublic(`http://site.test:${port}/to-private-literal`, { ...local, record: refused }));
+  assert.deepEqual(refused, { hops: [{ url: `http://site.test:${port}/to-private-literal`, status: 302 }] }, "a refused hop keeps the way there");
 });
 
 test("fetch names the operator's contact in the User-Agent only when one is configured", async () => {
