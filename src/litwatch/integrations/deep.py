@@ -49,7 +49,8 @@ class Outcome:
     """How a job ended. `usage` is the job's usage as the service reported it (turns, tokens,
     list cost); None when it never reported (the job was lost, or litwatch gave up waiting).
     `failure` says whose a failed job's failure was, as the service tagged it, or the service's
-    when the job was lost or never ended."""
+    when the job was lost or never ended. `still_running`: litwatch gave up waiting at the
+    job's deadline, but the job may yet end, and is to be followed once more."""
 
     result: dict[str, Any] | None
     trace: list[dict[str, Any]]
@@ -57,6 +58,7 @@ class Outcome:
     model: str
     error: str | None = None
     failure: Literal["paper", "service"] | None = None
+    still_running: bool = False
 
 
 # A 4xx the service answers a submission with that is not about the submission: a wrong
@@ -120,11 +122,17 @@ class DeepClient:
 
     async def follow(self, job_id: str, since: datetime, label: str = "") -> Outcome:
         """Poll a job until it ends, or until `timeout_seconds` after `since` (when it was
-        submitted). A failed poll raises, and the job can be followed again later, until then."""
+        submitted). A failed poll raises, and the job can be followed again later, until then.
+        Given up on at the deadline, the job is `still_running`; followed again past it, it is
+        looked at once more, and given up on for good if it has not ended: the service is stuck,
+        its own wall clock being shorter."""
         deadline = since + timedelta(seconds=self.timeout_seconds)
-        gave_up = Outcome(
-            None, [], None, "", "litwatch gave up waiting for the deep job", "service"
-        )
+        if datetime.now(UTC) > deadline:  # given up on once already
+            error = "litwatch gave up on the deep job: not ended when followed again"
+            gave_up = Outcome(None, [], None, "", error, "service")
+        else:
+            error = "litwatch gave up waiting for the deep job, to follow it again"
+            gave_up = Outcome(None, [], None, "", error, "service", still_running=True)
         seen = ""
         while True:
             await asyncio.sleep(self.poll_seconds)

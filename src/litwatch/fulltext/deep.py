@@ -19,7 +19,9 @@ for the owner on Quality, as every pass does. One that failed because of the ser
 service tagged it so, lost it, or never ended it) counts against nothing: the pass goes back in
 the queue. Nor does an error submitting or following a job, after which the attempt and the
 pass stay as they are: the job is followed, found by its key if its submission's answer was
-lost, or, when the service has none, the attempt ends and the pass is tried afresh. Any
+lost, or, when the service has none, the attempt ends and the pass is tried afresh. A job not
+ended by its deadline is kept too and followed once more after the pause; still not ended
+then, it is the service's failure, and the attempt ends. Any
 service failure pauses the whole queue for `PAUSE`. There is no daily cap; the owner's
 requests go first.
 """
@@ -169,6 +171,10 @@ async def _work_one(
     except httpx.HTTPError as exc:
         # The job goes on: followed again by the pass's next claim, after the pause.
         return await _service_failed(conn, c, attempt["id"], f"following the deep job: {exc}")
+    if outcome.still_running:
+        # Past its deadline the job may still end: kept, and followed once more after the
+        # pause, never submitted again while it may run.
+        return await _service_failed(conn, c, attempt["id"], outcome.error or "")
     if outcome.error or outcome.result is None:
         return await _ended(
             conn,

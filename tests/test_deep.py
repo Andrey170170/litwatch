@@ -600,6 +600,50 @@ async def test_a_job_whose_polls_keep_failing_is_given_up_at_its_deadline(db):
     assert (row["state"], row["failed_runs"]) == ("ready", 0)
 
 
+def hurried(fake: FakeDeep) -> Deep:
+    """A client that gives up on a job a moment after submitting it."""
+    client = DeepClient("http://deep.test", http=mock(fake.handle), poll_seconds=0)
+    client.timeout_seconds = 0.2
+    return Deep(client)
+
+
+async def test_a_job_given_up_on_at_its_deadline_is_kept_and_its_card_taken_once_it_ends(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.hold = True
+    d = hurried(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    (attempt,) = await attempts(db)
+    assert attempt["ended_at"] is None and attempt["service_failed_at"] is not None
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("running", 0)
+    assert await work(db, with_text(P), d) == {}  # paused
+
+    fake.hold = False  # it ends during the pause
+    await unpause(db)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    (made,) = await attempts(db)
+    assert made["usage"] == USAGE and fake.started == 1
+
+
+async def test_a_job_still_running_when_followed_again_past_its_deadline_ends_as_the_services(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.hold = True
+    d = hurried(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    await unpause(db)
+    polls = fake.polls
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    assert fake.polls == polls + 1  # looked at once more, not followed for another deadline
+    (ended,) = await attempts(db)
+    assert ended["ended_at"] is not None and "followed again" in ended["error"]
+    assert (ended["failure"], ended["usage"]) == ("service", None)
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("ready", 0)  # uncounted; not followed again
+    assert fake.started == 1
+
+
 async def test_one_worker_at_a_time_works_the_deep_passes(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
