@@ -220,6 +220,9 @@ test("a body is read only up to the byte cap", async () => {
   assert.equal(page.truncated, true);
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(bigFinished, false, "the server never got to send the whole 5 MB");
+  const fractional = (await fetchPublic(`http://site.test:${port}/big`, { ...local, maxChars: 1 << 20, maxBytes: 0.1 * 1024 * 1024 })) as Record<string, unknown>;
+  assert.equal((fractional.text as string).length, 104857, "a fractional cap is a whole number of bytes");
+  assert.equal(fractional.truncated, true);
 });
 
 test("a body left open at exactly the cap is not waited on", async () => {

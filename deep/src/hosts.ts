@@ -327,6 +327,8 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
  * left open past the cap is never waited on. */
 async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<{ raw: string; cut: boolean }> {
   if (!body) return { raw: "", cut: false };
+  // A whole number of bytes, or a fractional setting (DEEP_MAX_FETCH_MB=0.1) would never be reached.
+  const limit = Math.floor(maxBytes);
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -334,10 +336,10 @@ async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: num
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    const part = value.subarray(0, maxBytes - size);
+    const part = value.subarray(0, limit - size);
     chunks.push(part);
     size += part.byteLength;
-    if (size >= maxBytes) {
+    if (size >= limit) {
       cut = true;
       await reader.cancel();
       break;
