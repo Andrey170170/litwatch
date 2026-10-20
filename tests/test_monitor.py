@@ -3,7 +3,7 @@ reads as failed, and a nightly that did not happen reads as late. The status doc
 litwatch cannot do its job (data.md, the status document): many papers stopped at once, a
 provider failed for its account or for the night; one stuck paper is the app's alone."""
 
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 
 import httpx
 import pytest
@@ -16,6 +16,7 @@ from litwatch.config import Config, Models, RoleConfig, Schedule
 from litwatch.core import FAILED_RUNS
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
 from litwatch.store import db, failures, reading, runs
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
@@ -287,24 +288,28 @@ async def test_many_papers_stopped_at_one_step_in_the_night_turn_pipeline_degrad
     )
 
 
-async def test_brief_and_weight_passes_count_and_deep_passes_do_not(conn, monitor):
+async def test_brief_and_weight_passes_count_when_they_stop_and_deep_passes_do_not(conn, monitor):
     await papers_store.upsert(conn, PAPERS)
-
-    async def failed_pass(p, kind: str) -> None:
+    kinds = [(p, "deep") for p in PAPERS[:6]] + [
+        (p, ("brief", "weight")[i % 2]) for i, p in enumerate(PAPERS[:6])
+    ]
+    for p, kind in kinds:
         await conn.execute(
             "INSERT INTO fulltext_passes (paper_id, paper_revision, kind, reason, state, "
-            "priority, failed_runs, tried_at) VALUES (%s, 1, %s, 'r', 'failed', 1, %s, now())",
-            (p.id, kind, FAILED_RUNS),
+            "priority, failed_runs) VALUES (%s, 1, %s, 'r', 'ready', 1, %s)",
+            (p.id, kind, FAILED_RUNS - 1),
         )
-
-    for p in PAPERS[:6]:
-        await failed_pass(p, "deep")  # `deep` has their service failures
-    for p, kind in zip(PAPERS[:5], ["brief", "weight"] * 3, strict=False):
-        await failed_pass(p, kind)
+    # Every try claimed before the night started, each failing a third time in it.
+    text = await fulltext_store.claim(conn, timedelta(hours=1), limit=20)
+    deep = await fulltext_store.claim(conn, timedelta(hours=1), limit=20, deep=True)
+    await conn.execute("UPDATE fulltext_passes SET tried_at = now() - interval '1 day'")
+    assert (len(text), len(deep)) == (6, 6)  # `deep` has the Deep passes' service failures
+    for t in deep + text[:5]:
+        await fulltext_store.failed(conn, t, "no text to be had", counts=True)
     run = await night(conn)
     assert component((await monitor.get("/status")).json(), "pipeline")["status"] == "healthy"
 
-    await failed_pass(PAPERS[5], "brief")
+    await fulltext_store.failed(conn, text[5], "no text to be had", counts=True)
     await conn.execute("UPDATE runs SET finished_at = now() WHERE id = %s", (run,))
     pipeline = component((await monitor.get("/status")).json(), "pipeline")
     assert "6 at the Brief and Weight passes" in pipeline["reason"]
@@ -391,3 +396,13 @@ async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(c
     assert openrouter["reason"] == (
         f"2 calls in nightly {run} failed and none had a reply; expected a reply"
     )
+    # A reply in the night that settled an older run's call (a dead run's batch) is the night's.
+    (_,) = await (
+        await conn.execute(
+            "UPDATE inference_calls SET responded_at = r.finished_at "
+            "FROM runs r WHERE r.id = %s AND inference_calls.run_id <> r.id "
+            "AND usage->>'via' = 'openrouter' RETURNING inference_calls.id",
+            (run,),
+        )
+    ).fetchall()
+    assert provider((await monitor.get("/status")).json(), "openrouter")["status"] == "healthy"

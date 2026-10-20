@@ -220,7 +220,8 @@ each model provider, the archive, deep, the budget), for a monitoring system on 
 database session of the process running it, so a run whose process died reads as failed rather than running.
 
 The status document says when litwatch cannot do its job; a paper's own failure is the app's (pipeline.md, section 9).
-All of these read the latest nightly run that has ended, unless said otherwise.
+All of these read the latest nightly run that has finished, unless said otherwise (one whose process died has no
+known end, and `nightly` already reads it failed).
 
 - `pipeline` is degraded when, at one step, more distinct papers stopped during that run than max(5, 2 % of the
   papers it classified). The steps are classification, analysis, grading (a paper counts once however many topics) and

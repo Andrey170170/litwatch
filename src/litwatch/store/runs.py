@@ -50,13 +50,12 @@ async def latest(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | N
     ).fetchone()
 
 
-async def latest_ended(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
-    """The newest run of `kind` that has ended, with `ended_at`: when it finished, or for one
-    whose process died, now (when it died is not recorded)."""
+async def latest_finished(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
+    """The newest run of `kind` that finished, with an error or not. One whose process died has
+    no known end, nor its counts."""
     return await (
         await conn.execute(
-            "SELECT r.*, coalesce(r.finished_at, now()) AS ended_at FROM runs r "
-            f"WHERE kind = %s AND (finished_at IS NOT NULL OR NOT {ALIVE}) "
+            "SELECT * FROM runs WHERE kind = %s AND finished_at IS NOT NULL "
             "ORDER BY id DESC LIMIT 1",
             (kind,),
         )

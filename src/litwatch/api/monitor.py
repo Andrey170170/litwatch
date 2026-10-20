@@ -59,7 +59,7 @@ class Job:
 
 @dataclass
 class Night:
-    """The latest nightly that has ended, as the status document reads it."""
+    """The latest nightly that finished, as the status document reads it."""
 
     run_id: int
     classified: int
@@ -122,15 +122,16 @@ async def facts(
 
 
 async def _night(conn: psycopg.AsyncConnection) -> Night | None:
-    """The latest ended nightly: from its start to its end, its digest wait included."""
-    run = await runs.latest_ended(conn, "nightly")
+    """The latest finished nightly: from its start to its end, its digest wait included. One
+    whose process died reads failed on `nightly`, and has no known end."""
+    run = await runs.latest_finished(conn, "nightly")
     if run is None:
         return None
-    during = (run["started_at"], run["ended_at"], FAILED_RUNS)
+    during = (run["started_at"], run["finished_at"], FAILED_RUNS)
     stopped: dict[str, int] = dict(await failures.stopped_between(conn, *during))
     stopped["fulltext"] = await fulltext.stopped_between(conn, *during)
     classified = (run["counts"] or {}).get("classified", 0)
-    return Night(run["id"], classified, stopped, await calls.outcomes(conn, run["id"]))
+    return Night(run["id"], classified, stopped, await calls.outcomes(conn, run))
 
 
 async def _probe(call: Any) -> tuple[str | None, Any]:
@@ -366,7 +367,7 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
 
 
 def _pipeline(night: Night | None, now: datetime) -> dict[str, Any]:
-    """Degraded when many papers stopped at one step in the latest ended nightly; a paper's own
+    """Degraded when many papers stopped at one step in the latest finished nightly; a paper's own
     failure is the app's, so a few never turn it."""
     if night is None:
         return _component("pipeline", "healthy", None, now)
@@ -387,7 +388,7 @@ def _pipeline(night: Night | None, now: datetime) -> dict[str, Any]:
 
 def _provider(name: str, seen: dict[str, Any], night: Night | None) -> list[str]:
     """Why the provider is failed, if it is: an account error with no reply since, or the
-    latest ended nightly's calls to it failed without one reply."""
+    latest finished nightly's calls to it failed without one reply."""
     reasons = []
     error_at, replied_at = seen.get("account_error_at"), seen.get("replied_at")
     if error_at and (replied_at is None or replied_at < error_at):
@@ -414,9 +415,10 @@ def _deep(f: Facts) -> list[str]:
         detail = f" ({signin['detail']})" if signin.get("detail") else ""
         reasons.append(f"sign-in {said}{detail}; expected ok")
     if failure := f.deep_failure:
+        said = f": {failure['error']}" if failure["error"] else ""
         reasons.append(
-            f"service failure at {failure['at'].isoformat()}: {failure['error']}, no card made "
-            "since; expected a card after it"
+            f"service failure at {failure['at'].isoformat()}{said}, no card made since; "
+            "expected a card after it"
         )
     return reasons
 

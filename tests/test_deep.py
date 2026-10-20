@@ -398,6 +398,21 @@ async def test_the_deep_component_reads_the_sign_in_and_a_service_failure_until_
     assert (await deep_status(db, d))["status"] == "healthy"
 
 
+async def test_a_service_failure_the_job_outlived_is_not_told_with_the_papers_error(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep({"error": "no valid card", "failure": "paper", "stats": USAGE, "trace": []})
+    fake.fail_polls = 1  # following the job fails once; the job goes on
+    d = make(fake)
+    await work(db, with_text(P), d)
+    await unpause(db)
+    await work(db, with_text(P), d)  # followed again: it ends as the paper's failure
+    (ended,) = await attempts(db)
+    assert (ended["failure"], ended["error"]) == ("paper", "no valid card")
+    status = await deep_status(db, d)
+    assert status["status"] == "degraded"  # until the next card
+    assert "service failure at" in status["reason"] and "no valid card" not in status["reason"]
+
+
 async def test_a_submission_whose_answer_was_lost_is_found_by_its_key_after_the_pause(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)

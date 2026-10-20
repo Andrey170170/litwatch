@@ -211,10 +211,13 @@ async def paused_until(conn: psycopg.AsyncConnection, pause: timedelta) -> datet
 
 async def service_failure(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
     """The latest service failure of a Deep attempt, when no card was made after it: when, and
-    its error."""
+    its error while the attempt's error is the service's (null once the job it followed ended
+    as the paper's failure)."""
     return await (
         await conn.execute(
-            "SELECT service_failed_at AS at, error FROM deep_attempts "
+            "SELECT service_failed_at AS at, "
+            "CASE WHEN failure IS DISTINCT FROM 'paper' THEN error END AS error "
+            "FROM deep_attempts "
             "WHERE service_failed_at > (SELECT coalesce(max(written_at), '-infinity') "
             "FROM deep_cards) ORDER BY service_failed_at DESC LIMIT 1"
         )

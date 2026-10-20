@@ -232,6 +232,8 @@ class Batcher:
             account = isinstance(exc, ProviderError) and exc.account
             if account:  # never asked again: the calls fail on the account
                 log.error("a batch of %d calls was refused for the account: %s", len(held), exc)
+                if self.journal:
+                    await self.journal.account_error(self.provider.name, f"account: {exc}")
             else:
                 log.exception(
                     "a batch of %d calls could not be sent; they go as normal calls", len(held)
@@ -296,8 +298,8 @@ class Batcher:
                 log.exception("batch %s could not be read; trying again", batch_id)
                 return
             # Not read again this run: its calls fail on the account, and the batch is left
-            # open on its rows for a later run to account for. Seen even when no call waits on
-            # it (a dead run's batch): the provider is failed for its account.
+            # open on its rows for a later run to account for. Seen here, once, whether or not
+            # a call waits on it (a dead run's batch): the provider is failed for its account.
             log.error("batch %s could not be read for the account: %s", batch_id, exc)
             if self.journal:
                 await self.journal.account_error(self.provider.name, f"account: {exc}")

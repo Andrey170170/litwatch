@@ -119,8 +119,8 @@ class CallJournal:
             "AND request_key = %s AND usage->>'cost' IS NULL) RETURNING run_id",
             (Jsonb(usage.model_dump(mode="json")), batch_id, key),
         )
-        await self._retally(await cur.fetchone())
         await self._replied(usage)
+        await self._retally(await cur.fetchone())
 
     async def record(self, call_id: int, usage: Usage) -> None:
         """A reply came for the call: its accounting, whether or not the answer is usable."""
@@ -129,28 +129,32 @@ class CallJournal:
             "WHERE id = %s RETURNING run_id",
             (Jsonb(usage.model_dump(mode="json")), call_id),
         )
-        await self._retally(await cur.fetchone())
         await self._replied(usage)
+        await self._retally(await cur.fetchone())
 
+    # Observations from other processes (the API's calls, a nightly) can commit out of order:
+    # each keeps the later of the two.
     async def _replied(self, usage: Usage) -> None:
         """The provider replied (`provider_observations`); a reply shared from another call is
         not one of its own."""
         if usage.via is None or usage.reused:
             return
         await self.conn.execute(
-            "INSERT INTO provider_observations (provider, replied_at) "
-            "VALUES (%s, clock_timestamp()) "
-            "ON CONFLICT (provider) DO UPDATE SET replied_at = EXCLUDED.replied_at",
+            "INSERT INTO provider_observations AS o (provider, replied_at) "
+            "VALUES (%s, clock_timestamp()) ON CONFLICT (provider) DO UPDATE SET "
+            "replied_at = greatest(o.replied_at, EXCLUDED.replied_at)",
             (usage.via,),
         )
 
     async def account_error(self, provider: str, error: str) -> None:
-        """The provider refused a call or a batch for the account (models.md, the gateway)."""
+        """The provider refused a call or a batch for the account (models.md, the gateway), as
+        seen where it was: a normal call's by the gateway, a batch's by its batcher."""
         await self.conn.execute(
-            "INSERT INTO provider_observations (provider, account_error, account_error_at) "
+            "INSERT INTO provider_observations AS o (provider, account_error, account_error_at) "
             "VALUES (%s, %s, clock_timestamp()) ON CONFLICT (provider) DO UPDATE SET "
-            "account_error = EXCLUDED.account_error, "
-            "account_error_at = EXCLUDED.account_error_at",
+            "account_error = CASE WHEN o.account_error_at > EXCLUDED.account_error_at "
+            "THEN o.account_error ELSE EXCLUDED.account_error END, "
+            "account_error_at = greatest(o.account_error_at, EXCLUDED.account_error_at)",
             (provider, error[:2000]),
         )
 
@@ -271,17 +275,20 @@ async def observations(conn: psycopg.AsyncConnection) -> dict[str, dict[str, Any
     return {r["provider"]: r for r in rows}
 
 
-async def outcomes(conn: psycopg.AsyncConnection, run_id: int) -> dict[str, dict[str, int]]:
+async def outcomes(conn: psycopg.AsyncConnection, run: dict[str, Any]) -> dict[str, dict[str, int]]:
     """Per provider, the run's calls that failed without an answer (provider errors and
-    timeouts) and those it replied to (reused replies left out)."""
+    timeouts), and the replies it sent while the run went on, whichever run's calls they
+    settled (a dead run's batch, read in this one; reused replies left out)."""
     rows = await (
         await conn.execute(
-            "SELECT usage->>'via' AS provider, "
-            "count(*) FILTER (WHERE error LIKE 'provider%%' OR error LIKE 'timeout%%') "
-            "AS failed, count(*) FILTER (WHERE responded_at IS NOT NULL "
-            "AND NOT coalesce((usage->>'reused')::boolean, false)) AS replied "
-            "FROM inference_calls WHERE run_id = %s AND usage->>'via' IS NOT NULL GROUP BY 1",
-            (run_id,),
+            "SELECT provider, sum(failed)::int AS failed, sum(replied)::int AS replied FROM ("
+            "SELECT usage->>'via' AS provider, 1 AS failed, 0 AS replied FROM inference_calls "
+            "WHERE run_id = %(run)s AND (error LIKE 'provider%%' OR error LIKE 'timeout%%') "
+            "UNION ALL SELECT usage->>'via', 0, 1 FROM inference_calls "
+            "WHERE responded_at BETWEEN %(since)s AND %(until)s "
+            "AND NOT coalesce((usage->>'reused')::boolean, false)) seen "
+            "WHERE provider IS NOT NULL GROUP BY provider",
+            {"run": run["id"], "since": run["started_at"], "until": run["finished_at"]},
         )
     ).fetchall()
     return {r["provider"]: {"failed": r["failed"], "replied": r["replied"]} for r in rows}
