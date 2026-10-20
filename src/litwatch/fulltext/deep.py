@@ -7,8 +7,9 @@ urgent priority, and the `deep` integration's service is given it.
 
 Each submission is an attempt, recorded before it is sent and given its job once accepted, so a
 worker that dies while a job runs leaves the job to the next claim to follow, never paid for
-twice. A submission carries its attempt as a key, which the service answers with the job it
-already started for it, so one whose answer never came is sent again with the same key. When a
+twice. A submission carries its attempt as a key, by which the service finds the job it
+started for it: one whose answer never came is followed if the service has its job, and
+otherwise ends, its pass tried again as a first try is. When a
 job ends, with a card or failed, the attempt records the job's usage, or that it is unknown
 (the job was lost before it reported), and whose failure it was.
 
@@ -109,7 +110,7 @@ async def _work_one(
 ) -> str:
     """Follow the pass's job, one left running by a failed poll or a dead worker, or one a
     submission whose answer never came started, found by its key; else read the paper's text
-    and submit it, on the attempt still open if there is one. Then record how the job ended."""
+    and submit it. Then record how the job ended."""
     if attempt is not None and attempt["job_id"] is None:
         try:
             job_id = await deep.client.job_for(_key(attempt["id"], c))
@@ -118,40 +119,33 @@ async def _work_one(
         if job_id is not None:
             await cards.job_started(conn, attempt["id"], job_id)
             attempt = {**attempt, "job_id": job_id, "at": datetime.now(UTC)}
-    if attempt is None or attempt["job_id"] is None:
-        # Nothing runs for the pass: what is sent is read and judged now, as for a first try.
+        else:
+            # Its submission started no job the service has: nothing runs, so the attempt ends
+            # (its usage unknown, should a restarted service have lost one) and the pass is
+            # tried as a first try is.
+            await cards.attempt_ended(conn, attempt["id"], None, "its submission started no job")
+            attempt = None
+            if why := await still_wanted(conn, c):
+                return why
+    if attempt is None:
         a = await read(archive, c)
-        if a.text is None and attempt is not None:
-            if a.waiting:
-                await store_.let_go(conn, c, a.error or "awaiting text")
-                return "awaiting_text"
-            return await _ended(conn, c, attempt["id"], None, a.error or "no text", "paper")
         if a.text is None:  # awaiting text, or none to be had
             await record(conn, a)
             return "awaiting_text" if a.waiting else "card_failed"
         text = TextRead(a.text.version, a.text.source, a.text.sha256)
         async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
             # Under the paper's lock, judged again as at its claim: the paper may have been
-            # dismissed or unsaved during the read, and nothing is spent then (an attempt still
-            # open ends: its submission started no job). The owner's request may have taken the
-            # pass over since its claim, and then the submission and its attempt are theirs.
+            # dismissed or unsaved during the read, and nothing is spent then. The owner's
+            # request may have taken the pass over since its claim, and then the submission and
+            # its attempt are theirs.
             if why := await judged(conn, c):
-                if attempt is not None and why != "lost":
-                    error = "its submission started no job"
-                    await cards.attempt_ended(conn, attempt["id"], None, error)
                 return why
             reason = await store_.submitted(conn, c, text)
             if reason is None:
                 return "lost"
             requested = reason == REQUESTED
             submission = await deep.submission(conn, c.paper, a.text, requested)
-            if attempt is None:
-                attempt_id = await cards.add_attempt(
-                    conn, c.paper.id, c.id, automatic=not requested
-                )
-            else:
-                attempt_id = attempt["id"]
-                await cards.attempt_by(conn, attempt_id, automatic=not requested)
+            attempt_id = await cards.add_attempt(conn, c.paper.id, c.id, automatic=not requested)
         try:
             job_id = await deep.client.submit(submission, key=_key(attempt_id, c))
         except httpx.HTTPError as exc:

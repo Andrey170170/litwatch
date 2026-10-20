@@ -388,7 +388,7 @@ async def test_a_submission_whose_answer_was_lost_is_sent_again_with_its_key_aft
     assert fake.started == 1 and len(await attempts(db)) == 1
 
 
-async def test_a_lost_submission_the_service_no_longer_has_is_sent_again_as_it_reads_now(db):
+async def test_a_lost_submission_the_service_never_ran_ends_and_the_pass_is_tried_afresh(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.lose_answers = 1
@@ -400,38 +400,45 @@ async def test_a_lost_submission_the_service_no_longer_has_is_sent_again_as_it_r
     replaced = FakeArchive()
     replaced.texts[P.id] = (P.version, BODY + " Replaced.")  # the archive's text changed
     assert await work(db, replaced, d) == {"cards_written": 1}
-    (attempt,) = await attempts(db)
-    assert fake.keys_sent == [f"{attempt['id']}:{P.id}"] * 2 and fake.started == 2
+    lost, made = await attempts(db)
+    assert (lost["ended_at"] is not None, lost["usage"], lost["failure"]) == (True, None, None)
+    assert fake.keys_sent == [f"{lost['id']}:{P.id}", f"{made['id']}:{P.id}"]
+    assert made["usage"] == USAGE and fake.started == 2
     assert fake.requests[-1]["paper"]["body"].endswith("Replaced.")
     (row,) = await deep_rows(db)
     assert row["text_hash"] != first["text_hash"]  # the card's label is what was sent
 
 
-async def test_a_lost_submission_for_a_paper_unsaved_since_ends_without_a_job(db):
+async def test_a_lost_submission_with_no_job_waits_for_text_and_unsave_as_a_first_try(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.fail_submits = 1  # never reached the service
     d = make(fake)
     assert await work(db, with_text(P), d) == {"card_service_failed": 1}
-    await word.toggle(db, P.id, Hand.UNSAVE)
     await unpause(db)
-    assert await work(db, with_text(P), d) == {"fulltext_dropped": 1}
+    assert await work(db, FakeArchive(status="pending"), d) == {"awaiting_text": 1}
     (attempt,) = await attempts(db)
     assert attempt["ended_at"] is not None and attempt["usage"] is None
+    (row,) = await deep_rows(db)
+    assert row["state"] == "awaiting_text"  # listed on Quality after a week, as any pass
+    await word.toggle(db, P.id, Hand.UNSAVE)  # and an Unsave drops it, as any pass
     assert await deep_rows(db) == [] and fake.started == 0
 
 
-async def test_a_submission_the_service_refused_is_sent_again_after_the_pause(db):
+async def test_a_submission_the_service_refused_is_tried_again_after_the_pause(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.fail_submits = 1
     d = make(fake)
     assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("running", 0)  # its attempt kept, uncounted
+    assert await work(db, with_text(P), d) == {}  # paused
     await unpause(db)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
-    (attempt,) = await attempts(db)
-    assert (attempt["failure"], attempt["usage"]) == (None, USAGE)
-    assert fake.started == 1
+    refused, made = await attempts(db)
+    assert refused["service_failed_at"] is not None and refused["usage"] is None
+    assert made["usage"] == USAGE and fake.started == 1
 
 
 async def test_a_job_left_by_a_dead_worker_is_followed_not_paid_for_twice(db):

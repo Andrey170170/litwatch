@@ -284,8 +284,10 @@ goes back to waiting, the Deep worker pauses the whole queue for 15 minutes, and
 may still be running: the pass keeps its attempt and stays running, to be followed by its next claim after the pause,
 as when a worker dies. A submission whose answer never came may have started a job all the same, so each submission
 carries its attempt as a key, and the service answers a key it already has with that key's job: the pass keeps its
-attempt, and after the pause the same attempt is submitted again and follows whatever job it names. A job started
-twice for one attempt is not possible while the service runs; a service restarted in between has lost the job anyway.
+attempt, and after the pause the service is asked for the job its key names, which is followed. When the service has
+none, nothing runs for the attempt: it ends, its usage unknown, and the pass is tried again as a first try is. A job
+started twice for one attempt is not possible while the service runs; a service restarted in between has lost the job
+anyway.
 
 A pass that fails, including a model response that is truncated or invalid, is retried on the next run (a download
 the archive gave up on is asked for again with it), and goes down `brief`'s fallbacks as [models.md](models.md) says;

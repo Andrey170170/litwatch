@@ -145,17 +145,10 @@ async def add_attempt(
     return row["id"]
 
 
-async def attempt_by(conn: psycopg.AsyncConnection, attempt_id: int, *, automatic: bool) -> None:
-    """Whose an attempt sent again is: the owner's request may have taken its pass over."""
-    await conn.execute(
-        "UPDATE deep_attempts SET automatic = %s WHERE id = %s", (automatic, attempt_id)
-    )
-
-
 async def job_started(conn: psycopg.AsyncConnection, attempt_id: int, job_id: str) -> None:
-    """The service accepted the attempt's job, now: it is followed until it ends, across a failed
-    poll or a worker's death, and never submitted again meanwhile. A submission sent again
-    after its answer was lost is followed from when it was accepted."""
+    """The service accepted the attempt's job, or was found to have it after its answer was
+    lost: it is followed from now until it ends, across a failed poll or a worker's death, and
+    never submitted again meanwhile."""
     await conn.execute(
         "UPDATE deep_attempts SET job_id = %s, at = now() WHERE id = %s", (job_id, attempt_id)
     )
@@ -163,11 +156,11 @@ async def job_started(conn: psycopg.AsyncConnection, attempt_id: int, job_id: st
 
 async def open_attempt(conn: psycopg.AsyncConnection, pass_id: int) -> dict[str, Any] | None:
     """The pass's attempt that has not ended: its job (null when the submission's answer never
-    came), when it was submitted and whether it is automatic (not the owner's request)."""
+    came) and when it was submitted."""
     return await (
         await conn.execute(
-            "SELECT id, job_id, at, automatic FROM deep_attempts "
-            "WHERE pass_id = %s AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
+            "SELECT id, job_id, at FROM deep_attempts WHERE pass_id = %s AND ended_at IS NULL "
+            "ORDER BY id DESC LIMIT 1",
             (pass_id,),
         )
     ).fetchone()
