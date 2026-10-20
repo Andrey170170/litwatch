@@ -863,6 +863,26 @@ async def test_a_topic_may_not_take_the_name_of_one_exported_before(world):
     assert len({e["column"] for e in (await state.database(conn, "notion")).topics.values()}) == 1
 
 
+async def test_a_new_topic_adopts_its_column_made_with_a_lost_reply_but_not_the_readers(world):
+    conn, fake = world, FakeNotion(PARENT)
+    t0 = datetime(2026, 10, 19, 12, tzinfo=UTC)
+    assert await start(conn, notion(fake, topics={FAITH.slug: "Faith"}), t0)
+    fake.lose_patches = 1
+    both = {FAITH.slug: "Faith", MON.slug: "Monitoring"}
+    assert not await start(conn, notion(fake, topics=both), t0 + timedelta(minutes=1))
+    assert await start(conn, notion(fake, topics=both), t0 + timedelta(minutes=2))
+    assert sum(name == "Monitoring" for name in fake.source()["properties"]) == 1
+
+    fake._properties(fake.source()["id"], {"Notes": {"rich_text": {}}})  # the reader's
+    later = t0 + timedelta(hours=1)
+    for name in ("Notes", "Why"):
+        topics = both | {INTERP.slug: name}
+        assert not await start(conn, notion(fake, topics=topics), later)
+        assert name in (await outbox.cursor(conn, "notion")).setup_error
+        later += timedelta(hours=1)
+    assert fake.source()["properties"]["Notes"]["type"] == "rich_text"
+
+
 async def test_a_new_topic_never_takes_a_view_litwatch_made_for_another(world):
     conn, fake = world, FakeNotion(PARENT)
     assert await start(conn, notion(fake, topics={MON.slug: MONITORING}))

@@ -323,6 +323,8 @@ class Notion:
                 f"already the column of another topic: {', '.join(clash)}; give the topic "
                 "another name, or rename the other first"
             )
+        if taken := sorted(t.name for t in self.exported.values() if t.name in COLUMNS):
+            raise NotionError(f"the name of a column litwatch keeps: {', '.join(taken)}")
         by_id = {unquote(p["id"]): p for p in props.values()}
         # A column deleted, or turned into another type, is put back as litwatch makes it.
         mine = [c for c in COLUMNS if c not in (TITLE, READERS)]
@@ -333,8 +335,15 @@ class Notion:
         for slug, topic in self.exported.items():
             entry = db.topics.get(slug)
             column = by_id.get(entry["column"]) if entry else None
-            if column is None:
-                column = props.get(topic.name)  # made, though its reply was lost
+            if column is None and (column := props.get(topic.name)):
+                # Made, though its reply was lost: a select of the grade options alone. Any other
+                # column of that name is the reader's.
+                kept = column.get("select", {}).get("options", [])
+                if {o["name"] for o in kept} != {o["name"] for o in GRADE_OPTIONS}:
+                    raise NotionError(
+                        f"{topic.name!r} is already a column of the reader's; rename it, or give "
+                        "the topic another name"
+                    )
             if column is None:
                 change[topic.name] = {"select": {"options": GRADE_OPTIONS}}
                 added.append(slug)
