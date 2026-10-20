@@ -72,12 +72,14 @@ Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout
 - **A topic no longer exported** keeps its column and view. On each page its fields keep their last values: its
   grade column, its Topic option and its Why line. The page's other fields go on being written: Grade is the best
   grade over the topics still exported, and a page with no exported topic left is not written at all.
-- **A renamed topic** gets its Topic option and its grade column renamed. Its view keeps its title, which is the
-  owner's.
+- **A renamed topic** gets its grade column renamed and its new name on each row's Topic. Notion's API cannot rename
+  a select option, so the new option is added, the old one removed and the rows written again. Its view keeps its
+  title, which is the owner's. A name another topic's column carries is refused: rename that one first.
 - **A changed minimum grade** is applied per topic from the state recorded for each page: the topic's effective
   grade last written. A topic that was listed under the old minimum, whose grade is unchanged and now falls below the
   new one, becomes No longer listed with a Why such as "19 Oct 2026: the list now shows only Must read papers." A
-  topic already No longer listed keeps its Why. A lowered minimum lists papers again and removes their line.
+  topic already No longer listed keeps its Why, unless a later fall in its grade took it off under the new minimum;
+  then that change is its Why. A lowered minimum lists papers again and removes their line.
 - **Views are created once and recorded in the integration's state.** A view the owner rearranges or deletes is
   never touched again. Columns the integration writes are added back if missing, and the property hashes of every
   page are then cleared so the rows are filled again.
@@ -163,8 +165,8 @@ The layout is the approved sample's.
 - arXiv id: the paper's id as text, which identifies the page (see *Creation is adopted*). Hidden in the views.
 - One grade column per exported topic, a select with the same three options.
 
-**Views:** All papers, grouped by Grade; one view per exported topic, filtered to that topic and grouped by its grade
-column. Every view is sorted by Published, newest first.
+**Views:** All papers, grouped by Grade; one view per exported topic, filtered to the rows with a grade in that topic's
+column and grouped by it. Every view is sorted by Published, newest first.
 
 **The page body:**
 1. A 💡 callout pointing to "How to read this".
