@@ -54,7 +54,8 @@ digest's papers (#112, #115), and Needs you's groups fold (#106); follow-ups in
 and process notes ([`docs/plans/deep-open-web.md`](../../plans/deep-open-web.md), decisions 80–82), in three stages:
 the open web (#111) live since 2026-10-20, then traces (#119) and process notes, deployed together. Open from that
 deploy until done: a week after process notes are deployed, the owner's agent reads `litwatch deep notes` and tunes
-the prompt or the triggers (the plan's R3). The `deep` image and litwatch deploy together from #98 on. The Notion export
+the prompt or the triggers (the plan's R3), and decides whether acknowledged Deep notes leave Needs you after a
+while: today they stay in the Acknowledged section until the card is remade without notes. The `deep` image and litwatch deploy together from #98 on. The Notion export
 ([`docs/plans/notion-export.md`](../../plans/notion-export.md)) is on since 2026-10-20: `cause` on `grade.changed`
 (#95) and the `notion` integration (#96, #101). On the owner's instance it built the PI's database of 83 papers, its
 grades per topic matching production's, and 0.14's Notion databases are trashed. Pages show the abstract until Briefs
