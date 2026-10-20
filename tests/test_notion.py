@@ -775,6 +775,18 @@ async def test_a_renamed_topic_renames_its_column_and_option_but_not_its_view(wo
     assert fake.view_named("CoT faithfulness")  # the owner's title
 
 
+async def test_a_topic_option_deleted_in_notion_is_put_back_on_its_rows(world):
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    assert await start(conn, notion(fake))
+    kept = {"Topic": {"multi_select": {"options": [{"name": MONITORING}]}}}
+    fake._properties(fake.source()["id"], kept)  # the owner deleted the option
+    assert fake.value(fake.row(A.id), "Topic") == []
+
+    assert await start(conn, notion(fake))
+    assert fake.value(fake.row(A.id), "Topic") == [FAITHFUL]
+
+
 async def test_a_rename_failing_part_way_and_then_undone_puts_topic_back(world):
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, A, FAITH.slug, "must_read")

@@ -328,6 +328,7 @@ class Notion:
         missing = [c for c in COLUMNS if c not in props and c not in (TITLE, READERS)]
         change: dict[str, Any] = {c: COLUMNS[c] for c in missing}
         restored, added = bool(missing), []
+        recorded = set(db.topics)  # the topics exported before this pass
         for slug, topic in self.exported.items():
             entry = db.topics.get(slug)
             column = by_id.get(entry["column"]) if entry else None
@@ -356,7 +357,10 @@ class Notion:
                 for i, n in enumerate(wanted)
             ]
             change["Topic"] = {"multi_select": {"options": options}}
-            restored |= bool(set(have) - set(wanted))  # an option removed comes off the rows
+            # Rows lose an option that goes, and lack one the owner deleted: write them again.
+            gone = set(have) - set(wanted)
+            lost = {db.topics[s]["name"] for s in recorded} - set(have)
+            restored |= bool(gone or lost)
         if restored:  # first: the repair's reply may be lost, and the column then looks whole
             await state.rewrite_properties(conn, self.name)
         if change:
