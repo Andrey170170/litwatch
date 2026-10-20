@@ -1,6 +1,7 @@
 """The archive client: arxiv-archive's API, which registers papers, fetches their files at a
 priority, serves PDFs and LaTeX text and lists the papers of a date window; and a paper's full
-text read from it (`text`). Knows `core` and nothing else of litwatch."""
+text read from it (`text`), and a PDF page as an image (`pages`). Knows `core` and nothing else
+of litwatch."""
 
 from litwatch.archive.client import (
     BACKGROUND,
