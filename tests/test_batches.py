@@ -238,7 +238,8 @@ async def test_a_batch_given_up_on_for_the_account_settles_its_row_with_the_answ
     monkeypatch.setattr(anthropic, "status", unauthorized)
     with pytest.raises(CallError):
         await asked
-    # Readable again, the batch answered the request with an account error: on its own row.
+    # Readable again, the batch answered the request with an account error: on the batch's row,
+    # settled for good, and on the call's own, as the row was given up on.
     monkeypatch.undo()
     anthropic.end("msgbatch_1")
     with pytest.raises(CallError) as found:
@@ -247,7 +248,9 @@ async def test_a_batch_given_up_on_for_the_account_settles_its_row_with_the_answ
     assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
         ("msgbatch_1", "account: authentication_error in batch"),
         (None, "account: AuthenticationError: invalid x-api-key"),
+        (None, "account: authentication_error in batch"),
     ]
+    assert await CallJournal(conn, await runs.start(conn, "nightly")).open_batches() == []
     await gw.close()
 
 

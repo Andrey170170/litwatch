@@ -131,11 +131,9 @@ class Batcher:
         return await asyncio.shield(future)
 
     async def attach(self, batch_id: str, key: str, call_id: int) -> Answered:
-        """The reply of a call a dead run sent in batch `batch_id`, on journal row `call_id`. A
-        row given up on before waits on its batch again, until it is given up on again."""
+        """The reply of a call a dead run sent in batch `batch_id`, on journal row `call_id`."""
         if key in self._futures:
             return await self._shared(self._futures[key])
-        self.unsettled.discard(call_id)
         future = asyncio.get_running_loop().create_future()
         self._futures[key] = future
         batch = self._open.setdefault(batch_id, _Open())
@@ -308,7 +306,11 @@ class Batcher:
             if status == "gone":
                 await self.journal.gone(batch_id)
             for key, reply in replies.items():
-                if key in batch.waiting:
+                # A call settles its row with the answer, but for a row given up on before: a
+                # reply settles it still, anything else is its call's on a row of its own.
+                if key in batch.waiting and (
+                    isinstance(reply, Reply) or batch.rows.get(key) not in self.unsettled
+                ):
                     continue
                 if isinstance(reply, ProviderError):
                     await self.journal.answered(batch_id, key, None, f"account: {reply}")
