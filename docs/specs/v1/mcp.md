@@ -21,7 +21,7 @@ asking the archive for a paper's files at urgent priority, as opening a PDF in t
 - **Search.** The web app's search ([archive.md](archive.md), Search), lexical (decision 87): the collection's papers
   from litwatch's own index, the rest from the archive, each in its own order, exact title and phrase first. Optional
   filters: a date range, which applies to both, and from litwatch a topic, papers litwatch processed, a minimum grade,
-  a Weight, papers the owner reacted to; any of these searches litwatch's index alone. A result gives a paper's id,
+  a Weight, the owner's reaction (a thumb up or down); any of these searches litwatch's index alone. A result gives a paper's id,
   title, authors and date and, where litwatch processed it, its Gist, Weight and grade per topic.
 - **A paper.** Its metadata and abstract, and what litwatch has on it: Gist, Brief and Deep card where they exist,
   its Weight, the effective Fit and grade per topic, the owner's word and reactions, and its citation (the published
