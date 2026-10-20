@@ -106,6 +106,14 @@ export type FailedDigest = {
   note?: string;
 };
 
+/** A process note on a Deep card (GLOSSARY.md): what the Deep agent could not do, as the model or the service wrote
+ * it. `url`, when given, is linked only if it is http(s). */
+export type ProcessNote = { kind: "access" | "tool" | "budget" | "input"; source: "model" | "service"; note: string; url?: string };
+
+/** A Deep card with process notes (`store.integrations.deep_notes`): Needs you's Deep notes, which wait on nothing.
+ * `written_at` names the card, for Acknowledge: a card written again since is another. */
+export type DeepNotes = { paper_id: string; title: string; written_at: string; notes: ProcessNote[]; acknowledged_at?: string | null };
+
 export type Spend = { provider: string; spent: number; projected: number; budget: number | null; over: boolean };
 
 export type Recall = {
@@ -121,7 +129,7 @@ export type Recall = {
 };
 
 export type Quality = {
-  night: { run: number | null; error: string | null; splits: Split[]; awaiting_classification: Stuck[]; analysis_failed: Stuck[]; ungraded: Stuck[]; fulltext: TextPassStuck[]; digests: FailedDigest[] };
+  night: { run: number | null; error: string | null; splits: Split[]; awaiting_classification: Stuck[]; analysis_failed: Stuck[]; ungraded: Stuck[]; fulltext: TextPassStuck[]; digests: FailedDigest[]; deep_notes: DeepNotes[] };
   cost: Spend[];
   /** Deep cards' month to date at list prices: the attempts ended, their cost where known, and how many have their
    * usage unknown (the cost is "at least" while any is). */
@@ -195,7 +203,8 @@ export type Value = NonNullable<Schemas["Answer"]["value"]>;
 export type Waiting = "splits" | "awaiting_classification" | "analysis_failed" | "ungraded" | "fulltext" | "digests";
 
 /** How many things wait on the owner: splits and escalations still unlabelled, the three stuck steps, the
- * full-text passes and the failed digests, less what this visit settled and what the owner acknowledged. */
+ * full-text passes and the failed digests, less what this visit settled and what the owner acknowledged. Deep notes
+ * wait on nothing and are not counted. */
 export function waiting(q: Quality): number {
   const n = q.night;
   const open = (xs: { settled?: string; acknowledged_at?: string | null }[]) => xs.filter((x) => !x.settled && !x.acknowledged_at).length;
@@ -206,6 +215,11 @@ export function waiting(q: Quality): number {
  * Fit and are not acknowledged. */
 export type Red = "awaiting_classification" | "ungraded" | "analysis_failed" | "fulltext" | "digests";
 export const RED: Red[] = ["awaiting_classification", "ungraded", "analysis_failed", "fulltext", "digests"];
+
+/** The groups Acknowledge marks seen and the Acknowledged section holds: the red ones and Deep notes. Apart from
+ * `waiting()`, which Deep notes never join. */
+export type Acknowledgeable = Red | "deep_notes";
+export const ACKNOWLEDGEABLE: Acknowledgeable[] = [...RED, "deep_notes"];
 
 /** What an Acknowledge names, and what the API answers it marked (`POST /api/settings/acknowledge`). */
 export type Seen = Schemas["Acknowledgement"];
@@ -218,18 +232,23 @@ const unseen = (x: { settled?: string; acknowledged_at?: string | null }) => !x.
 
 /** What Acknowledge on the `lists` names: their rows the owner sees there now, each as it is shown (the failure
  * shown, by when it failed, so a later failure meanwhile is not acknowledged unseen). */
-export function toAcknowledge(q: Quality, lists: Red[]): Seen {
+export function toAcknowledge(q: Quality, lists: Acknowledgeable[]): Seen {
   const n = q.night;
   const steps = (Object.keys(STEP) as StepList[])
     .filter((l) => lists.includes(l))
     .flatMap((l) => n[l].filter(unseen).map((s) => ({ step: STEP[l], paper_id: s.paper_id, revision: s.revision, topic: s.topic ?? null, failed_at: s.failed_at })));
   const passes = lists.includes("fulltext") ? n.fulltext.filter(unseen).map((p) => ({ id: p.id, since: p.since })) : [];
   const digests = lists.includes("digests") ? n.digests.filter(unseen).map((d) => d.id) : [];
-  return { steps, passes, digests };
+  // A card's notes by the card shown: one written again meanwhile is not acknowledged unseen.
+  const cards = lists.includes("deep_notes") ? n.deep_notes.filter(unseen).map((c) => ({ paper_id: c.paper_id, written_at: c.written_at })) : [];
+  return { steps, passes, digests, cards };
 }
 
 /** Whether `seen` names anything. */
-export const any = (seen: Seen): boolean => seen.steps.length + seen.passes.length + seen.digests.length > 0;
+export const any = (seen: Seen): boolean => seen.steps.length + seen.passes.length + seen.digests.length + seen.cards.length > 0;
+
+/** How many items the owner acknowledged, which the Acknowledged section holds: the red groups' and Deep notes'. */
+export const acknowledgedCount = (q: Quality): number => ACKNOWLEDGEABLE.reduce((k, list) => k + q.night[list].filter((x) => x.acknowledged_at).length, 0);
 
 /** The same instant, however each side wrote it. */
 const at = (a: string, b: string) => Date.parse(a) === Date.parse(b);
@@ -246,6 +265,7 @@ export function acknowledged(q: Quality, seen: Seen, when: string): Quality {
     );
   night.fulltext = mark(night.fulltext, (p) => seen.passes.some((x) => x.id === p.id && at(x.since, p.since)));
   night.digests = mark(night.digests, (d) => seen.digests.includes(d.id));
+  night.deep_notes = mark(night.deep_notes, (c) => seen.cards.some((x) => x.paper_id === c.paper_id && at(x.written_at, c.written_at)));
   return { ...q, night };
 }
 

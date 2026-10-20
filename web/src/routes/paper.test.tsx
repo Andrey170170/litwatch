@@ -101,7 +101,7 @@ describe("a paper's page", () => {
     // The Needs you page the reader came from lists both passes; each is settled there as it leaves the paper.
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const row = (id: number, state: string) => ({ id, paper_id: "2610.00002", revision: 1, title: "Epic one", kind: "brief", state, failed_runs: 0, last_error: null, queued_at: "2026-10-08T03:00:00Z" });
-    client.setQueryData(["settings", "needs", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")], digests: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
+    client.setQueryData(["settings", "needs", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")], digests: [], deep_notes: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
     const settledRows = () => (client.getQueryData(["settings", "needs", "quality"]) as { night: { fulltext: { id: number; settled?: string }[] } }).night.fulltext.map((r) => r.settled);
     renderApp("/paper/2610.00002", client);
     await screen.findByRole("heading", { name: "Epic one" });
@@ -421,6 +421,33 @@ describe("a paper's page", () => {
     expect(await screen.findByText("Writing again · queued")).toBeInTheDocument();
     expect(screen.getByText(/Written from the LaTeX source/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write again" })).toBeNull();
+  });
+
+  it("folds a Deep card's process notes after its Limitations, each with its kind, linking only an http(s) page", async () => {
+    viewport(true);
+    const notes = [
+      { kind: "access", source: "model", note: "The linked repository could not be listed, so code is unverified.", url: "https://anonymous.4open.science/r/abc" },
+      { kind: "tool", source: "model", note: "A table could not be parsed from the PDF text.", url: "javascript:alert(1)" },
+    ];
+    const card = { card: { key_claim: "A meta-verifier catches 71% of unfaithful chains.", limitations: ["Two models only."], prior_work: [{ title: "Measuring Faithfulness", relation: "extends" }], process_notes: notes }, written_at: "2026-10-20T03:00:00Z" };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card } });
+    renderApp("/paper/2610.00002");
+    const fold = await screen.findByRole("button", { name: "Process notes · 2" });
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/could not be listed/)).toBeNull();
+    // Its place: after Limitations, before Prior work.
+    const rungs = [...document.querySelectorAll(".rung")];
+    const at = (el: Element) => rungs.indexOf(el.closest(".rung")!);
+    expect(at(screen.getByText("Limitations"))).toBeLessThan(at(fold));
+    expect(at(fold)).toBeLessThan(at(screen.getByText("Prior work")));
+    await userEvent.click(fold);
+    expect(fold).toHaveAttribute("aria-expanded", "true");
+    const rung = fold.closest(".rung") as HTMLElement;
+    expect(within(rung).getByText("access")).toHaveClass("tag");
+    expect(within(rung).getByText("tool")).toHaveClass("tag");
+    expect(within(rung).getByRole("link", { name: /anonymous\.4open\.science/ })).toHaveAttribute("href", "https://anonymous.4open.science/r/abc");
+    expect(within(rung).getAllByRole("link")).toHaveLength(1);
+    expect(rung.querySelector('a[href^="javascript"]')).toBeNull();
   });
 
   it("says why a card is coming and where it stands while its pass is open", async () => {

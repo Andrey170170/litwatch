@@ -591,6 +591,10 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .tag { display: inline-block; margin: 0 4px 4px 0; padding: 1px 7px; border: 1px solid var(--line); font-size: 12px; font-style: normal; }
 .lim { margin: 0; padding: 0; font-size: 13.5px; line-height: 1.5; }
 .lim li { margin-bottom: 4px; }
+/* the card's process notes: the fold's head in place of a section name, under the rung's own rule */
+.rung.pnotes .tpfold { border-top: 0; }
+.rung.pnotes .lim { margin-top: 8px; }
+.rung.pnotes .lim .lnk { white-space: normal; overflow-wrap: anywhere; }
 .pw { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 7px 8px; margin: 0 -8px; font-size: 13px; text-align: left; width: calc(100% + 16px); }
 .pw:not(.nolink):hover { background: color-mix(in srgb, var(--fg) 5%, transparent); cursor: pointer; }
 .pw .ti { font-weight: 600; color: var(--fg); }

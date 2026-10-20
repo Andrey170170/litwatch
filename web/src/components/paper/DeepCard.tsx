@@ -1,9 +1,11 @@
 /** The Deep card rung (DESIGN.md, "The ladder", 3): the claim, then each section as a rung of its own under it. */
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 import type { Schemas } from "@/api/client";
 import { useDeepRead } from "@/api/mutations";
 import { dateTime } from "@/lib/format";
 import { rc } from "@/lib/rarity";
+import type { ProcessNote } from "@/lib/settings";
 import type { Paper } from "./Actions";
 import { Rung } from "./Ladder";
 
@@ -47,9 +49,10 @@ type Card = {
   evaluation_setup?: Setup;
   limitations?: string[];
   prior_work?: Prior[];
+  process_notes?: ProcessNote[];
   [extension: string]: unknown;
 };
-const CORE = new Set(["key_claim", "summary", "paper_kind", "evaluation_setup", "limitations", "prior_work", "code_available", "code_url", "weights_available"]);
+const CORE = new Set(["key_claim", "summary", "paper_kind", "evaluation_setup", "limitations", "process_notes", "prior_work", "code_available", "code_url", "weights_available"]);
 const EXTENSION_NAME: Record<string, string> = { faithfulness: "CoT faithfulness", monitoring: "CoT monitoring" };
 const pretty = (k: string) => k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
@@ -83,6 +86,56 @@ function Fact({ name, value }: { name: string; value: unknown }) {
       <span>{name}</span>
       {items ? <Tags items={items.length ? items : ["none"]} /> : <div>{String(value)}</div>}
     </>
+  );
+}
+
+/** A URL to link, only when it is http(s): a note's URL comes from the model, and is never a `javascript:` link. */
+export function webUrl(url: string | undefined): URL | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:" ? u : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What Deep's own process held back (GLOSSARY.md, process note): folded under "Process notes · N" until opened, each
+ * note with its kind as a tag and its page as a link. It starts folded on every card. */
+function ProcessNotes({ notes }: { notes: ProcessNote[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Rung name="" className="sub pnotes">
+      <button className="tpfold" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className={`car${open ? " open" : ""}`} aria-hidden />
+        <span className="ct">
+          Process notes · <b>{notes.length}</b>
+        </span>
+      </button>
+      {open && (
+        <ul className="lim">
+          {notes.map((n, i) => {
+            const link = webUrl(n.url);
+            return (
+              <li key={i}>
+                <i className="tag">{n.kind}</i>
+                {n.note}
+                {link ? (
+                  <>
+                    {" "}
+                    <a className="lnk" href={link.href} target="_blank" rel="noopener noreferrer" title={link.href}>
+                      {link.hostname} ↗
+                    </a>
+                  </>
+                ) : n.url ? (
+                  <span className="faint"> {n.url}</span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Rung>
   );
 }
 
@@ -158,6 +211,8 @@ export function DeepCard({ paper, asked, deepRead }: { paper: Paper; asked: bool
           </ul>
         </Rung>
       ) : null}
+      {/* keyed by the card, so a card written again starts folded */}
+      {c.process_notes?.length ? <ProcessNotes key={`${paper.id}:${paper.card.written_at}`} notes={c.process_notes} /> : null}
       {c.prior_work?.length ? (
         <Rung name="Prior work" className="sub">
           {c.prior_work.map((p, i) =>

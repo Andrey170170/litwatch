@@ -29,7 +29,7 @@ const stuck = { paper_id: "2610.00002", revision: 1, title: "A stuck paper", fai
 const pass = { id: 7, paper_id: "2610.00003", revision: 1, title: "A textless paper", kind: "brief", state: "failed", failed_runs: 3, last_error: "the LaTeX did not build", queued_at: "2026-10-08T03:00:00Z", since: "2026-10-14T03:00:00Z" };
 const digest = { id: 3, topic: "mi", period: "day", day: "2026-10-08", error: "the writer timed out twice", written_at: "2026-10-09T03:00:00Z" };
 const quality = {
-  night: { run: 6, error: null, splits: [split], awaiting_classification: [], analysis_failed: [stuck], ungraded: [], fulltext: [pass], digests: [digest] },
+  night: { run: 6, error: null, splits: [split], awaiting_classification: [], analysis_failed: [stuck], ungraded: [], fulltext: [pass], digests: [digest], deep_notes: [] },
   cost: [{ provider: "anthropic", spent: 1.5, projected: 4, budget: 20, over: false }],
   recall: null,
   calibration: [],
@@ -432,7 +432,7 @@ describe("Settings", () => {
     expect(await screen.findByRole("link", { name: "3 failed" })).toBeInTheDocument();
     const textGroup = screen.getByRole("button", { name: "Full text · 1" }).closest(".ngrp") as HTMLElement;
     await userEvent.click(within(textGroup).getByRole("button", { name: "Acknowledge" }));
-    await waitFor(() => expect(acks().map((c) => c.body)).toEqual([{ steps: [], passes: [{ id: 7, since: "2026-10-14T03:00:00Z" }], digests: [] }]));
+    await waitFor(() => expect(acks().map((c) => c.body)).toEqual([{ steps: [], passes: [{ id: 7, since: "2026-10-14T03:00:00Z" }], digests: [], cards: [] }]));
     // The pass folds away; what remains keeps its order, and the run status counts one fewer.
     await waitFor(() => expect(screen.queryByRole("link", { name: "A textless paper" })).toBeNull());
     expect(screen.getAllByRole("link", { name: /paper$/ }).map((l) => l.textContent)).toEqual(["A split paper", "A stuck paper"]);
@@ -441,7 +441,7 @@ describe("Settings", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Acknowledge all" }));
     // Splits are not acknowledged: they wait on a Fit.
-    await waitFor(() => expect(acks()[1]?.body).toEqual({ steps: [{ step: "analysis", paper_id: "2610.00002", revision: 1, topic: null, failed_at: "2026-10-14T03:00:00Z" }], passes: [], digests: [3] }));
+    await waitFor(() => expect(acks()[1]?.body).toEqual({ steps: [{ step: "analysis", paper_id: "2610.00002", revision: 1, topic: null, failed_at: "2026-10-14T03:00:00Z" }], passes: [], digests: [3], cards: [] }));
     expect(await screen.findByRole("link", { name: "530" })).toHaveClass("ok");
     expect(screen.queryByRole("button", { name: "Acknowledge all" })).toBeNull();
     expect(screen.getByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
@@ -497,7 +497,7 @@ describe("Settings", () => {
     const head = await screen.findByRole("button", { name: "Ungraded · 11" });
     expect(head).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(within(head.closest(".ngrp") as HTMLElement).getByRole("button", { name: "Acknowledge" }));
-    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: ungraded.map((s) => ({ step: "grading", paper_id: s.paper_id, revision: 1, topic: "mi", failed_at: s.failed_at })), passes: [], digests: [] }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: ungraded.map((s) => ({ step: "grading", paper_id: s.paper_id, revision: 1, topic: "mi", failed_at: s.failed_at })), passes: [], digests: [], cards: [] }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Ungraded · 11" })).toBeNull());
     await userEvent.click(screen.getByRole("button", { name: "Acknowledged · 11" }));
     const section = screen.getByRole("region", { name: "Acknowledged" });
@@ -506,6 +506,47 @@ describe("Settings", () => {
     expect(within(section).queryAllByRole("link", { name: /^Ungraded paper/ })).toHaveLength(0);
     await userEvent.click(inside);
     expect(within(section).getAllByRole("link", { name: /^Ungraded paper/ })).toHaveLength(11);
+  });
+
+  it("lists Deep notes quietly, counted nowhere that says something waits, and acknowledges them for the card shown", async () => {
+    viewport(true);
+    const noted = { paper_id: "2610.00005", title: "A noted paper", written_at: "2026-10-20T03:00:00.123456Z", acknowledged_at: null, notes: [{ kind: "access", source: "model", note: "The linked repository could not be listed, so code is unverified.", url: "https://anonymous.4open.science/r/abc" }, { kind: "budget", source: "service", note: "The fetch budget of 60 per paper was used up; 3 more fetches were refused." }] };
+    const night = { ...quality.night, splits: [], fulltext: [], digests: [], deep_notes: [noted] };
+    const calls = scriptFetch({ ...common, "GET /api/summary": summaryOf(1), "GET /api/settings/quality": { ...quality, night }, "POST /api/settings/acknowledge": (c) => c.body });
+    renderApp("/settings/needs");
+    const head = await screen.findByRole("button", { name: "Deep notes · 1" });
+    // Neutral: neither yellow nor red, on the group's head or its item.
+    const group = head.closest(".ngrp") as HTMLElement;
+    expect(group.className).toBe("ngrp");
+    expect(within(group).getByRole("link", { name: "A noted paper" }).closest(".need")!.className).toBe("need");
+    expect(within(group).getByText("access")).toHaveClass("tag");
+    expect(within(group).getByText(/fetch budget of 60/)).toBeInTheDocument();
+    // The page's count is the stuck paper's alone.
+    expect(screen.getByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+
+    await userEvent.click(within(group).getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: [], passes: [], digests: [], cards: [{ paper_id: "2610.00005", written_at: "2026-10-20T03:00:00.123456Z" }] }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Deep notes · 1" })).toBeNull());
+    // The Acknowledged section shows with Deep notes its only items; the stuck paper still waits, and counts.
+    const acknowledged = screen.getByRole("button", { name: "Acknowledged · 1" });
+    expect(screen.getByText("1 thing waits on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    await userEvent.click(acknowledged);
+    const section = screen.getByRole("region", { name: "Acknowledged" });
+    expect(within(section).getByRole("button", { name: "Deep notes · 1" })).toBeInTheDocument();
+    expect(within(section).getByRole("link", { name: "A noted paper" })).toBeInTheDocument();
+    expect(within(section).queryByRole("button", { name: "Acknowledge" })).toBeNull();
+  });
+
+  it("puts Deep notes in Acknowledge all, and says nothing waits when they are all there is", async () => {
+    viewport(true);
+    const noted = { paper_id: "2610.00005", title: "A noted paper", written_at: "2026-10-20T03:00:00Z", acknowledged_at: null, notes: [{ kind: "tool", source: "service", note: "A cell ran past its 90 s limit, which ended the session and lost its state." }] };
+    const calls = scriptFetch({ ...common, "GET /api/summary": summaryOf(0), "GET /api/settings/quality": { ...quality, night: { ...quality.night, splits: [], analysis_failed: [], fulltext: [], digests: [], deep_notes: [noted] } }, "POST /api/settings/acknowledge": (c) => c.body });
+    renderApp("/settings/needs");
+    expect(await screen.findByText("Nothing waits on the owner.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledge all" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: [], passes: [], digests: [], cards: [{ paper_id: "2610.00005", written_at: "2026-10-20T03:00:00Z" }] }));
+    expect(await screen.findByRole("button", { name: "Acknowledged · 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Acknowledge all" })).toBeNull();
   });
 
   it("keeps a row's open form through a fold of its group", async () => {
@@ -527,13 +568,13 @@ describe("Settings", () => {
     const seen = "2026-10-19T08:00:00Z";
     const night = { ...quality.night, analysis_failed: [{ ...stuck, acknowledged_at: seen }], fulltext: [pass], digests: [{ ...digest, acknowledged_at: seen }] };
     // The pass stopped waiting as shown before the click landed: the API marks nothing.
-    const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night }, "POST /api/settings/acknowledge": { steps: [], passes: [], digests: [] } });
+    const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night }, "POST /api/settings/acknowledge": { steps: [], passes: [], digests: [], cards: [] } });
     renderApp("/settings/needs");
     expect(await screen.findByRole("button", { name: "Acknowledged · 2" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull();
     expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Acknowledge all" }));
-    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: [], passes: [{ id: 7, since: "2026-10-14T03:00:00Z" }], digests: [] }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: [], passes: [{ id: 7, since: "2026-10-14T03:00:00Z" }], digests: [], cards: [] }));
     // So the pass stays where it was, still to acknowledge.
     await waitFor(() => expect(calls.filter((c) => c.url === "/api/summary").length).toBeGreaterThan(1));
     expect(screen.getByRole("link", { name: "A textless paper" })).toBeInTheDocument();
