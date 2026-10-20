@@ -41,7 +41,10 @@ def _sql(node: ast.AST) -> bool:
         and isinstance(node.func, ast.Attribute)
         and (
             node.func.attr in {"execute", "executemany"}
-            or (node.func.attr == "copy" and bool(node.args))
+            or (
+                node.func.attr == "copy"
+                and (bool(node.args) or any(k.arg == "statement" for k in node.keywords))
+            )
         )
     )
 
