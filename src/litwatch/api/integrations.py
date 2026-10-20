@@ -42,8 +42,8 @@ def loaded(request: Request) -> list[events.Integration]:
     return request.app.state.integrations
 
 
-def providers(request: Request) -> list[SearchProvider]:
-    return [i for i in loaded(request) if isinstance(i, SearchProvider)]
+def providers(integrations: list[events.Integration]) -> list[SearchProvider]:
+    return [i for i in integrations if isinstance(i, SearchProvider)]
 
 
 def card_maker(integrations: list[events.Integration]) -> Deep | None:
@@ -215,10 +215,11 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
 
 
 async def card(
-    request: Request, c: Any, paper_id: str
+    c: Any, paper_id: str, integrations: list[events.Integration]
 ) -> tuple[s.DeepCard | None, s.CardPass | None, bool]:
     """The paper page's Deep card rung: the stored card, shown whatever is loaded; with a card
-    provider loaded, its open pass and whether "Deep read" (or "Write again") applies."""
+    provider among the loaded `integrations`, its open pass and whether "Deep read" (or "Write
+    again") applies."""
     stored = await integrations_store.card(c, paper_id)
     found = None
     if stored and stored["card"]:
@@ -233,7 +234,7 @@ async def card(
             source=stored["source"],
             among=[_among(a, marks.get(a["arxiv_id"])) for a in among],
         )
-    if not answers_card_requests(loaded(request)):
+    if not answers_card_requests(integrations):
         return found, None, False
     # The owner may ask unless they already have: their request takes an automatic pass over,
     # a failed one included.
@@ -276,7 +277,7 @@ async def _ask(
 @router.get("/search/scope")
 async def search_scope(request: Request) -> s.SearchScope:
     """The search box's scope beyond the collection (its placeholder names the archive's size)."""
-    archive = next((p for p in providers(request) if isinstance(p, Archive)), None)
+    archive = next((p for p in providers(loaded(request)) if isinstance(p, Archive)), None)
     if archive is None:
         return s.SearchScope()
     try:
@@ -287,23 +288,28 @@ async def search_scope(request: Request) -> s.SearchScope:
 
 
 async def search_outside(
-    request: Request, c: Any, query: str, filters: SearchFilters
+    c: Any,
+    query: str,
+    filters: SearchFilters,
+    integrations: list[events.Integration],
+    pool: ThreadPoolExecutor,
+    timeout: float,
+    stats: dict[str, dict[str, Any]],
 ) -> tuple[list[s.OutsideRow], list[str]]:
-    """Ask every search provider at once, each with a short timeout. Returns the hits the
+    """Ask every search provider among `integrations` at once on `pool`, each within
+    `timeout`, and count each answer in `stats` (Settings shows them). Returns the hits the
     collection lacks, merged by arXiv id (the first provider to name a paper keeps it), and
     the names of the providers left out because they failed or were too slow.
 
     The band keeps each provider's order, the providers in turn (archive.md, Search: the
     archive ranks); asked for the newest (`filters.sort`), it is newest first across them."""
-    asked = providers(request)
+    asked = providers(integrations)
     if not asked:
         return [], []
-    timeout = request.app.state.search_timeout
     answers = await asyncio.gather(
-        *(_ask(request.app.state.search_pool, p, query, filters, timeout) for p in asked),
+        *(_ask(pool, p, query, filters, timeout) for p in asked),
         return_exceptions=True,
     )
-    stats = request.app.state.search_stats
     hits: dict[str, tuple[str, SearchHit]] = {}
     left_out = []
     for provider, answer in zip(asked, answers, strict=True):

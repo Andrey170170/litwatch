@@ -15,7 +15,7 @@ from litwatch import store
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, budget_lines, protected, set_token_cookie, token_ok
-from litwatch.archive import ArchiveError
+from litwatch.archive import ArchiveClient, ArchiveError
 from litwatch.core import (
     Cause,
     Depth,
@@ -38,6 +38,7 @@ from litwatch.core import (
 from litwatch.core.classification import Membership, Source, standing
 from litwatch.core.digests import DAILY, DigestPeriod
 from litwatch.core.rules import FAILED_RUNS, REACTION_WORDS
+from litwatch.events import Integration
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
 from litwatch.intake.search import NoAnswerError
@@ -235,8 +236,15 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
             limit=params.limit,
             sort="newest" if params.sort == "newest" else "relevance",
         )
+        st = request.app.state
         answer.outside, answer.left_out = await integrations_api.search_outside(
-            request, c, params.q, filters
+            c,
+            params.q,
+            filters,
+            st.integrations,
+            st.search_pool,
+            st.search_timeout,
+            st.search_stats,
         )
     return answer
 
@@ -287,9 +295,33 @@ async def pdf(paper_id: str, request: Request) -> Response:
 )
 async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
     """The paper's page; for a paper litwatch has not fetched, the archive's record of it."""
+    st = request.app.state
+    try:
+        found = await paper_page(c, paper_id, st.archive, st.integrations)
+    except ArchiveDownError as exc:
+        raise HTTPException(status_code=503, detail=ARCHIVE_DOWN) from exc
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such paper")
+    return found
+
+
+class ArchiveDownError(Exception):
+    """The archive, asked for a paper litwatch lacks, did not answer within
+    `ARCHIVE_PAGE_BUDGET`: this says nothing of the paper."""
+
+
+async def paper_page(
+    c: psycopg.AsyncConnection,
+    paper_id: str,
+    archive: ArchiveClient | None,
+    integrations: list[Integration],
+) -> s.Paper | None:
+    """The paper's page, as /api and /mcp both show it; for a paper litwatch has not fetched,
+    the archive's record of it (`unfetched`); None when neither has it. Raises
+    `ArchiveDownError`."""
     found = await reading.paper(c, paper_id)
     if found is None:
-        return await _unfetched(request, paper_id)
+        return await unfetched(archive, paper_id, integrations)
     tree = await taxonomy_store.load(c)
     looks = _looks(tree)
     weight = Weight(found["weight"]) if found["weight"] else None
@@ -342,7 +374,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
         ]
     )
     published = await publications_store.get(c, paper_id)
-    card, card_pass, card_requestable = await integrations_api.card(request, c, paper_id)
+    card, card_pass, card_requestable = await integrations_api.card(c, paper_id, integrations)
     unattached = next((r for r in found["reactions"] if r["topic"] is None), None)
     return s.Paper(
         **{
@@ -386,19 +418,19 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
     )
 
 
-async def _unfetched(request: Request, paper_id: str) -> s.Paper:
+async def unfetched(
+    archive: ArchiveClient | None, paper_id: str, integrations: list[Integration]
+) -> s.Paper | None:
     """An archive paper litwatch has not fetched: its metadata, Process, Deep read (which
-    fetches it first) and Report as a miss. 404 without an archive or when the archive lacks
-    it; 503 when the archive cannot answer within `ARCHIVE_PAGE_BUDGET`, which says nothing of
-    the paper."""
-    archive = request.app.state.archive
+    fetches it first) and Report as a miss. None without an archive or when the archive lacks
+    it; `ArchiveDownError` when the archive cannot answer within `ARCHIVE_PAGE_BUDGET`."""
     try:
         async with asyncio.timeout(ARCHIVE_PAGE_BUDGET):
             found = await archive.paper(paper_id) if archive is not None else None
     except (ArchiveError, TimeoutError) as exc:
-        raise HTTPException(status_code=503, detail=ARCHIVE_DOWN) from exc
+        raise ArchiveDownError from exc
     if found is None:
-        raise HTTPException(status_code=404, detail="no such paper")
+        return None
     return s.Paper(
         **found.model_dump(include={"id", "title", "authors", "abstract", "published", "updated"}),
         version=found.version,
@@ -413,7 +445,7 @@ async def _unfetched(request: Request, paper_id: str) -> s.Paper:
         in_collection=False,
         stored=False,
         topics=[],
-        card_requestable=integrations_api.answers_card_requests(integrations_api.loaded(request)),
+        card_requestable=integrations_api.answers_card_requests(integrations),
     )
 
 
