@@ -5,7 +5,7 @@ import { processPaper, type RunOptions } from "../src/agent.ts";
 import { PROVIDER } from "../src/auth.ts";
 
 const OPTS: RunOptions = { model: "faux-1", effort: "low", maxCells: 4, cellTimeoutMs: 5000, wallClockMs: 60_000, maxOutputChars: 2000 };
-const HOSTS = { litwatchUrl: "http://litwatch.invalid", maxFetchChars: 1000 };
+const HOSTS = { litwatchUrl: "http://litwatch.invalid", maxFetchChars: 1000, maxFetches: 60, maxFetchBytes: 1 << 20 };
 const PAPER = { id: "2610.00001", title: "T", abstract: "A.", authors: [], body: "# T\nBody." };
 
 /** Models whose `openai` provider is pi-ai's faux one, signed in to the subscription. */

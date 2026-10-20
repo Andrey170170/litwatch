@@ -1,8 +1,14 @@
 /**
- * Host functions the isolate may call: litwatch's search, Semantic Scholar, and an
- * allowlisted fetch. Everything returns JSON-able values; errors become exceptions in the cell.
+ * Host functions the isolate may call: litwatch's search, Semantic Scholar, and a fetch of any
+ * public page, never a private address (decision 80). Everything returns JSON-able values; errors
+ * become exceptions in the cell.
  */
 
+import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from "node:dns";
+import { isIP } from "node:net";
+import type { ReadableStream } from "node:stream/web";
+import ipaddr from "ipaddr.js";
+import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import type { HostFn } from "./repl.ts";
 
 export interface HostConfig {
@@ -10,7 +16,12 @@ export interface HostConfig {
   /** litwatch's read token, which may only search and read papers. */
   litwatchToken?: string;
   s2ApiKey?: string;
+  /** Text kept per fetch. */
   maxFetchChars: number;
+  /** Fetches per paper; the next one throws. */
+  maxFetches: number;
+  /** Bytes read per fetched body; the rest is never read. */
+  maxFetchBytes: number;
 }
 
 /** One `store.search` hit, as the agent has always been given it. */
@@ -60,39 +71,32 @@ export function storeHits(body: { rows?: PaperRow[]; outside?: PaperRow[] }): St
   return [...(body.rows ?? []).map((r) => hit(r, true)), ...(body.outside ?? []).map((r) => hit(r, false))];
 }
 
-const ALLOWED_HOSTS = [
-  "arxiv.org",
-  "export.arxiv.org",
-  "api.semanticscholar.org",
-  "www.semanticscholar.org",
-  "openreview.net",
-  "api.openreview.net",
-  "api2.openreview.net",
-  "github.com",
-  "raw.githubusercontent.com",
-  "api.github.com",
-  "huggingface.co",
-];
-
 const S2 = "https://api.semanticscholar.org/graph/v1";
 const S2_FIELDS = "title,year,authors.name,externalIds,citationCount,openAccessPdf,abstract";
 const S2_REF_FIELDS = "references.title,references.year,references.externalIds,references.citationCount";
 const PACING_MS: Record<string, number> = { "arxiv.org": 3000, "export.arxiv.org": 3000, "api.semanticscholar.org": 1100 };
+/** The pace of a site the agent fetches that has none of its own above: polite, and far below the budget. */
+const FETCH_PACING_MS = 1000;
 
-/** One request at a time per host, spaced by that host's pacing. */
-const lanes = new Map<string, Promise<void>>();
-async function paced<T>(host: string, work: () => Promise<T>): Promise<T> {
-  const wait = PACING_MS[host] ?? 0;
-  const previous = lanes.get(host) ?? Promise.resolve();
-  let release!: () => void;
-  const mine = new Promise<void>((r) => (release = r));
-  lanes.set(host, previous.then(() => mine));
-  await previous;
-  try {
-    return await work();
-  } finally {
-    setTimeout(release, wait);
-  }
+type Pace = <T>(host: string, work: () => Promise<T>, fallbackMs?: number) => Promise<T>;
+
+/** One request at a time per host, spaced by that host's pacing (else `fallbackMs`). Each paper's
+ * session gets its own lanes, so they end with it. */
+export function pacer(): Pace {
+  const lanes = new Map<string, Promise<void>>();
+  return async (host, work, fallbackMs = 0) => {
+    const wait = PACING_MS[host] ?? fallbackMs;
+    const previous = lanes.get(host) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((r) => (release = r));
+    lanes.set(host, previous.then(() => mine));
+    await previous;
+    try {
+      return await work();
+    } finally {
+      setTimeout(release, wait);
+    }
+  };
 }
 
 async function withRetry<T>(attempt: () => Promise<T>, retries = 5): Promise<T> {
@@ -110,9 +114,9 @@ async function withRetry<T>(attempt: () => Promise<T>, retries = 5): Promise<T> 
 
 class RetryableError extends Error {}
 
-async function getJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
+async function getJson(pace: Pace, url: string, headers: Record<string, string> = {}): Promise<unknown> {
   const host = new URL(url).host;
-  return paced(host, () =>
+  return pace(host, () =>
     withRetry(async () => {
       // A request carrying a token refuses redirects, so the token never goes anywhere else.
       const carriesToken = Object.keys(headers).some((h) => h.toLowerCase() === "authorization");
@@ -135,23 +139,28 @@ export function buildHosts(cfg: HostConfig): Record<string, HostFn> {
   const litwatchHeaders: Record<string, string> = cfg.litwatchToken
     ? { authorization: `Bearer ${cfg.litwatchToken}` }
     : {};
+  const pace = pacer();
+  let fetches = 0;
   return {
     "store.search": async ([query, limit]) => {
       const n = Math.min(Math.max(Number(limit) || 10, 1), 50);
       const q = new URLSearchParams({ q: String(query), limit: String(n) });
-      const body = await getJson(`${cfg.litwatchUrl}/api/papers?${q}`, litwatchHeaders);
+      const body = await getJson(pace, `${cfg.litwatchUrl}/api/papers?${q}`, litwatchHeaders);
       if (!body || typeof body !== "object") throw new Error("litwatch's papers answer is not an object");
       return storeHits(body as Parameters<typeof storeHits>[0]).slice(0, n);
     },
     "s2.lookup": async ([q]) => {
       const text = String(q).trim();
       const id = s2Id(text);
-      if (id) return getJson(`${S2}/paper/${id}?fields=${S2_FIELDS},${S2_REF_FIELDS}`, s2Headers);
+      if (id) return getJson(pace, `${S2}/paper/${id}?fields=${S2_FIELDS},${S2_REF_FIELDS}`, s2Headers);
       const params = new URLSearchParams({ query: text, limit: "5", fields: S2_FIELDS });
-      const found = (await getJson(`${S2}/paper/search?${params}`, s2Headers)) as { data?: unknown[] };
+      const found = (await getJson(pace, `${S2}/paper/search?${params}`, s2Headers)) as { data?: unknown[] };
       return found.data ?? [];
     },
-    fetch: async ([url]) => fetchAllowed(String(url), cfg.maxFetchChars),
+    fetch: async ([url]) => {
+      if (++fetches > cfg.maxFetches) throw new Error(`the fetch budget of ${cfg.maxFetches} per paper is used up`);
+      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, pace });
+    },
   };
 }
 
@@ -164,36 +173,171 @@ export function s2Id(text: string): string | null {
   return null;
 }
 
-export async function fetchAllowed(url: string, maxChars: number): Promise<unknown> {
-  let parsed: URL;
+/** Whether an address is on the public internet: ipaddr.js's `unicast`, after unwrapping
+ * IPv4-mapped IPv6. Every other range is refused: private, loopback, link-local, unique-local,
+ * site-local, carrier-grade NAT, reserved, multicast, and the forms that embed an IPv4 address
+ * (NAT64, 6to4, Teredo). */
+export function isPublic(address: string): boolean {
   try {
-    parsed = new URL(url);
+    return ipaddr.process(address).range() === "unicast";
+  } catch {
+    return false;
+  }
+}
+
+type Resolve = (hostname: string, options: LookupOptions & { all: true }, cb: (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void) => void;
+type LookupCallback = (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void;
+
+/** A `lookup` for the socket that refuses a name unless every address it resolves to is public.
+ * It checks the addresses the connection then uses, so a name can't resolve one way for a check
+ * and another for the connection. */
+export function guardedLookup(publicOnly = isPublic, resolve: Resolve = dnsLookup as unknown as Resolve) {
+  return (hostname: string, options: LookupOptions, callback: LookupCallback): void => {
+    resolve(hostname, { ...options, all: true }, (err, addresses) => {
+      if (err) return callback(err, "");
+      const refused = addresses.find((a) => !publicOnly(a.address));
+      if (refused || addresses.length === 0)
+        return callback(new Error(`${hostname} resolves to ${refused?.address ?? "nothing"}, not a public address`), "");
+      if (options.all) callback(null, addresses);
+      else callback(null, addresses[0]!.address, addresses[0]!.family);
+    });
+  };
+}
+
+/** What lets a fetch through: the policy for literal addresses, and the dispatcher whose sockets
+ * resolve names through it. Tests build their own. */
+export interface Guard {
+  publicOnly: (address: string) => boolean;
+  dispatcher: Dispatcher;
+}
+
+let defaultGuard: Guard | undefined;
+const guard = (): Guard =>
+  (defaultGuard ??= { publicOnly: isPublic, dispatcher: new Agent({ connect: { lookup: guardedLookup() } }) });
+
+const MAX_HOPS = 5;
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+const USER_AGENT = "litwatch-deep (mailto:andrey24122004@gmail.com)";
+
+/** anonymous.4open.science builds its pages in the browser, and its `/r/` links answer 401 to a
+ * plain fetch; its JSON API serves the same repository: `files/` lists a folder, `file/<path>`
+ * returns a file. */
+export function rewriteAnonymous(url: URL): URL {
+  if (url.hostname !== "anonymous.4open.science") return url;
+  const m = /^\/r\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
+  if (!m) return url;
+  const decode = (s: string) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  };
+  const [id, rest = ""] = [decode(m[1]!), m[2] ?? ""];
+  const path = rest.split("/").filter(Boolean).map(decode);
+  const base = `${url.origin}/api/repo/${encodeURIComponent(id)}`;
+  if (path.length === 0) return new URL(`${base}/files/`);
+  if (rest.endsWith("/")) {
+    const listing = new URL(`${base}/files/`);
+    listing.searchParams.set("path", path.join("/"));
+    return listing;
+  }
+  return new URL(`${base}/file/${path.map(encodeURIComponent).join("/")}`);
+}
+
+/** A URL's host as an address when it is one: WHATWG URL keeps IPv6's brackets, which `isIP` reads as a name. */
+const literal = (hostname: string): string | null => {
+  const bare = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  return isIP(bare) ? bare : null;
+};
+
+export interface FetchOptions {
+  maxChars: number;
+  maxBytes: number;
+  pace?: Pace;
+  guard?: Guard;
+}
+
+/** GET a public page: each hop's scheme and address checked (a literal here, a name where the
+ * socket resolves it), at most five redirects, the body read only up to `maxBytes`. */
+export async function fetchPublic(url: string, opts: FetchOptions): Promise<unknown> {
+  const { publicOnly, dispatcher } = opts.guard ?? guard();
+  const pace = opts.pace ?? pacer();
+  let current: URL;
+  try {
+    current = new URL(url);
   } catch {
     throw new Error(`not a URL: ${url}`);
   }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
-    throw new Error(`only http(s) URLs can be fetched`);
-  if (!ALLOWED_HOSTS.includes(parsed.hostname))
-    throw new Error(`${parsed.hostname} is not on the allowlist (${ALLOWED_HOSTS.join(", ")})`);
-  return paced(parsed.hostname, async () => {
-    const resp = await fetch(url, {
-      headers: { "user-agent": "litwatch-deep (mailto:andrey24122004@gmail.com)" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(30_000),
-    });
-    const contentType = resp.headers.get("content-type") ?? "";
-    if (contentType.includes("pdf")) {
-      return { status: resp.status, contentType, text: "", note: "PDF bodies are not fetched; use the arXiv HTML or abstract page" };
+  for (let hop = 0; ; hop++) {
+    if (current.protocol !== "https:" && current.protocol !== "http:") throw new Error(`only http(s) URLs can be fetched`);
+    current = rewriteAnonymous(current);
+    const address = literal(current.hostname);
+    if (address && !publicOnly(address)) throw new Error(`${current.hostname} is not a public address`);
+    const at = current;
+    const answer = await pace<{ next?: URL; page?: unknown }>(
+      at.hostname,
+      async () => {
+        const resp = await undiciFetch(at, {
+          headers: { "user-agent": USER_AGENT },
+          redirect: "manual",
+          dispatcher,
+          signal: AbortSignal.timeout(30_000),
+        }).catch((e: unknown) => {
+          // undici says only "fetch failed"; the agent needs the reason: a refused address, DNS, a timeout.
+          const cause = e instanceof Error && e.cause instanceof Error ? e.cause : e;
+          throw new Error(`${at.href}: ${cause instanceof Error ? cause.message : String(cause)}`);
+        });
+        const location = resp.headers.get("location");
+        if (REDIRECTS.has(resp.status) && location) {
+          await resp.body?.cancel();
+          return { next: new URL(location, at) };
+        }
+        const contentType = resp.headers.get("content-type") ?? "";
+        if (contentType.includes("pdf")) {
+          await resp.body?.cancel();
+          return { page: { status: resp.status, contentType, url: at.href, text: "", note: "PDF bodies are not fetched; use the arXiv HTML or abstract page" } };
+        }
+        const { raw, cut } = await readCapped(resp.body, opts.maxBytes);
+        const text = contentType.includes("html") ? htmlToText(raw) : raw;
+        return {
+          page: {
+            status: resp.status,
+            contentType,
+            url: at.href,
+            text: text.slice(0, opts.maxChars),
+            truncated: cut || text.length > opts.maxChars,
+          },
+        };
+      },
+      FETCH_PACING_MS,
+    );
+    if (!answer.next) return answer.page;
+    if (hop + 1 > MAX_HOPS) throw new Error(`${url}: more than ${MAX_HOPS} redirects`);
+    current = answer.next;
+  }
+}
+
+/** A body as text, read only up to `maxBytes`; the rest is cancelled unread. */
+async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<{ raw: string; cut: boolean }> {
+  if (!body) return { raw: "", cut: false };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let cut = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (size + value.byteLength > maxBytes) {
+      chunks.push(value.subarray(0, maxBytes - size));
+      cut = true;
+      await reader.cancel();
+      break;
     }
-    const raw = await resp.text();
-    const text = contentType.includes("html") ? htmlToText(raw) : raw;
-    return {
-      status: resp.status,
-      contentType,
-      text: text.slice(0, maxChars),
-      truncated: text.length > maxChars,
-    };
-  });
+    chunks.push(value);
+    size += value.byteLength;
+  }
+  return { raw: new TextDecoder().decode(Buffer.concat(chunks)), cut };
 }
 
 /** Readable text from HTML: scripts and styles dropped, block boundaries kept as newlines. */

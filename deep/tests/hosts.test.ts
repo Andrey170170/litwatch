@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { buildHosts, s2Id, storeHits } from "../src/hosts.ts";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { after, before, test } from "node:test";
+import { Agent } from "undici";
+import { buildHosts, fetchPublic, guardedLookup, isPublic, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -18,7 +21,7 @@ test("store.search asks v1's papers table with the read token and keeps the old 
     });
   }) as typeof fetch;
   try {
-    const hosts = buildHosts({ litwatchUrl: "http://litwatch.test", litwatchToken: "r3ad", maxFetchChars: 100 });
+    const hosts = buildHosts({ litwatchUrl: "http://litwatch.test", litwatchToken: "r3ad", maxFetchChars: 100, maxFetches: 60, maxFetchBytes: 1 << 20 });
     const hits = (await hosts["store.search"](["hidden steps", 3])) as ReturnType<typeof storeHits>;
     assert.deepEqual(asked, [{ url: "http://litwatch.test/api/papers?q=hidden+steps&limit=3", auth: "Bearer r3ad" }]);
     assert.deepEqual(
@@ -52,4 +55,155 @@ test("Semantic Scholar is asked by arXiv id for a modern or a legacy id, any ver
   assert.equal(s2Id("arXiv:cs/9901001"), "arXiv:cs/9901001");
   assert.equal(s2Id("math.AG/0601001v3"), "arXiv:math.AG/0601001");
   assert.equal(s2Id("cs/990100"), null);
+});
+
+test("only public unicast addresses are public, whatever form they come in", () => {
+  const refused = [
+    "10.0.0.1", "172.16.5.4", "192.168.0.1", "127.0.0.1", "0.0.0.0", "169.254.169.254", "100.64.0.1",
+    "192.0.0.8", "198.18.0.1", "224.0.0.1", "255.255.255.255",
+    "::1", "::", "fe80::1", "fc00::1", "fd12:3456::1", "fec0::1", "ff02::1",
+    "::ffff:192.168.0.1", "::ffff:127.0.0.1", "64:ff9b::c0a8:1", "2002:c0a8:101::1", "2001::1",
+    "not an address",
+  ];
+  for (const a of refused) assert.equal(isPublic(a), false, a);
+  for (const a of ["8.8.8.8", "140.82.112.3", "2606:4700::1111", "::ffff:8.8.8.8"]) assert.equal(isPublic(a), true, a);
+});
+
+const answers: Record<string, string[]> = {
+  "site.test": ["127.0.0.1"],
+  "private.test": ["192.168.0.1"],
+  "mixed.test": ["127.0.0.1", "10.0.0.7"],
+};
+type Lookup = Parameters<typeof guardedLookup>[1];
+const stubResolve: Lookup = (hostname, _options, cb) => {
+  const found = answers[hostname];
+  if (!found) return cb(Object.assign(new Error(`ENOTFOUND ${hostname}`), { code: "ENOTFOUND" }), []);
+  cb(null, found.map((address) => ({ address, family: address.includes(":") ? 6 : 4 })));
+};
+// The test server is on loopback, so the tests' policy lets 127.0.0.1 through and nothing else private.
+const testPublic = (a: string) => a === "127.0.0.1" || isPublic(a);
+
+test("a name resolving to any private address is refused before the socket connects", async () => {
+  const lookup = guardedLookup(testPublic, stubResolve);
+  const ask = (name: string, all: boolean) =>
+    new Promise<unknown>((resolve, reject) =>
+      lookup(name, { all }, (err, address) => (err ? reject(err) : resolve(address))),
+    );
+  assert.deepEqual(await ask("site.test", true), [{ address: "127.0.0.1", family: 4 }]);
+  assert.equal(await ask("site.test", false), "127.0.0.1");
+  await assert.rejects(ask("private.test", false), /resolves to 192\.168\.0\.1, not a public address/);
+  await assert.rejects(ask("mixed.test", true), /resolves to 10\.0\.0\.7/);
+  await assert.rejects(ask("nowhere.test", false), /ENOTFOUND/);
+});
+
+test("a private literal address is refused without a connection, however it is written", async () => {
+  const opts = { maxChars: 100, maxBytes: 1000 };
+  for (const url of [
+    "http://127.0.0.1:9/",
+    "http://[::1]:9/",
+    "http://[::ffff:192.168.0.1]/",
+    "http://0x7f.1/",
+    "http://2130706433/",
+    "http://10.0.0.1/",
+    "http://169.254.169.254/latest/meta-data/",
+  ]) {
+    await assert.rejects(fetchPublic(url, opts), /is not a public address/, url);
+  }
+  await assert.rejects(fetchPublic("file:///etc/passwd", opts), /only http\(s\) URLs/);
+  await assert.rejects(fetchPublic("not a url", opts), /not a URL/);
+});
+
+let server: Server;
+let port = 0;
+let bigFinished: boolean | undefined;
+before(async () => {
+  server = createServer((req, res) => {
+    const to = (location: string) => res.writeHead(302, { location }).end();
+    switch (req.url) {
+      case "/page":
+        return res.writeHead(200, { "content-type": "text/html" }).end("<p>Code</p><script>x()</script><p>here</p>");
+      case "/hop":
+        return to(`http://site.test:${port}/page`);
+      case "/to-private-name":
+        return to(`http://private.test:${port}/page`);
+      case "/to-private-literal":
+        return to("http://10.0.0.1/");
+      case "/to-file":
+        return to("file:///etc/passwd");
+      case "/loop":
+        return to("/loop");
+      case "/big": {
+        res.writeHead(200, { "content-type": "text/plain" });
+        const chunk = "x".repeat(64 * 1024);
+        let sent = 0;
+        res.on("close", () => (bigFinished = res.writableFinished));
+        const pump = () => {
+          while (sent < 5 * 1024 * 1024) {
+            sent += chunk.length;
+            if (!res.write(chunk)) return res.once("drain", pump);
+          }
+          res.end();
+        };
+        return pump();
+      }
+      default:
+        return res.writeHead(404).end("missing");
+    }
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  port = (server.address() as AddressInfo).port;
+});
+after(() => server.close());
+
+const local = {
+  maxChars: 1000,
+  maxBytes: 2 * 1024 * 1024,
+  pace: <T>(_host: string, work: () => Promise<T>) => work(),
+  guard: { publicOnly: testPublic, dispatcher: new Agent({ connect: { lookup: guardedLookup(testPublic, stubResolve) } }) },
+};
+
+test("a public page is fetched as text through redirects, with the URL it ended at", async () => {
+  const page = (await fetchPublic(`http://site.test:${port}/hop`, local)) as Record<string, unknown>;
+  assert.equal(page.status, 200);
+  assert.equal(page.url, `http://site.test:${port}/page`);
+  assert.equal(page.text, "Code\nhere");
+  assert.equal(page.truncated, false);
+  const missing = (await fetchPublic(`http://site.test:${port}/nothing`, local)) as Record<string, unknown>;
+  assert.equal(missing.status, 404, "an HTTP status is a value for the agent, not an error");
+});
+
+test("every redirect hop is checked again", async () => {
+  await assert.rejects(fetchPublic(`http://site.test:${port}/to-private-name`, local), /private\.test resolves to 192\.168\.0\.1/);
+  await assert.rejects(fetchPublic(`http://site.test:${port}/to-private-literal`, local), /10\.0\.0\.1 is not a public address/);
+  await assert.rejects(fetchPublic(`http://site.test:${port}/to-file`, local), /only http\(s\) URLs/);
+  await assert.rejects(fetchPublic(`http://site.test:${port}/loop`, local), /more than 5 redirects/);
+});
+
+test("a body is read only up to the byte cap", async () => {
+  bigFinished = undefined;
+  const page = (await fetchPublic(`http://site.test:${port}/big`, { ...local, maxChars: 3 * 1024 * 1024 })) as Record<string, unknown>;
+  assert.equal((page.text as string).length, 2 * 1024 * 1024);
+  assert.equal(page.truncated, true);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(bigFinished, false, "the server never got to send the whole 5 MB");
+});
+
+test("a paper's session stops fetching once its budget is used", async () => {
+  const hosts = buildHosts({ litwatchUrl: "http://litwatch.test", maxFetchChars: 100, maxFetches: 2, maxFetchBytes: 1000 });
+  for (let i = 0; i < 2; i++) await assert.rejects(hosts.fetch!(["http://10.0.0.1/"]), /not a public address/);
+  await assert.rejects(hosts.fetch!(["https://example.com/"]), /fetch budget of 2 per paper is used up/);
+});
+
+test("anonymous.4open.science links go to its JSON API", () => {
+  const r = (u: string) => rewriteAnonymous(new URL(u)).href;
+  const api = "https://anonymous.4open.science/api/repo";
+  assert.equal(r("https://anonymous.4open.science/r/cot-monitorability"), `${api}/cot-monitorability/files/`);
+  assert.equal(r("https://anonymous.4open.science/r/cot-monitorability/"), `${api}/cot-monitorability/files/`);
+  assert.equal(r("https://anonymous.4open.science/r/cot-monitorability/src/run.py"), `${api}/cot-monitorability/file/src/run.py`);
+  assert.equal(r("https://anonymous.4open.science/r/x-1/a%20b/c&d%25e.py"), `${api}/x-1/file/a%20b/c%26d%25e.py`);
+  const listing = rewriteAnonymous(new URL("https://anonymous.4open.science/r/x-1/data&more%25/"));
+  assert.equal(listing.pathname, "/api/repo/x-1/files/");
+  assert.equal(listing.searchParams.get("path"), "data&more%");
+  assert.equal(r("https://anonymous.4open.science/api/repo/x/files/"), "https://anonymous.4open.science/api/repo/x/files/");
+  assert.equal(r("https://github.com/r/x"), "https://github.com/r/x");
 });

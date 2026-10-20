@@ -29,10 +29,12 @@ const config = {
     litwatchToken: secret("LITWATCH_TOKEN"),
     s2ApiKey: secret("S2_API_KEY"),
     maxFetchChars: Number(env("DEEP_MAX_FETCH_CHARS", "200000")),
+    maxFetches: Number(env("DEEP_MAX_FETCHES", "60")),
+    maxFetchBytes: Number(env("DEEP_MAX_FETCH_MB", "2")) * 1024 * 1024,
   } satisfies HostConfig,
   run: {
     model: env("DEEP_MODEL", "gpt-6.1-sol"),
-    effort: env("DEEP_EFFORT", "low") as RunOptions["effort"],
+    effort: env("DEEP_EFFORT", "medium") as RunOptions["effort"],
     maxCells: Number(env("DEEP_MAX_CELLS", "40")),
     cellTimeoutMs: Number(env("DEEP_CELL_TIMEOUT_S", "90")) * 1000,
     wallClockMs: Number(env("DEEP_WALL_CLOCK_MIN", "30")) * 60_000,

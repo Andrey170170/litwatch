@@ -53,8 +53,11 @@ null if none graded it), and reason (litwatch's Gist of the paper, if it wrote o
 - await s2.lookup(idOrQuery): Semantic Scholar. An arXiv id, DOI, or S2 id returns the paper with its \
 references; any other text searches by title and returns candidates. Unauthenticated access is \
 rate-limited, so a lookup can fail; the paper's own bibliography is the primary source for prior work
-- await fetch(url): GET on arxiv.org, semanticscholar.org, openreview.net, github.com, huggingface.co; \
-HTML comes back as text ({status, contentType, text})
+- await fetch(url): GET on any public site (private and local addresses are refused), following redirects; \
+HTML comes back as text ({status, contentType, url, text, truncated}). Pages built by JavaScript can come back \
+nearly empty: prefer a site's raw files or API (raw.githubusercontent.com, api.github.com, the Hugging Face API). \
+anonymous.4open.science links are read through its API: /r/<id> lists the repository, /r/<id>/<path> returns a \
+file. A paper's fetches have a budget far above what a card needs
 - await submit(result): validates the result and returns {ok: true} or {ok: false, errors: [...]}. \
 Fix the errors and submit again.
 
