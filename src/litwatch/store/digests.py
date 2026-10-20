@@ -79,9 +79,10 @@ _SHOWN_UPDATED = f"""EXISTS (
       AND d.state IN {_PUBLISHED} AND dp.role = 'updated')"""
 
 # Paper `p`'s newest version (`nv`) when it is after the first and its submission time is
-# known: the version an old paper comes back with as updated, and when it was submitted.
+# known: the version an old paper comes back with as updated, and when it was submitted (NULL
+# without one, which only a weekly's recap of its dailies admits).
 _NEWEST = """
-    JOIN LATERAL (
+    LEFT JOIN LATERAL (
         SELECT (e->>'date')::timestamptz AS submitted
         FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.version_history) = 'array'
                                        THEN p.version_history ELSE '[]' END) e
@@ -321,52 +322,69 @@ async def due_updated(
     within `DUE_WINDOW` before `last` (the digest's day, or its week's Sunday) and more than
     `DUE_WINDOW` after the paper's first; eligible there now at a higher bar than a new paper
     (for Focus, effective Fit central or related; for Area and Field, graded must read, an
-    Area's after its Weight re-check, as a pick); never shown as new by a published digest of
-    the topic, nor as updated by one of `period`. A Focus or Area weekly gives its `week`'s
-    Monday: it takes the versions listed that week, and any its published dailies, up to the
-    Monday after, listed as updated."""
+    Area's after its Weight re-check, as a pick, and by the pipeline on its current text, so
+    neither an older text's grade nor the owner's word makes it due); never shown as new by a
+    published digest of the topic, nor as updated by one of `period`. A Focus or Area weekly
+    gives its `week`'s Monday: it takes the versions listed that week, and recaps, at the
+    version they listed, the papers its published dailies listed as updated, up to the Monday
+    after, still eligible, whatever version has come since."""
     first = last - DUE_WINDOW
+    recapped = {} if week is None else await _listed_updated(conn, topic.slug, week)
     # A listing day comes one to four days after its submission's US Eastern date
     # (`listing_day`): these bounds hold every submission that can list in the window.
-    which = f"""nv.submitted >= %(since)s AND nv.submitted < %(until)s AND p.announced < %(old)s
+    which = f"""((nv.submitted >= %(since)s AND nv.submitted < %(until)s
+                  AND p.announced < %(old)s) OR p.id = ANY(%(recapped)s))
         AND NOT {_SHOWN_NEW} AND NOT {_SHOWN_UPDATED}"""
     params = _params(tree, topic, runs) | {
         "period": period.value,
         "since": datetime.combine(first - timedelta(days=5), time(), UTC),
         "until": datetime.combine(last + timedelta(days=1), time(), UTC),
         "old": first,
+        "recapped": list(recapped),
     }
     if topic.depth == Depth.FOCUS:
         query = _focus(which, updated=True)
     else:
-        gates = f"AND {_GRADED} AND s.grade = 'must_read'"
+        # The grade shown is must read, and the latest verdict on the current text where it is
+        # graded has the Fit it shows: the pipeline's, not an older text's or the owner's word.
+        gates = f"""AND {_GRADED} AND s.grade = 'must_read' AND (
+            SELECT v.fit FROM verdicts v
+            WHERE v.paper_id = p.id AND v.topic = g.topic AND v.paper_revision = p.revision
+            ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) = g.fit"""
         if topic.depth == Depth.AREA:
             gates += f" AND NOT {_RECHECKING}"
         query = _subtree(which, gates, updated=True)
-    recapped = set() if week is None else await _listed_updated(conn, topic.slug, week)
     found = []
     for row in await (await conn.execute(query, params)).fetchall():
-        day = listing_day(row.pop("submitted"))
-        if not first <= day <= last or row["announced"] >= day - DUE_WINDOW:
+        submitted = row.pop("submitted")
+        if row["paper_id"] in recapped:
+            found.append(Due(**row | {"version": recapped[row["paper_id"]]}))
             continue
-        if week is None or day >= week or row["paper_id"] in recapped:
+        day = listing_day(submitted) if submitted is not None else None
+        if day is None or not first <= day <= last or row["announced"] >= day - DUE_WINDOW:
+            continue
+        if week is None or day >= week:
             found.append(Due(**row))
     return found
 
 
-async def _listed_updated(conn: psycopg.AsyncConnection, topic: str, monday: date) -> set[str]:
-    """The papers the topic's published daily digests listed as updated up to the Monday after
-    the week from `monday` (written the same night, before the weekly)."""
+async def _listed_updated(
+    conn: psycopg.AsyncConnection, topic: str, monday: date
+) -> dict[str, int]:
+    """The papers the topic's published daily digests listed as updated, each with the version
+    listed, from three weeks before the week from `monday` to the Monday after (written the
+    same night, before the weekly)."""
     rows = await (
         await conn.execute(
-            f"""SELECT DISTINCT dp.paper_id FROM digest_papers dp
+            f"""SELECT dp.paper_id, max(dp.version) AS version FROM digest_papers dp
                 JOIN digests d ON d.id = dp.digest_id
                 WHERE d.topic = %s AND d.period = 'day' AND d.state IN {_PUBLISHED}
-                  AND d.day <= %s AND dp.role = 'updated'""",
-            (topic, monday + timedelta(days=7)),
+                  AND d.day BETWEEN %s AND %s AND dp.role = 'updated'
+                GROUP BY dp.paper_id""",
+            (topic, monday + timedelta(days=6) - DUE_WINDOW, monday + timedelta(days=7)),
         )
     ).fetchall()
-    return {r["paper_id"] for r in rows}
+    return {r["paper_id"]: r["version"] for r in rows}
 
 
 async def earlier_central(
