@@ -47,11 +47,42 @@ due for the topic during its week, and any paper a published daily digest covere
 daily digest written again after its week's weekly, the days before a recovery window's first Monday), so none is
 left out of every weekly; for a Field topic, which has no daily digest, writing the weekly is what clears
 them. The owner's word never makes a paper due: the owner already knows it. A paper announced more than three weeks
-before a digest's day is never due for it: late papers arrive within days, and one the collection gains much later (a
+before a digest's day is never due for it as new (it can come back once as updated, below): late papers arrive within days, and one the collection gains much later (a
 re-run after a topic edit, a reported miss, an old paper read on demand) was never news. A paper's day is the arXiv
 listing that first showed it, from its first version's submission time (before 14:00 US Eastern on a weekday, the
 next weekday's listing). arXiv's holidays are not known: the papers a holiday delays keep the holiday's date and
 are in the next day's digests.
+
+## Updated papers
+
+A new arXiv version of an old paper brings it back once, as an **updated** paper, in a folded list of its own beside
+the digest's papers (decisions 77–79). Intake takes in every changed record in its categories, so most such papers
+are ones litwatch first sees through their update; every new version is still classified and graded as before, and
+this only chooses what a digest lists. A paper is updated on the day of a new version (any version after the first,
+whatever it changed) when it was first announced more than three weeks before that day. A version's day is the
+listing that first showed it, by the same rule as a first version's, from that version's submission time in the
+version history; a version without one has no day and brings nothing back.
+
+An updated paper is due for a topic while:
+
+- it is eligible there on its current text: for Focus, effective Fit central or related; for Area and Field, a member
+  of the subtree that grading has finished for with grade must read (for Area, once its Weight re-check is done or
+  terminal, as for a pick). A rewritten version is graded again first, so the paper waits for that grade;
+- its version's day is within three weeks of the digest's day;
+- no published digest of the topic, daily or weekly, has shown it as new;
+- no published digest of the topic of the same period has shown it as updated.
+
+So an old paper is listed as updated once in a topic's dailies and once in its weeklies, the weekly recapping the
+daily as it does for new papers; a paper once shown as new never comes back, and neither does a paper's later
+version once it has been shown as updated. A daily digest covers the updated papers due when it is written. A Focus or
+Area weekly covers the ones whose version's day falls in its week, and any a published daily (written or "Nothing
+new") listed as updated that no weekly has; a Field weekly, the topic's only digest, covers every one due on its
+Sunday, so one graded after its week's weekly is in the next. A paper first announced within three weeks is never
+updated: its new versions show on its page.
+
+Updated papers are not given to the writer, add no call and are not in the digest's text, its count of new papers, its
+best rarity, its picks or a Focus weekly's earlier papers. A day with updated papers and nothing else due is a
+"Nothing new" digest with its updated papers.
 
 ## Quiet days
 
@@ -106,9 +137,11 @@ configured timezone.
 
 A digest is **published** when it is written or says "Nothing new". A published digest is final: a re-run of the
 same day does not rewrite it, and papers that become due afterwards go into the next one. Each of its papers is frozen
-as it was shown: paper revision, title, Gist, effective Fit, grade, rarity, and its role (pick, listed or mentioned). The one
+as it was shown: paper revision, title, Gist, effective Fit, grade, rarity, and its role (pick, listed, mentioned or
+updated; an updated paper also the arXiv version it came back with). The one
 live element is the set-aside mark: when the owner later sets a paper below relevant, it stays in the digest, shown
-struck through. A paper is announced as new in a topic's daily digests once (first v1, decisions 15 and 19).
+struck through. A paper is announced as new in a topic's daily digests once (first v1, decisions 15 and 19); an
+updated paper is listed once per period, and never one shown as new (above).
 
 A digest whose writer call fails, or returns text that does not parse, is **failed**, not published: the day shows
 one line saying that topic's digest could not be written, it is listed on Quality, and the next run writes it again
@@ -120,11 +153,12 @@ The detail-level ladder for digests, and the order rules the mechanics must supp
 [`DESIGN.md`](DESIGN.md)'s.
 
 1. **History**: days, newest first, as a list or a month calendar. Each day shows its topics' digest **Marks**: badge,
-   how many papers, and the colour of the best of them ("4 new · 1 must read", "Nothing new"); the calendar shows the
+   how many papers, and the colour of the best of them ("4 new · 1 must read", "Nothing new"), and how many updated
+   papers it has ("· 3 updated"); the calendar shows the
    colours alone where it is too narrow for the rest.
 2. **A day**: each topic's digest **Gist**, followed by the Marks of its picks (up to 3) and a small count of the rest.
    **A week** is the same for the week's weekly digests.
-3. **A digest**: its full text, its picks and listed papers at their Mark and Gist.
+3. **A digest**: its full text, its picks and listed papers at their Mark and Gist, then its updated papers, folded.
 4. **A paper**: the paper page, from its Brief down.
 
 The tab opens on today. Topics keep **one fixed order** everywhere (Focus first, then Area, then Field, each in the
