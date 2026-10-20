@@ -35,7 +35,8 @@ Separately, Needs you's groups fold. A group of 66 Focus splits filled the phone
   - **Daily:** the row is in the topic's daily covering the version's day. If it arrives late, it is in the next daily, which shows its version's day.
   - **Weekly:** the row is also in that week's weekly.
   - **Field:** a Field topic has only weeklies, so its rows appear only there.
-  - **"Once":** it holds per topic for each period, daily and weekly, just as "announced once" does today. The due window is three weeks from the version's day, matching the window for new papers.
+  - **"Once":** an updated row clears its own period only, so a daily's row is recapped in its week's weekly, as for new papers. A paper shown as new in either period never comes back as updated (D2). The due window is three weeks from the version's day, matching the window for new papers.
+  - **Field weeklies** cover every eligible updated paper due on their Sunday (the three weeks ending then), so one graded after its week's weekly is in the next. A Focus or Area weekly covers its week's updates and any a published daily listed (written or "Nothing new") that no weekly has.
 - **A paper waits for its grade.** A rewritten version is classified and graded again first. Its row comes only once the paper is eligible on its current text. Area keeps the Weight re-check gate it has for picks. A version with the same text needs no new grading.
 - **Updated papers are a fourth role, `updated`, in `digest_papers`.** Each row is frozen as shown, like the other roles, plus the arXiv version it came back with. The role stays out of everything the existing roles feed:
   - the writer's input and its call;
@@ -46,7 +47,7 @@ Separately, Needs you's groups fold. A group of 66 Focus splits filled the phone
   - the voice check's titles.
 - **The row.** Each row shows the paper row's stripe, glow and title, with "v3 · first out May 2026" in place of its date, and no Gist (the owner's note: there are too many for Gists). The list sits under the papers, folded to "Updated · 3". It opens the way the Acknowledged section on Needs you does.
 - **A day with only updated papers** publishes the "Nothing new" digest it would publish anyway, with the folded list under it. It still makes no model call. The digest card adds "· 3 updated" to its count line.
-- **Fix an intake bug first.** When the arXivRaw version list fails to load (`versions_error`), the upsert's `announced = coalesce(EXCLUDED.announced, papers.announced)` can move a paper's first day to a later version's. That would make an old paper due again as new. `announced` keeps the earliest value it has had, and data.md now says it never moves later.
+- **Fix an intake bug first.** When the arXivRaw version list fails to load (`versions_error`), `announced()` falls back to `published`, which can be `<created>`, a later version's date, and the upsert's `announced = coalesce(EXCLUDED.announced, papers.announced)` replaces the known first day with it. That would make an old paper due again as new. A day read from the first version's submission time is never replaced by one guessed from other metadata; the version history may still correct a guessed day either way (a Monday `<created>` reads as Tuesday's listing, a Monday-afternoon v1 is Wednesday's). data.md says so.
 - **Needs you's folds** reuse the existing fold pattern (the Acknowledged section's `tpfold` and the shelves' session memory, `remember.ts`).
 
 ## Decisions
@@ -67,7 +68,7 @@ The alternatives:
 
 A relevant Area or Field paper that only got updated stays on its topic page (decision 78).
 
-**D2: whether an appearance as new uses up the "once". Chosen: yes, one appearance per topic in all.** A paper that a digest of the topic already showed, new or updated, never comes back, and neither do its later versions. This matches "doesn't make sense to highlight one multiple times". In practice almost every updated row is a paper the owner never saw. The alternative was one updated row besides a paper's new appearance, for example a camera-ready version months later (decision 79).
+**D2: whether an appearance as new uses up the "once". Chosen: yes, one appearance per topic in all.** A paper that a digest of the topic showed as new never comes back as updated. One listed as updated comes back in no later daily, its week's weekly recapping it as weeklies do for new papers, and its later versions never bring it back. This matches "doesn't make sense to highlight one multiple times". In practice almost every updated row is a paper the owner never saw. The alternative was one updated row besides a paper's new appearance, for example a camera-ready version months later (decision 79).
 
 **D3: how Needs you's groups fold. Chosen: the head folds it; a group of more than ten starts folded; the choice is remembered for the session.**
 - Each group's head ("FOCUS SPLITS · 66") folds or opens it, and Acknowledge stays on the head.
@@ -101,15 +102,15 @@ By the method in [`docs/agents/verification.md`](../agents/verification.md).
 - **V1. Which papers come back, and where.** An eligible old paper's new version gives one updated row, on its version's day, in the daily and in the week's weekly. For Field it is in the weekly only. These give no row:
   - a recent paper's new version;
   - a later version of a paper already shown;
-  - a paper shown before as new;
+  - a paper shown before as new, in a daily or a weekly;
   - an ineligible paper (Focus adjacent; Area or Field below must read);
   - a version without a submission time.
 
-  A rewritten version waits for its grade, and Area waits for the re-check. *Evidence:* pytest on real Postgres, each test failing before the change.
+  A rewritten version waits for its grade, and Area waits for the re-check. A daily with only updated papers ("Nothing new") is recapped in its weekly; a Field update graded after its week's weekly is in the next one. *Evidence:* pytest on real Postgres, each test failing before the change.
 - **V2. Nothing else changes.** No model call is added, and the text input, counts, best rarity, picks, earlier papers, `as_shown` and `_COVERED` are unchanged by updated rows. *Evidence:*
   - pytest, with the fake gateway counting calls;
   - digests written for one recent day on a fresh copy of production (`scripts/refresh-sandbox.sh --production`). It shows the same calls and the same writer input as without the change, and reports the updated rows per topic.
-- **V3. The intake fix holds.** A failed version list no longer moves a paper's `announced`. *Evidence:* a pytest that fails before the fix.
+- **V3. The intake fix holds.** A failed version list no longer replaces a day read from the version history; a later version history still corrects a guessed day, in either direction. *Evidence:* pytests, the first failing before the fix.
 - **V4. Needs you folds as D3 says.**
   - A group of more than ten starts folded and a smaller one open.
   - The head folds and opens the group, and the choice holds for the session.

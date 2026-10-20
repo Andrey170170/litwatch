@@ -227,12 +227,14 @@ record in its categories, about 1,100 old papers a week with a new version, and 
 digest lists only papers first announced within three weeks.
 
 77. **An old paper's new version brings it back once**, as updated, in a folded list under the digest's papers, with
-    no model call and no place in the text, counts or picks. A digest is about recent work; an old paper worth a
+    no model call and no place in the text, the count of new papers, the best rarity or picks; the card counts it
+    apart ("· 3 updated"). A digest is about recent work; an old paper worth a
     look is worth one line, not a second announcement.
 78. **Only papers worth a look come back**: Focus central or related, Area and Field must read. With every graded
     member, a Field weekly's list would run to about 200 rows.
-79. **Once per topic in all**: a paper a digest of the topic already showed, new or updated, never comes back, and
-    neither do its later versions.
+79. **Once per topic in all**: a paper a digest of the topic showed as new never comes back as updated, and one
+    listed as updated comes back in no later daily, its week's weekly recapping it as for new papers; later versions
+    never bring it back.
 
 ## Open
 

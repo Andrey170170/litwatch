@@ -82,9 +82,12 @@ evaluation calls the same functions and writes only to evaluation tables.
 - What a digest still has to cover is not stored: a paper is due for a topic while it is eligible there, was announced
   within three weeks of the digest's day, and is in no published digest of the topic that clears it (a daily one for
   Focus and Area, a weekly one for Field), found from the database when a digest is written
-  ([digests.md](digests.md)). `papers.announced` is the date of the arXiv listing that first showed the paper; it
-  never moves later. An updated paper (digests.md, updated papers) is found the same way, its version's day read from
-  `papers.version_history`.
+  ([digests.md](digests.md)). `papers.announced` is the date of the arXiv listing that first showed the paper. A day
+  read from the first version's submission time in the version history is never replaced by one guessed from other
+  metadata (a `<created>` date, when the version list failed to load); the version history may correct a guessed day
+  either way. An updated paper (digests.md, updated papers) is not stored as due either: it is found from
+  `papers.announced` (first announced more than three weeks before its version's day), its newest version's day read
+  from `papers.version_history`, and the `digest_papers` rows of the topic's published digests by role and period.
 - `digests` (topic, period day | week, day (a week's Monday), state written | nothing_new | failed, gist, text, counts,
   best rarity, error, model (for a failed one, the writer model its attempt started from: the next attempt starts one
   further down, models.md, roles), acknowledged at (a failed one's), run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
