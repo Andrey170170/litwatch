@@ -12,8 +12,6 @@ BEFORE_THE_RULE = {
     "api/integrations.py:search_outside": 1,
     "api/reading.py:_bibtex": 1,
     "events/__init__.py:emit": 1,
-    "events/dispatch.py:deliver": 2,
-    "events/dispatch.py:idle": 2,
     "feedback/calibrate.py:_add": 1,
     "feedback/calibrate.py:_all": 1,
     "feedback/calibrate.py:answer": 4,

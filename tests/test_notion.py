@@ -632,7 +632,7 @@ async def test_a_setup_while_another_holds_the_lock_makes_nothing(world):
     conn, fake = world, FakeNotion(PARENT)
     n = notion(fake)
     async with await store.connect(conn.test_dsn, conn.test_schema) as other:
-        key = (dispatch.DISPATCH_LOCK, n.name)
+        key = (outbox.DISPATCH_LOCK, n.name)
         await other.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", key)
         assert not await start(conn, n)
         assert fake.requests == []
