@@ -66,9 +66,9 @@ owner's dotfiles.
 - **Reading.** The text is `archive.text.read_text`: the LaTeX first, the PDF's text when there is none or the
   paper's latest full-text pass has "Use the PDF" (`fulltext_passes.use_pdf`, a new by-paper query in
   `store.fulltext`). It is untrimmed: the Brief's bibliography cut and 160,000-character limit stay in
-  `fulltext/brief.py`. The outline comes from LaTeX's sectioning commands; a PDF's text is outlined by page, so the
-  PDF reading keeps each page's span (today `_pdf_text` joins the non-empty pages into one string, and an empty page
-  must still count). One call
+  `fulltext/brief.py`. The outline comes from LaTeX's sectioning commands (and its `thebibliography` block, so the
+  references are one entry); a PDF's text is outlined by page, so the PDF reading keeps each page's span
+  (`archive.text.read_pdf`, an empty page an empty span). One call
   returns at most 40,000 characters and says the offset to continue from: at LaTeX's density (about 2.2 characters a
   token, the budget in `fulltext/brief.py`) that is about 18k tokens, under Claude Code's cap with room for the
   answer's own lines.

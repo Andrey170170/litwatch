@@ -860,6 +860,18 @@ async def text_pass_for(conn: psycopg.AsyncConnection, paper_id: str) -> dict[st
     ).fetchone()
 
 
+async def uses_pdf(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Whether the paper's latest full-text pass, of any kind, has the owner's "Use the PDF":
+    its text is then its PDF's, not its LaTeX's."""
+    row = await (
+        await conn.execute(
+            "SELECT use_pdf FROM fulltext_passes WHERE paper_id = %s ORDER BY id DESC LIMIT 1",
+            (paper_id,),
+        )
+    ).fetchone()
+    return row is not None and row["use_pdf"]
+
+
 async def count_by_state(conn: psycopg.AsyncConnection) -> dict[tuple[str, str], int]:
     """Passes not done, by (kind, state), every pair present: a drained queue reads 0."""
     rows = await (

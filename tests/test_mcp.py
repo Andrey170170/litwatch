@@ -30,12 +30,17 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
 from tests.fakes_http import FakeArchive, mock
+from tests.test_archive_text import a_pdf
 from tests.test_reading import P, Q, analyse, classify, grade
 
 TOKEN, READ_TOKEN, MCP_TOKEN = "s3cret", "r3ad", "m-token"
 HOST = "litwatch.andrei-homelab.com"  # production's name, which the SDK's host check must let in
 AUTH = {"authorization": f"Bearer {TOKEN}"}
 ONLY = paper("2610.07777", title="Hidden steps in the archive", authors=["Ada Lovelace"])
+SEVEN = [
+    "get_paper", "list_digests", "paper_outline", "read_digest", "read_paper", "search_papers",
+    "view_pdf_page",
+]  # fmt: skip
 INIT = {
     "protocolVersion": "2025-06-18",
     "capabilities": {},
@@ -141,9 +146,7 @@ async def test_only_the_mcp_token_opens_mcp_and_it_opens_nothing_else(conn):
         # Stateless: no stream to open, no session to end.
         assert (await http.get("/mcp", headers=mcp)).status_code == 405
         tools = (await rpc(http, "tools/list")).json()["result"]["tools"]
-    assert sorted(t["name"] for t in tools) == [
-        "get_paper", "list_digests", "read_digest", "search_papers",
-    ]  # fmt: skip
+    assert sorted(t["name"] for t in tools) == SEVEN
     assert all(t["annotations"]["readOnlyHint"] for t in tools)
 
 
@@ -183,9 +186,8 @@ async def test_the_sdks_own_client_initializes_lists_and_calls_through_create_ap
             tools = await session.list_tools()
             found = await session.call_tool("search_papers", {"query": "hide"})
     assert opened.server_info.name == "litwatch" and "before the web" in opened.instructions
-    assert sorted(t.name for t in tools.tools) == [
-        "get_paper", "list_digests", "read_digest", "search_papers",
-    ]  # fmt: skip
+    assert sorted(t.name for t in tools.tools) == SEVEN
+    assert "call paper_outline first" in opened.instructions
     assert not found.is_error and ids(found.content[0].text) == [P.id]
 
 
@@ -312,7 +314,11 @@ def _shown(p, role: DigestRole, *, why=None, version=None, fit="central", grade=
 
 
 async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, shelves):
+    """V3, for all seven tools: the only effect is the archive's, asked for a paper's files."""
     fake, *_ = shelves
+    fake.texts[P.id] = (None, "\\section{Probes} Hidden steps.")  # its historical LaTeX
+    fake.records[ONLY.id]["item"]["version"] = 1
+    fake.pdfs[ONLY.id] = a_pdf("Figure 1: Hidden steps.")
     digest = await _digest(
         conn, FAITH, DigestPeriod.DAY, date(2026, 10, 14), [_shown(P, DigestRole.PICK)]
     )
@@ -329,10 +335,23 @@ async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, s
         await ok(http, "get_paper", paper_id=ONLY.id)  # only the archive's
         await ok(http, "list_digests", since="2026-10-01", until="2026-10-20")
         await ok(http, "read_digest", digest_id=digest)
+        found = len(seen)
+        assert "1. Probes" in await ok(http, "paper_outline", paper_id=P.id)
+        assert "Hidden steps." in await ok(http, "read_paper", paper_id=P.id, section=1)
+        assert "Hidden steps." in await ok(http, "read_paper", paper_id=ONLY.id)  # its PDF's
+        arguments = {"paper_id": ONLY.id, "page": 1}
+        shown = await rpc(http, "tools/call", {"name": "view_pdf_page", "arguments": arguments})
+        assert not shown.json()["result"]["isError"]
     assert await (await conn.execute(outbox)).fetchone() == before
     assert await papers_store.get(conn, ONLY.id) is None
     assert ("GET", "/v1/search") in seen and ("GET", f"/v1/papers/{ONLY.id}") in seen
-    assert {method for method, _ in seen} == {"GET"}  # no job asked for, no record written
+    assert {method for method, _ in seen[:found]} == {"GET"}  # the first four only read
+    # Reading asks the archive for a paper's files, its one effect; no record is written.
+    asked = [path for method, path in seen if method != "GET"]
+    assert asked and set(asked) == {"/v1/jobs"}
+    assert {(j["paper_id"], j["kind"], j["priority"]) for j in fake.jobs} == {
+        (ONLY.id, "pdf", 0), (ONLY.id, "source", 0),
+    }  # fmt: skip
 
 
 # -- V4: a paper and a digest in full --------------------------------------------------------------

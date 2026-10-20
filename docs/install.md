@@ -332,8 +332,10 @@ Notion export.
 `secret_env` (the variable holding the signing secret), `timeout`. A client that polls reads `GET /api/events`
 instead. See [`docs/integrations.md`](integrations.md).
 
-**The MCP server.** Research agents (Claude Code, Codex) search the archive and the collection and read what
-litwatch made of a paper or wrote in a digest, read-only, at `/mcp` (streamable HTTP, plain JSON answers). Set
+**The MCP server.** Research agents (Claude Code, Codex) search the archive and the collection, read what
+litwatch made of a paper or wrote in a digest, and read a paper's text and see its PDF's pages, read-only, at `/mcp`
+(streamable HTTP, plain JSON answers). A paper the archive has not fetched is asked for at urgent priority, as opening
+its PDF in the web app does. Set
 `LITWATCH_MCP_TOKEN` in `.env` and `docker compose up -d litwatch`; agents send it as `Authorization: Bearer …`, and
 neither the web app's token nor the read token opens it. Behind a proxy, add the host name it is reached by to
 `[mcp] allowed_hosts` in `litwatch.toml` (commented there): any other `Host` gets 421. Check, on the host:
@@ -345,7 +347,8 @@ curl -s -H "Authorization: Bearer $M" -H 'Accept: application/json, text/event-s
   http://127.0.0.1:8080/mcp
 ```
 
-answers JSON listing `search_papers`, `get_paper`, `list_digests` and `read_digest`.
+answers JSON listing `search_papers`, `get_paper`, `list_digests`, `read_digest`, `paper_outline`, `read_paper`
+and `view_pdf_page`.
 
 **Your own integration.** A Python module named with `use`; [`docs/integrations.md`](integrations.md) is the guide.
 
