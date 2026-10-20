@@ -225,9 +225,9 @@ async def test_a_must_read_with_a_deep_card_gets_every_column_and_its_deep_read(
         "id": db.guide_page
     }
     headings = [plain(b["heading_2"]["rich_text"]) for b in body if b["type"] == "heading_2"]
-    assert headings == ["TL;DR", "Summary", "Deep read"]
-    summary = [plain(b["paragraph"]["rich_text"]) for b in body if b["type"] == "paragraph"]
-    assert summary == ["Probes catch hidden steps.", "First.", "Second."]  # the Brief
+    assert headings == ["TL;DR", "Abstract", "Deep read"]
+    paragraphs = [plain(b["paragraph"]["rich_text"]) for b in body if b["type"] == "paragraph"]
+    assert paragraphs == ["Probes catch hidden steps.", *A.abstract.split("\n\n")]  # not the Brief
     deep = body[-1]["heading_2"]
     assert deep["is_toggleable"]
     icons = [c["callout"]["icon"]["emoji"] for c in deep["children"] if c["type"] == "callout"]
@@ -262,7 +262,7 @@ async def test_a_must_read_with_a_deep_card_gets_every_column_and_its_deep_read(
     assert not INTERNAL.search(words)
 
 
-async def test_a_worth_a_look_without_a_brief_shows_its_abstract(world):
+async def test_a_worth_a_look_without_a_gist_shows_its_abstract(world):
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, B, MON.slug, "relevant")
     assert await start(conn, notion(fake))
@@ -273,7 +273,7 @@ async def test_a_worth_a_look_without_a_brief_shows_its_abstract(world):
     assert page["properties"]["TL;DR"] == {"rich_text": []}
     body = page["children"]
     headings = [plain(b["heading_2"]["rich_text"]) for b in body if b["type"] == "heading_2"]
-    assert headings == ["Summary"]  # no Gist, no card
+    assert headings == ["Abstract"]  # no Gist, no card
     assert plain(body[-1]["paragraph"]["rich_text"]) == B.abstract
     # Papers below the minimum get no page.
     assert [fake.value(r, "arXiv id") for r in fake.rows()] == [B.id]
@@ -320,18 +320,12 @@ async def test_new_texts_a_card_and_a_published_record_reach_the_page_as_they_co
     await emit(events.GIST_WRITTEN)
     await deliver(conn, n)
     assert fake.value(row, "TL;DR") == "Probes catch hidden steps."
-    await texts(conn, A, brief="From the full text.")
-    await emit(events.BRIEF_WRITTEN)
-    await deliver(conn, n)
-    assert "From the full text." in [
-        plain(b["paragraph"]["rich_text"]) for b in fake.body(row["id"]) if b["type"] == "paragraph"
-    ]
     await integrations_store.put_card(
         conn, A.id, CARD, "deep", {}, [], revision=1, version=1, source="latex", pass_id=None
     )
     await emit(events.CARD_READY)
     await deliver(conn, n)
-    assert headings() == ["TL;DR", "Summary", "Deep read"]
+    assert headings() == ["TL;DR", "Abstract", "Deep read"]
     await store_record(conn, A.id, Publication(venue="ICLR", year=2027))  # emits its event
     await deliver(conn, n)
     assert fake.value(row, "Venue") == "ICLR 2027"

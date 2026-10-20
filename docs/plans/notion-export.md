@@ -117,7 +117,6 @@ A page is written only when one of its hashes changes, so restarts and repeated 
 - **Events handled:**
   - `grade.changed`, for an exported topic;
   - `gist.written`;
-  - `brief.written`;
   - `card.ready`;
   - `publication.found`;
   - `paper.revised`.
@@ -133,8 +132,8 @@ A page is written only when one of its hashes changes, so restarts and repeated 
   - `taxonomy`: "the topic's definition changed".
 
   "Off-topic" means the Fit fell. "Less important" means only the grade fell, the Fit staying the same.
-- **The body is replaced whole when its hash changes**: delete litwatch's blocks, then append the new ones. TL;DR,
-  Summary and Deep read change only with new text, so this is rare.
+- **The body is replaced whole when its hash changes**: delete litwatch's blocks, then append the new ones. TL;DR
+  and Deep read change only with new text, so this is rare.
 
 ### Options
 
@@ -171,7 +170,7 @@ column and grouped by it. Every view is sorted by Published, newest first.
 **The page body:**
 1. A 💡 callout pointing to "How to read this".
 2. Heading TL;DR, then the Gist.
-3. Heading Summary, then the Brief, or the abstract when there is no Brief.
+3. Heading Abstract, then the abstract. Briefs are not exported for now: their writing was weak until recently.
 4. When the paper has a Deep card, a collapsed toggle heading "Deep read" holding one callout per section of the
    card:
    - 💬 gray: Key claim
@@ -242,7 +241,7 @@ then a real run against a test target on the sandbox. For the sandbox runs, buil
 | V2. Pages, properties, Why lines and bodies are built and written as specified, and only when they changed | pytest with Notion faked over HTTP. Request bodies for: a must read with a Deep card, a worth-a-look, a delisted paper. A repeated event sends no request. A 429 is waited out. A page creation whose reply is lost, then a restart: the page is adopted, not duplicated. A failing setup is retried after backoff and its error is shown by the integrations API. A second setup while the lock is held creates nothing. A changed `parent_page` drops the old state |
 | V3. A first start builds the database, its columns, the views, "How to read this", and a page for every qualifying paper | A real run on the sandbox against the scratch page. The page count equals the sandbox's count of papers at relevant or above for the exported topics. Screenshot |
 | V4. A grade that falls shows No longer listed with the right Why, and listing again clears it | On the sandbox: label a listed paper off-topic, run the dispatcher, read the page; remove the label, read it again |
-| V5. New text reaches the page | On the sandbox: an event for a paper whose Brief changed rewrites its body; an event for a paper whose text did not change makes no write |
+| V5. New text reaches the page | On the sandbox: an event for a paper whose Gist or Deep card changed rewrites its body; an event for a paper whose text did not change makes no write |
 | V6. The owner's view arrangement survives a restart | In the scratch database: rearrange one view and hide columns in it, delete another view, restart, compare |
 | V7. Reconcile follows the configuration | Restart with `minimum_grade = "must_read"`: listed worth-a-look papers become No longer listed with the minimum-grade Why, and a paper V4 delisted keeps its owner's Why. Restart with one topic dropped and another added: on a page of the dropped topic alone nothing is written; on a page shared with a kept topic the dropped topic's fields keep their values while the rest is written; the new topic gets its column, view and papers |
 | V8. Ana's database matches what litwatch holds | After P3: the listed pages and their per-topic grades, compared with production's papers at relevant or above for the exported topics (a read-only query) |

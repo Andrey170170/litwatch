@@ -224,7 +224,7 @@ The built-in `archive` integration is a search provider.
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source), unless intake read it from the archive; answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers |
 | `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) | Asks the deep service for a reading card and records each attempt's usage; emits `card.ready`. Loads only with an archive to read papers from |
-| `notion` | `grade.changed` for an exported topic, `gist.written`, `brief.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the papers listed for the exported topics, for a reader who does not use litwatch; never deletes a page. See below |
+| `notion` | `grade.changed` for an exported topic, `gist.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the papers listed for the exported topics, for a reader who does not use litwatch; never deletes a page. See below |
 | `webhook` | any, by pattern | POSTs the event as JSON to a URL |
 
 Each module's docstring lists its options and environment variables.
@@ -272,7 +272,7 @@ under the new page and leaves the old database as it is.
 Authors, Venue (linked to the published version), arXiv, PDF, Added (the day it entered the list),
 Why, one grade column per exported topic, and a hidden arXiv id used to find the row. Status is the
 reader's and never written. The body is a callout pointing to "How to read this", the TL;DR, the
-Summary (the Brief, or the abstract) and, with a Deep card, a collapsed Deep read with one callout
+Abstract and, with a Deep card, a collapsed Deep read with one callout
 per section. A paper that falls below the minimum for a topic says No longer listed there, with a
 dated Why line from the newest `grade.changed` that took it off (a missing `cause` reads as
 `verdict`). A dismissed paper that has a page is No longer listed for every topic, "set it aside" by

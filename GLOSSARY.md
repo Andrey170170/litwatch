@@ -146,7 +146,7 @@ _Avoid_: Deep, reading card
 **Notion export**:
 The Notion database the `notion` integration keeps for a reader who does not use litwatch. It uses its own plain
 words, and only there: **Must read** and **Worth a look** for the grades must read and relevant, **No longer
-listed** for a paper that fell below them, **TL;DR** for the Gist, **Summary** for the Brief, **Deep read** for the
-Deep card.
-_Avoid_: Worth a look, No longer listed and TL;DR anywhere else. Must read is the grade's own name everywhere; Summary
-and Deep read keep their web-app meanings elsewhere (a Deep card's section, the action that asks for a Deep card).
+listed** for a paper that fell below them, **TL;DR** for the Gist, **Deep read** for the Deep card; a page shows the
+abstract, not the Brief.
+_Avoid_: Worth a look, No longer listed and TL;DR anywhere else. Must read is the grade's own name everywhere; Deep
+read keeps their web-app meanings elsewhere (a Deep card's section, the action that asks for a Deep card).

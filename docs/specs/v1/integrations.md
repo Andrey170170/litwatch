@@ -30,7 +30,7 @@ carries Fit, Weight and the derived grade; new `digest.written` (topic, period, 
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `gist.written`, `brief.written`, `publication.found`, `card.ready` | Keeps a Zotero item, tags and notes in step; on unsave it tags the item as dropped and never deletes it |
 | `webdav` | `grade.changed` to must read, `paper.saved` | Stores the PDF for Zotero's file sync, read from the archive |
 | `deep` | see below | Requests a Deep card; emits `card.ready` |
-| `notion` | `grade.changed`, `gist.written`, `brief.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the Focus papers for a reader outside litwatch (below) |
+| `notion` | `grade.changed`, `gist.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the Focus papers for a reader outside litwatch (below) |
 | `webhook` | any, by filter | POSTs the event to a URL, for n8n and the like |
 
 **Changed: `archive` is no longer an integration.** It is part of the stack ([archive.md](archive.md)); the archive
@@ -80,7 +80,7 @@ links into it; it links to arXiv, the PDF and the published version.
 
 **Its words.** None of litwatch's internal terms reach Notion. Grades read **Must read** and **Worth a look**
 (relevant); a paper taken off the list reads **No longer listed**. The detail levels read **TL;DR** (the Gist),
-**Summary** (the Brief, or the abstract when there is none) and **Deep read** (the Deep card). Topics carry short
+**Abstract** (the paper's own; Briefs are not exported yet) and **Deep read** (the Deep card). Topics carry short
 names. A "How to read this" page beside the database explains the topics, the grades, the text on each paper and
 which column is the reader's. The words are recorded in the glossary under *Notion export*.
 
@@ -92,7 +92,7 @@ topic, showing its papers grouped by that topic's grade; each sorted newest publ
 coloured from Notion's palette: Must read orange, Worth a look blue, No longer listed grey. Rarity, the web app's
 colour, is not exported: it spans all followed classes, and the PI reads only these topics.
 
-**The page.** A short callout pointing to "How to read this", the TL;DR, the Summary, and the Deep read when there is
+**The page.** A short callout pointing to "How to read this", the TL;DR, the Abstract, and the Deep read when there is
 one: a collapsed toggle holding one coloured callout per section of the card, as 0.14's reading card had them (key
 claim, summary, the faithfulness and monitoring sections when the card has them, evaluation, closest prior work with
 arXiv links, limitations, code). litwatch owns the body and rewrites it when its text changes.

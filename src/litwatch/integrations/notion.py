@@ -3,8 +3,8 @@ who does not use litwatch (docs/specs/v1/integrations.md, The Notion export).
 
 One row per paper whose effective grade for an exported topic is at least the minimum grade.
 The words are the export's own (GLOSSARY.md, The Notion export): Must read and Worth a look for
-the grades, No longer listed for a paper that fell below them, TL;DR, Summary and Deep read for
-the Gist, the Brief (or the abstract) and the Deep card. A page is never deleted: a paper that
+the grades, No longer listed for a paper that fell below them, TL;DR and Deep read for the Gist
+and the Deep card; the Abstract is the paper's own. A page is never deleted: a paper that
 falls below the minimum for a topic says No longer listed there, with a dated Why line saying
 who took it off and why, from the `grade.changed` that did; a dismissed paper says it for every
 topic, the owner having set it aside. A paper's page someone moves to Notion's trash or deletes
@@ -47,7 +47,6 @@ from litwatch.config import Config
 from litwatch.core import Cause, Depth, Event, Grade, Paper, Publication, Status
 from litwatch.integrations import IntegrationError, required, required_secret
 from litwatch.store import analyses as analyses_store
-from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import notion as state
 from litwatch.store import outbox
@@ -73,7 +72,6 @@ DEFAULT_VIEW = "Default view"  # the view Notion gives a new database
 EVENTS = {
     events.GRADE_CHANGED,
     events.GIST_WRITTEN,
-    events.BRIEF_WRITTEN,
     events.CARD_READY,
     events.PUBLICATION_FOUND,
     events.PAPER_REVISED,
@@ -502,10 +500,9 @@ class Notion:
             page = state.Page(paper_id, added=self.now().astimezone(self.zone).date())
         record = (await publications_store.found(conn, [paper_id])).get(paper_id)
         gist = await analyses_store.current_gist(conn, paper_id)
-        brief = await fulltext_store.brief_for(conn, paper_id)
         card = await integrations_store.card(conn, paper_id)
         properties = self._properties(paper, gist, record, page.added, topics)
-        body = self._body(paper, gist, brief["text"] if brief else None, card, topics)
+        body = self._body(paper, gist, card, topics)
         written = (page.page_id, page.properties_hash, page.body_hash, page.topics)
         if page.page_id is None:
             page.topics = topics  # kept with the creation: a lost reply is then known listed
@@ -739,7 +736,6 @@ class Notion:
         self,
         paper: Paper,
         gist: str | None,
-        brief: str | None,
         card: dict[str, Any] | None,
         topics: dict[str, Any],
     ) -> list[dict[str, Any]]:
@@ -757,7 +753,7 @@ class Notion:
         blocks.append(_callout("💡", "gray", [guide, *about]))
         if gist:
             blocks += [_heading("TL;DR"), *map(_paragraph, _paragraphs(gist))]
-        blocks += [_heading("Summary"), *map(_paragraph, _paragraphs(brief or paper.abstract))]
+        blocks += [_heading("Abstract"), *map(_paragraph, _paragraphs(paper.abstract))]
         if card and card["card"]:
             blocks.append(_heading("Deep read", children=_deep_read(card["card"])))
         return blocks
@@ -777,7 +773,7 @@ class Notion:
             del grades[SHOWN[Grade.RELEVANT]]
         text = {
             "TL;DR": "what the paper does, in a sentence or two.",
-            "Summary": "a summary written from the full text, or the abstract until there is one.",
+            "Abstract": "the paper's abstract, as its authors wrote it.",
             "Deep read": "for some papers, a longer reading of the full text: its key claim, "
             "its evaluation, the closest prior work and its limitations. It is folded under "
             "its heading.",
