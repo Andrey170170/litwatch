@@ -508,6 +508,20 @@ describe("Settings", () => {
     expect(within(section).getAllByRole("link", { name: /^Ungraded paper/ })).toHaveLength(11);
   });
 
+  it("keeps a row's open form through a fold of its group", async () => {
+    viewport(true);
+    const awaiting = { ...stuck, paper_id: "2610.00004", title: "An unclassified paper" };
+    scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night: { ...quality.night, awaiting_classification: [awaiting] } } });
+    renderApp("/settings/needs");
+    const head = await screen.findByRole("button", { name: "Awaiting classification · 1" });
+    await userEvent.click(screen.getByRole("button", { name: "Classify by hand" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Mech interp" }));
+    await userEvent.click(head);
+    expect(screen.queryByRole("button", { name: "Mech interp" })).toBeNull();
+    await userEvent.click(head);
+    expect(screen.getByRole("button", { name: "Mech interp" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("folds the rows the API says were acknowledged, and counts only the others", async () => {
     viewport(true);
     const seen = "2026-10-19T08:00:00Z";

@@ -59,7 +59,8 @@ function Group<T>({ kind, items, acknowledge, acknowledged = false, children }: 
         {acknowledge}
       </div>
       <div className="nsub">{KIND[kind].line}</div>
-      {open && items.map(children)}
+      {/* Folded rows stay mounted, hidden, so a draft or a pending action in one survives the fold. */}
+      <div hidden={!open}>{items.map(children)}</div>
     </div>
   );
 }
