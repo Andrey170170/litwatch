@@ -111,11 +111,13 @@ def entries(outline: str) -> list[tuple[str, int, str, int]]:
     return [(indent, int(n), title, int(at)) for indent, n, title, at in found]
 
 
-async def pass_using_pdf(conn, paper_id: str, use_pdf: bool) -> None:
+async def pass_using_pdf(
+    conn, paper_id: str, use_pdf: bool, *, kind: str = "brief", revision: int = 1
+) -> None:
     await conn.execute(
         "INSERT INTO fulltext_passes (paper_id, paper_revision, kind, reason, state, priority, "
-        "use_pdf) VALUES (%s, 1, 'brief', 'focus', 'done', 0, %s)",
-        (paper_id, use_pdf),
+        "use_pdf) VALUES (%s, %s, %s, 'focus', 'done', 0, %s)",
+        (paper_id, revision, kind, use_pdf),
     )
 
 
@@ -176,17 +178,20 @@ async def test_the_outline_lists_latex_sections_and_reads_them_whole_a_page_at_a
     assert "characters 170000–170500 of" in ranged
 
 
-async def test_reading_follows_the_owners_use_the_pdf_on_the_latest_pass(conn, shelf, monkeypatch):
+async def test_reading_follows_the_owners_use_the_pdf_on_the_papers_text(conn, shelf, monkeypatch):
     monkeypatch.setitem(sys.modules, "pymupdf4llm", None)
     fake = FakeArchive()
     fake.texts[HELD.id] = (2, LATEX)
     fake.pdfs[HELD.id] = pages_pdf(["The words of the PDF."])
     await pass_using_pdf(conn, HELD.id, True)
+    await pass_using_pdf(conn, HELD.id, False, kind="deep")  # a later pass without it
     async with serving(reading_app(conn, fake)) as http:
         from_pdf = await ok(http, "paper_outline", paper_id=HELD.id)
         read = await ok(http, "read_paper", paper_id=HELD.id, section=1)
         asked = [j["kind"] for j in fake.jobs]
-        await pass_using_pdf(conn, HELD.id, False)  # a later pass, read from the LaTeX
+        # A new revision is a new text: its LaTeX, until the owner says otherwise.
+        await conn.execute("UPDATE papers SET revision = 2 WHERE id = %s", (HELD.id,))
+        await pass_using_pdf(conn, HELD.id, False, revision=2)
         latex = await ok(http, "paper_outline", paper_id=HELD.id)
     assert 'its PDF\'s text (the owner chose "Use the PDF" for it), 1 page,' in from_pdf
     assert chunk(read) == "The words of the PDF." and set(asked) == {"pdf"}

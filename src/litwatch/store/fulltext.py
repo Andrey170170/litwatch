@@ -861,15 +861,18 @@ async def text_pass_for(conn: psycopg.AsyncConnection, paper_id: str) -> dict[st
 
 
 async def uses_pdf(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
-    """Whether the paper's latest full-text pass, of any kind, has the owner's "Use the PDF":
-    its text is then its PDF's, not its LaTeX's."""
+    """Whether the owner chose "Use the PDF" on any full-text pass of the paper's current
+    revision, of any kind: its text is then its PDF's, not its LaTeX's. A new revision is a
+    new text, read from its LaTeX until the owner says otherwise."""
     row = await (
         await conn.execute(
-            "SELECT use_pdf FROM fulltext_passes WHERE paper_id = %s ORDER BY id DESC LIMIT 1",
+            "SELECT bool_or(f.use_pdf) AS use_pdf FROM fulltext_passes f "
+            "JOIN papers p ON p.id = f.paper_id AND p.revision = f.paper_revision "
+            "WHERE f.paper_id = %s",
             (paper_id,),
         )
     ).fetchone()
-    return row is not None and row["use_pdf"]
+    return bool(row and row["use_pdf"])
 
 
 async def count_by_state(conn: psycopg.AsyncConnection) -> dict[tuple[str, str], int]:

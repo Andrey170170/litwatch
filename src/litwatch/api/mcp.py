@@ -398,9 +398,9 @@ def build(state: State) -> MCPServer:
         return _digest_answer(found)
 
     async def _paper(paper_id: str) -> tuple[Paper, bool]:
-        """The paper, as litwatch holds it or else as the archive does, and whether its latest
-        full-text pass has the owner's "Use the PDF". The database is read before any wait,
-        which holds no connection."""
+        """The paper, as litwatch holds it or else as the archive does, and whether the owner
+        chose "Use the PDF" for its current text. The database is read before any wait, which
+        holds no connection."""
         try:
             pid = id_from_url(paper_id)
         except ValueError as exc:
