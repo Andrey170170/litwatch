@@ -22,6 +22,16 @@ redirect it was answered with (`hops`, URL and status), then the `url` and `stat
 `bytes` of body read. The model is asked for detailed reasoning summaries. litwatch keeps every
 attempt's trace and reads it with `litwatch deep trace`.
 
+A card may carry `process_notes`, `[{kind, source, note, url?}]`: what the agent could not do because of its
+tools, access, budget or input (`kind` access, tool, budget or input), as against `limitations`, the paper's own.
+The model may give up to six (`source: "model"`, a note of at least 20 characters, a `url` only absolute http(s)),
+validated with the card. The service adds its own (`source: "service"`) once the run is over, after `submit`'s
+validation, so the model can neither forge nor drop them, and what happened after the submit counts too: one note
+per kind of event, with how many times and the first URL concerned, for a fetch the network guard refused, a fetch
+failed on the network (DNS, the connection, a timeout, a body cut off; never an HTTP status, which is an answer),
+the fetch budget used up, and a cell timeout. litwatch shows them folded on the card and in Needs you's Deep notes,
+and `litwatch deep notes` lists them; they go to neither Zotero nor Notion.
+
 The card places the paper among litwatch's collection (`among_collection`): papers it agrees with,
 contradicts, extends or supersedes. `submit` takes only ids a `store.search` in the same session
 returned from the collection. `paper` is the archive's LaTeX source, or the PDF's text as markdown.

@@ -71,8 +71,10 @@ ${schemaJson(extensions)}
 Standards: every statement about the paper comes from its text. Prior work and code availability are \
 checked, not assumed: an unreachable or empty repository is not available. among_collection names only \
 papers a store.search in this session returned with in_collection true, and a relation only where both \
-papers' texts or Gists bear it out. Write for lab members who \
-have not read the paper: specific methods, numbers, and model names; no hype; no markdown in strings. \
+papers' texts or Gists bear it out. process_notes say what you could not do because of your tools, access or \
+budget (a page you could not reach, a tool that failed, the paper's text cut or unreadable) and what the card says \
+because of it, not what the paper lacks: that is a limitation. The service adds its own for what it saw. Write for \
+lab members who have not read the paper: specific methods, numbers, and model names; no hype; no markdown in strings. \
 Budget: ${maxCells} cells. The run ends on a successful submit.`;
 }
 

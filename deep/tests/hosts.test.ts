@@ -4,7 +4,7 @@ import dns from "node:dns";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
-import { buildHosts, fetchPublic, type FetchRecord, guardedLookup, htmlToText, isPublic, pacer, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
+import { BudgetError, buildHosts, fetchPublic, type FetchOptions, type FetchRecord, guardedLookup, htmlToText, isPublic, NetworkError, pacer, makeGuard, RefusedError, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -237,6 +237,29 @@ test("every redirect hop is checked again", async () => {
   await assert.rejects(fetchPublic(`http://site.test:${port}/self`, local), /more than 5 redirects/, "an empty Location is the page itself");
 });
 
+test("a fetch says whether the guard refused it or the network failed it, and an HTTP status is neither", async () => {
+  const kind = (url: string, opts: FetchOptions = local) =>
+    fetchPublic(url, opts).then(
+      () => "answered",
+      (e: unknown) => (e instanceof RefusedError ? "refused" : e instanceof NetworkError ? "network" : "other"),
+    );
+  assert.equal(await kind("http://10.0.0.1/"), "refused", "a literal");
+  assert.equal(await kind(`http://private.test:${port}/page`), "refused", "a name's answer, refused where the socket connects");
+  assert.equal(await kind(`http://site.test:${port}/to-private-name`), "refused", "on a redirect hop");
+  assert.equal(await kind(`http://nowhere.test:${port}/page`), "network", "DNS");
+  assert.equal(await kind(`http://site.test:${port}/drop`), "network", "a body cut off");
+  const closed = createServer();
+  await new Promise<void>((r) => closed.listen(0, "127.0.0.1", r));
+  const gone = (closed.address() as AddressInfo).port;
+  await new Promise((r) => closed.close(r));
+  assert.equal(await kind(`http://site.test:${gone}/page`), "network", "a connection refused");
+  assert.equal(await kind(`http://site.test:${port}/nothing`), "answered", "a 404 is an answer");
+  assert.equal(await kind(`http://site.test:${port}/loop`), "other", "too many redirects is the site's");
+  const ended = new AbortController();
+  ended.abort();
+  assert.equal(await kind(`http://site.test:${port}/page`, { ...local, ended: ended.signal }), "other", "the session's end is not the network's");
+});
+
 test("the production fetch asks DNS where it connects and refuses a private answer before any request", async () => {
   const realLookup = dns.lookup;
   const fake: Record<string, string[]> = {
@@ -337,7 +360,7 @@ test("a retry's backoff ends with the session", async () => {
 test("a paper's session stops fetching once its budget is used", async () => {
   const hosts = buildHosts({ litwatchUrl: "http://litwatch.test", maxFetchChars: 100, maxFetches: 2, maxFetchBytes: 1000 });
   for (let i = 0; i < 2; i++) await assert.rejects(hosts.fetch!(["http://10.0.0.1/"]), /not a public address/);
-  await assert.rejects(hosts.fetch!(["https://example.com/"]), /fetch budget of 2 per paper is used up/);
+  await assert.rejects(hosts.fetch!(["https://example.com/"]), (e: unknown) => e instanceof BudgetError && /fetch budget of 2 per paper is used up/.test(e.message));
 });
 
 test("HTML becomes its readable text", () => {

@@ -123,6 +123,14 @@ async function withRetry<T>(attempt: () => Promise<T>, ended?: AbortSignal, retr
 
 class RetryableError extends Error {}
 
+/** A fetch the network guard refused: an address that is not public, as a literal or as a name resolves. */
+export class RefusedError extends Error {}
+/** A fetch that failed on the network: DNS, the connection, a timeout, a body cut off. Never an HTTP status,
+ * which is an answer. */
+export class NetworkError extends Error {}
+/** A fetch past the paper's budget. */
+export class BudgetError extends Error {}
+
 /** A request's time limit, cut short when its paper's session ends. */
 const deadline = (ended?: AbortSignal): AbortSignal =>
   ended ? AbortSignal.any([ended, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
@@ -173,7 +181,7 @@ export function buildHosts(cfg: HostConfig, ended?: AbortSignal): Record<string,
       return found.data ?? [];
     },
     fetch: async ([url], detail) => {
-      if (++fetches > cfg.maxFetches) throw new Error(`the fetch budget of ${cfg.maxFetches} per paper is used up`);
+      if (++fetches > cfg.maxFetches) throw new BudgetError(`the fetch budget of ${cfg.maxFetches} per paper is used up`);
       const record: FetchRecord = { hops: [] };
       if (detail) detail.fetch = record;
       return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, contact: cfg.contact, pace, ended, record });
@@ -214,7 +222,7 @@ export function guardedLookup(publicOnly = isPublic, resolve?: Resolve) {
       if (err) return callback(err, "");
       const refused = addresses.find((a) => !publicOnly(a.address));
       if (refused || addresses.length === 0)
-        return callback(new Error(`${hostname} resolves to ${refused?.address ?? "nothing"}, not a public address`), "");
+        return callback(new RefusedError(`${hostname} resolves to ${refused?.address ?? "nothing"}, not a public address`), "");
       if (options.all) callback(null, addresses);
       else callback(null, addresses[0]!.address, addresses[0]!.family);
     });
@@ -309,8 +317,10 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
     if (current.protocol !== "https:" && current.protocol !== "http:") throw new Error(`only http(s) URLs can be fetched`);
     current = rewriteAnonymous(current);
     const address = literal(current.hostname);
-    if (address && !publicOnly(address)) throw new Error(`${current.hostname} is not a public address`);
+    if (address && !publicOnly(address)) throw new RefusedError(`${current.hostname} is not a public address`);
     const at = current;
+    // A failure once the paper's session has ended is the session's, not the network's.
+    const failed = (message: string) => (opts.ended?.aborted ? new Error(message) : new NetworkError(message));
     const answer = await pace<{ next?: URL; page?: unknown }>(
       at.hostname,
       async () => {
@@ -322,7 +332,8 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
         }).catch((e: unknown) => {
           // undici says only "fetch failed"; the agent needs the reason: a refused address, DNS, a timeout.
           const cause = e instanceof Error && e.cause instanceof Error ? e.cause : e;
-          throw new Error(`${at.href}: ${cause instanceof Error ? cause.message : String(cause)}`);
+          const message = `${at.href}: ${cause instanceof Error ? cause.message : String(cause)}`;
+          throw cause instanceof RefusedError ? new RefusedError(message) : failed(message);
         });
         const location = resp.headers.get("location");
         if (REDIRECTS.has(resp.status) && location !== null) {
@@ -337,7 +348,9 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
           await resp.body?.cancel();
           return { page: { status: resp.status, contentType, url: at.href, text: "", note: "PDF bodies are not fetched; use the arXiv HTML or abstract page" } };
         }
-        const { raw, cut } = await readCapped(resp.body, opts.maxBytes, record);
+        const { raw, cut } = await readCapped(resp.body, opts.maxBytes, record).catch((e: unknown) => {
+          throw failed(`${at.href}: the body was cut off: ${e instanceof Error ? e.message : String(e)}`);
+        });
         const text = media.includes("html") ? htmlToText(raw) : raw;
         return {
           page: {

@@ -1,16 +1,16 @@
 /**
  * One paper through the agent: the configured model and effort, the single `run_code` tool, a validating
- * `submit`, a cell budget, and a trace of everything that happened.
+ * `submit`, a cell budget, a trace of everything that happened, and the service's own process notes on the card.
  */
 
 import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { Models, ThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { PROVIDER, requireSubscription } from "./auth.ts";
-import { buildHosts, type FetchRecord, type HostConfig, type StoreHit } from "./hosts.ts";
+import { BudgetError, buildHosts, NetworkError, RefusedError, type FetchRecord, type HostConfig, type StoreHit } from "./hosts.ts";
 import { systemPrompt, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
 import { Repl, type HostDetail, type HostFn } from "./repl.ts";
-import { validate, type Result } from "./schema.ts";
+import { isWebUrl, validate, type ProcessNote, type Result } from "./schema.ts";
 
 export interface RunOptions {
   model: string;
@@ -82,6 +82,23 @@ export function detailedSummaries(payload: unknown): unknown {
   return payload;
 }
 
+/** What the service itself saw hold a run back, by kind of event: a fetch the network guard refused, one that
+ * failed on the network, the fetch budget used up, a cell timeout. */
+export type Held = "refused" | "network" | "budget" | "timeout";
+
+/** The service's process notes: one per kind of event the run saw, with how many times and the first URL
+ * concerned, in the order they first happened. */
+export function serviceNotes(seen: ReadonlyMap<Held, { count: number; url?: string }>, hostCfg: HostConfig, opts: RunOptions): ProcessNote[] {
+  const times = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`);
+  const text: Record<Held, (n: number) => Pick<ProcessNote, "kind" | "note">> = {
+    refused: (n) => ({ kind: "access", note: `${times(n, "A fetch was", "fetches were")} refused: the address is not a public one.` }),
+    network: (n) => ({ kind: "access", note: `${times(n, "A fetch", "fetches")} failed on the network: DNS, the connection, a timeout or a body cut off.` }),
+    budget: (n) => ({ kind: "budget", note: `The fetch budget of ${hostCfg.maxFetches} per paper was used up; ${times(n, "one more fetch was", "more fetches were")} refused.` }),
+    timeout: () => ({ kind: "tool", note: `A cell ran past its ${opts.cellTimeoutMs / 1000} s limit, which ended the session and lost its state.` }),
+  };
+  return [...seen].map(([held, { count, url }]) => ({ ...text[held](count), source: "service", ...(url ? { url } : {}) }));
+}
+
 export async function processPaper(
   paper: PaperInput,
   spec: CardSpec,
@@ -108,6 +125,13 @@ export async function processPaper(
   let submitted: Result | null = null;
   let failure: string | undefined;
   let failedBy: Failure = "paper";
+  // What held the run back, as the service saw it; it becomes the card's service notes when the run is over.
+  const seen = new Map<Held, { count: number; url?: string }>();
+  const saw = (held: Held, url?: unknown) => {
+    const known = seen.get(held);
+    if (known) known.count += 1;
+    else seen.set(held, { count: 1, ...(typeof url === "string" && isWebUrl(url) ? { url } : {}) });
+  };
 
   // Each host call is traced with what it did (`detail`), and a failed one with its reason.
   const traced = (name: string, fn: HostFn): HostFn => async (args) => {
@@ -120,6 +144,9 @@ export async function processPaper(
     } catch (e) {
       const error = (e instanceof Error ? e.message : String(e)).slice(0, MAX_ERROR_CHARS);
       record({ t: now(), type: "host", name, args: short(args), ms: Date.now() - t0, ok: false, chars: 0, error, ...detail });
+      if (e instanceof RefusedError) saw("refused", args[0]);
+      else if (e instanceof NetworkError) saw("network", args[0]);
+      else if (e instanceof BudgetError) saw("budget");
       throw e;
     }
   };
@@ -168,6 +195,7 @@ export async function processPaper(
       const n = ++stats.cells;
       const cell = await repl.run(params.code);
       record({ t: now(), type: "cell", n, code: params.code, output: cell.output, error: cell.error, ms: cell.ms, ...(cell.timedOut ? { timedOut: true } : {}) });
+      if (cell.timedOut) saw("timeout");
       let text = cell.output;
       if (cell.error) text += `${text ? "\n" : ""}Error: ${cell.error}`;
       if (!text) text = "(no output)";
@@ -238,7 +266,14 @@ export async function processPaper(
   }
   stats.seconds = Math.round((Date.now() - started) / 1000);
   const error = submitted ? undefined : (failure ?? (stats.cells >= opts.maxCells ? "cell budget exhausted without a submit" : "the model stopped without submitting"));
-  return { result: submitted, trace, stats, model: `${PROVIDER}/${opts.model}`, error, failure: error === undefined ? undefined : failedBy };
+  return { result: withServiceNotes(submitted, serviceNotes(seen, hostCfg, opts)), trace, stats, model: `${PROVIDER}/${opts.model}`, error, failure: error === undefined ? undefined : failedBy };
+}
+
+/** The validated card with the service's notes after the model's: added once the run is over, past `validate`,
+ * so the model can neither forge them nor leave them out, and an event after its submit still counts. */
+function withServiceNotes(card: Result | null, notes: ProcessNote[]): Result | null {
+  if (!card || notes.length === 0) return card;
+  return { ...card, process_notes: [...(card.process_notes ?? []), ...notes] };
 }
 
 function short(args: unknown[]): string {
