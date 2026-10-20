@@ -37,6 +37,7 @@ class DigestRole(StrEnum):
     PICK = "pick"  # put forward by name
     LISTED = "listed"  # in its list (a Focus digest's papers, an Area's "also due")
     MENTIONED = "mentioned"  # named in its text, not a pick
+    UPDATED = "updated"  # an old paper back with a new version, in its folded list, not new
 
 
 # The depths with a daily digest; every depth has a weekly one.
@@ -78,16 +79,27 @@ def listing_day(submitted: datetime | date) -> date:
     return next_weekday(day)
 
 
-def announced(paper: Paper) -> date | None:
-    """The listing day of the paper's first version: from its submission time where the
-    version history has it, else from its first-version date, a time and all where the source
-    gives one (arXiv's search does; OAI gives a day, which reads as midnight UTC)."""
+def first_listing(paper: Paper) -> date | None:
+    """The listing day of the paper's first version, from its submission time in the version
+    history: a known day, which a guessed one (`announced`'s fallback) never replaces. None
+    when the history has no time for it."""
     for v in paper.version_history:
         if v.get("version") == 1 and v.get("date"):
             try:
                 return listing_day(datetime.fromisoformat(str(v["date"])))
             except ValueError:
-                break
+                return None
+    return None
+
+
+def announced(paper: Paper) -> date | None:
+    """The listing day of the paper's first version: `first_listing` where the version history
+    has it, else guessed from its first-version date, a time and all where the source gives one
+    (arXiv's search does; OAI gives a day, which reads as midnight UTC, and its `<created>` can
+    be a later version's)."""
+    known = first_listing(paper)
+    if known is not None:
+        return known
     if paper.published:
         at = datetime.fromisoformat(paper.published)
         at = at.replace(tzinfo=at.tzinfo or UTC).astimezone(UTC)

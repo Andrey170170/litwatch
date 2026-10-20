@@ -85,7 +85,7 @@ evaluation calls the same functions and writes only to evaluation tables.
   ([digests.md](digests.md)). `papers.announced` is the date of the arXiv listing that first showed the paper. A day
   read from the first version's submission time in the version history is never replaced by one guessed from other
   metadata (a `<created>` date, when the version list failed to load); the version history may correct a guessed day
-  either way. An updated paper (digests.md, updated papers) is not stored as due either: it is found from
+  either way. `papers.announced_known` says which it is: such a record also clears the stored history. An updated paper (digests.md, updated papers) is not stored as due either: it is found from
   `papers.announced` (first announced more than three weeks before its version's day), its newest version's day read
   from `papers.version_history`, and the `digest_papers` rows of the topic's published digests by role and period.
 - `digests` (topic, period day | week, day (a week's Monday), state written | nothing_new | failed, gist, text, counts,

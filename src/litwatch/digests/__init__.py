@@ -8,7 +8,11 @@ eligible late is in the next one. Published digests are final; one whose writer 
 failed, its papers stay due, and the next run writes it again, one model further down `writer`'s
 list after each failed answer in a row, until a digest of the topic is published (models.md,
 roles). A digest with nothing due is published as nothing new, without a call. Its picks are
-settled as it is published, so an Area pick gets its Deep card (`feedback.word.settle`)."""
+settled as it is published, so an Area pick gets its Deep card (`feedback.word.settle`).
+
+An old paper back with a new arXiv version is listed once more as updated
+(`store.digests.due_updated`), after the digest's papers and apart from them: the writer is not
+given it, and it is in none of the digest's counts of new papers, best rarity or picks."""
 
 from __future__ import annotations
 
@@ -41,10 +45,12 @@ def _outcome(
     gist: str | None = None,
     text: str | None = None,
     extra: Sequence[Shown] = (),
+    updated: Sequence[Shown] = (),
     model: str | None = None,
 ) -> Outcome:
     """A published digest: written when it has a text, else nothing new. Its Mark counts the
-    papers it covered (`extra`, an earlier paper brought back, is not one)."""
+    papers it covered (`extra`, an earlier paper brought back, is not one), and its `updated`
+    papers apart: they are in neither its counts of new papers nor its best rarity."""
     best = max((Rarity(s.due.rarity) for s in covered), key=lambda r: r.level, default=None)
     return Outcome(
         topic,
@@ -53,13 +59,14 @@ def _outcome(
         DigestState.WRITTEN if text is not None else DigestState.NOTHING_NEW,
         gist=gist,
         text=text,
-        papers=[*covered, *extra],
+        papers=[*covered, *extra, *updated],
         counts={
             "papers": len(covered),
             "picks": sum(s.role == DigestRole.PICK for s in covered),
             "central": sum(s.due.fit == "central" for s in covered),
             "related": sum(s.due.fit == "related" for s in covered),
             "must_read": sum(s.due.grade == "must_read" for s in covered),
+            "updated": len(updated),
         },
         best_rarity=best.value if best else None,
         model=model,
@@ -114,16 +121,22 @@ async def compose(
 ) -> Outcome:
     """The topic's digest of `period` on `day` (a week's Monday) over the papers due now, not
     stored. With nothing due it is nothing new, without a call; a failed call, or an answer
-    that does not parse, makes it failed."""
+    that does not parse, makes it failed. Its updated papers are listed after the rest, and
+    the writer is not given them: alone, they make a nothing new digest."""
     name = tree.get(topic.slug).name
     weekly = period == DigestPeriod.WEEK
-    if weekly and topic.depth in DAILY:  # its week's daily digests' papers
+    last = day + timedelta(days=6) if weekly else day
+    recap = weekly and topic.depth in DAILY
+    if recap:  # its week's daily digests' papers
         found = await store_.of_week(conn, tree, topic, day)
     else:
-        last = day + timedelta(days=6) if weekly else day
         found = await store_.due(conn, tree, topic, period, last, FAILED_RUNS)
+    back = await store_.due_updated(
+        conn, tree, topic, period, last, FAILED_RUNS, week=day if recap else None
+    )
+    updated = [Shown(d, DigestRole.UPDATED) for d in back]
     if not found:
-        return _outcome(topic.slug, period, day, [])
+        return _outcome(topic.slug, period, day, [], updated=updated)
     w = _Writer(run, await store_.failed_writer(conn, topic.slug))
     try:
         if not weekly and topic.depth == Depth.FOCUS:
@@ -135,6 +148,7 @@ async def compose(
                 _covered(found),
                 gist=out.gist,
                 text=out.text,
+                updated=updated,
                 model=w.model,
             )
         if not weekly:
@@ -150,7 +164,7 @@ async def compose(
                 ]
                 request = writer.focus_week(topic, name, day, found, dailies, earlier)
                 out = await w.ask(request)
-                back = [
+                recalled = [
                     Shown(e, DigestRole.MENTIONED) for e in earlier if e.paper_id == out.recalled
                 ]
                 covered = _covered(found)
@@ -161,7 +175,8 @@ async def compose(
                     covered,
                     gist=out.gist,
                     text=out.text,
-                    extra=back,
+                    extra=recalled,
+                    updated=updated,
                     model=w.model,
                 )
             out = await w.ask(writer.week(topic, name, day, found, dailies))
@@ -169,7 +184,16 @@ async def compose(
         failed = w.failure(exc)
         return Outcome(topic.slug, period, day, DigestState.FAILED, error=str(exc), model=failed)
     covered = _covered(found, out.picks, out.mentioned)
-    return _outcome(topic.slug, period, day, covered, gist=out.gist, text=out.text, model=w.model)
+    return _outcome(
+        topic.slug,
+        period,
+        day,
+        covered,
+        gist=out.gist,
+        text=out.text,
+        updated=updated,
+        model=w.model,
+    )
 
 
 async def write(

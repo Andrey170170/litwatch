@@ -6,21 +6,30 @@ a paper becomes or stops being eligible (a grading, a re-check, the owner's word
 label, an edit of the followed topics) is seen without a hook of its own. A paper is due for a
 topic while it is eligible there (`_ELIGIBLE`), was announced within `DUE_WINDOW` of the
 digest's day, and is in no published digest of the topic that clears it: a daily digest for
-Focus and Area topics, a weekly one for Field topics."""
+Focus and Area topics, a weekly one for Field topics. An old paper back with a new arXiv version
+is due as updated by rules of its own (`due_updated`), found the same way."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch import events
-from litwatch.core import Depth, Status, Taxonomy, Topic
-from litwatch.core.digests import DUE_WINDOW, PUBLISHED, DigestPeriod, DigestRole, DigestState
+from litwatch.core import Depth, Grade, Status, Taxonomy, Topic
+from litwatch.core.digests import (
+    DUE_WINDOW,
+    PUBLISHED,
+    DigestPeriod,
+    DigestRole,
+    DigestState,
+    listing_day,
+)
 from litwatch.core.fulltext import AWAITING_TOO_LONG
+from litwatch.core.grading import GRADES, NO_WEIGHT
 from litwatch.core.rules import REACTION_WORDS
 from litwatch.store.analyses import CURRENT_GIST
 from litwatch.store.reading import SCOPE, STANDING, _rank, _scope
@@ -46,13 +55,57 @@ class Due:
     fit_reason: str | None
     brief: str | None
     abstract: str | None = None  # a Focus paper's, which the writer reads when it has no Brief
+    version: int | None = None  # an updated paper's: the arXiv version it came back with
 
 
-# The covering digests of topic %(topic)s that clear paper `p` for %(period)s.
+# The covering digests of topic %(topic)s that clear paper `p` for %(period)s. An updated row
+# is no cover: it is a role of its own (`_SHOWN_UPDATED`).
 _COVERED = f"""EXISTS (
     SELECT 1 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
     WHERE dp.paper_id = p.id AND d.topic = %(topic)s AND d.period = %(period)s
-      AND d.state IN {_PUBLISHED})"""
+      AND d.state IN {_PUBLISHED} AND dp.role <> 'updated')"""
+
+# A published digest of topic %(topic)s showed paper `p` as new, of either period: it never
+# comes back as updated (digests.md, updated papers).
+_SHOWN_NEW = f"""EXISTS (
+    SELECT 1 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
+    WHERE dp.paper_id = p.id AND d.topic = %(topic)s AND d.state IN {_PUBLISHED}
+      AND dp.role <> 'updated')"""
+
+# A published digest of topic %(topic)s of %(period)s listed paper `p` as updated, at any
+# version: once per period.
+_SHOWN_UPDATED = f"""EXISTS (
+    SELECT 1 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
+    WHERE dp.paper_id = p.id AND d.topic = %(topic)s AND d.period = %(period)s
+      AND d.state IN {_PUBLISHED} AND dp.role = 'updated')"""
+
+# Paper `p`'s newest version (`nv`) when it is after the first and its submission time is
+# known: the version an old paper comes back with as updated, and when it was submitted (NULL
+# without one, which only a weekly's recap of its dailies admits).
+_NEWEST = """
+    LEFT JOIN LATERAL (
+        SELECT (e->>'date')::timestamptz AS submitted
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.version_history) = 'array'
+                                       THEN p.version_history ELSE '[]' END) e
+        WHERE p.version > 1 AND e->>'version' = p.version::text
+          AND pg_input_is_valid(e->>'date', 'timestamptz')
+        LIMIT 1) nv ON true"""
+
+# What an updated paper's row adds: the version it came back with, and when that was submitted.
+_VERSION = ", p.version, nv.submitted"
+# The (Fit, Weight) pairs the pipeline grades must read (`core.grading.GRADES`).
+_MUST_READ = (
+    "("
+    + ", ".join(
+        f"('{f.value}', '{w.value}')"
+        for f, row in GRADES.items()
+        for w, g in row.items()
+        if g == Grade.MUST_READ
+    )
+    + ")"
+)
+# Each grade's place, most inclusive first: an updated list's order before rarity.
+_GRADES = "ARRAY[" + ", ".join(f"'{g.value}'" for g in Grade) + "]::text[]"
 
 # A Brief or Weight re-check of paper `p`'s current text still to finish: open and not terminal
 # (pipeline.md, section 6), and no pass for that text done. An Area paper graded must read from
@@ -144,16 +197,26 @@ _SUBTREE_LED = f"""(
                WHERE {_held("u.topic")} AND {_fit("u.topic")} IN ('central', 'related')))"""
 
 
-def _focus(which: str) -> str:
+def _order(updated: bool, grade: str, rarity: str) -> str:
+    """A digest's list, rarest first; an updated list by grade, then rarity, then the paper
+    first out most recently (a Field's must reads are alike in grade and rarity)."""
+    if updated:
+        return f"array_position({_GRADES}, {grade}), {_rank(rarity)} DESC, p.announced DESC, p.id"
+    return f"{_rank(rarity)} DESC, p.announced, p.id"
+
+
+def _focus(which: str, updated: bool = False) -> str:
     """A Focus topic's eligible papers: graded there, at effective Fit central or related, and
     at a verdict's Fit on the current text that was too (a rewritten paper waits for its
     grading), so the owner's word, which the owner already knows, never
     makes a paper due, and led there by the pipeline (`_FOCUS_LED`). Its rarity is a mixed
-    list's, as in every digest (pipeline.md, section 5)."""
+    list's, as in every digest (pipeline.md, section 5). With `updated`, each with its newest
+    version (`_NEWEST`), which `which` may read as `nv`."""
+    rarity = "coalesce(r.level, g.rarity)"
     return f"""
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, g.grade,
-           coalesce(r.level, g.rarity) AS rarity, g.topic AS graded_on, v.reason AS fit_reason,
-           p.abstract, {_WRITER_READS}
+           {rarity} AS rarity, g.topic AS graded_on, v.reason AS fit_reason,
+           p.abstract, {_WRITER_READS}{_VERSION if updated else ""}
     FROM papers p
     JOIN effective_grades g ON g.paper_id = p.id AND g.topic = %(topic)s
     LEFT JOIN rarities r ON r.paper_id = p.id
@@ -161,21 +224,23 @@ def _focus(which: str) -> str:
                   WHERE v.paper_id = p.id AND v.topic = %(topic)s
                     AND v.paper_revision = p.revision
                   ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) v ON true
+    {_NEWEST if updated else ""}
     WHERE p.dismissed_at IS NULL AND g.fit IN ('central', 'related')
       AND v.fit IN ('central', 'related') AND {which} AND {_FOCUS_LED}
-    ORDER BY {_rank("coalesce(r.level, g.rarity)")} DESC, p.announced, p.id
+    ORDER BY {_order(updated, "g.grade", rarity)}
     """
 
 
-def _subtree(which: str, gates: str) -> str:
+def _subtree(which: str, gates: str, updated: bool = False) -> str:
     """An Area or Field topic's papers: its subtree's papers by the pipeline (`_SUBTREE_LED`),
     at its page's standing (its rarity a mixed list's), less those the owner's word sets below
-    related where they are graded."""
+    related where they are graded. With `updated`, as in `_focus`."""
+    rarity = "coalesce(r.level, s.rarity, 'common')"
     return f"""
     WITH {SCOPE}{STANDING}
     SELECT p.id AS paper_id, p.revision, p.title, p.announced, g.fit, s.grade,
-           coalesce(r.level, s.rarity, 'common') AS rarity, g.topic AS graded_on,
-           v.reason AS fit_reason, {_WRITER_READS}
+           {rarity} AS rarity, g.topic AS graded_on,
+           v.reason AS fit_reason, {_WRITER_READS}{_VERSION if updated else ""}
     FROM standing s JOIN papers p ON p.id = s.paper_id
     LEFT JOIN rarities r ON r.paper_id = p.id
     LEFT JOIN effective_grades g
@@ -184,9 +249,10 @@ def _subtree(which: str, gates: str) -> str:
                        WHERE v.paper_id = p.id AND v.topic = g.topic
                        ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC
                        LIMIT 1) v ON true
+    {_NEWEST if updated else ""}
     WHERE p.dismissed_at IS NULL AND {which} AND {_SUBTREE_LED}
       AND (g.fit IN ('adjacent', 'none') AND {_word("p.id", "g.topic")}) IS NOT TRUE {gates}
-    ORDER BY {_rank("coalesce(r.level, s.rarity, 'common')")} DESC, p.announced, p.id
+    ORDER BY {_order(updated, "s.grade", rarity)}
     """
 
 
@@ -244,7 +310,7 @@ async def of_week(
     which = f"""p.announced BETWEEN %(first)s AND %(sunday)s AND NOT {_COVERED} AND EXISTS (
         SELECT 1 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
         WHERE dp.paper_id = p.id AND d.topic = %(topic)s AND d.period = 'day'
-          AND d.state = 'written' AND d.day <= %(after)s)"""
+          AND d.state = 'written' AND d.day <= %(after)s AND dp.role <> 'updated')"""
     params = _params(tree, topic, 0) | {
         "period": DigestPeriod.WEEK.value,
         "first": sunday - DUE_WINDOW,
@@ -253,6 +319,98 @@ async def of_week(
     }
     query = _focus(which) if topic.depth == Depth.FOCUS else _subtree(which, "")
     return _rows(await (await conn.execute(query, params)).fetchall())
+
+
+async def due_updated(
+    conn: psycopg.AsyncConnection,
+    tree: Taxonomy,
+    topic: Topic,
+    period: DigestPeriod,
+    last: date,
+    runs: int,
+    week: date | None = None,
+) -> list[Due]:
+    """The old papers due for the topic's digest of `period` as updated (digests.md, updated
+    papers), by grade, then rarity, then newest first out, each with its newest version: one
+    whose listing day is within `DUE_WINDOW` before `last` (the digest's day, or its week's
+    Sunday) and more than `DUE_WINDOW` after the paper's first; eligible there now at a higher
+    bar than a new paper (for Focus, effective Fit central or related; for Area and Field,
+    graded must read, an Area's after its Weight re-check, as a pick, and by the pipeline on its
+    current text, so neither an older text's grade nor the owner's word makes it due); never
+    shown as new by a published digest of the topic, nor as updated by one of `period`. A Focus
+    or Area weekly gives its `week`'s Monday: it takes the versions listed that week, and
+    recaps, at the version they listed, the papers its published dailies listed as updated, up
+    to the Monday after, still eligible, whatever version has come since."""
+    first = last - DUE_WINDOW
+    recapped = {} if week is None else await _listed_updated(conn, topic.slug, week)
+    # A listing day comes one to four days after its submission's US Eastern date
+    # (`listing_day`): these bounds hold every submission that can list in the window.
+    which = f"""((nv.submitted >= %(since)s AND nv.submitted < %(until)s
+                  AND p.announced < %(old)s) OR p.id = ANY(%(recapped)s))
+        AND NOT {_SHOWN_NEW} AND NOT {_SHOWN_UPDATED}"""
+    params = _params(tree, topic, runs) | {
+        "period": period.value,
+        "since": datetime.combine(first - timedelta(days=5), time(), UTC),
+        "until": datetime.combine(last + timedelta(days=1), time(), UTC),
+        "old": first,
+        "recapped": list(recapped),
+    }
+    if topic.depth == Depth.FOCUS:
+        query = _focus(which, updated=True)
+    else:
+        # The grade shown is must read, and so is the pipeline's where it is graded: the latest
+        # verdict on the current text at the paper's Weight, not an older text's grade or the
+        # owner's word.
+        gates = f"""AND {_GRADED} AND s.grade = 'must_read' AND ((
+            SELECT v.fit FROM verdicts v
+            WHERE v.paper_id = p.id AND v.topic = g.topic AND v.paper_revision = p.revision
+            ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1),
+            coalesce(r.weight, '{NO_WEIGHT.value}')) IN {_MUST_READ}"""
+        if topic.depth == Depth.AREA:
+            gates += f" AND NOT {_RECHECKING}"
+        query = _subtree(which, gates, updated=True)
+    found = []
+    for row in await (await conn.execute(query, params)).fetchall():
+        submitted = row.pop("submitted")
+        if row["paper_id"] in recapped:
+            found.append(Due(**row | {"version": recapped[row["paper_id"]]}))
+            continue
+        day = listing_day(submitted) if submitted is not None else None
+        if day is None or not first <= day <= last or row["announced"] >= day - DUE_WINDOW:
+            continue
+        if week is None or day >= week:
+            found.append(Due(**row))
+    return found
+
+
+async def _listed_updated(
+    conn: psycopg.AsyncConnection, topic: str, monday: date
+) -> dict[str, int]:
+    """The papers the topic's published daily digests listed as updated, each with the version
+    listed, up to the Monday after the week from `monday` (written the same night, before the
+    weekly), less a version of that Monday's own listing: it is the next week's."""
+    after = monday + timedelta(days=7)
+    rows = await (
+        await conn.execute(
+            f"""SELECT dp.paper_id, dp.version, (
+                    SELECT (e->>'date')::timestamptz
+                    FROM papers p, jsonb_array_elements(
+                        CASE WHEN jsonb_typeof(p.version_history) = 'array'
+                             THEN p.version_history ELSE '[]' END) e
+                    WHERE p.id = dp.paper_id AND (e->>'version')::int = dp.version
+                    LIMIT 1) AS submitted
+                FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
+                WHERE d.topic = %s AND d.period = 'day' AND d.state IN {_PUBLISHED}
+                  AND d.day <= %s AND dp.role = 'updated'""",
+            (topic, after),
+        )
+    ).fetchall()
+    found: dict[str, int] = {}
+    for r in rows:
+        if r["submitted"] is not None and listing_day(r["submitted"]) >= after:
+            continue
+        found[r["paper_id"]] = max(r["version"], found.get(r["paper_id"], 0))
+    return found
 
 
 async def earlier_central(
@@ -271,7 +429,7 @@ async def earlier_central(
                 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
                 JOIN papers p ON p.id = dp.paper_id
                 WHERE d.topic = %s AND d.state = 'written' AND d.day < %s AND dp.fit = 'central'
-                  AND dp.role <> 'mentioned'
+                  AND dp.role IN ('pick', 'listed')
                 ORDER BY dp.paper_id, d.day DESC) x
             ORDER BY day DESC, paper_id LIMIT %s
             """,
@@ -282,7 +440,8 @@ async def earlier_central(
 
 
 async def as_shown(conn: psycopg.AsyncConnection, digest_id: int, focus: bool) -> list[Due]:
-    """A published digest's papers with what it froze of each (title, Gist, Fit, rarity), in a
+    """A published digest's papers the writer was given (not its updated ones), with what it
+    froze of each (title, Gist, Fit, rarity), in a
     writer's order (rarest first), each with the latest Brief and Fit reason of the revision
     shown, and for a `focus` topic its abstract when that revision is still current: the
     writer's input rebuilt for an evaluation's request. It is the input the writer had as far as
@@ -302,7 +461,7 @@ async def as_shown(conn: psycopg.AsyncConnection, digest_id: int, focus: bool) -
                    CASE WHEN %(focus)s AND p.revision = dp.paper_revision THEN p.abstract END
                        AS abstract
             FROM digest_papers dp JOIN papers p ON p.id = dp.paper_id
-            WHERE dp.digest_id = %(digest)s
+            WHERE dp.digest_id = %(digest)s AND dp.role <> 'updated'
             ORDER BY {_rank("dp.rarity")} DESC, p.announced, dp.paper_id
             """,
             {"digest": digest_id, "focus": focus},
@@ -419,8 +578,8 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
         async with conn.cursor() as cur:
             await cur.executemany(
                 "INSERT INTO digest_papers (digest_id, paper_id, role, position, why, "
-                "paper_revision, title, gist, fit, grade, rarity, graded_on) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "paper_revision, title, gist, fit, grade, rarity, graded_on, version) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 [
                     (
                         row["id"],
@@ -435,6 +594,7 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
                         s.due.grade,
                         s.due.rarity,
                         s.due.graded_on,
+                        s.due.version,
                     )
                     for i, s in enumerate(o.papers)
                 ],
@@ -556,7 +716,8 @@ async def digests_on(
 # the owner's word is in force where its grade was shown and puts it below relevant.
 _SHOWN = f"""
     SELECT dp.digest_id, dp.paper_id, dp.role, dp.position, dp.why, dp.paper_revision, dp.gist,
-           dp.fit, dp.grade, dp.rarity, dp.graded_on, dp.title, p.announced, p.published,
+           dp.fit, dp.grade, dp.rarity, dp.graded_on, dp.title, dp.version, p.announced,
+           p.published,
            (g.grade NOT IN ('must_read', 'relevant')
             AND {_word("dp.paper_id", "dp.graded_on")}) IS TRUE AS set_aside
     FROM digest_papers dp JOIN papers p ON p.id = dp.paper_id
@@ -650,13 +811,15 @@ async def strips(
 
 
 async def written(conn: psycopg.AsyncConnection, first: date, last: date) -> list[dict[str, Any]]:
-    """The written digests from `first` to `last` (a weekly one by its Monday), with their
-    papers' titles: what the voice check reads."""
+    """The written digests from `first` to `last` (a weekly one by its Monday), with the
+    titles of the papers the writer was given (not its updated papers): what the voice check
+    reads."""
     return await (
         await conn.execute(
             """
             SELECT d.id, d.topic, d.period, d.day, d.gist, d.text, d.counts,
-                   array(SELECT dp.title FROM digest_papers dp WHERE dp.digest_id = d.id) AS titles
+                   array(SELECT dp.title FROM digest_papers dp
+                         WHERE dp.digest_id = d.id AND dp.role <> 'updated') AS titles
             FROM digests d WHERE d.state = 'written' AND d.day BETWEEN %s AND %s
             ORDER BY d.day, d.period, d.topic
             """,

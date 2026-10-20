@@ -610,13 +610,14 @@ class SessionIn(BaseModel):
 
 class DigestCounts(BaseModel):
     """What a digest's Mark counts: the papers it covered, its picks, and of them those central,
-    related, and graded must read."""
+    related, and graded must read; apart from them, its updated papers."""
 
     papers: int = 0
     picks: int = 0
     central: int = 0
     related: int = 0
     must_read: int = 0
+    updated: int = 0
 
 
 class DigestMark(BaseModel):
@@ -633,12 +634,14 @@ class DigestMark(BaseModel):
 
 class DigestPaper(BaseModel):
     """A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set
-    it below relevant where it was graded."""
+    it below relevant where it was graded. An updated paper has the arXiv `version` it came
+    back with; its `announced` is when it first came out."""
 
     id: str
     title: str
     announced: date | None = None
     role: DigestRole
+    version: int | None = None
     why: str | None = None  # a pick's reason
     revision: int
     gist: str | None = None

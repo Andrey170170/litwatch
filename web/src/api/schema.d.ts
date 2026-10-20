@@ -1447,7 +1447,7 @@ export interface components {
         /**
          * DigestCounts
          * @description What a digest's Mark counts: the papers it covered, its picks, and of them those central,
-         *     related, and graded must read.
+         *     related, and graded must read; apart from them, its updated papers.
          */
         DigestCounts: {
             /**
@@ -1475,6 +1475,11 @@ export interface components {
              * @default 0
              */
             must_read: number;
+            /**
+             * Updated
+             * @default 0
+             */
+            updated: number;
         };
         /**
          * DigestMark
@@ -1497,7 +1502,8 @@ export interface components {
         /**
          * DigestPaper
          * @description A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set
-         *     it below relevant where it was graded.
+         *     it below relevant where it was graded. An updated paper has the arXiv `version` it came
+         *     back with; its `announced` is when it first came out.
          */
         DigestPaper: {
             /** Id */
@@ -1507,6 +1513,8 @@ export interface components {
             /** Announced */
             announced?: string | null;
             role: components["schemas"]["DigestRole"];
+            /** Version */
+            version?: number | null;
             /** Why */
             why?: string | null;
             /** Revision */
@@ -1532,7 +1540,7 @@ export interface components {
          * @description How a digest shows one of its papers.
          * @enum {string}
          */
-        DigestRole: "pick" | "listed" | "mentioned";
+        DigestRole: "pick" | "listed" | "mentioned" | "updated";
         /**
          * DigestState
          * @description A digest is published once written, or once it says "Nothing new"; a failed one is

@@ -76,7 +76,8 @@ So an old paper is listed as updated once in a topic's dailies and once in its w
 daily as it does for new papers; a paper once shown as new never comes back, and neither does a paper's later
 version once it has been shown as updated. A daily digest covers the updated papers due when it is written. A Focus or
 Area weekly covers the ones whose version's day falls in its week, and any a published daily (written or "Nothing
-new") listed as updated that no weekly has; a Field weekly, the topic's only digest, covers every one due on its
+new") listed as updated that no weekly has, at a version listed by the week's end (the Monday after's daily is written
+first, and its own listing's are the next week's); a Field weekly, the topic's only digest, covers every one due on its
 Sunday, so one graded after its week's weekly is in the next. A paper first announced within three weeks is never
 updated: its new versions show on its page.
 
