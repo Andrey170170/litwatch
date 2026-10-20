@@ -1,4 +1,5 @@
-"""The model call journal: durable accounting and exact-request reuse."""
+"""The model call journal: durable accounting and exact-request reuse; and what each provider
+last said, its latest account error and reply (`provider_observations`)."""
 
 from __future__ import annotations
 
@@ -13,14 +14,36 @@ from litwatch.llm.types import Usage
 
 RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
 RETALLY_LOCK = 7213912  # advisory lock namespace, beside jobs.lock.RUN_LOCK
+EVAL = "eval"  # an evaluation run's kind: its calls say nothing to the status document
+
+# What a provider said, kept in `provider_observations` by the same statement as the call row it
+# came with (`c`, returning `responded_at`), so the two never part and the reply's time is its
+# row's own. Observations from other processes can commit out of order: each keeps the later.
+_REPLIED = (
+    "o AS (INSERT INTO provider_observations AS o (provider, replied_at) "
+    "SELECT %(via)s::text, responded_at FROM c WHERE %(own)s "
+    "ON CONFLICT (provider) DO UPDATE SET "
+    "replied_at = greatest(o.replied_at, EXCLUDED.replied_at))"
+)
+_ACCOUNT_ERROR = (
+    "INSERT INTO provider_observations AS o (provider, account_error, account_error_at) "
+    "SELECT %(provider)s::text, %(error)s, clock_timestamp() {source} "
+    "ON CONFLICT (provider) DO UPDATE SET "
+    "account_error = CASE WHEN o.account_error_at > EXCLUDED.account_error_at "
+    "THEN o.account_error ELSE EXCLUDED.account_error END, "
+    "account_error_at = greatest(o.account_error_at, EXCLUDED.account_error_at)"
+)
 
 
 class CallJournal:
     """One run's calls. Give it a connection of its own: concurrent calls write here while
-    the job's connection is inside a transaction."""
+    the job's connection is inside a transaction. Without `observes` (an evaluation run, which
+    writes its own tables only) it keeps no provider observations."""
 
-    def __init__(self, conn: psycopg.AsyncConnection, run_id: int) -> None:
-        self.conn, self.run_id = conn, run_id
+    def __init__(
+        self, conn: psycopg.AsyncConnection, run_id: int, *, observes: bool = True
+    ) -> None:
+        self.conn, self.run_id, self.observes = conn, run_id, observes
         self._retallying = asyncio.Lock()  # the connection holds one retally's lock at a time
 
     async def cached(self, key: str) -> dict[str, Any] | None:
@@ -113,20 +136,40 @@ class CallJournal:
             )
             return
         cur = await self.conn.execute(
-            "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
-            "WHERE id = (SELECT min(id) FROM inference_calls WHERE batch_id = %s "
-            "AND request_key = %s AND usage->>'cost' IS NULL) RETURNING run_id",
-            (Jsonb(usage.model_dump(mode="json")), batch_id, key),
+            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
+            "responded_at = clock_timestamp() WHERE id = (SELECT min(id) FROM inference_calls "
+            "WHERE batch_id = %(batch)s AND request_key = %(key)s AND usage->>'cost' IS NULL) "
+            f"RETURNING run_id, responded_at), {_REPLIED} SELECT run_id FROM c",
+            {"usage": Jsonb(usage.model_dump(mode="json")), "batch": batch_id, "key": key}
+            | self._reply(usage),
         )
         await self._retally(await cur.fetchone())
 
     async def record(self, call_id: int, usage: Usage) -> None:
+        """A reply came for the call: its accounting, whether or not the answer is usable, and
+        that the provider replied."""
         cur = await self.conn.execute(
-            "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
-            "WHERE id = %s RETURNING run_id",
-            (Jsonb(usage.model_dump(mode="json")), call_id),
+            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
+            "responded_at = clock_timestamp() WHERE id = %(id)s RETURNING run_id, responded_at), "
+            f"{_REPLIED} SELECT run_id FROM c",
+            {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id} | self._reply(usage),
         )
         await self._retally(await cur.fetchone())
+
+    def _reply(self, usage: Usage) -> dict[str, Any]:
+        """`_REPLIED`'s parameters: a reply shared from another call is not the provider's."""
+        own = self.observes and usage.via is not None and not usage.reused
+        return {"via": usage.via, "own": own}
+
+    async def account_error(self, provider: str, error: str) -> None:
+        """The provider refused a batch, or a request in one, for the account (models.md, the
+        gateway), seen by its batcher whether or not a call waits on it. A normal call's is its
+        `reject`."""
+        if not self.observes:
+            return
+        await self.conn.execute(
+            _ACCOUNT_ERROR.format(source=""), {"provider": provider, "error": error[:2000]}
+        )
 
     async def _retally(self, row: dict[str, Any] | None) -> None:
         """A charge on another run's call (a dead run's batch, read later) is in that run's cost
@@ -160,10 +203,17 @@ class CallJournal:
             "UPDATE inference_calls SET output = %s WHERE id = %s", (Jsonb(output), call_id)
         )
 
-    async def reject(self, call_id: int, error: str, reply: str | None = None) -> None:
+    async def reject(
+        self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
+    ) -> None:
+        """The call got no usable answer; with `account`, that provider refused it for the
+        account, which is observed with it (`observes`)."""
+        account = account if self.observes else None
+        update = "UPDATE inference_calls SET error = %(error)s, reply = %(reply)s WHERE id = %(id)s"
+        observed = _ACCOUNT_ERROR.format(source="FROM c")
         await self.conn.execute(
-            "UPDATE inference_calls SET error = %s, reply = %s WHERE id = %s",
-            (error, reply, call_id),
+            f"WITH c AS ({update} RETURNING id), o AS ({observed}) SELECT 1" if account else update,
+            {"error": error, "reply": reply, "id": call_id, "provider": account},
         )
 
     async def refused(self, key: str, paper_id: str | None) -> bool:
@@ -237,3 +287,35 @@ async def mean_cost(
         )
     ).fetchone()
     return row["cost"]
+
+
+async def observations(conn: psycopg.AsyncConnection) -> dict[str, dict[str, Any]]:
+    """Each provider's latest account error and latest reply, by provider."""
+    rows = await (await conn.execute("SELECT * FROM provider_observations")).fetchall()
+    return {r["provider"]: r for r in rows}
+
+
+async def outcomes(conn: psycopg.AsyncConnection, run: dict[str, Any]) -> dict[str, dict[str, int]]:
+    """Per provider, the run's calls that failed without an answer (provider errors and
+    timeouts), and the replies it sent while the run went on, whichever run's calls they
+    settled (a dead run's batch, read in this one; reused replies and evaluation runs' calls
+    left out)."""
+    rows = await (
+        await conn.execute(
+            "SELECT provider, sum(failed)::int AS failed, sum(replied)::int AS replied FROM ("
+            "SELECT usage->>'via' AS provider, 1 AS failed, 0 AS replied FROM inference_calls "
+            "WHERE run_id = %(run)s AND (error LIKE 'provider%%' OR error LIKE 'timeout%%') "
+            "UNION ALL SELECT usage->>'via', 0, 1 FROM inference_calls "
+            "WHERE responded_at BETWEEN %(since)s AND %(until)s "
+            "AND NOT coalesce((usage->>'reused')::boolean, false) "
+            "AND run_id NOT IN (SELECT id FROM runs WHERE kind = %(eval)s)) seen "
+            "WHERE provider IS NOT NULL GROUP BY provider",
+            {
+                "run": run["id"],
+                "since": run["started_at"],
+                "until": run["finished_at"],
+                "eval": EVAL,
+            },
+        )
+    ).fetchall()
+    return {r["provider"]: {"failed": r["failed"], "replied": r["replied"]} for r in rows}

@@ -254,7 +254,7 @@ class FakeDeep:
     with a status and its error (`answer_submits`, as it turns one down), keep a job running
     (`hold`) since `started_at`, or queued (`queued`), forget its jobs (`vanish`, as a restart
     does), or accept a submission and then lose the answer (`lose_answers`), as a dropped
-    connection would."""
+    connection would. Its health check reports the sign-in `auth`."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         self.outcome = outcome
@@ -271,8 +271,11 @@ class FakeDeep:
         self.queued = False
         self.vanish = False
         self.lose_answers = 0
+        self.auth: dict[str, Any] = {"state": "ok"}
 
     def handle(self, req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path == "/healthz":
+            return httpx.Response(200, json={"ok": True, "model": "m@low", "auth": self.auth})
         if req.method == "POST" and req.url.path == "/process":
             self.requests.append(json.loads(req.content))
             self.keys_sent.append(req.headers.get("idempotency-key"))

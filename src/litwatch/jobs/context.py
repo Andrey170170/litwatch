@@ -15,7 +15,7 @@ import psycopg
 from litwatch import llm, store
 from litwatch.config import Config
 from litwatch.store import runs
-from litwatch.store.calls import CallJournal
+from litwatch.store.calls import EVAL, CallJournal
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,8 @@ async def model_run(
     connection is inside a transaction.
     """
     async with run_record(conn, kind, window=window) as record, await store.sibling(conn) as side:
-        journal = CallJournal(side, record.run_id)
+        # An evaluation run writes its own tables only (AGENTS.md): no provider observations.
+        journal = CallJournal(side, record.run_id, observes=kind != EVAL)
         failed = True
         try:
             yield ModelRun(record, gateway(config, journal), journal)

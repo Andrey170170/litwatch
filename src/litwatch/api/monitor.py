@@ -19,11 +19,13 @@ from fastapi.responses import PlainTextResponse
 from litwatch import store
 from litwatch.api.deps import budget_lines
 from litwatch.archive import ArchiveClient
-from litwatch.config import Config
+from litwatch.config import ROLES, Config
+from litwatch.core import FAILED_RUNS
 from litwatch.core.budget import Spend
 from litwatch.events import Integration
 from litwatch.integrations.deep import Deep
-from litwatch.store import fulltext, outbox, reading, runs
+from litwatch.store import calls, failures, fulltext, outbox, reading, runs
+from litwatch.store import integrations as integrations_store
 from litwatch.store.outbox import Cursor
 
 SERVICE = "litwatch"
@@ -35,6 +37,17 @@ READY_AFTER_DEADLINE = timedelta(minutes=90)
 PROBE_SECONDS = 3.0
 # A lag past this many events, on an integration that is not failing, is worth a look.
 LAG_DEGRADED = 500
+# Many papers stopped at once: at one step in one night, more than this many, or this share of
+# the papers the night classified if that is more (data.md, the status document).
+STOPPED_AT_ONCE = 5
+STOPPED_SHARE = 0.02
+# The steps a paper stops at, as the status document names them, in the pipeline's order.
+STEPS = {
+    "classification": "classification",
+    "analysis": "analysis",
+    "grading": "grading",
+    "fulltext": "the Brief and Weight passes",
+}
 
 
 @dataclass
@@ -42,6 +55,16 @@ class Job:
     latest: dict | None  # the newest run
     success: dict | None  # the newest that finished without an error
     running: bool  # the newest run is open and alive (runs of a kind never overlap)
+
+
+@dataclass
+class Night:
+    """The latest nightly that finished, as the status document reads it."""
+
+    run_id: int
+    classified: int
+    stopped: dict[str, int]  # by `STEPS` key: the distinct papers that stopped there during it
+    calls: dict[str, dict[str, int]]  # by provider: calls `failed` without an answer, `replied`
 
 
 @dataclass
@@ -57,6 +80,10 @@ class Facts:
     cursors: dict[str, Cursor]  # of the loaded integrations
     spend: list[Spend]
     probes: dict[str, str | None] = field(default_factory=dict)  # name: error, None if it answers
+    night: Night | None = None
+    observed: dict[str, dict[str, Any]] = field(default_factory=dict)  # `calls.observations`
+    signin: dict[str, Any] | None = None  # the Deep service's, as its health check reported it
+    deep_failure: dict[str, Any] | None = None  # `integrations.service_failure`
 
 
 async def facts(
@@ -78,26 +105,44 @@ async def facts(
         passes=await fulltext.count_by_state(conn),
         cursors=await outbox.cursors(conn, [i.name for i in integrations]),
         spend=await budget_lines(conn, config.budget),
+        night=await _night(conn),
+        observed=await calls.observations(conn),
+        deep_failure=await integrations_store.service_failure(conn),
     )
     probes = {}
     if archive is not None:
         probes["archive"] = archive.indexed()
     for deep in (i for i in integrations if isinstance(i, Deep)):
         probes["deep"] = deep.client.health()
-    answers = await asyncio.gather(*map(_probe, probes.values()))
-    found.probes = dict(zip(probes, answers, strict=True))
+    answers = dict(zip(probes, await asyncio.gather(*map(_probe, probes.values())), strict=True))
+    found.probes = {name: error for name, (error, _) in answers.items()}
+    if "deep" in answers and answers["deep"][0] is None:
+        found.signin = (answers["deep"][1] or {}).get("auth") or {}
     return found
 
 
-async def _probe(call: Any) -> str | None:
+async def _night(conn: psycopg.AsyncConnection) -> Night | None:
+    """The latest finished nightly: from its start to its end, its digest wait included. One
+    whose process died reads failed on `nightly`, and has no known end."""
+    run = await runs.latest_finished(conn, "nightly")
+    if run is None:
+        return None
+    during = (run["started_at"], run["finished_at"], FAILED_RUNS)
+    stopped: dict[str, int] = dict(await failures.stopped_between(conn, *during))
+    stopped["fulltext"] = await fulltext.stopped_between(conn, *during)
+    classified = (run["counts"] or {}).get("classified", 0)
+    return Night(run["id"], classified, stopped, await calls.outcomes(conn, run))
+
+
+async def _probe(call: Any) -> tuple[str | None, Any]:
+    """The error, None if it answered in time, and its answer."""
     try:
         async with asyncio.timeout(PROBE_SECONDS):
-            await call
+            return None, await call
     except TimeoutError:
-        return f"no answer within {PROBE_SECONDS:g} s"
+        return f"no answer within {PROBE_SECONDS:g} s", None
     except Exception as exc:  # noqa: BLE001 - any failure is the observation
-        return f"{type(exc).__name__}: {exc}"
-    return None
+        return f"{type(exc).__name__}: {exc}", None
 
 
 # -- /metrics --------------------------------------------------------------------------------------
@@ -273,21 +318,7 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
     else:
         out.append(_component("nightly", "healthy", None, now))
 
-    stuck = {
-        "awaiting classification": s["awaiting_classification"],
-        "analysis failed": s["analysis_failed"],
-        "ungraded": s["ungraded"],
-        "full-text pass failed or awaiting text": s["fulltext_failed"],
-    }
-    named = [f"{n} {what}" for what, n in stuck.items() if n]
-    out.append(
-        _component(
-            "pipeline",
-            "degraded" if named else "healthy",
-            f"papers stopped: {', '.join(named)}; expected none" if named else None,
-            now,
-        )
-    )
+    out.append(_pipeline(f.night, now))
     failed = s["digests_failed"]
     out.append(
         _component(
@@ -297,6 +328,10 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
             now,
         )
     )
+    for name in sorted({m.provider for r in ROLES for m in config.models.role(r).models}):
+        reasons = _provider(name, f.observed.get(name, {}), f.night)
+        status = "degraded" if reasons else "healthy"
+        out.append(_component(f"provider-{name}", status, "; ".join(reasons) or None, now))
     for name, c in sorted(f.cursors.items()):
         if c.setup_failures:
             reason = (
@@ -315,18 +350,13 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
         else:
             out.append(_component(f"integration-{name}", "healthy", None, now))
     for name, err in sorted(f.probes.items()):
+        reasons = [f"does not answer: {err}; expected an answer within {PROBE_SECONDS:g} s"]
+        reasons = reasons if err else []
+        if name == "deep":
+            reasons += _deep(f)
         # Without the archive nothing is read or taken in; without deep only cards wait.
-        status = "healthy" if err is None else ("failed" if name == "archive" else "degraded")
-        out.append(
-            _component(
-                name,
-                status,
-                f"does not answer: {err}; expected an answer within {PROBE_SECONDS:g} s"
-                if err
-                else None,
-                now,
-            )
-        )
+        status = "healthy" if not reasons else ("failed" if name == "archive" else "degraded")
+        out.append(_component(name, status, "; ".join(reasons) or None, now))
     over = [x for x in f.spend if x.over]
     reason = "; ".join(
         f"{x.provider} projected ${x.projected:.2f} this month, budget ${x.budget:.2f}"
@@ -334,6 +364,63 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
     )
     out.append(_component("budget", "degraded" if over else "healthy", reason or None, now))
     return out
+
+
+def _pipeline(night: Night | None, now: datetime) -> dict[str, Any]:
+    """Degraded when many papers stopped at one step in the latest finished nightly; a paper's own
+    failure is the app's, so a few never turn it."""
+    if night is None:
+        return _component("pipeline", "healthy", None, now)
+    most = max(STOPPED_AT_ONCE, STOPPED_SHARE * night.classified)
+    over = [
+        f"{night.stopped[k]} at {what}"
+        for k, what in STEPS.items()
+        if night.stopped.get(k, 0) > most
+    ]
+    if not over:
+        return _component("pipeline", "healthy", None, now)
+    reason = (
+        f"papers stopped in nightly {night.run_id}, which classified {night.classified}: "
+        f"{', '.join(over)}; expected at most {most:g} at a step"
+    )
+    return _component("pipeline", "degraded", reason, now)
+
+
+def _provider(name: str, seen: dict[str, Any], night: Night | None) -> list[str]:
+    """Why the provider is failed, if it is: an account error with no reply since, or the
+    latest finished nightly's calls to it failed without one reply."""
+    reasons = []
+    error_at, replied_at = seen.get("account_error_at"), seen.get("replied_at")
+    if error_at and (replied_at is None or replied_at < error_at):
+        reasons.append(
+            f"{seen['account_error']} at {error_at.isoformat()}, no reply since; "
+            "expected a reply after it"
+        )
+    ran = night.calls.get(name, {}) if night else {}
+    if ran.get("failed") and not ran.get("replied"):
+        reasons.append(
+            f"{ran['failed']} calls in nightly {night.run_id} failed and none had a reply; "
+            "expected a reply"
+        )
+    return reasons
+
+
+def _deep(f: Facts) -> list[str]:
+    """Why the Deep service is failed, but for not answering: its sign-in when it answered, a
+    service failure litwatch saw with no card made since."""
+    reasons = []
+    signin = f.signin
+    if signin is not None and signin.get("state") != "ok":
+        said = signin.get("state") or "not reported"
+        detail = f" ({signin['detail']})" if signin.get("detail") else ""
+        reasons.append(f"sign-in {said}{detail}; expected ok")
+    if failure := f.deep_failure:
+        said = f": {failure['error']}" if failure["error"] else ""
+        reasons.append(
+            f"service failure at {failure['at'].isoformat()}{said}, no card made since; "
+            "expected a card after it"
+        )
+    return reasons
 
 
 def status_document(f: Facts, config: Config) -> dict[str, Any]:

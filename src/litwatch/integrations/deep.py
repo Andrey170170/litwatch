@@ -13,7 +13,9 @@ reacts to no event: `card.requested` is the owner's request already queued, and 
 emitted when the card is stored.
 
 Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `poll_seconds`
-(15) and `timeout_minutes` (45). There is no daily cap: `max_per_day` is refused.
+(15) and `timeout_minutes` (45). There is no daily cap: `max_per_day` is refused. Keep
+`timeout_minutes` above the service's `DEEP_WALL_CLOCK_MIN` (30): a job running longer than it,
+by its own start, ends as stuck, so a lower one ends healthy jobs and lets a duplicate in.
 """
 
 from __future__ import annotations
@@ -96,10 +98,12 @@ class DeepClient:
         self.poll_seconds = poll_seconds
         self.timeout_seconds = timeout_seconds
 
-    async def health(self) -> None:
-        """Raise unless the service answers its health check."""
+    async def health(self) -> dict[str, Any]:
+        """The service's health check, its sign-in in `auth` (`state`, and `detail` when not
+        ok); raises unless it answers."""
         resp = await self.http.get(f"{self.base_url}/healthz", timeout=10.0)
         resp.raise_for_status()
+        return resp.json()
 
     async def submit(self, submission: dict[str, Any], *, key: str) -> str:
         """Submit one paper; returns the job's id. `key` names the submission: the service

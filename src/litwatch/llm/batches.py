@@ -41,6 +41,8 @@ type Answered = Reply | ProviderError | None
 class BatchProvider(Protocol):
     """A provider that batches (anthropic.AnthropicProvider). `custom_id` is the request key."""
 
+    name: str
+
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str: ...
     async def status(self, batch_id: str) -> str: ...  # in_progress, canceling, ended or gone
     async def cancel(self, batch_id: str) -> None: ...
@@ -53,6 +55,7 @@ class BatchJournal(Protocol):
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None: ...
     async def gone(self, batch_id: str) -> None: ...
+    async def account_error(self, provider: str, error: str) -> None: ...
 
 
 def _size(request: Request) -> int:
@@ -229,6 +232,8 @@ class Batcher:
             account = isinstance(exc, ProviderError) and exc.account
             if account:  # never asked again: the calls fail on the account
                 log.error("a batch of %d calls was refused for the account: %s", len(held), exc)
+                if self.journal:
+                    await self.journal.account_error(self.provider.name, f"account: {exc}")
             else:
                 log.exception(
                     "a batch of %d calls could not be sent; they go as normal calls", len(held)
@@ -293,8 +298,11 @@ class Batcher:
                 log.exception("batch %s could not be read; trying again", batch_id)
                 return
             # Not read again this run: its calls fail on the account, and the batch is left
-            # open on its rows for a later run to account for.
+            # open on its rows for a later run to account for. Seen here, once, whether or not
+            # a call waits on it (a dead run's batch): the provider is failed for its account.
             log.error("batch %s could not be read for the account: %s", batch_id, exc)
+            if self.journal:
+                await self.journal.account_error(self.provider.name, f"account: {exc}")
             del self._open[batch_id]
             self._give_up(batch)
             for key in batch.waiting:
@@ -306,6 +314,8 @@ class Batcher:
             if status == "gone":
                 await self.journal.gone(batch_id)
             for key, reply in replies.items():
+                if isinstance(reply, ProviderError):  # seen here, whoever waits on it
+                    await self.journal.account_error(self.provider.name, f"account: {reply}")
                 # A call settles its row with the answer, but for a row given up on before: a
                 # reply settles it still, anything else is its call's on a row of its own.
                 if key in batch.waiting and (

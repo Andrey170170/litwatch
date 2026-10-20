@@ -118,6 +118,22 @@ async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[di
     ).fetchall()
 
 
+async def stopped_between(
+    conn: psycopg.AsyncConnection, since: datetime, until: datetime, runs: int
+) -> dict[Step, int]:
+    """Per step, the distinct papers it stopped on between `since` and `until`: those whose
+    failure reached `runs` runs, or was stopped by a refusal, then. A step left for the owner is
+    not run again, so its failure's time is when it stopped."""
+    rows = await (
+        await conn.execute(
+            "SELECT step, count(DISTINCT paper_id) AS n FROM step_failures "
+            "WHERE failed_runs >= %s AND failed_at BETWEEN %s AND %s GROUP BY step",
+            (runs, since, until),
+        )
+    ).fetchall()
+    return {r["step"]: r["n"] for r in rows}
+
+
 async def waiting(
     conn: psycopg.AsyncConnection, paper: Paper, step: Step, runs: int, topic: str = ""
 ) -> bool:

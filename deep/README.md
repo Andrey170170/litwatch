@@ -33,7 +33,7 @@ node src/main.ts serve
 | `DEEP_MODEL`, `DEEP_EFFORT` | `gpt-6.1-sol`, `low` | The agent's model and reasoning effort |
 | `DEEP_MAX_CELLS` | `40` | REPL cells per paper |
 | `DEEP_CELL_TIMEOUT_S` | `90` | One cell's time limit |
-| `DEEP_WALL_CLOCK_MIN` | `30` | One paper's time limit |
+| `DEEP_WALL_CLOCK_MIN` | `30` | One paper's time limit; keep it below litwatch's `[integrations.deep] timeout_minutes` (45), past which litwatch ends a running job as stuck and may start a duplicate |
 | `DEEP_MAX_OUTPUT_CHARS` | `8000` | Output kept per cell |
 | `DEEP_MAX_FETCH_CHARS` | `200000` | Text kept per `fetch` |
 | `LITWATCH_URL` | `http://litwatch:8080` | litwatch v1, for the agent's `store.search` (`GET /api/papers`) |

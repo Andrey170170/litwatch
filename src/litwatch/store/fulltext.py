@@ -446,6 +446,7 @@ async def failed(
     await conn.execute(
         """
         UPDATE fulltext_passes SET state = 'failed', lease_until = NULL, last_error = %(error)s,
+            failed_at = now(),
             failed_runs = greatest(failed_runs + %(counts)s,
                                    CASE WHEN %(refused)s THEN %(floor)s ELSE 0 END),
             unusable_runs = unusable_runs + %(unusable)s,
@@ -738,6 +739,22 @@ async def count_stuck(
             "SELECT count(*) AS n FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
             f"WHERE {STUCK} {seen}",
             stuck_params(runs),
+        )
+    ).fetchone()
+    return row["n"]
+
+
+async def stopped_between(
+    conn: psycopg.AsyncConnection, since: datetime, until: datetime, runs: int
+) -> int:
+    """The distinct papers whose Brief or Weight pass stopped between `since` and `until`:
+    failed `runs` runs, or refused by every model, then. A pass left for the owner is not tried
+    again, so its last failure is the one that stopped it."""
+    row = await (
+        await conn.execute(
+            "SELECT count(DISTINCT paper_id) AS n FROM fulltext_passes WHERE kind <> 'deep' "
+            "AND state = 'failed' AND failed_runs >= %s AND failed_at BETWEEN %s AND %s",
+            (runs, since, until),
         )
     ).fetchone()
     return row["n"]

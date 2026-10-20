@@ -173,7 +173,8 @@ async def test_a_replay_writes_only_to_the_evaluation_tables(conn, models):
     r = await start(conn, models, [*LABELLED, *await replay.misses(conn)])
     after = await contents(conn)
     changed = {t for t in before if before[t] != after[t]}
-    # The run record and its call journal carry the cost; nothing of the pipeline moves.
+    # The run record and its call journal carry the cost; nothing of the pipeline moves, nor
+    # what the status document reads of the providers.
     assert changed == {"eval_runs", "eval_labels", "eval_results", "runs", "inference_calls"}
     run = await evaluation.get(conn, r.eval_run_id)
     assert run["finished_at"] is not None and float(run["cost"]) > 0

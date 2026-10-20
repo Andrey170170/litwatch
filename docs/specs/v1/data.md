@@ -220,7 +220,8 @@ each model provider, the archive, deep, the budget), for a monitoring system on 
 database session of the process running it, so a run whose process died reads as failed rather than running.
 
 The status document says when litwatch cannot do its job; a paper's own failure is the app's (pipeline.md, section 9).
-All of these read the latest nightly run that has ended, unless said otherwise.
+All of these read the latest nightly run that has finished, unless said otherwise (one whose process died has no
+known end, and `nightly` already reads it failed).
 
 - `pipeline` is degraded when, at one step, more distinct papers stopped during that run than max(5, 2 % of the
   papers it classified). The steps are classification, analysis, grading (a paper counts once however many topics) and
@@ -230,7 +231,8 @@ All of these read the latest nightly run that has ended, unless said otherwise.
 - `provider-<name>`, one per model provider, is degraded from an `account` error (models.md, the gateway) until the
   provider's next reply; and when, in that run, the provider had failed calls (provider errors, timeouts) and not one
   reply. A reply is any answer the provider sent, a refusal or an invalid answer included; an answer reused from the
-  journal is not one.
+  journal is not one. Evaluation runs write their own tables only, so an account error or a reply only an evaluation
+  saw does not reach it.
 - `deep` is degraded while the service's health check reports a sign-in other than ok or does not answer, and from
   any service failure litwatch sees (a job the service tagged `service`, an error submitting or following a job) until
   the next card is made, whenever either happened.
