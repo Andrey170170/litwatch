@@ -92,12 +92,14 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
 
 - **Migration 0035.**
   - Adds `deep_attempts.trace jsonb`.
-  - Copies each card's trace onto the attempt that made it. `card_failed` overwrites the trace with a failed
-    attempt's and keeps the older card. So for a card whose `error` is set, the trace is the paper's latest ended
-    attempt with that error. Otherwise, it is the latest ended attempt with the card's `pass_id` and no error.
-  - The migration fails, leaving the column in place, if any non-empty trace has no attempt or more than one. That
-    case is then handled by hand. On the production copy, all 46 cards match exactly one attempt (no failed remake
-    yet). P1's remakes come before P2, so the check runs again on a fresh production copy when P2 is built.
+  - Copies each card's non-empty trace onto the attempt whose job wrote it. Only an attempt whose job ran writes a
+    trace: `put_card`, or `card_failed` with a trace. A failure before the job ran keeps the older trace and
+    replaces only `error`. So the candidate is the paper's latest ended attempt with a `job_id`, never matched by
+    error.
+  - **Provenance is checked, not assumed.** The candidate's `usage.turns` must equal the trace's count of assistant
+    events. A trace with no candidate, or one that fails the check, makes the migration fail, leaving the column in
+    place, and that case is handled by hand. On the production copy, all 46 cards pass (2026-10-20, read-only
+    query). P1's remakes come before P2, so the check runs again on a fresh production copy when P2 is built.
   - Drops `deep_cards.trace` only after the copy and the check.
 - **Writes.** `attempt_ended` writes the trace. `put_card` and `card_failed` stop touching it. A lost or stuck job has
   no trace (null), not `[]`: `DeepClient`'s `Outcome` carries `trace: list | None` instead of turning a missing
@@ -226,7 +228,7 @@ The owner settled four more in conversation:
 | V1. Any public host can be fetched; no private address can, directly or through a redirect | `deep/tests/hosts.test.ts` against a local server and a stubbed lookup: every refused class (private, loopback, link-local, unique-local, site-local, CGNAT, reserved, NAT64, 6to4, IPv4-mapped), each as a literal (IPv6 bracketed) and as a DNS answer, and a redirect to a private address, all refused. After deploy, from the container: a public URL answers, 192.168.0.1 is refused |
 | V2. anonymous.4open.science repositories get checked | A rewrite unit test. On a dev `deep`, 2610.24495's card has `code_available: true` with its repository. The other 4 the same once remade in production |
 | V3. The budget and byte cap hold | Unit tests: the 61st fetch throws; a 5 MB body is cut at 2 MB without being read whole |
-| V4. Every attempt keeps its trace, none lost in the move | Pytest on a fresh schema, with a card whose trace came from a failed remake and a trace with no attempt (the migration fails). On a production-copy sandbox: 46 traces before and after, none left on a card. A failed or lost attempt keeps its own trace, or none, never a wiped one |
+| V4. Every attempt keeps its trace, none lost in the move | Pytest on a fresh schema, with a card whose trace survived a remake turned down before its job ran (it goes to the attempt that ran), and a trace whose turns match no attempt (the migration fails). On a production-copy sandbox: 46 traces before and after, none left on a card. A failed or lost attempt keeps its own trace, or none, never a wiped one |
 | V5. The agent can read what Deep did | `litwatch deep trace 2610.24495` output in P2's evidence: turns, cells, host calls with reasons and hops, timings |
 | V6. Process notes reach the card and Needs you, folded and quiet | Deep tests with pi-ai's fake provider: model notes validated, service notes merged after. Screenshots at 390 and 1440 px, dark and light: the card's folded rung, the Deep notes group. Vitest and pytest: run status, `waiting` and the page count unchanged; Acknowledge; a remade card clears it |
 | V7. Cards don't get worse | 3 previously fine papers remade on a dev `deep` at medium, compared with their production cards made at low, with each run's time and tokens |
