@@ -15,7 +15,7 @@ from PIL import Image
 from litwatch.archive.text import _PDF_LOCK
 
 MAX_SIDE = 1568  # the long side of a page's image, in pixels
-_KINDS = {"figure": r"(?:Figure|Fig\.)", "table": r"(?:Table|Tab\.)"}
+_KINDS = {"figure": r"(?:Figure|Fig\b\.?)", "table": r"(?:Table|Tab\b\.?)"}
 # A caption's label: a number, an appendix's or supplement's ("A.1", "A1", "S3", "B.2.1"), a
 # Roman numeral ("IV", as IEEE numbers tables) or a single letter ("A").
 _LABEL = r"(?:[A-Za-z]\.?)?\d+(?:\.\d+)*|[IVXLC]+|[A-Za-z]"
