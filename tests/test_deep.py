@@ -5,6 +5,7 @@ daily cap, revisions, and what the API shows."""
 
 import asyncio
 import contextlib
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -583,7 +584,7 @@ async def test_a_paper_dismissed_or_unsaved_during_the_read_is_never_submitted(d
     assert (fake.requests, await attempts(db)) == ([], [])
 
 
-async def test_a_job_whose_polls_keep_failing_is_given_up_at_its_deadline(db):
+async def test_a_job_unreachable_past_its_deadline_is_kept_until_the_service_answers(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.fail_polls = 1
@@ -591,13 +592,18 @@ async def test_a_job_whose_polls_keep_failing_is_given_up_at_its_deadline(db):
     assert await work(db, with_text(P), d) == {"card_service_failed": 1}
     await db.execute("UPDATE deep_attempts SET at = now() - interval '2 hours'")
     await unpause(db)
-    fake.fail_polls = 100  # the service is gone for good
+    fake.fail_polls = 1  # unreachable past the deadline: it may yet run, so it is kept
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    (attempt,) = await attempts(db)
+    assert attempt["ended_at"] is None
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("running", 0)
+    await unpause(db)
+    fake.vanish = True  # back, restarted: the job is gone, so the attempt ends
     assert await work(db, with_text(P), d) == {"card_service_failed": 1}
     (attempt,) = await attempts(db)
     assert (attempt["usage"], attempt["failure"]) == (None, "service")
-    assert "gave up" in attempt["error"]
-    (row,) = await deep_rows(db)
-    assert (row["state"], row["failed_runs"]) == ("ready", 0)
+    assert "vanished" in attempt["error"] and fake.started == 1
 
 
 def hurried(fake: FakeDeep) -> Deep:
@@ -626,22 +632,32 @@ async def test_a_job_given_up_on_at_its_deadline_is_kept_and_its_card_taken_once
     assert made["usage"] == USAGE and fake.started == 1
 
 
-async def test_a_job_still_running_when_followed_again_past_its_deadline_ends_as_the_services(db):
+async def test_a_job_running_past_its_deadline_by_the_services_clock_is_given_up_on(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.hold = True
-    d = hurried(fake)
-    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
-    await unpause(db)
-    polls = fake.polls
-    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
-    assert fake.polls == polls + 1  # looked at once more, not followed for another deadline
+    fake.started_at = (datetime.now(UTC) - timedelta(hours=1)).isoformat()  # stuck
+    assert await work(db, with_text(P), hurried(fake)) == {"card_service_failed": 1}
     (ended,) = await attempts(db)
-    assert ended["ended_at"] is not None and "followed again" in ended["error"]
+    assert ended["ended_at"] is not None and "running past its deadline" in ended["error"]
     assert (ended["failure"], ended["usage"]) == ("service", None)
     (row,) = await deep_rows(db)
-    assert (row["state"], row["failed_runs"]) == ("ready", 0)  # uncounted; not followed again
-    assert fake.started == 1
+    assert (row["state"], row["failed_runs"]) == ("ready", 0)  # uncounted, tried afresh
+
+
+async def test_a_job_queued_past_its_deadline_is_kept_however_often_it_is_followed(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.queued = True  # behind another job: its own clock has not started
+    d = hurried(fake)
+    for _ in range(3):
+        assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+        (attempt,) = await attempts(db)
+        assert attempt["ended_at"] is None
+        await unpause(db)
+    fake.queued = False
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert fake.started == 1 and len(await attempts(db)) == 1
 
 
 async def test_one_worker_at_a_time_works_the_deep_passes(db):

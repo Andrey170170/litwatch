@@ -20,8 +20,9 @@ service tagged it so, lost it, or never ended it) counts against nothing: the pa
 the queue. Nor does an error submitting or following a job, after which the attempt and the
 pass stay as they are: the job is followed, found by its key if its submission's answer was
 lost, or, when the service has none, the attempt ends and the pass is tried afresh. A job not
-ended by its deadline is kept too and followed once more after the pause; still not ended
-then, it is the service's failure, and the attempt ends. Any
+ended by its deadline is kept too and followed again after each pause until it ends; one
+running past the deadline by the service's own clock, which is shorter, is given up on as
+the service's failure. Any
 service failure pauses the whole queue for `PAUSE`. There is no daily cap; the owner's
 requests go first.
 """
@@ -172,8 +173,8 @@ async def _work_one(
         # The job goes on: followed again by the pass's next claim, after the pause.
         return await _service_failed(conn, c, attempt["id"], f"following the deep job: {exc}")
     if outcome.still_running:
-        # Past its deadline the job may still end: kept, and followed once more after the
-        # pause, never submitted again while it may run.
+        # Past its deadline the job may still run: kept, and followed again after the pause,
+        # never submitted again while it may.
         return await _service_failed(conn, c, attempt["id"], outcome.error or "")
     if outcome.error or outcome.result is None:
         return await _ended(

@@ -290,11 +290,12 @@ after the pause, as when a worker dies. A submission whose answer never came may
 each submission carries its attempt as a key, and the service answers a key it already has with that key's job: the pass
 keeps its attempt, and after the pause the service is asked for the job its key names, which is followed. When the
 service has none, nothing runs for the attempt: it ends, its usage unknown, and the pass is tried again as a first try
-is. A job litwatch has followed to its timeout (45 minutes from the submission, above the service's own 30-minute wall
-clock, so only a stuck service reaches it) is a service failure that keeps its attempt too: it is followed once more
-after the pause, and taken as it ended by then, a card or its failure; not ended then, the attempt ends as the service's
-failure, its usage unknown, and the next try is a new submission. A job started twice for one attempt is not possible
-while the service runs; a service restarted in between has lost the job anyway.
+is. A job litwatch has followed to its timeout (45 minutes from the submission) is a service failure that keeps its
+attempt too: it is followed again after each pause and taken as it ends, a card or its failure. It may be queued behind
+another job, or the service unreachable, and may yet run, so it is not given up on; but one that has been running longer
+than the timeout by the service's own clock has outlived the service's 30-minute wall clock, so the service is stuck:
+the attempt ends as the service's failure, its usage unknown, and the next try is a new submission. A job started twice
+for one attempt is not possible while the service runs; a service restarted in between has lost the job anyway.
 
 A pass that fails, including a model response that is truncated or invalid, is retried on the next run (a download
 the archive gave up on is asked for again with it), and goes down `brief`'s fallbacks as [models.md](models.md) says;

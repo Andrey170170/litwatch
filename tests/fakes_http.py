@@ -252,8 +252,9 @@ class FakeDeep:
     (`started` counts those started), and found by `GET /keys/<key>`. It can fail the next
     submissions (`fail_submits`) or polls and lookups (`fail_polls`), answer every submission
     with a status and its error (`answer_submits`, as it turns one down), keep a job running
-    (`hold`), forget its jobs (`vanish`, as a restart does), or accept a submission and then
-    lose the answer (`lose_answers`), as a dropped connection would."""
+    (`hold`) since `started_at`, or queued (`queued`), forget its jobs (`vanish`, as a restart
+    does), or accept a submission and then lose the answer (`lose_answers`), as a dropped
+    connection would."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         self.outcome = outcome
@@ -266,6 +267,8 @@ class FakeDeep:
         self.answer_submits: tuple[int, str] | None = None
         self.fail_polls = 0
         self.hold = False
+        self.started_at: str | None = None
+        self.queued = False
         self.vanish = False
         self.lose_answers = 0
 
@@ -298,8 +301,11 @@ class FakeDeep:
                 self.fail_polls -= 1
                 return httpx.Response(503)
             self.polls += 1
+            if self.queued:
+                return httpx.Response(200, json={"status": "queued", "stats": {}})
             if self.polls < 2 or self.hold:
-                return httpx.Response(200, json={"status": "running", "stats": {"cells": 3}})
+                job = {"status": "running", "stats": {"cells": 3}, "started_at": self.started_at}
+                return httpx.Response(200, json=job)
             status = "error" if self.outcome.get("error") else "done"
             return httpx.Response(200, json={"status": status, **self.outcome})
         return httpx.Response(404)

@@ -123,16 +123,13 @@ class DeepClient:
     async def follow(self, job_id: str, since: datetime, label: str = "") -> Outcome:
         """Poll a job until it ends, or until `timeout_seconds` after `since` (when it was
         submitted). A failed poll raises, and the job can be followed again later, until then.
-        Given up on at the deadline, the job is `still_running`; followed again past it, it is
-        looked at once more, and given up on for good if it has not ended: the service is stuck,
-        its own wall clock being shorter."""
-        deadline = since + timedelta(seconds=self.timeout_seconds)
-        if datetime.now(UTC) > deadline:  # given up on once already
-            error = "litwatch gave up on the deep job: not ended when followed again"
-            gave_up = Outcome(None, [], None, "", error, "service")
-        else:
-            error = "litwatch gave up waiting for the deep job, to follow it again"
-            gave_up = Outcome(None, [], None, "", error, "service", still_running=True)
+        Past the deadline the job is `still_running`, to be followed again later (one poll),
+        unless it has been running longer than `timeout_seconds` by the service's own clock,
+        whose wall clock is shorter: the service is stuck, and litwatch gives up on the job. A
+        job queued behind another, or unreachable, may yet run, so it is never given up on."""
+        deadline = since + self.limit
+        error = "litwatch stopped waiting for the deep job, to follow it again"
+        kept = Outcome(None, [], None, "", error, "service", still_running=True)
         seen = ""
         while True:
             await asyncio.sleep(self.poll_seconds)
@@ -144,7 +141,7 @@ class DeepClient:
                 resp.raise_for_status()
             except httpx.HTTPError:
                 if datetime.now(UTC) > deadline:
-                    return gave_up  # what it spent was never reported
+                    return kept
                 raise
             job = resp.json()
             stats = job.get("stats") or {}
@@ -171,7 +168,17 @@ class DeepClient:
                     job.get("failure"),
                 )
             if datetime.now(UTC) > deadline:
-                return gave_up  # the job may go on spending; what it spent was never reported
+                started = job.get("started_at")
+                running = started and datetime.now(UTC) - datetime.fromisoformat(started)
+                if job["status"] == "running" and running and running > self.limit:
+                    # It may go on spending; what it spent was never reported.
+                    error = "litwatch gave up on the deep job: running past its deadline"
+                    return Outcome(None, [], None, "", error, "service")
+                return kept
+
+    @property
+    def limit(self) -> timedelta:
+        return timedelta(seconds=self.timeout_seconds)
 
 
 class Deep:
