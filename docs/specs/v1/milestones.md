@@ -47,7 +47,11 @@ the nightly under the owner's caps before the switch (#74, #75). N8, the switch
 ([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), decisions 68–72) is built, on 2026-10-20, and
 goes live with the next deployment: Acknowledge (#91), fallback models per role chosen by replay (#94, #97), service
 failures that don't count against a paper and Deep cards without a cap (#98), and a status document that says only
-when litwatch can't do its job (#102). The `deep` image and litwatch deploy together from #98 on.
+when litwatch can't do its job (#102). The `deep` image and litwatch deploy together from #98 on. The Notion export
+([`docs/plans/notion-export.md`](../../plans/notion-export.md)) is on since 2026-10-20: `cause` on `grade.changed`
+(#95) and the `notion` integration (#96, #101). On the owner's instance it built the PI's database of 83 papers, its
+grades per topic matching production's, and 0.14's Notion databases are trashed. Pages show the abstract until Briefs
+are written well enough (decision 70). Next there: the owner's views, and the PI's week.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).
