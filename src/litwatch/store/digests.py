@@ -29,6 +29,7 @@ from litwatch.core.digests import (
     listing_day,
 )
 from litwatch.core.fulltext import AWAITING_TOO_LONG
+from litwatch.core.grading import GRADES, NO_WEIGHT
 from litwatch.core.rules import REACTION_WORDS
 from litwatch.store.analyses import CURRENT_GIST
 from litwatch.store.reading import SCOPE, STANDING, _rank, _scope
@@ -92,6 +93,17 @@ _NEWEST = """
 
 # What an updated paper's row adds: the version it came back with, and when that was submitted.
 _VERSION = ", p.version, nv.submitted"
+# The (Fit, Weight) pairs the pipeline grades must read (`core.grading.GRADES`).
+_MUST_READ = (
+    "("
+    + ", ".join(
+        f"('{f.value}', '{w.value}')"
+        for f, row in GRADES.items()
+        for w, g in row.items()
+        if g == Grade.MUST_READ
+    )
+    + ")"
+)
 # Each grade's place, most inclusive first: an updated list's order before rarity.
 _GRADES = "ARRAY[" + ", ".join(f"'{g.value}'" for g in Grade) + "]::text[]"
 
@@ -345,12 +357,14 @@ async def due_updated(
     if topic.depth == Depth.FOCUS:
         query = _focus(which, updated=True)
     else:
-        # The grade shown is must read, and the latest verdict on the current text where it is
-        # graded has the Fit it shows: the pipeline's, not an older text's or the owner's word.
-        gates = f"""AND {_GRADED} AND s.grade = 'must_read' AND (
+        # The grade shown is must read, and so is the pipeline's where it is graded: the latest
+        # verdict on the current text at the paper's Weight, not an older text's grade or the
+        # owner's word.
+        gates = f"""AND {_GRADED} AND s.grade = 'must_read' AND ((
             SELECT v.fit FROM verdicts v
             WHERE v.paper_id = p.id AND v.topic = g.topic AND v.paper_revision = p.revision
-            ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) = g.fit"""
+            ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1),
+            coalesce(r.weight, '{NO_WEIGHT.value}')) IN {_MUST_READ}"""
         if topic.depth == Depth.AREA:
             gates += f" AND NOT {_RECHECKING}"
         query = _subtree(which, gates, updated=True)
@@ -372,16 +386,16 @@ async def _listed_updated(
     conn: psycopg.AsyncConnection, topic: str, monday: date
 ) -> dict[str, int]:
     """The papers the topic's published daily digests listed as updated, each with the version
-    listed, from three weeks before the week from `monday` to the Monday after (written the
-    same night, before the weekly)."""
+    listed, up to the Monday after the week from `monday` (written the same night, before the
+    weekly)."""
     rows = await (
         await conn.execute(
             f"""SELECT dp.paper_id, max(dp.version) AS version FROM digest_papers dp
                 JOIN digests d ON d.id = dp.digest_id
                 WHERE d.topic = %s AND d.period = 'day' AND d.state IN {_PUBLISHED}
-                  AND d.day BETWEEN %s AND %s AND dp.role = 'updated'
+                  AND d.day <= %s AND dp.role = 'updated'
                 GROUP BY dp.paper_id""",
-            (topic, monday + timedelta(days=6) - DUE_WINDOW, monday + timedelta(days=7)),
+            (topic, monday + timedelta(days=7)),
         )
     ).fetchall()
     return {r["paper_id"]: r["version"] for r in rows}

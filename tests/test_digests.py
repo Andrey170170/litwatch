@@ -744,13 +744,15 @@ async def test_a_field_weekly_lists_updated_must_reads_and_one_graded_late_in_th
 
 async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db):
     """Graded must read on its first text, then rewritten, U is not listed while its new text
-    has no verdict (its grading ended without one), only once graded must read again; V,
-    relevant by the pipeline, is not listed when the owner's word makes it must read."""
+    has no verdict (its grading ended without one), only once graded must read again. One
+    relevant by the pipeline is not listed when the owner's word makes it must read; a landmark
+    graded central, which the owner's related leaves must read, is."""
     w = Writer()
     friday = "2026-10-08T15:00:00+00:00"
     first = paper(U.id, title=U.title, version=1, version_history=history(MAY))
     word_only = updated("2605.00012", friday, title="Must read by the owner's word")
-    await papers_store.upsert(db, [first, word_only])
+    kept = updated("2605.00013", friday, title="A landmark, related by the owner")
+    await papers_store.upsert(db, [first, word_only, kept])
     await field(db, first, "central")
     rewritten = updated(U.id, friday, abstract="An entirely different abstract about robots.")
     await papers_store.upsert(db, [rewritten])
@@ -762,6 +764,12 @@ async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db):
         paper_id=word_only.id, topic=AGENTS.slug, value=LabelValue.CENTRAL, origin="reader"
     )
     await word.label(db, label)
+    await classify(db, kept, AGENTS.slug)
+    await analyse(db, kept, "landmark")
+    await grade(db, kept, "central", AGENTS)
+    await verdicts.passed(db, [(kept.id, 1)])
+    label = Label(paper_id=kept.id, topic=AGENTS.slug, value=LabelValue.RELATED, origin="reader")
+    await word.label(db, label)
     grades = await (
         await db.execute(
             "SELECT paper_id, grade FROM effective_grades WHERE topic = %s", (AGENTS.slug,)
@@ -770,15 +778,30 @@ async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db):
     assert {g["paper_id"]: g["grade"] for g in grades} == {
         U.id: "must_read",
         word_only.id: "must_read",
+        kept.id: "must_read",
     }
     await week(db, w, MON)
-    assert await shown(db, AGENTS.slug, "week", MON) == ("nothing_new", [])
+    assert await shown(db, AGENTS.slug, "week", MON) == ("nothing_new", [(kept.id, "updated")])
     await grade(db, rewritten, "central", AGENTS)
     await week(db, w, date(2026, 10, 12))
     assert await shown(db, AGENTS.slug, "week", date(2026, 10, 12)) == (
         "nothing_new",
         [(U.id, "updated")],
     )
+
+
+async def test_a_weekly_recaps_a_dailys_updated_paper_no_weekly_has_however_old(db):
+    """Listed as updated by the daily of Tue 15 Sep, U is in no weekly while they are not
+    written (a pause): the weekly of 5 Oct recaps it."""
+    w = Writer()
+    u = updated(U.id, "2026-09-14T15:00:00+00:00")
+    await papers_store.upsert(db, [u])
+    await focus(db, u, "central")
+    await listed(db, date(2026, 9, 15), S)
+    await day(db, w, date(2026, 9, 15))
+    assert (await shown(db, FAITH.slug, "day", date(2026, 9, 15)))[1] == [(U.id, "updated")]
+    await week(db, w, MON)
+    assert await shown(db, FAITH.slug, "week", MON) == ("nothing_new", [(U.id, "updated")])
 
 
 async def test_an_updated_paper_is_not_a_focus_weeklys_earlier_paper(db):
