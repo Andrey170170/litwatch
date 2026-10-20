@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
+import dns from "node:dns";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
-import { Agent } from "undici";
-import { buildHosts, fetchPublic, guardedLookup, isPublic, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
+import { buildHosts, fetchPublic, guardedLookup, isPublic, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -116,8 +116,10 @@ test("a private literal address is refused without a connection, however it is w
 let server: Server;
 let port = 0;
 let bigFinished: boolean | undefined;
+let served: string[] = [];
 before(async () => {
   server = createServer((req, res) => {
+    served.push(req.url ?? "");
     const to = (location: string) => res.writeHead(302, { location }).end();
     switch (req.url) {
       case "/page":
@@ -132,6 +134,14 @@ before(async () => {
         return to("file:///etc/passwd");
       case "/loop":
         return to("/loop");
+      case "/open-at-cap":
+        // exactly the cap, then the connection stays open
+        res.writeHead(200, { "content-type": "text/plain" });
+        return void res.write("y".repeat(1000));
+      case "/pdf":
+        return res.writeHead(200, { "content-type": "Application/PDF" }).end("%PDF-1.7 body");
+      case "/self":
+        return res.writeHead(302, { location: "" }).end();
       case "/big": {
         res.writeHead(200, { "content-type": "text/plain" });
         const chunk = "x".repeat(64 * 1024);
@@ -159,7 +169,7 @@ const local = {
   maxChars: 1000,
   maxBytes: 2 * 1024 * 1024,
   pace: <T>(_host: string, work: () => Promise<T>) => work(),
-  guard: { publicOnly: testPublic, dispatcher: new Agent({ connect: { lookup: guardedLookup(testPublic, stubResolve) } }) },
+  guard: makeGuard(testPublic, stubResolve),
 };
 
 test("a public page is fetched as text through redirects, with the URL it ended at", async () => {
@@ -177,6 +187,30 @@ test("every redirect hop is checked again", async () => {
   await assert.rejects(fetchPublic(`http://site.test:${port}/to-private-literal`, local), /10\.0\.0\.1 is not a public address/);
   await assert.rejects(fetchPublic(`http://site.test:${port}/to-file`, local), /only http\(s\) URLs/);
   await assert.rejects(fetchPublic(`http://site.test:${port}/loop`, local), /more than 5 redirects/);
+  await assert.rejects(fetchPublic(`http://site.test:${port}/self`, local), /more than 5 redirects/, "an empty Location is the page itself");
+});
+
+test("the production fetch asks DNS where it connects and refuses a private answer before any request", async () => {
+  const realLookup = dns.lookup;
+  const fake: Record<string, string[]> = {
+    "loop.example": ["127.0.0.1"],
+    "loop6.example": ["::1"],
+    "mapped.example": ["::ffff:127.0.0.1"],
+    "lan.example": ["192.168.0.1"],
+    "mixed.example": ["93.184.215.14", "127.0.0.1"],
+  };
+  (dns as { lookup: unknown }).lookup = (host: string, _opts: unknown, cb: (e: Error | null, a: unknown) => void) =>
+    cb(null, (fake[host] ?? []).map((address) => ({ address, family: address.includes(":") ? 6 : 4 })));
+  served = [];
+  try {
+    const hosts = buildHosts({ litwatchUrl: "http://litwatch.test", maxFetchChars: 100, maxFetches: 60, maxFetchBytes: 1000 });
+    for (const name of Object.keys(fake)) {
+      await assert.rejects(hosts.fetch!([`http://${name}:${port}/page`]), /not a public address/, name);
+    }
+    assert.deepEqual(served, [], "the listener on 127.0.0.1 was never reached");
+  } finally {
+    (dns as { lookup: unknown }).lookup = realLookup;
+  }
 });
 
 test("a body is read only up to the byte cap", async () => {
@@ -186,6 +220,18 @@ test("a body is read only up to the byte cap", async () => {
   assert.equal(page.truncated, true);
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(bigFinished, false, "the server never got to send the whole 5 MB");
+});
+
+test("a body left open at exactly the cap is not waited on", async () => {
+  const page = (await fetchPublic(`http://site.test:${port}/open-at-cap`, { ...local, maxBytes: 1000 })) as Record<string, unknown>;
+  assert.equal((page.text as string).length, 1000);
+  assert.equal(page.truncated, true);
+});
+
+test("a PDF body is never read, whatever the case of its media type", async () => {
+  const page = (await fetchPublic(`http://site.test:${port}/pdf`, local)) as Record<string, unknown>;
+  assert.equal(page.text, "");
+  assert.match(String(page.note), /PDF bodies are not fetched/);
 });
 
 test("a paper's session stops fetching once its budget is used", async () => {

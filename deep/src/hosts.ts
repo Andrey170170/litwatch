@@ -4,7 +4,7 @@
  * become exceptions in the cell.
  */
 
-import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from "node:dns";
+import dns, { type LookupAddress, type LookupOptions } from "node:dns";
 import { isIP } from "node:net";
 import type { ReadableStream } from "node:stream/web";
 import ipaddr from "ipaddr.js";
@@ -191,9 +191,9 @@ type LookupCallback = (err: NodeJS.ErrnoException | null, address: string | Look
 /** A `lookup` for the socket that refuses a name unless every address it resolves to is public.
  * It checks the addresses the connection then uses, so a name can't resolve one way for a check
  * and another for the connection. */
-export function guardedLookup(publicOnly = isPublic, resolve: Resolve = dnsLookup as unknown as Resolve) {
+export function guardedLookup(publicOnly = isPublic, resolve?: Resolve) {
   return (hostname: string, options: LookupOptions, callback: LookupCallback): void => {
-    resolve(hostname, { ...options, all: true }, (err, addresses) => {
+    (resolve ?? (dns.lookup as unknown as Resolve))(hostname, { ...options, all: true }, (err, addresses) => {
       if (err) return callback(err, "");
       const refused = addresses.find((a) => !publicOnly(a.address));
       if (refused || addresses.length === 0)
@@ -211,9 +211,13 @@ export interface Guard {
   dispatcher: Dispatcher;
 }
 
+/** The guard production uses, and tests with their own policy and resolver. */
+export function makeGuard(publicOnly = isPublic, resolve?: Resolve): Guard {
+  return { publicOnly, dispatcher: new Agent({ connect: { lookup: guardedLookup(publicOnly, resolve) } }) };
+}
+
 let defaultGuard: Guard | undefined;
-const guard = (): Guard =>
-  (defaultGuard ??= { publicOnly: isPublic, dispatcher: new Agent({ connect: { lookup: guardedLookup() } }) });
+const guard = (): Guard => (defaultGuard ??= makeGuard());
 
 const MAX_HOPS = 5;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
@@ -289,17 +293,18 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
           throw new Error(`${at.href}: ${cause instanceof Error ? cause.message : String(cause)}`);
         });
         const location = resp.headers.get("location");
-        if (REDIRECTS.has(resp.status) && location) {
+        if (REDIRECTS.has(resp.status) && location !== null) {
           await resp.body?.cancel();
           return { next: new URL(location, at) };
         }
         const contentType = resp.headers.get("content-type") ?? "";
-        if (contentType.includes("pdf")) {
+        const media = contentType.toLowerCase();
+        if (media.includes("pdf")) {
           await resp.body?.cancel();
           return { page: { status: resp.status, contentType, url: at.href, text: "", note: "PDF bodies are not fetched; use the arXiv HTML or abstract page" } };
         }
         const { raw, cut } = await readCapped(resp.body, opts.maxBytes);
-        const text = contentType.includes("html") ? htmlToText(raw) : raw;
+        const text = media.includes("html") ? htmlToText(raw) : raw;
         return {
           page: {
             status: resp.status,
@@ -318,7 +323,8 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
   }
 }
 
-/** A body as text, read only up to `maxBytes`; the rest is cancelled unread. */
+/** A body as text, read only up to `maxBytes`: reading stops once that many have come, so a body
+ * left open past the cap is never waited on. */
 async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<{ raw: string; cut: boolean }> {
   if (!body) return { raw: "", cut: false };
   const reader = body.getReader();
@@ -328,14 +334,14 @@ async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: num
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (size + value.byteLength > maxBytes) {
-      chunks.push(value.subarray(0, maxBytes - size));
+    const part = value.subarray(0, maxBytes - size);
+    chunks.push(part);
+    size += part.byteLength;
+    if (size >= maxBytes) {
       cut = true;
       await reader.cancel();
       break;
     }
-    chunks.push(value);
-    size += value.byteLength;
   }
   return { raw: new TextDecoder().decode(Buffer.concat(chunks)), cut };
 }
