@@ -253,7 +253,7 @@ def deep_notes(
     from litwatch.store import integrations as cards  # noqa: PLC0415
 
     zone = configuration.load(config).schedule.zone
-    start = since.replace(tzinfo=zone) if since else None
+    start = since.replace(tzinfo=zone) if since is not None else None
     found = _run(lambda conn: cards.process_notes(conn, start), migrate=False)
     print(text.notes_text(found, zone), end="")
 

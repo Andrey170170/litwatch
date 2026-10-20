@@ -416,10 +416,12 @@ async def test_the_deep_commands_read_each_attempts_trace_and_the_cards_notes(
     monkeypatch.setenv(
         "LITWATCH_DATABASE_URL", f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     )
-    (tmp_path / "litwatch.toml").write_text('[schedule]\ntimezone = "UTC"\n')
+    config = tmp_path / "litwatch.toml"
+    config.write_text('[schedule]\ntimezone = "UTC"\n')
 
     async def run(*args: str) -> str:
-        result = await asyncio.to_thread(CliRunner().invoke, cli.app, ["deep", *args])
+        argv = ["deep", *args, "--config", str(config)]
+        result = await asyncio.to_thread(CliRunner().invoke, cli.app, argv)
         assert result.exit_code == 0, result.output
         return result.output
 
