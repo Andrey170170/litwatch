@@ -126,6 +126,12 @@ databases trashed. *Check:* the PI's database holds every paper the configuratio
 every Focus paper at relevant or above) that the web app shows, with grades per topic matching; a paper taken off a
 topic shows No longer listed with its Why; the owner's rearranged views survive a sync.
 
+**The MCP server** (decisions 83–87, after the switch; [mcp.md](mcp.md)): search with litwatch's filters, a paper with
+what litwatch has on it, digests, outline-first reading and PDF page images, read-only, at `/mcp` on litwatch's host
+with its own token; the client configuration in the owner's dotfiles. A build plan comes first. *Check:* from a
+research session on another machine, an agent given only a vague memory of a digest finds the paper, reads the
+section asked for and shows a figure, without the web.
+
 After v1: backfill of the archive's older papers (the owner's plan: a local decision-style model over several nights,
 for example DiffusionGemma with constrained decoding, then leftover monthly credit on the stronger graders for what it
 surfaces); semantic search and a citation graph in the archive; other sources.

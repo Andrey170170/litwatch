@@ -255,6 +255,19 @@ a fixed list of hosts, so 5 of the first 46 production cards called real, public
     from the model and from the service, folded on the card and in a quiet Needs you group that counts nowhere. A
     card written around a blocked fetch looks like a card about a paper without code; the note says which.
 
+## Decided 2026-10-20, the MCP server
+
+The spec is [mcp.md](mcp.md): the owner's research agents find and read papers through litwatch instead of the web.
+
+83. **The MCP server is litwatch's, not the archive's** (replacing archive.md's "an MCP server ... belongs in the
+    archive"). Reading a paper needs litwatch's PDF fallback, and finding one the owner saw needs litwatch's records:
+    digests, Briefs, grades, reactions.
+84. **Read-only at first.** Writes (a Miss, a save, a Deep card) wait until use shows the owner wants them.
+85. **Agents read outline first**, then a section, a range or everything; figures and tables as PDF page images.
+86. **One endpoint on litwatch's host, LAN and tailnet only, with its own token**; the client configuration lives in
+    the owner's dotfiles.
+87. **Lexical search for now**, the archive's; semantic search stays the archive's later work.
+
 ## Open
 
 - The grade table and rarity offsets are starting points, tuned in N2.
