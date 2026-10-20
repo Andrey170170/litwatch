@@ -83,7 +83,7 @@ The alternatives were "the first 3, then Show all N" (still a scroll past every 
   - **How it's handled:** each of them gets a test showing that an updated row stays out of it.
   - **The "once" guard:** it is its own query, so a row of one role never counts as the other's coverage. The exception is the D2 rule, where an earlier appearance as new does count.
 - **R2: The volume is set by arXiv.** About 160 old papers a day arrive this way now. D1 sets how many become rows.
-  - **How it's handled:** V2 measures the rows per topic on a copy of production before the web stage. A list is sorted by grade, then rarity.
+  - **How it's handled:** V2 measures the rows per topic on a copy of production before the web stage. A list is sorted by grade, then rarity, then the paper first out most recently. V2 found a Field weekly's rows all must read and epic, about 200 in language-models; the owner kept them all, newest first out on top (2026-10-20).
 - **R3: A wrong day.** A version without a submission time adds no row rather than a guessed one, and the intake fix keeps a first day from moving later.
 - **R4: The role's database constraint.** `digest_papers.role` has a CHECK constraint. The migration widens it, and the API's `DigestRole` and the web's `sections()` learn the new role. An unknown role would otherwise be dropped silently in the web app.
 

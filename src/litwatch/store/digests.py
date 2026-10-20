@@ -198,9 +198,10 @@ _SUBTREE_LED = f"""(
 
 
 def _order(updated: bool, grade: str, rarity: str) -> str:
-    """A digest's list, rarest first; an updated list by grade, then rarity."""
+    """A digest's list, rarest first; an updated list by grade, then rarity, then the paper
+    first out most recently (a Field's must reads are alike in grade and rarity)."""
     if updated:
-        return f"array_position({_GRADES}, {grade}), {_rank(rarity)} DESC, p.id"
+        return f"array_position({_GRADES}, {grade}), {_rank(rarity)} DESC, p.announced DESC, p.id"
     return f"{_rank(rarity)} DESC, p.announced, p.id"
 
 
@@ -330,16 +331,16 @@ async def due_updated(
     week: date | None = None,
 ) -> list[Due]:
     """The old papers due for the topic's digest of `period` as updated (digests.md, updated
-    papers), by grade, then rarity, each with its newest version: one whose listing day is
-    within `DUE_WINDOW` before `last` (the digest's day, or its week's Sunday) and more than
-    `DUE_WINDOW` after the paper's first; eligible there now at a higher bar than a new paper
-    (for Focus, effective Fit central or related; for Area and Field, graded must read, an
-    Area's after its Weight re-check, as a pick, and by the pipeline on its current text, so
-    neither an older text's grade nor the owner's word makes it due); never shown as new by a
-    published digest of the topic, nor as updated by one of `period`. A Focus or Area weekly
-    gives its `week`'s Monday: it takes the versions listed that week, and recaps, at the
-    version they listed, the papers its published dailies listed as updated, up to the Monday
-    after, still eligible, whatever version has come since."""
+    papers), by grade, then rarity, then newest first out, each with its newest version: one
+    whose listing day is within `DUE_WINDOW` before `last` (the digest's day, or its week's
+    Sunday) and more than `DUE_WINDOW` after the paper's first; eligible there now at a higher
+    bar than a new paper (for Focus, effective Fit central or related; for Area and Field,
+    graded must read, an Area's after its Weight re-check, as a pick, and by the pipeline on its
+    current text, so neither an older text's grade nor the owner's word makes it due); never
+    shown as new by a published digest of the topic, nor as updated by one of `period`. A Focus
+    or Area weekly gives its `week`'s Monday: it takes the versions listed that week, and
+    recaps, at the version they listed, the papers its published dailies listed as updated, up
+    to the Monday after, still eligible, whatever version has come since."""
     first = last - DUE_WINDOW
     recapped = {} if week is None else await _listed_updated(conn, topic.slug, week)
     # A listing day comes one to four days after its submission's US Eastern date

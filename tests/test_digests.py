@@ -535,6 +535,7 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
 # -- updated papers --------------------------------------------------------------------------------
 
 MAY = "2026-05-04T15:00:00+00:00"  # first out on Tue 5 May
+JUNE = "2026-06-01T15:00:00+00:00"  # first out on Tue 2 June
 FOR_TUE = "2026-10-05T15:00:00+00:00"  # Monday 11:00 in New York: Tuesday's listing
 
 
@@ -627,15 +628,20 @@ async def test_updated_papers_add_no_call_and_stay_out_of_the_text_counts_and_ra
     assert [r["titles"] for r in await store_.written(db, TUE, TUE)] == [[S.title]]
 
 
-async def test_an_updated_list_is_by_grade_then_rarity(db):
-    """Two must reads, the landmark one rarer, then a relevant one, whatever their ids."""
+async def test_an_updated_list_is_by_grade_then_rarity_then_newest_first_out(db):
+    """Three must reads, the landmark one rarer, then of two alike the one first out in June
+    before May's, then a relevant one, whatever their ids."""
     w = Writer()
     landmark = updated("2605.00013", title="A landmark")
+    june = paper(
+        "2606.00019", title="Out in June", version=2, version_history=history(JUNE, FOR_TUE)
+    )
     solid = updated("2605.00012", title="Solid")
     relevant = updated("2605.00011", title="Related only")
-    await papers_store.upsert(db, [landmark, solid, relevant])
+    await papers_store.upsert(db, [landmark, june, solid, relevant])
     for p, fit, weight in (
         (landmark, "central", "landmark"),
+        (june, "central", "solid"),
         (solid, "central", "solid"),
         (relevant, "related", "solid"),
     ):
@@ -646,7 +652,12 @@ async def test_an_updated_list_is_by_grade_then_rarity(db):
     await day(db, w, TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == (
         "nothing_new",
-        [(landmark.id, "updated"), (solid.id, "updated"), (relevant.id, "updated")],
+        [
+            (landmark.id, "updated"),
+            (june.id, "updated"),
+            (solid.id, "updated"),
+            (relevant.id, "updated"),
+        ],
     )
 
 
