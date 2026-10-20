@@ -45,12 +45,16 @@ The server's instructions tell agents to use it before the web for arXiv papers.
 ## Access
 
 - **One endpoint on litwatch's host** (decision 86): streamable HTTP at `https://litwatch.andrei-homelab.com/mcp`,
-  behind the gateway's existing virtual host, so it is reachable from the LAN and the tailnet and nowhere else. The
-  gateway gains a `location /mcp` that proxies a stream (a homelab-config change).
+  behind the gateway's existing virtual host, so it is reachable from the LAN and the tailnet and nowhere else. It
+  answers each request with plain JSON, no stream, so the gateway's existing proxy carries it unchanged.
 - **Its own token**, a bearer token apart from the web app's `LITWATCH_API_TOKEN`: it sits in agent configurations on
   several machines, so revoking it must not sign the web app out, and when writes come they get their own.
-- **Slow reads stay out of the web app.** A PDF read or a page render must not slow the web app's requests; whether
-  that is a process of its own is the build plan's call.
+- **Slow reads stay out of the web app.** A PDF read or a page render must not slow the web app's requests. It runs
+  inside `litwatch serve`, its heavy work in an executor of its own
+  ([`docs/plans/mcp-server.md`](../../plans/mcp-server.md), D1).
+- **Vergil sees it**, by the homelab's telemetry convention: calls and their durations per tool on the service's
+  metrics, and an `mcp` component in the status document that degrades only when the server fails (a paper not
+  found or still being fetched is not a failure).
 
 ## Clients
 
