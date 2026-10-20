@@ -97,7 +97,8 @@ class Reply:
 
 
 # What a provider answers when the account, not the request, is the trouble: a key revoked
-# (401), credits used up (402), access withdrawn (403).
+# (401), credits used up (402), access withdrawn (403). OpenRouter's 403 about the request's
+# content is a refusal instead (openrouter.declined).
 ACCOUNT_STATUSES = frozenset({401, 402, 403})
 
 

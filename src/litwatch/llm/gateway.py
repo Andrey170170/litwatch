@@ -50,7 +50,8 @@ def _without_nul(value: Any) -> Any:
 
 class CallError(Exception):
     """A call produced no usable answer. `kind` is `truncated`, `refused`, `invalid`,
-    `timeout`, `provider` or `account` (the provider's 401, 402 or 403: never retried); the
+    `timeout`, `provider` or `account` (the provider's 401, 402 or 403, but for OpenRouter's
+    403 about the request's content, a refusal: never retried); the
     message carries the detail. `usage` is the reply's, when one
     came back and was billed; `model` the model asked last (`provider:model@effort`). From
     `Gateway.ask`, `refused` means every model asked down the role's list refused."""

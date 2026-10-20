@@ -176,13 +176,14 @@ async def test_a_connection_that_never_opened_is_tried_again_and_a_read_timeout_
     assert len(client.sent) == 1
 
 
-def _status(sdk, code: int) -> Exception:
-    """The SDK's error for an HTTP status, as it raises one."""
+def _status(sdk, code: int, body: dict | None = None) -> Exception:
+    """The SDK's error for an HTTP status, as it raises one; `body` is the response's `error`."""
     http = sys.modules[type(sdk.DefaultAsyncHttpxClient()).__mro__[1].__module__.split(".")[0]]
     request = http.Request("POST", "https://api.example.org")
     client = sdk.AsyncAnthropic(api_key="k") if sdk is anthropic else sdk.AsyncOpenAI(api_key="k")
     response = http.Response(code, request=request)
-    return client._make_status_error(f"status {code}", body=None, response=response)
+    body = None if body is None else {"error": body}
+    return client._make_status_error(f"status {code}", body=body, response=response)
 
 
 @pytest.mark.parametrize("code", [401, 402, 403])
@@ -202,6 +203,54 @@ async def test_an_account_error_is_never_retried_and_journalled_as_its_kind(
     (row,) = await calls(conn)
     assert row["error"].startswith("account: ")
     assert row["usage"]["via"] == provider  # whose account, though no reply came
+
+
+def _forbidden(metadata: dict | None) -> dict:
+    return {"code": 403, "message": "Forbidden"} | ({"metadata": metadata} if metadata else {})
+
+
+# OpenRouter's 403s about the request's content (its API reference, errors), each with what
+# marks it.
+DECLINED = {
+    "moderation": {"reasons": ["violence"], "flagged_input": "...", "provider_name": "OpenAI"},
+    "guardrail": {"error_type": "permission_denied", "patterns": ["ignore all previous"]},
+    "content_policy_violation": {"error_type": "content_policy_violation", "provider_code": "S"},
+    "refusal": {"error_type": "refusal", "provider_name": "Anthropic"},
+}
+
+
+@pytest.mark.parametrize("category", list(DECLINED))
+async def test_an_openrouter_403_about_the_request_is_a_refusal_that_goes_down_the_list(
+    conn, journal, category
+):
+    openrouter = SdkClient(_status(openai, 403, _forbidden(DECLINED[category])))
+    anthropic = SdkClient(anthropic_message(GOOD))
+    models = Models(writer=MUSE.model_copy(update={"fallbacks": (HAIKU,)}))
+    answer = await gateway(models, anthropic, openrouter, journal=journal).ask("writer", REQUEST)
+    assert answer.value.yes and (len(openrouter.sent), len(anthropic.sent)) == (1, 1)
+    refused, answered = await calls(conn)
+    assert refused["error"] == f"refused: {category}" and answered["error"] is None
+    assert refused["usage"]["via"] == "openrouter" and refused["usage"]["cost"] is None
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"limit_source": "openrouter_key_limit", "scope": "key_limit", "limit_usd": 30},
+        {"error_type": "permission_denied"},  # no guardrail matched: the key's permission
+        None,  # nothing to tell it by
+    ],
+    ids=["budget", "permission", "unknown"],
+)
+async def test_any_other_openrouter_403_is_the_account_and_stops_the_list(conn, journal, metadata):
+    openrouter = SdkClient(_status(openai, 403, _forbidden(metadata)))
+    anthropic = SdkClient(anthropic_message(GOOD))
+    models = Models(writer=MUSE.model_copy(update={"fallbacks": (HAIKU,)}))
+    with pytest.raises(CallError) as caught:
+        await gateway(models, anthropic, openrouter, journal=journal).ask("writer", REQUEST)
+    assert caught.value.kind == "account" and anthropic.sent == []
+    (row,) = await calls(conn)
+    assert row["error"].startswith("account: ")
 
 
 async def test_a_role_without_credentials_fails_as_a_call_error():
