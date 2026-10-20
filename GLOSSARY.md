@@ -149,4 +149,4 @@ words, and only there: **Must read** and **Worth a look** for the grades must re
 listed** for a paper that fell below them, **TL;DR** for the Gist, **Deep read** for the Deep card; a page shows the
 abstract, not the Brief.
 _Avoid_: Worth a look, No longer listed and TL;DR anywhere else. Must read is the grade's own name everywhere; Deep
-read keeps their web-app meanings elsewhere (a Deep card's section, the action that asks for a Deep card).
+read keeps its web-app meaning elsewhere: the action that asks for a Deep card.

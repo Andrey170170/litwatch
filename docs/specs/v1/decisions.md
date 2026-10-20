@@ -179,8 +179,9 @@ The owner talked to the PI: she asked for a week to see whether the Notion view 
 69. **Notion is the PI's view, not the owner's**: papers only, no digests; the exported topics and the minimum grade
     are options, by default the Focus topics at relevant or above. It follows grades, not the library. Pages stand
     on their own, with no links into litwatch. *Why:* the owner reads the web app; the PI cannot reach it.
-70. **Plain words only**: Must read, Worth a look, No longer listed; TL;DR, Summary, Deep read; short topic names;
-    a "How to read this" page. *Why:* the PI does not know litwatch's terms, and Fit levels read as jargon.
+70. **Plain words only**: Must read, Worth a look, No longer listed; TL;DR, Abstract, Deep read; short topic names;
+    a "How to read this" page. *Why:* the PI does not know litwatch's terms, and Fit levels read as jargon. The
+    page shows the abstract, not the Brief, until Briefs are written well enough (2026-10-19).
 71. **A paper that leaves keeps its page**, marked No longer listed with a Why line per topic left, naming who took it
     off (the owner, litwatch on re-checking, or a change to the topic) and whether it was judged off-topic or less
     important; `grade.changed` gains a `cause` for this. Pages are never deleted. *Why:* a row the PI saw should not
@@ -191,7 +192,7 @@ The owner talked to the PI: she asked for a week to see whether the Notion view 
     are the owner's; Status is the reader's; nothing comes back from Notion. *Why:* the owner arranges the views by
     hand, and a trial needs no feedback path.
 74. **The Deep read is coloured callouts by section**, inside a collapsed toggle, as 0.14's reading card was. *Why:*
-    the owner liked 0.14's look; the toggle keeps the page short for a reader who stops at the Summary.
+    the owner liked 0.14's look; the toggle keeps the page short for a reader who stops at the Abstract.
 75. **The first set-up fills the database with every paper that qualifies then**, not only papers from new events.
 76. **On the owner's instance the database goes on the existing LitWatch page**, already shared with the PI, behind
     its own Notion integration token. 0.14's Papers, Digest and Selections databases and the page's linked view go to
