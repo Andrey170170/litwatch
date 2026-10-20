@@ -18,8 +18,10 @@ pass: it is tried again on the next nightly run, and after `FAILED_RUNS` failed 
 for the owner on Quality, as every pass does. One that failed because of the service (the
 service tagged it so, lost it, or never ended it) counts against nothing: the pass goes back in
 the queue. Nor does an error submitting or following a job, after which the attempt and the
-pass stay as they are, to be followed or sent again. Any service failure pauses the whole
-queue for `PAUSE`. There is no daily cap; the owner's requests go first.
+pass stay as they are: the job is followed, found by its key if its submission's answer was
+lost, or, when the service has none, the attempt ends and the pass is tried afresh. Any
+service failure pauses the whole queue for `PAUSE`. There is no daily cap; the owner's
+requests go first.
 """
 
 from __future__ import annotations
@@ -118,7 +120,7 @@ async def _work_one(
             return await _service_failed(conn, c, attempt["id"], f"finding the deep job: {exc}")
         if job_id is not None:
             await cards.job_started(conn, attempt["id"], job_id)
-            attempt = {**attempt, "job_id": job_id, "at": datetime.now(UTC)}
+            attempt = {**attempt, "job_id": job_id}  # followed from when it was submitted
         else:
             # Its submission started no job the service has: nothing runs, so the attempt ends
             # (its usage unknown, should a restarted service have lost one) and the pass is

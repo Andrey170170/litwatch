@@ -147,11 +147,9 @@ async def add_attempt(
 
 async def job_started(conn: psycopg.AsyncConnection, attempt_id: int, job_id: str) -> None:
     """The service accepted the attempt's job, or was found to have it after its answer was
-    lost: it is followed from now until it ends, across a failed poll or a worker's death, and
-    never submitted again meanwhile."""
-    await conn.execute(
-        "UPDATE deep_attempts SET job_id = %s, at = now() WHERE id = %s", (job_id, attempt_id)
-    )
+    lost: it is followed until it ends, across a failed poll or a worker's death, and never
+    submitted again meanwhile."""
+    await conn.execute("UPDATE deep_attempts SET job_id = %s WHERE id = %s", (job_id, attempt_id))
 
 
 async def open_attempt(conn: psycopg.AsyncConnection, pass_id: int) -> dict[str, Any] | None:

@@ -368,7 +368,7 @@ async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_que
     assert fake.requests[1]["paper"]["id"] != tried_first  # the failed one went to the back
 
 
-async def test_a_submission_whose_answer_was_lost_is_sent_again_with_its_key_after_the_pause(db):
+async def test_a_submission_whose_answer_was_lost_is_found_by_its_key_after_the_pause(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.lose_answers = 1  # the service took the job; its answer never came
@@ -385,7 +385,8 @@ async def test_a_submission_whose_answer_was_lost_is_sent_again_with_its_key_aft
     # Found by its key and followed, without the archive (which has nothing now) or a new job.
     assert await work(db, FakeArchive(status="pending"), d) == {"cards_written": 1}
     assert fake.keys_sent == [f"{attempt['id']}:{P.id}"]
-    assert fake.started == 1 and len(await attempts(db)) == 1
+    (followed,) = await attempts(db)
+    assert fake.started == 1 and followed["at"] == attempt["at"]  # still when it was submitted
 
 
 async def test_a_lost_submission_the_service_never_ran_ends_and_the_pass_is_tried_afresh(db):

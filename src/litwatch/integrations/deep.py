@@ -6,9 +6,9 @@ the topics the card is for and the card extensions they ask for), and the servic
 protocol, followed to the job's end with its usage.
 
 The queue records each submission as an attempt before it is sent and the job once accepted,
-and sends the attempt as the submission's key, which the service answers with the job it
-already started for that key while it keeps it; so a submission is sent again only when its
-answer was lost. A failed job says whose failure it was, the paper's or the service's. It
+and sends the attempt as the submission's key, by which the service finds the job it
+started for that key while it keeps it; so a submission whose answer was lost is looked up,
+never sent again. A failed job says whose failure it was, the paper's or the service's. It
 reacts to no event: `card.requested` is the owner's request already queued, and `card.ready` is
 emitted when the card is stored.
 
