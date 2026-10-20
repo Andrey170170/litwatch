@@ -38,6 +38,7 @@ const config = {
     litwatchUrl: env("LITWATCH_URL", "http://litwatch:8080"),
     litwatchToken: secret("LITWATCH_TOKEN"),
     s2ApiKey: secret("S2_API_KEY"),
+    contact: process.env.DEEP_CONTACT || undefined,
     maxFetchChars: whole("DEEP_MAX_FETCH_CHARS", 200000),
     maxFetches: whole("DEEP_MAX_FETCHES", 60),
     maxFetchBytes: whole("DEEP_MAX_FETCH_MB", 2, 1024 * 1024),

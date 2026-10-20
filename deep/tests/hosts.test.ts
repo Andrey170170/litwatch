@@ -120,9 +120,11 @@ let server: Server;
 let port = 0;
 let bigFinished: boolean | undefined;
 let served: string[] = [];
+let agents: (string | undefined)[] = [];
 before(async () => {
   server = createServer((req, res) => {
     served.push(req.url ?? "");
+    agents.push(req.headers["user-agent"]);
     const to = (location: string) => res.writeHead(302, { location }).end();
     switch (req.url) {
       case "/page":
@@ -183,6 +185,13 @@ test("a public page is fetched as text through redirects, with the URL it ended 
   assert.equal(page.truncated, false);
   const missing = (await fetchPublic(`http://site.test:${port}/nothing`, local)) as Record<string, unknown>;
   assert.equal(missing.status, 404, "an HTTP status is a value for the agent, not an error");
+});
+
+test("fetch names the operator's contact in the User-Agent only when one is configured", async () => {
+  agents = [];
+  await fetchPublic(`http://site.test:${port}/page`, { ...local, contact: "ops@example.org" });
+  await fetchPublic(`http://site.test:${port}/page`, local);
+  assert.deepEqual(agents, ["litwatch-deep (mailto:ops@example.org)", "litwatch-deep"]);
 });
 
 test("every redirect hop is checked again", async () => {

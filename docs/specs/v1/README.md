@@ -47,6 +47,7 @@ graph (they belong to the archive, later). Sources other than arXiv. Mobile apps
 | [archive.md](archive.md) | The archive's role, deployment, storage policy, full text, search, papers outside the collection |
 | [models.md](models.md) | Model roles, the gateway, lab diversity, assurance per depth, budgets |
 | [integrations.md](integrations.md) | Events, the integration contract, Zotero, WebDAV, deep, webhook (mostly carried over) |
+| [mcp.md](mcp.md) | The MCP server: research agents search, read and see litwatch's view of papers; access and clients |
 | [publications.md](publications.md) | Published versions on DBLP and BibTeX (carried over) |
 | [data.md](data.md) | Modules, data model, configuration |
 | [taxonomy.md](taxonomy.md) | The draft class tree |

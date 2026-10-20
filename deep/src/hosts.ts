@@ -16,6 +16,8 @@ export interface HostConfig {
   /** litwatch's read token, which may only search and read papers. */
   litwatchToken?: string;
   s2ApiKey?: string;
+  /** An address the fetched sites can write to, sent in the User-Agent; arXiv asks for one. */
+  contact?: string;
   /** Text kept per fetch. */
   maxFetchChars: number;
   /** Fetches per paper; the next one throws. */
@@ -159,7 +161,7 @@ export function buildHosts(cfg: HostConfig): Record<string, HostFn> {
     },
     fetch: async ([url]) => {
       if (++fetches > cfg.maxFetches) throw new Error(`the fetch budget of ${cfg.maxFetches} per paper is used up`);
-      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, pace });
+      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, contact: cfg.contact, pace });
     },
   };
 }
@@ -221,8 +223,6 @@ const guard = (): Guard => (defaultGuard ??= makeGuard());
 
 const MAX_HOPS = 5;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
-const USER_AGENT = "litwatch-deep (mailto:andrey24122004@gmail.com)";
-
 /** anonymous.4open.science builds its pages in the browser, and its `/r/` links answer 401 to a
  * plain fetch; its JSON API serves the same repository: `files/` lists a folder, `file/<path>`
  * returns a file. */
@@ -258,6 +258,8 @@ const literal = (hostname: string): string | null => {
 export interface FetchOptions {
   maxChars: number;
   maxBytes: number;
+  /** Named in the User-Agent when set. */
+  contact?: string;
   pace?: Pace;
   guard?: Guard;
 }
@@ -283,7 +285,7 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
       at.hostname,
       async () => {
         const resp = await undiciFetch(at, {
-          headers: { "user-agent": USER_AGENT },
+          headers: { "user-agent": opts.contact ? `litwatch-deep (mailto:${opts.contact})` : "litwatch-deep" },
           redirect: "manual",
           dispatcher,
           signal: AbortSignal.timeout(30_000),

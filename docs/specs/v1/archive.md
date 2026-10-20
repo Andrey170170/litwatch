@@ -14,8 +14,8 @@ stops being an optional integration and becomes **part of the stack**: litwatch 
 - **Full text.** The archive serves the text of a paper's LaTeX source (its text-only filter keeps the LaTeX and
   drops figures and data: from several GB to a few MB per paper). When a paper has no source, the PDF's text is used.
 - **Search.** The archive is the search engine for papers (see below).
-- **Later.** Semantic search, a citation graph and an MCP server for research agents belong in the archive and become
-  available to litwatch through it.
+- **Later.** Semantic search and a citation graph belong in the archive and become available to litwatch through it.
+  The MCP server for research agents is litwatch's ([mcp.md](mcp.md), decision 83).
 
 ## Deployment
 

@@ -2,6 +2,7 @@
   "name": "litwatch-deep",
   "version": "0.10.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Deep processor for litwatch: a Pi agent with one JavaScript REPL tool over the paper",
   "type": "module",
   "engines": {
