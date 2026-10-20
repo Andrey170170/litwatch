@@ -360,7 +360,7 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
         (P.id, done["id"]),
     )
     await integrations_store.put_card(
-        conn, P.id, CARD, "deep-model", {}, [], revision=1, version=2, source="latex", pass_id=None
+        conn, P.id, CARD, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
     )
     published = Publication(
         dblp_key="conf/nips/Smith26",
@@ -410,7 +410,7 @@ async def test_a_deep_card_from_an_older_text_says_which_text_it_read(conn, shel
     fake, *_ = shelves
     await conn.execute("UPDATE papers SET version = 1, revision = 1 WHERE id = %s", (P.id,))
     await integrations_store.put_card(
-        conn, P.id, CARD, "deep-model", {}, [], revision=1, version=1, source="latex", pass_id=None
+        conn, P.id, CARD, "deep-model", {}, revision=1, version=1, source="latex", pass_id=None
     )
     async with serving(_app(conn, fake)) as http:
         current = await ok(http, "get_paper", paper_id=P.id)
