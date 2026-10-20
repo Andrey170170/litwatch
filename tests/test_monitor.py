@@ -15,6 +15,7 @@ from litwatch.api.monitor import Facts, Job, Night, components, create_monitor, 
 from litwatch.config import Config, Models, RoleConfig, Schedule
 from litwatch.core import FAILED_RUNS
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm.gateway import KEYS
 from litwatch.store import db, failures, reading, runs
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
@@ -30,6 +31,14 @@ STOPPED = {
     "fulltext_failed": 0,
     "digests_failed": 0,
 }
+
+
+@pytest.fixture(autouse=True)
+def keys(monkeypatch):
+    """Both providers' keys set, as on a working install; a test unsets one to see it missing."""
+    for variable in KEYS.values():
+        monkeypatch.setenv(variable, "k3y")
+        monkeypatch.delenv(f"{variable}_FILE", raising=False)
 
 
 @pytest.fixture
@@ -414,3 +423,27 @@ async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(c
         )
     ).fetchall()
     assert provider((await monitor.get("/status")).json(), "openrouter")["status"] == "healthy"
+
+
+async def test_a_provider_a_role_uses_without_its_key_is_degraded(monitor, monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENROUTER_API_KEY")
+    document = (await monitor.get("/status")).json()
+    assert component(document, "provider-anthropic")["status"] == "healthy"
+    openrouter = component(document, "provider-openrouter")
+    assert openrouter["status"] == "degraded"
+    assert openrouter["reason"] == (
+        "no key: neither OPENROUTER_API_KEY nor OPENROUTER_API_KEY_FILE is set; "
+        "expected one, as a configured role uses it"
+    )
+    # A key given as a file counts.
+    (tmp_path / "key").write_text("k3y\n")
+    monkeypatch.setenv("OPENROUTER_API_KEY_FILE", str(tmp_path / "key"))
+    document = (await monitor.get("/status")).json()
+    assert component(document, "provider-openrouter")["status"] == "healthy"
+    # One that cannot be read is a reason, not a failed status.
+    monkeypatch.setenv("OPENROUTER_API_KEY_FILE", str(tmp_path / "gone"))
+    openrouter = component((await monitor.get("/status")).json(), "provider-openrouter")
+    assert openrouter["status"] == "degraded"
+    assert openrouter["reason"].startswith(
+        "no key: OPENROUTER_API_KEY_FILE cannot be read (No such file or directory)"
+    )

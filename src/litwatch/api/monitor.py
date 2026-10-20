@@ -19,11 +19,12 @@ from fastapi.responses import PlainTextResponse
 from litwatch import store
 from litwatch.api.deps import budget_lines
 from litwatch.archive import ArchiveClient
-from litwatch.config import ROLES, Config
+from litwatch.config import ROLES, Config, secret
 from litwatch.core import FAILED_RUNS
 from litwatch.core.budget import Spend
 from litwatch.events import Integration
 from litwatch.integrations.deep import Deep
+from litwatch.llm.gateway import KEYS
 from litwatch.store import calls, failures, fulltext, outbox, reading, runs
 from litwatch.store import integrations as integrations_store
 from litwatch.store.outbox import Cursor
@@ -84,6 +85,7 @@ class Facts:
     observed: dict[str, dict[str, Any]] = field(default_factory=dict)  # `calls.observations`
     signin: dict[str, Any] | None = None  # the Deep service's, as its health check reported it
     deep_failure: dict[str, Any] | None = None  # `integrations.service_failure`
+    unkeyed: dict[str, str] = field(default_factory=dict)  # provider: why it has no key
 
 
 async def facts(
@@ -108,6 +110,7 @@ async def facts(
         night=await _night(conn),
         observed=await calls.observations(conn),
         deep_failure=await integrations_store.service_failure(conn),
+        unkeyed=_unkeyed(),
     )
     probes = {}
     if archive is not None:
@@ -119,6 +122,19 @@ async def facts(
     if "deep" in answers and answers["deep"][0] is None:
         found.signin = (answers["deep"][1] or {}).get("auth") or {}
     return found
+
+
+def _unkeyed() -> dict[str, str]:
+    """Each provider whose key is not in the environment, with why; an unreadable key file is a
+    reason, not an error, so the rest of the status still answers."""
+    out = {}
+    for name, variable in KEYS.items():
+        try:
+            if not secret(variable):
+                out[name] = f"neither {variable} nor {variable}_FILE is set"
+        except OSError as e:
+            out[name] = f"{variable}_FILE cannot be read ({e.strerror})"
+    return out
 
 
 async def _night(conn: psycopg.AsyncConnection) -> Night | None:
@@ -329,7 +345,7 @@ def components(f: Facts, config: Config) -> list[dict[str, Any]]:
         )
     )
     for name in sorted({m.provider for r in ROLES for m in config.models.role(r).models}):
-        reasons = _provider(name, f.observed.get(name, {}), f.night)
+        reasons = _provider(name, f.observed.get(name, {}), f.night, f.unkeyed.get(name))
         status = "degraded" if reasons else "healthy"
         out.append(_component(f"provider-{name}", status, "; ".join(reasons) or None, now))
     for name, c in sorted(f.cursors.items()):
@@ -386,10 +402,14 @@ def _pipeline(night: Night | None, now: datetime) -> dict[str, Any]:
     return _component("pipeline", "degraded", reason, now)
 
 
-def _provider(name: str, seen: dict[str, Any], night: Night | None) -> list[str]:
-    """Why the provider is failed, if it is: an account error with no reply since, or the
-    latest finished nightly's calls to it failed without one reply."""
+def _provider(
+    name: str, seen: dict[str, Any], night: Night | None, unkeyed: str | None
+) -> list[str]:
+    """Why the provider is failed, if it is: no key in the environment, an account error with no
+    reply since, or the latest finished nightly's calls to it failed without one reply."""
     reasons = []
+    if unkeyed:
+        reasons.append(f"no key: {unkeyed}; expected one, as a configured role uses it")
     error_at, replied_at = seen.get("account_error_at"), seen.get("replied_at")
     if error_at and (replied_at is None or replied_at < error_at):
         reasons.append(

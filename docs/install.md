@@ -349,8 +349,9 @@ services:
       - "127.0.0.1:9108:9108"
 ```
 
-Apply it with `docker compose up -d litwatch`, then check: `curl -s http://127.0.0.1:9108/status`. Before the first successful nightly its `nightly` component reads
-degraded. The provider components do not notice a missing key; `ping` does.
+Apply it with `docker compose up -d litwatch`, then check: `curl -s http://127.0.0.1:9108/status`. Before the first
+successful nightly its `nightly` component reads degraded. A provider that a configured role uses reads degraded while
+its key is missing.
 
 Logs are one JSON object per line (`docker compose logs litwatch`); `LITWATCH_LOG_FORMAT=text` in the environment
 gives plain lines.
