@@ -1,4 +1,5 @@
-"""The model call journal: durable accounting and exact-request reuse."""
+"""The model call journal: durable accounting and exact-request reuse; and what each provider
+last said, its latest account error and reply (`provider_observations`)."""
 
 from __future__ import annotations
 
