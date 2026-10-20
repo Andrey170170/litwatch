@@ -332,8 +332,12 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
         }).catch((e: unknown) => {
           // undici says only "fetch failed"; the agent needs the reason: a refused address, DNS, a timeout.
           const cause = e instanceof Error && e.cause instanceof Error ? e.cause : e;
-          const message = `${at.href}: ${cause instanceof Error ? cause.message : String(cause)}`;
-          throw cause instanceof RefusedError ? new RefusedError(message) : failed(message);
+          const message = `${at.href}: ${(cause instanceof Error ? cause.message : String(cause)) || "fetch refused the answer"}`;
+          if (cause instanceof RefusedError) throw new RefusedError(message);
+          // The network's: a system error (DNS, a refused or reset connection, a connect timeout) or the
+          // fetch's deadline. What fetch refuses itself (a 407, a blocked port) is the site's or the URL's.
+          const network = (cause instanceof Error && typeof (cause as NodeJS.ErrnoException).code === "string") || (e instanceof Error && e.name === "TimeoutError");
+          throw network ? failed(message) : new Error(message);
         });
         const location = resp.headers.get("location");
         if (REDIRECTS.has(resp.status) && location !== null) {

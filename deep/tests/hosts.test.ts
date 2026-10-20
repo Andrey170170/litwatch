@@ -157,6 +157,9 @@ before(async () => {
         res.writeHead(200, { "content-type": "text/plain", "content-length": "1000" });
         res.write("0123456789");
         return void setTimeout(() => res.destroy(), 50);
+      case "/407":
+        // fetch turns this status into a rejection of its own
+        return res.writeHead(407).end();
       case "/pdf":
         return res.writeHead(200, { "content-type": "Application/PDF" }).end("%PDF-1.7 body");
       case "/self":
@@ -254,6 +257,8 @@ test("a fetch says whether the guard refused it or the network failed it, and an
   await new Promise((r) => closed.close(r));
   assert.equal(await kind(`http://site.test:${gone}/page`), "network", "a connection refused");
   assert.equal(await kind(`http://site.test:${port}/nothing`), "answered", "a 404 is an answer");
+  assert.equal(await kind(`http://site.test:${port}/407`), "other", "a status fetch rejects is the site's");
+  assert.equal(await kind("http://site.test:6000/page"), "other", "a port fetch blocks is the URL's");
   assert.equal(await kind(`http://site.test:${port}/loop`), "other", "too many redirects is the site's");
   const ended = new AbortController();
   ended.abort();
