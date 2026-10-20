@@ -3315,6 +3315,11 @@
             "title": "Escalated",
             "default": false
           },
+          "one_lab": {
+            "type": "boolean",
+            "title": "One Lab",
+            "default": false
+          },
           "opinions": {
             "additionalProperties": {
               "$ref": "#/components/schemas/Opinion"
@@ -3346,7 +3351,7 @@
           "reason"
         ],
         "title": "CurrentVerdict",
-        "description": "A topic's current verdict: the Fit that stands, each grader's answer by role, and the\npaper revision it was made from."
+        "description": "A topic's current verdict: the Fit that stands, each grader's answer by role, and the\npaper revision it was made from. `one_lab`: one Focus grader refused throughout and the\nother's Fit stands."
       },
       "Day": {
         "properties": {
@@ -4822,6 +4827,7 @@
               "analysis_stopped",
               "split",
               "escalated",
+              "one_lab",
               "ungraded",
               "fulltext_failed",
               "card_failed",
@@ -4855,6 +4861,11 @@
             ],
             "title": "Error"
           },
+          "refused": {
+            "type": "boolean",
+            "title": "Refused",
+            "default": false
+          },
           "pass_id": {
             "anyOf": [
               {
@@ -4873,7 +4884,7 @@
           "revision"
         ],
         "title": "OpenState",
-        "description": "What waits on the owner for this paper, as Needs you lists it, with the paper revision\nthe action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the\ntext), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or\n`ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep card's\n`card_failed`, or either `awaiting_text` over a week (run it now)."
+        "description": "What waits on the owner for this paper, as Needs you lists it, with the paper revision\nthe action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the\ntext), `analysis_stopped` (try again), a topic's `split`, `escalated`, `one_lab` (label it)\nor `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep\ncard's `card_failed`, or either `awaiting_text` over a week (run it now). `refused`: every\nmodel refused, rather than the last error."
       },
       "Opinion": {
         "properties": {
@@ -7021,6 +7032,7 @@
         "enum": [
           "split",
           "escalated",
+          "one_lab",
           "ungraded",
           "grading_again"
         ]

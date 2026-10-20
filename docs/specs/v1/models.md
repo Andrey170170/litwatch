@@ -20,22 +20,26 @@ made by the `deep` service on its own subscription and are not a gateway role.
 
 Each role that writes (`analyse`, `judge`, `check`, `field_grade`, `brief`, `writer`) names its **fallbacks**: an
 ordered list of models, each with its provider, model and effort, asked in turn when the role's model fails for the
-paper ([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), which sets the starting lists from a
-replay). The decision roles (`classify`, `area_check`) have none. A call to a fallback is journalled under the role's
-name, with the model it went to.
+paper. A list may be empty: `field_grade`'s is, as no candidate graded Field topics close to Haiku 5.5's own agreement
+and Haiku has not failed a Field grading, so one it cannot answer stops ungraded. The lists were chosen by a replay
+([`evals/2026-10-19-fallback-ladders.md`](../../../evals/2026-10-19-fallback-ladders.md), the failure-handling plan's
+P1) and are the configuration's defaults. The decision roles (`classify`, `area_check`) have none. A call to a fallback
+is journalled under the role's name, with the model it went to.
 
-- **A refusal** goes to the next model at once, in the same run. When every model in the list has refused, the step
-  stops for that paper at once and waits for the owner ([pipeline.md](pipeline.md), section 9), without three runs of
-  asking the same models again.
+- **A refusal** goes to the next model at once, in the same run; past the last, to the top of the list, for a run that
+  started further down. When every model in the list has refused, the step stops for that paper at once and waits for
+  the owner ([pipeline.md](pipeline.md), section 9), without three runs of asking the same models again.
 - **An unusable answer** (invalid or truncated) counts as one of the step's three failed runs, as before, and the next
   run starts one model further down the list: the first run asks the role's model, the second the next, the third the
-  one after. One call per run, as many as without fallbacks.
+  one after. One call per run, as many as without fallbacks. Only unusable answers move it: a full-text pass that found
+  no text to read counts a failed run but asks the same model next time.
 - **A call that got no answer** (a timeout, a provider error, an `account` error, below) never moves down the list: it
   says nothing about the paper and is not counted against it.
 - **`writer`** writes digests, which are retried every run until written rather than stopped after three
   ([digests.md](digests.md), a digest is a record). A refusal goes down the list at once, as above. Each failed digest of
-  the topic in a row starts the next attempt one model further down, and the last model in the list is kept until a
-  digest of the topic is published. A digest every model refused is failed like any other.
+  the topic in a row starts the next attempt one model further down from where the failed one started (a refusal
+  past the last model goes on to the top, but the next attempt still starts lower), and the last model in the list is
+  kept until a digest of the topic is published. A digest every model refused is failed like any other.
 
 A fallback may come from the same lab as the role's model (refusals follow a lab's policy, but a lab's models differ:
 Sonnet 5.5 answered all three papers Opus 5.5 refused,
@@ -45,9 +49,10 @@ starts from the model that gave it, so an unchanged question costs nothing after
 
 ## The gateway
 
-Carried from the first v1: `Gateway.complete(role, request, *, paper_id)` resolves the role to a provider, model and
-effort, applies retries and the timeout, journals the call with its cost, and reuses an identical earlier call
-(identical includes the resolved provider, model, effort and routing, so `judge` and `check` never share a reply).
+Carried from the first v1: `Gateway.ask(role, request, *, paper_id)` resolves the role to its list of models (above),
+each a provider, model and effort; for each it applies retries and the timeout, journals the call with its cost, and
+reuses an identical earlier call (identical includes the resolved provider, model, effort and routing, so `judge` and
+`check` never share a reply).
 Providers: `anthropic` (prompt caching, cost from a price table) and `openrouter`.
 
 A provider's 401, 402 or 403 is an **`account` error** (a key revoked, credits used up, access withdrawn), in normal

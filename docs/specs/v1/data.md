@@ -58,10 +58,12 @@ evaluation calls the same functions and writes only to evaluation tables.
   paper and its Weight's floor alone sets the level, and the current Weight the level was set with): kept current so every surface reads one answer and lists sort
   by it.
 - `step_failures` (paper, step classification | analysis | grading, topic for a grading, paper revision, failed
-  runs, refused throughout (for a Focus grading, which side), last error, acknowledged at): a step's failed runs on the
-  paper's current text; three unusable answers in a row, or every model of the role refusing, leave it for the owner
-  (pipeline.md, section 9), except a Focus side refused while the other is still to answer (pipeline.md, section 4). The
-  failed runs also say how far down the role's fallbacks the next run starts (models.md, roles). Acknowledged at is
+  runs, refused throughout (for a Focus grading, which side), stopped by that refusal, last error, acknowledged at): a
+  step's failed runs on the paper's current text; three unusable answers in a row, or every model of the role refusing,
+  leave it for the owner (pipeline.md, section 9), except a Focus side refused while the other is still to answer
+  (pipeline.md, section 4); stopped by that refusal says which of the two stopped it, as a Focus side can refuse
+  throughout while the other fails three runs. The failed runs also say how far down the role's fallbacks the next run
+  starts (models.md, roles). Acknowledged at is
   set by the owner's Acknowledge and cleared when the step fails again after recovering.
 - `grading_passes` (paper, paper revision, at): the revision's first grading pass is done; after it only failed
   gradings and reported misses are graded (pipeline.md, section 4).
@@ -72,7 +74,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   as the current Gist.
 - `fulltext_passes` (paper, paper revision, kind brief | weight | deep, reason, state awaiting_text | ready | running |
   done | failed, priority, queued at, tried at, text arrived at, arXiv version read, text source latex | pdf, text
-  hash, paper's update read for, lease until, failed runs, retry text, use the PDF (the owner's, for LaTeX that reads
+  hash, paper's update read for, lease until, failed runs, unusable runs (how far down `brief`'s list the next try
+  starts: a run that found no text counts a failed run, not one of these), retry text, use the PDF (the owner's, for LaTeX that reads
   badly), last error, refused throughout, acknowledged at, as for `step_failures`): one Brief or Weight re-check open per paper revision, and one
   Deep pass open per paper (reason request | focus | pick; its revision is the one it read); a worker takes the least recently
   tried first. `weights` and `gists` name the pass a full-text row came from.
@@ -81,8 +84,8 @@ evaluation calls the same functions and writes only to evaluation tables.
   Focus and Area, a weekly one for Field), found from the database when a digest is written
   ([digests.md](digests.md)). `papers.announced` is the date of the arXiv listing that first showed the paper.
 - `digests` (topic, period day | week, day (a week's Monday), state written | nothing_new | failed, gist, text, counts,
-  best rarity, error, model (for a failed one, the writer model that failed: the next attempt's step down, models.md,
-  roles), acknowledged at (a failed one's), run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
+  best rarity, error, model (for a failed one, the writer model its attempt started from: the next attempt starts one
+  further down, models.md, roles), acknowledged at (a failed one's), run, written at; published means written or nothing_new) and `digest_papers` (digest, paper,
   role pick | listed | mentioned, position, why, and frozen at writing: paper revision, title, gist, fit, grade, rarity (a
   mixed list's), and the topic whose grade it showed).
 - `text_ratings` (target gist | brief | digest, id, accurate | off, at), replacing `take_ratings`; a Gist rating
@@ -165,11 +168,11 @@ model = "claude-haiku-5-5"
 provider = "anthropic"
 model = "claude-sonnet-5-5"
 effort = "high"
-fallbacks = [              # asked in order on refusals and unusable answers (models.md, roles); shown
-                           # here for brief only: every role that writes has its list, the defaults chosen
-                           # by the failure-handling replay (P1) and set in the configuration in P2
+fallbacks = [              # asked in order on refusals and unusable answers (models.md, roles). A
+                           # role written here replaces its default, list included, so the other
+                           # roles above, as written, have none; leave a role out to keep its
+                           # default list (the failure-handling replay's; field_grade's is empty)
   { provider = "openrouter", model = "openai/gpt-6.1-sol", effort = "high" },
-  { provider = "openrouter", model = "moonshotai/kimi-k3" },
 ]
 
 [models.writer]

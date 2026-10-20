@@ -1,8 +1,10 @@
 """Grading (docs/specs/v1/pipeline.md, section 4): the Fit of a paper for each topic that grades
 it, checked as the topic's depth says. Focus: `judge` and `check` at once, the more inclusive
-Fit standing. Area: `judge`, then the `area_check` decision model on whether its Fit holds,
-escalating to `check` on doubt, the less inclusive Fit standing. Field: `field_grade` alone.
-`grade` asks and writes nothing; `record` stores what it found and settles the paper."""
+Fit standing, or the one side's Fit when the other's every model refused (`one_lab`). Area:
+`judge`, then the `area_check` decision model on whether its Fit holds, escalating to `check` on
+doubt, the less inclusive Fit standing. Field: `field_grade` alone. Each grader goes down its
+role's list (`Gateway.ask`), from as far as the grading's failed runs say. `grade` asks and
+writes nothing; `record` stores what it found and settles the paper."""
 
 from __future__ import annotations
 
@@ -84,11 +86,15 @@ def check_request(paper: Paper, topic: Topic, name: str, proposed: Opinion) -> D
 
 @dataclass(frozen=True)
 class Due:
-    """A grading to do: the paper's current text for one topic, with its class's name."""
+    """A grading to do: the paper's current text for one topic, with its class's name, its
+    failed runs so far (how far down each grader's list it starts, D4) and the Focus side whose
+    every model refused on an earlier run, not asked again while the other side is."""
 
     paper: Paper
     topic: Topic
     name: str
+    failed_runs: int = 0
+    refused: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -100,16 +106,33 @@ class Graded:
     error: str | None = None
     # Some grader answered and the answer could not be used: a failed run that counts.
     unusable: bool = False
+    # The graders whose every model refused, this run or before; `stops` when that ends the
+    # grading at once, ungraded (pipeline.md, section 4).
+    refused: frozenset[str] = frozenset()
+    stops: bool = False
 
 
-async def _fit(gateway: Gateway, role: str, d: Due) -> Opinion:
-    answer = await gateway.ask(role, request(d.paper, d.topic, d.name), paper_id=d.paper.id)
+async def _fit(gateway: Gateway, role: str, d: Due, refused: set[str]) -> Opinion:
+    """The grader's Fit; a grader whose every model refused is added to `refused`."""
+    try:
+        answer = await gateway.ask(
+            role, request(d.paper, d.topic, d.name), paper_id=d.paper.id, start=d.failed_runs
+        )
+    except CallError as exc:
+        if exc.kind == "refused":
+            refused.add(role)
+        raise
     return Opinion(model=answer.model, fit=answer.value.fit, reason=answer.value.reason)
 
 
-async def _holds(gateway: Gateway, d: Due, proposed: Opinion) -> Opinion:
+async def _holds(gateway: Gateway, d: Due, proposed: Opinion, refused: set[str]) -> Opinion:
     asked = check_request(d.paper, d.topic, d.name, proposed)
-    answer = await gateway.decide("area_check", asked, paper_id=d.paper.id)
+    try:
+        answer = await gateway.decide("area_check", asked, paper_id=d.paper.id)
+    except CallError as exc:
+        if exc.kind == "refused":
+            refused.add("area_check")
+        raise
     p = answer.value.probabilities[HOLDS]
     return Opinion(model=answer.model, holds=p >= 0.5, probability=p)
 
@@ -127,47 +150,68 @@ def _verdict(d: Due, opinions: dict[str, Opinion], standing: Opinion, **marks: b
     )
 
 
-async def _graded(d: Due, gateway: Gateway, settings: Grading) -> Verdict:
-    """The verdict, or the first `CallError` of a grader it needed."""
+async def _graded(d: Due, gateway: Gateway, settings: Grading, refused: set[str]) -> Verdict:
+    """The verdict, or the first `CallError` of a grader it needed; the graders whose every
+    model refused are added to `refused`."""
     match d.topic.depth:
         case Depth.FOCUS:
-            # Concurrently, and both answers awaited even when one fails.
+            # Concurrently, and both answers awaited even when one fails. A side refused before
+            # is not asked again (models.md, lab diversity).
+            sides = [r for r in ("judge", "check") if r not in refused]
             answers = await asyncio.gather(
-                _fit(gateway, "judge", d), _fit(gateway, "check", d), return_exceptions=True
+                *(_fit(gateway, r, d, refused) for r in sides), return_exceptions=True
             )
             failed = [a for a in answers if isinstance(a, BaseException)]
             if bug := next((e for e in failed if not isinstance(e, CallError)), None):
                 raise bug
-            if failed:  # a failed run that counts when either grader answered unusably
-                raise next((e for e in failed if e.unusable), failed[0])
-            judge, check = answers
-            standing = min(answers, key=lambda o: o.fit.rank)  # the more inclusive
-            opinions = {"judge": judge, "check": check}
+            if errors := [e for e in failed if e.kind != "refused"]:
+                # A failed run that counts when either grader answered unusably; a side that
+                # refused stays refused, and the other is asked again.
+                raise next((e for e in errors if e.unusable), errors[0])
+            if failed and len(refused) == 2:  # both sides refused throughout: ungraded
+                raise failed[0]
+            opinions = {r: a for r, a in zip(sides, answers, strict=True) if isinstance(a, Opinion)}
+            if len(opinions) == 1:  # the other side refused throughout: one lab decides
+                (alone,) = opinions.values()
+                return _verdict(d, opinions, alone, one_lab=True)
+            judge, check = opinions["judge"], opinions["check"]
+            standing = min((judge, check), key=lambda o: o.fit.rank)  # the more inclusive
             return _verdict(d, opinions, standing, split=judge.fit != check.fit)
         case Depth.AREA:
-            judge = await _fit(gateway, "judge", d)
-            holds = await _holds(gateway, d, judge)
+            judge = await _fit(gateway, "judge", d, refused)
+            holds = await _holds(gateway, d, judge, refused)
             opinions = {"judge": judge, "area_check": holds}
             if holds.holds and holds.probability >= settings.area_check_min_confidence:
                 return _verdict(d, opinions, judge)
             # A "no" or a doubtful "yes": the other lab grades too. An Area's risk is a false
             # pick, not a miss, so the less inclusive Fit stands.
-            check = opinions["check"] = await _fit(gateway, "check", d)
+            check = opinions["check"] = await _fit(gateway, "check", d, refused)
             standing = max((judge, check), key=lambda o: o.fit.rank)
             return _verdict(d, opinions, standing, split=judge.fit != check.fit, escalated=True)
         case Depth.FIELD:
-            alone = await _fit(gateway, "field_grade", d)
+            alone = await _fit(gateway, "field_grade", d, refused)
             return _verdict(d, {"field_grade": alone}, alone)
     raise AssertionError(d.topic.depth)
 
 
 async def _one(d: Due, gateway: Gateway, settings: Grading) -> Graded:
+    refused: set[str] = set()
     try:
-        return Graded(d, await _graded(d, gateway, settings))
+        # A side refused on an earlier run stays refused while its list refused this very
+        # question: a changed topic or list asks it again.
+        asked = request(d.paper, d.topic, d.name)
+        refused = {
+            r for r in d.refused if await gateway.refused_throughout(r, asked, paper_id=d.paper.id)
+        }
+        return Graded(d, await _graded(d, gateway, settings, refused))
     except CallError as exc:
-        # Truncated, invalid or refused: no verdict, and a failed run that counts. A grader that
-        # did not answer (a timeout, a provider down) is retried without counting.
-        return Graded(d, error=str(exc), unusable=exc.unusable)
+        # Truncated or invalid: no verdict, and a failed run that counts. A grader that did not
+        # answer (a timeout, a provider down) is retried without counting. A grader whose every
+        # model refused stops the grading at once (`_graded` raises it only when it does).
+        stops = exc.kind == "refused"
+        return Graded(
+            d, error=str(exc), unusable=exc.unusable, refused=frozenset(refused), stops=stops
+        )
 
 
 def grade(
@@ -191,12 +235,17 @@ async def due(
     topic the paper leads to later waits for a re-run (pipeline.md, section 10), as does a
     topic edit, whatever the topic's version. First passes first, oldest paper first, and new
     gradings before failed ones; after `runs` failed runs a grading is not tried at all: it
-    waits for the owner. A paused or draft topic grades nothing."""
+    waits for the owner. A failed one carries its failed runs and the side refused so far. A
+    paused or draft topic grades nothing."""
     active = {t.slug: t for t in tree.topics if t.status == Status.ACTIVE}
     found: list[tuple[str, str, bool]] = []  # (paper, topic, failed before)
     passes: list[tuple[str, int]] = []
+    failed_runs: dict[tuple[str, str], int] = {}
+    refused: dict[tuple[str, str], list[str]] = {}
     for row in await store.candidates(conn, runs, limit):
         failed = row["failed"]
+        failed_runs |= {(row["paper_id"], t): n for t, n in failed.items()}
+        refused |= {(row["paper_id"], t): r for t, r in row["refused"].items()}
         if row["passed"]:
             should = set(failed)
         else:
@@ -208,7 +257,17 @@ async def due(
                 found.append((row["paper_id"], slug, slug in failed))
     found.sort(key=lambda f: f[2])  # stable: new gradings first, in paper order
     by_id = {p.id: p for p in await papers_store.get_many(conn, sorted({p for p, _, _ in found}))}
-    due = [Due(by_id[p], active[s], tree.get(s).name) for p, s, _ in found if p in by_id]
+    due = [
+        Due(
+            by_id[p],
+            active[s],
+            tree.get(s).name,
+            failed_runs.get((p, s), 0),
+            frozenset(refused.get((p, s), ())),
+        )
+        for p, s, _ in found
+        if p in by_id
+    ]
     return due, passes
 
 
@@ -225,7 +284,16 @@ async def record(conn: psycopg.AsyncConnection, g: Graded) -> bool:
             return False
         if g.verdict is None:
             error = g.error or "no answer"
-            await failures.failed(conn, paper, "grading", error, counts=g.unusable, topic=slug)
+            await failures.failed(
+                conn,
+                paper,
+                "grading",
+                error,
+                counts=g.unusable,
+                topic=slug,
+                refused=g.refused,
+                stops=g.stops,
+            )
             return True
         stored = await store.add(conn, g.verdict)
         await failures.succeeded(conn, paper.id, "grading", slug)
@@ -242,5 +310,6 @@ async def record(conn: psycopg.AsyncConnection, g: Graded) -> bool:
             grade=derived(stored.fit, weight).value,
             split=stored.split,
             escalated=stored.escalated,
+            one_lab=stored.one_lab,
         )
     return True

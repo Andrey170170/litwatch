@@ -99,9 +99,7 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
     def answer(role, request):
         return Reply(json.dumps(ANSWER), Stop.COMPLETE, Usage(model=role.model, cost=charge[0]))
 
-    models = Models(
-        brief=ROLE.model_copy(update={"fallback": "brief_fallback"}), brief_fallback=OTHER
-    )
+    models = Models(brief=ROLE.model_copy(update={"fallbacks": (OTHER,)}))
     providers = {
         "anthropic": ScriptedProvider("anthropic", refuse),
         "openrouter": ScriptedProvider("openrouter", answer),
@@ -126,9 +124,8 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
     (failed,) = await briefs.run(gw, seeds.taxonomy(), pair, archive, tmp_path / "down.jsonl")
     assert failed.error and failed.cost is None
     # Another fallback is another configuration: the run is not resumed into the same file.
-    other = Models(
-        brief=models.brief, brief_fallback=OTHER.model_copy(update={"model": "lab/another"})
-    )
+    another = OTHER.model_copy(update={"model": "lab/another"})
+    other = Models(brief=models.brief.model_copy(update={"fallbacks": (another,)}))
     with pytest.raises(ValueError, match="another request"):
         await briefs.run(Gateway(other, providers), seeds.taxonomy(), pair, archive, out)
 

@@ -112,22 +112,31 @@ class Analysed:
     usage: Usage | None = None
     error: str | None = None
     unusable: bool = False  # the model answered unusably: a failed run that counts
+    refused: bool = False  # every model of the role refused: the step stops at once
 
 
-async def _one(paper: Paper, area: TaxonomyClass, gateway: Gateway) -> Analysed:
+async def _one(paper: Paper, area: TaxonomyClass, failed_runs: int, gateway: Gateway) -> Analysed:
     try:
-        answer = await gateway.ask(ROLE, request(paper, area), paper_id=paper.id)
+        answer = await gateway.ask(ROLE, request(paper, area), paper_id=paper.id, start=failed_runs)
     except CallError as exc:
-        return Analysed(paper, area.slug, error=str(exc), usage=exc.usage, unusable=exc.unusable)
+        return Analysed(
+            paper,
+            area.slug,
+            error=str(exc),
+            usage=exc.usage,
+            unusable=exc.unusable,
+            refused=exc.kind == "refused",
+        )
     return Analysed(paper, area.slug, answer.value.analysis(), answer.model, answer.usage)
 
 
 def analyse(
-    papers: list[tuple[Paper, TaxonomyClass]], gateway: Gateway, concurrency: int = 8
+    papers: list[tuple[Paper, TaxonomyClass, int]], gateway: Gateway, concurrency: int = 8
 ) -> AbstractAsyncContextManager[AsyncIterator[Analysed]]:
-    """Ask the `analyse` role about each paper, judged in its primary class, giving results as
-    they arrive, held with `async with` (`concurrency.bounded`: leaving it stops every call).
-    Writes nothing. A failed call is given with its error."""
+    """Ask the `analyse` role about each paper, judged in its primary class, from as far down
+    the role's list as its failed runs say (D4), giving results as they arrive, held with
+    `async with` (`concurrency.bounded`: leaving it stops every call). Writes nothing. A failed
+    call is given with its error."""
     return bounded(papers, lambda pa: _one(*pa, gateway), gateway.width(concurrency))
 
 
@@ -141,7 +150,16 @@ async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
             return False
         if a.analysis is None or a.model is None:
             error = a.error or "no answer"
-            await failures.failed(conn, a.paper, "analysis", error, counts=a.unusable)
+            refused = [ROLE] if a.refused else []
+            await failures.failed(
+                conn,
+                a.paper,
+                "analysis",
+                error,
+                counts=a.unusable,
+                refused=refused,
+                stops=a.refused,
+            )
             return True
         gist = await store.add(conn, a.paper, a.primary, a.analysis, a.model)
         await failures.succeeded(conn, a.paper.id, "analysis")

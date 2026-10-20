@@ -297,7 +297,12 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
     rail = _rail(tree, looks, found, standings)
     states = (
         [
-            s.OpenState(kind=kind, revision=found["revision"], error=f["last_error"])
+            s.OpenState(
+                kind=kind,
+                revision=found["revision"],
+                error=f["last_error"],
+                refused=f["stopped_by_refusal"],
+            )
             for f in found["failures"]
             for step, kind in (
                 ("classification", "awaiting_classification"),
@@ -310,14 +315,16 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
                 kind=t.state,
                 revision=found["revision"],
                 topic=t.topic.slug,
-                error=next(
-                    (f["last_error"] for f in found["failures"] if f["topic"] == t.topic.slug), None
-                )
-                if t.state == "ungraded"
-                else None,
+                error=failed["last_error"] if failed else None,
+                refused=bool(failed and failed["stopped_by_refusal"]),
             )
             for t in rail
-            if t.state in ("split", "escalated", "ungraded")
+            if t.state in ("split", "escalated", "one_lab", "ungraded")
+            for failed in [
+                next((f for f in found["failures"] if f["topic"] == t.topic.slug), None)
+                if t.state == "ungraded"
+                else None
+            ]
         ]
         + [
             s.OpenState(
@@ -328,6 +335,7 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
                 else "fulltext_failed",
                 revision=found["revision"],
                 error=f["last_error"],
+                refused=f["refused"],
                 pass_id=f["id"],
             )
             for f in found["stuck_passes"]
@@ -420,6 +428,11 @@ def _members(tree: Taxonomy | None, rows: list[dict[str, Any]]) -> set[str]:
     return {m.slug for m in standing(found) if m.source in SHOWN and m.slug in classes}
 
 
+def _asks_word(v: dict[str, Any]) -> bool:
+    """`verdicts.ASKS_WORD` on a current verdict's row."""
+    return v["split"] or v["escalated"] or (v["one_lab"] and v["fit"] in ("central", "related"))
+
+
 def _rail(
     tree: Taxonomy | None,
     looks: dict[str, s.Badge],
@@ -453,8 +466,8 @@ def _rail(
         state = None
         if slug in failed and failed[slug]["failed_runs"] >= FAILED_RUNS:
             state = "ungraded"
-        elif v and (v["split"] or v["escalated"]) and not (label and not label["provisional"]):
-            state = "escalated" if v["escalated"] else "split"
+        elif v and _asks_word(v) and not (label and not label["provisional"]):
+            state = "escalated" if v["escalated"] else "split" if v["split"] else "one_lab"
         elif slug in failed:
             state = "grading_again"
         rail.append(

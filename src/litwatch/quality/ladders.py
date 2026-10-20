@@ -96,7 +96,7 @@ class Candidate(BaseModel):
 
     @model_validator(mode="after")
     def _alone(self) -> Candidate:
-        if self.role.fallback is not None or self.role.decisions:
+        if self.role.fallbacks or self.role.decisions:
             raise ValueError(f"{self.name}: a candidate is a chat model asked alone")
         prices = (*self.price, *self.price_max)
         if not all(math.isfinite(p) and p >= 0 for p in prices):

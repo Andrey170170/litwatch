@@ -10,6 +10,10 @@ from psycopg.types.json import Jsonb
 from litwatch.core import Opinion, Verdict
 from litwatch.core.classification import Membership
 
+# A current verdict that waits for the owner's word, over its columns (pipeline.md, section 4):
+# a Focus split, an Area escalation, or a central or related grade from one lab.
+ASKS_WORD = "(split OR escalated OR (one_lab AND fit IN ('central', 'related')))"
+
 
 def _verdict(row: dict[str, Any]) -> Verdict:
     return Verdict(
@@ -23,6 +27,7 @@ def _verdict(row: dict[str, Any]) -> Verdict:
         opinions={k: Opinion.model_validate(v) for k, v in row["opinions"].items()},
         split=row["split"],
         escalated=row["escalated"],
+        one_lab=row["one_lab"],
         recorded_at=row["recorded_at"],
     )
 
@@ -36,8 +41,8 @@ async def add(conn: psycopg.AsyncConnection, verdict: Verdict) -> Verdict:
         await conn.execute(
             """
             INSERT INTO verdicts (paper_id, topic, topic_version, paper_revision, fit, reason,
-                                  opinions, split, escalated)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
+                                  opinions, split, escalated, one_lab)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
             """,
             (
                 verdict.paper_id,
@@ -49,6 +54,7 @@ async def add(conn: psycopg.AsyncConnection, verdict: Verdict) -> Verdict:
                 Jsonb(opinions),
                 verdict.split,
                 verdict.escalated,
+                verdict.one_lab,
             ),
         )
     ).fetchone()
@@ -74,7 +80,8 @@ async def candidates(
     (`memberships`), whether its grading pass is done (`passed`), the topics graded on its
     current text (`graded`), the topics whose current verdict on an earlier revision has a Fit
     above none (`held`; pipeline.md, section 8), the failed grading runs in a row per topic on
-    its current text (`failed`) and the active topics a miss was reported for (`missed`)."""
+    its current text (`failed`), the roles whose every model refused per topic (`refused`) and the
+    active topics a miss was reported for (`missed`)."""
     rows = await (
         await conn.execute(
             """
@@ -121,6 +128,9 @@ async def candidates(
                    (SELECT coalesce(jsonb_object_agg(f.topic, f.failed_runs), '{}')
                     FROM step_failures f WHERE f.paper_id = p.id AND f.step = 'grading'
                     AND f.paper_revision = p.revision) AS failed,
+                   (SELECT coalesce(jsonb_object_agg(f.topic, f.refused), '{}')
+                    FROM step_failures f WHERE f.paper_id = p.id AND f.step = 'grading'
+                    AND f.paper_revision = p.revision AND f.refused <> '{}') AS refused,
                    (SELECT coalesce(array_agg(DISTINCT x.topic), '{}') FROM misses x
                     JOIN topics t ON t.class = x.topic AND t.status = 'active'
                     WHERE x.paper_id = p.id) AS missed

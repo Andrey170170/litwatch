@@ -5,9 +5,10 @@ written on Monday for the week before.
 
 A digest covers the papers due when it is written (`store.digests.due`), so a paper that became
 eligible late is in the next one. Published digests are final; one whose writer call failed is
-failed, its papers stay due, and the next run writes it again. A digest with nothing due is
-published as nothing new, without a call. Its picks are settled as it is published, so an Area
-pick gets its Deep card (`feedback.word.settle`)."""
+failed, its papers stay due, and the next run writes it again, one model further down `writer`'s
+list after each failed answer in a row, until a digest of the topic is published (models.md,
+roles). A digest with nothing due is published as nothing new, without a call. Its picks are
+settled as it is published, so an Area pick gets its Deep card (`feedback.word.settle`)."""
 
 from __future__ import annotations
 
@@ -40,6 +41,7 @@ def _outcome(
     gist: str | None = None,
     text: str | None = None,
     extra: Sequence[Shown] = (),
+    model: str | None = None,
 ) -> Outcome:
     """A published digest: written when it has a text, else nothing new. Its Mark counts the
     papers it covered (`extra`, an earlier paper brought back, is not one)."""
@@ -60,6 +62,7 @@ def _outcome(
             "must_read": sum(s.due.grade == "must_read" for s in covered),
         },
         best_rarity=best.value if best else None,
+        model=model,
     )
 
 
@@ -76,8 +79,29 @@ def _covered(
     return first + sorted(rest, key=lambda s: s.due.fit != "central")
 
 
-async def _ask(run: ModelRun, request: Request) -> writer.Written:
-    return (await run.gateway.ask(writer.ROLE, request)).value
+class _Writer:
+    """The topic's writer calls, from one model further down `writer`'s list than its latest
+    failed digest's (the last model is kept), and which model answered."""
+
+    def __init__(self, run: ModelRun, failed: str | None) -> None:
+        self.labels = [m.label for m in run.gateway.models.role(writer.ROLE).models]
+        self.run, self.failed = run, failed
+        self.start = self.labels.index(failed) + 1 if failed in self.labels else 0
+        self.model: str | None = None
+
+    async def ask(self, request: Request) -> writer.Written:
+        answer = await self.run.gateway.ask(writer.ROLE, request, start=self.start)
+        self.model = answer.model
+        return answer.value
+
+    def failure(self, exc: CallError) -> str | None:
+        """The model a failed digest records: the one its attempt started from when a model
+        answered unusably or refused (a refusal can go on past the last model to the top, so
+        the next attempt still starts further down), or the one before when no model answered
+        (a call with no answer moves nothing down)."""
+        if not exc.unusable:
+            return self.failed
+        return self.labels[min(self.start, len(self.labels) - 1)]
 
 
 async def compose(
@@ -100,12 +124,21 @@ async def compose(
         found = await store_.due(conn, tree, topic, period, last, FAILED_RUNS)
     if not found:
         return _outcome(topic.slug, period, day, [])
+    w = _Writer(run, await store_.failed_writer(conn, topic.slug))
     try:
         if not weekly and topic.depth == Depth.FOCUS:
-            out = await _ask(run, writer.focus_day(topic, name, day, found))
-            return _outcome(topic.slug, period, day, _covered(found), gist=out.gist, text=out.text)
+            out = await w.ask(writer.focus_day(topic, name, day, found))
+            return _outcome(
+                topic.slug,
+                period,
+                day,
+                _covered(found),
+                gist=out.gist,
+                text=out.text,
+                model=w.model,
+            )
         if not weekly:
-            out = await _ask(run, writer.area_day(topic, name, day, found))
+            out = await w.ask(writer.area_day(topic, name, day, found))
         else:
             dailies = await store_.daily_texts(conn, topic.slug, day)
             if topic.depth == Depth.FOCUS:
@@ -116,19 +149,27 @@ async def compose(
                     if e.paper_id not in ids
                 ]
                 request = writer.focus_week(topic, name, day, found, dailies, earlier)
-                out = await _ask(run, request)
+                out = await w.ask(request)
                 back = [
                     Shown(e, DigestRole.MENTIONED) for e in earlier if e.paper_id == out.recalled
                 ]
                 covered = _covered(found)
                 return _outcome(
-                    topic.slug, period, day, covered, gist=out.gist, text=out.text, extra=back
+                    topic.slug,
+                    period,
+                    day,
+                    covered,
+                    gist=out.gist,
+                    text=out.text,
+                    extra=back,
+                    model=w.model,
                 )
-            out = await _ask(run, writer.week(topic, name, day, found, dailies))
+            out = await w.ask(writer.week(topic, name, day, found, dailies))
     except CallError as exc:
-        return Outcome(topic.slug, period, day, DigestState.FAILED, error=str(exc))
+        failed = w.failure(exc)
+        return Outcome(topic.slug, period, day, DigestState.FAILED, error=str(exc), model=failed)
     covered = _covered(found, out.picks, out.mentioned)
-    return _outcome(topic.slug, period, day, covered, gist=out.gist, text=out.text)
+    return _outcome(topic.slug, period, day, covered, gist=out.gist, text=out.text, model=w.model)
 
 
 async def write(

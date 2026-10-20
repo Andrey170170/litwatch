@@ -9,6 +9,7 @@ import type { Schemas } from "@/api/client";
 import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useRetryAnalysis, useRunPassNow } from "@/api/mutations";
 import { taxonomyQuery } from "@/api/queries";
 import type { Paper } from "./Actions";
+import { ASKING, graders } from "./TopicRow";
 
 type OpenState = Schemas["OpenState"];
 
@@ -68,14 +69,14 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
   const name = topic?.topic.name ?? state.topic ?? "";
   switch (state.kind) {
     case "split":
-    case "escalated": {
-      const said = topic?.verdict ? Object.entries(topic.verdict.opinions ?? {}).filter(([, o]) => o.fit).map(([role, o]) => `${role} ${o.fit}`) : [];
-      const opinions = said.join(", ").replace(/^\w/, (c) => c.toUpperCase());
+    case "escalated":
+    case "one_lab": {
+      const opinions = graders(topic?.verdict).join(", ").replace(/^\w/, (c) => c.toUpperCase());
       return (
         <div className="note">
           <div>
             <b>
-              {state.kind === "split" ? "Split" : "Escalated"} on {name}.
+              {ASKING[state.kind]} on {name}.
             </b>{" "}
             {opinions}; {topic?.fit} stands until it is labelled.
           </div>
@@ -91,7 +92,7 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
       return (
         <div className="note fail">
           <div>
-            <b>Ungraded on {name}:</b> grading failed three runs in a row.
+            <b>Ungraded on {name}:</b> {state.refused ? "every model refused to grade it." : "grading failed three runs in a row."}
             {state.error && <div className="err">{state.error}</div>}
           </div>
           <div className="acts">
@@ -105,7 +106,7 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
       return (
         <div className="note fail">
           <div>
-            <b>Analysis failed three runs in a row.</b> The paper has no Gist, Weight or Brief until it succeeds; the abstract stands in.
+            <b>{state.refused ? "Every model refused the analysis." : "Analysis failed three runs in a row."}</b> The paper has no Gist, Weight or Brief until it succeeds; the abstract stands in.
             {state.error && <div className="err">{state.error}</div>}
           </div>
           <div className="acts">
@@ -129,7 +130,7 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
               <b>The Deep card failed three runs in a row.</b>
             ) : state.kind === "fulltext_failed" ? (
               <>
-                <b>Full text failed three runs in a row.</b> Until a pass succeeds, {meanwhile}.
+                <b>{state.refused ? "Every model refused the full text." : "Full text failed three runs in a row."}</b> Until a pass succeeds, {meanwhile}.
               </>
             ) : (
               <>
@@ -153,7 +154,7 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
       return (
         <div className="note fail">
           <div>
-            <b>Awaiting classification:</b> it failed three runs in a row, so nothing after it has run.
+            <b>Awaiting classification:</b> {state.refused ? "the classifier refused it" : "it failed three runs in a row"}, so nothing after it has run.
             {state.error && <div className="err">{state.error}</div>}
           </div>
           {form === "classes" ? (

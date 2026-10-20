@@ -11,7 +11,7 @@ from typing import Any
 
 import psycopg
 
-from litwatch.core import Paper, TaxonomyClass, Weight
+from litwatch.core import FAILED_RUNS, Paper, TaxonomyClass, Weight
 from litwatch.core.digests import PUBLISHED
 from litwatch.core.fulltext import (
     AUTOMATIC_PRIORITY,
@@ -227,6 +227,7 @@ class Claimed:
     lease_until: datetime
     retry_text: bool = False  # the archive is to retry the downloads it gave up on
     use_pdf: bool = False  # the owner's "Use the PDF": read its PDF, not its LaTeX
+    unusable_runs: int = 0  # how far down `brief`'s list it starts (models.md, roles)
 
 
 # Held by the worker that works the Deep passes, so the service's and a terminal's never run
@@ -294,10 +295,10 @@ async def claim(
                                              lease_until = now() + %(lease)s
                 FROM taken WHERE f.id = taken.id
                 RETURNING f.id, f.kind, f.reason, f.paper_revision, f.lease_until, f.paper_id,
-                          f.retry_text, f.use_pdf
+                          f.retry_text, f.use_pdf, f.unusable_runs
             )
             SELECT {COLUMNS}, x.id AS pass_id, x.kind, x.reason, x.paper_revision AS pass_revision,
-                   x.lease_until, x.retry_text, x.use_pdf,
+                   x.lease_until, x.retry_text, x.use_pdf, x.unusable_runs,
                    k.slug, k.name, k.description, k.parent, k.threshold
             FROM claimed x JOIN papers p ON p.id = x.paper_id
             LEFT JOIN LATERAL (SELECT primary_class FROM classifications
@@ -325,6 +326,7 @@ async def claim(
             lease_until=r["lease_until"],
             retry_text=r["retry_text"],
             use_pdf=r["use_pdf"],
+            unusable_runs=r["unusable_runs"],
         )
         for r in rows
     ]
@@ -426,15 +428,22 @@ async def failed(
     *,
     counts: bool,
     text: TextRead | None = None,
+    unusable: bool = False,
+    refused: bool = False,
 ) -> None:
     """The pass failed this run; it is tried again on the next. Only a failure that `counts`
-    (no text to be had, an unusable answer) adds a failed run. A pass left for the owner is
-    not run again but on their word, or while it awaits its text, so a failure here is a new
-    one: it clears the owner's Acknowledge. Call it in a transaction that `held` the pass."""
+    (no text to be had, an unusable answer) adds a failed run, and only an `unusable` answer
+    starts the next try one model further down `brief`'s list; one every model of `brief`
+    `refused` stops at once, counted as `FAILED_RUNS`. A pass left for the owner is not run
+    again but on their word, or while it awaits its text, so a failure here is a new one: it
+    clears the owner's Acknowledge. Call it in a transaction that `held` the pass."""
     await conn.execute(
         """
         UPDATE fulltext_passes SET state = 'failed', lease_until = NULL, last_error = %(error)s,
-            failed_runs = failed_runs + %(counts)s, acknowledged_at = NULL,
+            failed_runs = greatest(failed_runs + %(counts)s,
+                                   CASE WHEN %(refused)s THEN %(floor)s ELSE 0 END),
+            unusable_runs = unusable_runs + %(unusable)s,
+            refused = %(refused)s, acknowledged_at = NULL,
             text_arrived_at = CASE WHEN %(arrived)s THEN coalesce(text_arrived_at, now())
                                    ELSE text_arrived_at END,
             arxiv_version = CASE WHEN %(arrived)s THEN %(version)s ELSE arxiv_version END,
@@ -442,7 +451,15 @@ async def failed(
             text_hash = coalesce(%(hash)s, text_hash)
         WHERE id = %(id)s
         """,
-        {"id": c.id, "error": error[:2000], "counts": int(counts), **_read(text)},
+        {
+            "id": c.id,
+            "error": error[:2000],
+            "counts": int(counts),
+            "unusable": int(unusable),
+            "refused": refused,
+            "floor": FAILED_RUNS,
+            **_read(text),
+        },
     )
 
 
@@ -690,12 +707,13 @@ STUCK = (
 
 
 async def stuck(conn: psycopg.AsyncConnection, runs: int) -> list[dict[str, Any]]:
-    """The passes waiting on the owner, with their paper's title, since when they wait
-    (`SINCE`) and when the owner acknowledged them, most failed first."""
+    """The passes waiting on the owner, with their paper's title, whether every model refused,
+    since when they wait (`SINCE`) and when the owner acknowledged them, most failed first."""
     return await (
         await conn.execute(
             "SELECT f.id, f.paper_id, f.paper_revision AS revision, p.title, f.kind, f.state, "
-            f"f.failed_runs, f.last_error, f.queued_at, {SINCE} AS since, f.acknowledged_at "
+            f"f.failed_runs, f.last_error, f.refused, f.queued_at, {SINCE} AS since, "
+            "f.acknowledged_at "
             "FROM fulltext_passes f "
             f"JOIN papers p ON p.id = f.paper_id WHERE {STUCK} "
             "ORDER BY f.failed_runs DESC, f.queued_at, f.id",
@@ -757,14 +775,16 @@ async def paper_of(conn: psycopg.AsyncConnection, pass_id: int) -> str | None:
 async def run_now(
     conn: psycopg.AsyncConnection, pass_id: int, runs: int, *, pdf: bool = False
 ) -> bool:
-    """The owner's "run it now" on a pass waiting for them: three more runs, and first in line.
+    """The owner's "run it now" on a pass waiting for them: three more runs, from the role's own
+    model, and first in line.
     A Deep pass becomes the owner's request, ahead of the automatic ones and past the daily cap;
     a text pass too, ahead of them and the service worker's while a nightly runs.
     With `pdf` ("Use the PDF"), it reads the paper's PDF from then on, not its LaTeX. Returns
     False when it does not wait for the owner."""
     cur = await conn.execute(
-        "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, tried_at = NULL, "
-        "acknowledged_at = NULL, "
+        "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, unusable_runs = 0, "
+        "refused = false, "
+        "tried_at = NULL, acknowledged_at = NULL, "
         "queued_at = now(), retry_text = true, use_pdf = f.use_pdf OR %(pdf)s, "
         "reason = CASE WHEN f.kind = 'deep' THEN %(requested)s ELSE f.reason END, "
         "priority = CASE WHEN f.kind = 'deep' THEN %(first)s ELSE %(text_first)s END "

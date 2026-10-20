@@ -43,11 +43,9 @@ class Answer(BaseModel):
 
 
 GOOD = json.dumps({"yes": True, "why": "it says so"})
-BRIEF = RoleConfig(
-    provider="anthropic", model="test-brief", effort="high", fallback="brief_fallback"
-)
 OTHER = RoleConfig(provider="openrouter", model="lab/other")
-MODELS = Models(brief=BRIEF, brief_fallback=OTHER)
+BRIEF = RoleConfig(provider="anthropic", model="test-brief", effort="high", fallbacks=(OTHER,))
+MODELS = Models(brief=BRIEF)
 START = datetime(2026, 10, 16, 9, tzinfo=UTC)  # 03:00 in Denver
 DEADLINE = START + timedelta(hours=4, minutes=30)
 FAST = {"quiet": 0.02, "poll": 0.01}  # the batcher's timings in tests
@@ -136,7 +134,7 @@ async def test_what_a_batch_does_not_answer_goes_as_a_normal_call():
 async def test_a_batch_answer_is_handled_as_a_normal_one_the_fallback_included():
     gw, anthropic, openrouter, _ = batching()
     answer = await gw.ask("brief", ask("refuse"))
-    assert answer.model == OTHER.label  # the refusal went to the fallback, as a normal call
+    assert answer.model == OTHER.label  # the refusal went to the fallback, at once
     assert [r.user for _, r in openrouter.calls] == ["paper refuse"]
     with pytest.raises(CallError) as found:
         await gw.ask("brief", ask("truncate"))
@@ -280,23 +278,25 @@ async def test_a_requests_size_is_counted_as_it_is_sent_its_escapes_included():
     await gw.close()
 
 
-async def test_a_fallback_on_a_provider_that_batches_is_a_normal_call():
-    models = Models(
-        brief=RoleConfig(provider="openrouter", model="lab/other", fallback="brief_fallback"),
-        brief_fallback=RoleConfig(provider="anthropic", model="test-brief"),
-    )
+async def test_a_batched_refusal_goes_down_the_list_in_the_same_run_batched_too():
+    sonnet = RoleConfig(provider="anthropic", model="test-sonnet")
+    models = Models(brief=RoleConfig(provider="anthropic", model="test-opus", fallbacks=(sonnet,)))
 
     def refusing(role, request):
-        if role.provider == "openrouter":
-            return Reply("", Stop.REFUSED, Usage(model=role.model, cost=0.001), refusal="cyber")
+        if role.model == "test-opus":
+            return Reply("", Stop.REFUSED, Usage(model=role.model, cost=0.001), refusal="bio")
         return GOOD
 
     anthropic = BatchingProvider("anthropic", refusing)
-    providers = {"anthropic": anthropic, "openrouter": ScriptedProvider("openrouter", refusing)}
-    gw = Gateway(models, providers, retry_delays=(0.0,), batch_options=FAST | {"now": Clock()})
+    gw = Gateway(
+        models, {"anthropic": anthropic}, retry_delays=(0.0,), batch_options=FAST | {"now": Clock()}
+    )
     gw.batch_until(DEADLINE)
-    assert (await gw.ask("brief", ask(1))).value.yes
-    assert (anthropic.batches, len(anthropic.calls)) == ({}, 1)
+    answer = await gw.ask("brief", ask(1))
+    assert answer.value.yes and answer.model == sonnet.label
+    # Two batches, the second asking the next model; no normal call: the job decides.
+    assert [m.model for m, _ in anthropic.batched] == ["test-opus", "test-sonnet"]
+    assert (len(anthropic.batches), anthropic.calls) == (2, [])
     await gw.close()
 
 

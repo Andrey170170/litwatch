@@ -60,17 +60,29 @@ export function whoseFit(t: PaperTopic): string | null {
   return `your word: ${t.word}`;
 }
 
+/** The topic states that ask for the owner's word, by the name they show under: a Focus split, an Area escalation,
+ * a central or related grade from one lab. */
+export const ASKING = { split: "Split", escalated: "Escalated", one_lab: "One lab" } as const;
+export const asks = (t: PaperTopic): t is PaperTopic & { state: keyof typeof ASKING } => t.state != null && t.state in ASKING;
+
+/** What the graders said, by role; for a grade from one lab, first the side that refused it throughout. */
+export function graders(v: PaperTopic["verdict"]): string[] {
+  if (!v) return [];
+  const said = Object.entries(v.opinions ?? {})
+    .filter(([, o]) => o.fit)
+    .map(([role, o]) => `${role} ${o.fit}`);
+  return v.one_lab ? [`${v.opinions?.judge ? "check" : "judge"} refused`, ...said] : said;
+}
+
 export function verdictLine(t: PaperTopic, weight: Weight | null | undefined): React.ReactNode {
-  if (t.state === "split" || t.state === "escalated") {
-    const v = t.verdict;
-    const said = v ? Object.entries(v.opinions ?? {}).filter(([, o]) => o.fit).map(([role, o]) => `${role} ${o.fit}`) : [];
+  if (asks(t)) {
     return (
       <>
-        <b className="askt">{t.state === "split" ? "Split" : "Escalated"}</b> · {said.join(" · ")} · {t.fit} stands
+        <b className="askt">{ASKING[t.state]}</b> · {graders(t.verdict).join(" · ")} · {t.fit} stands
       </>
     );
   }
-  if (t.state === "ungraded") return <b className="badt">Grading failed 3 runs</b>;
+  if (t.state === "ungraded") return <b className="badt">Grading stopped</b>;
   if (t.state === "grading_again") return "Grading again";
   if (t.word) return <b>{whoseFit(t)}</b>;
   if (!t.fit) return "not graded here";
@@ -126,11 +138,11 @@ export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t:
   const [pick, setPick] = useState<ReactionValue | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const gradeNow = useGradeNow(paperId);
-  const asks = t.state === "split" || t.state === "escalated";
+  const asking = asks(t);
   const failed = t.state === "ungraded";
   return (
     <>
-      <div className={`tprow${asks ? " ask" : ""}`} data-topic={t.topic.slug} style={{ "--rc": rowColour(t) } as React.CSSProperties}>
+      <div className={`tprow${asking ? " ask" : ""}`} data-topic={t.topic.slug} style={{ "--rc": rowColour(t) } as React.CSSProperties}>
         <Badge topic={t.topic} />
         <span className="nm">{t.topic.name}</span>
         <span className={`gr${failed ? " fail" : ""}`}>{failed || t.state === "grading_again" ? "ungraded" : gradeLine(t.grade, weight)}</span>
@@ -146,13 +158,13 @@ export function TopicRow({ paperId, t, weight, revision }: { paperId: string; t:
           )}
         </span>
         <Thumbs reaction={t.reaction} pick={pick} setPick={setPick} />
-        <button className="lb" onClick={() => setLabelOpen((o) => !o)} title="Label the Fit" aria-expanded={labelOpen || asks}>
+        <button className="lb" onClick={() => setLabelOpen((o) => !o)} title="Label the Fit" aria-expanded={labelOpen || asking}>
           Label
         </button>
       </div>
       {pick && <Reasons paperId={paperId} topic={t.topic.slug} value={pick} current={t.reaction} onDone={() => setPick(null)} />}
-      {(labelOpen || asks) && (
-        <div className={`why${asks ? " ask" : ""}`}>
+      {(labelOpen || asking) && (
+        <div className={`why${asking ? " ask" : ""}`}>
           <FitControl paperId={paperId} t={t} revision={revision} />
         </div>
       )}

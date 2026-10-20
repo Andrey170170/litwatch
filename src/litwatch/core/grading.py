@@ -227,6 +227,7 @@ class Verdict(BaseModel):
     opinions: dict[str, Opinion]  # by role, in the order asked
     split: bool = False  # two graders gave different Fits
     escalated: bool = False  # an Area grading `check` was asked to grade too
+    one_lab: bool = False  # a Focus grading one side refused throughout: the other's Fit stands
     recorded_at: datetime | None = None
 
 

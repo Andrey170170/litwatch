@@ -551,6 +551,18 @@ describe("a paper's topic rows", () => {
     expect(scrolled).toEqual(["nn"]);
   });
 
+  it("show a grade from one lab as asking for a label, naming the side that refused", async () => {
+    viewport(true);
+    const verdict = { fit: "related", reason: "r", split: false, escalated: false, one_lab: true, opinions: { judge: { fit: "related", reason: "j" } } };
+    const one = { ...many, topics: many.topics.map((t) => (t.topic.slug === "rl" ? { ...t, state: "one_lab", verdict } : t)), states: [{ kind: "one_lab", topic: "rl", revision: 1, error: null, pass_id: null }] };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": one });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText(/One lab on Rel one/).closest(".note")).toHaveTextContent("Check refused, judge related; related stands until it is labelled.");
+    expect(document.querySelector('[data-topic="rl"]')).toHaveClass("ask");
+    expect(document.querySelector('[data-topic="rl"] .vd')).toHaveTextContent("One lab · check refused · judge related · related stands");
+  });
+
   it("keep an open Label open when a third topic arrives and the fold appears", async () => {
     viewport(true);
     const calls = scriptFetch({

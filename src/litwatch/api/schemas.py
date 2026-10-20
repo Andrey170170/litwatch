@@ -104,7 +104,8 @@ class PaperRef(BaseModel):
     title: str
 
 
-# A row's open state: `word` asks for the owner's word (an unlabelled split or escalation),
+# A row's open state: `word` asks for the owner's word (an unlabelled split, escalation or
+# central or related grade from one lab),
 # `failure` reports a step stopped after three failed runs; `word` when both.
 type RowState = Literal["word", "failure"]
 
@@ -320,12 +321,14 @@ class WeightState(BaseModel):
 
 class CurrentVerdict(BaseModel):
     """A topic's current verdict: the Fit that stands, each grader's answer by role, and the
-    paper revision it was made from."""
+    paper revision it was made from. `one_lab`: one Focus grader refused throughout and the
+    other's Fit stands."""
 
     fit: Fit
     reason: str
     split: bool = False
     escalated: bool = False
+    one_lab: bool = False
     opinions: dict[str, Opinion] = Field(default_factory=dict)
     paper_revision: int = 1
     recorded_at: datetime | None = None
@@ -342,10 +345,11 @@ class ReactionState(BaseModel):
     reason: ReactionReason | None = None
 
 
-# A topic's open state on a paper: an unlabelled split or escalation asks for the owner's word;
-# `ungraded` is a grading stopped after three failed runs (Grade it now); `grading_again` a
-# grading that failed and is tried again.
-type TopicState = Literal["split", "escalated", "ungraded", "grading_again"]
+# A topic's open state on a paper: an unlabelled split, escalation or central or related grade
+# from one lab (`one_lab`) asks for the owner's word; `ungraded` is a grading stopped after three
+# failed runs or refused by every model (Grade it now); `grading_again` a grading that failed
+# and is tried again.
+type TopicState = Literal["split", "escalated", "one_lab", "ungraded", "grading_again"]
 
 
 class PaperTopic(BaseModel):
@@ -370,15 +374,17 @@ class PaperTopic(BaseModel):
 class OpenState(BaseModel):
     """What waits on the owner for this paper, as Needs you lists it, with the paper revision
     the action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the
-    text), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or
-    `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep card's
-    `card_failed`, or either `awaiting_text` over a week (run it now)."""
+    text), `analysis_stopped` (try again), a topic's `split`, `escalated`, `one_lab` (label it)
+    or `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep
+    card's `card_failed`, or either `awaiting_text` over a week (run it now). `refused`: every
+    model refused, rather than the last error."""
 
     kind: Literal[
         "awaiting_classification",
         "analysis_stopped",
         "split",
         "escalated",
+        "one_lab",
         "ungraded",
         "fulltext_failed",
         "card_failed",
@@ -387,6 +393,7 @@ class OpenState(BaseModel):
     revision: int
     topic: str | None = None
     error: str | None = None
+    refused: bool = False
     pass_id: int | None = None
 
 

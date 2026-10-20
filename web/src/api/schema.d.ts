@@ -1296,7 +1296,8 @@ export interface components {
         /**
          * CurrentVerdict
          * @description A topic's current verdict: the Fit that stands, each grader's answer by role, and the
-         *     paper revision it was made from.
+         *     paper revision it was made from. `one_lab`: one Focus grader refused throughout and the
+         *     other's Fit stands.
          */
         CurrentVerdict: {
             fit: components["schemas"]["Fit"];
@@ -1312,6 +1313,11 @@ export interface components {
              * @default false
              */
             escalated: boolean;
+            /**
+             * One Lab
+             * @default false
+             */
+            one_lab: boolean;
             /** Opinions */
             opinions?: {
                 [key: string]: components["schemas"]["Opinion"];
@@ -1917,22 +1923,28 @@ export interface components {
          * OpenState
          * @description What waits on the owner for this paper, as Needs you lists it, with the paper revision
          *     the action endpoints take: `awaiting_classification` (dismiss, classify by hand, fix the
-         *     text), `analysis_stopped` (try again), a topic's `split`, `escalated` (label it) or
-         *     `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep card's
-         *     `card_failed`, or either `awaiting_text` over a week (run it now).
+         *     text), `analysis_stopped` (try again), a topic's `split`, `escalated`, `one_lab` (label it)
+         *     or `ungraded` (grade it now), and a full-text pass (`pass_id`) `fulltext_failed`, a Deep
+         *     card's `card_failed`, or either `awaiting_text` over a week (run it now). `refused`: every
+         *     model refused, rather than the last error.
          */
         OpenState: {
             /**
              * Kind
              * @enum {string}
              */
-            kind: "awaiting_classification" | "analysis_stopped" | "split" | "escalated" | "ungraded" | "fulltext_failed" | "card_failed" | "awaiting_text";
+            kind: "awaiting_classification" | "analysis_stopped" | "split" | "escalated" | "one_lab" | "ungraded" | "fulltext_failed" | "card_failed" | "awaiting_text";
             /** Revision */
             revision: number;
             /** Topic */
             topic?: string | null;
             /** Error */
             error?: string | null;
+            /**
+             * Refused
+             * @default false
+             */
+            refused: boolean;
             /** Pass Id */
             pass_id?: number | null;
         };
@@ -2724,7 +2736,7 @@ export interface components {
             via?: string | null;
         };
         /** @enum {string} */
-        TopicState: "split" | "escalated" | "ungraded" | "grading_again";
+        TopicState: "split" | "escalated" | "one_lab" | "ungraded" | "grading_again";
         /** ValidationError */
         ValidationError: {
             /** Location */

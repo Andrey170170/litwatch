@@ -15,15 +15,16 @@ from litwatch.store.taxonomy import row_to_class
 
 async def due(
     conn: psycopg.AsyncConnection, runs: int, limit: int | None = None
-) -> list[tuple[Paper, TaxonomyClass]]:
+) -> list[tuple[Paper, TaxonomyClass, int]]:
     """Papers whose current text is classified but not analysed, oldest first, each with the
-    primary class of its newest classification (retired since or not). One that failed is
-    tried again after the new ones, and after `runs` failed runs it is not tried at all: it
-    waits for the owner. A dismissed paper is never analysed."""
+    primary class of its newest classification (retired since or not) and its failed runs so
+    far. One that failed is tried again after the new ones, and after `runs` failed runs it is
+    not tried at all: it waits for the owner. A dismissed paper is never analysed."""
     rows = await (
         await conn.execute(
             f"""
-            SELECT {COLUMNS}, k.slug, k.name, k.description, k.parent, k.threshold
+            SELECT {COLUMNS}, k.slug, k.name, k.description, k.parent, k.threshold,
+                   coalesce(f.failed_runs, 0) AS failed_runs
             FROM papers p
             JOIN LATERAL (SELECT primary_class FROM classifications
                           WHERE paper_id = p.id AND paper_revision = p.revision
@@ -40,7 +41,7 @@ async def due(
             (runs, limit),
         )
     ).fetchall()
-    return [(row_to_paper(r), row_to_class(r)) for r in rows]
+    return [(row_to_paper(r), row_to_class(r), r["failed_runs"]) for r in rows]
 
 
 async def add(

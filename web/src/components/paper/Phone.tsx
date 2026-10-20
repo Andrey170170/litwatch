@@ -13,7 +13,7 @@ import { gradeLine } from "@/lib/rarity";
 import type { ReactionValue } from "@/lib/reactions";
 import { DeepReadCell, linkCells, MissPicker, type Paper, passWord, ProcessCell } from "./Actions";
 import { Classes, Published } from "./Ladder";
-import { FitControl, Reasons, rowColour, whoseFit, type PaperTopic } from "./TopicRow";
+import { ASKING, asks, FitControl, graders, Reasons, rowColour, whoseFit, type PaperTopic } from "./TopicRow";
 import { FoldedTopics, type Topics } from "./Fold";
 
 /** The topic row a reaction sheet opens on: the one the paper was opened under, else its only one; none when it
@@ -52,22 +52,20 @@ function ReactSheet({ paper, value, under, onClose }: { paper: Paper; value: Rea
 }
 
 function Slab({ paper, t }: { paper: Paper; t: PaperTopic }) {
-  const asks = t.state === "split" || t.state === "escalated";
   const failed = t.state === "ungraded";
-  const said = t.verdict ? Object.entries(t.verdict.opinions ?? {}).filter(([, o]) => o.fit).map(([role, o]) => `${role} ${o.fit}`) : [];
   return (
-    <div className={`slab${asks ? " ask" : ""}`} style={{ "--rc": rowColour(t) } as React.CSSProperties}>
+    <div className={`slab${asks(t) ? " ask" : ""}`} style={{ "--rc": rowColour(t) } as React.CSSProperties}>
       <div className="sh">
         <Badge topic={t.topic} />
         <span className="nm">{t.topic.name}</span>
       </div>
       <div className="ss">
-        {asks ? (
+        {asks(t) ? (
           <>
-            <b className="askt">{t.state === "split" ? "Split" : "Escalated"}</b> · {said.join(" · ")} · {t.fit} stands
+            <b className="askt">{ASKING[t.state]}</b> · {graders(t.verdict).join(" · ")} · {t.fit} stands
           </>
         ) : failed ? (
-          <b className="badt">ungraded · grading failed 3 runs</b>
+          <b className="badt">ungraded · grading stopped</b>
         ) : (
           <>
             <span className="gr">{t.state === "grading_again" ? "ungraded · grading again" : gradeLine(t.grade, paper.weight?.weight)}</span>
