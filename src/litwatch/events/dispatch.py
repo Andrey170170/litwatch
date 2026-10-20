@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import psycopg
@@ -37,8 +36,6 @@ log = logging.getLogger(__name__)
 BATCH = 100
 IDLE_SECONDS = 5.0
 IDLE_HOOK_SECONDS = 60.0  # the least time between two `idle` calls to one integration
-# Held per integration while delivering, so two services never hand over one event twice.
-DISPATCH_LOCK = 7213914
 
 
 def backoff(failures: int) -> timedelta:
@@ -50,23 +47,6 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"[:500]
 
 
-@contextlib.asynccontextmanager
-async def _locked(conn: psycopg.AsyncConnection, integration: Integration) -> AsyncIterator[bool]:
-    """Hold the integration's dispatch lock for the block, if no other session holds it; yields
-    whether it is held."""
-    key = (DISPATCH_LOCK, integration.name)
-    row = await (
-        await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS locked", key)
-    ).fetchone()
-    if not row["locked"]:
-        yield False
-        return
-    try:
-        yield True
-    finally:
-        await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", key)
-
-
 async def deliver(
     conn: psycopg.AsyncConnection, integration: Integration, now: datetime | None = None
 ) -> int:
@@ -74,7 +54,7 @@ async def deliver(
     first failure. Returns how many events the cursor moved past, wanted or not. `now` fixes
     the clock, for tests; otherwise a failure's backoff runs from the moment it failed."""
     clock = (lambda: now) if now else (lambda: datetime.now(UTC))
-    async with _locked(conn, integration) as locked:
+    async with outbox.dispatching(conn, integration.name) as locked:
         if not locked:
             return 0
         cursor = await outbox.cursor(conn, integration.name)
@@ -127,7 +107,7 @@ async def start(
         # The section may have had another implementation, one whose setup failed.
         await outbox.setup_done(conn, integration.name)
         return True
-    async with _locked(conn, integration) as locked:
+    async with outbox.dispatching(conn, integration.name) as locked:
         if not locked:
             return False
         cursor = await outbox.cursor(conn, integration.name)
@@ -154,7 +134,7 @@ async def idle(conn: psycopg.AsyncConnection, integration: Integration) -> bool:
     hook = getattr(integration, "idle", None)
     if hook is None:
         return False
-    async with _locked(conn, integration) as locked:
+    async with outbox.dispatching(conn, integration.name) as locked:
         if not locked:
             return False
         try:

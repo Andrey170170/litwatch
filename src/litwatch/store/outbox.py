@@ -7,7 +7,9 @@ own. Only events whose transaction is older than every transaction still running
 
 from __future__ import annotations
 
+import contextlib
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple
@@ -67,6 +69,27 @@ _FIELDS = (
     "name, position_xid::text::bigint AS position_xid, position, failing, failures, retry_at, "
     "last_error, failed_at, skipped, setup_failures, setup_error, setup_failed_at, setup_retry_at"
 )
+
+
+# Held per integration while delivering, so two services never hand over one event twice.
+DISPATCH_LOCK = 7213914
+
+
+@contextlib.asynccontextmanager
+async def dispatching(conn: psycopg.AsyncConnection, name: str) -> AsyncIterator[bool]:
+    """Hold the integration's dispatch lock for the block, if no other session holds it; yields
+    whether it is held."""
+    key = (DISPATCH_LOCK, name)
+    row = await (
+        await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS locked", key)
+    ).fetchone()
+    if not row["locked"]:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", key)
 
 
 def _cursor(row: dict) -> Cursor:
