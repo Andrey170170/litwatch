@@ -394,6 +394,12 @@
               }
             }
           },
+          "404": {
+            "description": "No such paper, or DBLP has no such record"
+          },
+          "502": {
+            "description": "DBLP did not answer"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -463,6 +469,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such paper or topic"
           },
           "422": {
             "description": "Validation Error",
@@ -676,6 +685,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No such paper or topic"
           },
           "422": {
             "description": "Validation Error",
@@ -2683,6 +2695,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Wrong token"
           },
           "422": {
             "description": "Validation Error",

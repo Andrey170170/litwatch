@@ -2979,6 +2979,13 @@ export interface operations {
                     "application/json": components["schemas"]["Publication"] | null;
                 };
             };
+            /** @description No such paper, or DBLP has no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2987,6 +2994,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description DBLP did not answer */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3051,6 +3065,13 @@ export interface operations {
                     "text/plain": string;
                 };
             };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3083,6 +3104,13 @@ export interface operations {
                 content: {
                     "text/plain": string;
                 };
+            };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -4712,6 +4740,13 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Wrong token */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

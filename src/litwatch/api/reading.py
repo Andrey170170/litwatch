@@ -533,7 +533,13 @@ async def _history(
     ]
 
 
-@router.put("/papers/{paper_id:path}/publication")
+@router.put(
+    "/papers/{paper_id:path}/publication",
+    responses={
+        404: {"description": "No such paper, or DBLP has no such record"},
+        502: {"description": "DBLP did not answer"},
+    },
+)
 async def set_publication(
     paper_id: str, body: s.PublicationIn, request: Request, c: Conn
 ) -> Publication | None:
@@ -602,7 +608,7 @@ async def _matching(c: psycopg.AsyncConnection, query: s.PaperQuery) -> list[str
     return [r["id"] for r in listed.rows]
 
 
-@router.post("/bibtex", response_class=PlainTextResponse)
+@router.post("/bibtex", response_class=PlainTextResponse, responses=NOT_FOUND)
 async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
     """BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the
     published version as soon as DBLP has it; several use what is stored. `cited` are
@@ -628,7 +634,7 @@ async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
     return await _bibtex(c, ids, outside)
 
 
-@router.get("/bibtex", response_class=PlainTextResponse)
+@router.get("/bibtex", response_class=PlainTextResponse, responses=NOT_FOUND)
 async def bibtex_filter(c: Conn, params: Annotated[s.PaperQuery, Query()]) -> str:
     """BibTeX for every collection paper a Papers filter matches."""
     return await _bibtex(c, await _matching(c, params))
@@ -838,7 +844,7 @@ async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
 session = APIRouter(prefix="/api")
 
 
-@session.post("/session", status_code=204)
+@session.post("/session", status_code=204, responses={401: {"description": "Wrong token"}})
 async def sign_in(body: s.SessionIn, request: Request, response: Response) -> None:
     """Exchange the token for the cookie the web app then rides on."""
     if not token_ok(request, body.token):
