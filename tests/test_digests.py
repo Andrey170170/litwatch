@@ -840,6 +840,34 @@ async def test_a_weekly_recaps_a_dailys_updated_paper_no_weekly_has_however_old(
     assert await shown(db, FAITH.slug, "week", MON) == ("nothing_new", [(U.id, "updated")])
 
 
+async def test_the_monday_after_recaps_last_weeks_versions_and_keeps_its_own(db):
+    """Monday 12 Oct's daily, written before the weekly of 5 Oct, lists L, whose v2 was in
+    Friday's listing and graded late, and U, whose v2 is in Monday's own: the weekly of 5 Oct
+    recaps L, and U waits for the weekly of 12 Oct."""
+    w = Writer()
+    late = updated("2605.00016", "2026-10-08T15:00:00+00:00", title="Graded late")
+    monday = updated(U.id, "2026-10-09T15:00:00+00:00")
+    await papers_store.upsert(db, [late, monday])
+    await focus(db, late, "central")
+    await focus(db, monday, "central")
+    await focus(db, S, "related")
+    after = MON + timedelta(days=7)
+    await listed(db, after, S)
+    await day(db, w, after)
+    assert (await shown(db, FAITH.slug, "day", after))[1] == [
+        (S.id, "listed"),
+        (U.id, "updated"),
+        (late.id, "updated"),
+    ]
+    await week(db, w, MON)
+    assert (await shown(db, FAITH.slug, "week", MON))[1] == [(late.id, "updated")]
+    await week(db, w, after)
+    assert (await shown(db, FAITH.slug, "week", after))[1] == [
+        (S.id, "listed"),
+        (U.id, "updated"),
+    ]
+
+
 async def test_an_updated_paper_is_not_a_focus_weeklys_earlier_paper(db):
     """Listed as updated at Fit central the week before, U is not one the next weekly may
     bring back; P, listed there as new, is."""

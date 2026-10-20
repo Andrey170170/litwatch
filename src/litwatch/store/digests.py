@@ -388,18 +388,29 @@ async def _listed_updated(
 ) -> dict[str, int]:
     """The papers the topic's published daily digests listed as updated, each with the version
     listed, up to the Monday after the week from `monday` (written the same night, before the
-    weekly)."""
+    weekly), less a version of that Monday's own listing: it is the next week's."""
+    after = monday + timedelta(days=7)
     rows = await (
         await conn.execute(
-            f"""SELECT dp.paper_id, max(dp.version) AS version FROM digest_papers dp
-                JOIN digests d ON d.id = dp.digest_id
+            f"""SELECT dp.paper_id, dp.version, (
+                    SELECT (e->>'date')::timestamptz
+                    FROM papers p, jsonb_array_elements(
+                        CASE WHEN jsonb_typeof(p.version_history) = 'array'
+                             THEN p.version_history ELSE '[]' END) e
+                    WHERE p.id = dp.paper_id AND (e->>'version')::int = dp.version
+                    LIMIT 1) AS submitted
+                FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
                 WHERE d.topic = %s AND d.period = 'day' AND d.state IN {_PUBLISHED}
-                  AND d.day <= %s AND dp.role = 'updated'
-                GROUP BY dp.paper_id""",
-            (topic, monday + timedelta(days=7)),
+                  AND d.day <= %s AND dp.role = 'updated'""",
+            (topic, after),
         )
     ).fetchall()
-    return {r["paper_id"]: r["version"] for r in rows}
+    found: dict[str, int] = {}
+    for r in rows:
+        if r["submitted"] is not None and listing_day(r["submitted"]) >= after:
+            continue
+        found[r["paper_id"]] = max(r["version"], found.get(r["paper_id"], 0))
+    return found
 
 
 async def earlier_central(
