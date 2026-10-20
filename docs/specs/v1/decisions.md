@@ -220,6 +220,20 @@ ungraded" for two biosecurity papers `judge` refused, and no new paper had a Dee
     which counts only failures (stopped papers and passes, failed digests, a failed nightly), not splits. A failed
     nightly is not acknowledged.
 
+## Decided 2026-10-20, updated papers in digests
+
+The plan is [`docs/plans/updated-papers.md`](../../plans/updated-papers.md). Intake takes in every changed arXiv
+record in its categories, about 1,100 old papers a week with a new version, and none of them reached a digest: a
+digest lists only papers first announced within three weeks.
+
+77. **An old paper's new version brings it back once**, as updated, in a folded list under the digest's papers, with
+    no model call and no place in the text, counts or picks. A digest is about recent work; an old paper worth a
+    look is worth one line, not a second announcement.
+78. **Only papers worth a look come back**: Focus central or related, Area and Field must read. With every graded
+    member, a Field weekly's list would run to about 200 rows.
+79. **Once per topic in all**: a paper a digest of the topic already showed, new or updated, never comes back, and
+    neither do its later versions.
+
 ## Open
 
 - The grade table and rarity offsets are starting points, tuned in N2.

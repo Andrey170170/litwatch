@@ -112,8 +112,11 @@ a large badge, the topic's name, "Daily digest · Tue 13 Oct" or "Weekly digest 
 rarity colour; the full text, where a paper it names reads as part of the sentence and opens the paper's page
 (under the digest's topic; a faint underline, the accent on hover); then its papers by role as rows with Gists. A Focus daily digest: Central, then
 Related, whose rows are one line each without a Gist. An Area daily digest: Picks, Mentioned (papers its text names), Also due. A weekly digest: "Central this
-week" for Focus, Picks for the others. A digest with nothing due says so in one line; a failed one says it could not
-be written and that the next run writes it again.
+week" for Focus, Picks for the others. Last, the updated papers ([digests.md](digests.md), updated papers), folded
+to "Updated · 3" until opened (its head folds or opens it, as the Acknowledged section on Needs you): one line each, a
+paper row (stripe, glow, title) with "v3 · first out May 2026" in place of its date, no Gist. A digest with nothing due says so in one line, with
+its folded updated papers under it if it has any; a failed one says it could not be written and that the next run
+writes it again.
 
 ### Topics
 
@@ -239,7 +242,9 @@ again, Use the PDF) and digests (Write it again), red. A red item says why it st
 last error). A title opens its paper, where the same item shows (Paper, open states). Each red group has Acknowledge,
 and the page "Acknowledge all": the owner has seen them and they stop counting in the run status. Acknowledged items
 move to a folded "Acknowledged" section at the foot, grouped as above and keeping their buttons; one that recovers and
-fails again comes back.
+fails again comes back. Each group's head (its name and count) folds or opens it, Acknowledge staying on the head; a
+group of more than ten items starts folded, showing its head and line, and the owner's choice is remembered for the
+session, as the topic page's shelves are.
 
 **Calibrate.** A first page with "Start a session" and the past sessions (date, answered, seed, how many answers differ
 from the pipeline). A session draws its papers as the spec says (about 20 per Focus topic, half at relevant or
@@ -409,7 +414,8 @@ topic page and Papers rows 15 % over 220 px; the paper header 15 % over 132 px; 
 three quarters of each strength. A quiet row (nothing new) has no stripe or glow.
 
 **Digest card** (Gist level): the topic's badge and name, the count line at the right in the colour of the digest's
-best rarity ("2 new · 1 must read", "11 new · 1 pick", "Week · 3 picks"); the Gist; up to three picks as paper rows
+best rarity ("2 new · 1 must read", "11 new · 1 pick", "Week · 3 picks"), then "· 3 updated" when the digest has
+updated papers; the Gist; up to three picks as paper rows
 (stripe, glow, title, date; no badges, the card names the topic); "+10 papers" when more are due. The whole card opens
 the digest. A quiet topic is the head alone, "Nothing new", in its slot; a failed one is one red line. On the phone the
 count sits on its own line under the name, so it starts at the same place in every card.
