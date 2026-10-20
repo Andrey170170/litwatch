@@ -10,7 +10,7 @@ spec differ, the spec wins and the plan is corrected. Terms are the glossary's.
 
 ## Goal and approach
 
-Ana, the owner's PI, asked on 2026-10-19 for a week to see whether a Notion view of litwatch is useful to her. She
+The owner's PI asked on 2026-10-19 for a week to see whether a Notion view of litwatch is useful to her. She
 does not use litwatch itself. The integration keeps a Notion database of every paper whose effective grade for an
 exported topic is relevant or above. It runs on the owner's instance, on the LitWatch page she can already see.
 
@@ -21,7 +21,7 @@ The work comes in three stages:
 3. Switch it on in production with the owner present, then clear away 0.14's Notion databases.
 
 The page and database layout is the sample the owner approved. The sample is the Notion page "litwatch · papers for
-Ana (SAMPLE, not shared)", id `3fe89c45-f79d-8182-89de-d0a0f5f4b6b1`. Its layout is described under *Layout* below.
+the PI (SAMPLE, not shared)", id `<sample page id>`. Its layout is described under *Layout* below.
 
 ## Choices made without asking
 
@@ -159,7 +159,7 @@ The layout is the approved sample's.
 - Topic: a multi-select.
 - TL;DR.
 - Published.
-- Status: a select of To read, Read, Useful, Not useful. Ana owns it and litwatch never writes it.
+- Status: a select of To read, Read, Useful, Not useful. The PI owns it and litwatch never writes it.
 - Authors, Venue (linked to the published version: its URL, else its DOI), arXiv (url), PDF (url), Added and Why.
 - arXiv id: the paper's id as text, which identifies the page (see *Creation is adopted*). Hidden in the views.
 - One grade column per exported topic, a select with the same three options.
@@ -191,14 +191,14 @@ lines.
 - the topics;
 - the grades;
 - what each paper's text holds;
-- that Status is Ana's column;
+- that Status is the PI's column;
 - that comments belong at the page level.
 
 ## Decisions
 
 - **D1. Development uses its own Notion integration, "litwatch-dev".** It is shared only with the page "Litwatch dev
-  scratch", id `3fe89c45-f79d-8064-be60-f7588e2f34b7`. The owner created both on 2026-10-19. A development run cannot
-  reach Ana's page even with a wrong `parent_page`. The cost is one more integration in Notion's settings.
+  scratch", id `<scratch page id>`. The owner created both on 2026-10-19. A development run cannot
+  reach the PI's page even with a wrong `parent_page`. The cost is one more integration in Notion's settings.
 - **D2. The database is set up and filled automatically when the dispatcher starts** (reconcile, above). Turning the
   section on in `litwatch.toml` and restarting is the whole set-up. The same pass reconciles later changes to the
   configuration, so there is no separate command and no second code path.
@@ -215,8 +215,8 @@ lines.
   each kind of change, a cleared owner's word included.
 - **R4. The owner's view arrangement could be reset.** Views are created once and never touched again. The owner
   arranges them once after P3. V6 shows that the arrangement survives a restart.
-- **R5. Ana could see a half-filled table.** The production fill runs once, on the restart, in a minute or two, and
-  before Ana is told. If something goes wrong, switch the section off and trash the database; nothing else is
+- **R5. The PI could see a half-filled table.** The production fill runs once, on the restart, in a minute or two, and
+  before the PI is told. If something goes wrong, switch the section off and trash the database; nothing else is
   touched.
 
 ## Stages
@@ -227,7 +227,7 @@ Each PR goes through `drive`.
 | --- | --- | --- |
 | P1 | **`cause` on `grade.changed`.** Every caller of `change`/`settle` and its variants names the cause; `settle` derives `weight`; `docs/integrations.md` documents the payload. A small PR. | V1. |
 | P2 | **The `notion` integration.** The paced client, the state migration, reconcile on start, event handling, the page builder and Why lines; `notion` added to `BUILT_IN`; the package docstring; `docs/integrations.md`. The dispatcher's backoff and Settings entry for a failing setup, with the API change and regenerated client types. A normal PR. | V2 in pytest. V3–V7 on the sandbox against the scratch page through litwatch-dev, with screenshots, and V9. Then the owner looks at the scratch database. |
-| P3 | **Switch-on on the owner's instance.** With the owner present: the owner creates the "litwatch" integration and shares the LitWatch page with it; the token goes into the stack as a secret; the `[integrations.notion]` section goes into the stack's `litwatch.toml`; restart. Then delete the sample page. After the owner confirms the new database, trash 0.14's Papers, Digest and Selections databases and the LitWatch page's untitled linked view through the API. | V8. The owner arranges the views once and tells Ana. |
+| P3 | **Switch-on on the owner's instance.** With the owner present: the owner creates the "litwatch" integration and shares the LitWatch page with it; the token goes into the stack as a secret; the `[integrations.notion]` section goes into the stack's `litwatch.toml`; restart. Then delete the sample page. After the owner confirms the new database, trash 0.14's Papers, Digest and Selections databases and the LitWatch page's untitled linked view through the API. | V8. The owner arranges the views once and tells the PI. |
 
 ## Verification
 
@@ -244,7 +244,7 @@ then a real run against a test target on the sandbox. For the sandbox runs, buil
 | V5. New text reaches the page | On the sandbox: an event for a paper whose Gist or Deep card changed rewrites its body; an event for a paper whose text did not change makes no write |
 | V6. The owner's view arrangement survives a restart | In the scratch database: rearrange one view and hide columns in it, delete another view, restart, compare |
 | V7. Reconcile follows the configuration | Restart with `minimum_grade = "must_read"`: listed worth-a-look papers become No longer listed with the minimum-grade Why, and a paper V4 delisted keeps its owner's Why. Restart with one topic dropped and another added: on a page of the dropped topic alone nothing is written; on a page shared with a kept topic the dropped topic's fields keep their values while the rest is written; the new topic gets its column, view and papers |
-| V8. Ana's database matches what litwatch holds | After P3: the listed pages and their per-topic grades, compared with production's papers at relevant or above for the exported topics (a read-only query) |
+| V8. The PI's database matches what litwatch holds | After P3: the listed pages and their per-topic grades, compared with production's papers at relevant or above for the exported topics (a read-only query) |
 | V9. Adoption works against Notion itself, not only the fake: a page created moments before is found by its arXiv id | On the sandbox against the scratch page: create a paper's page, drop the reply without recording it, restart at once; exactly one page has that arXiv id. If Notion's query lags behind a fresh page, adoption waits and asks again before creating |
 
 ## Scope
@@ -258,7 +258,7 @@ then a real run against a test target on the sandbox. For the sandbox runs, buil
 - Trashing 0.14's Papers, Digest and Selections databases and the linked view.
 
 **Out:**
-- Anything flowing back from Notion into litwatch (Status, comments). Revisit only if Ana stays.
+- Anything flowing back from Notion into litwatch (Status, comments). Revisit only if the PI stays.
 - Digests in Notion.
 - Any Settings page for Notion beyond the generic integrations list.
 - The Research workspace's Zotero-fed Papers source. It is never touched.

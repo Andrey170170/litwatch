@@ -93,6 +93,7 @@ services:
       # Without it deep cannot search litwatch for "Among the collection" (deploy/README.md).
       LITWATCH_TOKEN: ${LITWATCH_READ_TOKEN:-}
       S2_API_KEY: ${S2_API_KEY:-}
+      DEEP_CONTACT: ${ARXIV_CONTACT:-}
     volumes:
       # Sign in once: docker compose run --rm deep login
       - deep-auth:/var/lib/litwatch-deep

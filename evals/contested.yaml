@@ -34,7 +34,7 @@ papers:
   note: 'contested: draft must_read, Terra mech_interp. draft (openai/gpt-5.6-luna, high): The paper interprets
     CoT reasoning steps using sparse autoencoders and probes internal features for correctness and logicality,
     but does not propose a faithfulness or monitoring benchmark or definition. | hand pass 2026-09-07
-    (Claude, pending Andrei/Ana)'
+    (Claude, pending Andrei/the PI)'
 - id: '2608.22332'
   title: Mechanistic Interpretability of Chain-of-Thought Reasoning via Sequential Activation Patching
   abstract: Large Language Models (LLMs) demonstrate remarkable problem-solving capabilities when guided
@@ -65,7 +65,7 @@ papers:
   note: 'contested: draft must_read, Terra mech_interp. draft (openai/gpt-5.6-luna, high): The paper analyzes
     CoT reasoning through sequential activation patching and ablation of attention heads to identify internal
     causal mechanisms, but does not propose a faithfulness definition or benchmark. | hand pass 2026-09-07
-    (Claude, pending Andrei/Ana)'
+    (Claude, pending Andrei/the PI)'
 - id: '2508.00943'
   title: LLMs Can Covertly Sandbag on Capability Evaluations Against Chain-of-Thought Monitoring
   abstract: 'Trustworthy evaluations of dangerous capabilities are increasingly crucial for determining
@@ -93,7 +93,7 @@ papers:
     cot-faithfulness: 3
   note: 'contested: draft must_read, Terra aware. draft (openai/gpt-5.6-luna, high): The paper directly
     evaluates covert sandbagging against chain-of-thought monitoring and contributes covert sandbagging
-    policies that expose monitoring failure modes. | hand pass 2026-09-07 (Claude, pending Andrei/Ana)'
+    policies that expose monitoring failure modes. | hand pass 2026-09-07 (Claude, pending Andrei/the PI)'
 - id: '2511.08409'
   title: Faithful-First Reasoning, Planning, and Acting for Multimodal LLMs
   abstract: Multimodal Large Language Models (MLLMs) frequently suffer from unfaithfulness, generating
@@ -280,9 +280,9 @@ papers:
   expected:
     cot-faithfulness: 4
     mech-interp: 2
-  note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending Ana''s view on
+  note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending the PI''s view on
     scope (mechanistic CoT analysis, internals-based deception/hallucination detection) | hand pass 2026-09-07
-    (Claude, pending Andrei/Ana)'
+    (Claude, pending Andrei/the PI)'
 - id: '2504.04072'
   title: 'Among Us: A Sandbox for Measuring and Detecting Agentic Deception'
   abstract: 'Prior studies on deception in language-based AI agents typically assess whether the agent
@@ -309,7 +309,7 @@ papers:
   published: '2025-04-05'
   url: http://arxiv.org/abs/2504.04072v3
   expected: null
-  note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending Ana''s view on
+  note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending the PI''s view on
     scope (mechanistic CoT analysis, internals-based deception/hallucination detection)'
 - id: '2510.11529'
   title: Hallucination Detection via Internal States and Structured Reasoning Consistency in Large Language
@@ -339,7 +339,7 @@ papers:
   published: '2025-10-13'
   url: http://arxiv.org/abs/2510.11529v2
   expected: null
-  note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending Ana''s view on
+  note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending the PI''s view on
     scope (mechanistic CoT analysis, internals-based deception/hallucination detection)'
 - id: '2601.03052'
   title: Detecting Hallucinations in Retrieval-Augmented Generation via Semantic-level Internal Reasoning
@@ -368,7 +368,7 @@ papers:
   published: '2026-01-06'
   url: http://arxiv.org/abs/2601.03052v1
   expected: null
-  note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending Ana''s view on
+  note: 'contested: Andrei''s first pass said must_read, Terra says otherwise; pending the PI''s view on
     scope (mechanistic CoT analysis, internals-based deception/hallucination detection)'
 - id: '2609.01779'
   title: 'Agents That Model Agents: Five Principles Toward a Theory of Mind for 6G Networks'
@@ -527,7 +527,7 @@ papers:
   note: 'contested: backfill 2026-09-03, draft must_read, Terra aware. Terra: The paper evaluates disclosure
     of misleading-context influence in reasoning traces and shows that an LLM monitor detects corrupted
     decisions far better from open CoT than from final responses, without using model internals. | hand
-    pass 2026-09-07 (Claude, pending Andrei/Ana)'
+    pass 2026-09-07 (Claude, pending Andrei/the PI)'
 - id: '2609.01466'
   title: 'Parsing the Stream: A Live Trace Model for Long-Horizon Agents and Their Observers'
   abstract: 'A long-horizon agent''s trace outgrows both of its consumers: the human observer monitoring
@@ -623,7 +623,7 @@ papers:
   note: 'contested: backfill 2026-09-03, draft must_read, Terra aware. Terra: The paper analyzes verbally
     expressed eval-awareness in chain-of-thought as a safety-relevant signal and shows that distinct CoT
     framings predict compliance, but describes no internal-model analysis or new benchmark. | hand pass
-    2026-09-07 (Claude, pending Andrei/Ana)'
+    2026-09-07 (Claude, pending Andrei/the PI)'
 - id: '2608.27141'
   title: 'Safety Does Not Compose: Non-Decaying Loop State for Autonomous LLM Agents'
   abstract: 'Large language model agents are increasingly deployed as autonomous loops. Starting from

@@ -238,7 +238,7 @@ The Notion export; its words are in GLOSSARY.md). Its state is in `notion_databa
 
 ```toml
 [integrations.notion]
-parent_page = "3fe89c45-f79d-8064-be60-f7588e2f34b7"   # the page holding the database
+parent_page = "0123456789abcdef0123456789abcdef"   # the page holding the database
 owner_name = "Andrei"                                  # who Why lines name for the owner's word
 minimum_grade = "relevant"                             # or "must_read"
 
