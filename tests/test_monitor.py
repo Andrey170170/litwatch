@@ -440,3 +440,10 @@ async def test_a_provider_a_role_uses_without_its_key_is_degraded(monitor, monke
     monkeypatch.setenv("OPENROUTER_API_KEY_FILE", str(tmp_path / "key"))
     document = (await monitor.get("/status")).json()
     assert component(document, "provider-openrouter")["status"] == "healthy"
+    # One that cannot be read is a reason, not a failed status.
+    monkeypatch.setenv("OPENROUTER_API_KEY_FILE", str(tmp_path / "gone"))
+    openrouter = component((await monitor.get("/status")).json(), "provider-openrouter")
+    assert openrouter["status"] == "degraded"
+    assert openrouter["reason"].startswith(
+        "no key: OPENROUTER_API_KEY_FILE cannot be read (No such file or directory)"
+    )

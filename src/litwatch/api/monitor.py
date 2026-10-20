@@ -85,7 +85,7 @@ class Facts:
     observed: dict[str, dict[str, Any]] = field(default_factory=dict)  # `calls.observations`
     signin: dict[str, Any] | None = None  # the Deep service's, as its health check reported it
     deep_failure: dict[str, Any] | None = None  # `integrations.service_failure`
-    unkeyed: dict[str, str] = field(default_factory=dict)  # provider: the variable its key lacks
+    unkeyed: dict[str, str] = field(default_factory=dict)  # provider: why it has no key
 
 
 async def facts(
@@ -110,7 +110,7 @@ async def facts(
         night=await _night(conn),
         observed=await calls.observations(conn),
         deep_failure=await integrations_store.service_failure(conn),
-        unkeyed={name: variable for name, variable in KEYS.items() if not secret(variable)},
+        unkeyed=_unkeyed(),
     )
     probes = {}
     if archive is not None:
@@ -122,6 +122,19 @@ async def facts(
     if "deep" in answers and answers["deep"][0] is None:
         found.signin = (answers["deep"][1] or {}).get("auth") or {}
     return found
+
+
+def _unkeyed() -> dict[str, str]:
+    """Each provider whose key is not in the environment, with why; an unreadable key file is a
+    reason, not an error, so the rest of the status still answers."""
+    out = {}
+    for name, variable in KEYS.items():
+        try:
+            if not secret(variable):
+                out[name] = f"neither {variable} nor {variable}_FILE is set"
+        except OSError as e:
+            out[name] = f"{variable}_FILE cannot be read ({e.strerror})"
+    return out
 
 
 async def _night(conn: psycopg.AsyncConnection) -> Night | None:
@@ -396,10 +409,7 @@ def _provider(
     reply since, or the latest finished nightly's calls to it failed without one reply."""
     reasons = []
     if unkeyed:
-        reasons.append(
-            f"no key: neither {unkeyed} nor {unkeyed}_FILE is set; "
-            "expected one, as a configured role uses it"
-        )
+        reasons.append(f"no key: {unkeyed}; expected one, as a configured role uses it")
     error_at, replied_at = seen.get("account_error_at"), seen.get("replied_at")
     if error_at and (replied_at is None or replied_at < error_at):
         reasons.append(
