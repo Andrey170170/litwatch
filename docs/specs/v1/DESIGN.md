@@ -163,7 +163,8 @@ collection" in place of a rarity.
    rung is **Abstract**, with no switch and one quiet line saying why there is none.
 3. **Deep card**: its claim in bold, then each section as a rung of its own under it: Summary, Setup (models and
    tasks as tags, and how far it transfers), the topic's own facts and text (for CoT faithfulness: mismatch, ground
-   truth, monitor, signals, then detection, definition, generality), Limitations, Prior work (rows that open the paper
+   truth, monitor, signals, then detection, definition, generality), Limitations, Process notes when there are
+   any ("Process notes · 2", folded until opened, each with its kind as a tag: access, tool, budget, input), Prior work (rows that open the paper
    when it has an arXiv id), Among the collection (rows with their rarity stripe and a tag: agrees, extends,
    contradicts, supersedes). It ends with what it was written from and when, and "Write again". Without a card: one
    line saying when cards are automatic and "Deep read" to ask for one; while one is queued or being written, a
@@ -238,7 +239,9 @@ stage, and "Matters, no topic".
 Graded by one lab (one grader's lab refused the paper throughout and only the other answered; the line names which)
 and Area escalations (yellow, settled with the Fit control, the standing Fit underlined); awaiting classification
 (Dismiss, Classify by hand, Fix the text), ungraded (Grade it now), analysis (the error, Try again), full text (Try
-again, Use the PDF) and digests (Write it again), red. A red item says why it stopped (refused by every model, or the
+again, Use the PDF) and digests (Write it again), red; and Deep notes, neutral (a paper whose Deep card carries
+process notes: its title, then the notes, one line each), which counts nowhere, neither in the run status nor in
+the page's count, and is there only to look at. A red item says why it stopped (refused by every model, or the
 last error). A title opens its paper, where the same item shows (Paper, open states). Each red group has Acknowledge,
 and the page "Acknowledge all": the owner has seen them and they stop counting in the run status. Acknowledged items
 move to a folded "Acknowledged" section at the foot, grouped as above and keeping their buttons; one that recovers and

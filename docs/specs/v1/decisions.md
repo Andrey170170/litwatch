@@ -236,6 +236,25 @@ digest lists only papers first announced within three weeks.
     listed as updated comes back in no later daily, its week's weekly recapping it as for new papers; later versions
     never bring it back.
 
+## Decided 2026-10-20, Deep's open web and process notes
+
+The plan is [`docs/plans/deep-open-web.md`](../../plans/deep-open-web.md). The `deep` service's `fetch` reached only
+a fixed list of hosts, so 5 of the first 46 production cards called real, public code unavailable
+(anonymous.4open.science), and 0.14's cards missed about ten project pages. Nothing recorded why the list existed.
+
+80. **Deep's fetch reaches any public site, and never the home network.** GET only, with no cookies and no headers
+    the model can set; an address that is not public unicast is refused where the connection is made and on every
+    redirect hop. The isolate holds no tokens and can write nowhere, so reading the web costs little. What it can
+    leak in a URL (the paper, the topics' names, subjects and rubrics, search hits) the owner accepted, and
+    that a page can steer a card as the paper's own text already can. The `deep` container reaches the
+    LAN, so the guard is the one thing that must hold.
+81. **Every Deep attempt keeps its trace, for the agent, not the owner.** Traces move from the card to the attempt
+    and are kept; a CLI (`litwatch deep trace`, `deep notes`) reads them. The owner reads cards, not traces; when a
+    card looks wrong, the agent looks at what Deep did.
+82. **A Deep card says when its own process held it back.** Process notes, apart from the paper's limitations, come
+    from the model and from the service, folded on the card and in a quiet Needs you group that counts nowhere. A
+    card written around a blocked fetch looks like a card about a paper without code; the note says which.
+
 ## Open
 
 - The grade table and rarity offsets are starting points, tuned in N2.

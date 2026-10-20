@@ -111,8 +111,8 @@ class labels; the value is a Fit or unsure, and the grade column is gone: the gr
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
 `zotero_items`, `webdav_files`, `deep_cards` (plus what it was written from: paper revision, arXiv version, text
-source, pass; the job columns are gone), `deep_attempts` (plus pass, job, ended at, error, whose failure it was,
-paper or service, when the service last failed it (the Deep queue's pause and the `deep` component read it), and the job's usage: tokens, turns, list cost, null when unknown), `eval_runs` (plus every run record a
+source, pass, and when the owner acknowledged its process notes; the job columns and the trace are gone), `deep_attempts` (plus pass, job, ended at, error, whose failure it was,
+paper or service, when the service last failed it (the Deep queue's pause and the `deep` component read it), and the job's usage: tokens, turns, list cost, null when unknown, and its trace, kept, null when the job was lost), `eval_runs` (plus every run record a
 resumed replay ran under, whose costs are its cost), `eval_results` (columns for classification instead of triage:
 whether the classifier alone and the uncertain band made the paper a member, the highest probability in the topic's
 subtree, and the graded Fit; the keyword hit, both opinions, split and the two errors as before), `eval_samples`,
