@@ -595,7 +595,9 @@ async def test_an_old_papers_new_version_is_listed_once_in_its_daily_and_its_wee
     )
     weekly = await digest_row(db, FAITH.slug, "week", MON)
     assert [p["version"] for p in await store_.papers_of(db, weekly["id"])][-1] == 2
-    await listed(db, date(2026, 10, 13), R)
+    await listed(db, date(2026, 10, 12), R)
+    await day(db, w, date(2026, 10, 12))  # v3's own listing day
+    assert await shown(db, FAITH.slug, "day", date(2026, 10, 12)) == ("nothing_new", [])
     await week(db, w, date(2026, 10, 12))
     assert await shown(db, FAITH.slug, "week", date(2026, 10, 12)) == ("nothing_new", [])
 
@@ -623,6 +625,29 @@ async def test_updated_papers_add_no_call_and_stay_out_of_the_text_counts_and_ra
     assert row["best_rarity"] == papers[S.id]["rarity"] != papers[U.id]["rarity"]
     assert [d.paper_id for d in await store_.as_shown(db, row["id"], True)] == [S.id]
     assert [r["titles"] for r in await store_.written(db, TUE, TUE)] == [[S.title]]
+
+
+async def test_an_updated_list_is_by_grade_then_rarity(db):
+    """Two must reads, the landmark one rarer, then a relevant one, whatever their ids."""
+    w = Writer()
+    landmark = updated("2605.00013", title="A landmark")
+    solid = updated("2605.00012", title="Solid")
+    relevant = updated("2605.00011", title="Related only")
+    await papers_store.upsert(db, [landmark, solid, relevant])
+    for p, fit, weight in (
+        (landmark, "central", "landmark"),
+        (solid, "central", "solid"),
+        (relevant, "related", "solid"),
+    ):
+        await classify(db, p, FAITH.slug)
+        await analyse(db, p, weight)
+        await grade(db, p, fit)
+    await listed(db, TUE, S)
+    await day(db, w, TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == (
+        "nothing_new",
+        [(landmark.id, "updated"), (solid.id, "updated"), (relevant.id, "updated")],
+    )
 
 
 async def test_a_day_with_only_updated_papers_is_nothing_new_and_its_weekly_recaps_them(db):
