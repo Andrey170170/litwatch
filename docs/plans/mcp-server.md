@@ -64,8 +64,8 @@ owner's dotfiles.
   its papers grouped by role. The updated papers listed under a digest arrive with the `updated` role of
   [updated-papers.md](updated-papers.md); the role grouping shows them with nothing to change here.
 - **Reading.** The text is `archive.text.read_text`: the LaTeX first, the PDF's text when there is none or the
-  paper's latest full-text pass has "Use the PDF" (`fulltext_passes.use_pdf`, a new by-paper query in
-  `store.fulltext`). It is untrimmed: the Brief's bibliography cut and 160,000-character limit stay in
+  owner chose "Use the PDF" on any full-text pass of the paper's current revision (`fulltext_passes.use_pdf`, a
+  new by-paper query in `store.fulltext`; a new revision starts again from its LaTeX). It is untrimmed: the Brief's bibliography cut and 160,000-character limit stay in
   `fulltext/brief.py`. The outline comes from LaTeX's sectioning commands (and its `thebibliography` block, so the
   references are one entry); a PDF's text is outlined by page, so the PDF reading keeps each page's span
   (`archive.text.read_pdf`, an empty page an empty span). One call
