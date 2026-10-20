@@ -4,6 +4,7 @@ version it is of, and nothing while the archive is still fetching."""
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from litwatch.archive import (
     ArchiveClient,
     ArchiveError,
     PaperText,
+    PdfText,
     TextUnavailable,
     read_text,
 )
@@ -32,20 +34,31 @@ def client(fake: FakeArchive) -> ArchiveClient:
 
 def a_pdf(*lines: str) -> bytes:
     """A one-page PDF with `lines` set in Helvetica, built by hand."""
-    shown = b" ".join(b"(" + line.encode() + b") Tj 0 -16 Td" for line in lines)
-    content = b"BT /F1 12 Tf 72 720 Td " + shown + b" ET"
+    return pages_pdf(list(lines))
+
+
+def pages_pdf(*pages: list[str]) -> bytes:
+    """A PDF of `pages`, each the lines set on it in Helvetica (none: a blank page)."""
+    n = len(pages)
+    # 1: the catalog, 2: the page tree, 3: the font, then each page and its content.
+    kids = b" ".join(b"%d 0 R" % (4 + 2 * i) for i in range(n))
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
-        b"/Resources << /Font << /F1 5 0 R >> >> >>",
-        b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
+        b"<< /Type /Pages /Kids [" + kids + b"] /Count %d >>" % n,
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
+    for i, lines in enumerate(pages):
+        shown = b" ".join(b"(" + line.encode() + b") Tj 0 -16 Td" for line in lines)
+        content = b"BT /F1 12 Tf 72 720 Td " + shown + b" ET" if lines else b""
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R "
+            b"/Resources << /Font << /F1 3 0 R >> >> >>" % (5 + 2 * i)
+        )
+        objects.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
     out, offsets = bytearray(b"%PDF-1.4\n"), []
-    for n, body in enumerate(objects, 1):
+    for number, body in enumerate(objects, 1):
         offsets.append(len(out))
-        out += b"%d 0 obj\n" % n + body + b"\nendobj\n"
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
     xref = len(out)
     out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
     out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
@@ -59,9 +72,20 @@ def a_pdf(*lines: str) -> bytes:
 def test_a_pdf_is_read_without_the_pdf_extra(monkeypatch):
     # The owner, 2026-10-15: pypdfium2 by default, so the MIT template reads PDF-only papers.
     monkeypatch.setitem(sys.modules, "pymupdf4llm", None)  # the extra not installed
-    text = text_module.pdf_to_markdown(a_pdf("We train a probe.", "Accuracy is 0.81."))
-    assert text == "We train a probe.\nAccuracy is 0.81."
-    assert text_module.pdf_to_markdown(b"%PDF-1.4 not really") is None
+    text = text_module.read_pdf(a_pdf("We train a probe.", "Accuracy is 0.81."))
+    assert text == PdfText("We train a probe.\nAccuracy is 0.81.", ((0, 35),))
+    assert text_module.read_pdf(b"%PDF-1.4 not really") is None
+
+
+def test_each_page_keeps_its_span_and_a_blank_one_still_counts(monkeypatch):
+    # The MCP outlines a PDF's text by page, numbered as the PDF numbers them (mcp.md).
+    monkeypatch.setitem(sys.modules, "pymupdf4llm", None)
+    pdf = pages_pdf(["Page one."], [], ["Page three."], [])
+    read = text_module.read_pdf(pdf)
+    assert read.body == "Page one.\n\nPage three."  # the text a Brief reads, as before
+    assert [read.body[a:b] for a, b in read.pages] == ["Page one.", "", "Page three.", ""]
+    assert read.pages == ((0, 9), (9, 9), (11, 22), (22, 22))
+    assert text_module.read_pdf(pages_pdf([], [])) is None  # blank pages are no text
 
 
 def test_the_pdf_extra_is_preferred_when_installed(monkeypatch):
@@ -73,8 +97,11 @@ def test_the_pdf_extra_is_preferred_when_installed(monkeypatch):
             return False
 
     monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=lambda **_: Doc()))
-    monkeypatch.setitem(sys.modules, "pymupdf4llm", SimpleNamespace(to_markdown=lambda d: "# M"))
-    assert text_module.pdf_to_markdown(a_pdf("Plain.")) == "# M"
+    chunks = [{"text": "# M\n"}, {"text": ""}, {"text": "page 3\n"}]
+    extra = SimpleNamespace(to_markdown=lambda d, page_chunks: chunks if page_chunks else None)
+    monkeypatch.setitem(sys.modules, "pymupdf4llm", extra)
+    spans = ((0, 4), (4, 4), (4, 11))
+    assert text_module.read_pdf(a_pdf("Plain.")) == PdfText("# M\npage 3\n", spans)
 
 
 def test_one_pdf_is_read_at_a_time(monkeypatch):
@@ -98,7 +125,7 @@ def test_one_pdf_is_read_at_a_time(monkeypatch):
     monkeypatch.setitem(sys.modules, "pymupdf4llm", None)
     monkeypatch.setitem(sys.modules, "pypdfium2", SimpleNamespace(PdfDocument=Document))
     with ThreadPoolExecutor(4) as pool:
-        list(pool.map(text_module.pdf_to_markdown, [b"%PDF"] * 4))
+        list(pool.map(text_module.read_pdf, [b"%PDF"] * 4))
     assert most == 1
 
 
@@ -120,9 +147,9 @@ async def test_nothing_while_the_source_is_fetched():
 async def test_a_paper_without_a_source_is_read_from_its_pdf(monkeypatch):
     fake = FakeArchive()
     fake.statuses["source"] = "unavailable"
-    monkeypatch.setattr(text_module, "pdf_to_markdown", lambda pdf: BODY if pdf else None)
+    monkeypatch.setattr(text_module, "read_pdf", lambda pdf: PdfText(BODY, ((0, len(BODY)),)))
     found = await read_text(client(fake), paper("2610.00001", version=2))
-    assert found == PaperText(BODY, 2, "pdf")
+    assert found == PaperText(BODY, 2, "pdf", ((0, len(BODY)),))
     assert [j["kind"] for j in fake.jobs] == ["source", "pdf"]
     fake.statuses["pdf"] = "pending"
     assert await read_text(client(fake), paper("2610.00001", version=2)) is None
@@ -131,7 +158,7 @@ async def test_a_paper_without_a_source_is_read_from_its_pdf(monkeypatch):
 async def test_an_empty_source_text_falls_back_to_the_pdf(monkeypatch):
     fake = FakeArchive()
     fake.texts["2610.00001"] = (1, "\n\n")
-    monkeypatch.setattr(text_module, "pdf_to_markdown", lambda pdf: BODY)
+    monkeypatch.setattr(text_module, "read_pdf", lambda pdf: PdfText(BODY, ((0, len(BODY)),)))
     assert (await read_text(client(fake), paper("2610.00001", version=1))).source == "pdf"
 
 
@@ -147,7 +174,7 @@ async def test_no_text_to_be_had_says_why(monkeypatch):
         await read_text(client(fake), paper("2610.00001", version=1))
     fake = FakeArchive()
     fake.statuses["source"] = "unavailable"
-    monkeypatch.setattr(text_module, "pdf_to_markdown", lambda pdf: None)  # no text in it
+    monkeypatch.setattr(text_module, "read_pdf", lambda pdf: None)  # no text in it
     with pytest.raises(TextUnavailable, match="no usable text"):
         await read_text(client(fake), paper("2610.00001", version=1))
 
@@ -187,9 +214,9 @@ async def test_use_the_pdf_reads_the_pdf_alone(monkeypatch):
     # DESIGN.md, Needs you: "Use the PDF", for a paper whose LaTeX reads badly.
     fake = FakeArchive()
     fake.texts["2610.00001"] = (1, BODY)  # a source that reads, badly
-    monkeypatch.setattr(text_module, "pdf_to_markdown", lambda pdf: "From the PDF.")
+    monkeypatch.setattr(text_module, "read_pdf", lambda pdf: PdfText("From the PDF.", ((0, 13),)))
     found = await read_text(client(fake), paper("2610.00001", version=1), pdf=True)
-    assert found == PaperText("From the PDF.", 1, "pdf")
+    assert found == PaperText("From the PDF.", 1, "pdf", ((0, 13),))
     assert [j["kind"] for j in fake.jobs] == ["pdf"]
     fake.statuses["pdf"] = "unavailable"
     with pytest.raises(TextUnavailable, match="source not read .Use the PDF.; PDF unavailable"):
@@ -205,3 +232,20 @@ async def test_use_the_pdf_has_the_archive_retry_the_pdf_alone():
     asked = await text_module.retry_downloads(client(fake), one, pdf=True)
     assert asked == 1
     assert [fake.jobs[i - 1]["kind"] for i in fake.retried] == ["pdf"]
+
+
+async def test_a_pdf_is_read_in_the_executor_given(monkeypatch):
+    # The MCP reads PDFs in its own executor, off the loop's default pool (mcp-server.md).
+    fake = FakeArchive()
+    fake.statuses["source"] = "unavailable"
+    threads = []
+
+    def read(pdf):
+        threads.append(threading.current_thread().name)
+        return PdfText(BODY, ((0, len(BODY)),))
+
+    monkeypatch.setattr(text_module, "read_pdf", read)
+    with ThreadPoolExecutor(1, thread_name_prefix="own-pdf") as own:
+        await read_text(client(fake), paper("2610.00001", version=2), executor=own)
+    await read_text(client(fake), paper("2610.00001", version=2))
+    assert threads[0].startswith("own-pdf") and not threads[1].startswith("own-pdf")

@@ -15,8 +15,9 @@ from litwatch.archive.client import (
     metadata,
 )
 from litwatch.archive.text import (
+    PdfText,
     TextUnavailable,
-    pdf_to_markdown,
+    read_pdf,
     read_text,
     retry_downloads,
     stored_text,
@@ -34,7 +35,8 @@ __all__ = [
     "TextUnavailable",
     "listed",
     "metadata",
-    "pdf_to_markdown",
+    "PdfText",
+    "read_pdf",
     "read_text",
     "retry_downloads",
     "stored_text",

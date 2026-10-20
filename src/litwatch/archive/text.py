@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from concurrent.futures import Executor
+from dataclasses import dataclass
 
 from litwatch.archive.client import (
     URGENT,
@@ -32,7 +34,16 @@ class TextUnavailable(ArchiveError):  # noqa: N818 - an outcome, as ArchiveUnava
 _PDF_LOCK = threading.Lock()
 
 
-def pdf_to_markdown(pdf: bytes) -> str | None:
+@dataclass(frozen=True)
+class PdfText:
+    """A PDF's text, and where each of its pages lies in it: `(start, end)` in `body`, one per
+    page in the PDF's order, an empty page an empty span."""
+
+    body: str
+    pages: tuple[tuple[int, int], ...]
+
+
+def read_pdf(pdf: bytes) -> PdfText | None:
     """The PDF's text, or None when it has none to read. With the `pdf` extra (pymupdf4llm,
     AGPL) installed, as Markdown with its headings and tables; else the plain text of each page
     by pypdfium2 (Apache/BSD), so a template without the extra still reads PDF-only papers.
@@ -41,7 +52,7 @@ def pdf_to_markdown(pdf: bytes) -> str | None:
         return _read_pdf(pdf)
 
 
-def _read_pdf(pdf: bytes) -> str | None:
+def _read_pdf(pdf: bytes) -> PdfText | None:
     try:
         import pymupdf  # noqa: PLC0415 - heavy and optional, only on the fallback path
         import pymupdf4llm  # noqa: PLC0415
@@ -49,13 +60,15 @@ def _read_pdf(pdf: bytes) -> str | None:
         return _pdf_text(pdf)
     try:
         with pymupdf.open(stream=pdf, filetype="pdf") as doc:
-            return pymupdf4llm.to_markdown(doc)
+            chunks = pymupdf4llm.to_markdown(doc, page_chunks=True)
     except Exception as exc:  # a broken PDF is no text, not a reason to retry forever
         log.warning("unreadable PDF: %s", type(exc).__name__)
         return None
+    # Its pages one after another, as `to_markdown` without `page_chunks` writes them.
+    return _paged([chunk["text"] for chunk in chunks], "")
 
 
-def _pdf_text(pdf: bytes) -> str | None:
+def _pdf_text(pdf: bytes) -> PdfText | None:
     import pypdfium2  # noqa: PLC0415 - only on the fallback path
 
     try:
@@ -67,7 +80,30 @@ def _pdf_text(pdf: bytes) -> str | None:
     except Exception as exc:  # as above: a broken PDF is no text
         log.warning("unreadable PDF: %s", type(exc).__name__)
         return None
-    return "\n\n".join(p.replace("\r\n", "\n").strip() for p in pages if p.strip()) or None
+    return _paged([p.replace("\r\n", "\n").strip() for p in pages], "\n\n")
+
+
+def _paged(pages: list[str], sep: str) -> PdfText | None:
+    """The pages' texts joined by `sep`, an empty one adding nothing, each page's span kept."""
+    parts: list[str] = []
+    spans: list[tuple[int, int]] = []
+    at = 0
+    for text in pages:
+        if text and parts:
+            parts.append(sep)
+            at += len(sep)
+        spans.append((at, at + len(text)))
+        if text:
+            parts.append(text)
+            at += len(text)
+    body = "".join(parts)
+    return PdfText(body, tuple(spans)) if body.strip() else None
+
+
+async def _from_pdf(body: bytes, version: int, executor: Executor | None) -> PaperText | None:
+    """The PDF's text as the paper's, read in `executor` (None: the loop's default pool)."""
+    read = await asyncio.get_running_loop().run_in_executor(executor, read_pdf, body)
+    return _usable(PaperText(read.body, version, "pdf", read.pages) if read else None)
 
 
 def _usable(text: PaperText | None) -> PaperText | None:
@@ -84,8 +120,7 @@ async def stored_text(archive: ArchiveClient, paper: Paper) -> PaperText | None:
     if found := _usable(await archive.latex(paper.id, paper.version)):
         return found
     body = await archive.available_pdf(paper.id, paper.version)
-    text = await asyncio.to_thread(pdf_to_markdown, body) if body else None
-    return _usable(PaperText(text, paper.version, "pdf") if text else None)
+    return await _from_pdf(body, paper.version, None) if body else None
 
 
 def _why(job: dict) -> str:
@@ -129,7 +164,12 @@ async def retry_downloads(
 
 
 async def read_text(
-    archive: ArchiveClient, paper: Paper, priority: int = URGENT, *, pdf: bool = False
+    archive: ArchiveClient,
+    paper: Paper,
+    priority: int = URGENT,
+    *,
+    pdf: bool = False,
+    executor: Executor | None = None,
 ) -> PaperText | None:
     """The paper's text, of its arXiv version, or None while the archive is still fetching it.
     Its source is asked for at `priority`; when arXiv has no usable source for it, its PDF.
@@ -137,7 +177,7 @@ async def read_text(
     A paper of no known version is read from the archive's historical LaTeX alone, of no known
     version either: a newer source the archive holds may be of another text. Raises
     TextUnavailable when there is no text to be had, and ArchiveUnavailable while the archive
-    cannot be reached."""
+    cannot be reached. A PDF is read in `executor`, the loop's default pool without one."""
     try:
         paper = await archive.resolve(paper)
     except ArchiveVersionUnknown:
@@ -162,7 +202,6 @@ async def read_text(
     if job.get("status") != "complete":
         return None
     body = await archive.available_pdf(paper.id, paper.version)
-    text = await asyncio.to_thread(pdf_to_markdown, body) if body else None
-    if found := _usable(PaperText(text, paper.version, "pdf") if text else None):
+    if body and (found := await _from_pdf(body, paper.version, executor)):
         return found
     raise TextUnavailable(f"{paper.id}v{paper.version}: no usable text in its source or PDF")
