@@ -266,7 +266,7 @@ The spec is [mcp.md](mcp.md): the owner's research agents find and read papers t
 85. **Agents read outline first**, then a section, a range or everything; figures and tables as PDF page images.
 86. **One endpoint on litwatch's host, LAN and tailnet only, with its own token**; the client configuration lives in
     the owner's dotfiles.
-87. **Lexical search for now**, the archive's; semantic search stays the archive's later work.
+87. **Lexical search for now**, the web app's; semantic search stays the archive's later work.
 
 ## Open
 
