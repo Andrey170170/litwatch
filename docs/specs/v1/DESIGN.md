@@ -155,8 +155,8 @@ collection" in place of a rarity.
 1. **Gist**, with ✓ and ✗ to say whether it is accurate.
 2. **Brief**, with ✓ ✗. A Brief that found the abstract overstating says so first, in a red-edged callout. A Brief
    from an older revision says which, and that the current one waits for the text. The rung's name is a switch,
-   "Brief | Abstract": it opens on the Brief on every paper, not remembered, and swaps the abstract in place, nothing
-   else on the page moving; the callout and the revision line are the Brief's alone. Where a paper has no Brief, the
+   "Brief | Abstract": it opens on the Brief on every paper, not remembered, and swaps the abstract in place, the
+   rung fitting the text shown; the callout and the revision line are the Brief's alone. Where a paper has no Brief, the
    rung is **Abstract**, with no switch and one quiet line saying why there is none.
 3. **Deep card**: its claim in bold, then each section as a rung of its own under it: Summary, Setup (models and
    tasks as tags, and how far it transfers), the topic's own facts and text (for CoT faithfulness: mismatch, ground

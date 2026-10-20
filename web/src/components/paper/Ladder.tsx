@@ -148,8 +148,8 @@ export function BriefBody({ paper, brief }: { paper: Paper; brief: Brief }) {
 /** Where a Brief, and the Gist written with it, came from: the paper's LaTeX source or its PDF. */
 const from = (brief: Brief) => (brief.source === "latex" ? "from the LaTeX" : "from the PDF");
 
-/** The Brief, with a switch to the abstract in its place. Both stay laid out in one cell, the unseen one hidden, so
- * switching moves nothing else on the page; it opens on the Brief for every paper. */
+/** The Brief, with a switch to the abstract in its place; the rung takes the height of the text shown. It opens on the
+ * Brief for every paper. */
 function BriefRung({ paper, brief }: { paper: Paper; brief: Brief }) {
   const [abstract, setAbstract] = useState(false);
   const pick = (label: string, on: boolean, to: boolean) => (
@@ -168,14 +168,7 @@ function BriefRung({ paper, brief }: { paper: Paper; brief: Brief }) {
   );
   return (
     <Rung name={name} extra={<span className={`faint normal-case tracking-normal${abstract ? " invisible" : ""}`}>{from(brief)}</span>}>
-      <div className="swap">
-        <div className={abstract ? "invisible" : ""} aria-hidden={abstract}>
-          <BriefBody paper={paper} brief={brief} />
-        </div>
-        <div className={abstract ? "" : "invisible"} aria-hidden={!abstract}>
-          <p className="prose">{paper.abstract}</p>
-        </div>
-      </div>
+      {abstract ? <p className="prose">{paper.abstract}</p> : <BriefBody paper={paper} brief={brief} />}
     </Rung>
   );
 }
