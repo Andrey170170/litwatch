@@ -128,7 +128,8 @@ topic shows No longer listed with its Why; the owner's rearranged views survive 
 
 **The MCP server** (decisions 83–87, after the switch; [mcp.md](mcp.md)): search with litwatch's filters, a paper with
 what litwatch has on it, digests, outline-first reading and PDF page images, read-only, at `/mcp` on litwatch's host
-with its own token; the client configuration in the owner's dotfiles. A build plan comes first. *Check:* from a
+with its own token; the client configuration in the owner's dotfiles; its telemetry for Vergil. The plan is
+[`docs/plans/mcp-server.md`](../../plans/mcp-server.md) (approved 2026-10-20), in three stages. *Check:* from a
 research session on another machine, an agent given only a vague memory of a digest finds the paper, reads the
 section asked for and shows a figure, without the web.
 
