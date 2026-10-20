@@ -191,14 +191,13 @@ async def _work_one(
             return "lost"
         revision, text = await store_.read_of(conn, c.id)
         assert text is not None  # recorded before the job was submitted
-        await cards.attempt_ended(conn, attempt["id"], outcome.usage, None)
+        await cards.attempt_ended(conn, attempt["id"], outcome.usage, None, trace=outcome.trace)
         await cards.put_card(
             conn,
             c.paper.id,
             outcome.result,
             outcome.model,
             outcome.usage or {},
-            outcome.trace,
             revision=revision,
             version=text.version,
             source=text.source,
@@ -233,16 +232,16 @@ async def _ended(
     *,
     ran: bool = True,
 ) -> str:
-    """An attempt that made no card: its usage (None, unknown), the error and whose `failure` it
-    was. The paper's fails the pass for this run, a run that counts; the service's puts it back
-    in the queue, which pauses. A job that never `ran` leaves the card's last stats as they
-    were."""
+    """An attempt that made no card: its usage (None, unknown), the error, whose `failure` it
+    was and its trace (None, there is none). The paper's fails the pass for this run, a run
+    that counts; the service's puts it back in the queue, which pauses. A job that never `ran`
+    leaves the card's last stats as they were."""
     log.warning("%s: deep card failed (%s): %s", c.paper.id, failure, error)
     async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
-        await cards.attempt_ended(conn, attempt_id, usage, error, failure)
+        await cards.attempt_ended(conn, attempt_id, usage, error, failure, trace)
         if not await store_.held(conn, c):
             return "lost"
-        await cards.card_failed(conn, c.paper.id, error, usage if ran else None, trace)
+        await cards.card_failed(conn, c.paper.id, error, usage if ran else None)
         if failure == "service":
             await store_.wait_again(conn, c, error)
             return "card_service_failed"

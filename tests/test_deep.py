@@ -347,6 +347,34 @@ async def test_a_job_the_service_lost_has_its_usage_unknown_and_counts_against_n
     assert month == {"attempts": 2, "list_cost": USAGE["list_cost"], "unknown": 1}
 
 
+def trace(text: str) -> list[dict]:
+    """A job's trace of one turn."""
+    return [{"t": 0, "type": "assistant", "text": text, "thinking": "", "stop": "stop"}]
+
+
+async def test_each_attempt_keeps_its_own_trace_and_a_job_without_one_keeps_none(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.vanish = True
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}  # lost: no trace
+    await unpause(db)
+    fake.vanish = False
+    fake.outcome = {"error": "no valid card", "failure": "paper", "stats": USAGE}
+    fake.outcome["trace"] = trace("failed")
+    assert await work(db, with_text(P), d) == {"card_failed": 1}
+    fake.outcome = DONE | {"trace": trace("carded")}
+    await deep_passes.request(db, P.id)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    fake.answer_submits = (422, "no such extension")  # turned down: its job never ran
+    await deep_passes.request(db, P.id)
+    assert await work(db, with_text(P), d) == {"card_failed": 1}
+
+    kept = [a["trace"] for a in await attempts(db)]
+    assert kept == [None, trace("failed"), trace("carded"), None]
+    assert "trace" not in await (await db.execute("SELECT * FROM deep_cards")).fetchone()
+
+
 async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_queue(db):
     await grade(db, Fit.CENTRAL)
     await grade(db, Fit.CENTRAL, Q.id)
