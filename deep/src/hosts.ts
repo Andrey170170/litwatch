@@ -83,8 +83,8 @@ const FETCH_PACING_MS = 1000;
 type Pace = <T>(host: string, work: () => Promise<T>, fallbackMs?: number) => Promise<T>;
 
 /** One request at a time per host, spaced by that host's pacing (else `fallbackMs`). Each paper's
- * session gets its own lanes, so they end with it. */
-export function pacer(): Pace {
+ * session gets its own lanes, and once `ended` aborts, work still queued in them never starts. */
+export function pacer(ended?: AbortSignal): Pace {
   const lanes = new Map<string, Promise<void>>();
   return async (host, work, fallbackMs = 0) => {
     const wait = PACING_MS[host] ?? fallbackMs;
@@ -94,6 +94,7 @@ export function pacer(): Pace {
     lanes.set(host, previous.then(() => mine));
     await previous;
     try {
+      ended?.throwIfAborted();
       return await work();
     } finally {
       setTimeout(release, wait);
@@ -116,7 +117,11 @@ async function withRetry<T>(attempt: () => Promise<T>, retries = 5): Promise<T> 
 
 class RetryableError extends Error {}
 
-async function getJson(pace: Pace, url: string, headers: Record<string, string> = {}): Promise<unknown> {
+/** A request's time limit, cut short when its paper's session ends. */
+const deadline = (ended?: AbortSignal): AbortSignal =>
+  ended ? AbortSignal.any([ended, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
+
+async function getJson(pace: Pace, url: string, headers: Record<string, string> = {}, ended?: AbortSignal): Promise<unknown> {
   const host = new URL(url).host;
   return pace(host, () =>
     withRetry(async () => {
@@ -125,7 +130,7 @@ async function getJson(pace: Pace, url: string, headers: Record<string, string> 
       const resp = await fetch(url, {
         headers,
         redirect: carriesToken ? "manual" : "follow",
-        signal: AbortSignal.timeout(30_000),
+        signal: deadline(ended),
       });
       if (resp.status >= 300 && resp.status < 400) throw new Error(`${url}: redirected (HTTP ${resp.status})`);
       if (resp.status === 429 || resp.status >= 500)
@@ -136,32 +141,34 @@ async function getJson(pace: Pace, url: string, headers: Record<string, string> 
   );
 }
 
-export function buildHosts(cfg: HostConfig): Record<string, HostFn> {
+/** The agent's host functions for one paper's session; `ended` aborts when the session ends, and
+ * stops what it left queued or under way. */
+export function buildHosts(cfg: HostConfig, ended?: AbortSignal): Record<string, HostFn> {
   const s2Headers: Record<string, string> = cfg.s2ApiKey ? { "x-api-key": cfg.s2ApiKey } : {};
   const litwatchHeaders: Record<string, string> = cfg.litwatchToken
     ? { authorization: `Bearer ${cfg.litwatchToken}` }
     : {};
-  const pace = pacer();
+  const pace = pacer(ended);
   let fetches = 0;
   return {
     "store.search": async ([query, limit]) => {
       const n = Math.min(Math.max(Number(limit) || 10, 1), 50);
       const q = new URLSearchParams({ q: String(query), limit: String(n) });
-      const body = await getJson(pace, `${cfg.litwatchUrl}/api/papers?${q}`, litwatchHeaders);
+      const body = await getJson(pace, `${cfg.litwatchUrl}/api/papers?${q}`, litwatchHeaders, ended);
       if (!body || typeof body !== "object") throw new Error("litwatch's papers answer is not an object");
       return storeHits(body as Parameters<typeof storeHits>[0]).slice(0, n);
     },
     "s2.lookup": async ([q]) => {
       const text = String(q).trim();
       const id = s2Id(text);
-      if (id) return getJson(pace, `${S2}/paper/${id}?fields=${S2_FIELDS},${S2_REF_FIELDS}`, s2Headers);
+      if (id) return getJson(pace, `${S2}/paper/${id}?fields=${S2_FIELDS},${S2_REF_FIELDS}`, s2Headers, ended);
       const params = new URLSearchParams({ query: text, limit: "5", fields: S2_FIELDS });
-      const found = (await getJson(pace, `${S2}/paper/search?${params}`, s2Headers)) as { data?: unknown[] };
+      const found = (await getJson(pace, `${S2}/paper/search?${params}`, s2Headers, ended)) as { data?: unknown[] };
       return found.data ?? [];
     },
     fetch: async ([url]) => {
       if (++fetches > cfg.maxFetches) throw new Error(`the fetch budget of ${cfg.maxFetches} per paper is used up`);
-      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, contact: cfg.contact, pace });
+      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, contact: cfg.contact, pace, ended });
     },
   };
 }
@@ -261,6 +268,8 @@ export interface FetchOptions {
   /** Named in the User-Agent when set. */
   contact?: string;
   pace?: Pace;
+  /** Aborts when the paper's session ends. */
+  ended?: AbortSignal;
   guard?: Guard;
 }
 
@@ -288,7 +297,7 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
           headers: { "user-agent": opts.contact ? `litwatch-deep (mailto:${opts.contact})` : "litwatch-deep" },
           redirect: "manual",
           dispatcher,
-          signal: AbortSignal.timeout(30_000),
+          signal: deadline(opts.ended),
         }).catch((e: unknown) => {
           // undici says only "fetch failed"; the agent needs the reason: a refused address, DNS, a timeout.
           const cause = e instanceof Error && e.cause instanceof Error ? e.cause : e;
@@ -354,10 +363,11 @@ async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: num
  * It runs on the event loop, outside any cell's time limit, so every step is linear in the page:
  * a hostile page of unclosed tags must not hold the service for hours. */
 export function htmlToText(html: string): string {
-  return dropBlocks(html)
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6]|tr|section|article|blockquote|pre|dd|dt)>/gi, "\n")
-    .replace(/<[^<>]*>/g, " ")
+  return stripTags(
+    dropBlocks(html)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|h[1-6]|tr|section|article|blockquote|pre|dd|dt)>/gi, "\n"),
+  )
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -367,6 +377,22 @@ export function htmlToText(html: string): string {
     .replace(/[^\S\n]+/g, " ")
     .replace(/ ?\n[ \n]*/g, "\n")
     .trim();
+}
+
+/** Each tag as a space, a tag running from a `<` to the next `>` as `/<[^>]+>/g` reads it, without
+ * that regex retrying from every `<` when no `>` follows. */
+function stripTags(html: string): string {
+  let out = "";
+  let kept = 0;
+  for (let open = html.indexOf("<"); open !== -1; open = html.indexOf("<", open + 1)) {
+    const close = html.indexOf(">", open + 1);
+    if (close === -1) break;
+    if (close === open + 1) continue;
+    out += html.slice(kept, open) + " ";
+    kept = close + 1;
+    open = close;
+  }
+  return out + html.slice(kept);
 }
 
 /** HTML without its comments and its script, style, noscript, svg, nav, header and footer elements.

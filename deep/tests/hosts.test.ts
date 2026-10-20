@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import dns from "node:dns";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -125,6 +126,7 @@ before(async () => {
   server = createServer((req, res) => {
     served.push(req.url ?? "");
     agents.push(req.headers["user-agent"]);
+    if (req.url?.startsWith("/slow/")) return void setTimeout(() => res.end('{"rows":[]}'), 300);
     const to = (location: string) => res.writeHead(302, { location }).end();
     switch (req.url) {
       case "/page":
@@ -250,6 +252,20 @@ test("a PDF body is never read, whatever the case of its media type", async () =
   assert.match(String(page.note), /PDF bodies are not fetched/);
 });
 
+test("when a paper's session ends, its requests under way are aborted and its queued ones never start", async () => {
+  const session = new AbortController();
+  const hosts = buildHosts({ litwatchUrl: `http://127.0.0.1:${port}/slow`, maxFetchChars: 100, maxFetches: 60, maxFetchBytes: 1000 }, session.signal);
+  served = [];
+  const underWay = hosts["store.search"]!(["a"]);
+  const queued = hosts["store.search"]!(["b"]);
+  await new Promise((r) => setTimeout(r, 100));
+  session.abort();
+  await assert.rejects(underWay, /abort/i);
+  await assert.rejects(queued, /abort/i);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(served.length, 1, "the queued search never reached the server");
+});
+
 test("a paper's session stops fetching once its budget is used", async () => {
   const hosts = buildHosts({ litwatchUrl: "http://litwatch.test", maxFetchChars: 100, maxFetches: 2, maxFetchBytes: 1000 });
   for (let i = 0; i < 2; i++) await assert.rejects(hosts.fetch!(["http://10.0.0.1/"]), /not a public address/);
@@ -262,26 +278,21 @@ test("HTML becomes its readable text", () => {
 <h1>Title &amp; more</h1><p>One&nbsp;line<br/>two\t\t lines</p>
 
 
-<div>Code &lt;here&gt; &quot;q&quot; &#39;s&#39;</div><svg><path d="M0"/></svg><footer>(c)</footer><script>never closed`;
-  assert.equal(htmlToText(page), "Title & more\nOne line\ntwo lines\nCode <here> \"q\" 's'\nnever closed");
+<div>Code &lt;here&gt; &quot;q&quot; &#39;s&#39;</div><svg><path d="M0"/></svg><footer>(c)</footer>
+<p title="a < b">Visible</p><>kept<script>never closed`;
+  assert.equal(htmlToText(page), "Title & more\nOne line\ntwo lines\nCode <here> \"q\" 's'\nVisible\n<>kept never closed");
 });
 
 test("hostile HTML up to the byte cap is read in linear time", () => {
-  const n = 2 * 1024 * 1024;
-  const pages = {
-    "unclosed tags": "<".repeat(n),
-    "unclosed blocks": "<nav".repeat(n / 4),
-    "unclosed comments": "<!--".repeat(n / 4),
-    "tags within tags": "<a".repeat(n / 2),
-    "breaks with no end": ("<br" + " ".repeat(29)).repeat(n / 32),
-    "whitespace with no newline": "\r".repeat(n),
-  };
-  for (const [name, page] of Object.entries(pages)) {
-    const started = performance.now();
-    htmlToText(page);
-    // The quadratic version took minutes on each of these; linear takes well under a second.
-    assert.ok(performance.now() - started < 2000, name);
-  }
+  // In a child, so a regression fails at the deadline instead of holding the suite for hours.
+  const script = `
+    import { htmlToText } from ${JSON.stringify(new URL("../src/hosts.ts", import.meta.url).href)};
+    const n = 2 * 1024 * 1024;
+    for (const page of ["<".repeat(n), "<nav".repeat(n / 4), "<!--".repeat(n / 4), "<a".repeat(n / 2),
+      ("<br" + " ".repeat(29)).repeat(n / 32), "\\r".repeat(n)]) htmlToText(page);`;
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { timeout: 10_000, encoding: "utf8" });
+  assert.equal(run.signal, null, "the quadratic version took minutes per page; linear takes well under a second");
+  assert.equal(run.status, 0, run.stderr);
 });
 
 test("anonymous.4open.science links go to its JSON API", () => {

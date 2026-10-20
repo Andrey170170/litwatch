@@ -108,8 +108,10 @@ export async function processPaper(
       throw e;
     }
   };
+  // Ends with the paper: what the agent left fetching or queued stops with it.
+  const session = new AbortController();
   const hosts: Record<string, HostFn> = Object.fromEntries(
-    Object.entries(buildHosts(hostCfg)).map(([name, fn]) => [name, traced(name, fn)]),
+    Object.entries(buildHosts(hostCfg, session.signal)).map(([name, fn]) => [name, traced(name, fn)]),
   );
   // The collection's papers the agent was shown: among_collection may name only these.
   const collection = new Set<string>();
@@ -214,6 +216,7 @@ export async function processPaper(
     }
   } finally {
     clearTimeout(clock);
+    session.abort();
     repl.dispose();
   }
   stats.seconds = Math.round((Date.now() - started) / 1000);
