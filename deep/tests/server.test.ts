@@ -16,11 +16,14 @@ const outcome = (id: string): Outcome => ({
 test("jobs run one at a time and expose progress, outcome, and health", async () => {
   const order: string[] = [];
   const seen: Record<string, unknown>[] = [];
+  // Job a runs until the test has seen it running, whatever the machine's load.
+  let releaseA!: () => void;
+  const gateA = new Promise<void>((r) => (releaseA = r));
   const jobs = new JobQueue(async ({ paper, extensions, selections }, progress) => {
     seen.push({ id: paper.id, extensions, selections });
     order.push(`start ${paper.id}`);
     progress({ t: 0, type: "cell", n: 1, code: "1", output: "1", ms: 1 }, { cells: 1, turns: 0, input: 0, output: 0, reasoning: 0, cache_read: 0, list_cost: 0, seconds: 0 });
-    await new Promise((r) => setTimeout(r, 20));
+    await (paper.id === "a" ? gateA : new Promise((r) => setTimeout(r, 20)));
     order.push(`end ${paper.id}`);
     return outcome(paper.id);
   });
@@ -45,6 +48,7 @@ test("jobs run one at a time and expose progress, outcome, and health", async ()
     const health = (await (await fetch(`${base}/healthz`)).json()) as Record<string, unknown>;
     assert.equal(health.running, a.id);
     assert.equal(health.queued, 1);
+    releaseA();
     let job: Record<string, unknown> = {};
     for (let i = 0; i < 50 && job.status !== "error"; i++) {
       await new Promise((r) => setTimeout(r, 10));
@@ -65,6 +69,7 @@ test("jobs run one at a time and expose progress, outcome, and health", async ()
     assert.ok(!("trace" in list[0]));
     assert.equal((await fetch(`${base}/jobs/00000000-0000-0000-0000-000000000000`)).status, 404);
   } finally {
+    releaseA();
     server.close();
   }
 });

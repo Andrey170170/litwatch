@@ -15,6 +15,20 @@ import type { PaperInput, SelectionContext } from "./prompt.ts";
 import { buildServer } from "./server.ts";
 
 const env = (name: string, fallback: string) => process.env[name] ?? fallback;
+/** A numeric setting as a whole number from 1 to `max` in its consumer's unit, refused at start otherwise: a limit
+ * set to Infinity, a negative, a typo, or past what its consumer holds would quietly lift it. A count is given whole;
+ * a setting in a larger unit (`scale`: MiB, seconds, minutes) may be fractional and is rounded down to the smaller. */
+const whole = (name: string, fallback: number, scale = 1, max = Number.MAX_SAFE_INTEGER): number => {
+  const raw = env(name, String(fallback));
+  const scaled = Number(raw) * scale;
+  const value = scale === 1 ? scaled : Math.floor(scaled);
+  if (!(Number.isInteger(value) && value >= 1 && value <= max)) throw new Error(`${name} is out of range: ${JSON.stringify(raw)}`);
+  return value;
+};
+/** Node's timers fire at once past this many milliseconds. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+/** A body is decoded as one string, and V8's strings stop short of 512 Mi characters. */
+const MAX_BODY_BYTES = 256 * 1024 * 1024;
 const secret = (name: string): string | undefined => {
   if (process.env[name]) return process.env[name];
   const file = process.env[`${name}_FILE`];
@@ -22,22 +36,24 @@ const secret = (name: string): string | undefined => {
 };
 
 const config = {
-  port: Number(env("DEEP_PORT", "8081")),
+  port: whole("DEEP_PORT", 8081, 1, 65535),
   authFile: env("DEEP_AUTH_FILE", "/var/lib/litwatch-deep/auth.json"),
   hosts: {
     litwatchUrl: env("LITWATCH_URL", "http://litwatch:8080"),
     litwatchToken: secret("LITWATCH_TOKEN"),
     s2ApiKey: secret("S2_API_KEY"),
     contact: process.env.DEEP_CONTACT || undefined,
-    maxFetchChars: Number(env("DEEP_MAX_FETCH_CHARS", "200000")),
+    maxFetchChars: whole("DEEP_MAX_FETCH_CHARS", 200000),
+    maxFetches: whole("DEEP_MAX_FETCHES", 60),
+    maxFetchBytes: whole("DEEP_MAX_FETCH_MB", 2, 1024 * 1024, MAX_BODY_BYTES),
   } satisfies HostConfig,
   run: {
     model: env("DEEP_MODEL", "gpt-6.1-sol"),
-    effort: env("DEEP_EFFORT", "low") as RunOptions["effort"],
-    maxCells: Number(env("DEEP_MAX_CELLS", "40")),
-    cellTimeoutMs: Number(env("DEEP_CELL_TIMEOUT_S", "90")) * 1000,
-    wallClockMs: Number(env("DEEP_WALL_CLOCK_MIN", "30")) * 60_000,
-    maxOutputChars: Number(env("DEEP_MAX_OUTPUT_CHARS", "8000")),
+    effort: env("DEEP_EFFORT", "medium") as RunOptions["effort"],
+    maxCells: whole("DEEP_MAX_CELLS", 40),
+    cellTimeoutMs: whole("DEEP_CELL_TIMEOUT_S", 90, 1000, MAX_TIMER_MS),
+    wallClockMs: whole("DEEP_WALL_CLOCK_MIN", 30, 60_000, MAX_TIMER_MS),
+    maxOutputChars: whole("DEEP_MAX_OUTPUT_CHARS", 8000),
   } satisfies RunOptions,
 };
 
