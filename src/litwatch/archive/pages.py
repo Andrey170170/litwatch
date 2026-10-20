@@ -16,7 +16,9 @@ from litwatch.archive.text import _PDF_LOCK
 
 MAX_SIDE = 1568  # the long side of a page's image, in pixels
 _KINDS = {"figure": r"(?:Figure|Fig\.)", "table": r"(?:Table|Tab\.)"}
-_ASKED = re.compile(r"\s*(fig(?:ure)?|tab(?:le)?)\.?\s*([A-Za-z]?\d+(?:\.\d+)*)\s*", re.IGNORECASE)
+# A caption's label: a number, or an appendix's or supplement's ("A.1", "A1", "S3", "B.2.1").
+_LABEL = r"(?:[A-Za-z]\.?)?\d+(?:\.\d+)*"
+_ASKED = re.compile(r"\s*(fig(?:ure)?|tab(?:le)?)\.?\s*(" + _LABEL + r")\s*", re.IGNORECASE)
 
 
 class NoSuchPage(LookupError):  # noqa: N818 - an answer, as LookupError
@@ -47,7 +49,10 @@ class Caption:
 
     def patterns(self) -> tuple[re.Pattern[str], re.Pattern[str]]:
         """Its caption, a line that starts with it and a colon or full stop, and any mention."""
-        named = _KINDS[self.kind] + r"\s*" + re.escape(self.label) + r"(?!\.?\w)"
+        # A lettered label matches with its dot or without ("A.1" and "A1").
+        letter, number = re.fullmatch(r"([A-Za-z]?)\.?(.+)", self.label).groups()
+        label = re.escape(letter) + (r"\.?" if letter else "") + re.escape(number)
+        named = _KINDS[self.kind] + r"\s*" + label + r"(?!\.?\w)"
         caption = re.compile(r"^[ \t]*" + named + r"\s*[:.]", re.IGNORECASE | re.MULTILINE)
         return caption, re.compile(r"\b" + named, re.IGNORECASE)
 

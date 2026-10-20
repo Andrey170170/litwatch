@@ -3,6 +3,7 @@ the whole text a page at a time, untrimmed, following "Use the PDF"; a PDF's tex
 bounded urgent fetch; PDF pages as images by number and by caption, without the AGPL extra.
 Every call goes through `create_app` over HTTP, as an agent's does."""
 
+import asyncio
 import base64
 import io
 import re
@@ -13,6 +14,7 @@ import httpx
 import pytest
 from PIL import Image
 
+from litwatch.api import mcp as mcp_server
 from litwatch.api import mcp_reading
 from litwatch.api.monitor import create_monitor
 from litwatch.archive import pages
@@ -294,6 +296,41 @@ async def test_a_paper_the_archive_cannot_get_says_so_and_an_outage_is_an_error(
     assert component["status"] == "healthy"
 
 
+async def test_an_archive_that_stops_answering_after_pending_is_an_error_not_fetching(
+    conn, shelf, monkeypatch
+):
+    """Only the wait's end after a pending answer says "fetching": a request that hangs past
+    the bound, after pending or after the fetch is done, is an error the monitor sees."""
+    monkeypatch.setattr(mcp_reading, "READ_SLACK", 0.3)
+    fake = FakeArchive(status="pending")
+    fake.texts[HELD.id] = (2, LATEX)
+    hang_after = {"/v1/jobs": 1}  # a path's answers before it hangs; absent, it never does
+
+    async def handle(req: httpx.Request) -> httpx.Response:
+        key = next((k for k in hang_after if req.url.path.startswith(k)), None)
+        if key is not None:
+            if hang_after[key] <= 0:
+                await asyncio.Event().wait()  # never answers
+            hang_after[key] -= 1
+        return fake.handle(req)
+
+    app = reading_app(conn, fake, wait=0.2)
+    async with serving(app) as http:
+        app.state.archive.http = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        text, failed = await call(http, "read_paper", paper_id=HELD.id)
+        assert failed and "did not finish in time" in text and "fetching" not in text
+        # The PDF's job done, its download hangs.
+        fake.status = "complete"
+        hang_after.clear()
+        hang_after[f"/v1/papers/{PDF_ONLY.id}/pdf"] = 0
+        page, failed = await call(http, "view_pdf_page", paper_id=PDF_ONLY.id, page=1)
+        assert failed and "did not finish in time" in page
+        component, metrics = await _component(app)
+    assert component["status"] == "degraded"
+    assert 'litwatch_mcp_calls_total{tool="read_paper",outcome="error"} 1' in metrics
+    assert 'outcome="fetching"} 0' in metrics and 'outcome="fetching"} 1' not in metrics
+
+
 # -- V7: a page as an image ------------------------------------------------------------------------
 
 
@@ -394,3 +431,49 @@ async def test_reading_arguments_out_of_bounds_are_refused_and_not_counted(conn,
     assert component["status"] == "healthy"
     assert re.search(r'outcome="(error|ok)"} [1-9]', metrics) is None
     assert chunk(at_end) == "(blank)" and at_end.endswith("[The end of the text.]")
+
+
+async def test_an_appendix_or_supplement_caption_renders_dotted_or_not(conn, shelf):
+    fake = FakeArchive()
+    fake.pdfs[PDF_ONLY.id] = pages_pdf(
+        ["Body text; Table A.1 and Figure A2 are in the appendix."],
+        ["Table A.1: Hyperparameters."],
+        ["Figure A.2: Loss curves."],
+        ["Table S3: Supplementary results."],
+    )
+    async with serving(reading_app(conn, fake)) as http:
+        found = {
+            asked: _image(await view(http, paper_id=PDF_ONLY.id, caption=asked))[0]
+            for asked in ("Table A.1", "Table A1", "Figure A.2", "fig. A2", "Table S3")
+        }
+        none = await call(http, "view_pdf_page", paper_id=PDF_ONLY.id, caption="Table A.10")
+    for asked, page in [("Table A.1", 2), ("Table A1", 2), ("Figure A.2", 3), ("fig. A2", 3),
+                        ("Table S3", 4)]:  # fmt: skip
+        assert f"page {page} of 4: " in found[asked] and "caption is on it" in found[asked]
+    assert none[1] is False and "none of its 4 pages names Table A.10" in none[0]
+
+
+async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(conn, shelf):
+    many = "Front matter.\n" + "".join(f"\\subsection{{Lemma {k}}}\nProof.\n" for k in range(650))
+    fake = FakeArchive()
+    fake.texts[HELD.id] = (2, many)
+    app = reading_app(conn, fake)
+    async with serving(app) as http:
+        listed, start, answers = [], None, 0
+        while True:
+            asked = {"start": start} if start is not None else {}
+            answer = await ok(http, "paper_outline", paper_id=HELD.id, **asked)
+            answers += 1
+            shown = [n for _, n, _, _ in entries(answer)]
+            assert len(shown) <= mcp_server.MAX_LISTED
+            listed += shown
+            found = re.search(r"call paper_outline again with start=(\d+)\.\]$", answer)
+            if found is None:
+                break
+            start = int(found[1])
+        past, failed = await call(http, "paper_outline", paper_id=HELD.id, start=651)
+        component, metrics = await _component(app)
+    assert listed == list(range(651)) and answers == 3
+    assert failed and "No entry 651: the outline numbers 0–650." in past
+    assert 'tool="paper_outline",outcome="error"} 0' in metrics
+    assert component["status"] == "healthy"

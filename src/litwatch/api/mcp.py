@@ -452,12 +452,25 @@ def build(state: State) -> MCPServer:
 
     async def paper_outline(
         paper_id: Annotated[Text, Field(description="An arXiv id or link, e.g. 2610.01234.")],
+        start: Annotated[
+            Number | None,
+            Field(
+                description="List from the entry of this number on; omitted, from the first. "
+                f"An answer lists at most {MAX_LISTED} entries and says where to go on."
+            ),
+        ] = None,
     ) -> str:
         """Read this first, before read_paper: the paper's sections (a PDF's text: its pages)
         with their numbers, sizes and offsets, and where its text comes from, its LaTeX source
         or its PDF. The text is whole: its references and appendix are there."""
         paper, text, use_pdf = await _text(paper_id)
-        return _outline_answer(paper, text, use_pdf, mcp_reading.outline(text))
+        parts = mcp_reading.outline(text)
+        first = 0
+        if start is not None:
+            first = next((i for i, p in enumerate(parts) if p.index == start), -1)
+            if first < 0:
+                raise ArgumentError(f"No entry {start}: the outline numbers {_numbers(parts)}.")
+        return _outline_answer(paper, text, use_pdf, parts, first)
 
     async def read_paper(
         paper_id: Annotated[Text, Field(description="An arXiv id or link, e.g. 2610.01234.")],
@@ -477,7 +490,7 @@ def build(state: State) -> MCPServer:
             Field(
                 ge=1,
                 le=mcp_reading.PAGE_CHARS,
-                description="How many characters; omitted or past the cap, 40,000.",
+                description="How many characters, at most 40,000; omitted, 40,000.",
             ),
         ] = None,
     ) -> str:
@@ -490,8 +503,7 @@ def build(state: State) -> MCPServer:
         if section is not None:
             part = next((p for p in parts if p.index == section), None)
             if part is None:
-                numbers = f"{parts[0].index}–{parts[-1].index}"
-                raise ArgumentError(f"No section {section}: the outline numbers {numbers}.")
+                raise ArgumentError(f"No section {section}: the outline numbers {_numbers(parts)}.")
         try:
             window = mcp_reading.window(len(text.body), part, offset, length)
         except ValueError as exc:
@@ -857,18 +869,25 @@ READ_HOW = (
 )
 
 
+def _numbers(parts: list[mcp_reading.Part]) -> str:
+    return f"{parts[0].index}–{parts[-1].index}"
+
+
 def _outline_answer(
-    paper: Paper, text: PaperText, use_pdf: bool, parts: list[mcp_reading.Part]
+    paper: Paper, text: PaperText, use_pdf: bool, parts: list[mcp_reading.Part], first: int
 ) -> str:
+    """The outline's entries from `parts[first]`, at most `MAX_LISTED` of them."""
     out = [f"# {_one_line(paper.title)}", _source(paper, text, use_pdf), READ_HOW, ""]
-    for p in parts[:MAX_LISTED]:
+    if first > 0:
+        out.append(f"(Entries {_numbers(parts[:first])} come before these.)")
+    shown = parts[first : first + MAX_LISTED]
+    for p in shown:
         size = f"{p.end - p.start:,} characters" if p.end > p.start else "blank"
         out.append(f"{'  ' * p.depth}{p.index}. {p.title} · {size} · offset {p.start}")
-    if len(parts) > MAX_LISTED:
-        rest = parts[MAX_LISTED:]
+    if rest := parts[first + MAX_LISTED :]:
         out.append(
-            f"({len(rest)} more, numbered {rest[0].index}–{rest[-1].index}, from offset "
-            f"{rest[0].start}: read them by number or offset.)"
+            f"[{len(rest)} more entries, numbered {_numbers(rest)}: call paper_outline again "
+            f"with start={rest[0].index}.]"
         )
     return "\n".join(out)
 

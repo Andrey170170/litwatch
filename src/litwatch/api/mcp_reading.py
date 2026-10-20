@@ -43,25 +43,19 @@ class Unobtainable(Exception):  # noqa: N818 - an outcome
 
 
 async def _polled[T](step: Callable[[], Awaitable[T | None]], wait: float) -> T:
-    """`step`'s answer, asked again every `POLL_SECONDS` while it is None, for `wait` seconds;
-    past them `StillFetching`. The whole is bounded by `wait + READ_SLACK`: a `TimeoutError`
-    when the archive never answered, `StillFetching` once it said it was fetching."""
+    """`step`'s answer, asked again every `POLL_SECONDS` while it is None (the archive said it
+    is fetching), for `wait` seconds; past them `StillFetching`. The whole is bounded by
+    `wait + READ_SLACK`: a step that does not answer in it, whatever came before, is a
+    `TimeoutError`, as nothing says the archive is still fetching."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + wait
-    fetching = False
-    try:
-        async with asyncio.timeout(wait + READ_SLACK):
-            while (found := await step()) is None:
-                fetching = True
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    raise StillFetching
-                await asyncio.sleep(min(POLL_SECONDS, remaining))
-            return found
-    except TimeoutError:
-        if fetching:
-            raise StillFetching from None
-        raise
+    async with asyncio.timeout(wait + READ_SLACK):
+        while (found := await step()) is None:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise StillFetching
+            await asyncio.sleep(min(POLL_SECONDS, remaining))
+        return found
 
 
 async def text_of(
