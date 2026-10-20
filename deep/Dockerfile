@@ -17,7 +17,8 @@ LABEL org.opencontainers.image.title="litwatch-deep" \
       org.opencontainers.image.description="Deep processor for litwatch: a Pi agent with one JavaScript REPL tool" \
       org.opencontainers.image.source="${SOURCE}" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.revision="${REVISION}"
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 ENV NODE_ENV=production \
     HOME=/var/lib/litwatch-deep \
@@ -27,6 +28,7 @@ WORKDIR /app
 COPY --from=deps --chown=0:0 /app/node_modules ./node_modules
 COPY --chown=0:0 package.json ./
 COPY --chown=0:0 src ./src
+COPY --chown=0:0 LICENSE ./
 
 # The image's `node` user is already 1000:1000, which is what the host state directory expects.
 RUN install -d -o node -g node -m 0750 /var/lib/litwatch-deep && \

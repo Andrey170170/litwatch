@@ -46,7 +46,8 @@ LABEL org.opencontainers.image.title="litwatch" \
       org.opencontainers.image.description="Literature watch for CoT monitoring and faithfulness papers" \
       org.opencontainers.image.source="${SOURCE}" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.revision="${REVISION}"
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -58,6 +59,7 @@ WORKDIR /var/lib/litwatch
 
 COPY --from=builder --chown=0:0 /app/.venv /app/.venv
 COPY --from=builder --chown=0:0 /app/src /app/src
+COPY --chown=0:0 LICENSE /app/LICENSE
 
 # Fixed 1000:1000 so bind-mounted secret files can be readable without root.
 RUN groupadd --gid 1000 litwatch && \
