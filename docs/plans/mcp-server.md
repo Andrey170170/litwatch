@@ -85,10 +85,12 @@ owner's dotfiles.
   so the reading path takes the executor as a parameter rather than relying on it.
 - **Telemetry for Vergil**, by the homelab convention (`/opt/homelab-config/docs/telemetry-convention.md`), on
   `serve`'s existing metrics port (`api/monitor.py`):
-  - metrics `litwatch_mcp_calls_total{tool,outcome}`, with outcome one of `ok`, `not_found`, `fetching`, `error`,
-    and `litwatch_mcp_call_seconds{tool}`, counted in the process (the MCP runs inside it, D1);
+  - metrics `litwatch_mcp_calls_total{tool,outcome}`, with outcome one of `ok`, `not_found`, `fetching`,
+    `partial` (a search provider left out), `error`, and `litwatch_mcp_call_seconds{tool}`, counted in the process
+    (the MCP runs inside it, D1);
   - an `mcp` component in the status document, degraded when calls in the last hour failed with server errors and
-    none has succeeded since, its reason giving the counts. A paper not found or an "ask again" is not a failure, so
+    none has succeeded since, its reason giving the counts. A partial answer neither fails nor clears it. A paper
+    not found or an "ask again" is not a failure, so
     the component speaks only when the server cannot do its job (decision 68);
   - one JSON log line per call: tool, outcome, duration. Never the token, the arguments' text or the answer.
 - **Server instructions** tell agents what the server holds; to use it before the web for arXiv papers; to read

@@ -251,6 +251,9 @@ known end, and `nightly` already reads it failed).
   the next card is made, whenever either happened.
 - `digests` is degraded by a failed digest, whatever the reason.
 - `mcp`, while the MCP server is served, is degraded when calls in the last hour failed with a server error and
-  none has been answered since the last of them; a paper not found, or one still being fetched, is an answer. Its
-  calls are counted in the process (`litwatch_mcp_calls_total{tool,outcome}`, `litwatch_mcp_call_seconds{tool}`) and
-  each is logged as one line: the tool, how it ended and how long it took, never its arguments.
+  none has been answered since the last of them; a paper not found, or one still being fetched, is an answer. A
+  partial answer (a search whose provider did not answer, which it names) neither fails nor clears it, and arguments
+  the server refuses (a date outside 1991–2100) are not calls. Its calls are counted in the process
+  (`litwatch_mcp_calls_total{tool,outcome}`, outcome `ok`, `not_found`, `fetching`, `partial` or `error`;
+  `litwatch_mcp_call_seconds{tool}`) and each is logged as one line: the tool, how it ended and how long it took,
+  never its arguments.

@@ -8,8 +8,11 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 
 import httpx
+import httpx2
 import psycopg
 import pytest
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 from litwatch.api import app as app_module
 from litwatch.api import create_app
@@ -17,7 +20,7 @@ from litwatch.api import mcp as mcp_api
 from litwatch.api.monitor import MCP_WINDOW, McpCalls, create_monitor
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
-from litwatch.core import Publication
+from litwatch.core import Publication, Taxonomy
 from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
 from litwatch.integrations.archive import Archive
 from litwatch.jobs import publications as lookups
@@ -162,6 +165,28 @@ async def test_mcp_is_not_shadowed_by_the_web_app_and_absent_without_its_token(
     async with serving(without) as http:
         assert (await rpc(http, "initialize", INIT)).status_code == 405  # the web app's GET route
         assert (await http.get("/mcp")).text == "<p>shell</p>"
+
+
+async def test_the_sdks_own_client_initializes_lists_and_calls_through_create_app(conn):
+    await taxonomy_store.save(conn, TREE)
+    await papers_store.upsert(conn, [P])
+    app = _app(conn)
+    headers = {"authorization": f"Bearer {MCP_TOKEN}"}
+    async with app.router.lifespan_context(app):
+        transport = httpx2.ASGITransport(app=app)
+        async with (
+            httpx2.AsyncClient(transport=transport, headers=headers) as http,
+            streamable_http_client(f"http://{HOST}/mcp", http_client=http) as (read, write),
+            ClientSession(read, write) as session,
+        ):
+            opened = await session.initialize()
+            tools = await session.list_tools()
+            found = await session.call_tool("search_papers", {"query": "hide"})
+    assert opened.server_info.name == "litwatch" and "before the web" in opened.instructions
+    assert sorted(t.name for t in tools.tools) == [
+        "get_paper", "list_digests", "read_digest", "search_papers",
+    ]  # fmt: skip
+    assert not found.is_error and ids(found.content[0].text) == [P.id]
 
 
 def test_the_mcp_token_must_be_its_own():
@@ -365,12 +390,34 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
     assert "Weight: solid (from the abstract): Sound work." in held
     faith = next(line for line in held.splitlines() if line.startswith("- **Chain-of-thought"))
     assert "verdict central" in faith and "the owner's word: related" in faith
-    assert "labelled related" in faith and "thumb up" in faith and "grade " in faith
+    assert "labelled related" in faith and "grade " in faith
+    assert f"- up on Chain-of-thought faithfulness ({FAITH.slug}), " in held
     assert "@inproceedings{" in held and "NeurIPS" in held and "Published: NeurIPS 2026" in held
     assert "Only in the archive" in only and "Ada Lovelace" in only and ONLY.id in only
     assert "```bibtex\n@" in only
     assert missing == ("Neither litwatch nor the archive has a paper 2610.05555.", False)
     assert no_id[1] is False and "No arXiv id" in no_id[0]
+
+
+async def test_a_thumb_on_a_topic_no_longer_followed_still_shows_with_its_reason(conn, shelves):
+    fake, _, agents, _ = shelves
+    async with serving(_app(conn, fake)) as http:
+        for thumb in (
+            {"topic": AGENTS.slug, "value": "down", "reason": "already_knew"},
+            {"value": "up", "reason": "great_find"},
+        ):
+            answer = await http.put(f"/api/reactions/{agents.id}", json=thumb, headers=AUTH)
+            assert answer.status_code == 200, answer.text
+    await taxonomy_store.save(conn, Taxonomy(classes=TREE.classes, topics=[FAITH, INTERP]))
+    async with serving(_app(conn, fake)) as http:
+        assert agents.id in ids(await ok(http, "search_papers", reaction="down"))
+        assert agents.id in ids(await ok(http, "search_papers", reaction="up"))
+        page = await ok(http, "get_paper", paper_id=agents.id)
+    thumbs = page.split("## The owner's thumbs\n")[1].split("\n\n")[0].splitlines()
+    assert [line.rsplit(", ", 1)[0] for line in thumbs] == [
+        f"- down on Agents and tool use ({AGENTS.slug}), no longer followed (already knew)",
+        "- up on no topic (great find)",
+    ]
 
 
 async def test_a_paper_the_archive_cannot_be_asked_for_is_an_error_not_a_missing_paper(conn):
@@ -448,6 +495,10 @@ async def test_the_monitor_counts_calls_and_degrades_mcp_only_while_calls_fail(c
         degraded = await mcp_status()
         assert degraded["status"] == "degraded"
         assert degraded["reason"].startswith("1 calls failed in the last hour (get_paper 1)")
+        # The archive's search left out: an answer that names it, neither clearing nor failing.
+        partial = await ok(http, "search_papers", query="secret words")
+        assert "Not searched, as they did not answer: archive" in partial
+        assert (await mcp_status())["status"] == "degraded"
         flaky.down = False
         await ok(http, "search_papers", query="secret words")
         assert (await mcp_status())["status"] == "healthy"
@@ -456,6 +507,7 @@ async def test_the_monitor_counts_calls_and_degrades_mcp_only_while_calls_fail(c
         'litwatch_mcp_calls_total{tool="get_paper",outcome="not_found"} 1',
         'litwatch_mcp_calls_total{tool="get_paper",outcome="error"} 1',
         'litwatch_mcp_calls_total{tool="search_papers",outcome="ok"} 1',
+        'litwatch_mcp_calls_total{tool="search_papers",outcome="partial"} 1',
         'litwatch_mcp_calls_total{tool="read_digest",outcome="ok"} 0',
         'litwatch_mcp_call_seconds_count{tool="get_paper"} 2',
     ]:
@@ -464,9 +516,33 @@ async def test_the_monitor_counts_calls_and_degrades_mcp_only_while_calls_fail(c
     # One line per call: tool, outcome, duration, never the arguments.
     lines = [r for r in caplog.records if r.name == "litwatch.api.mcp"]
     assert [(r.fields["tool"], r.fields["outcome"]) for r in lines] == [
-        ("get_paper", "not_found"), ("get_paper", "error"), ("search_papers", "ok"),
+        ("get_paper", "not_found"), ("get_paper", "error"), ("search_papers", "partial"),
+        ("search_papers", "ok"),
     ]  # fmt: skip
     assert not any("secret" in r.getMessage() or "secret" in str(r.fields) for r in lines)
+
+
+async def test_a_date_out_of_range_is_an_argument_error_not_a_server_error(conn):
+    await taxonomy_store.save(conn, TREE)
+    app = _app(conn)
+    transport = httpx.ASGITransport(create_monitor(app))
+    async with (
+        serving(app) as http,
+        httpx.AsyncClient(transport=transport, base_url="http://m") as m,
+    ):
+        for tool, arguments in [
+            ("list_digests", {"until": "0001-01-01"}),
+            ("list_digests", {"since": "1990-12-31", "until": "2026-10-20"}),
+            ("search_papers", {"until": "9999-12-31"}),
+            ("search_papers", {"since": "2101-01-01"}),
+        ]:
+            text, failed = await call(http, tool, **arguments)
+            assert failed and "validation error" in text, (tool, arguments, text)
+        component = [c for c in (await m.get("/status")).json()["components"] if c["id"] == "mcp"]
+        assert component[0]["status"] == "healthy"
+        assert 'outcome="error"} 1' not in (await m.get("/metrics")).text
+        # The bounds themselves are days a tool takes.
+        await ok(http, "list_digests", since="1991-01-01", until="2100-12-31")
 
 
 async def test_an_mcp_without_its_token_has_no_component_or_metrics(conn):
@@ -486,5 +562,9 @@ def test_a_failure_older_than_the_window_no_longer_degrades():
     calls.record("get_paper", "error", 0.1, now - timedelta(minutes=5))
     calls.record("get_paper", "error", 0.1, now - timedelta(minutes=4))
     assert "2 calls failed" in calls.component(now)["reason"]
-    calls.record("get_paper", "not_found", 0.1, now - timedelta(minutes=3))
+    calls.record("search_papers", "partial", 0.1, now - timedelta(minutes=3))
+    assert calls.component(now)["status"] == "degraded"
+    calls.record("get_paper", "not_found", 0.1, now - timedelta(minutes=2))
+    assert calls.component(now)["status"] == "healthy"
+    calls.record("search_papers", "partial", 0.1, now - timedelta(minutes=1))
     assert calls.component(now)["status"] == "healthy"

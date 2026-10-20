@@ -71,8 +71,9 @@ class Night:
 
 
 # How a call to the MCP server ended: answered, nothing found, still being fetched (ask again),
-# or failed with a server error. Only the last is a failure.
-MCP_OUTCOMES = ("ok", "not_found", "fetching", "error")
+# answered without what a dependency failed to give, or failed with a server error. Only the
+# last is a failure; `partial` neither is one nor shows the server works.
+MCP_OUTCOMES = ("ok", "not_found", "fetching", "partial", "error")
 # How far back the `mcp` component looks for failed calls.
 MCP_WINDOW = timedelta(hours=1)
 
@@ -95,14 +96,15 @@ class McpCalls:
         self.seconds[tool] = self.seconds.get(tool, 0.0) + seconds
         if outcome == "error":
             self.failed.append((now, tool))
-        else:
+        elif outcome != "partial":
             self.answered_at = now
         while self.failed and self.failed[0][0] < now - MCP_WINDOW:
             self.failed.popleft()
 
     def component(self, now: datetime) -> dict[str, Any]:
         """Degraded when calls in the last `MCP_WINDOW` failed and none answered since the last
-        of them; a paper not found or still being fetched is an answer (decision 68)."""
+        of them; a paper not found or still being fetched is an answer (decision 68), a partial
+        one neither a failure nor an answer."""
         failed = [(at, tool) for at, tool in self.failed if at >= now - MCP_WINDOW]
         last = failed[-1][0] if failed else None
         if last is None or (self.answered_at is not None and self.answered_at > last):

@@ -70,10 +70,20 @@ AUTHORS_SHOWN = 3
 # How long a range list_digests lists, as History (`schemas.HISTORY_SPAN`).
 DIGEST_SPAN = s.HISTORY_SPAN
 DIGEST_DAYS = 14  # the range when none is given, ending today
+# A day a tool takes: arXiv's years, with room ahead. Outside them it is an argument error,
+# refused before any date arithmetic can overflow.
+Day = Annotated[date, Field(ge=date(1991, 1, 1), le=date(2100, 12, 31))]
 
 
 class NotFoundError(LookupError):
     """An answer that nothing was found: the call's outcome is `not_found`, not a failure."""
+
+
+class Partial(str):
+    """An answer missing what a dependency did not give (a search provider that failed): the
+    call's outcome is `partial`, neither a failure nor proof the server works."""
+
+    __slots__ = ()
 
 
 async def connect(dsn: str) -> psycopg.AsyncConnection:
@@ -130,8 +140,9 @@ def mount(app: FastAPI, token: str, allowed_hosts: tuple[str, ...]) -> MCPServer
 
 
 def _counted(calls: McpCalls, tool: Callable[..., Awaitable[str]]) -> Callable[..., Any]:
-    """`tool`, counted and logged per call; a `NotFoundError` is its answer. A call cancelled
-    (the client went away) is neither."""
+    """`tool`, counted and logged per call; a `NotFoundError` is its answer, a `Partial` one is
+    counted apart. A call cancelled (the client went away) is not counted, nor are arguments
+    the SDK refused before calling it."""
 
     @functools.wraps(tool)
     async def call(*args: Any, **kwargs: Any) -> str:
@@ -144,8 +155,8 @@ def _counted(calls: McpCalls, tool: Callable[..., Awaitable[str]]) -> Callable[.
         except Exception:
             _record(calls, tool.__name__, "error", started)
             raise
-        _record(calls, tool.__name__, "ok", started)
-        return answer
+        _record(calls, tool.__name__, "partial" if isinstance(answer, Partial) else "ok", started)
+        return str(answer)
 
     return call
 
@@ -197,8 +208,8 @@ def build(state: State) -> MCPServer:
         processed: Annotated[
             bool, Field(description="Only papers litwatch processed (its collection).")
         ] = False,
-        since: Annotated[date | None, Field(description="Published on or after (UTC).")] = None,
-        until: Annotated[date | None, Field(description="Published on or before (UTC).")] = None,
+        since: Annotated[Day | None, Field(description="Published on or after (UTC).")] = None,
+        until: Annotated[Day | None, Field(description="Published on or before (UTC).")] = None,
         sort: Annotated[
             Literal["best", "rarest", "newest"] | None,
             Field(description="Omitted: best match while a query is given, else rarest first."),
@@ -239,7 +250,8 @@ def build(state: State) -> MCPServer:
                     state.search_timeout,
                     state.search_stats,
                 )
-        return _papers_answer(rows, listed.total, offset, outside, left_out)
+        answer = _papers_answer(rows, listed.total, offset, outside, left_out)
+        return Partial(answer) if left_out else answer
 
     async def get_paper(
         paper_id: Annotated[str, Field(description="An arXiv id or link, e.g. 2610.01234.")],
@@ -275,8 +287,8 @@ def build(state: State) -> MCPServer:
         topic: Annotated[
             str | None, Field(description="A followed topic's slug; omitted, every topic.")
         ] = None,
-        since: Annotated[date | None, Field(description="From this day.")] = None,
-        until: Annotated[date | None, Field(description="To this day; omitted, today.")] = None,
+        since: Annotated[Day | None, Field(description="From this day.")] = None,
+        until: Annotated[Day | None, Field(description="To this day; omitted, today.")] = None,
     ) -> str:
         """The digests over a range of days (by default the last two weeks), newest first: each
         with its id, topic, day, how many papers it covered and its Gist. A weekly digest is
@@ -401,13 +413,20 @@ def _topic_line(t: s.PaperTopic) -> str:
         said.append(f"the owner's word: {t.word}")
     if t.label:
         said.append(f"labelled {t.label.value}")
-    if t.reaction:
-        why = f" ({_words(t.reaction.reason)})" if t.reaction.reason else ""
-        said.append(f"thumb {t.reaction.value}{why}")
     if t.missed:
         said.append("reported as a miss")
     look = t.topic
     return f"- **{look.name}** ({look.slug}, {look.depth.value.capitalize()}): " + "; ".join(said)
+
+
+def _thumb_line(h: s.HistoryItem) -> str:
+    """A thumb as it stands, on whatever topic it was given: one no longer followed says so."""
+    if h.topic is None:
+        on = "on no topic"
+    else:
+        on = f"on {h.name or h.topic} ({h.topic})" + ("" if h.followed else ", no longer followed")
+    why = f" ({_words(h.reason)})" if h.reason else ""
+    return f"- {h.value} {on}{why}, {_day(h.at)}"
 
 
 def _paper_answer(p: s.Paper, citation: str) -> str:
@@ -440,8 +459,8 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
         )
     if p.topics:
         out += ["", "## Topics", *(_topic_line(t) for t in p.topics)]
-    if p.reaction:
-        out.append(f"Thumb on no topic: {p.reaction.value}")
+    if thumbs := [h for h in p.history if h.what == "reacted"]:
+        out += ["", "## The owner's thumbs", *(_thumb_line(h) for h in thumbs)]
     if p.gist:
         out += ["", f"## Gist (from the {_words(p.gist.source)})", p.gist.text]
     if p.brief:
