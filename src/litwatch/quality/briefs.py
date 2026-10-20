@@ -154,7 +154,9 @@ class _Spent:
     async def accept(self, call_id: int, output: dict) -> None:
         return None
 
-    async def reject(self, call_id: int, error: str, reply: str | None = None) -> None:
+    async def reject(
+        self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
+    ) -> None:
         return None
 
 
