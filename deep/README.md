@@ -36,7 +36,7 @@ node src/main.ts serve
 | `DEEP_WALL_CLOCK_MIN` | `30` | One paper's time limit; keep it below litwatch's `[integrations.deep] timeout_minutes` (45), past which litwatch ends a running job as stuck and may start a duplicate |
 | `DEEP_MAX_OUTPUT_CHARS` | `8000` | Output kept per cell |
 | `DEEP_MAX_FETCH_CHARS` | `200000` | Text kept per `fetch` |
-| `DEEP_MAX_FETCH_MB` | `2` | Bytes read per `fetch`; the rest of the body is never read |
+| `DEEP_MAX_FETCH_MB` | `2` | MiB read per `fetch`, fractions allowed; the rest of the body is never read |
 | `DEEP_MAX_FETCHES` | `60` | `fetch` calls per paper; the next one fails in the cell |
 | `LITWATCH_URL` | `http://litwatch:8080` | litwatch v1, for the agent's `store.search` (`GET /api/papers`) |
 | `LITWATCH_TOKEN` | | litwatch's read token (`LITWATCH_READ_TOKEN` there), which may only search and read papers |
@@ -49,8 +49,8 @@ the service's own user-agent, no cookies, and no headers the agent sets. Every a
 be public unicast, checked where the socket connects, and a literal address in the URL is checked up front, so
 loopback, the LAN, link-local (cloud metadata) and unique-local addresses are refused, and so are the IPv6
 transition ranges that embed an IPv4 address (NAT64, 6to4, Teredo). An IPv4-mapped IPv6 address
-(`::ffff:a.b.c.d`) is judged as the IPv4 address it carries. Numeric settings must be finite and above zero, or
-the service refuses to start. Redirects are followed by hand, at most five, each hop checked again. Each site is paced at one
+(`::ffff:a.b.c.d`) is judged as the IPv4 address it carries. Numeric settings must come to a whole number of at least one
+in their unit (bytes, milliseconds) and within what their consumer holds, or the service refuses to start. Redirects are followed by hand, at most five, each hop checked again. Each site is paced at one
 request a second at most (arXiv and Semantic Scholar slower). anonymous.4open.science links are read through
 its JSON API, since its pages are built in the browser. `store.search` and `s2.lookup` don't go through this
 guard: litwatch itself is on a private address.

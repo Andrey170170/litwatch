@@ -57,15 +57,17 @@ test("Semantic Scholar is asked by arXiv id for a modern or a legacy id, any ver
   assert.equal(s2Id("cs/990100"), null);
 });
 
+// One address of every class the fetch must refuse: private, loopback, unspecified, link-local, CGNAT, reserved,
+// multicast, broadcast, unique-local, site-local, IPv4-mapped, NAT64, 6to4, Teredo.
+const refused = [
+  "10.0.0.1", "172.16.5.4", "192.168.0.1", "127.0.0.1", "0.0.0.0", "169.254.169.254", "100.64.0.1",
+  "192.0.0.8", "198.18.0.1", "224.0.0.1", "255.255.255.255",
+  "::1", "::", "fe80::1", "fc00::1", "fd12:3456::1", "fec0::1", "ff02::1",
+  "::ffff:192.168.0.1", "::ffff:127.0.0.1", "64:ff9b::c0a8:1", "2002:c0a8:101::1", "2001::1",
+];
+
 test("only public unicast addresses are public, whatever form they come in", () => {
-  const refused = [
-    "10.0.0.1", "172.16.5.4", "192.168.0.1", "127.0.0.1", "0.0.0.0", "169.254.169.254", "100.64.0.1",
-    "192.0.0.8", "198.18.0.1", "224.0.0.1", "255.255.255.255",
-    "::1", "::", "fe80::1", "fc00::1", "fd12:3456::1", "fec0::1", "ff02::1",
-    "::ffff:192.168.0.1", "::ffff:127.0.0.1", "64:ff9b::c0a8:1", "2002:c0a8:101::1", "2001::1",
-    "not an address",
-  ];
-  for (const a of refused) assert.equal(isPublic(a), false, a);
+  for (const a of [...refused, "not an address"]) assert.equal(isPublic(a), false, a);
   for (const a of ["8.8.8.8", "140.82.112.3", "2606:4700::1111", "::ffff:8.8.8.8"]) assert.equal(isPublic(a), true, a);
 });
 
@@ -106,6 +108,7 @@ test("a private literal address is refused without a connection, however it is w
     "http://2130706433/",
     "http://10.0.0.1/",
     "http://169.254.169.254/latest/meta-data/",
+    ...refused.map((a) => (a.includes(":") ? `http://[${a}]/` : `http://${a}/`)),
   ]) {
     await assert.rejects(fetchPublic(url, opts), /is not a public address/, url);
   }
@@ -198,6 +201,7 @@ test("the production fetch asks DNS where it connects and refuses a private answ
     "mapped.example": ["::ffff:127.0.0.1"],
     "lan.example": ["192.168.0.1"],
     "mixed.example": ["93.184.215.14", "127.0.0.1"],
+    ...Object.fromEntries(refused.map((a, i) => [`class${i}.example`, [a]])),
   };
   (dns as { lookup: unknown }).lookup = (host: string, _opts: unknown, cb: (e: Error | null, a: unknown) => void) =>
     cb(null, (fake[host] ?? []).map((address) => ({ address, family: address.includes(":") ? 6 : 4 })));
