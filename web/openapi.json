@@ -19,6 +19,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -248,6 +254,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such paper or topic"
           },
@@ -286,6 +298,12 @@
             "content": {
               "application/pdf": {}
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "307": {
             "description": "arXiv's PDF: no archive, or none it could get in time"
@@ -329,6 +347,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such paper or topic"
@@ -394,6 +418,18 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "No such paper, or DBLP has no such record"
+          },
+          "502": {
+            "description": "DBLP did not answer"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -424,6 +460,12 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "422": {
             "description": "Validation Error",
@@ -463,6 +505,15 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "No such paper or topic"
           },
           "422": {
             "description": "Validation Error",
@@ -677,6 +728,15 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "No such paper or topic"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -716,6 +776,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such paper or topic"
           },
@@ -754,6 +820,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -944,6 +1016,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such paper or topic"
           },
@@ -996,6 +1074,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such paper or topic"
@@ -1054,6 +1138,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1103,6 +1193,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such paper or topic"
@@ -1166,6 +1262,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such paper or topic"
           },
@@ -1216,6 +1318,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1254,6 +1362,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such paper or topic"
@@ -1305,6 +1419,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1345,6 +1465,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "422": {
             "description": "Validation Error",
@@ -1397,6 +1523,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1436,6 +1568,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such digest, or its topic is no longer shown"
@@ -1480,6 +1618,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such digest, or its topic is no longer shown"
           },
@@ -1522,6 +1666,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -1541,6 +1691,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No taxonomy yet"
@@ -1562,6 +1718,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -1596,6 +1758,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such topic"
@@ -1652,6 +1820,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such class"
           },
@@ -1687,6 +1861,12 @@
           "204": {
             "description": "Successful Response"
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1717,6 +1897,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -1746,6 +1932,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "422": {
             "description": "Validation Error",
@@ -1779,6 +1971,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -1812,6 +2010,12 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such paper"
@@ -1871,6 +2075,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such paper"
           },
@@ -1920,6 +2130,12 @@
           "204": {
             "description": "Successful Response"
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such paper"
           },
@@ -1968,6 +2184,12 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such paper"
@@ -2034,6 +2256,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such paper"
           },
@@ -2072,6 +2300,12 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such full-text pass"
@@ -2112,6 +2346,12 @@
           "204": {
             "description": "Successful Response"
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such full-text pass"
           },
@@ -2150,6 +2390,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       },
@@ -2181,6 +2427,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "422": {
             "description": "Validation Error",
@@ -2222,6 +2474,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such session"
@@ -2269,6 +2527,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such session"
@@ -2324,6 +2588,12 @@
           "204": {
             "description": "Successful Response"
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such session, or no paper at that position in it"
           },
@@ -2359,6 +2629,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -2377,6 +2653,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -2398,6 +2680,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -2421,6 +2709,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -2444,6 +2738,12 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           },
           "404": {
             "description": "No such integration is loaded"
@@ -2507,6 +2807,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such integration is loaded"
           },
@@ -2566,6 +2872,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2606,6 +2918,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
           "404": {
             "description": "No such paper"
           },
@@ -2643,6 +2961,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -2661,6 +2985,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
           }
         }
       }
@@ -2683,6 +3013,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Wrong token"
           },
           "422": {
             "description": "Validation Error",

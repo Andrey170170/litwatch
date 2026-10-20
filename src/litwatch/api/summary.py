@@ -4,17 +4,17 @@ lists stay with the pages that show them."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import Request
 
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, budget_lines
+from litwatch.api.deps import Conn, budget_lines, protected
 from litwatch.api.reading import _looks, run_status
 from litwatch.feedback import calibrate
 from litwatch.store import quality
 from litwatch.store import taxonomy as taxonomy_store
 
-router = APIRouter(prefix="/api")
+router = protected("/api")
 
 
 @router.get("/summary")

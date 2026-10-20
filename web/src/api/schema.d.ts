@@ -2818,6 +2818,20 @@ export interface operations {
                     "application/json": components["schemas"]["RunStatus"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     papers_api_papers_get: {
@@ -2853,6 +2867,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Papers"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such paper or topic */
             404: {
@@ -2899,6 +2927,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2929,6 +2971,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Paper"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such paper or topic */
             404: {
@@ -2979,6 +3035,27 @@ export interface operations {
                     "application/json": components["schemas"]["Publication"] | null;
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such paper, or DBLP has no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2987,6 +3064,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description DBLP did not answer */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3003,6 +3087,20 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3051,6 +3149,27 @@ export interface operations {
                     "text/plain": string;
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3084,6 +3203,27 @@ export interface operations {
                     "text/plain": string;
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such paper or topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3116,6 +3256,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Lookup"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such paper or topic */
             404: {
@@ -3160,6 +3314,20 @@ export interface operations {
                     "application/json": components["schemas"]["TopicGroup"][];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     topic_api_topics__slug__get: {
@@ -3194,6 +3362,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TopicPage"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such paper or topic */
             404: {
@@ -3237,6 +3419,20 @@ export interface operations {
                     "application/json": components["schemas"]["Ack"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such paper or topic */
             404: {
                 headers: {
@@ -3277,6 +3473,20 @@ export interface operations {
                     "application/json": components["schemas"]["Ack"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3311,6 +3521,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Ack"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such paper or topic */
             404: {
@@ -3355,6 +3579,20 @@ export interface operations {
                     "application/json": components["schemas"]["Ack"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such paper or topic */
             404: {
                 headers: {
@@ -3394,6 +3632,20 @@ export interface operations {
                     "application/json": components["schemas"]["Ack"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3426,6 +3678,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Ack"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such paper or topic */
             404: {
@@ -3479,6 +3745,20 @@ export interface operations {
                     "application/json": components["schemas"]["Day"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3509,6 +3789,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Week"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -3542,6 +3836,20 @@ export interface operations {
                     "application/json": components["schemas"]["History"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3572,6 +3880,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Digest"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such digest, or its topic is no longer shown */
             404: {
@@ -3610,6 +3932,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Digest"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such digest, or its topic is no longer shown */
             404: {
@@ -3654,6 +3990,20 @@ export interface operations {
                     "application/json": components["schemas"]["Taxonomy"] | null;
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     taxonomy_yaml_api_settings_taxonomy_yaml_get: {
@@ -3673,6 +4023,20 @@ export interface operations {
                 content: {
                     "text/plain": string;
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No taxonomy yet */
             404: {
@@ -3701,6 +4065,20 @@ export interface operations {
                     "application/json": components["schemas"]["TaxonomyStats"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     keyword_matches_api_settings_topics__slug__keywords_get: {
@@ -3724,6 +4102,20 @@ export interface operations {
                         [key: string]: number;
                     };
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such topic */
             404: {
@@ -3769,6 +4161,20 @@ export interface operations {
                     "application/json": components["schemas"]["Topic"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such class */
             404: {
                 headers: {
@@ -3807,6 +4213,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3838,6 +4258,20 @@ export interface operations {
                     };
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     acknowledge_api_settings_acknowledge_post: {
@@ -3861,6 +4295,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Acknowledgement"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -3891,6 +4339,20 @@ export interface operations {
                     "application/json": components["schemas"]["Miss"][];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     dismiss_api_settings_classification__paper_id__dismiss_post: {
@@ -3910,6 +4372,20 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3966,6 +4442,20 @@ export interface operations {
                     };
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such paper */
             404: {
                 headers: {
@@ -4013,6 +4503,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such paper */
             404: {
                 headers: {
@@ -4055,6 +4559,20 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4110,6 +4628,20 @@ export interface operations {
                     "application/json": components["schemas"]["GradedOut"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such paper */
             404: {
                 headers: {
@@ -4153,6 +4685,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such full-text pass */
             404: {
                 headers: {
@@ -4191,6 +4737,20 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4241,6 +4801,20 @@ export interface operations {
                     }[];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     draw_api_settings_calibrate_post: {
@@ -4266,6 +4840,20 @@ export interface operations {
                         [key: string]: number;
                     };
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -4299,6 +4887,20 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such session */
             404: {
@@ -4340,6 +4942,20 @@ export interface operations {
                     };
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such session */
             404: {
                 headers: {
@@ -4376,6 +4992,20 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4419,6 +5049,20 @@ export interface operations {
                     }[];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     schedule_api_settings_schedule_get: {
@@ -4438,6 +5082,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ScheduleOut"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -4461,6 +5119,20 @@ export interface operations {
                     };
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     status_api_settings_integrations_get: {
@@ -4481,6 +5153,20 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationCard"][];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     retry_api_settings_integrations__name__retry_post: {
@@ -4496,6 +5182,20 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4548,6 +5248,20 @@ export interface operations {
                     "application/json": components["schemas"]["Failing"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No such integration is loaded */
             404: {
                 headers: {
@@ -4594,6 +5308,20 @@ export interface operations {
                     "application/json": components["schemas"]["Changes"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4624,6 +5352,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CardRequested"];
                 };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such paper */
             404: {
@@ -4675,6 +5417,20 @@ export interface operations {
                     "application/json": components["schemas"]["SearchScope"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     summary_api_summary_get: {
@@ -4695,6 +5451,20 @@ export interface operations {
                     "application/json": components["schemas"]["Summary"];
                 };
             };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     sign_in_api_session_post: {
@@ -4712,6 +5482,13 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Wrong token */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

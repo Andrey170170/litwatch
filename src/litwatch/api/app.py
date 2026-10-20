@@ -9,14 +9,13 @@ from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from litwatch import fulltext
 from litwatch.api import digests, reading, settings, summary
 from litwatch.api import integrations as integrations_api
-from litwatch.api.deps import authorised
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import (
@@ -111,12 +110,12 @@ def create_app(
     app.state.search_stats = {}
     app.state.fulltext_wake = asyncio.Event()  # set to have the full-text worker look now
     app.state.deep_wake = asyncio.Event()  # and the Deep card worker
-    protected = [Depends(authorised)]
-    app.include_router(reading.router, dependencies=protected)
-    app.include_router(digests.router, dependencies=protected)
-    app.include_router(settings.router, dependencies=protected)
-    app.include_router(integrations_api.router, dependencies=protected)
-    app.include_router(summary.router, dependencies=protected)
+    # Each router but the sign-in asks for the token (`deps.protected`).
+    app.include_router(reading.router)
+    app.include_router(digests.router)
+    app.include_router(settings.router)
+    app.include_router(integrations_api.router)
+    app.include_router(summary.router)
     app.include_router(reading.session)
 
     @app.get("/healthz", include_in_schema=False)
