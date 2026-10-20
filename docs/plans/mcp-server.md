@@ -29,6 +29,8 @@ owner's dotfiles.
   Streamable HTTP, **stateless with plain JSON answers** (`stateless_http`, `json_response`): no sessions and no
   event stream. The gateway's existing `location /` for `litwatch.andrei-homelab.com` (LAN and tailnet only, 90 s
   read timeout) carries it, so nginx needs no change.
+- **Read-only by construction.** The MCP's database connections set `default_transaction_read_only`, so a write
+  through them fails rather than lands. The only effect outside the process is an archive request.
 - **The token.** `LITWATCH_MCP_TOKEN` (or `LITWATCH_MCP_TOKEN_FILE`, read through `config.secret`), as a bearer
   header only. With it unset, `/mcp` is not served. `/mcp` refuses the web app's token and the read token (which
   `deep` uses), and `/api` refuses the MCP token, so revoking it touches nothing else.
@@ -64,8 +66,12 @@ owner's dotfiles.
 - **Reading.** The text is `archive.text.read_text`: the LaTeX first, the PDF's text when there is none or the
   paper's latest full-text pass has "Use the PDF" (`fulltext_passes.use_pdf`, a new by-paper query in
   `store.fulltext`). It is untrimmed: the Brief's bibliography cut and 160,000-character limit stay in
-  `fulltext/brief.py`. The outline comes from LaTeX's sectioning commands; a PDF's text is outlined by page. One call
-  returns at most about 60,000 characters and says the offset to continue from.
+  `fulltext/brief.py`. The outline comes from LaTeX's sectioning commands; a PDF's text is outlined by page, so the
+  PDF reading keeps each page's span (today `_pdf_text` joins the non-empty pages into one string, and an empty page
+  must still count). One call
+  returns at most 40,000 characters and says the offset to continue from: at LaTeX's density (about 2.2 characters a
+  token, the budget in `fulltext/brief.py`) that is about 18k tokens, under Claude Code's cap with room for the
+  answer's own lines.
 - **Waiting.** A paper the archive has not fetched is asked for at urgent priority, and the tool polls `read_text`
   for up to 30 s. Past that, it answers that the paper is being fetched and to ask again in a minute. A paper the
   archive cannot get says so.
@@ -73,7 +79,8 @@ owner's dotfiles.
   encodes the PNG, with the long side at most 1568 px. The PDF comes from `ArchiveClient.pdf`, which asks for it at
   priority 0 when it is not stored. A caption is found by searching each page's text for "Figure N" or "Table N".
 - **The work stays off the web app's requests.** PDF reads and page renders run in a small executor of the MCP's
-  own, under the existing `_PDF_LOCK`.
+  own, under the existing `_PDF_LOCK`. `read_text` converts a PDF with `asyncio.to_thread`, the loop's default pool,
+  so the reading path takes the executor as a parameter rather than relying on it.
 - **Telemetry for Vergil**, by the homelab convention (`/opt/homelab-config/docs/telemetry-convention.md`), on
   `serve`'s existing metrics port (`api/monitor.py`):
   - metrics `litwatch_mcp_calls_total{tool,outcome}`, with outcome one of `ok`, `not_found`, `fetching`, `error`,
@@ -120,8 +127,8 @@ to the web app's shapes and auth, and the new filters would have to enter the pu
 ## Risks
 
 - **R1. Clients cap tool output.** Claude Code cuts an MCP answer at about 25k tokens, so a whole paper in one answer
-  would be truncated. Reads are paged at about 60,000 characters (roughly 15k tokens), each answer ending with the
-  offset to continue from, and page images are downscaled.
+  would be truncated. Reads are paged at 40,000 characters (about 18k tokens of math-heavy LaTeX), each answer
+  ending with the offset to continue from, and page images are downscaled.
 - **R2. The mount can fail quietly.** Under a mount, the SDK needs the host app's lifespan to run its session
   manager (`mcp.session_manager.run()` in `_lifespan`). The web app's catch-all `GET /{path}` in `_serve_web`
   shadows any route added after it, so the mount goes in before it. Tests go through `create_app`, not a bare MCP
@@ -141,8 +148,8 @@ Each stage is one PR, through `drive`.
 | Stage | Builds | Shows before the next starts |
 | --- | --- | --- |
 | **P1. Finding** | The SDK, the mount, the token, the server instructions; `search_papers`, `get_paper`, `list_digests`, `read_digest`; the D2 extraction; the reaction, processed and digest-topic filters; the telemetry. | V1–V4 and V9 green; a dev `serve` on the sandbox answers a real Claude Code session on the LAN. |
-| **P2. Reading** | `paper_outline`, `read_paper` (sections, ranges, paging), the bounded urgent fetch, "Use the PDF" by paper, `view_pdf_page` with Pillow. | V5–V7 green; the dev session reads a method section and shows a figure, with fetches only from a disposable archive. |
-| **P3. Live** | The token's secret and environment in the homelab `litwatch-v1` stack; the deploy; the dotfiles entries and `agent-secret`'s prefix; the milestone marked built. | V8, the milestone's check, from another machine on production. |
+| **P2. Reading** | `paper_outline`, `read_paper` (sections, ranges, paging), the bounded urgent fetch, "Use the PDF" by paper, `view_pdf_page` with Pillow. | V3 rerun for all seven tools, V5–V7 green; the dev session reads a method section and shows a figure, with fetches only from a disposable archive. |
+| **P3. Live** | The token's secret (`/run/secrets/mcp_token`) and `LITWATCH_MCP_TOKEN_FILE` in the production stack, homelab-config's `stacks/litwatch` (not `litwatch-v1`, the stopped side-by-side stack); the deploy; the dotfiles entries and `agent-secret`'s prefix; the milestone marked built. | V8, the milestone's check, from another machine on production. |
 
 ## Verification
 
@@ -154,9 +161,9 @@ end on the sandbox before production. No model spend.
 | --- | --- |
 | **V1.** Only the MCP token opens `/mcp`, and it opens nothing else. `/mcp` works behind the real `Host` and is not shadowed by the web app. | pytest through `create_app` with the SDK's client: no token, the web token, the read token, and the MCP token on `/api`. |
 | **V2.** Search returns the web app's results in the web app's order, and each new filter keeps exactly the papers it names. | pytest on Postgres with `FakeArchive`: the same query through `/api/papers` and `search_papers`; one case per filter. |
-| **V3.** No tool writes: no rows, no outbox events. The only side effect is an archive request. | pytest: every tool called; table counts and the outbox unchanged; the fake archive records the requests. |
+| **V3.** No tool writes: no rows, no outbox events. The only side effect is an archive request. | pytest: the MCP's connection refuses a write (a store write through it raises); every tool built so far called against seeded rows succeeds on it, and the outbox is unchanged; the fake archive records the requests. P1 covers its four tools, P2 reruns it for all seven. |
 | **V4.** A paper carries its Gist, Brief, Deep card, Weight, grades, the owner's word, reactions and citation; digests list by topic and read in full. | pytest with seeded rows. The existing API tests pass after the D2 extraction. |
-| **V5.** Reading is outline first, by section or range, untrimmed (the bibliography and text past 160,000 characters are there), paged under the cap, and follows "Use the PDF". | pytest with LaTeX and PDF fixtures (`a_pdf`) and one long paper. |
+| **V5.** Reading is outline first, by section or range, untrimmed (the bibliography and text past 160,000 characters are there), paged under the cap, and follows "Use the PDF". A PDF's outline numbers its pages as the PDF does. | pytest with LaTeX and PDF fixtures (`a_pdf`), one long math-heavy paper, and a multipage PDF with an empty page. |
 | **V6.** A paper that is not stored is asked for urgently, waited on for a bounded time, then answered "ask again". | pytest with a delayed `FakeArchive`; a real fetch of a few papers from the disposable archive. |
 | **V7.** A page renders by number and by caption, without the AGPL extra. | pytest on a generated PDF in an environment without `pymupdf4llm`; a real paper's figure on dev. |
 | **V8.** The milestone's check: from another machine, an agent given only a vague memory of a digest finds the paper, reads the section asked for and shows a figure, without the web. | The owner's run on production after P3, with Claude Code and with Codex. |
