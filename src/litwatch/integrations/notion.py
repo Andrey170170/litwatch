@@ -383,10 +383,7 @@ class Notion:
         for slug in added:
             db.topics[slug]["column"] = unquote(props[db.topics[slug]["name"]]["id"])
         await state.save_database(conn, db)
-        # The title is the reader's to rename, and is still Title to the views.
-        return {
-            TITLE if p["id"] == "title" else name: unquote(p["id"]) for name, p in props.items()
-        }
+        return {name: unquote(p["id"]) for name, p in props.items()}
 
     async def _guide(self, conn: psycopg.AsyncConnection, db: state.Database) -> None:
         """ "How to read this", beside the database, rewritten when what it says changed, and
@@ -469,7 +466,17 @@ class Notion:
         """A table view grouped by the grade column `group`, newest published first; `filtered`
         shows only the rows with a grade there."""
         order = [*COLUMNS, *(db.topics[s]["name"] for s in self._order(db))]
-        shown = sorted(columns, key=lambda c: order.index(c) if c in order else len(order))
+
+        def title(c: str) -> bool:  # by its fixed id: the reader may rename it
+            return columns[c] == "title"
+
+        def place(c: str) -> tuple[bool, int]:
+            return not title(c), order.index(c) if c in order else len(order)
+
+        def visible(c: str) -> bool:  # a column of the reader's named Title stays hidden
+            return title(c) or (c != TITLE and c in VISIBLE)
+
+        shown = sorted(columns, key=place)
         body: dict[str, Any] = {
             "name": name,
             "sorts": [{"property": columns["Published"], "direction": "descending"}],
@@ -481,8 +488,8 @@ class Notion:
                     "sort": {"type": "manual"},
                     "hide_empty_groups": True,
                 },
-                # Every column, in the layout's order, only the VISIBLE ones shown.
-                "properties": [{"property_id": columns[c], "visible": c in VISIBLE} for c in shown],
+                # Every column, in the layout's order, only the title and the VISIBLE ones shown.
+                "properties": [{"property_id": columns[c], "visible": visible(c)} for c in shown],
             },
         }
         if filtered:

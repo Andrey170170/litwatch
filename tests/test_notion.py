@@ -822,13 +822,16 @@ async def test_a_column_turned_into_another_type_is_put_back(world):
 async def test_a_renamed_title_is_still_shown_first_in_a_view_made_later(world):
     conn, fake = world, FakeNotion(PARENT)
     assert await start(conn, notion(fake, topics={FAITH.slug: "Faith"}))
-    fake._properties(fake.source()["id"], {"title": {"name": "Paper"}})
+    renamed = {"title": {"name": "Paper"}, "Title": {"rich_text": {}}}  # and a column of theirs
+    fake._properties(fake.source()["id"], renamed)
+    theirs = unquote(fake.source()["properties"]["Title"]["id"])
 
     n = notion(fake, topics={FAITH.slug: "Faith", MON.slug: "Monitoring"})
     assert await start(conn, n)
     view = (await state.database(conn, n.name)).topics[MON.slug]["view"]
-    first = fake.views[view]["configuration"]["properties"][0]
-    assert first == {"property_id": "title", "visible": True}
+    shown = fake.views[view]["configuration"]["properties"]
+    assert shown[0] == {"property_id": "title", "visible": True}
+    assert {"property_id": theirs, "visible": False} in shown
 
 
 async def test_a_rename_failing_part_way_and_then_undone_puts_topic_back(world):
