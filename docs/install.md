@@ -224,12 +224,14 @@ answers JSON with `"state": "none"` before the first run; without the token it a
 ## 7. Check the model keys
 
 ```sh
-docker compose exec litwatch litwatch ping classify
+docker compose exec litwatch litwatch ping check
 docker compose exec litwatch litwatch ping judge
 ```
 
-`ping <role>` sends one small request through a role's model: `classify`, `analyse`, `judge`, `check`,
-`area_check`, `field_grade`, `brief` or `writer`. Ping at least one role per provider.
+`ping <role>` sends one small request through a role's model as a chat completion: `analyse`, `judge`, `check`,
+`field_grade`, `brief` or `writer`. Ping at least one role per provider; with the defaults `check` is on OpenRouter
+and `judge` on Anthropic. Don't ping `classify` or `area_check`: they ask OpenRouter for decisions, which `ping` does
+not, so it can fail with good keys.
 
 Check: each prints the model, `-> 42` and the tokens and cost. `CallError: provider: no credentials for …` means
 that provider's key is not in the container (Troubleshooting).
@@ -284,7 +286,8 @@ Two rules for all of them:
 
 - An integration is a section in `litwatch.toml` and is on unless it says `enabled = false`
   ([`docs/integrations.md`](integrations.md)); `docker compose restart litwatch` applies it. It starts at the
-  outbox's end: it acts on what happens from then on.
+  outbox's end: it acts on what happens from then on. Notion is the exception: switched on, it first fills its
+  database with every paper that already qualifies.
 - Secrets come from the environment, never from `litwatch.toml`. The compose file passes only its own variables to
   `litwatch`, so add an integration's secrets in `compose.override.yaml` beside `compose.yaml` (Compose reads it
   without being told) and their values to `.env`, then `docker compose up -d`:
@@ -346,7 +349,7 @@ services:
       - "127.0.0.1:9108:9108"
 ```
 
-Check: `curl -s http://127.0.0.1:9108/status`. Before the first successful nightly its `nightly` component reads
+Apply it with `docker compose up -d litwatch`, then check: `curl -s http://127.0.0.1:9108/status`. Before the first successful nightly its `nightly` component reads
 degraded. The provider components do not notice a missing key; `ping` does.
 
 Logs are one JSON object per line (`docker compose logs litwatch`); `LITWATCH_LOG_FORMAT=text` in the environment
